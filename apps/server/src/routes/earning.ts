@@ -151,11 +151,14 @@ async function buildUserPoolView(
   username: string,
   rankByKey: Map<string, typeof ranks.$inferSelect>,
   tierByKey: Map<string, typeof rankTiers.$inferSelect>,
+  /** Per-server economy partition. Defaults to the default server so the
+   *  existing callers read today's single pool with the flag off. */
+  serverId: string = DEFAULT_SERVER_ID,
 ): Promise<PoolView | null> {
   const row = (await db
     .select()
     .from(userEarning)
-    .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, userId)))
+    .where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, userId)))
     .limit(1))[0];
   if (!row) {
     // Lazy-create equivalent: return a synthesized zero view so the
@@ -208,11 +211,14 @@ async function buildCharacterPoolView(
   characterName: string,
   rankByKey: Map<string, typeof ranks.$inferSelect>,
   tierByKey: Map<string, typeof rankTiers.$inferSelect>,
+  /** Per-server economy partition. Defaults to the default server so the
+   *  existing callers read today's single pool with the flag off. */
+  serverId: string = DEFAULT_SERVER_ID,
 ): Promise<PoolView | null> {
   const row = (await db
     .select()
     .from(characterEarning)
-    .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId)))
+    .where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, characterId)))
     .limit(1))[0];
   if (!row) {
     return {
@@ -282,13 +288,20 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * notifications. Cacheable on the catalog slice (everyone sees the
    * same catalog), the wallet/ledger slices are per-user.
    */
-  app.get("/earning/me", async (req, reply) => {
+  app.get<{ Querystring: { serverId?: string } }>("/earning/me", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
 
+    // Per-server economy: the dashboard reflects ONE server's pool
+    // snapshot. The optional `?serverId=` picks it; absent (today's
+    // single-server world, flag off) it resolves to DEFAULT_SERVER_ID, so
+    // every read below is byte-identical to the legacy behavior. The
+    // response SHAPE is unchanged — only the source server varies.
+    const sid = req.query.serverId ?? DEFAULT_SERVER_ID;
+
     const { rankRows, tierRows, rankByKey, tierByKey } = await loadRankTierLookup(db);
 
-    const master = await buildUserPoolView(db, me.id, me.username, rankByKey, tierByKey);
+    const master = await buildUserPoolView(db, me.id, me.username, rankByKey, tierByKey, sid);
 
     // Every character of the user (active or not) with a non-zero
     // earning row. We include zero-XP characters too if they have a
@@ -302,7 +315,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .limit(50);
     const characterViews: PoolView[] = [];
     for (const c of charsOfMine) {
-      const v = await buildCharacterPoolView(db, c.id, c.name, rankByKey, tierByKey);
+      const v = await buildCharacterPoolView(db, c.id, c.name, rankByKey, tierByKey, sid);
       if (v) characterViews.push(v);
     }
 
@@ -311,46 +324,48 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     // character_owned_*. Each set is independent, a master who
     // bought Embers does NOT make their character own it, and vice
     // versa.
-    // Per-server economy: this dashboard reflects the default (active) server's
-    // ownership. Every ownership read below is scoped to DEFAULT_SERVER_ID so
-    // /earning/me stays backward-compatible (today's single-server view).
+    // Per-server economy: this dashboard reflects the CHOSEN server's
+    // ownership (sid). Every ownership read below is scoped to sid so
+    // /earning/me stays backward-compatible (flag off → DEFAULT_SERVER_ID,
+    // today's single-server view) while showing the active server's pool
+    // when the flag is on.
     const ownedStyleRows = await db
       .select()
       .from(userOwnedNameStyles)
-      .where(and(eq(userOwnedNameStyles.serverId, DEFAULT_SERVER_ID), eq(userOwnedNameStyles.userId, me.id)));
+      .where(and(eq(userOwnedNameStyles.serverId, sid), eq(userOwnedNameStyles.userId, me.id)));
     const ownedBorderRows = await db
       .select()
       .from(userOwnedBorders)
-      .where(and(eq(userOwnedBorders.serverId, DEFAULT_SERVER_ID), eq(userOwnedBorders.userId, me.id)));
+      .where(and(eq(userOwnedBorders.serverId, sid), eq(userOwnedBorders.userId, me.id)));
     const charIdsForOwnership = charsOfMine.map((c) => c.id);
     const charOwnedStyleRows = charIdsForOwnership.length
       ? await db
           .select()
           .from(characterOwnedNameStyles)
-          .where(and(eq(characterOwnedNameStyles.serverId, DEFAULT_SERVER_ID), inArray(characterOwnedNameStyles.characterId, charIdsForOwnership)))
+          .where(and(eq(characterOwnedNameStyles.serverId, sid), inArray(characterOwnedNameStyles.characterId, charIdsForOwnership)))
       : [];
     const charOwnedBorderRows = charIdsForOwnership.length
       ? await db
           .select()
           .from(characterOwnedBorders)
-          .where(and(eq(characterOwnedBorders.serverId, DEFAULT_SERVER_ID), inArray(characterOwnedBorders.characterId, charIdsForOwnership)))
+          .where(and(eq(characterOwnedBorders.serverId, sid), inArray(characterOwnedBorders.characterId, charIdsForOwnership)))
       : [];
     // Free-form border ownership, parallel to rank-tier borders. Two
     // independent ledgers per the migration 0149 comment.
     const ownedFreeformBorderRows = await db
       .select()
       .from(userOwnedFreeformBorders)
-      .where(and(eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID), eq(userOwnedFreeformBorders.userId, me.id)));
+      .where(and(eq(userOwnedFreeformBorders.serverId, sid), eq(userOwnedFreeformBorders.userId, me.id)));
     const charOwnedFreeformBorderRows = charIdsForOwnership.length
       ? await db
           .select()
           .from(characterOwnedFreeformBorders)
-          .where(and(eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID), inArray(characterOwnedFreeformBorders.characterId, charIdsForOwnership)))
+          .where(and(eq(characterOwnedFreeformBorders.serverId, sid), inArray(characterOwnedFreeformBorders.characterId, charIdsForOwnership)))
       : [];
     const activeCosmeticsRow = (await db
       .select()
       .from(userActiveCosmetics)
-      .where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id)))
+      .where(and(eq(userActiveCosmetics.serverId, sid), eq(userActiveCosmetics.userId, me.id)))
       .limit(1))[0];
     // Per-character active cosmetics. Pulled from the same
     // character_earning rows the pool view already touches, but
@@ -373,7 +388,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             activeRoomTransitionKey: characterEarning.activeRoomTransitionKey,
           })
           .from(characterEarning)
-          .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), inArray(characterEarning.characterId, charIds)))
+          .where(and(eq(characterEarning.serverId, sid), inArray(characterEarning.characterId, charIds)))
       : [];
     // Owned room-transition keys per identity, from the earning ledger
     // (reason `purchase_transition_<key>`). Free `slide` is implicitly owned
@@ -382,7 +397,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .select({ scope: earningLedger.scope, ownerId: earningLedger.ownerId, reason: earningLedger.reason })
       .from(earningLedger)
       .where(and(
-        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
+        eq(earningLedger.serverId, sid),
         like(earningLedger.reason, "purchase_transition_%"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -419,7 +434,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         sessionExitTemplate: userEarning.sessionExitTemplate,
       })
       .from(userEarning)
-      .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id)))
+      .where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, me.id)))
       .limit(1))[0];
     // Flair-purchase ownership lookup: which identities (master +
     // characters) have bought `flair_profile_banner` from the
@@ -435,7 +450,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       })
       .from(earningLedger)
       .where(and(
-        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
+        eq(earningLedger.serverId, sid),
         eq(earningLedger.reason, "purchase_flair_profile_banner"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -457,7 +472,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       })
       .from(earningLedger)
       .where(and(
-        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
+        eq(earningLedger.serverId, sid),
         eq(earningLedger.reason, "purchase_flair_typing_phrase"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -479,7 +494,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       })
       .from(earningLedger)
       .where(and(
-        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
+        eq(earningLedger.serverId, sid),
         eq(earningLedger.reason, "purchase_flair_lurking_master"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -502,7 +517,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       })
       .from(earningLedger)
       .where(and(
-        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
+        eq(earningLedger.serverId, sid),
         eq(earningLedger.reason, "purchase_flair_room_presence"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -520,7 +535,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .select({ ownerId: earningLedger.ownerId })
       .from(earningLedger)
       .where(and(
-        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
+        eq(earningLedger.serverId, sid),
         eq(earningLedger.reason, "purchase_flair_session_presence"),
         eq(earningLedger.scope, "user"),
         eq(earningLedger.ownerId, me.id),
@@ -535,7 +550,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .select({ scope: earningLedger.scope, ownerId: earningLedger.ownerId })
       .from(earningLedger)
       .where(and(
-        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
+        eq(earningLedger.serverId, sid),
         eq(earningLedger.reason, "purchase_flair_profile_visitors"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -552,7 +567,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .select({ scope: earningLedger.scope, ownerId: earningLedger.ownerId })
       .from(earningLedger)
       .where(and(
-        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
+        eq(earningLedger.serverId, sid),
         eq(earningLedger.reason, "purchase_flair_profile_marquee"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -610,7 +625,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const inventoryRows = await db
       .select()
       .from(identityInventory)
-      .where(sql`${identityInventory.serverId} = ${DEFAULT_SERVER_ID} AND ((${identityInventory.ownerScope} = 'user' AND ${identityInventory.ownerId} = ${me.id})
+      .where(sql`${identityInventory.serverId} = ${sid} AND ((${identityInventory.ownerScope} = 'user' AND ${identityInventory.ownerId} = ${me.id})
         OR (${identityInventory.ownerScope} = 'character' AND ${identityInventory.ownerId} IN (${
         // Empty IN () is invalid SQL, guard with a sentinel that
         // can't match any real character id when the user has none.
@@ -637,7 +652,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const collectionRows = await db
       .select()
       .from(identityCollection)
-      .where(sql`${identityCollection.serverId} = ${DEFAULT_SERVER_ID} AND ((${identityCollection.ownerScope} = 'user' AND ${identityCollection.ownerId} = ${me.id})
+      .where(sql`${identityCollection.serverId} = ${sid} AND ((${identityCollection.ownerScope} = 'user' AND ${identityCollection.ownerId} = ${me.id})
         OR (${identityCollection.ownerScope} = 'character' AND ${identityCollection.ownerId} IN (${
         charIdSet.size > 0
           ? sql.join(Array.from(charIdSet).map((id) => sql`${id}`), sql`, `)
@@ -661,7 +676,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const petCollectionRows = await db
       .select()
       .from(identityPetCollection)
-      .where(sql`${identityPetCollection.serverId} = ${DEFAULT_SERVER_ID} AND ((${identityPetCollection.ownerScope} = 'user' AND ${identityPetCollection.ownerId} = ${me.id})
+      .where(sql`${identityPetCollection.serverId} = ${sid} AND ((${identityPetCollection.ownerScope} = 'user' AND ${identityPetCollection.ownerId} = ${me.id})
         OR (${identityPetCollection.ownerScope} = 'character' AND ${identityPetCollection.ownerId} IN (${
         charIdSet.size > 0
           ? sql.join(Array.from(charIdSet).map((id) => sql`${id}`), sql`, `)

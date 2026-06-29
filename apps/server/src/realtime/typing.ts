@@ -26,7 +26,7 @@
  */
 
 import type { Server as IoServer } from "socket.io";
-import { inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
@@ -37,6 +37,7 @@ import type { Db } from "../db/index.js";
 import { characterEarning, ignores, userActiveCosmetics, userEarning } from "../db/schema.js";
 import { hasPermission } from "../auth/permissions.js";
 import { blocksAmong } from "../auth/blocks.js";
+import { resolveRoomServerId } from "../earning/pool.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -222,6 +223,11 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
   // the lurking flag is server-internal filtering metadata, the
   // wire only carries entries the receiver is allowed to see.
   const lurkingTypers = new Set<string>(); // userIds of typers currently lurking
+  // Phase 5b: typing-phrase / lurking flags are read from the
+  // per-server earning pool, so scope these reads to the room's
+  // server (flag-off: the room homes to DEFAULT_SERVER_ID, the
+  // single existing pool, so this is byte-identical).
+  const sid = await resolveRoomServerId(db, roomId);
 
   // Phase 5 + Phase 6, splice typing-phrase + lurking flags into
   // per-typer state. Two batched queries (one per scope) keep this
@@ -245,7 +251,7 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
           lurking: characterEarning.lurkingMasterEnabled,
         })
         .from(characterEarning)
-        .where(inArray(characterEarning.characterId, charIds));
+        .where(and(eq(characterEarning.serverId, sid), inArray(characterEarning.characterId, charIds)));
       for (const r of rows) {
         charPhraseByChar.set(r.characterId, r.phrase);
         charLurkingByChar.set(r.characterId, !!r.lurking);
@@ -257,7 +263,7 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
       const phraseRows = await db
         .select({ userId: userEarning.userId, phrase: userEarning.typingPhrase })
         .from(userEarning)
-        .where(inArray(userEarning.userId, userIds));
+        .where(and(eq(userEarning.serverId, sid), inArray(userEarning.userId, userIds)));
       for (const r of phraseRows) userPhraseByUser.set(r.userId, r.phrase);
       const lurkingRows = await db
         .select({ userId: userActiveCosmetics.userId, lurking: userActiveCosmetics.lurkingMasterEnabled })

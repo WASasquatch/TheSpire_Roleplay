@@ -11,6 +11,7 @@ import {
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 
 /** Roles that appear on the Staff page, masteradmin first. */
 const STAFF_ROLES = ["mod", "admin", "masteradmin"] as const;
@@ -75,7 +76,10 @@ export async function registerStaffRoutes(app: FastifyInstance, db: Db): Promise
         freeformBorderKey: userEarning.selectedFreeformBorderKey,
       })
       .from(userEarning)
-      .where(inArray(userEarning.userId, ids));
+      // Staff card shows the master pool border; with no per-server
+      // context here, scope to the default server (flag-off: the only
+      // pool, byte-identical to today).
+      .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), inArray(userEarning.userId, ids)));
     const borderByUser = new Map(borderRows.map((r) => [r.userId, r]));
 
     // Per-user owned name-style + freeform-border config blobs (the

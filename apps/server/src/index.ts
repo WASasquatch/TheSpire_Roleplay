@@ -36,6 +36,7 @@ import {
 
 import { db } from "./db/index.js";
 import { bans, characters, messages, roomMembers, roomThreadCategories, rooms, sessions, userEarning, userNpcs, userServerLastRoom, users } from "./db/schema.js";
+import { DEFAULT_SERVER_ID } from "./earning/pool.js";
 import { hasPermission } from "./auth/permissions.js";
 import { CommandRegistry } from "./commands/registry.js";
 import { registerBuiltins } from "./commands/builtins/index.js";
@@ -1986,7 +1987,10 @@ async function main() {
           const sessionExitRow = (await db
             .select({ sessionExitTemplate: userEarning.sessionExitTemplate })
             .from(userEarning)
-            .where(eq(userEarning.userId, userId))
+            // Disconnect spans every room this socket was in; there is no
+            // single room serverId in hand here, so scope to the default
+            // server (flag-off: the only pool, byte-identical to today).
+            .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, userId)))
             .limit(1))[0];
           const sessionExitTemplate = sessionExitRow?.sessionExitTemplate ?? null;
           for (const id of roomIds) {

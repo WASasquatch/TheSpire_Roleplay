@@ -31,6 +31,33 @@ import {
   fetchEarningMe,
 } from "../lib/earning.js";
 
+/**
+ * Fetch `/earning/me` for a specific server (Multi-Server Lift). When
+ * `serverId` is null/empty the URL is the LITERAL `/earning/me` — byte-
+ * identical to the legacy {@link fetchEarningMe} path — so a flag-off /
+ * no-server context hits today's exact endpoint and behavior. When a
+ * server is active the id rides as `?serverId=<id>` and the server
+ * returns that server's pool in the same field shape.
+ *
+ * Lives here (the state slice) rather than in `lib/earning.ts` so the
+ * per-server read threading stays inside the dashboard's own file set;
+ * it reuses the exported `fetchEarningMe` for the unscoped path and only
+ * inlines the scoped fetch.
+ */
+async function fetchEarningMeForServer(
+  serverId: string | null | undefined,
+): Promise<EarningMeResponse> {
+  if (!serverId) return fetchEarningMe();
+  const r = await fetch(`/earning/me?serverId=${encodeURIComponent(serverId)}`, {
+    credentials: "include",
+  });
+  if (!r.ok) {
+    const msg = await r.text().catch(() => "");
+    throw new Error(msg || `Request failed (${r.status}).`);
+  }
+  return (await r.json()) as EarningMeResponse;
+}
+
 interface EarningState {
   /** True while the first /earning/me fetch is in flight. */
   loading: boolean;
@@ -50,8 +77,14 @@ interface EarningState {
    */
   earnedTick: number;
 
-  /** Trigger a fresh fetch. Safe to call multiple times, guards against overlap. */
-  refresh: () => Promise<void>;
+  /**
+   * Trigger a fresh fetch. Safe to call multiple times, guards against
+   * overlap. Pass the active `serverId` (Multi-Server Lift) to scope the
+   * snapshot to that server's economy; omit it (or pass null) for the
+   * legacy unscoped `/earning/me` read used flag-off / when no server is
+   * resolved.
+   */
+  refresh: (serverId?: string | null) => Promise<void>;
   /** Reset to initial state (call on logout). */
   reset: () => void;
 
@@ -102,14 +135,14 @@ let inFlight: Promise<void> | null = null;
 export const useEarning = create<EarningState>((set, get) => ({
   ...INITIAL,
 
-  refresh: async () => {
+  refresh: async (serverId?: string | null) => {
     // Coalesce concurrent calls, multiple components mounting at the
     // same time should share one network round trip.
     if (inFlight) return inFlight;
     set({ loading: true, error: null });
     inFlight = (async () => {
       try {
-        const snap = await fetchEarningMe();
+        const snap = await fetchEarningMeForServer(serverId);
         set({
           snapshot: snap,
           unackRankUps: snap.notifications,

@@ -6,6 +6,7 @@ import { getSettings, parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
 import { isBlockedBetween } from "../../auth/blocks.js";
+import { DEFAULT_SERVER_ID } from "../../earning/pool.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -65,7 +66,10 @@ async function getEquippedNameStyle(
   const active = (await db
     .select({ key: characterEarning.activeNameStyleKey })
     .from(characterEarning)
-    .where(eq(characterEarning.characterId, ownerId))
+    // Profile display reads the equipped cosmetic; with no per-server
+    // viewer context here, scope to the default server (flag-off: the
+    // only pool, byte-identical to today).
+    .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, ownerId)))
     .limit(1))[0];
   const key = active?.key ?? null;
   if (!key) return { key: null, config: null };
@@ -106,7 +110,7 @@ async function getEquippedProfileBannerUrl(
   const row = (await db
     .select({ url: characterEarning.profileBannerUrl })
     .from(characterEarning)
-    .where(eq(characterEarning.characterId, ownerId))
+    .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, ownerId)))
     .limit(1))[0];
   return row?.url ?? null;
 }

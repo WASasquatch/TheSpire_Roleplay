@@ -25,6 +25,7 @@ import {
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 
 /**
  * Two profile-customization Flair surfaces (migration 0192):
@@ -417,7 +418,10 @@ async function readEarningRow(db: Db, identity: ProfileIdentity): Promise<Earnin
         showProfileVisitorsCount: characterEarning.showProfileVisitorsCount,
       })
       .from(characterEarning)
-      .where(eq(characterEarning.characterId, identity.characterId))
+      // Profile flair display reads the pool snapshot; with no per-server
+      // context here, scope to the default server (flag-off: the only
+      // pool, byte-identical to today).
+      .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, identity.characterId)))
       .limit(1))[0];
     return r ?? null;
   }
@@ -427,7 +431,7 @@ async function readEarningRow(db: Db, identity: ProfileIdentity): Promise<Earnin
       showProfileVisitorsCount: userEarning.showProfileVisitorsCount,
     })
     .from(userEarning)
-    .where(eq(userEarning.userId, identity.userId))
+    .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, identity.userId)))
     .limit(1))[0];
   return r ?? null;
 }

@@ -8,6 +8,7 @@ import { getSessionUser } from "./auth.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import { recordAudit } from "../audit.js";
 import { canonicalizeNameForLookup, loweredSpaceCanonical, substringNameInsensitive } from "../lib/nameLookup.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -238,7 +239,13 @@ export async function registerUsersRoutes(
         tier: userEarning.tier,
       })
       .from(userEarning)
-      .where(sql`${userEarning.userId} IN (${sql.join(matchedUserIds.map((u) => sql`${u}`), sql`, `)})`);
+      // Admin user list shows the master pool rank; with no per-server
+      // context here, scope to the default server (flag-off: the only
+      // pool, byte-identical to today).
+      .where(and(
+        eq(userEarning.serverId, DEFAULT_SERVER_ID),
+        sql`${userEarning.userId} IN (${sql.join(matchedUserIds.map((u) => sql`${u}`), sql`, `)})`,
+      ));
     const rankByUser = new Map(rankRows.map((r) => [r.userId, { rankKey: r.rankKey, tier: r.tier }]));
 
     // Filter by rank AFTER the lookup so the SQL doesn't have to

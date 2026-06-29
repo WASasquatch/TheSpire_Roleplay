@@ -1953,11 +1953,15 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
   /** Current liquid currency for a pool (creditPool floors debits at 0, so a
    *  buy must pre-check funds here rather than rely on going negative). */
   async function poolCurrency(scope: "user" | "character", ownerId: string): Promise<number> {
+    // Scriptorium copy purchases run over HTTP with no room context, so
+    // the funds pre-check reads the default server's pool — the same
+    // server the matching debit lands on (flag-off: the only pool,
+    // byte-identical to today).
     if (scope === "user") {
-      const r = (await db.select({ c: userEarning.currency }).from(userEarning).where(eq(userEarning.userId, ownerId)).limit(1))[0];
+      const r = (await db.select({ c: userEarning.currency }).from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, ownerId))).limit(1))[0];
       return r?.c ?? 0;
     }
-    const r = (await db.select({ c: characterEarning.currency }).from(characterEarning).where(eq(characterEarning.characterId, ownerId)).limit(1))[0];
+    const r = (await db.select({ c: characterEarning.currency }).from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, ownerId))).limit(1))[0];
     return r?.c ?? 0;
   }
 

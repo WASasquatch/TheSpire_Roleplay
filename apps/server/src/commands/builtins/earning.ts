@@ -28,6 +28,7 @@ import {
 } from "../../db/schema.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 import { transferCurrency } from "../../earning/transfer.js";
+import { resolveRoomServerId } from "../../earning/pool.js";
 import { resolveIdentityArg, emitAmbiguousIdentityModal } from "../identityArg.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -45,11 +46,12 @@ interface PoolSummary {
 async function readUserPool(
   db: import("../../db/index.js").Db,
   userId: string,
+  sid: string,
 ): Promise<PoolSummary> {
   const row = (await db
     .select()
     .from(userEarning)
-    .where(eq(userEarning.userId, userId))
+    .where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, userId)))
     .limit(1))[0];
   if (!row) {
     return { scopeLabel: "master", currency: 0, xp: 0, rankName: null, tierLabel: null };
@@ -68,11 +70,12 @@ async function readCharacterPool(
   db: import("../../db/index.js").Db,
   characterId: string,
   characterName: string,
+  sid: string,
 ): Promise<PoolSummary> {
   const row = (await db
     .select()
     .from(characterEarning)
-    .where(eq(characterEarning.characterId, characterId))
+    .where(and(eq(characterEarning.serverId, sid), eq(characterEarning.characterId, characterId)))
     .limit(1))[0];
   if (!row) {
     return { scopeLabel: characterName, currency: 0, xp: 0, rankName: null, tierLabel: null };
@@ -125,6 +128,7 @@ function formatPool(p: PoolSummary): string {
 async function unpurchasedEligibleBorders(
   db: import("../../db/index.js").Db,
   userId: string,
+  sid: string,
 ): Promise<Array<{ rankKey: string; rankName: string; cost: number | null }>> {
   const peak = (await db
     .select({
@@ -132,7 +136,7 @@ async function unpurchasedEligibleBorders(
       maxTierEverHeld: userEarning.maxTierEverHeld,
     })
     .from(userEarning)
-    .where(eq(userEarning.userId, userId))
+    .where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, userId)))
     .limit(1))[0];
   if (!peak?.maxRankKeyEverHeld || (peak.maxTierEverHeld ?? 0) < 4) {
     // User has never crossed any Tier IV, no borders eligible.
@@ -231,9 +235,12 @@ export const currencyCommand: CommandHandler = {
   async run(ctx) {
     const args = ctx.argsText.trim();
 
-    // /currency (no args), own balances
+    // /currency (no args), own balances. Read from the pool on the
+    // room's server (flag-off: the room homes to the default server,
+    // so this is today's single pool).
     if (!args) {
-      const master = await readUserPool(ctx.db, ctx.user.id);
+      const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
+      const master = await readUserPool(ctx.db, ctx.user.id, sid);
       const lines = [formatPool({ ...master, scopeLabel: "Your master OOC" })];
       if (ctx.user.activeCharacterId) {
         const cRow = (await ctx.db
@@ -242,7 +249,7 @@ export const currencyCommand: CommandHandler = {
           .where(eq(characters.id, ctx.user.activeCharacterId))
           .limit(1))[0];
         if (cRow) {
-          const charPool = await readCharacterPool(ctx.db, ctx.user.activeCharacterId, cRow.name);
+          const charPool = await readCharacterPool(ctx.db, ctx.user.activeCharacterId, cRow.name, sid);
           lines.push(formatPool({ ...charPool, scopeLabel: cRow.name }));
         }
       }
@@ -306,11 +313,12 @@ export const currencyCommand: CommandHandler = {
       return;
     }
     const t = resolution.target;
+    const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
     // Privacy gate is the owner's master setting (covers their character pools).
     const ownerEarning = (await ctx.db
       .select({ currency: userEarning.currency, hideCurrencyCount: userEarning.hideCurrencyCount })
       .from(userEarning)
-      .where(eq(userEarning.userId, t.userId))
+      .where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, t.userId)))
       .limit(1))[0];
     if (ownerEarning?.hideCurrencyCount && t.userId !== ctx.user.id) {
       notice(ctx, "CURRENCY_PRIVATE", `${t.displayName} keeps their Currency private.`);
@@ -321,7 +329,7 @@ export const currencyCommand: CommandHandler = {
       const ce = (await ctx.db
         .select({ currency: characterEarning.currency })
         .from(characterEarning)
-        .where(eq(characterEarning.characterId, t.characterId))
+        .where(and(eq(characterEarning.serverId, sid), eq(characterEarning.characterId, t.characterId)))
         .limit(1))[0];
       currency = ce?.currency;
     } else {
@@ -356,7 +364,8 @@ export const expCommand: CommandHandler = {
   async run(ctx) {
     const args = ctx.argsText.trim();
     if (!args) {
-      const master = await readUserPool(ctx.db, ctx.user.id);
+      const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
+      const master = await readUserPool(ctx.db, ctx.user.id, sid);
       const lines = [formatPool({ ...master, scopeLabel: "Your master OOC" })];
       if (ctx.user.activeCharacterId) {
         const cRow = (await ctx.db
@@ -365,11 +374,11 @@ export const expCommand: CommandHandler = {
           .where(eq(characters.id, ctx.user.activeCharacterId))
           .limit(1))[0];
         if (cRow) {
-          const charPool = await readCharacterPool(ctx.db, ctx.user.activeCharacterId, cRow.name);
+          const charPool = await readCharacterPool(ctx.db, ctx.user.activeCharacterId, cRow.name, sid);
           lines.push(formatPool({ ...charPool, scopeLabel: cRow.name }));
         }
       }
-      const eligible = await unpurchasedEligibleBorders(ctx.db, ctx.user.id);
+      const eligible = await unpurchasedEligibleBorders(ctx.db, ctx.user.id, sid);
       if (eligible.length > 0) {
         const borderList = eligible
           .map((b) => `${b.rankName}${b.cost != null ? ` (${b.cost} Currency)` : ""}`)
@@ -392,9 +401,10 @@ export const expCommand: CommandHandler = {
       return;
     }
     const t = resolution.target;
+    const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
     const pool = t.characterId
-      ? await readCharacterPool(ctx.db, t.characterId, t.displayName)
-      : await readUserPool(ctx.db, t.userId);
+      ? await readCharacterPool(ctx.db, t.characterId, t.displayName, sid)
+      : await readUserPool(ctx.db, t.userId, sid);
     const rankBit = pool.rankName ? ` · ${pool.rankName} ${pool.tierLabel ?? ""}`.trimEnd() : "";
     notice(ctx, "EXP_VIEW", `${t.displayName}: ${pool.xp} XP${rankBit}.`);
   },

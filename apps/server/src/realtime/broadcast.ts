@@ -78,6 +78,7 @@ import {
 import { loadReactionsForTargets } from "../reactions.js";
 import { emptyPollState, loadPollState } from "../polls.js";
 import { readPoolRank } from "../earning/resolver.js";
+import { DEFAULT_SERVER_ID, resolveRoomServerId } from "../earning/pool.js";
 import { routeMessage } from "../earning/routing.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -414,6 +415,10 @@ export async function addMessage(
   let rankKeySnapshot: string | null = null;
   let tierSnapshot: number | null = null;
   let authorShowRankInChat = true;
+  // Rank / cosmetic snapshots read from the pool on THIS room's server
+  // (flag-off: the room homes to the default server, so this is the
+  // single existing pool — byte-identical to today).
+  const messageServerId = await resolveRoomServerId(ctx.db, ctx.roomId);
   try {
     const u = (await ctx.db
       .select({ showRankInChat: users.showRankInChat })
@@ -429,7 +434,7 @@ export async function addMessage(
         const ownerId = scope.kind === "character"
           ? (ctx.user.activeCharacterId as string)
           : ctx.user.id;
-        const rank = await readPoolRank(ctx.db, scope.kind === "character" ? "character" : "user", ownerId);
+        const rank = await readPoolRank(ctx.db, scope.kind === "character" ? "character" : "user", ownerId, messageServerId);
         rankKeySnapshot = rank.rankKey;
         tierSnapshot = rank.tier;
       }
@@ -453,7 +458,7 @@ export async function addMessage(
           selectedBorderRankKey: characterEarning.selectedBorderRankKey,
         })
         .from(characterEarning)
-        .where(eq(characterEarning.characterId, ctx.user.activeCharacterId))
+        .where(and(eq(characterEarning.serverId, messageServerId), eq(characterEarning.characterId, ctx.user.activeCharacterId)))
         .limit(1))[0];
       if (ce) {
         inlineAvatarEnabledSnapshot = !!ce.inlineAvatarEnabled;
@@ -469,7 +474,7 @@ export async function addMessage(
       const ue = (await ctx.db
         .select({ selectedBorderRankKey: userEarning.selectedBorderRankKey })
         .from(userEarning)
-        .where(eq(userEarning.userId, ctx.user.id))
+        .where(and(eq(userEarning.serverId, messageServerId), eq(userEarning.userId, ctx.user.id)))
         .limit(1))[0];
       if (ue) selectedBorderRankKeySnapshot = ue.selectedBorderRankKey;
     }
@@ -1652,6 +1657,10 @@ async function joinRoomBody(
   // the chosen source = use the default phrasing. The session-presence
   // templates are master-only.
   // Reads are bounded, one row from each table the user touches.
+  // Presence templates are per-server cosmetics: read from THIS room's
+  // server (flag-off: room.serverId is null/the default, so this is the
+  // single existing pool — byte-identical to today).
+  const joinServerId = room.serverId ?? DEFAULT_SERVER_ID;
   const presenceMaster = (await db
     .select({
       roomJoinTemplate: userEarning.roomJoinTemplate,
@@ -1659,7 +1668,7 @@ async function joinRoomBody(
       sessionConnectTemplate: userEarning.sessionConnectTemplate,
     })
     .from(userEarning)
-    .where(eq(userEarning.userId, user.id))
+    .where(and(eq(userEarning.serverId, joinServerId), eq(userEarning.userId, user.id)))
     .limit(1))[0] ?? null;
   const presenceCharacter = user.activeCharacterId
     ? (await db
@@ -1668,7 +1677,7 @@ async function joinRoomBody(
           roomLeaveTemplate: characterEarning.roomLeaveTemplate,
         })
         .from(characterEarning)
-        .where(eq(characterEarning.characterId, user.activeCharacterId))
+        .where(and(eq(characterEarning.serverId, joinServerId), eq(characterEarning.characterId, user.activeCharacterId)))
         .limit(1))[0] ?? null
     : null;
   // `presenceCharacter` is non-null only when a character is active, so
@@ -2593,18 +2602,22 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // character. The occupant render below picks the pool that matches
   // the resolved identity (character pool when attached, master pool
   // otherwise). Both queries skip when there are no candidates.
+  // Userlist rank/cosmetic snapshots read from THIS room's server
+  // (flag-off: the room homes to the default server, so these are the
+  // single existing pools — byte-identical to today).
+  const listServerId = await resolveRoomServerId(db, roomId);
   const userEarningRows = userIds.length
     ? await db
         .select({ userId: userEarning.userId, rankKey: userEarning.rankKey, tier: userEarning.tier })
         .from(userEarning)
-        .where(inArray(userEarning.userId, userIds))
+        .where(and(eq(userEarning.serverId, listServerId), inArray(userEarning.userId, userIds)))
     : [];
   const userRankByUser = new Map(userEarningRows.map((r) => [r.userId, { rankKey: r.rankKey, tier: r.tier }]));
   const charEarningRows = charIds.length
     ? await db
         .select({ characterId: characterEarning.characterId, rankKey: characterEarning.rankKey, tier: characterEarning.tier })
         .from(characterEarning)
-        .where(inArray(characterEarning.characterId, charIds))
+        .where(and(eq(characterEarning.serverId, listServerId), inArray(characterEarning.characterId, charIds)))
     : [];
   const charRankByChar = new Map(charEarningRows.map((r) => [r.characterId, { rankKey: r.rankKey, tier: r.tier }]));
 
@@ -2644,7 +2657,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
           inlineAvatarEnabled: characterEarning.inlineAvatarEnabled,
         })
         .from(characterEarning)
-        .where(inArray(characterEarning.characterId, charIds))
+        .where(and(eq(characterEarning.serverId, listServerId), inArray(characterEarning.characterId, charIds)))
     : [];
   const charActiveStyleByChar = new Map(
     charActiveRows
@@ -2668,7 +2681,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
           selectedFreeformBorderKey: userEarning.selectedFreeformBorderKey,
         })
         .from(userEarning)
-        .where(inArray(userEarning.userId, userIds))
+        .where(and(eq(userEarning.serverId, listServerId), inArray(userEarning.userId, userIds)))
     : [];
   const userBorderByUser = new Map(userBorderRows.map((r) => [r.userId, r.selectedBorderRankKey]));
   const userFreeformBorderByUser = new Map(userBorderRows.map((r) => [r.userId, r.selectedFreeformBorderKey]));
@@ -2680,7 +2693,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
           selectedFreeformBorderKey: characterEarning.selectedFreeformBorderKey,
         })
         .from(characterEarning)
-        .where(inArray(characterEarning.characterId, charIds))
+        .where(and(eq(characterEarning.serverId, listServerId), inArray(characterEarning.characterId, charIds)))
     : [];
   const charBorderByChar = new Map(charBorderRows.map((r) => [r.characterId, r.selectedBorderRankKey]));
   const charFreeformBorderByChar = new Map(charBorderRows.map((r) => [r.characterId, r.selectedFreeformBorderKey]));

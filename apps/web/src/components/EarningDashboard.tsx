@@ -82,6 +82,7 @@ import { CloseButton } from "./CloseButton.js";
 import { extractFreeformBorderVarsWithDefaults, parseFreeformBorderConfig } from "@thekeep/shared";
 import { ROOM_TRANSITIONS, type RoomTransition } from "@thekeep/shared";
 import { previewRoomTransition } from "../lib/transitions/orchestrator.js";
+import { getServer } from "../lib/servers.js";
 
 type DashboardTab = "overview" | "ledger" | "settings" | "styles" | "borders" | "transitions" | "cosmetics" | "items" | "rankings";
 type ItemsSubTab = "inventory" | "shop" | "collection" | "pets";
@@ -113,6 +114,16 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
   const error = useEarning((s) => s.error);
   const refresh = useEarning((s) => s.refresh);
   const me = useChat((s) => s.me);
+  // Multi-Server Lift: which server's economy are we viewing? The
+  // snapshot is scoped to the room's server (`currentServerId`). With
+  // the flag off — or before a server resolves — `currentServerId` is
+  // null and the fetch falls back to the literal `/earning/me`, so the
+  // dashboard is byte-identical to today. `defaultServerId` lets us
+  // tell "viewing a guest server" from "viewing home" so the label
+  // only appears when it adds information.
+  const serversEnabled = useChat((s) => s.branding.serversEnabled === true);
+  const currentServerId = useChat((s) => s.currentServerId);
+  const defaultServerId = useChat((s) => s.defaultServerId);
   const [tab, setTab] = useState<DashboardTab>(initialTab ?? "overview");
   // Flash Sale → shop tab nav. When the user clicks a sale card, we
   // jump to the matching tab AND stash the catalog row key the card
@@ -126,13 +137,16 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
     setFocusKey(key);
   }
 
-  // Re-fetch on mount so a freshly-opened dashboard reflects any
-  // earnings that landed while the modal was closed (rank-up events
-  // already updated the unack list live; this catches wallet drift if
-  // a credit somehow missed the live event).
+  // Re-fetch on mount (and whenever the active server changes) so a
+  // freshly-opened dashboard reflects any earnings that landed while
+  // the modal was closed (rank-up events already updated the unack list
+  // live; this catches wallet drift if a credit somehow missed the live
+  // event), AND so switching servers swaps to that server's economy.
+  // `currentServerId` is null with the flag off → refresh() hits the
+  // literal `/earning/me`, unchanged from today.
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void refresh(currentServerId);
+  }, [refresh, currentServerId]);
 
   // Today's flash sale, hoisted here so every tab (Overview hero,
   // Name Styles / Cosmetics / Items shop pips) reads from the same
@@ -198,6 +212,14 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
           <CloseButton onClick={onClose} />
         </div>
 
+        {/* Multi-Server Lift: which server's economy is this? Only
+            renders when the servers flag is on AND the viewer is on a
+            non-default (guest) server, so the home-server / flag-off
+            dashboard looks exactly like today (the bar is absent). */}
+        {serversEnabled && currentServerId && currentServerId !== defaultServerId ? (
+          <ActiveServerLabel serverId={currentServerId} />
+        ) : null}
+
         {/* `min-h-0 flex-1` so the body fills the remaining card
             height. Earlier `max-h-[78vh]` capped against the viewport
             directly, which didn't compose with the new
@@ -241,6 +263,34 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * Thin "you're viewing <Server>'s economy" sub-bar shown under the
+ * header when the Multi-Server Lift flag is on and the viewer is on a
+ * non-default server (the parent gates rendering). Resolves the server
+ * name lazily via `getServer` so we don't have to thread the rail's
+ * server catalog down into the dashboard's file set; until the name
+ * lands it shows a neutral "this server" so there's never a flash of a
+ * raw id. Failures fall back silently to the same neutral copy — the
+ * label is informational, not load-bearing.
+ */
+function ActiveServerLabel({ serverId }: { serverId: string }) {
+  const [name, setName] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setName(null);
+    getServer(serverId)
+      .then((r) => { if (!cancelled) setName(r.server.name); })
+      .catch(() => { /* silent — label is decoration */ });
+    return () => { cancelled = true; };
+  }, [serverId]);
+  return (
+    <div className="flex shrink-0 items-center gap-2 border-b border-keep-rule bg-keep-bg/40 px-4 py-1.5 text-[11px] uppercase tracking-widest text-keep-muted">
+      <span aria-hidden>🏰</span>
+      <span>Viewing {name ?? "this server"}&rsquo;s economy</span>
+    </div>
   );
 }
 

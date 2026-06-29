@@ -86,10 +86,10 @@ import {
   type RaffleState,
 } from "../../games/raffle.js";
 import { addMessage, addMessageDirect, addSystemMessage } from "../../realtime/broadcast.js";
-import { characterEarning, rooms, userEarning, users } from "../../db/schema.js";
+import { rooms, users } from "../../db/schema.js";
 import { findItem } from "./items.js";
 import { creditPool } from "../../earning/award.js";
-import { resolveRoomServerId } from "../../earning/pool.js";
+import { readPool, resolveRoomServerId } from "../../earning/pool.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string): void {
@@ -119,20 +119,12 @@ async function readWalletBalance(
   scope: "user" | "character",
   ownerId: string,
 ): Promise<number> {
-  if (scope === "user") {
-    const row = (await ctx.db
-      .select({ c: userEarning.currency })
-      .from(userEarning)
-      .where(eq(userEarning.userId, ownerId))
-      .limit(1))[0];
-    return row?.c ?? 0;
-  }
-  const row = (await ctx.db
-    .select({ c: characterEarning.currency })
-    .from(characterEarning)
-    .where(eq(characterEarning.characterId, ownerId))
-    .limit(1))[0];
-  return row?.c ?? 0;
+  // Read the wallet from the SAME server the raffle debit lands on
+  // (the crediting room's server, else DEFAULT_SERVER_ID). Flag-off:
+  // the room homes to the default server, so this is today's pool.
+  const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
+  const row = await readPool(ctx.db, sid, scope, ownerId);
+  return row?.currency ?? 0;
 }
 
 /* ============================================================ *

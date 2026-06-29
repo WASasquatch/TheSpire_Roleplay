@@ -76,7 +76,7 @@ import {
   type ForumUsergroupMemberWire,
   type ForumUsergroupWire,
 } from "@thekeep/shared";
-import { broadcastPresence, findCanonicalLanding, sendRoomBacklogTo } from "../realtime/broadcast.js";
+import { broadcastPresence, emitTreeChanged, findCanonicalLanding, sendRoomBacklogTo } from "../realtime/broadcast.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -1158,7 +1158,10 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       replyMode: "nested",
       forumId: gate.forum.id,
     });
-    io.emit("rooms:tree-changed");
+    // A board belongs to its forum, which is homed to a server; the forum
+    // row is in hand so its serverId is free. emitTreeChanged falls back to
+    // the bare global pulse when the servers flag is off.
+    emitTreeChanged(io, gate.forum.serverId);
     await recordAudit(db, {
       actorUserId: gate.me.id,
       action: "forum_board_create",
@@ -1201,7 +1204,9 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       if (body.membersOnly !== undefined) update.forumMembersOnly = body.membersOnly;
       if (Object.keys(update).length === 0) return { ok: true };
       await db.update(rooms).set(update).where(eq(rooms.id, board.id));
-      io.emit("rooms:tree-changed");
+      // The board (a room) row is in hand, so its serverId is free;
+      // emitTreeChanged falls back to the bare global pulse when off.
+      emitTreeChanged(io, board.serverId);
       return { ok: true };
     },
   );
@@ -1219,7 +1224,9 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       // leaves the catalog. Site admins can resurrect via the admin Rooms
       // tools if a community changes its mind.
       await db.update(rooms).set({ archivedAt: new Date() }).where(eq(rooms.id, board.id));
-      io.emit("rooms:tree-changed");
+      // The board (a room) row is in hand, so its serverId is free;
+      // emitTreeChanged falls back to the bare global pulse when off.
+      emitTreeChanged(io, board.serverId);
       await recordAudit(db, {
         actorUserId: gate.me.id,
         action: "forum_board_archive",

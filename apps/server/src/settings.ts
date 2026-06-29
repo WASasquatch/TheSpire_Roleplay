@@ -227,6 +227,24 @@ export async function getSettings(db: Db): Promise<SiteSettings> {
   return ensureSiteSettings(db);
 }
 
+/**
+ * Synchronous, cache-only read of `areServersEnabled` for hot paths that
+ * can't await a DB round-trip (e.g. the realtime tree-changed chokepoint,
+ * which fires from sites that don't all have a `db` handle in hand).
+ *
+ * Reads the process-wide settings cache filled at boot by
+ * `ensureSiteSettings`. When the cache hasn't been primed yet (only true in
+ * the first few ms of boot, before the bootstrap settings read) this
+ * returns `false` — the SAFE default that maps to today's flag-off
+ * behavior, so no caller can accidentally take a servers-on branch before
+ * the real flag value is known. Still honors `SERVERS_KILL` so the operator
+ * kill-switch wins here exactly as in `areServersEnabled`.
+ */
+export function areServersEnabledCached(): boolean {
+  if (!cached) return false;
+  return areServersEnabled(cached);
+}
+
 export interface SettingsPatch {
   messageRetentionMs?: number;
   sessionTtlMs?: number;

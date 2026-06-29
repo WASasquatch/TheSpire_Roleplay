@@ -35,6 +35,7 @@ import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "../commands/registry.js";
 import {
   broadcastRoomState,
+  emitTreeChanged,
   findCanonicalLanding,
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
@@ -926,8 +927,10 @@ export async function registerAdminRoutes(
     }).onConflictDoNothing();
     // Live-publish the new room into every connected client's rooms tree.
     // No one is in the room yet so broadcastRoomState/Presence would be
-    // no-ops here; emit the pulse directly.
-    io.emit("rooms:tree-changed");
+    // no-ops here; emit the pulse directly. Admin-created rooms carry no
+    // serverId yet, so this resolves to the bare global pulse (today's
+    // behavior) whether or not the servers feature is on.
+    emitTreeChanged(io, null);
     return { id, name: body.name, type: body.type };
   });
 
@@ -1101,8 +1104,10 @@ export async function registerAdminRoutes(
     // not just the ones who happened to be inside it. broadcastRoomState
     // above only fires when the deleted room had live occupants, an empty
     // archived room going away would otherwise be invisible until the 20s
-    // backstop poll.
-    io.emit("rooms:tree-changed");
+    // backstop poll. The deleted room row is in hand, so its serverId is
+    // free; emitTreeChanged falls back to the bare global pulse when the
+    // servers flag is off.
+    emitTreeChanged(io, room.serverId);
 
     return { ok: true, deleted: room.id, name: room.name };
   });

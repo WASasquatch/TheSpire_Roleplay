@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { type Role, VERSION } from "@thekeep/shared";
-import { sessions, users } from "../db/schema.js";
+import { serverMembers, sessions, users } from "../db/schema.js";
 import { hashPassword, verifyPassword } from "../auth/passwords.js";
 import { permissionsFor } from "../auth/permissions.js";
 import { getSettings } from "../settings.js";
@@ -299,6 +299,28 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
         return { error: "registration conflict - try a different email or username" };
       }
       throw err;
+    }
+
+    // Enroll every new account as an explicit member of the default server
+    // (`server_spire_system`) so it owns an enumerable roster row. This is
+    // PURELY additive and safe even with the servers feature OFF: access to the
+    // default server already flows from serverAuthority's is_system implicit-
+    // membership rule (a signed-in user is a member with NO row), so this writes
+    // a management-enumeration convenience, never the access source of truth —
+    // nothing reads it on the flag-off path. INSERT OR IGNORE keeps it
+    // idempotent (re-runs / races are no-ops). The try/catch guards a fresh
+    // install where ensureSystemServer hasn't run yet: a missing default server
+    // (FK miss) must NEVER fail registration, so we swallow + log only.
+    try {
+      await db.insert(serverMembers).values({
+        serverId: "server_spire_system",
+        userId: id,
+        role: "member",
+        permissionsJson: "[]",
+        joinedAt: new Date(),
+      }).onConflictDoNothing();
+    } catch (err) {
+      req.log.error({ err }, "default-server auto-join failed (non-fatal)");
     }
 
     const sessionToken = await issueSession(db, id, req);

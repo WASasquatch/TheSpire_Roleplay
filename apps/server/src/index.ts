@@ -35,7 +35,7 @@ import {
 } from "@thekeep/shared";
 
 import { db } from "./db/index.js";
-import { bans, characters, messages, roomMembers, roomThreadCategories, rooms, sessions, userEarning, userNpcs, users } from "./db/schema.js";
+import { bans, characters, messages, roomMembers, roomThreadCategories, rooms, sessions, userEarning, userNpcs, userServerLastRoom, users } from "./db/schema.js";
 import { hasPermission } from "./auth/permissions.js";
 import { CommandRegistry } from "./commands/registry.js";
 import { registerBuiltins } from "./commands/builtins/index.js";
@@ -47,8 +47,10 @@ import {
   checkpointPlayingTheaters,
   hydrateTheaterFromDb,
   persistTheaterCheckpoint,
+  emitTreeChanged,
   expireIfEmpty,
   findCanonicalLanding,
+  findServerLanding,
   joinRoom,
   registerIdleGhost,
   sendRoomBacklogTo,
@@ -120,7 +122,7 @@ import { registerThesaurusRoutes } from "./routes/thesaurus.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { ensureSystemSeeds, startJanitor } from "./seed.js";
-import { getSettings } from "./settings.js";
+import { getSettings, areServersEnabled } from "./settings.js";
 
 // In dev: server runs on 3001, Vite dev-server on 5173 with a proxy to 3001.
 // In prod: a single Node process serves both the API and the built web bundle
@@ -710,6 +712,7 @@ async function main() {
         intent?: unknown;
         tabCharId?: unknown;
         tabRoomId?: unknown;
+        tabServerId?: unknown;
       } | undefined;
       const raw = typeof a?.token === "string" ? a.token : typeof a?.sid === "string" ? a.sid : "";
       const sid = raw.trim();
@@ -782,6 +785,13 @@ async function main() {
       // public-vs-private / ban state before joining.
       if (typeof a?.tabRoomId === "string" && a.tabRoomId.length > 0) {
         (socket.data as { tabRoomId?: string }).tabRoomId = a.tabRoomId;
+      }
+      // Per-tab last-known server (multi-server feature, plan §7). Stored
+      // raw alongside tabRoomId; the connection handler reads it only when
+      // the servers feature is live. Purely additive: when the feature is
+      // off nothing consults it, so this is a harmless no-op stash.
+      if (typeof a?.tabServerId === "string" && a.tabServerId.length > 0) {
+        (socket.data as { tabServerId?: string }).tabServerId = a.tabServerId;
       }
       // Sync the in-memory user's activeCharacterId + displayName to
       // match the resolved tabCharId. Otherwise the user object the
@@ -874,7 +884,9 @@ async function main() {
       // and the room reappears in everyone's rail.
       if (room.archivedAt && opts?.resurrect) {
         await db.update(rooms).set({ archivedAt: null }).where(eq(rooms.id, room.id));
-        io.emit("rooms:tree-changed");
+        // The room row is in hand, so its serverId is free; emitTreeChanged
+        // falls back to the bare global pulse when the servers flag is off.
+        emitTreeChanged(io, room.serverId);
       }
       return room.id;
     }
@@ -907,6 +919,15 @@ async function main() {
     // Each candidate runs through validateRoomForUser so a stale id
     // (deleted room, since-archived, newly banned) silently degrades to
     // the next tier instead of dead-ending the connect.
+    // Multi-server placement context (plan §7.4/§7.7). Resolved once so the
+    // new per-server tiers below can share it. When the feature is OFF this
+    // is a single cached boolean read and `targetServerId` stays null, so
+    // every new branch keyed on `serversEnabled` is skipped and the
+    // placement walk is byte-identical to today.
+    const serversEnabled = areServersEnabled(await getSettings(db));
+    const tabServerId = (socket.data as { tabServerId?: string }).tabServerId ?? null;
+    const targetServerId = serversEnabled ? tabServerId : null;
+
     let initialRoomId: string | null = null;
     const tabRoomId = (socket.data as { tabRoomId?: string }).tabRoomId ?? null;
     initialRoomId = await validateRoomForUser(tabRoomId, { resurrect: true });
@@ -922,12 +943,34 @@ async function main() {
         }
       }
     }
+    // Per-(user, server) last-room memory. Placed AHEAD of the account-
+    // global users.lastRoomId fallback so, when the user is returning to a
+    // specific server, we restore the room they last held IN THAT SERVER
+    // rather than whatever account-global slot another server's tab last
+    // wrote. Gated on serversEnabled + a known target server, so it never
+    // runs (and never reorders the walk) on the flag-off path.
+    if (!initialRoomId && serversEnabled && targetServerId) {
+      const last = (await db
+        .select({ roomId: userServerLastRoom.roomId })
+        .from(userServerLastRoom)
+        .where(and(
+          eq(userServerLastRoom.userId, user.id),
+          eq(userServerLastRoom.serverId, targetServerId),
+        ))
+        .limit(1))[0];
+      initialRoomId = await validateRoomForUser(last?.roomId ?? null, { resurrect: true });
+    }
     if (!initialRoomId) {
       const userRow = (await db.select().from(users).where(eq(users.id, user.id)).limit(1))[0];
       initialRoomId = await validateRoomForUser(userRow?.lastRoomId ?? null, { resurrect: true });
     }
     if (!initialRoomId) {
-      const landing = await findCanonicalLanding(db);
+      // Flag-off keeps the exact canonical resolver; flag-on with a known
+      // target server scopes the landing to that server, falling back to
+      // the canonical landing when the server has no joinable system room.
+      const landing = serversEnabled && targetServerId
+        ? (await findServerLanding(db, targetServerId)) ?? (await findCanonicalLanding(db))
+        : await findCanonicalLanding(db);
       if (landing) initialRoomId = landing.id;
     }
     if (initialRoomId) await joinRoom(io, db, socket, user, initialRoomId);

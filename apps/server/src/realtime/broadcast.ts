@@ -42,6 +42,7 @@ import {
   userOwnedFreeformBorders,
   userOwnedNameStyles,
   userEarning,
+  userServerLastRoom,
   users,
   worlds,
 } from "../db/schema.js";
@@ -57,7 +58,7 @@ import {
 import { blockedUserIdsFor, blocksAmong } from "../auth/blocks.js";
 import type { CommandContext, SessionUser } from "../commands/types.js";
 import { expandInlineCommands } from "../commands/registry.js";
-import { getSettings } from "../settings.js";
+import { getSettings, areServersEnabledCached } from "../settings.js";
 import { awardForForum, awardForMessage } from "../earning/award.js";
 import { bumpLifetimeForMessage, classifyMessageForLifetime } from "../lib/lifetimePostCounts.js";
 import { getClearedAt } from "../lib/roomClears.js";
@@ -1277,6 +1278,69 @@ export async function findCanonicalLanding(db: Db): Promise<typeof rooms.$inferS
 }
 
 /**
+ * Server-scoped sibling of `findCanonicalLanding` (multi-server feature,
+ * plan §7.3/§7.7). Resolves the room a user should land in WITHIN a single
+ * server. Resolution order mirrors the canonical resolver but is filtered
+ * to `serverId`:
+ *
+ *   1. The default-flagged room (`rooms.is_default = 1`) that belongs to
+ *      this server. Post-Phase-2 each server carries at most one such row.
+ *   2. The oldest system room (`rooms.is_system = 1`) in this server, so a
+ *      server with no explicit default still lands users somewhere
+ *      deterministic instead of on SQLite's natural row order.
+ *
+ * Returns null when the server has no joinable system room at all (caller
+ * degrades to its next placement tier). This is NEVER consulted on the
+ * flag-off path: the connection handler only calls it when serversEnabled
+ * is true, so `findCanonicalLanding` remains the sole resolver today.
+ */
+export async function findServerLanding(
+  db: Db,
+  serverId: string,
+): Promise<typeof rooms.$inferSelect | null> {
+  const defaulted = (await db
+    .select()
+    .from(rooms)
+    .where(and(eq(rooms.isDefault, true), eq(rooms.serverId, serverId)))
+    .limit(1))[0];
+  if (defaulted) return defaulted;
+  const fallback = (await db
+    .select()
+    .from(rooms)
+    .where(and(eq(rooms.isSystem, true), eq(rooms.serverId, serverId)))
+    .orderBy(asc(rooms.name))
+    .limit(1))[0];
+  return fallback ?? null;
+}
+
+/**
+ * The single chokepoint for the "your rooms tree is stale" pulse (multi-
+ * server feature, plan §7.8). Every site that used to call the bare
+ * `io.emit("rooms:tree-changed")` routes through here instead.
+ *
+ * Flag-OFF (the default) OR no server in hand: behaves EXACTLY like the
+ * old bare emit — a single global `io.emit("rooms:tree-changed")`, nothing
+ * else. This is the byte-identical path a reviewer diffs against.
+ *
+ * Flag-ON with a known `serverId`: emit the scoped `server:tree-changed`
+ * to that server's socket band so clients viewing OTHER servers ignore it,
+ * AND dual-emit the bare `rooms:tree-changed` globally so older client
+ * bundles (which never learned server scoping) still refresh. Old clients
+ * see today's behavior; new clients additionally get the scoped pulse.
+ */
+export function emitTreeChanged(io: Io, serverId?: string | null): void {
+  // Flag-off, or no server in hand → the exact bare global emit, unchanged.
+  if (!serverId || !areServersEnabledCached()) {
+    io.emit("rooms:tree-changed");
+    return;
+  }
+  // Flag-on with a known server: scoped pulse to that server's socket band,
+  // PLUS the bare global emit for old bundles (plan §7.8).
+  io.to(`server:${serverId}`).emit("server:tree-changed", { serverId });
+  io.emit("rooms:tree-changed");
+}
+
+/**
  * Send the per-viewer-filtered recent backlog for `roomId` to a single
  * socket. Mirrors the slice joinRoom assembles on a fresh join: ignored
  * authors are dropped, whispers are visible only to sender/recipient,
@@ -1670,6 +1734,36 @@ async function joinRoomBody(
   }
 
   socket.join(`room:${roomId}`);
+
+  // Multi-server socket banding (plan §7). Each socket joins a
+  // `server:<serverId>` band alongside its `room:` band so server-scoped
+  // broadcasts (emitTreeChanged's `server:tree-changed`) reach exactly the
+  // sockets viewing that server. On a cross-server move we drop the old
+  // band first so a socket never lingers in two servers' bands at once.
+  //
+  // GATED on the servers feature: when off we touch NO bands at all, so the
+  // socket's room membership set is byte-identical to today and every
+  // existing broadcast path is unaffected.
+  if (areServersEnabledCached()) {
+    const targetServerBand = room.serverId ? `server:${room.serverId}` : null;
+    for (const band of socket.rooms) {
+      if (band.startsWith("server:") && band !== targetServerBand) socket.leave(band);
+    }
+    if (targetServerBand) socket.join(targetServerBand);
+    // Per-(user, server) last-room memory (plan §7.4). Upsert the room the
+    // user is now in for this server so a later same-server placement can
+    // restore it ahead of the account-global users.lastRoomId fallback.
+    // Only meaningful when the room actually belongs to a server.
+    if (room.serverId) {
+      await db
+        .insert(userServerLastRoom)
+        .values({ userId: user.id, serverId: room.serverId, roomId })
+        .onConflictDoUpdate({
+          target: [userServerLastRoom.userId, userServerLastRoom.serverId],
+          set: { roomId, updatedAt: new Date() },
+        });
+    }
+  }
 
   socket.data.roomId = roomId;
   // Persist as the account-global last-room slot on EVERY join, not
@@ -2097,8 +2191,10 @@ export async function broadcastRoomState(
   // needs to know. Sockets in other rooms wouldn't see the room-
   // scoped emit above, so they'd be stuck on a stale tree until
   // the 20s backstop poll. Payload-free pulse; the client refetches
-  // `/rooms` (debounced) and re-renders.
-  io.emit("rooms:tree-changed");
+  // `/rooms` (debounced) and re-renders. The room row is already in hand,
+  // so its serverId is free here; emitTreeChanged ignores it when the flag
+  // is off and emits the same bare global pulse as before.
+  emitTreeChanged(io, room.serverId);
 }
 
 export async function broadcastPresence(io: Io, db: Db, roomId: string): Promise<void> {
@@ -2120,7 +2216,20 @@ export async function broadcastPresence(io: Io, db: Db, roomId: string): Promise
   // a viewer in room A finds out about a join/leave in room B is to
   // re-fetch the rooms tree. Client-side debounce coalesces a flurry
   // (rapid /char switches, mass disconnect) into a single refetch.
-  io.emit("rooms:tree-changed");
+  //
+  // This path doesn't already hold the room row (only an id), so resolving
+  // the serverId costs a row read. Pay it ONLY when the servers feature is
+  // live; on the flag-off path we skip the lookup entirely and emit the
+  // exact bare global pulse, leaving today's behavior byte-identical.
+  let presenceServerId: string | null = null;
+  if (areServersEnabledCached()) {
+    presenceServerId = (await db
+      .select({ serverId: rooms.serverId })
+      .from(rooms)
+      .where(eq(rooms.id, roomId))
+      .limit(1))[0]?.serverId ?? null;
+  }
+  emitTreeChanged(io, presenceServerId);
 }
 
 /**
@@ -2302,8 +2411,10 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
   await db.update(rooms).set({ archivedAt: new Date() }).where(eq(rooms.id, roomId));
   // Archived rooms are filtered out of the tree, so the rail in every
   // open client just got stale. Caller skips broadcastPresence on the
-  // expired branch, so we emit the tree pulse here instead.
-  io.emit("rooms:tree-changed");
+  // expired branch, so we emit the tree pulse here instead. The room row
+  // is in hand, so its serverId is free; emitTreeChanged falls back to the
+  // bare global pulse when the flag is off.
+  emitTreeChanged(io, room.serverId);
   return true;
 }
 

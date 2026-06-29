@@ -331,6 +331,17 @@ export interface ServerToClientEvents {
    */
   "rooms:tree-changed": () => void;
   /**
+   * Server-scoped sibling of `rooms:tree-changed` (multi-server feature,
+   * plan §7.8). Emitted ONLY when the servers feature is live and a change
+   * is scoped to a known server; the payload pins which server's tree went
+   * stale so a client viewing a different server can ignore it. The server
+   * ALSO dual-emits the bare `rooms:tree-changed` alongside this so older
+   * client bundles (which never learned about server scoping) keep
+   * refreshing exactly as today. When the feature is off this event never
+   * fires — `rooms:tree-changed` is emitted alone, byte-identical to before.
+   */
+  "server:tree-changed": (payload: { serverId: string }) => void;
+  /**
    * Emoticon reaction was added or removed on a chat message, DM, or
    * forum post. Clients merge the delta into the cached reaction
    * summary for that target, no full refetch. The server scopes the

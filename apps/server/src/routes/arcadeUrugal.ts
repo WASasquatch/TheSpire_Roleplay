@@ -42,6 +42,7 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { creditPool } from "../earning/award.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Scope = "user" | "character";
@@ -224,6 +225,7 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
     let credited = false;
     if (result.award.currency > 0 || result.award.xp > 0) {
       await creditPool(db, io, {
+        serverId: DEFAULT_SERVER_ID,
         scope: g.scope,
         ownerId: g.ownerId,
         xpDelta: result.award.xp,

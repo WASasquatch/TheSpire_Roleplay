@@ -10,11 +10,13 @@
  * only). Living familiars sort above dormant ones, which carry a `dead` flag
  * (the lifeless/dormant state) for a 💤 badge.
  */
+import { eq } from "drizzle-orm";
 import { eidolonLevelFromXp } from "@thekeep/shared";
 import { eidolonState } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { fetchDisplayInfo, type RankingPoolEntry } from "./rankings.js";
 import { catchUp } from "./eidolon.js";
+import { DEFAULT_SERVER_ID } from "./pool.js";
 
 const LIMIT = 10;
 type FamiliarCosmetics = Omit<RankingPoolEntry, "value" | "scope" | "ownerId">;
@@ -55,7 +57,9 @@ interface Base extends FamiliarCosmetics {
 }
 
 export async function buildFamiliarRankings(db: Db): Promise<FamiliarRankingsResponse> {
-  const rows = await db.select().from(eidolonState);
+  // Per-server economy: default (system) server only this pass, matching the
+  // other leaderboards. With the servers flag off this is the only server.
+  const rows = await db.select().from(eidolonState).where(eq(eidolonState.serverId, DEFAULT_SERVER_ID));
   if (rows.length === 0) return { byLevel: [], byAge: [], byStreak: [], byHealth: [] };
 
   const now = Date.now();

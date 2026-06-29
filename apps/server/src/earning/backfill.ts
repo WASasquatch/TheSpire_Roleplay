@@ -32,6 +32,7 @@ import {
 } from "../db/schema.js";
 import { getSettings, updateSettings } from "../settings.js";
 import { mergeMaxEverHeld, resolveRankForXp } from "./resolver.js";
+import { DEFAULT_SERVER_ID } from "./pool.js";
 
 /** Per (scope, ownerId) pool accumulator. */
 type Pool = { scope: "user" | "character"; ownerId: string; xp: number; messageCount: number };
@@ -126,9 +127,12 @@ export async function runBackfillIfNeeded(
   // the writer lock anyway. Lazy-create the earning row if missing.
   for (const pool of pools.values()) {
     try {
+      // Historical XP all homes to the default server (the pre-servers world
+      // = the single default server). Stamp server_spire_system on the pool
+      // rows + ledger so the grain matches the rest of the legacy data.
       if (pool.scope === "user") {
-        await db.insert(userEarning).values({ userId: pool.ownerId }).onConflictDoNothing();
-        const prior = (await db.select().from(userEarning).where(sql`${userEarning.userId} = ${pool.ownerId}`).limit(1))[0];
+        await db.insert(userEarning).values({ serverId: DEFAULT_SERVER_ID, userId: pool.ownerId }).onConflictDoNothing();
+        const prior = (await db.select().from(userEarning).where(sql`${userEarning.serverId} = ${DEFAULT_SERVER_ID} AND ${userEarning.userId} = ${pool.ownerId}`).limit(1))[0];
         if (!prior) continue;
         const newXp = prior.xp + pool.xp;
         const placed = await resolveRankForXp(db, newXp);
@@ -143,10 +147,10 @@ export async function runBackfillIfNeeded(
           maxRankKeyEverHeld: peak.maxRankKeyEverHeld,
           maxTierEverHeld: peak.maxTierEverHeld,
           updatedAt: new Date(),
-        }).where(sql`${userEarning.userId} = ${pool.ownerId}`);
+        }).where(sql`${userEarning.serverId} = ${DEFAULT_SERVER_ID} AND ${userEarning.userId} = ${pool.ownerId}`);
       } else {
-        await db.insert(characterEarning).values({ characterId: pool.ownerId }).onConflictDoNothing();
-        const prior = (await db.select().from(characterEarning).where(sql`${characterEarning.characterId} = ${pool.ownerId}`).limit(1))[0];
+        await db.insert(characterEarning).values({ serverId: DEFAULT_SERVER_ID, characterId: pool.ownerId }).onConflictDoNothing();
+        const prior = (await db.select().from(characterEarning).where(sql`${characterEarning.serverId} = ${DEFAULT_SERVER_ID} AND ${characterEarning.characterId} = ${pool.ownerId}`).limit(1))[0];
         if (!prior) continue;
         const newXp = prior.xp + pool.xp;
         const placed = await resolveRankForXp(db, newXp);
@@ -161,10 +165,11 @@ export async function runBackfillIfNeeded(
           maxRankKeyEverHeld: peak.maxRankKeyEverHeld,
           maxTierEverHeld: peak.maxTierEverHeld,
           updatedAt: new Date(),
-        }).where(sql`${characterEarning.characterId} = ${pool.ownerId}`);
+        }).where(sql`${characterEarning.serverId} = ${DEFAULT_SERVER_ID} AND ${characterEarning.characterId} = ${pool.ownerId}`);
       }
       await db.insert(earningLedger).values({
         id: nanoid(),
+        serverId: DEFAULT_SERVER_ID,
         scope: pool.scope,
         ownerId: pool.ownerId,
         xpDelta: pool.xp,

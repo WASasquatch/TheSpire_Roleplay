@@ -79,6 +79,7 @@ import { buildRankings } from "../earning/rankings.js";
 import { buildGameRankings } from "../earning/gameRankings.js";
 import { buildFamiliarRankings } from "../earning/familiarRankings.js";
 import { buildScriptoriumRankings } from "../earning/scriptoriumRankings.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 // creditPool is no longer called directly here, purchase endpoints
 // run their own sqlite transaction (see `runPurchaseTxn` below) for
 // atomicity. The award engine still imports it for the live earn
@@ -154,7 +155,7 @@ async function buildUserPoolView(
   const row = (await db
     .select()
     .from(userEarning)
-    .where(eq(userEarning.userId, userId))
+    .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, userId)))
     .limit(1))[0];
   if (!row) {
     // Lazy-create equivalent: return a synthesized zero view so the
@@ -211,7 +212,7 @@ async function buildCharacterPoolView(
   const row = (await db
     .select()
     .from(characterEarning)
-    .where(eq(characterEarning.characterId, characterId))
+    .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId)))
     .limit(1))[0];
   if (!row) {
     return {
@@ -310,43 +311,46 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     // character_owned_*. Each set is independent, a master who
     // bought Embers does NOT make their character own it, and vice
     // versa.
+    // Per-server economy: this dashboard reflects the default (active) server's
+    // ownership. Every ownership read below is scoped to DEFAULT_SERVER_ID so
+    // /earning/me stays backward-compatible (today's single-server view).
     const ownedStyleRows = await db
       .select()
       .from(userOwnedNameStyles)
-      .where(eq(userOwnedNameStyles.userId, me.id));
+      .where(and(eq(userOwnedNameStyles.serverId, DEFAULT_SERVER_ID), eq(userOwnedNameStyles.userId, me.id)));
     const ownedBorderRows = await db
       .select()
       .from(userOwnedBorders)
-      .where(eq(userOwnedBorders.userId, me.id));
+      .where(and(eq(userOwnedBorders.serverId, DEFAULT_SERVER_ID), eq(userOwnedBorders.userId, me.id)));
     const charIdsForOwnership = charsOfMine.map((c) => c.id);
     const charOwnedStyleRows = charIdsForOwnership.length
       ? await db
           .select()
           .from(characterOwnedNameStyles)
-          .where(inArray(characterOwnedNameStyles.characterId, charIdsForOwnership))
+          .where(and(eq(characterOwnedNameStyles.serverId, DEFAULT_SERVER_ID), inArray(characterOwnedNameStyles.characterId, charIdsForOwnership)))
       : [];
     const charOwnedBorderRows = charIdsForOwnership.length
       ? await db
           .select()
           .from(characterOwnedBorders)
-          .where(inArray(characterOwnedBorders.characterId, charIdsForOwnership))
+          .where(and(eq(characterOwnedBorders.serverId, DEFAULT_SERVER_ID), inArray(characterOwnedBorders.characterId, charIdsForOwnership)))
       : [];
     // Free-form border ownership, parallel to rank-tier borders. Two
     // independent ledgers per the migration 0149 comment.
     const ownedFreeformBorderRows = await db
       .select()
       .from(userOwnedFreeformBorders)
-      .where(eq(userOwnedFreeformBorders.userId, me.id));
+      .where(and(eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID), eq(userOwnedFreeformBorders.userId, me.id)));
     const charOwnedFreeformBorderRows = charIdsForOwnership.length
       ? await db
           .select()
           .from(characterOwnedFreeformBorders)
-          .where(inArray(characterOwnedFreeformBorders.characterId, charIdsForOwnership))
+          .where(and(eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID), inArray(characterOwnedFreeformBorders.characterId, charIdsForOwnership)))
       : [];
     const activeCosmeticsRow = (await db
       .select()
       .from(userActiveCosmetics)
-      .where(eq(userActiveCosmetics.userId, me.id))
+      .where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id)))
       .limit(1))[0];
     // Per-character active cosmetics. Pulled from the same
     // character_earning rows the pool view already touches, but
@@ -369,7 +373,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             activeRoomTransitionKey: characterEarning.activeRoomTransitionKey,
           })
           .from(characterEarning)
-          .where(inArray(characterEarning.characterId, charIds))
+          .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), inArray(characterEarning.characterId, charIds)))
       : [];
     // Owned room-transition keys per identity, from the earning ledger
     // (reason `purchase_transition_<key>`). Free `slide` is implicitly owned
@@ -378,6 +382,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .select({ scope: earningLedger.scope, ownerId: earningLedger.ownerId, reason: earningLedger.reason })
       .from(earningLedger)
       .where(and(
+        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
         like(earningLedger.reason, "purchase_transition_%"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -414,7 +419,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         sessionExitTemplate: userEarning.sessionExitTemplate,
       })
       .from(userEarning)
-      .where(eq(userEarning.userId, me.id))
+      .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id)))
       .limit(1))[0];
     // Flair-purchase ownership lookup: which identities (master +
     // characters) have bought `flair_profile_banner` from the
@@ -430,6 +435,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       })
       .from(earningLedger)
       .where(and(
+        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
         eq(earningLedger.reason, "purchase_flair_profile_banner"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -451,6 +457,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       })
       .from(earningLedger)
       .where(and(
+        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
         eq(earningLedger.reason, "purchase_flair_typing_phrase"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -472,6 +479,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       })
       .from(earningLedger)
       .where(and(
+        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
         eq(earningLedger.reason, "purchase_flair_lurking_master"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -494,6 +502,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       })
       .from(earningLedger)
       .where(and(
+        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
         eq(earningLedger.reason, "purchase_flair_room_presence"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -511,6 +520,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .select({ ownerId: earningLedger.ownerId })
       .from(earningLedger)
       .where(and(
+        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
         eq(earningLedger.reason, "purchase_flair_session_presence"),
         eq(earningLedger.scope, "user"),
         eq(earningLedger.ownerId, me.id),
@@ -525,6 +535,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .select({ scope: earningLedger.scope, ownerId: earningLedger.ownerId })
       .from(earningLedger)
       .where(and(
+        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
         eq(earningLedger.reason, "purchase_flair_profile_visitors"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -541,6 +552,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       .select({ scope: earningLedger.scope, ownerId: earningLedger.ownerId })
       .from(earningLedger)
       .where(and(
+        eq(earningLedger.serverId, DEFAULT_SERVER_ID),
         eq(earningLedger.reason, "purchase_flair_profile_marquee"),
         or(
           and(eq(earningLedger.scope, "user"), eq(earningLedger.ownerId, me.id)),
@@ -598,14 +610,14 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const inventoryRows = await db
       .select()
       .from(identityInventory)
-      .where(sql`(${identityInventory.ownerScope} = 'user' AND ${identityInventory.ownerId} = ${me.id})
+      .where(sql`${identityInventory.serverId} = ${DEFAULT_SERVER_ID} AND ((${identityInventory.ownerScope} = 'user' AND ${identityInventory.ownerId} = ${me.id})
         OR (${identityInventory.ownerScope} = 'character' AND ${identityInventory.ownerId} IN (${
         // Empty IN () is invalid SQL, guard with a sentinel that
         // can't match any real character id when the user has none.
         charIdSet.size > 0
           ? sql.join(Array.from(charIdSet).map((id) => sql`${id}`), sql`, `)
           : sql`''`
-      }))`);
+      })))`);
     const inventoryMaster: { itemKey: string; quantity: number; acquiredAt: number }[] = [];
     const inventoryByCharacter: Record<string, { itemKey: string; quantity: number; acquiredAt: number }[]> = {};
     for (const row of inventoryRows) {
@@ -625,12 +637,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const collectionRows = await db
       .select()
       .from(identityCollection)
-      .where(sql`(${identityCollection.ownerScope} = 'user' AND ${identityCollection.ownerId} = ${me.id})
+      .where(sql`${identityCollection.serverId} = ${DEFAULT_SERVER_ID} AND ((${identityCollection.ownerScope} = 'user' AND ${identityCollection.ownerId} = ${me.id})
         OR (${identityCollection.ownerScope} = 'character' AND ${identityCollection.ownerId} IN (${
         charIdSet.size > 0
           ? sql.join(Array.from(charIdSet).map((id) => sql`${id}`), sql`, `)
           : sql`''`
-      }))`);
+      })))`);
     const collectionMaster: { slot: number; itemKey: string }[] = [];
     const collectionByCharacter: Record<string, { slot: number; itemKey: string }[]> = {};
     for (const row of collectionRows) {
@@ -649,12 +661,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     const petCollectionRows = await db
       .select()
       .from(identityPetCollection)
-      .where(sql`(${identityPetCollection.ownerScope} = 'user' AND ${identityPetCollection.ownerId} = ${me.id})
+      .where(sql`${identityPetCollection.serverId} = ${DEFAULT_SERVER_ID} AND ((${identityPetCollection.ownerScope} = 'user' AND ${identityPetCollection.ownerId} = ${me.id})
         OR (${identityPetCollection.ownerScope} = 'character' AND ${identityPetCollection.ownerId} IN (${
         charIdSet.size > 0
           ? sql.join(Array.from(charIdSet).map((id) => sql`${id}`), sql`, `)
           : sql`''`
-      }))`);
+      })))`);
     const petCollectionMaster: { slot: number; itemKey: string; nickname: string | null }[] = [];
     const petCollectionByCharacter: Record<string, { slot: number; itemKey: string; nickname: string | null }[]> = {};
     for (const row of petCollectionRows) {
@@ -927,7 +939,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         const masterFlags = (await db
           .select({ hideCurrencyCount: userEarning.hideCurrencyCount, hideXpCount: userEarning.hideXpCount })
           .from(userEarning)
-          .where(eq(userEarning.userId, target.id))
+          .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, target.id)))
           .limit(1))[0];
         hideCurrencyCount = masterFlags?.hideCurrencyCount ?? false;
         hideXpCount = masterFlags?.hideXpCount ?? false;
@@ -961,6 +973,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               .select({ rankKey: characterOwnedBorders.rankKey })
               .from(characterOwnedBorders)
               .where(and(
+                eq(characterOwnedBorders.serverId, DEFAULT_SERVER_ID),
                 eq(characterOwnedBorders.characterId, character.id),
                 eq(characterOwnedBorders.rankKey, resolvedRankBorderKey),
               ))
@@ -969,6 +982,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               .select({ rankKey: userOwnedBorders.rankKey })
               .from(userOwnedBorders)
               .where(and(
+                eq(userOwnedBorders.serverId, DEFAULT_SERVER_ID),
                 eq(userOwnedBorders.userId, target.id),
                 eq(userOwnedBorders.rankKey, resolvedRankBorderKey),
               ))
@@ -981,6 +995,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               .select({ borderKey: characterOwnedFreeformBorders.borderKey })
               .from(characterOwnedFreeformBorders)
               .where(and(
+                eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
                 eq(characterOwnedFreeformBorders.characterId, character.id),
                 eq(characterOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
               ))
@@ -989,6 +1004,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               .select({ borderKey: userOwnedFreeformBorders.borderKey })
               .from(userOwnedFreeformBorders)
               .where(and(
+                eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
                 eq(userOwnedFreeformBorders.userId, target.id),
                 eq(userOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
               ))
@@ -1009,6 +1025,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             .select({ configJson: characterOwnedFreeformBorders.configJson })
             .from(characterOwnedFreeformBorders)
             .where(and(
+              eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
               eq(characterOwnedFreeformBorders.characterId, character.id),
               eq(characterOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
             ))
@@ -1019,6 +1036,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             .select({ configJson: userOwnedFreeformBorders.configJson })
             .from(userOwnedFreeformBorders)
             .where(and(
+              eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
               eq(userOwnedFreeformBorders.userId, target.id),
               eq(userOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
             ))
@@ -1180,7 +1198,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       // Per-character path: hide flags don't apply (those are
       // master-only privacy prefs), only the border equip routes
       // here. Ensure the character_earning row exists.
-      await db.insert(characterEarning).values({ characterId }).onConflictDoNothing();
+      await db.insert(characterEarning).values({ serverId: DEFAULT_SERVER_ID, characterId }).onConflictDoNothing();
       if (body.selectedBorderRankKey !== undefined) {
         let value: string | null = null;
         if (body.selectedBorderRankKey !== null) {
@@ -1188,6 +1206,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             .select()
             .from(characterOwnedBorders)
             .where(and(
+              eq(characterOwnedBorders.serverId, DEFAULT_SERVER_ID),
               eq(characterOwnedBorders.characterId, characterId),
               eq(characterOwnedBorders.rankKey, body.selectedBorderRankKey),
             ))
@@ -1201,7 +1220,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         await db
           .update(characterEarning)
           .set({ selectedBorderRankKey: value, updatedAt: new Date() })
-          .where(eq(characterEarning.characterId, characterId));
+          .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId)));
       }
       if (body.selectedFreeformBorderKey !== undefined) {
         let value: string | null = null;
@@ -1214,6 +1233,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             .select()
             .from(characterOwnedFreeformBorders)
             .where(and(
+              eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
               eq(characterOwnedFreeformBorders.characterId, characterId),
               eq(characterOwnedFreeformBorders.borderKey, body.selectedFreeformBorderKey),
             ))
@@ -1227,14 +1247,14 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         await db
           .update(characterEarning)
           .set({ selectedFreeformBorderKey: value, updatedAt: new Date() })
-          .where(eq(characterEarning.characterId, characterId));
+          .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId)));
       }
       await rebroadcastPresenceForUser(me.id);
       return { ok: true };
     }
 
     // Master path, unchanged behavior.
-    await db.insert(userEarning).values({ userId: me.id }).onConflictDoNothing();
+    await db.insert(userEarning).values({ serverId: DEFAULT_SERVER_ID, userId: me.id }).onConflictDoNothing();
 
     const update: Partial<typeof userEarning.$inferInsert> = { updatedAt: new Date() };
     if (body.hideCurrencyCount !== undefined) update.hideCurrencyCount = body.hideCurrencyCount;
@@ -1248,6 +1268,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .select()
           .from(userOwnedBorders)
           .where(and(
+            eq(userOwnedBorders.serverId, DEFAULT_SERVER_ID),
             eq(userOwnedBorders.userId, me.id),
             eq(userOwnedBorders.rankKey, body.selectedBorderRankKey),
           ))
@@ -1267,6 +1288,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .select()
           .from(userOwnedFreeformBorders)
           .where(and(
+            eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
             eq(userOwnedFreeformBorders.userId, me.id),
             eq(userOwnedFreeformBorders.borderKey, body.selectedFreeformBorderKey),
           ))
@@ -1279,7 +1301,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       }
     }
     if (Object.keys(update).length === 1) return { ok: true }; // only updatedAt, nothing to do
-    await db.update(userEarning).set(update).where(eq(userEarning.userId, me.id));
+    await db.update(userEarning).set(update).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id)));
     // Border equip changes the bordered-avatar rendering on every line
     // this user appears on, so peers need a fresh occupant snapshot to
     // see it without a refresh. hideCurrencyCount / hideXpCount only
@@ -1537,12 +1559,14 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           if (!style || !style.enabled) return { ok: false, status: 404, error: "style not found or disabled" };
           if (characterId) {
             const already = tx.select().from(characterOwnedNameStyles).where(and(
+              eq(characterOwnedNameStyles.serverId, DEFAULT_SERVER_ID),
               eq(characterOwnedNameStyles.characterId, characterId),
               eq(characterOwnedNameStyles.styleKey, req.params.key),
             )).limit(1).all()[0];
             if (already) return { ok: false, status: 409, error: "already owned" };
           } else {
             const already = tx.select().from(userOwnedNameStyles).where(and(
+              eq(userOwnedNameStyles.serverId, DEFAULT_SERVER_ID),
               eq(userOwnedNameStyles.userId, me.id),
               eq(userOwnedNameStyles.styleKey, req.params.key),
             )).limit(1).all()[0];
@@ -1561,12 +1585,14 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         grant: (tx) => {
           if (characterId) {
             tx.insert(characterOwnedNameStyles).values({
+              serverId: DEFAULT_SERVER_ID,
               characterId,
               styleKey: req.params.key,
               configJson: null,
             }).run();
           } else {
             tx.insert(userOwnedNameStyles).values({
+              serverId: DEFAULT_SERVER_ID,
               userId: me.id,
               styleKey: req.params.key,
               configJson: null,
@@ -1618,6 +1644,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .select()
           .from(characterOwnedNameStyles)
           .where(and(
+            eq(characterOwnedNameStyles.serverId, DEFAULT_SERVER_ID),
             eq(characterOwnedNameStyles.characterId, characterId),
             eq(characterOwnedNameStyles.styleKey, req.params.key),
           ))
@@ -1627,6 +1654,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .update(characterOwnedNameStyles)
           .set({ configJson: body.config ? JSON.stringify(body.config) : null })
           .where(and(
+            eq(characterOwnedNameStyles.serverId, DEFAULT_SERVER_ID),
             eq(characterOwnedNameStyles.characterId, characterId),
             eq(characterOwnedNameStyles.styleKey, req.params.key),
           ));
@@ -1634,13 +1662,13 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         const owned = (await db
           .select()
           .from(userOwnedNameStyles)
-          .where(and(eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, req.params.key)))
+          .where(and(eq(userOwnedNameStyles.serverId, DEFAULT_SERVER_ID), eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, req.params.key)))
           .limit(1))[0];
         if (!owned) { reply.code(404); return { error: "not owned" }; }
         await db
           .update(userOwnedNameStyles)
           .set({ configJson: body.config ? JSON.stringify(body.config) : null })
-          .where(and(eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, req.params.key)));
+          .where(and(eq(userOwnedNameStyles.serverId, DEFAULT_SERVER_ID), eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, req.params.key)));
       }
       // Style config (colors / glow / outline) feeds straight into the
       // occupant payload's `activeStyleConfig`, so a refresh here lands
@@ -1670,6 +1698,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .select()
           .from(characterOwnedNameStyles)
           .where(and(
+            eq(characterOwnedNameStyles.serverId, DEFAULT_SERVER_ID),
             eq(characterOwnedNameStyles.characterId, body.characterId),
             eq(characterOwnedNameStyles.styleKey, body.styleKey),
           ))
@@ -1679,7 +1708,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         const owned = (await db
           .select()
           .from(userOwnedNameStyles)
-          .where(and(eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, body.styleKey)))
+          .where(and(eq(userOwnedNameStyles.serverId, DEFAULT_SERVER_ID), eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, body.styleKey)))
           .limit(1))[0];
         if (!owned) { reply.code(403); return { error: "you don't own that style" }; }
       }
@@ -1711,9 +1740,11 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       // active_name_style_key column.
       await db
         .insert(characterEarning)
-        .values({ characterId: c.id, activeNameStyleKey: body.styleKey })
+        .values({ serverId: DEFAULT_SERVER_ID, characterId: c.id, activeNameStyleKey: body.styleKey })
         .onConflictDoUpdate({
-          target: characterEarning.characterId,
+          // PK is now (server_id, character_id) — the conflict target must
+          // be the full composite key or the upsert would never match.
+          target: [characterEarning.serverId, characterEarning.characterId],
           set: { activeNameStyleKey: body.styleKey, updatedAt: new Date() },
         });
     } else {
@@ -1721,15 +1752,16 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       const existing = (await db
         .select()
         .from(userActiveCosmetics)
-        .where(eq(userActiveCosmetics.userId, me.id))
+        .where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id)))
         .limit(1))[0];
       if (existing) {
         await db.update(userActiveCosmetics).set({
           activeNameStyleKey: body.styleKey,
           updatedAt: new Date(),
-        }).where(eq(userActiveCosmetics.userId, me.id));
+        }).where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id)));
       } else {
         await db.insert(userActiveCosmetics).values({
+          serverId: DEFAULT_SERVER_ID,
           userId: me.id,
           activeNameStyleKey: body.styleKey,
         });
@@ -1784,12 +1816,22 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * and free promo cosmetics still flow through the same ledger
    * insert.
    */
-  async function hasPurchased(scope: "user" | "character", ownerId: string, cosmeticKey: string): Promise<boolean> {
+  async function hasPurchased(
+    scope: "user" | "character",
+    ownerId: string,
+    cosmeticKey: string,
+    // Per-server economy: cosmetics are owned per server (the purchase ledger
+    // row carries the server_id). This pass keys ownership to the default
+    // (active) server; with the servers flag off it's the only pool, so the
+    // "already owned" gate behaves exactly as today.
+    serverId: string = DEFAULT_SERVER_ID,
+  ): Promise<boolean> {
     const reason = `purchase_${cosmeticKey}`;
     const r = (await db
       .select({ id: earningLedger.id })
       .from(earningLedger)
       .where(and(
+        eq(earningLedger.serverId, serverId),
         eq(earningLedger.scope, scope),
         eq(earningLedger.ownerId, ownerId),
         eq(earningLedger.reason, reason),
@@ -1914,19 +1956,20 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           //                      ledger insert that `runPurchaseTxn` does.
           if (req.params.key !== "inline_avatar") return;
           if (characterId) {
-            tx.insert(characterEarning).values({ characterId, inlineAvatarEnabled: true }).onConflictDoUpdate({
-              target: characterEarning.characterId,
+            tx.insert(characterEarning).values({ serverId: DEFAULT_SERVER_ID, characterId, inlineAvatarEnabled: true }).onConflictDoUpdate({
+              target: [characterEarning.serverId, characterEarning.characterId],
               set: { inlineAvatarEnabled: true, updatedAt: new Date() },
             }).run();
           } else {
-            const existing = tx.select().from(userActiveCosmetics).where(eq(userActiveCosmetics.userId, me.id)).limit(1).all()[0];
+            const existing = tx.select().from(userActiveCosmetics).where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id))).limit(1).all()[0];
             if (existing) {
               tx.update(userActiveCosmetics)
                 .set({ inlineAvatarEnabled: true, updatedAt: new Date() })
-                .where(eq(userActiveCosmetics.userId, me.id))
+                .where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id)))
                 .run();
             } else {
               tx.insert(userActiveCosmetics).values({
+                serverId: DEFAULT_SERVER_ID,
                 userId: me.id,
                 inlineAvatarEnabled: true,
               }).run();
@@ -2025,9 +2068,9 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         }
         await db
           .insert(characterEarning)
-          .values({ characterId: c.id, [cols.characterField]: body.enabled })
+          .values({ serverId: DEFAULT_SERVER_ID, characterId: c.id, [cols.characterField]: body.enabled })
           .onConflictDoUpdate({
-            target: characterEarning.characterId,
+            target: [characterEarning.serverId, characterEarning.characterId],
             set: { [cols.characterField]: body.enabled, updatedAt: new Date() },
           });
       } else {
@@ -2038,14 +2081,15 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         const existing = (await db
           .select()
           .from(userActiveCosmetics)
-          .where(eq(userActiveCosmetics.userId, me.id))
+          .where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id)))
           .limit(1))[0];
         if (existing) {
           await db.update(userActiveCosmetics)
             .set({ [cols.masterField]: body.enabled, updatedAt: new Date() })
-            .where(eq(userActiveCosmetics.userId, me.id));
+            .where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id)));
         } else {
           await db.insert(userActiveCosmetics).values({
+            serverId: DEFAULT_SERVER_ID,
             userId: me.id,
             [cols.masterField]: body.enabled,
           });
@@ -2098,11 +2142,13 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         validate: (tx) => {
           const existing = characterId
             ? tx.select({ id: earningLedger.id }).from(earningLedger).where(and(
+                eq(earningLedger.serverId, DEFAULT_SERVER_ID),
                 eq(earningLedger.scope, "character"),
                 eq(earningLedger.ownerId, characterId),
                 eq(earningLedger.reason, reason),
               )).limit(1).all()[0]
             : tx.select({ id: earningLedger.id }).from(earningLedger).where(and(
+                eq(earningLedger.serverId, DEFAULT_SERVER_ID),
                 eq(earningLedger.scope, "user"),
                 eq(earningLedger.ownerId, me.id),
                 eq(earningLedger.reason, reason),
@@ -2115,7 +2161,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           // /earning/me's byCharacter map (and a later equip can land). The
           // ledger row that runPurchaseTxn writes IS the ownership record.
           if (characterId) {
-            tx.insert(characterEarning).values({ characterId }).onConflictDoNothing().run();
+            tx.insert(characterEarning).values({ serverId: DEFAULT_SERVER_ID, characterId }).onConflictDoNothing().run();
           }
         },
         reason,
@@ -2173,20 +2219,20 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       if (!c || c.userId !== me.id || c.deletedAt) { reply.code(403); return { error: "not your character" }; }
       await db
         .insert(characterEarning)
-        .values({ characterId: c.id, activeRoomTransitionKey: key })
+        .values({ serverId: DEFAULT_SERVER_ID, characterId: c.id, activeRoomTransitionKey: key })
         .onConflictDoUpdate({
-          target: characterEarning.characterId,
+          target: [characterEarning.serverId, characterEarning.characterId],
           set: { activeRoomTransitionKey: key, updatedAt: new Date() },
         });
     } else {
       const existing = (await db
-        .select().from(userActiveCosmetics).where(eq(userActiveCosmetics.userId, me.id)).limit(1))[0];
+        .select().from(userActiveCosmetics).where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id))).limit(1))[0];
       if (existing) {
         await db.update(userActiveCosmetics)
           .set({ activeRoomTransitionKey: key, updatedAt: new Date() })
-          .where(eq(userActiveCosmetics.userId, me.id));
+          .where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id)));
       } else {
-        await db.insert(userActiveCosmetics).values({ userId: me.id, activeRoomTransitionKey: key });
+        await db.insert(userActiveCosmetics).values({ serverId: DEFAULT_SERVER_ID, userId: me.id, activeRoomTransitionKey: key });
       }
     }
     return { ok: true };
@@ -2208,12 +2254,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       if (!c || c.userId !== me.id || c.deletedAt) return { key: null };
       const row = (await db
         .select({ key: characterEarning.activeRoomTransitionKey })
-        .from(characterEarning).where(eq(characterEarning.characterId, characterId)).limit(1))[0];
+        .from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId))).limit(1))[0];
       key = row?.key ?? null;
     } else {
       const row = (await db
         .select({ key: userActiveCosmetics.activeRoomTransitionKey })
-        .from(userActiveCosmetics).where(eq(userActiveCosmetics.userId, me.id)).limit(1))[0];
+        .from(userActiveCosmetics).where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id))).limit(1))[0];
       key = row?.key ?? null;
     }
     return { key };
@@ -2310,23 +2356,24 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     if (characterId) {
       await db
         .insert(characterEarning)
-        .values({ characterId, profileBannerUrl: final })
+        .values({ serverId: DEFAULT_SERVER_ID, characterId, profileBannerUrl: final })
         .onConflictDoUpdate({
-          target: characterEarning.characterId,
+          target: [characterEarning.serverId, characterEarning.characterId],
           set: { profileBannerUrl: final, updatedAt: new Date() },
         });
     } else {
       const existing = (await db
         .select()
         .from(userActiveCosmetics)
-        .where(eq(userActiveCosmetics.userId, me.id))
+        .where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id)))
         .limit(1))[0];
       if (existing) {
         await db.update(userActiveCosmetics)
           .set({ profileBannerUrl: final, updatedAt: new Date() })
-          .where(eq(userActiveCosmetics.userId, me.id));
+          .where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, me.id)));
       } else {
         await db.insert(userActiveCosmetics).values({
+          serverId: DEFAULT_SERVER_ID,
           userId: me.id,
           profileBannerUrl: final,
         });
@@ -2412,17 +2459,17 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     if (characterId) {
       await db
         .insert(characterEarning)
-        .values({ characterId, typingPhrase: final })
+        .values({ serverId: DEFAULT_SERVER_ID, characterId, typingPhrase: final })
         .onConflictDoUpdate({
-          target: characterEarning.characterId,
+          target: [characterEarning.serverId, characterEarning.characterId],
           set: { typingPhrase: final, updatedAt: new Date() },
         });
     } else {
       await db
         .insert(userEarning)
-        .values({ userId: me.id, typingPhrase: final })
+        .values({ serverId: DEFAULT_SERVER_ID, userId: me.id, typingPhrase: final })
         .onConflictDoUpdate({
-          target: userEarning.userId,
+          target: [userEarning.serverId, userEarning.userId],
           set: { typingPhrase: final, updatedAt: new Date() },
         });
     }
@@ -2510,9 +2557,9 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       if (Object.keys(updates).length > 1) {
         await db
           .insert(characterEarning)
-          .values({ characterId, ...updates })
+          .values({ serverId: DEFAULT_SERVER_ID, characterId, ...updates })
           .onConflictDoUpdate({
-            target: characterEarning.characterId,
+            target: [characterEarning.serverId, characterEarning.characterId],
             set: updates,
           });
       }
@@ -2522,16 +2569,16 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           roomLeaveTemplate: characterEarning.roomLeaveTemplate,
         })
         .from(characterEarning)
-        .where(eq(characterEarning.characterId, characterId))
+        .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId)))
         .limit(1))[0];
       return { ok: true, joinTemplate: row?.roomJoinTemplate ?? null, leaveTemplate: row?.roomLeaveTemplate ?? null };
     }
     if (Object.keys(updates).length > 1) {
       await db
         .insert(userEarning)
-        .values({ userId: me.id, ...updates })
+        .values({ serverId: DEFAULT_SERVER_ID, userId: me.id, ...updates })
         .onConflictDoUpdate({
-          target: userEarning.userId,
+          target: [userEarning.serverId, userEarning.userId],
           set: updates,
         });
     }
@@ -2541,7 +2588,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         roomLeaveTemplate: userEarning.roomLeaveTemplate,
       })
       .from(userEarning)
-      .where(eq(userEarning.userId, me.id))
+      .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id)))
       .limit(1))[0];
     return { ok: true, joinTemplate: row?.roomJoinTemplate ?? null, leaveTemplate: row?.roomLeaveTemplate ?? null };
   });
@@ -2575,9 +2622,9 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     if (Object.keys(updates).length > 1) {
       await db
         .insert(userEarning)
-        .values({ userId: me.id, ...updates })
+        .values({ serverId: DEFAULT_SERVER_ID, userId: me.id, ...updates })
         .onConflictDoUpdate({
-          target: userEarning.userId,
+          target: [userEarning.serverId, userEarning.userId],
           set: updates,
         });
     }
@@ -2587,7 +2634,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         sessionExitTemplate: userEarning.sessionExitTemplate,
       })
       .from(userEarning)
-      .where(eq(userEarning.userId, me.id))
+      .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id)))
       .limit(1))[0];
     return {
       ok: true,
@@ -2662,12 +2709,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           // its own border even if their master has.
           let earning: { maxRankKeyEverHeld: string | null; maxTierEverHeld: number | null };
           if (characterId) {
-            tx.insert(characterEarning).values({ characterId }).onConflictDoNothing().run();
-            const row = tx.select().from(characterEarning).where(eq(characterEarning.characterId, characterId)).limit(1).all()[0]!;
+            tx.insert(characterEarning).values({ serverId: DEFAULT_SERVER_ID, characterId }).onConflictDoNothing().run();
+            const row = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId))).limit(1).all()[0]!;
             earning = { maxRankKeyEverHeld: row.maxRankKeyEverHeld, maxTierEverHeld: row.maxTierEverHeld };
           } else {
-            tx.insert(userEarning).values({ userId: me.id }).onConflictDoNothing().run();
-            const row = tx.select().from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0]!;
+            tx.insert(userEarning).values({ serverId: DEFAULT_SERVER_ID, userId: me.id }).onConflictDoNothing().run();
+            const row = tx.select().from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id))).limit(1).all()[0]!;
             earning = { maxRankKeyEverHeld: row.maxRankKeyEverHeld, maxTierEverHeld: row.maxTierEverHeld };
           }
           let eligible = false;
@@ -2687,12 +2734,14 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           // Already-owned check against the scope-appropriate table.
           if (characterId) {
             const already = tx.select().from(characterOwnedBorders).where(and(
+              eq(characterOwnedBorders.serverId, DEFAULT_SERVER_ID),
               eq(characterOwnedBorders.characterId, characterId),
               eq(characterOwnedBorders.rankKey, rankKey),
             )).limit(1).all()[0];
             if (already) return { ok: false, status: 409, error: "already owned" };
           } else {
             const already = tx.select().from(userOwnedBorders).where(and(
+              eq(userOwnedBorders.serverId, DEFAULT_SERVER_ID),
               eq(userOwnedBorders.userId, me.id),
               eq(userOwnedBorders.rankKey, rankKey),
             )).limit(1).all()[0];
@@ -2702,23 +2751,23 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         },
         grant: (tx) => {
           if (characterId) {
-            tx.insert(characterOwnedBorders).values({ characterId, rankKey }).onConflictDoNothing().run();
+            tx.insert(characterOwnedBorders).values({ serverId: DEFAULT_SERVER_ID, characterId, rankKey }).onConflictDoNothing().run();
             // Auto-equip on first character purchase. Reads /
             // writes `character_earning.selected_border_rank_key`.
-            const cur = tx.select({ selected: characterEarning.selectedBorderRankKey }).from(characterEarning).where(eq(characterEarning.characterId, characterId)).limit(1).all()[0];
+            const cur = tx.select({ selected: characterEarning.selectedBorderRankKey }).from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId))).limit(1).all()[0];
             if (!cur?.selected) {
               tx.update(characterEarning)
                 .set({ selectedBorderRankKey: rankKey, updatedAt: new Date() })
-                .where(eq(characterEarning.characterId, characterId))
+                .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId)))
                 .run();
             }
           } else {
-            tx.insert(userOwnedBorders).values({ userId: me.id, rankKey }).onConflictDoNothing().run();
-            const cur = tx.select({ selected: userEarning.selectedBorderRankKey }).from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0];
+            tx.insert(userOwnedBorders).values({ serverId: DEFAULT_SERVER_ID, userId: me.id, rankKey }).onConflictDoNothing().run();
+            const cur = tx.select({ selected: userEarning.selectedBorderRankKey }).from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id))).limit(1).all()[0];
             if (!cur?.selected) {
               tx.update(userEarning)
                 .set({ selectedBorderRankKey: rankKey, updatedAt: new Date() })
-                .where(eq(userEarning.userId, me.id))
+                .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id)))
                 .run();
             }
           }
@@ -2799,12 +2848,14 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           if (!row || !row.enabled) return { ok: false, status: 404, error: "border not found or disabled" };
           if (characterId) {
             const already = tx.select().from(characterOwnedFreeformBorders).where(and(
+              eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
               eq(characterOwnedFreeformBorders.characterId, characterId),
               eq(characterOwnedFreeformBorders.borderKey, borderKey),
             )).limit(1).all()[0];
             if (already) return { ok: false, status: 409, error: "already owned" };
           } else {
             const already = tx.select().from(userOwnedFreeformBorders).where(and(
+              eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
               eq(userOwnedFreeformBorders.userId, me.id),
               eq(userOwnedFreeformBorders.borderKey, borderKey),
             )).limit(1).all()[0];
@@ -2820,7 +2871,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         },
         grant: (tx) => {
           if (characterId) {
-            tx.insert(characterOwnedFreeformBorders).values({ characterId, borderKey }).onConflictDoNothing().run();
+            tx.insert(characterOwnedFreeformBorders).values({ serverId: DEFAULT_SERVER_ID, characterId, borderKey }).onConflictDoNothing().run();
             // Auto-equip on first purchase when the freeform slot is
             // empty. Doing this regardless of the rank-tier slot is
             // deliberate: a user just paid Currency for a deliberate
@@ -2832,26 +2883,26 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             // user/character_earning.selectedBorderRankKey and
             // re-emerges automatically if the user later unequips
             // the freeform.
-            tx.insert(characterEarning).values({ characterId }).onConflictDoNothing().run();
+            tx.insert(characterEarning).values({ serverId: DEFAULT_SERVER_ID, characterId }).onConflictDoNothing().run();
             const cur = tx.select({
               freeform: characterEarning.selectedFreeformBorderKey,
-            }).from(characterEarning).where(eq(characterEarning.characterId, characterId)).limit(1).all()[0];
+            }).from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId))).limit(1).all()[0];
             if (!cur?.freeform) {
               tx.update(characterEarning)
                 .set({ selectedFreeformBorderKey: borderKey, updatedAt: new Date() })
-                .where(eq(characterEarning.characterId, characterId))
+                .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId)))
                 .run();
             }
           } else {
-            tx.insert(userOwnedFreeformBorders).values({ userId: me.id, borderKey }).onConflictDoNothing().run();
-            tx.insert(userEarning).values({ userId: me.id }).onConflictDoNothing().run();
+            tx.insert(userOwnedFreeformBorders).values({ serverId: DEFAULT_SERVER_ID, userId: me.id, borderKey }).onConflictDoNothing().run();
+            tx.insert(userEarning).values({ serverId: DEFAULT_SERVER_ID, userId: me.id }).onConflictDoNothing().run();
             const cur = tx.select({
               freeform: userEarning.selectedFreeformBorderKey,
-            }).from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0];
+            }).from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id))).limit(1).all()[0];
             if (!cur?.freeform) {
               tx.update(userEarning)
                 .set({ selectedFreeformBorderKey: borderKey, updatedAt: new Date() })
-                .where(eq(userEarning.userId, me.id))
+                .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id)))
                 .run();
             }
           }
@@ -2968,6 +3019,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .select({ borderKey: characterOwnedFreeformBorders.borderKey })
           .from(characterOwnedFreeformBorders)
           .where(and(
+            eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
             eq(characterOwnedFreeformBorders.characterId, characterId),
             eq(characterOwnedFreeformBorders.borderKey, borderKey),
           ))
@@ -2977,6 +3029,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .update(characterOwnedFreeformBorders)
           .set({ configJson: cleaned ? JSON.stringify(cleaned) : null })
           .where(and(
+            eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
             eq(characterOwnedFreeformBorders.characterId, characterId),
             eq(characterOwnedFreeformBorders.borderKey, borderKey),
           ));
@@ -2985,6 +3038,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .select({ borderKey: userOwnedFreeformBorders.borderKey })
           .from(userOwnedFreeformBorders)
           .where(and(
+            eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
             eq(userOwnedFreeformBorders.userId, me.id),
             eq(userOwnedFreeformBorders.borderKey, borderKey),
           ))
@@ -2994,6 +3048,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           .update(userOwnedFreeformBorders)
           .set({ configJson: cleaned ? JSON.stringify(cleaned) : null })
           .where(and(
+            eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
             eq(userOwnedFreeformBorders.userId, me.id),
             eq(userOwnedFreeformBorders.borderKey, borderKey),
           ));
@@ -3080,6 +3135,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           const existing = tx.select({ qty: identityInventory.quantity })
             .from(identityInventory)
             .where(and(
+              eq(identityInventory.serverId, DEFAULT_SERVER_ID),
               eq(identityInventory.ownerScope, ownerScope),
               eq(identityInventory.ownerId, ownerId),
               eq(identityInventory.itemKey, req.params.key),
@@ -3107,6 +3163,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           const existing = tx.select({ qty: identityInventory.quantity })
             .from(identityInventory)
             .where(and(
+              eq(identityInventory.serverId, DEFAULT_SERVER_ID),
               eq(identityInventory.ownerScope, ownerScope),
               eq(identityInventory.ownerId, ownerId),
               eq(identityInventory.itemKey, req.params.key),
@@ -3115,6 +3172,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             tx.update(identityInventory)
               .set({ quantity: existing.qty + body.quantity, updatedAt: new Date() })
               .where(and(
+                eq(identityInventory.serverId, DEFAULT_SERVER_ID),
                 eq(identityInventory.ownerScope, ownerScope),
                 eq(identityInventory.ownerId, ownerId),
                 eq(identityInventory.itemKey, req.params.key),
@@ -3122,6 +3180,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               .run();
           } else {
             tx.insert(identityInventory).values({
+              serverId: DEFAULT_SERVER_ID,
               ownerScope,
               ownerId,
               itemKey: req.params.key,
@@ -3242,6 +3301,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           const ownedRows = tx.select({ itemKey: identityInventory.itemKey })
             .from(identityInventory)
             .where(and(
+              eq(identityInventory.serverId, DEFAULT_SERVER_ID),
               eq(identityInventory.ownerScope, ownerScope),
               eq(identityInventory.ownerId, ownerId),
               inArray(identityInventory.itemKey, itemKeysToCheck),
@@ -3273,6 +3333,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         for (const s of body.slots) {
           if (s.itemKey === null) {
             tx.delete(identityCollection).where(and(
+              eq(identityCollection.serverId, DEFAULT_SERVER_ID),
               eq(identityCollection.ownerScope, ownerScope),
               eq(identityCollection.ownerId, ownerId),
               eq(identityCollection.slot, s.slot),
@@ -3282,11 +3343,13 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             // DO UPDATE works too, but this idiom matches the rest
             // of the codebase's per-row writes.
             tx.delete(identityCollection).where(and(
+              eq(identityCollection.serverId, DEFAULT_SERVER_ID),
               eq(identityCollection.ownerScope, ownerScope),
               eq(identityCollection.ownerId, ownerId),
               eq(identityCollection.slot, s.slot),
             )).run();
             tx.insert(identityCollection).values({
+              serverId: DEFAULT_SERVER_ID,
               ownerScope,
               ownerId,
               slot: s.slot,
@@ -3372,6 +3435,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           const ownedRows = tx.select({ itemKey: identityInventory.itemKey })
             .from(identityInventory)
             .where(and(
+              eq(identityInventory.serverId, DEFAULT_SERVER_ID),
               eq(identityInventory.ownerScope, ownerScope),
               eq(identityInventory.ownerId, ownerId),
               inArray(identityInventory.itemKey, itemKeysToCheck),
@@ -3409,6 +3473,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         })
           .from(identityPetCollection)
           .where(and(
+            eq(identityPetCollection.serverId, DEFAULT_SERVER_ID),
             eq(identityPetCollection.ownerScope, ownerScope),
             eq(identityPetCollection.ownerId, ownerId),
           ))
@@ -3418,17 +3483,20 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         for (const s of body.slots) {
           if (s.itemKey === null) {
             tx.delete(identityPetCollection).where(and(
+              eq(identityPetCollection.serverId, DEFAULT_SERVER_ID),
               eq(identityPetCollection.ownerScope, ownerScope),
               eq(identityPetCollection.ownerId, ownerId),
               eq(identityPetCollection.slot, s.slot),
             )).run();
           } else {
             tx.delete(identityPetCollection).where(and(
+              eq(identityPetCollection.serverId, DEFAULT_SERVER_ID),
               eq(identityPetCollection.ownerScope, ownerScope),
               eq(identityPetCollection.ownerId, ownerId),
               eq(identityPetCollection.slot, s.slot),
             )).run();
             tx.insert(identityPetCollection).values({
+              serverId: DEFAULT_SERVER_ID,
               ownerScope,
               ownerId,
               slot: s.slot,
@@ -3514,6 +3582,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         .select({ itemKey: identityPetCollection.itemKey })
         .from(identityPetCollection)
         .where(and(
+          eq(identityPetCollection.serverId, DEFAULT_SERVER_ID),
           eq(identityPetCollection.ownerScope, ownerScope),
           eq(identityPetCollection.ownerId, ownerId),
           eq(identityPetCollection.slot, slot),
@@ -3527,6 +3596,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         .update(identityPetCollection)
         .set({ nickname: next, updatedAt: new Date() })
         .where(and(
+          eq(identityPetCollection.serverId, DEFAULT_SERVER_ID),
           eq(identityPetCollection.ownerScope, ownerScope),
           eq(identityPetCollection.ownerId, ownerId),
           eq(identityPetCollection.slot, slot),
@@ -3683,8 +3753,17 @@ function runPurchaseTxn(
      * the original master-pool behavior runs.
      */
     characterId?: string | null;
+    /**
+     * Per-server economy partition the purchase debits + the ownership ledger
+     * row land on. Defaults to the default (active) server; with the servers
+     * flag off it's the only pool, so the debit + grant are byte-identical to
+     * today. (Callers pass the crediting room's serverId once the UI is
+     * per-server in a later pass.)
+     */
+    serverId?: string;
   },
 ): PurchaseOutcome {
+  const serverId = opts.serverId ?? DEFAULT_SERVER_ID;
   return db.transaction((tx): PurchaseOutcome => {
     const v = opts.validate(tx);
     if (!v.ok) return { ok: false, status: v.status, error: v.error };
@@ -3694,8 +3773,8 @@ function runPurchaseTxn(
       // exists so brand-new characters can still purchase. The
       // ledger row uses scope='character' + ownerId=characterId so
       // the audit trail attributes the spend to the right identity.
-      tx.insert(characterEarning).values({ characterId: charId }).onConflictDoNothing().run();
-      const earning = tx.select().from(characterEarning).where(eq(characterEarning.characterId, charId)).limit(1).all()[0];
+      tx.insert(characterEarning).values({ serverId, characterId: charId }).onConflictDoNothing().run();
+      const earning = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, charId))).limit(1).all()[0];
       const balance = earning?.currency ?? 0;
       if (balance < v.cost) {
         return { ok: false, status: 402, error: "insufficient funds", required: v.cost, balance };
@@ -3705,9 +3784,10 @@ function runPurchaseTxn(
       tx.update(characterEarning).set({
         currency: newCurrency,
         updatedAt: new Date(),
-      }).where(eq(characterEarning.characterId, charId)).run();
+      }).where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, charId))).run();
       tx.insert(earningLedger).values({
         id: nanoid(),
+        serverId,
         scope: "character",
         ownerId: charId,
         xpDelta: 0,
@@ -3727,8 +3807,8 @@ function runPurchaseTxn(
       };
     }
     // Master pool path, unchanged from the original behavior.
-    tx.insert(userEarning).values({ userId }).onConflictDoNothing().run();
-    const earning = tx.select().from(userEarning).where(eq(userEarning.userId, userId)).limit(1).all()[0];
+    tx.insert(userEarning).values({ serverId, userId }).onConflictDoNothing().run();
+    const earning = tx.select().from(userEarning).where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, userId))).limit(1).all()[0];
     const balance = earning?.currency ?? 0;
     if (balance < v.cost) {
       return { ok: false, status: 402, error: "insufficient funds", required: v.cost, balance };
@@ -3738,9 +3818,10 @@ function runPurchaseTxn(
     tx.update(userEarning).set({
       currency: newCurrency,
       updatedAt: new Date(),
-    }).where(eq(userEarning.userId, userId)).run();
+    }).where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, userId))).run();
     tx.insert(earningLedger).values({
       id: nanoid(),
+      serverId,
       scope: "user",
       ownerId: userId,
       xpDelta: 0,

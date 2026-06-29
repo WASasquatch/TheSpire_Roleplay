@@ -29,6 +29,7 @@ import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { builtinCommandConfig, gameStats, identityInventory, items } from "../db/schema.js";
 import { creditPool } from "../earning/award.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -164,9 +165,17 @@ export async function mintRewardForWinner(
   winner: RewardTarget,
   reward: BuiltinCommandReward,
   source: string,
-  options?: { multiplier?: number },
+  options?: {
+    multiplier?: number;
+    /** Per-server economy partition the reward lands on. Defaults to the
+     *  default server; with the servers flag off it's the only pool, so the
+     *  reward credits exactly today's pool. (Game callers can pass the
+     *  room's serverId in a later pass.) */
+    serverId?: string;
+  },
 ): Promise<void> {
   if (!rewardIsNonZero(reward)) return;
+  const serverId = options?.serverId ?? DEFAULT_SERVER_ID;
   // Floor at 0 (not 1) so the duel system can pass a sub-1
   // multiplier for sloppy fights or for the loser's partial-credit
   // payout. Callers that want a >=1 floor pre-clamp before calling.
@@ -178,6 +187,7 @@ export async function mintRewardForWinner(
   try {
     if (scaledXp > 0 || scaledCurrency > 0) {
       await creditPool(db, io as never, {
+        serverId,
         scope: winnerScope,
         ownerId: winnerOwnerId,
         xpDelta: scaledXp,
@@ -188,7 +198,7 @@ export async function mintRewardForWinner(
     }
     if (reward.itemKey && reward.itemCount > 0) {
       // Item count deliberately unscaled, see computePointMultiplier docs.
-      await creditItem(db, winnerScope, winnerOwnerId, reward.itemKey, reward.itemCount);
+      await creditItem(db, serverId, winnerScope, winnerOwnerId, reward.itemKey, reward.itemCount);
     }
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -210,6 +220,7 @@ export async function mintRewardForWinner(
  */
 async function creditItem(
   db: Db,
+  serverId: string,
   scope: "user" | "character",
   ownerId: string,
   itemKey: string,
@@ -224,6 +235,7 @@ async function creditItem(
     .select({ qty: identityInventory.quantity })
     .from(identityInventory)
     .where(and(
+      eq(identityInventory.serverId, serverId),
       eq(identityInventory.ownerScope, scope),
       eq(identityInventory.ownerId, ownerId),
       eq(identityInventory.itemKey, itemKey),
@@ -233,12 +245,14 @@ async function creditItem(
     await db.update(identityInventory)
       .set({ quantity: existing.qty + count, updatedAt: new Date() })
       .where(and(
+        eq(identityInventory.serverId, serverId),
         eq(identityInventory.ownerScope, scope),
         eq(identityInventory.ownerId, ownerId),
         eq(identityInventory.itemKey, itemKey),
       ));
   } else {
     await db.insert(identityInventory).values({
+      serverId,
       ownerScope: scope,
       ownerId,
       itemKey,

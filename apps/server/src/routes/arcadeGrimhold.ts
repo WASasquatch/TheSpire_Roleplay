@@ -40,6 +40,7 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { creditPool } from "../earning/award.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Scope = "user" | "character";
@@ -185,6 +186,7 @@ export async function registerGrimholdRoutes(app: FastifyInstance, db: Db, io: I
     let credited = false;
     if (grantedCurrency > 0 || grantedXp > 0) {
       await creditPool(db, io, {
+        serverId: DEFAULT_SERVER_ID,
         scope: g.scope,
         ownerId: g.ownerId,
         xpDelta: grantedXp,

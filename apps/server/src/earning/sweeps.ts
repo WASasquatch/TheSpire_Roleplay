@@ -26,6 +26,7 @@ import { rooms, earningLedger, users } from "../db/schema.js";
 import { getSettings } from "../settings.js";
 import type { EarningConfig } from "./config.js";
 import { awardForPresence } from "./award.js";
+import { DEFAULT_SERVER_ID } from "./pool.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -33,6 +34,9 @@ interface IdentitySnapshot {
   userId: string;
   characterId: string | null;
   roomId: string;
+  /** Server the occupied room belongs to (default server when the room's
+   *  serverId is null). Drives the per-server pool + cap partitioning. */
+  serverId: string;
 }
 
 /**
@@ -58,10 +62,13 @@ async function snapshotActiveIdentities(db: Db, io: Io): Promise<IdentitySnapsho
   // as absent prevents zombie presence credits).
   const roomIds = [...new Set(raws.map((r) => r.roomId))];
   const roomRows = await db
-    .select({ id: rooms.id, archivedAt: rooms.archivedAt })
+    .select({ id: rooms.id, archivedAt: rooms.archivedAt, serverId: rooms.serverId })
     .from(rooms)
     .where(inArray(rooms.id, roomIds));
   const liveRoomIds = new Set(roomRows.filter((r) => !r.archivedAt).map((r) => r.id));
+  // Per-server economy: map each room to its owning server (default server
+  // when serverId is null) so presence credits + caps partition per server.
+  const serverIdByRoom = new Map(roomRows.map((r) => [r.id, r.serverId ?? DEFAULT_SERVER_ID]));
 
   // Resolve users' default active character so sockets without a per-tab
   // override use the same fallback as the broadcast layer.
@@ -80,7 +87,12 @@ async function snapshotActiveIdentities(db: Db, io: Io): Promise<IdentitySnapsho
     const key = `${raw.userId}::${characterId ?? ""}::${raw.roomId}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    out.push({ userId: raw.userId, characterId, roomId: raw.roomId });
+    out.push({
+      userId: raw.userId,
+      characterId,
+      roomId: raw.roomId,
+      serverId: serverIdByRoom.get(raw.roomId) ?? DEFAULT_SERVER_ID,
+    });
   }
   return out;
 }
@@ -92,6 +104,7 @@ async function snapshotActiveIdentities(db: Db, io: Io): Promise<IdentitySnapsho
  */
 async function isPresenceCapHit(
   db: Db,
+  serverId: string,
   scope: "user" | "character",
   ownerId: string,
   cap: number,
@@ -99,10 +112,13 @@ async function isPresenceCapHit(
   if (cap <= 0) return true;
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const reason = scope === "character" ? "presence_ic" : "presence_ooc";
+  // Per-server cap: only count blocks earned on THIS server's pool, so a
+  // user active on two servers gets a full block allowance on each.
   const rows = await db
     .select({ id: earningLedger.id })
     .from(earningLedger)
     .where(and(
+      eq(earningLedger.serverId, serverId),
       eq(earningLedger.scope, scope),
       eq(earningLedger.ownerId, ownerId),
       eq(earningLedger.reason, reason),
@@ -141,7 +157,7 @@ export async function sweepPresenceOnce(db: Db, io: Io): Promise<{ awarded: numb
     const scope = ident.characterId ? "character" : "user";
     const ownerId = ident.characterId ?? ident.userId;
     const cap = cfg.presenceDailyBlockCap;
-    if (await isPresenceCapHit(db, scope, ownerId, cap)) {
+    if (await isPresenceCapHit(db, ident.serverId, scope, ownerId, cap)) {
       skipped += 1;
       continue;
     }

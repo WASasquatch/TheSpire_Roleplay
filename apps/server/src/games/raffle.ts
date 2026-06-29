@@ -45,6 +45,7 @@ import {
 import { addMessageDirect, addSystemMessage } from "../realtime/broadcast.js";
 import { identityInventory, rooms, users } from "../db/schema.js";
 import { creditPool } from "../earning/award.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { formatWinningsLine } from "./config.js";
 import type { Db } from "../db/index.js";
 
@@ -106,11 +107,16 @@ export function debitItemFromInventory(
   ownerId: string,
   itemKey: string,
   count: number,
+  // Per-server economy partition. Defaults to the default server; with the
+  // servers flag off it's the only pool, so the escrow debit is identical to
+  // today. (Raffle callers can pass the room's serverId in a later pass.)
+  serverId: string = DEFAULT_SERVER_ID,
 ): { ok: true } | { ok: false; have: number } {
   return db.transaction((tx): { ok: true } | { ok: false; have: number } => {
     const row = tx.select({ qty: identityInventory.quantity })
       .from(identityInventory)
       .where(and(
+        eq(identityInventory.serverId, serverId),
         eq(identityInventory.ownerScope, scope),
         eq(identityInventory.ownerId, ownerId),
         eq(identityInventory.itemKey, itemKey),
@@ -122,6 +128,7 @@ export function debitItemFromInventory(
     const remaining = have - count;
     if (remaining === 0) {
       tx.delete(identityInventory).where(and(
+        eq(identityInventory.serverId, serverId),
         eq(identityInventory.ownerScope, scope),
         eq(identityInventory.ownerId, ownerId),
         eq(identityInventory.itemKey, itemKey),
@@ -130,6 +137,7 @@ export function debitItemFromInventory(
       tx.update(identityInventory)
         .set({ quantity: remaining, updatedAt: new Date() })
         .where(and(
+          eq(identityInventory.serverId, serverId),
           eq(identityInventory.ownerScope, scope),
           eq(identityInventory.ownerId, ownerId),
           eq(identityInventory.itemKey, itemKey),
@@ -151,11 +159,15 @@ export function creditItemToInventory(
   ownerId: string,
   itemKey: string,
   count: number,
+  // Per-server economy partition; see debitItemFromInventory. Defaults to the
+  // default server (flag-off identical to today).
+  serverId: string = DEFAULT_SERVER_ID,
 ): void {
   db.transaction((tx) => {
     const row = tx.select({ qty: identityInventory.quantity })
       .from(identityInventory)
       .where(and(
+        eq(identityInventory.serverId, serverId),
         eq(identityInventory.ownerScope, scope),
         eq(identityInventory.ownerId, ownerId),
         eq(identityInventory.itemKey, itemKey),
@@ -166,6 +178,7 @@ export function creditItemToInventory(
       tx.update(identityInventory)
         .set({ quantity: row.qty + count, updatedAt: new Date() })
         .where(and(
+          eq(identityInventory.serverId, serverId),
           eq(identityInventory.ownerScope, scope),
           eq(identityInventory.ownerId, ownerId),
           eq(identityInventory.itemKey, itemKey),
@@ -173,6 +186,7 @@ export function creditItemToInventory(
         .run();
     } else {
       tx.insert(identityInventory).values({
+        serverId,
         ownerScope: scope,
         ownerId,
         itemKey,
@@ -310,6 +324,7 @@ async function postRaffleResult(
 async function refundPrize(db: Db, io: import("socket.io").Server, state: RaffleState): Promise<void> {
   if (state.prize.kind === "currency") {
     await creditPool(db, io as never, {
+      serverId: DEFAULT_SERVER_ID,
       scope: state.hostScope,
       ownerId: state.hostOwnerId,
       xpDelta: 0,
@@ -344,6 +359,7 @@ async function awardPrize(
   const winnerOwnerId = winner.characterId ?? winner.userId;
   if (state.prize.kind === "currency") {
     await creditPool(db, io as never, {
+      serverId: DEFAULT_SERVER_ID,
       scope: winnerScope,
       ownerId: winnerOwnerId,
       xpDelta: 0,

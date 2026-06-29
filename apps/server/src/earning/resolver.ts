@@ -25,6 +25,7 @@ import {
   type DbRank,
   type DbRankTier,
 } from "../db/schema.js";
+import { DEFAULT_SERVER_ID } from "./pool.js";
 
 export interface ResolvedRank {
   /** null when the user is below the lowest enabled tier (e.g. fresh account, no XP yet). */
@@ -189,7 +190,9 @@ export async function backfillAllRankPlacements(db: Db): Promise<{ users: number
         maxTierEverHeld: peak.maxTierEverHeld,
         updatedAt: new Date(),
       })
-      .where(eq(userEarning.userId, row.userId));
+      // Per-server economy: update only THIS server's row for the identity
+      // (the grain is now (server_id, user_id)).
+      .where(and(eq(userEarning.serverId, row.serverId), eq(userEarning.userId, row.userId)));
   }
   const charRows = await db.select().from(characterEarning).all();
   for (const row of charRows) {
@@ -207,7 +210,7 @@ export async function backfillAllRankPlacements(db: Db): Promise<{ users: number
         maxTierEverHeld: peak.maxTierEverHeld,
         updatedAt: new Date(),
       })
-      .where(eq(characterEarning.characterId, row.characterId));
+      .where(and(eq(characterEarning.serverId, row.serverId), eq(characterEarning.characterId, row.characterId)));
   }
   return { users: userRows.length, characters: charRows.length };
 }
@@ -302,19 +305,23 @@ export async function readPoolRank(
   db: Db,
   scope: "user" | "character",
   ownerId: string,
+  /** Per-server economy partition. Defaults to the default server so the
+   *  existing single-server callers (broadcast userlist) read today's pool
+   *  with the flag off. */
+  serverId: string = DEFAULT_SERVER_ID,
 ): Promise<ResolvedRank> {
   if (scope === "user") {
     const row = (await db
       .select({ rankKey: userEarning.rankKey, tier: userEarning.tier })
       .from(userEarning)
-      .where(eq(userEarning.userId, ownerId))
+      .where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, ownerId)))
       .limit(1))[0];
     return { rankKey: row?.rankKey ?? null, tier: row?.tier ?? null };
   }
   const row = (await db
     .select({ rankKey: characterEarning.rankKey, tier: characterEarning.tier })
     .from(characterEarning)
-    .where(eq(characterEarning.characterId, ownerId))
+    .where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId)))
     .limit(1))[0];
   return { rankKey: row?.rankKey ?? null, tier: row?.tier ?? null };
 }

@@ -38,6 +38,7 @@ import {
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { recordAudit } from "../audit.js";
 import { loadReactionsForTargets, parseSheetCells } from "../reactions.js";
 
@@ -708,24 +709,24 @@ export async function registerEmoticonRoutes(
         // Race-safe re-check of funds + lazy-ensure the earning row
         // exists. Same pattern as runPurchaseTxn in earning.ts.
         if (scopeCharacterId) {
-          tx.insert(characterEarning).values({ characterId: scopeCharacterId }).onConflictDoNothing().run();
+          tx.insert(characterEarning).values({ serverId: DEFAULT_SERVER_ID, characterId: scopeCharacterId }).onConflictDoNothing().run();
           const row = tx.select({ currency: characterEarning.currency })
-            .from(characterEarning).where(eq(characterEarning.characterId, scopeCharacterId)).limit(1).all()[0];
+            .from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, scopeCharacterId))).limit(1).all()[0];
           const balance = row?.currency ?? 0;
           if (balance < cost) throw new InsufficientFunds(cost, balance);
           tx.update(characterEarning)
             .set({ currency: balance - cost, updatedAt: new Date() })
-            .where(eq(characterEarning.characterId, scopeCharacterId))
+            .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, scopeCharacterId)))
             .run();
         } else {
-          tx.insert(userEarning).values({ userId: me.id }).onConflictDoNothing().run();
+          tx.insert(userEarning).values({ serverId: DEFAULT_SERVER_ID, userId: me.id }).onConflictDoNothing().run();
           const row = tx.select({ currency: userEarning.currency })
-            .from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0];
+            .from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id))).limit(1).all()[0];
           const balance = row?.currency ?? 0;
           if (balance < cost) throw new InsufficientFunds(cost, balance);
           tx.update(userEarning)
             .set({ currency: balance - cost, updatedAt: new Date() })
-            .where(eq(userEarning.userId, me.id))
+            .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id)))
             .run();
         }
         // Append the ledger row. Reason embeds the submission id so
@@ -734,6 +735,7 @@ export async function registerEmoticonRoutes(
         // reason.
         tx.insert(earningLedger).values({
           id: nanoid(),
+          serverId: DEFAULT_SERVER_ID,
           scope: submitterScope,
           ownerId: submitterPoolId,
           xpDelta: 0,
@@ -878,37 +880,37 @@ export async function registerEmoticonRoutes(
         db.transaction((tx) => {
           // Debit buyer pool.
           if (scopeCharacterId) {
-            tx.insert(characterEarning).values({ characterId: scopeCharacterId }).onConflictDoNothing().run();
+            tx.insert(characterEarning).values({ serverId: DEFAULT_SERVER_ID, characterId: scopeCharacterId }).onConflictDoNothing().run();
             const row = tx.select({ currency: characterEarning.currency })
-              .from(characterEarning).where(eq(characterEarning.characterId, scopeCharacterId)).limit(1).all()[0];
+              .from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, scopeCharacterId))).limit(1).all()[0];
             const balance = row?.currency ?? 0;
             if (balance < cost) throw new InsufficientFunds(cost, balance);
             tx.update(characterEarning)
               .set({ currency: balance - cost, updatedAt: new Date() })
-              .where(eq(characterEarning.characterId, scopeCharacterId))
+              .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, scopeCharacterId)))
               .run();
           } else {
-            tx.insert(userEarning).values({ userId: me.id }).onConflictDoNothing().run();
+            tx.insert(userEarning).values({ serverId: DEFAULT_SERVER_ID, userId: me.id }).onConflictDoNothing().run();
             const row = tx.select({ currency: userEarning.currency })
-              .from(userEarning).where(eq(userEarning.userId, me.id)).limit(1).all()[0];
+              .from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id))).limit(1).all()[0];
             const balance = row?.currency ?? 0;
             if (balance < cost) throw new InsufficientFunds(cost, balance);
             tx.update(userEarning)
               .set({ currency: balance - cost, updatedAt: new Date() })
-              .where(eq(userEarning.userId, me.id))
+              .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id)))
               .run();
           }
           // Credit creator master pool. Revenue always lands in the
           // creator's user pool regardless of which pool they used to
           // submit; the creator is the user account, not a specific
           // character.
-          tx.insert(userEarning).values({ userId: creatorUserId }).onConflictDoNothing().run();
+          tx.insert(userEarning).values({ serverId: DEFAULT_SERVER_ID, userId: creatorUserId }).onConflictDoNothing().run();
           const creatorRow = tx.select({ currency: userEarning.currency })
-            .from(userEarning).where(eq(userEarning.userId, creatorUserId)).limit(1).all()[0];
+            .from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, creatorUserId))).limit(1).all()[0];
           const creatorBalance = creatorRow?.currency ?? 0;
           tx.update(userEarning)
             .set({ currency: creatorBalance + cost, updatedAt: new Date() })
-            .where(eq(userEarning.userId, creatorUserId))
+            .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, creatorUserId)))
             .run();
           // Twin ledger rows so both sides of the transfer are
           // auditable. The reasons share the useId so a future
@@ -924,6 +926,7 @@ export async function registerEmoticonRoutes(
           };
           tx.insert(earningLedger).values({
             id: nanoid(),
+            serverId: DEFAULT_SERVER_ID,
             scope: buyerScope,
             ownerId: buyerPoolId,
             xpDelta: 0,
@@ -934,6 +937,7 @@ export async function registerEmoticonRoutes(
           }).run();
           tx.insert(earningLedger).values({
             id: nanoid(),
+            serverId: DEFAULT_SERVER_ID,
             scope: "user",
             ownerId: creatorUserId,
             xpDelta: 0,
@@ -969,11 +973,11 @@ export async function registerEmoticonRoutes(
       try {
         const buyerNow = scopeCharacterId
           ? (await db.select({ xp: characterEarning.xp, currency: characterEarning.currency })
-              .from(characterEarning).where(eq(characterEarning.characterId, scopeCharacterId)).limit(1))[0]
+              .from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, scopeCharacterId))).limit(1))[0]
           : (await db.select({ xp: userEarning.xp, currency: userEarning.currency })
-              .from(userEarning).where(eq(userEarning.userId, me.id)).limit(1))[0];
+              .from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, me.id))).limit(1))[0];
         const creatorNow = (await db.select({ xp: userEarning.xp, currency: userEarning.currency })
-          .from(userEarning).where(eq(userEarning.userId, creatorUserId)).limit(1))[0];
+          .from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, creatorUserId))).limit(1))[0];
         const sockets = await io.fetchSockets();
         for (const s of sockets) {
           const uid = (s.data as { userId?: string }).userId;
@@ -1244,23 +1248,24 @@ export async function registerEmoticonRoutes(
         if (refundAmount > 0 && refundScope && refundPoolId) {
           if (refundScope === "character") {
             const cur = tx.select({ currency: characterEarning.currency })
-              .from(characterEarning).where(eq(characterEarning.characterId, refundPoolId)).limit(1).all()[0];
+              .from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, refundPoolId))).limit(1).all()[0];
             const balance = cur?.currency ?? 0;
             tx.update(characterEarning)
               .set({ currency: balance + refundAmount, updatedAt: new Date() })
-              .where(eq(characterEarning.characterId, refundPoolId))
+              .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, refundPoolId)))
               .run();
           } else {
             const cur = tx.select({ currency: userEarning.currency })
-              .from(userEarning).where(eq(userEarning.userId, refundPoolId)).limit(1).all()[0];
+              .from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, refundPoolId))).limit(1).all()[0];
             const balance = cur?.currency ?? 0;
             tx.update(userEarning)
               .set({ currency: balance + refundAmount, updatedAt: new Date() })
-              .where(eq(userEarning.userId, refundPoolId))
+              .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, refundPoolId)))
               .run();
           }
           tx.insert(earningLedger).values({
             id: nanoid(),
+            serverId: DEFAULT_SERVER_ID,
             scope: refundScope,
             ownerId: refundPoolId,
             xpDelta: 0,

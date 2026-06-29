@@ -52,6 +52,7 @@ import {
 } from "../earning/config.js";
 import { backfillAllRankPlacements, mergeMaxEverHeld, resolveRankForXp } from "../earning/resolver.js";
 import { creditPool } from "../earning/award.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { clearEchoCacheFor } from "../earning/messageQuality.js";
 import { recordAudit } from "../audit.js";
 import {
@@ -1298,6 +1299,9 @@ export function registerAdminEarningRoutes(
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "user not found" }; }
     await creditPool(db, io, {
+      // Admin grants target the default server's pool (per-server-targeted
+      // admin grants are a later pass; with the flag off this is the only pool).
+      serverId: DEFAULT_SERVER_ID,
       scope: "user",
       ownerId: target.id,
       xpDelta: body.amount,
@@ -1317,6 +1321,7 @@ export function registerAdminEarningRoutes(
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "user not found" }; }
     await creditPool(db, io, {
+      serverId: DEFAULT_SERVER_ID,
       scope: "user",
       ownerId: target.id,
       xpDelta: 0,
@@ -1348,22 +1353,23 @@ export function registerAdminEarningRoutes(
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "user not found" }; }
 
-    // Lazy-create the earning row before write.
-    await db.insert(userEarning).values({ userId: target.id }).onConflictDoNothing();
+    // Lazy-create the earning row before write (on the default server's
+    // partition; per-server-targeted rank overrides are a later pass).
+    await db.insert(userEarning).values({ serverId: DEFAULT_SERVER_ID, userId: target.id }).onConflictDoNothing();
 
     if (body.rankKey === null || body.tier === null) {
       // Clear path: reset to the XP-driven placement.
       const cur = (await db
         .select()
         .from(userEarning)
-        .where(eq(userEarning.userId, target.id))
+        .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, target.id)))
         .limit(1))[0];
       const placed = await resolveRankForXp(db, cur?.xp ?? 0);
       await db.update(userEarning).set({
         rankKey: placed.rankKey,
         tier: placed.tier,
         updatedAt: new Date(),
-      }).where(eq(userEarning.userId, target.id));
+      }).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, target.id)));
       return { ok: true, cleared: true };
     }
 
@@ -1378,7 +1384,7 @@ export function registerAdminEarningRoutes(
     const prior = (await db
       .select()
       .from(userEarning)
-      .where(eq(userEarning.userId, target.id))
+      .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, target.id)))
       .limit(1))[0];
     const peak = await mergeMaxEverHeld(db, {
       maxRankKeyEverHeld: prior?.maxRankKeyEverHeld ?? null,
@@ -1395,7 +1401,7 @@ export function registerAdminEarningRoutes(
       maxRankKeyEverHeld: peak.maxRankKeyEverHeld,
       maxTierEverHeld: peak.maxTierEverHeld,
       updatedAt: new Date(),
-    }).where(eq(userEarning.userId, target.id));
+    }).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, target.id)));
 
     // Audit row through the ledger so the timeline shows the grant.
     // Direct insert, we're using a small ledger entry without going
@@ -1403,6 +1409,7 @@ export function registerAdminEarningRoutes(
     // is purely a rank-override audit row.
     await db.insert(earningLedger).values({
       id: nanoid(),
+      serverId: DEFAULT_SERVER_ID,
       scope: "user",
       ownerId: target.id,
       xpDelta: 0,
@@ -1437,11 +1444,13 @@ export function registerAdminEarningRoutes(
     const rank = (await db.select().from(ranks).where(eq(ranks.key, body.rankKey)).limit(1))[0];
     if (!rank) { reply.code(404); return { error: "rank not found" }; }
     await db.insert(userOwnedBorders).values({
+      serverId: DEFAULT_SERVER_ID,
       userId: target.id,
       rankKey: body.rankKey,
     }).onConflictDoNothing();
     await db.insert(earningLedger).values({
       id: nanoid(),
+      serverId: DEFAULT_SERVER_ID,
       scope: "user",
       ownerId: target.id,
       xpDelta: 0,
@@ -1471,12 +1480,14 @@ export function registerAdminEarningRoutes(
     const style = (await db.select().from(nameStyles).where(eq(nameStyles.key, body.styleKey)).limit(1))[0];
     if (!style) { reply.code(404); return { error: "style not found" }; }
     await db.insert(userOwnedNameStyles).values({
+      serverId: DEFAULT_SERVER_ID,
       userId: target.id,
       styleKey: body.styleKey,
       configJson: null,
     }).onConflictDoNothing();
     await db.insert(earningLedger).values({
       id: nanoid(),
+      serverId: DEFAULT_SERVER_ID,
       scope: "user",
       ownerId: target.id,
       xpDelta: 0,
@@ -1545,6 +1556,7 @@ export function registerAdminEarningRoutes(
     const existing = (await db.select({ qty: identityInventory.quantity })
       .from(identityInventory)
       .where(and(
+        eq(identityInventory.serverId, DEFAULT_SERVER_ID),
         eq(identityInventory.ownerScope, ownerScope),
         eq(identityInventory.ownerId, ownerId),
         eq(identityInventory.itemKey, body.itemKey),
@@ -1567,11 +1579,13 @@ export function registerAdminEarningRoutes(
       // the identity no longer holds.
       if (existing) {
         await db.delete(identityInventory).where(and(
+          eq(identityInventory.serverId, DEFAULT_SERVER_ID),
           eq(identityInventory.ownerScope, ownerScope),
           eq(identityInventory.ownerId, ownerId),
           eq(identityInventory.itemKey, body.itemKey),
         ));
         await db.delete(identityCollection).where(and(
+          eq(identityCollection.serverId, DEFAULT_SERVER_ID),
           eq(identityCollection.ownerScope, ownerScope),
           eq(identityCollection.ownerId, ownerId),
           eq(identityCollection.itemKey, body.itemKey),
@@ -1581,12 +1595,14 @@ export function registerAdminEarningRoutes(
       await db.update(identityInventory)
         .set({ quantity: desired, updatedAt: new Date() })
         .where(and(
+          eq(identityInventory.serverId, DEFAULT_SERVER_ID),
           eq(identityInventory.ownerScope, ownerScope),
           eq(identityInventory.ownerId, ownerId),
           eq(identityInventory.itemKey, body.itemKey),
         ));
     } else {
       await db.insert(identityInventory).values({
+        serverId: DEFAULT_SERVER_ID,
         ownerScope,
         ownerId,
         itemKey: body.itemKey,
@@ -1596,6 +1612,7 @@ export function registerAdminEarningRoutes(
 
     await db.insert(earningLedger).values({
       id: nanoid(),
+      serverId: DEFAULT_SERVER_ID,
       scope: ownerScope,
       ownerId,
       xpDelta: 0,
@@ -1643,6 +1660,7 @@ export function registerAdminEarningRoutes(
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "user not found" }; }
     await db.delete(userOwnedBorders).where(and(
+      eq(userOwnedBorders.serverId, DEFAULT_SERVER_ID),
       eq(userOwnedBorders.userId, target.id),
       eq(userOwnedBorders.rankKey, body.rankKey),
     ));
@@ -1650,11 +1668,13 @@ export function registerAdminEarningRoutes(
     await db.update(userEarning)
       .set({ selectedBorderRankKey: null, updatedAt: new Date() })
       .where(and(
+        eq(userEarning.serverId, DEFAULT_SERVER_ID),
         eq(userEarning.userId, target.id),
         eq(userEarning.selectedBorderRankKey, body.rankKey),
       ));
     await db.insert(earningLedger).values({
       id: nanoid(),
+      serverId: DEFAULT_SERVER_ID,
       scope: "user",
       ownerId: target.id,
       xpDelta: 0,
@@ -1683,17 +1703,20 @@ export function registerAdminEarningRoutes(
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "user not found" }; }
     await db.delete(userOwnedNameStyles).where(and(
+      eq(userOwnedNameStyles.serverId, DEFAULT_SERVER_ID),
       eq(userOwnedNameStyles.userId, target.id),
       eq(userOwnedNameStyles.styleKey, body.styleKey),
     ));
     await db.update(userActiveCosmetics)
       .set({ activeNameStyleKey: null, updatedAt: new Date() })
       .where(and(
+        eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID),
         eq(userActiveCosmetics.userId, target.id),
         eq(userActiveCosmetics.activeNameStyleKey, body.styleKey),
       ));
     await db.insert(earningLedger).values({
       id: nanoid(),
+      serverId: DEFAULT_SERVER_ID,
       scope: "user",
       ownerId: target.id,
       xpDelta: 0,
@@ -1744,35 +1767,38 @@ export function registerAdminEarningRoutes(
 
     if (characterId) {
       await db.insert(characterOwnedFreeformBorders).values({
+        serverId: DEFAULT_SERVER_ID,
         characterId,
         borderKey: body.borderKey,
       }).onConflictDoNothing();
       // Auto-equip on first acquisition (matches the purchase flow's
       // behavior so admin grants land visible immediately).
-      await db.insert(characterEarning).values({ characterId }).onConflictDoNothing();
+      await db.insert(characterEarning).values({ serverId: DEFAULT_SERVER_ID, characterId }).onConflictDoNothing();
       const cur = (await db.select({ selected: characterEarning.selectedFreeformBorderKey })
-        .from(characterEarning).where(eq(characterEarning.characterId, characterId)).limit(1))[0];
+        .from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId))).limit(1))[0];
       if (!cur?.selected) {
         await db.update(characterEarning)
           .set({ selectedFreeformBorderKey: body.borderKey, updatedAt: new Date() })
-          .where(eq(characterEarning.characterId, characterId));
+          .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, characterId)));
       }
     } else {
       await db.insert(userOwnedFreeformBorders).values({
+        serverId: DEFAULT_SERVER_ID,
         userId: target.id,
         borderKey: body.borderKey,
       }).onConflictDoNothing();
-      await db.insert(userEarning).values({ userId: target.id }).onConflictDoNothing();
+      await db.insert(userEarning).values({ serverId: DEFAULT_SERVER_ID, userId: target.id }).onConflictDoNothing();
       const cur = (await db.select({ selected: userEarning.selectedFreeformBorderKey })
-        .from(userEarning).where(eq(userEarning.userId, target.id)).limit(1))[0];
+        .from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, target.id))).limit(1))[0];
       if (!cur?.selected) {
         await db.update(userEarning)
           .set({ selectedFreeformBorderKey: body.borderKey, updatedAt: new Date() })
-          .where(eq(userEarning.userId, target.id));
+          .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, target.id)));
       }
     }
     await db.insert(earningLedger).values({
       id: nanoid(),
+      serverId: DEFAULT_SERVER_ID,
       scope: characterId ? "character" : "user",
       ownerId: characterId ?? target.id,
       xpDelta: 0,
@@ -1812,29 +1838,34 @@ export function registerAdminEarningRoutes(
         return { error: "no such character on this user" };
       }
       await db.delete(characterOwnedFreeformBorders).where(and(
+        eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
         eq(characterOwnedFreeformBorders.characterId, characterId),
         eq(characterOwnedFreeformBorders.borderKey, body.borderKey),
       ));
       await db.update(characterEarning)
         .set({ selectedFreeformBorderKey: null, updatedAt: new Date() })
         .where(and(
+          eq(characterEarning.serverId, DEFAULT_SERVER_ID),
           eq(characterEarning.characterId, characterId),
           eq(characterEarning.selectedFreeformBorderKey, body.borderKey),
         ));
     } else {
       await db.delete(userOwnedFreeformBorders).where(and(
+        eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
         eq(userOwnedFreeformBorders.userId, target.id),
         eq(userOwnedFreeformBorders.borderKey, body.borderKey),
       ));
       await db.update(userEarning)
         .set({ selectedFreeformBorderKey: null, updatedAt: new Date() })
         .where(and(
+          eq(userEarning.serverId, DEFAULT_SERVER_ID),
           eq(userEarning.userId, target.id),
           eq(userEarning.selectedFreeformBorderKey, body.borderKey),
         ));
     }
     await db.insert(earningLedger).values({
       id: nanoid(),
+      serverId: DEFAULT_SERVER_ID,
       scope: characterId ? "character" : "user",
       ownerId: characterId ?? target.id,
       xpDelta: 0,
@@ -1862,14 +1893,17 @@ export function registerAdminEarningRoutes(
     if (!username) { reply.code(400); return { error: "username required" }; }
     const target = await resolveTargetUser(username);
     if (!target) { reply.code(404); return { error: "user not found" }; }
+    // Scope ownership reads to the default server's partition so the revoke
+    // list matches what the grant/revoke routes (which target the default
+    // server) actually act on. Per-server admin tooling is a later pass.
     const ownedStyles = await db
       .select({ styleKey: userOwnedNameStyles.styleKey })
       .from(userOwnedNameStyles)
-      .where(eq(userOwnedNameStyles.userId, target.id));
+      .where(and(eq(userOwnedNameStyles.serverId, DEFAULT_SERVER_ID), eq(userOwnedNameStyles.userId, target.id)));
     const ownedBorders = await db
       .select({ rankKey: userOwnedBorders.rankKey })
       .from(userOwnedBorders)
-      .where(eq(userOwnedBorders.userId, target.id));
+      .where(and(eq(userOwnedBorders.serverId, DEFAULT_SERVER_ID), eq(userOwnedBorders.userId, target.id)));
     // Free-form border ownership. Master scope here; per-character
     // ownership lookup ships in the per-character section below
     // alongside character_owned_borders if a future admin UI needs
@@ -1877,7 +1911,7 @@ export function registerAdminEarningRoutes(
     const ownedFreeformBorders = await db
       .select({ borderKey: userOwnedFreeformBorders.borderKey })
       .from(userOwnedFreeformBorders)
-      .where(eq(userOwnedFreeformBorders.userId, target.id));
+      .where(and(eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID), eq(userOwnedFreeformBorders.userId, target.id)));
     // Per-identity inventory: master rows + per-character rows. The
     // admin UI uses the master list to surface "what does this user
     // currently hold on their OOC pool?" before granting; characters
@@ -1896,12 +1930,12 @@ export function registerAdminEarningRoutes(
         quantity: identityInventory.quantity,
       })
       .from(identityInventory)
-      .where(sql`(${identityInventory.ownerScope} = 'user' AND ${identityInventory.ownerId} = ${target.id})
+      .where(sql`${identityInventory.serverId} = ${DEFAULT_SERVER_ID} AND ((${identityInventory.ownerScope} = 'user' AND ${identityInventory.ownerId} = ${target.id})
         OR (${identityInventory.ownerScope} = 'character' AND ${identityInventory.ownerId} IN (${
         targetCharIds.length > 0
           ? sql.join(targetCharIds.map((id) => sql`${id}`), sql`, `)
           : sql`''`
-      }))`);
+      })))`);
     const inventory: { itemKey: string; quantity: number }[] = [];
     const inventoryByCharacter: Record<string, { itemKey: string; quantity: number }[]> = {};
     for (const r of inventoryRows) {
@@ -1946,7 +1980,7 @@ export function registerAdminEarningRoutes(
     // added across migrations 0148-0151 so a reset is genuinely a
     // clean slate (a leftover `typing_phrase` on a reset account
     // would surprise QA tracing a Flair regression).
-    await db.insert(userEarning).values({ userId: target.id }).onConflictDoNothing();
+    await db.insert(userEarning).values({ serverId: DEFAULT_SERVER_ID, userId: target.id }).onConflictDoNothing();
     await db.update(userEarning).set({
       xp: 0,
       currency: 0,
@@ -1958,7 +1992,7 @@ export function registerAdminEarningRoutes(
       selectedFreeformBorderKey: null,
       typingPhrase: null,
       updatedAt: new Date(),
-    }).where(eq(userEarning.userId, target.id));
+    }).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, target.id)));
 
     // Zero out every character pool tied to this user. Same set of
     // columns; character_earning carries the per-character cosmetic
@@ -1983,7 +2017,7 @@ export function registerAdminEarningRoutes(
         lurkingMasterEnabled: false,
         inlineAvatarEnabled: false,
         updatedAt: new Date(),
-      }).where(inArray(characterEarning.characterId, ownedCharIds));
+      }).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), inArray(characterEarning.characterId, ownedCharIds)));
     }
 
     // Wipe ownership rows. Deleting (rather than soft-marking) is
@@ -1991,14 +2025,14 @@ export function registerAdminEarningRoutes(
     // Free-form border ownership is partitioned the same way as the
     // rank-tier set; both master + character pools need their rows
     // dropped.
-    await db.delete(userOwnedBorders).where(eq(userOwnedBorders.userId, target.id));
-    await db.delete(userOwnedNameStyles).where(eq(userOwnedNameStyles.userId, target.id));
-    await db.delete(userOwnedFreeformBorders).where(eq(userOwnedFreeformBorders.userId, target.id));
+    await db.delete(userOwnedBorders).where(and(eq(userOwnedBorders.serverId, DEFAULT_SERVER_ID), eq(userOwnedBorders.userId, target.id)));
+    await db.delete(userOwnedNameStyles).where(and(eq(userOwnedNameStyles.serverId, DEFAULT_SERVER_ID), eq(userOwnedNameStyles.userId, target.id)));
+    await db.delete(userOwnedFreeformBorders).where(and(eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID), eq(userOwnedFreeformBorders.userId, target.id)));
     if (ownedCharIds.length > 0) {
       await db.delete(characterOwnedFreeformBorders)
-        .where(inArray(characterOwnedFreeformBorders.characterId, ownedCharIds));
+        .where(and(eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID), inArray(characterOwnedFreeformBorders.characterId, ownedCharIds)));
     }
-    await db.delete(userActiveCosmetics).where(eq(userActiveCosmetics.userId, target.id));
+    await db.delete(userActiveCosmetics).where(and(eq(userActiveCosmetics.serverId, DEFAULT_SERVER_ID), eq(userActiveCosmetics.userId, target.id)));
 
     // Phase 3 reaction submissions. Pending rows hold paid Currency
     //, but a reset is destructive by design (used by QA / dev),
@@ -2025,6 +2059,7 @@ export function registerAdminEarningRoutes(
     // Ledger audit. Single row; the metadata captures what was wiped.
     await db.insert(earningLedger).values({
       id: nanoid(),
+      serverId: DEFAULT_SERVER_ID,
       scope: "user",
       ownerId: target.id,
       xpDelta: 0,

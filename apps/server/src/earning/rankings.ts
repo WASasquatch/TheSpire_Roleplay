@@ -51,10 +51,19 @@ import {
   userOwnedNameStyles,
   users,
 } from "../db/schema.js";
+import { DEFAULT_SERVER_ID } from "./pool.js";
 
 /** Top N rows per board. 10 fits in a comfortable scroll without
  *  paging, anything more pushes the tab into virtual-list territory. */
 const TOP_N = 10;
+
+/**
+ * The server whose pools these leaderboards reflect. This pass keeps the
+ * boards backward-compatible by surfacing the DEFAULT (system) server only —
+ * the per-active-server Rankings UI is a later pass. With the servers flag off
+ * this is the only server, so the boards are identical to today.
+ */
+const RANKINGS_SERVER_ID = DEFAULT_SERVER_ID;
 
 export type RankingScope = "user" | "character";
 
@@ -245,7 +254,7 @@ async function queryCurrencyBoard(db: Db): Promise<RawEntry[]> {
     .select({ ownerId: userEarning.userId, value: userEarning.currency })
     .from(userEarning)
     .innerJoin(users, eq(users.id, userEarning.userId))
-    .where(and(publicUserFilter(), eq(userEarning.hideCurrencyCount, false)))
+    .where(and(eq(userEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), eq(userEarning.hideCurrencyCount, false)))
     .orderBy(desc(userEarning.currency))
     .limit(TOP_N);
   const charRows = await db
@@ -253,8 +262,8 @@ async function queryCurrencyBoard(db: Db): Promise<RawEntry[]> {
     .from(characterEarning)
     .innerJoin(characters, eq(characters.id, characterEarning.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(publicUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideCurrencyCount, false)))
-    .leftJoin(userEarning, eq(userEarning.userId, characters.userId))
+    .leftJoin(userEarning, and(eq(userEarning.userId, characters.userId), eq(userEarning.serverId, RANKINGS_SERVER_ID)))
+    .where(and(eq(characterEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideCurrencyCount, false)))
     .orderBy(desc(characterEarning.currency))
     .limit(TOP_N);
   return mergeTop(
@@ -268,7 +277,7 @@ async function queryXpBoard(db: Db): Promise<RawEntry[]> {
     .select({ ownerId: userEarning.userId, value: userEarning.xp })
     .from(userEarning)
     .innerJoin(users, eq(users.id, userEarning.userId))
-    .where(and(publicUserFilter(), eq(userEarning.hideXpCount, false)))
+    .where(and(eq(userEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), eq(userEarning.hideXpCount, false)))
     .orderBy(desc(userEarning.xp))
     .limit(TOP_N);
   const charRows = await db
@@ -276,8 +285,8 @@ async function queryXpBoard(db: Db): Promise<RawEntry[]> {
     .from(characterEarning)
     .innerJoin(characters, eq(characters.id, characterEarning.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .leftJoin(userEarning, eq(userEarning.userId, characters.userId))
-    .where(and(publicUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideXpCount, false)))
+    .leftJoin(userEarning, and(eq(userEarning.userId, characters.userId), eq(userEarning.serverId, RANKINGS_SERVER_ID)))
+    .where(and(eq(characterEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideXpCount, false)))
     .orderBy(desc(characterEarning.xp))
     .limit(TOP_N);
   return mergeTop(
@@ -301,7 +310,7 @@ async function queryRankBoard(db: Db): Promise<RawEntry[]> {
     .from(userEarning)
     .innerJoin(users, eq(users.id, userEarning.userId))
     .leftJoin(ranks, eq(ranks.key, userEarning.rankKey))
-    .where(and(publicUserFilter(), eq(userEarning.hideXpCount, false), isNotNull(userEarning.rankKey)))
+    .where(and(eq(userEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), eq(userEarning.hideXpCount, false), isNotNull(userEarning.rankKey)))
     .orderBy(desc(ranks.order), desc(userEarning.tier))
     .limit(TOP_N);
   const charRows = await db
@@ -314,9 +323,9 @@ async function queryRankBoard(db: Db): Promise<RawEntry[]> {
     .from(characterEarning)
     .innerJoin(characters, eq(characters.id, characterEarning.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .leftJoin(userEarning, eq(userEarning.userId, characters.userId))
+    .leftJoin(userEarning, and(eq(userEarning.userId, characters.userId), eq(userEarning.serverId, RANKINGS_SERVER_ID)))
     .leftJoin(ranks, eq(ranks.key, characterEarning.rankKey))
-    .where(and(publicUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideXpCount, false), isNotNull(characterEarning.rankKey)))
+    .where(and(eq(characterEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideXpCount, false), isNotNull(characterEarning.rankKey)))
     .orderBy(desc(ranks.order), desc(characterEarning.tier))
     .limit(TOP_N);
   function encode(orderVal: number | null, tier: number | null): number {
@@ -344,6 +353,7 @@ async function queryItemsBoard(db: Db): Promise<RawEntry[]> {
     // directly; character rows must resolve to a non-disabled
     // public-master account. Done in JS post-fetch since drizzle
     // doesn't have a clean polymorphic-fk join helper.
+    .where(eq(identityInventory.serverId, RANKINGS_SERVER_ID))
     .groupBy(identityInventory.ownerScope, identityInventory.ownerId)
     .orderBy(desc(sql`COALESCE(SUM(${identityInventory.quantity}), 0)`))
     .limit(TOP_N * 3);
@@ -400,27 +410,27 @@ async function queryBordersBoard(db: Db): Promise<RawEntry[]> {
     .select({ ownerId: userOwnedBorders.userId, value: sql<number>`COUNT(*)` })
     .from(userOwnedBorders)
     .innerJoin(users, eq(users.id, userOwnedBorders.userId))
-    .where(publicUserFilter())
+    .where(and(eq(userOwnedBorders.serverId, RANKINGS_SERVER_ID), publicUserFilter()))
     .groupBy(userOwnedBorders.userId);
   const masterFreeformBorders = await db
     .select({ ownerId: userOwnedFreeformBorders.userId, value: sql<number>`COUNT(*)` })
     .from(userOwnedFreeformBorders)
     .innerJoin(users, eq(users.id, userOwnedFreeformBorders.userId))
-    .where(publicUserFilter())
+    .where(and(eq(userOwnedFreeformBorders.serverId, RANKINGS_SERVER_ID), publicUserFilter()))
     .groupBy(userOwnedFreeformBorders.userId);
   const charRankBorders = await db
     .select({ ownerId: characterOwnedBorders.characterId, value: sql<number>`COUNT(*)` })
     .from(characterOwnedBorders)
     .innerJoin(characters, eq(characters.id, characterOwnedBorders.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(publicUserFilter(), isNull(characters.deletedAt)))
+    .where(and(eq(characterOwnedBorders.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt)))
     .groupBy(characterOwnedBorders.characterId);
   const charFreeformBorders = await db
     .select({ ownerId: characterOwnedFreeformBorders.characterId, value: sql<number>`COUNT(*)` })
     .from(characterOwnedFreeformBorders)
     .innerJoin(characters, eq(characters.id, characterOwnedFreeformBorders.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(publicUserFilter(), isNull(characters.deletedAt)))
+    .where(and(eq(characterOwnedFreeformBorders.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt)))
     .groupBy(characterOwnedFreeformBorders.characterId);
   return mergeBorderLikeCounts(
     [masterRankBorders, masterFreeformBorders],
@@ -433,14 +443,14 @@ async function queryStylesBoard(db: Db): Promise<RawEntry[]> {
     .select({ ownerId: userOwnedNameStyles.userId, value: sql<number>`COUNT(*)` })
     .from(userOwnedNameStyles)
     .innerJoin(users, eq(users.id, userOwnedNameStyles.userId))
-    .where(publicUserFilter())
+    .where(and(eq(userOwnedNameStyles.serverId, RANKINGS_SERVER_ID), publicUserFilter()))
     .groupBy(userOwnedNameStyles.userId);
   const charStyles = await db
     .select({ ownerId: characterOwnedNameStyles.characterId, value: sql<number>`COUNT(*)` })
     .from(characterOwnedNameStyles)
     .innerJoin(characters, eq(characters.id, characterOwnedNameStyles.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(publicUserFilter(), isNull(characters.deletedAt)))
+    .where(and(eq(characterOwnedNameStyles.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt)))
     .groupBy(characterOwnedNameStyles.characterId);
   return mergeTop(
     masterStyles.map((r) => ({ scope: "user" as const, ownerId: r.ownerId, value: Number(r.value) })),
@@ -609,8 +619,8 @@ export async function fetchDisplayInfo(
         activeNameStyleKey: userActiveCosmetics.activeNameStyleKey,
       })
       .from(users)
-      .leftJoin(userEarning, eq(userEarning.userId, users.id))
-      .leftJoin(userActiveCosmetics, eq(userActiveCosmetics.userId, users.id))
+      .leftJoin(userEarning, and(eq(userEarning.userId, users.id), eq(userEarning.serverId, RANKINGS_SERVER_ID)))
+      .leftJoin(userActiveCosmetics, and(eq(userActiveCosmetics.userId, users.id), eq(userActiveCosmetics.serverId, RANKINGS_SERVER_ID)))
       .where(inArray(users.id, userIds));
     // Rank tier display labels (rankName, tierLabel, sigil), one
     // batched lookup against ranks + rank_tiers.
@@ -669,7 +679,7 @@ export async function fetchDisplayInfo(
       })
       .from(characters)
       .innerJoin(users, eq(users.id, characters.userId))
-      .leftJoin(characterEarning, eq(characterEarning.characterId, characters.id))
+      .leftJoin(characterEarning, and(eq(characterEarning.characterId, characters.id), eq(characterEarning.serverId, RANKINGS_SERVER_ID)))
       .where(inArray(characters.id, charIds));
     const rankTierMap = await loadRankTierDisplay(db);
     const nameStyleConfigByChar = await loadCharacterNameStyleConfigs(db, rows
@@ -766,7 +776,7 @@ async function loadMasterNameStyleConfigs(
       configJson: userOwnedNameStyles.configJson,
     })
     .from(userOwnedNameStyles)
-    .where(inArray(userOwnedNameStyles.userId, userIds));
+    .where(and(eq(userOwnedNameStyles.serverId, RANKINGS_SERVER_ID), inArray(userOwnedNameStyles.userId, userIds)));
   const byKey = new Map<string, string | null>();
   for (const r of rows) byKey.set(`${r.userId}::${r.styleKey}`, r.configJson);
   for (const [userId, styleKey] of pairs) {
@@ -789,7 +799,7 @@ async function loadCharacterNameStyleConfigs(
       configJson: characterOwnedNameStyles.configJson,
     })
     .from(characterOwnedNameStyles)
-    .where(inArray(characterOwnedNameStyles.characterId, charIds));
+    .where(and(eq(characterOwnedNameStyles.serverId, RANKINGS_SERVER_ID), inArray(characterOwnedNameStyles.characterId, charIds)));
   const byKey = new Map<string, string | null>();
   for (const r of rows) byKey.set(`${r.characterId}::${r.styleKey}`, r.configJson);
   for (const [charId, styleKey] of pairs) {
@@ -812,7 +822,7 @@ async function loadMasterFreeformConfigs(
       configJson: userOwnedFreeformBorders.configJson,
     })
     .from(userOwnedFreeformBorders)
-    .where(inArray(userOwnedFreeformBorders.userId, userIds));
+    .where(and(eq(userOwnedFreeformBorders.serverId, RANKINGS_SERVER_ID), inArray(userOwnedFreeformBorders.userId, userIds)));
   const byKey = new Map<string, string | null>();
   for (const r of rows) byKey.set(`${r.userId}::${r.borderKey}`, r.configJson);
   for (const [userId, borderKey] of pairs) {
@@ -835,7 +845,7 @@ async function loadCharacterFreeformConfigs(
       configJson: characterOwnedFreeformBorders.configJson,
     })
     .from(characterOwnedFreeformBorders)
-    .where(inArray(characterOwnedFreeformBorders.characterId, charIds));
+    .where(and(eq(characterOwnedFreeformBorders.serverId, RANKINGS_SERVER_ID), inArray(characterOwnedFreeformBorders.characterId, charIds)));
   const byKey = new Map<string, string | null>();
   for (const r of rows) byKey.set(`${r.characterId}::${r.borderKey}`, r.configJson);
   for (const [charId, borderKey] of pairs) {

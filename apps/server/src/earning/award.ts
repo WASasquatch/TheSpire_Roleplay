@@ -18,7 +18,7 @@
  * write can't break message persistence.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type {
@@ -44,6 +44,7 @@ import {
 } from "./resolver.js";
 import { recordRankUp } from "./notifications.js";
 import { messageSourceKind, routeMessage } from "./routing.js";
+import { resolveRoomServerId } from "./pool.js";
 import { liveCharacterIdsOnly } from "./scopes.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -51,6 +52,14 @@ type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 export type AwardScopeKind = "user" | "character";
 
 export interface CreditPoolInput {
+  /**
+   * Per-server economy partition (Servers Lift, Phase 5.7). REQUIRED so the
+   * compiler flags every call site: each caller derives it from the crediting
+   * room's serverId when in hand, else passes {@link DEFAULT_SERVER_ID}. With
+   * the servers flag off this is always the default server, so the credit
+   * lands in exactly the pool it does today.
+   */
+  serverId: string;
   scope: AwardScopeKind;
   ownerId: string;
   xpDelta: number;
@@ -101,16 +110,16 @@ export async function creditPool(
       placed: { rankKey: string | null; tier: number | null };
       peak: { maxRankKeyEverHeld: string | null; maxTierEverHeld: number | null };
     } = db.transaction((tx) => {
-      // 1. Lazy create row.
+      // 1. Lazy create row (on this server's partition).
       if (input.scope === "user") {
-        tx.insert(userEarning).values({ userId: input.ownerId }).onConflictDoNothing().run();
+        tx.insert(userEarning).values({ serverId: input.serverId, userId: input.ownerId }).onConflictDoNothing().run();
       } else {
-        tx.insert(characterEarning).values({ characterId: input.ownerId }).onConflictDoNothing().run();
+        tx.insert(characterEarning).values({ serverId: input.serverId, characterId: input.ownerId }).onConflictDoNothing().run();
       }
 
       // 2. Read prior under the write lock so the next write can't be
       //    overlapped by another credit.
-      const prior: PriorEarning = readPriorEarningSync(tx, input.scope, input.ownerId);
+      const prior: PriorEarning = readPriorEarningSync(tx, input.serverId, input.scope, input.ownerId);
 
       // 3. Compute new totals + rank placement using pre-loaded rank/tier
       //    rows (sync helpers, the async `resolveRankForXp` can't run
@@ -137,7 +146,7 @@ export async function creditPool(
           maxRankKeyEverHeld: peak.maxRankKeyEverHeld,
           maxTierEverHeld: peak.maxTierEverHeld,
           updatedAt: new Date(),
-        }).where(eq(userEarning.userId, input.ownerId)).run();
+        }).where(and(eq(userEarning.serverId, input.serverId), eq(userEarning.userId, input.ownerId))).run();
       } else {
         tx.update(characterEarning).set({
           xp: newXp,
@@ -147,7 +156,7 @@ export async function creditPool(
           maxRankKeyEverHeld: peak.maxRankKeyEverHeld,
           maxTierEverHeld: peak.maxTierEverHeld,
           updatedAt: new Date(),
-        }).where(eq(characterEarning.characterId, input.ownerId)).run();
+        }).where(and(eq(characterEarning.serverId, input.serverId), eq(characterEarning.characterId, input.ownerId))).run();
       }
 
       // 5. Ledger row, included in the same transaction so a crash
@@ -155,6 +164,7 @@ export async function creditPool(
       //    audit row.
       tx.insert(earningLedger).values({
         id: nanoid(),
+        serverId: input.serverId,
         scope: input.scope,
         ownerId: input.ownerId,
         xpDelta: input.xpDelta,
@@ -232,11 +242,12 @@ export async function creditPool(
 /** Sync read of the earning row used inside the transaction. */
 function readPriorEarningSync(
   tx: Parameters<Parameters<Db["transaction"]>[0]>[0],
+  serverId: string,
   scope: AwardScopeKind,
   ownerId: string,
 ): PriorEarning {
   if (scope === "user") {
-    const row = tx.select().from(userEarning).where(eq(userEarning.userId, ownerId)).limit(1).all()[0];
+    const row = tx.select().from(userEarning).where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, ownerId))).limit(1).all()[0];
     if (row) {
       return {
         xp: row.xp,
@@ -249,7 +260,7 @@ function readPriorEarningSync(
     }
     return { xp: 0, currency: 0, rankKey: null, tier: null, maxRankKeyEverHeld: null, maxTierEverHeld: null };
   }
-  const row = tx.select().from(characterEarning).where(eq(characterEarning.characterId, ownerId)).limit(1).all()[0];
+  const row = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId))).limit(1).all()[0];
   if (row) {
     return {
       xp: row.xp,
@@ -362,8 +373,14 @@ export async function awardForMessage(input: AwardForMessageInput): Promise<void
     // this one. Helper trims + lowercases internally.
     recordAwardedMessage(input.userId, input.body);
 
+    // Per-server economy: the credit lands on the pool for the server the
+    // message's room belongs to (else the default server). Resolve once and
+    // reuse across the IC fan-out so every character credits the same pool.
+    const serverId = await resolveRoomServerId(input.db, input.roomId);
+
     if (scope.kind === "master") {
       await creditPool(input.db, input.io, {
+        serverId,
         scope: "user",
         ownerId: input.userId,
         xpDelta: xp,
@@ -397,6 +414,7 @@ export async function awardForMessage(input: AwardForMessageInput): Promise<void
     if (xpEach === 0 && currencyEach === 0) return;
     for (const charId of characters) {
       await creditPool(input.db, input.io, {
+        serverId,
         scope: "character",
         ownerId: charId,
         xpDelta: xpEach,
@@ -434,7 +452,11 @@ export async function awardForForum(input: {
     const xp = sourceFlags.xp ? amounts.xp : 0;
     const currency = sourceFlags.currency ? amounts.currency : 0;
     if (xp === 0 && currency === 0) return;
+    // Forum boards ARE server rooms (forums revamp), so the board's room
+    // carries the owning serverId; derive the credit's pool from it.
+    const serverId = await resolveRoomServerId(input.db, input.roomId);
     await creditPool(input.db, input.io, {
+      serverId,
       scope: "user",
       ownerId: input.userId,
       xpDelta: xp,
@@ -468,7 +490,11 @@ export async function awardForPresence(input: {
   const xp = flags.xp ? amounts.xp : 0;
   const currency = flags.currency ? amounts.currency : 0;
   if (xp === 0 && currency === 0) return;
+  // Presence credit lands on the pool for the server the occupied room
+  // belongs to (else the default server).
+  const serverId = await resolveRoomServerId(input.db, input.roomId);
   await creditPool(input.db, input.io, {
+    serverId,
     scope: input.scope,
     ownerId: input.ownerId,
     xpDelta: xp,

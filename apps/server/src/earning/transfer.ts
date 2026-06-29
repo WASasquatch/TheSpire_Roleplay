@@ -34,6 +34,7 @@ import {
 } from "../db/schema.js";
 import { getSettings } from "../settings.js";
 import { creditPool } from "./award.js";
+import { DEFAULT_SERVER_ID } from "./pool.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -46,6 +47,13 @@ export interface TransferTarget {
   /** Master user that owns the pool, used for self-send checks and event emission. */
   userId: string;
   displayName: string;
+  /**
+   * Per-server economy partition the pool lives on. Currency cannot move
+   * between servers, so source.serverId must equal target.serverId. Both
+   * default to the default server until the servers flag is on (so transfers
+   * behave exactly as today).
+   */
+  serverId: string;
 }
 
 export type TransferError =
@@ -59,6 +67,7 @@ export type TransferError =
   | { code: "daily_send_cap"; message: string }
   | { code: "daily_receive_cap"; message: string }
   | { code: "insufficient_funds"; message: string }
+  | { code: "cross_server"; message: string }
   | { code: "internal"; message: string };
 
 export interface TransferResult {
@@ -92,14 +101,14 @@ export async function resolveTransferTarget(
     if (!charId || /\s/.test(charId)) return null;
     const c = (await db.select().from(characters).where(eq(characters.id, charId)).limit(1))[0];
     if (!c || c.deletedAt) return null;
-    return { ok: true, target: { kind: "character", ownerId: c.id, userId: c.userId, displayName: c.name } };
+    return { ok: true, target: { kind: "character", ownerId: c.id, userId: c.userId, displayName: c.name, serverId: DEFAULT_SERVER_ID } };
   }
   if (trimmed.startsWith("@id:")) {
     const userId = trimmed.slice(4).trim();
     if (!userId || /\s/.test(userId)) return null;
     const u = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
     if (!u || u.disabledAt) return null;
-    return { ok: true, target: { kind: "user", ownerId: u.id, userId: u.id, displayName: u.username } };
+    return { ok: true, target: { kind: "user", ownerId: u.id, userId: u.id, displayName: u.username, serverId: DEFAULT_SERVER_ID } };
   }
 
   const lower = trimmed.toLowerCase();
@@ -126,6 +135,7 @@ export async function resolveTransferTarget(
     ownerId: c.id,
     userId: c.userId,
     displayName: c.name,
+    serverId: DEFAULT_SERVER_ID,
   }));
   const userCandidate: TransferTarget | null = userRow
     ? {
@@ -133,6 +143,7 @@ export async function resolveTransferTarget(
         ownerId: userRow.id,
         userId: userRow.id,
         displayName: userRow.username,
+        serverId: DEFAULT_SERVER_ID,
       }
     : null;
 
@@ -174,12 +185,13 @@ export async function resolveTransferTarget(
  * past 24 hours. Used by the daily-send-cap check. Returns the
  * absolute value (deltas are negative for sends).
  */
-async function sumDailySent(db: Db, scope: "user" | "character", ownerId: string): Promise<number> {
+async function sumDailySent(db: Db, serverId: string, scope: "user" | "character", ownerId: string): Promise<number> {
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const rows = await db
     .select({ delta: earningLedger.currencyDelta })
     .from(earningLedger)
     .where(and(
+      eq(earningLedger.serverId, serverId),
       eq(earningLedger.scope, scope),
       eq(earningLedger.ownerId, ownerId),
       eq(earningLedger.reason, "currency_send_out"),
@@ -189,12 +201,13 @@ async function sumDailySent(db: Db, scope: "user" | "character", ownerId: string
   return rows.reduce((acc, r) => acc + Math.abs(r.delta), 0);
 }
 
-async function sumDailyReceived(db: Db, scope: "user" | "character", ownerId: string): Promise<number> {
+async function sumDailyReceived(db: Db, serverId: string, scope: "user" | "character", ownerId: string): Promise<number> {
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
   const rows = await db
     .select({ delta: earningLedger.currencyDelta })
     .from(earningLedger)
     .where(and(
+      eq(earningLedger.serverId, serverId),
       eq(earningLedger.scope, scope),
       eq(earningLedger.ownerId, ownerId),
       eq(earningLedger.reason, "currency_send_in"),
@@ -204,19 +217,19 @@ async function sumDailyReceived(db: Db, scope: "user" | "character", ownerId: st
   return rows.reduce((acc, r) => acc + r.delta, 0);
 }
 
-async function readPoolCurrency(db: Db, scope: "user" | "character", ownerId: string): Promise<number> {
+async function readPoolCurrency(db: Db, serverId: string, scope: "user" | "character", ownerId: string): Promise<number> {
   if (scope === "user") {
     const row = (await db
       .select({ c: userEarning.currency })
       .from(userEarning)
-      .where(eq(userEarning.userId, ownerId))
+      .where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, ownerId)))
       .limit(1))[0];
     return row?.c ?? 0;
   }
   const row = (await db
     .select({ c: characterEarning.currency })
     .from(characterEarning)
-    .where(eq(characterEarning.characterId, ownerId))
+    .where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId)))
     .limit(1))[0];
   return row?.c ?? 0;
 }
@@ -290,6 +303,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         ownerId: c.id,
         userId: input.senderUserId,
         displayName: c.name,
+        serverId: DEFAULT_SERVER_ID,
       };
     } else {
       const u = (await input.db
@@ -305,6 +319,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         ownerId: input.senderUserId,
         userId: input.senderUserId,
         displayName: u.username,
+        serverId: DEFAULT_SERVER_ID,
       };
     }
 
@@ -315,6 +330,16 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
       return {
         ok: false,
         error: { code: "self_send", message: "You can't send Currency to yourself." },
+      };
+    }
+
+    // Per-server economy: Currency is partitioned per server and cannot cross
+    // server boundaries. With the servers flag off both sides resolve to the
+    // default server, so this guard never trips today.
+    if (source.serverId !== target.serverId) {
+      return {
+        ok: false,
+        error: { code: "cross_server", message: "You can't send Currency to a pool on a different server." },
       };
     }
 
@@ -344,7 +369,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
     }
 
     // Daily caps.
-    const sentToday = await sumDailySent(input.db, source.kind, source.ownerId);
+    const sentToday = await sumDailySent(input.db, source.serverId, source.kind, source.ownerId);
     if (sentToday + input.amount > cfg.dailySendCap) {
       const remaining = Math.max(0, cfg.dailySendCap - sentToday);
       return {
@@ -355,7 +380,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         },
       };
     }
-    const receivedToday = await sumDailyReceived(input.db, target.kind, target.ownerId);
+    const receivedToday = await sumDailyReceived(input.db, target.serverId, target.kind, target.ownerId);
     if (receivedToday + input.amount > cfg.dailyReceiveCap) {
       return {
         ok: false,
@@ -367,7 +392,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
     }
 
     // Funds check.
-    const balance = await readPoolCurrency(input.db, source.kind, source.ownerId);
+    const balance = await readPoolCurrency(input.db, source.serverId, source.kind, source.ownerId);
     if (balance < input.amount) {
       return {
         ok: false,
@@ -380,6 +405,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
 
     // Paired ledger writes via creditPool.
     await creditPool(input.db, input.io, {
+      serverId: source.serverId,
       scope: source.kind,
       ownerId: source.ownerId,
       xpDelta: 0,
@@ -389,6 +415,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
       notifyUserId: source.userId,
     });
     await creditPool(input.db, input.io, {
+      serverId: target.serverId,
       scope: target.kind,
       ownerId: target.ownerId,
       xpDelta: 0,

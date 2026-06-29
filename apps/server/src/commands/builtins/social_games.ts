@@ -89,6 +89,7 @@ import { addMessage, addMessageDirect, addSystemMessage } from "../../realtime/b
 import { characterEarning, rooms, userEarning, users } from "../../db/schema.js";
 import { findItem } from "./items.js";
 import { creditPool } from "../../earning/award.js";
+import { resolveRoomServerId } from "../../earning/pool.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string): void {
@@ -447,6 +448,7 @@ async function runRaffleStart(
     // drag the balance negative; the balance check above keeps the
     // common-case error message friendly.
     await creditPool(ctx.db, ctx.io as never, {
+      serverId: await resolveRoomServerId(ctx.db, ctx.roomId),
       scope,
       ownerId,
       xpDelta: 0,
@@ -606,6 +608,7 @@ function parseItemPrizeArgs(args: readonly string[]): { itemQuery: string; count
 async function refundOnStartFailure(ctx: CommandContext, state: RaffleState): Promise<void> {
   if (state.prize.kind === "currency") {
     await creditPool(ctx.db, ctx.io as never, {
+      serverId: await resolveRoomServerId(ctx.db, ctx.roomId),
       scope: state.hostScope,
       ownerId: state.hostOwnerId,
       xpDelta: 0,

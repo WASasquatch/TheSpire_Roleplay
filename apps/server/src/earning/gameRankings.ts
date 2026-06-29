@@ -14,9 +14,11 @@
  * registration step is required when adding a new game.
  */
 
+import { eq } from "drizzle-orm";
 import { gameStats } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { fetchDisplayInfo, type RankingPoolEntry, type RankingScope } from "./rankings.js";
+import { DEFAULT_SERVER_ID } from "./pool.js";
 
 const PER_GAME_LIMIT = 10;
 const OVERALL_LIMIT = 20;
@@ -90,7 +92,11 @@ export async function buildGameRankings(db: Db): Promise<GameRankingsResponse> {
       points: gameStats.points,
       lastWonAt: gameStats.lastWonAt,
     })
-    .from(gameStats);
+    .from(gameStats)
+    // Per-server economy: this pass surfaces the default (system) server's
+    // game stats only (matches the rankings boards). Per-active-server is a
+    // later pass; with the flag off this is the only server.
+    .where(eq(gameStats.serverId, DEFAULT_SERVER_ID));
 
   if (allRows.length === 0) {
     return { games: [], overall: [] };

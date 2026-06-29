@@ -20,6 +20,7 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { creditPool } from "../earning/award.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { fetchDisplayInfo } from "../earning/rankings.js";
 import {
   BASIC_HEAL_AMOUNT, BASIC_HEAL_COST, POTION_HEAL_AMOUNT,
@@ -167,6 +168,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     if (res.advanced && res.reward > 0) {
       // Best-effort (logs, never throws) — writes the ledger + emits earning:earned.
       await creditPool(db, io, {
+        serverId: DEFAULT_SERVER_ID,
         scope, ownerId, xpDelta: 0, currencyDelta: res.reward,
         reason: "eidolon_streak", metadata: { streak: res.streakCount }, notifyUserId: userId,
       });

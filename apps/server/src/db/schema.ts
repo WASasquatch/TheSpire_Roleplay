@@ -2491,6 +2491,8 @@ export const storyChapters = sqliteTable(
 export const scriptoriumWriteStreaks = sqliteTable(
   "scriptorium_write_streaks",
   {
+    /** Per-server economy partition (migration 0286). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
     streakCount: integer("streak_count").notNull().default(0),
@@ -2500,7 +2502,7 @@ export const scriptoriumWriteStreaks = sqliteTable(
     updatedAt: ts("updated_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.ownerScope, t.ownerId] }),
+    pk: primaryKey({ columns: [t.serverId, t.ownerScope, t.ownerId] }),
   }),
 );
 export type DbScriptoriumWriteStreak = typeof scriptoriumWriteStreaks.$inferSelect;
@@ -2515,6 +2517,8 @@ export const storyCopies = sqliteTable(
   "story_copies",
   {
     id: id(),
+    /** Per-server economy partition (migration 0284). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     storyId: text("story_id").notNull().references(() => stories.id, { onDelete: "cascade" }),
     /** Buyer identity: "user" (master/OOC) or "character". */
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
@@ -2527,8 +2531,8 @@ export const storyCopies = sqliteTable(
     purchasedAt: ts("purchased_at"),
   },
   (t) => ({
-    ownerStoryUq: uniqueIndex("story_copies_owner_story_uq").on(t.ownerScope, t.ownerId, t.storyId),
-    showcaseIdx: index("story_copies_showcase_idx").on(t.ownerScope, t.ownerId, t.showcaseSlot),
+    ownerStoryUq: uniqueIndex("story_copies_owner_story_uq").on(t.serverId, t.ownerScope, t.ownerId, t.storyId),
+    showcaseIdx: index("story_copies_showcase_idx").on(t.serverId, t.ownerScope, t.ownerId, t.showcaseSlot),
     storyIdx: index("story_copies_story_idx").on(t.storyId),
   }),
 );
@@ -3928,6 +3932,23 @@ export const serverVisits = sqliteTable(
 export type DbServerVisit = typeof serverVisits.$inferSelect;
 
 /**
+ * Per-server economy backfill latch (migration 0287). One row per server,
+ * idempotency marker for the economy backfill / provisioning pass (Team H
+ * runtime). `completedAt` is null until that server's per-server economy
+ * initialization has run to completion; a non-null timestamp makes a re-run a
+ * no-op. The default (is_system) server is seeded as already-complete because
+ * migrations 0282-0286 + the Phase-2 backfill already homed all existing data
+ * to it. No FK to `servers` on purpose: the latch may be stamped during
+ * provisioning before/independently of the server row's own lifecycle, and a
+ * dangling latch row is harmless.
+ */
+export const serverBackfillState = sqliteTable("server_backfill_state", {
+  serverId: text("server_id").primaryKey(),
+  completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+});
+export type DbServerBackfillState = typeof serverBackfillState.$inferSelect;
+
+/**
  * Per-server settings row (migration 0276). The per-server BEHAVIOR slice split
  * out of the site_settings singleton (retention, caps, edit grace, default
  * look, welcome/rules HTML, forum caps, earning config, flash sale). NULL
@@ -4170,8 +4191,14 @@ export const cosmetics = sqliteTable("cosmetics", {
  * eligibility persists even if admins raise thresholds later.
  */
 export const userEarning = sqliteTable("user_earning", {
+  /**
+   * Per-server economy partition (migration 0283). XP / Currency / Rank /
+   * equipped cosmetics are SEPARATE per server; the grain is (server_id,
+   * user_id). Defaults to (and all legacy rows home to) the default server.
+   */
+  serverId: text("server_id").notNull().default("server_spire_system"),
   userId: text("user_id")
-    .primaryKey()
+    .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   xp: integer("xp").notNull().default(0),
   currency: integer("currency").notNull().default(0),
@@ -4247,7 +4274,9 @@ export const userEarning = sqliteTable("user_earning", {
   showProfileVisitorsCount: integer("show_profile_visitors_count", { mode: "boolean" }).notNull().default(false),
   createdAt: ts("created_at"),
   updatedAt: ts("updated_at"),
-});
+}, (t) => ({
+  pk: primaryKey({ columns: [t.serverId, t.userId] }),
+}));
 
 /* ---------- character_earning ----------
  * Per-character pool, mirrors user_earning. Activity performed as
@@ -4256,8 +4285,10 @@ export const userEarning = sqliteTable("user_earning", {
  * user gets the same award).
  */
 export const characterEarning = sqliteTable("character_earning", {
+  /** Per-server economy partition (migration 0283); grain is (server_id, character_id). */
+  serverId: text("server_id").notNull().default("server_spire_system"),
   characterId: text("character_id")
-    .primaryKey()
+    .notNull()
     .references(() => characters.id, { onDelete: "cascade" }),
   xp: integer("xp").notNull().default(0),
   currency: integer("currency").notNull().default(0),
@@ -4335,7 +4366,9 @@ export const characterEarning = sqliteTable("character_earning", {
   showProfileVisitorsCount: integer("show_profile_visitors_count", { mode: "boolean" }).notNull().default(false),
   createdAt: ts("created_at"),
   updatedAt: ts("updated_at"),
-});
+}, (t) => ({
+  pk: primaryKey({ columns: [t.serverId, t.characterId] }),
+}));
 
 /* ---------- profile_views ----------
  *
@@ -4393,6 +4426,9 @@ export const earningLedger = sqliteTable(
   "earning_ledger",
   {
     id: id(),
+    /** Per-server economy discriminator (migration 0282). Legacy rows + off-flag
+     *  credits home to the default server. */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     scope: text("scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
     xpDelta: integer("xp_delta").notNull().default(0),
@@ -4405,6 +4441,13 @@ export const earningLedger = sqliteTable(
   (t) => ({
     ownerTimeIdx: index("earning_ledger_owner_time_idx").on(t.scope, t.ownerId, t.createdAt),
     reasonIdx: index("earning_ledger_reason_idx").on(t.reason, t.createdAt),
+    serverOwnerTimeIdx: index("earning_ledger_server_owner_time_idx").on(
+      t.serverId,
+      t.scope,
+      t.ownerId,
+      t.reason,
+      t.createdAt,
+    ),
   }),
 );
 
@@ -4416,6 +4459,8 @@ export const earningLedger = sqliteTable(
 export const userOwnedBorders = sqliteTable(
   "user_owned_borders",
   {
+    /** Per-server economy partition (migration 0285). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -4425,7 +4470,7 @@ export const userOwnedBorders = sqliteTable(
     acquiredAt: ts("acquired_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.userId, t.rankKey] }),
+    pk: primaryKey({ columns: [t.serverId, t.userId, t.rankKey] }),
     userIdx: index("user_owned_borders_user_idx").on(t.userId),
   }),
 );
@@ -4439,6 +4484,8 @@ export const userOwnedBorders = sqliteTable(
 export const userOwnedNameStyles = sqliteTable(
   "user_owned_name_styles",
   {
+    /** Per-server economy partition (migration 0285). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -4450,7 +4497,7 @@ export const userOwnedNameStyles = sqliteTable(
     acquiredAt: ts("acquired_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.userId, t.styleKey] }),
+    pk: primaryKey({ columns: [t.serverId, t.userId, t.styleKey] }),
     userIdx: index("user_owned_name_styles_user_idx").on(t.userId),
   }),
 );
@@ -4466,6 +4513,8 @@ export const userOwnedNameStyles = sqliteTable(
 export const characterOwnedNameStyles = sqliteTable(
   "character_owned_name_styles",
   {
+    /** Per-server economy partition (migration 0285). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     characterId: text("character_id")
       .notNull()
       .references(() => characters.id, { onDelete: "cascade" }),
@@ -4476,7 +4525,7 @@ export const characterOwnedNameStyles = sqliteTable(
     acquiredAt: ts("acquired_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.characterId, t.styleKey] }),
+    pk: primaryKey({ columns: [t.serverId, t.characterId, t.styleKey] }),
     characterIdx: index("character_owned_name_styles_character_idx").on(t.characterId),
   }),
 );
@@ -4490,6 +4539,8 @@ export const characterOwnedNameStyles = sqliteTable(
 export const characterOwnedBorders = sqliteTable(
   "character_owned_borders",
   {
+    /** Per-server economy partition (migration 0285). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     characterId: text("character_id")
       .notNull()
       .references(() => characters.id, { onDelete: "cascade" }),
@@ -4499,7 +4550,7 @@ export const characterOwnedBorders = sqliteTable(
     acquiredAt: ts("acquired_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.characterId, t.rankKey] }),
+    pk: primaryKey({ columns: [t.serverId, t.characterId, t.rankKey] }),
     characterIdx: index("character_owned_borders_character_idx").on(t.characterId),
   }),
 );
@@ -4543,6 +4594,8 @@ export const freeformBorders = sqliteTable("freeform_borders", {
 export const userOwnedFreeformBorders = sqliteTable(
   "user_owned_freeform_borders",
   {
+    /** Per-server economy partition (migration 0285). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -4561,7 +4614,7 @@ export const userOwnedFreeformBorders = sqliteTable(
     configJson: text("config_json"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.userId, t.borderKey] }),
+    pk: primaryKey({ columns: [t.serverId, t.userId, t.borderKey] }),
     userIdx: index("user_owned_freeform_borders_user_idx").on(t.userId),
   }),
 );
@@ -4570,6 +4623,8 @@ export const userOwnedFreeformBorders = sqliteTable(
 export const characterOwnedFreeformBorders = sqliteTable(
   "character_owned_freeform_borders",
   {
+    /** Per-server economy partition (migration 0285). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     characterId: text("character_id")
       .notNull()
       .references(() => characters.id, { onDelete: "cascade" }),
@@ -4582,7 +4637,7 @@ export const characterOwnedFreeformBorders = sqliteTable(
     configJson: text("config_json"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.characterId, t.borderKey] }),
+    pk: primaryKey({ columns: [t.serverId, t.characterId, t.borderKey] }),
     characterIdx: index("character_owned_freeform_borders_character_idx").on(t.characterId),
   }),
 );
@@ -4686,6 +4741,8 @@ export const items = sqliteTable(
 export const identityInventory = sqliteTable(
   "identity_inventory",
   {
+    /** Per-server economy partition (migration 0284). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     /** "user" (OOC master) or "character", selects which id table ownerId points at. */
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
@@ -4697,7 +4754,7 @@ export const identityInventory = sqliteTable(
     updatedAt: ts("updated_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.ownerScope, t.ownerId, t.itemKey] }),
+    pk: primaryKey({ columns: [t.serverId, t.ownerScope, t.ownerId, t.itemKey] }),
     ownerIdx: index("identity_inventory_owner_idx").on(t.ownerScope, t.ownerId),
     itemIdx: index("identity_inventory_item_idx").on(t.itemKey),
   }),
@@ -4719,6 +4776,8 @@ export const identityInventory = sqliteTable(
 export const identityCollection = sqliteTable(
   "identity_collection",
   {
+    /** Per-server economy partition (migration 0284). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
     /** 0..9, enforced by SQL CHECK + the route validator. */
@@ -4729,7 +4788,7 @@ export const identityCollection = sqliteTable(
     updatedAt: ts("updated_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.ownerScope, t.ownerId, t.slot] }),
+    pk: primaryKey({ columns: [t.serverId, t.ownerScope, t.ownerId, t.slot] }),
     ownerIdx: index("identity_collection_owner_idx").on(t.ownerScope, t.ownerId),
   }),
 );
@@ -4748,6 +4807,8 @@ export const identityCollection = sqliteTable(
 export const identityPetCollection = sqliteTable(
   "identity_pet_collection",
   {
+    /** Per-server economy partition (migration 0284). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
     /** 0..4, enforced by SQL CHECK + the route validator. */
@@ -4767,7 +4828,7 @@ export const identityPetCollection = sqliteTable(
     updatedAt: ts("updated_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.ownerScope, t.ownerId, t.slot] }),
+    pk: primaryKey({ columns: [t.serverId, t.ownerScope, t.ownerId, t.slot] }),
     ownerIdx: index("identity_pet_collection_owner_idx").on(t.ownerScope, t.ownerId),
   }),
 );
@@ -4777,8 +4838,10 @@ export const identityPetCollection = sqliteTable(
  * Created lazily on first equip.
  */
 export const userActiveCosmetics = sqliteTable("user_active_cosmetics", {
+  /** Per-server economy partition (migration 0285); grain is (server_id, user_id). */
+  serverId: text("server_id").notNull().default("server_spire_system"),
   userId: text("user_id")
-    .primaryKey()
+    .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
   /** Inline-avatar cosmetic equipped on chat lines. Requires ownership recorded in earning_ledger. */
   inlineAvatarEnabled: integer("inline_avatar_enabled", { mode: "boolean" }).notNull().default(false),
@@ -4803,7 +4866,9 @@ export const userActiveCosmetics = sqliteTable("user_active_cosmetics", {
    */
   profileBannerUrl: text("profile_banner_url"),
   updatedAt: ts("updated_at"),
-});
+}, (t) => ({
+  pk: primaryKey({ columns: [t.serverId, t.userId] }),
+}));
 
 /* ---------- earning_notifications ----------
  * Persists unacknowledged rank-up and tier-up events so the chat
@@ -4816,6 +4881,8 @@ export const earningNotifications = sqliteTable(
   "earning_notifications",
   {
     id: id(),
+    /** Per-server economy discriminator (migration 0286). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -4836,6 +4903,11 @@ export const earningNotifications = sqliteTable(
   },
   (t) => ({
     userUnreadIdx: index("earning_notifications_user_unread_idx").on(t.userId, t.acknowledgedAt),
+    serverUserIdx: index("earning_notifications_server_user_idx").on(
+      t.serverId,
+      t.userId,
+      t.acknowledgedAt,
+    ),
   }),
 );
 
@@ -5234,6 +5306,8 @@ export type DbBuiltinCommandConfig = typeof builtinCommandConfig.$inferSelect;
  *                  on each win.
  */
 export const gameStats = sqliteTable("game_stats", {
+  /** Per-server economy partition (migration 0284). */
+  serverId: text("server_id").notNull().default("server_spire_system"),
   ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
   ownerId: text("owner_id").notNull(),
   gameKind: text("game_kind").notNull(),
@@ -5241,7 +5315,7 @@ export const gameStats = sqliteTable("game_stats", {
   points: integer("points").notNull().default(0),
   lastWonAt: ts("last_won_at"),
 }, (t) => ({
-  pk: primaryKey({ columns: [t.ownerScope, t.ownerId, t.gameKind] }),
+  pk: primaryKey({ columns: [t.serverId, t.ownerScope, t.ownerId, t.gameKind] }),
 }));
 export type DbGameStats = typeof gameStats.$inferSelect;
 
@@ -5258,6 +5332,8 @@ export type DbGameStats = typeof gameStats.$inferSelect;
 export const eidolonState = sqliteTable(
   "eidolon_state",
   {
+    /** Per-server economy partition (migration 0284). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
     // "dormant" = the chosen death model: health-0 freezes the familiar (no
@@ -5307,7 +5383,7 @@ export const eidolonState = sqliteTable(
     updatedAt: ts("updated_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.ownerScope, t.ownerId] }),
+    pk: primaryKey({ columns: [t.serverId, t.ownerScope, t.ownerId] }),
   }),
 );
 export type DbEidolonState = typeof eidolonState.$inferSelect;
@@ -5322,6 +5398,8 @@ export type DbEidolonState = typeof eidolonState.$inferSelect;
 export const eidolonVisits = sqliteTable(
   "eidolon_visits",
   {
+    /** Per-server economy partition (migration 0284). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     visitorUserId: text("visitor_user_id").notNull(),
     targetOwnerScope: text("target_owner_scope", { enum: ["user", "character"] }).notNull(),
     targetOwnerId: text("target_owner_id").notNull(),
@@ -5329,7 +5407,7 @@ export const eidolonVisits = sqliteTable(
     visitedAt: integer("visited_at").notNull().default(0),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.visitorUserId, t.targetOwnerScope, t.targetOwnerId] }),
+    pk: primaryKey({ columns: [t.serverId, t.visitorUserId, t.targetOwnerScope, t.targetOwnerId] }),
   }),
 );
 export type DbEidolonVisit = typeof eidolonVisits.$inferSelect;
@@ -5345,6 +5423,8 @@ export const eidolonHall = sqliteTable(
   "eidolon_hall",
   {
     id: text("id").primaryKey(),
+    /** Per-server economy partition (migration 0284). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
     name: text("name").notNull().default(""),
@@ -5361,7 +5441,7 @@ export const eidolonHall = sqliteTable(
     departedAt: integer("departed_at").notNull().default(0),
   },
   (t) => ({
-    ownerIdx: index("eidolon_hall_owner_idx").on(t.ownerScope, t.ownerId, t.departedAt),
+    ownerIdx: index("eidolon_hall_owner_idx").on(t.serverId, t.ownerScope, t.ownerId, t.departedAt),
   }),
 );
 export type DbEidolonHall = typeof eidolonHall.$inferSelect;
@@ -5381,6 +5461,8 @@ export const urugalRun = sqliteTable(
   "urugal_run",
   {
     id: text("id").primaryKey(),
+    /** Per-server economy partition (migration 0286). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
     /** Master account id (for creditPool's `notifyUserId` + socket emit). */
@@ -5395,7 +5477,7 @@ export const urugalRun = sqliteTable(
     endedAt: integer("ended_at"),
   },
   (t) => ({
-    ownerIdx: index("urugal_run_owner_idx").on(t.ownerScope, t.ownerId, t.status),
+    ownerIdx: index("urugal_run_owner_idx").on(t.serverId, t.ownerScope, t.ownerId, t.status),
   }),
 );
 export type DbUrugalRun = typeof urugalRun.$inferSelect;

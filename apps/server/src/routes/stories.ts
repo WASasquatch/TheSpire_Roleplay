@@ -94,6 +94,7 @@ import { sanitizeBio, stripMarginNotes } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
 import { pushToUser } from "../push.js";
 import { creditPool } from "../earning/award.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { detectProseSpam } from "../earning/messageQuality.js";
 import { getSettings } from "../settings.js";
 import { recordAudit } from "../audit.js";
@@ -2029,6 +2030,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
 
     if (price > 0) {
       await creditPool(db, io, {
+        serverId: DEFAULT_SERVER_ID,
         scope: buyer.scope, ownerId: buyer.ownerId, xpDelta: 0, currencyDelta: -price,
         reason: "scriptorium_copy_purchase", metadata: { storyId: s.id, authorUserId: s.authorUserId }, notifyUserId: me.id,
       });
@@ -2050,6 +2052,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     }
     if (royalty > 0) {
       await creditPool(db, io, {
+        serverId: DEFAULT_SERVER_ID,
         scope: authorScope, ownerId: authorOwnerId, xpDelta: 0, currencyDelta: royalty,
         reason: "scriptorium_royalty", metadata: { storyId: s.id, buyerScope: buyer.scope }, notifyUserId: s.authorUserId,
       });
@@ -3875,6 +3878,7 @@ async function awardChapterPublishReward(
   if (xp <= 0 && currency <= 0) return; // daily cap exhausted
 
   await creditPool(db, io, {
+    serverId: DEFAULT_SERVER_ID,
     scope,
     ownerId,
     xpDelta: xp,
@@ -3927,12 +3931,13 @@ async function revokeBookEarnings(
   // (creditPool floors currency at 0 but NOT xp, and a negative xp would break
   // rank placement).
   const bal = scope === "user"
-    ? (await db.select({ xp: userEarning.xp, currency: userEarning.currency }).from(userEarning).where(eq(userEarning.userId, ownerId)).limit(1))[0]
-    : (await db.select({ xp: characterEarning.xp, currency: characterEarning.currency }).from(characterEarning).where(eq(characterEarning.characterId, ownerId)).limit(1))[0];
+    ? (await db.select({ xp: userEarning.xp, currency: userEarning.currency }).from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, ownerId))).limit(1))[0]
+    : (await db.select({ xp: characterEarning.xp, currency: characterEarning.currency }).from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, ownerId))).limit(1))[0];
   const revokeXp = Math.min(earnedXp, bal?.xp ?? 0);
   const revokeCurrency = Math.min(earnedCurrency, bal?.currency ?? 0);
   if (revokeXp <= 0 && revokeCurrency <= 0) return { xp: 0, currency: 0 };
   await creditPool(db, io, {
+    serverId: DEFAULT_SERVER_ID,
     scope,
     ownerId,
     xpDelta: -revokeXp,

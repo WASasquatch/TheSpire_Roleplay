@@ -150,6 +150,15 @@ export interface SiteBranding {
    */
   defaultStyleKey: string;
   /**
+   * Master toggle for the Multi-Server Lift. When false (the default and
+   * the only value any existing deploy ships with) the Server Rail never
+   * renders and the chat shell is byte-identical to today; the `/servers`
+   * routes 404 like any disabled feature. Optional so the `/site` payload
+   * and cached branding from a pre-servers build hydrate cleanly to
+   * "off". Flipped on by an admin once servers are ready to surface.
+   */
+  serversEnabled?: boolean;
+  /**
    * Admin-configured per-preset design map. Keys are THEME_PRESETS names
    * (Parchment, Twilight, …); values are design keys (medieval/modern/
    * scifi). When the user's active palette matches a preset, this map
@@ -201,6 +210,9 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // key ('medieval', 'modern', 'scifi'); unknown keys fall back to this
   // value at render time.
   defaultStyleKey: "medieval",
+  // Off by default — the chat shell stays exactly as it is today until an
+  // admin turns the Multi-Server Lift on.
+  serversEnabled: false,
   // Empty by default, every theme falls straight through to
   // defaultStyleKey. Admins seed pinned designs via the migration and
   // can edit them in the admin settings UI.
@@ -278,6 +290,9 @@ export function loadCachedBranding(): SiteBranding {
       defaultStyleKey: typeof parsed.defaultStyleKey === "string" && parsed.defaultStyleKey.length > 0
         ? parsed.defaultStyleKey
         : DEFAULT_BRANDING.defaultStyleKey,
+      serversEnabled: typeof parsed.serversEnabled === "boolean"
+        ? parsed.serversEnabled
+        : DEFAULT_BRANDING.serversEnabled ?? false,
       themeDesignMap: sanitizeThemeDesignMap(parsed.themeDesignMap),
     };
   } catch {
@@ -442,6 +457,22 @@ interface ChatState {
 
   currentRoomId: string | null;
   setCurrentRoom: (id: string | null) => void;
+
+  /**
+   * Server (Multi-Server Lift) the CURRENT room belongs to. Derived state:
+   * set ONLY from `room:state`'s `room.serverId` (via {@link setCurrentServerId})
+   * so it can never drift from the room the viewer is actually in — the
+   * Server Rail reads it to highlight the active server's icon, and the
+   * `/rooms` fetch scopes to it (only when `branding.serversEnabled`). Null
+   * means "not resolved yet" or the room predates server scoping; with the
+   * flag off it stays null and nothing reads it. */
+  currentServerId: string | null;
+  /** The system/default server's id, learned from the catalog. Lets the rail
+   *  mark the home server and lets the shell fall back to it. Null until the
+   *  catalog loads (or the feature is off). */
+  defaultServerId: string | null;
+  setCurrentServerId: (id: string | null) => void;
+  setDefaultServerId: (id: string | null) => void;
 
   /**
    * Forum surface (catalog modal / public landing) currently overriding the
@@ -987,6 +1018,11 @@ export const useChat = create<ChatState>((set) => ({
 
   currentRoomId: null,
   setCurrentRoom: (id) => set({ currentRoomId: id }),
+
+  currentServerId: null,
+  defaultServerId: null,
+  setCurrentServerId: (id) => set({ currentServerId: id }),
+  setDefaultServerId: (id) => set({ defaultServerId: id }),
 
   scopedRootDesign: null,
   setScopedRootDesign: (d) => set({ scopedRootDesign: d }),

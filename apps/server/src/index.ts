@@ -99,6 +99,8 @@ import { registerLinkRoutes } from "./routes/links.js";
 import { registerWorldRoutes } from "./routes/worlds.js";
 import { registerStoryRoutes } from "./routes/stories.js";
 import { registerForumRoutes } from "./routes/forums.js";
+import { registerServerRoutes } from "./routes/servers.js";
+import { registerAdminServerRoutes } from "./admin/servers.js";
 import { registerNpcRoutes } from "./routes/npcs.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerReportRoutes } from "./routes/reports.js";
@@ -641,6 +643,8 @@ async function main() {
   await registerWorldRoutes(baseApp, db, io);
   await registerStoryRoutes(baseApp, db, io);
   await registerForumRoutes(baseApp, db, io, uploadsRoot);
+  await registerServerRoutes(baseApp, db, io);
+  await registerAdminServerRoutes(baseApp, db, io);
   await registerNpcRoutes(baseApp, db);
   await registerFriendsRoutes(baseApp, db, io);
   await registerBlockRoutes(baseApp, db, io);

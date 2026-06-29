@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import type { Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
-import { siteSettings } from "./db/schema.js";
+import { serverSettings, siteSettings } from "./db/schema.js";
 import type { EarningConfig } from "./earning/config.js";
 import { parseEarningConfig, normalizeEarningConfig } from "./earning/config.js";
 
@@ -417,6 +417,9 @@ export async function updateSettings(
   }
   await db.update(siteSettings).set(update).where(eq(siteSettings.id, "singleton"));
   cached = null;
+  // A platform-default change shifts the inherited value of every server that
+  // left the matching column NULL, so the per-server cache must recompute too.
+  invalidateServerSettings();
   return getSettings(db);
 }
 
@@ -533,4 +536,126 @@ export async function ensureVapidKeys(db: Db): Promise<{ publicKey: string }> {
   cached = null;
   await getSettings(db);
   return { publicKey: keys.publicKey };
+}
+
+/* ============================================================
+ * Per-server settings layer (multi-server lift, Phase 5)
+ *
+ * A server may override a SUBSET of the platform settings on its own
+ * `server_settings` row (migration 0276). Every column there is nullable; a
+ * NULL means "inherit the platform default" (the singleton value). The
+ * effective config a server-scoped surface reads is therefore the platform
+ * settings with each non-NULL server column merged over the top.
+ *
+ * FLAG-OFF / DEFAULT SERVER: callers that haven't been ported still read
+ * `getSettings(db)` and get byte-identical numbers; this layer is purely
+ * additive and only consulted on server-scoped paths once `serversEnabled`.
+ * The default (system) server has no `server_settings` row in practice, so it
+ * inherits everything — identical to the platform settings either way.
+ * ============================================================ */
+
+/**
+ * The slice of platform settings a server may override on its own row, merged
+ * to effective values. NOT a full SiteSettings: only the columns that exist on
+ * `server_settings` are server-tunable; everything else (retention policy
+ * caps, email, VAPID, registration, platform branding) stays platform-global
+ * and is read via `getSettings`. Each field here is already resolved (the
+ * server value when set, else the platform default).
+ */
+export interface ServerSettings {
+  /** The server this resolved config belongs to. */
+  serverId: string;
+  messageRetentionMs: number;
+  maxRoomsPerOwner: number;
+  maxMessageLength: number;
+  editGraceMs: number;
+  maxForumPostLength: number;
+  forumTopicsPerPage: number;
+  /** Resolved theme — server override when present, else the platform default. */
+  defaultTheme: Theme;
+  /** Raw override JSON (null = inherit), for serializing to the owner console. */
+  defaultThemeJson: string | null;
+  defaultStyleKey: string;
+  themeDesignMap: Record<string, string>;
+  /** Per-community content. Null = inherit the platform copy. */
+  rulesHtml: string;
+  securityNoticeHtml: string;
+  welcomeHtml: string;
+  newUserWelcomeHtml: string;
+  newUserWelcomeHash: string;
+  earningConfig: EarningConfig;
+  /** Flash-sale toggle is server-only (no platform analog); null → false. */
+  flashSaleEnabled: boolean;
+}
+
+/**
+ * Per-server settings cache. Mirrors the singleton `cached` design: cheap
+ * in-memory reads keyed by serverId, invalidated wholesale on any write (see
+ * `invalidateServerSettings`). Single-process (min_machines_running=1) so a
+ * plain Map is sufficient.
+ */
+const serverCache = new Map<string, ServerSettings>();
+
+/**
+ * Resolve a server's EFFECTIVE settings: the platform defaults with each
+ * non-NULL `server_settings` column merged over the top (NULL = inherit). The
+ * platform `getSettings(db)` path is untouched and stays byte-identical.
+ *
+ * Cached per serverId; the first read populates the entry, `updateSettings`
+ * (platform) and the server-settings write path both invalidate so a later
+ * read recomputes against the fresh base + override.
+ */
+export async function getServerSettings(db: Db, serverId: string): Promise<ServerSettings> {
+  const hit = serverCache.get(serverId);
+  if (hit) return hit;
+  const base = await getSettings(db);
+  const row = (await db.select().from(serverSettings).where(eq(serverSettings.serverId, serverId)).limit(1))[0];
+  const merged = mergeServerSettings(base, serverId, row ?? null);
+  serverCache.set(serverId, merged);
+  return merged;
+}
+
+/**
+ * Drop a server's cached settings (or the whole map when no id is given). Call
+ * after writing a `server_settings` row, and the platform `updateSettings`
+ * already clears it too (a platform-default change shifts every inheriting
+ * server's effective config).
+ */
+export function invalidateServerSettings(serverId?: string): void {
+  if (serverId) serverCache.delete(serverId);
+  else serverCache.clear();
+}
+
+/** Build the effective config: platform defaults, each non-NULL override on top. */
+function mergeServerSettings(
+  base: SiteSettings,
+  serverId: string,
+  row: typeof serverSettings.$inferSelect | null,
+): ServerSettings {
+  let defaultTheme = base.defaultTheme;
+  if (row?.defaultThemeJson) {
+    try { defaultTheme = normalizeTheme(JSON.parse(row.defaultThemeJson)); }
+    catch { /* keep inherited theme on parse failure */ }
+  }
+  const newUserWelcomeHtml = row?.newUserWelcomeHtml ?? base.newUserWelcomeHtml;
+  return {
+    serverId,
+    messageRetentionMs: row?.messageRetentionMs ?? base.messageRetentionMs,
+    maxRoomsPerOwner: row?.maxRoomsPerOwner ?? base.maxRoomsPerOwner,
+    maxMessageLength: row?.maxMessageLength ?? base.maxMessageLength,
+    editGraceMs: row?.editGraceMs ?? base.editGraceMs,
+    maxForumPostLength: row?.maxForumPostLength ?? base.maxForumPostLength,
+    forumTopicsPerPage: row?.forumTopicsPerPage ?? base.forumTopicsPerPage,
+    defaultTheme,
+    defaultThemeJson: row?.defaultThemeJson ?? null,
+    defaultStyleKey: row?.defaultStyleKey ?? base.defaultStyleKey,
+    themeDesignMap: row?.themeDesignMap ? parseThemeDesignMap(row.themeDesignMap) : base.themeDesignMap,
+    rulesHtml: row?.rulesHtml ?? base.rulesHtml,
+    securityNoticeHtml: row?.securityNoticeHtml ?? base.securityNoticeHtml,
+    welcomeHtml: row?.welcomeHtml ?? base.welcomeHtml,
+    newUserWelcomeHtml,
+    newUserWelcomeHash: hashWelcome(newUserWelcomeHtml),
+    earningConfig: row?.earningConfigJson ? parseEarningConfig(row.earningConfigJson) : base.earningConfig,
+    flashSaleEnabled: !!row?.flashSaleEnabled,
+  };
 }

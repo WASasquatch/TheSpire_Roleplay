@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { PermissionKey, Role } from "@thekeep/shared";
@@ -7,6 +7,7 @@ import { messages, modCaseEvidence, modCaseUpdates, modCases, rooms, users } fro
 import type { Db } from "../db/index.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { recordAudit } from "../audit.js";
+import { areServersEnabled, getSettings } from "../settings.js";
 import { resolveIdentityArg } from "../commands/identityArg.js";
 
 interface SessionUserCtx {
@@ -163,6 +164,19 @@ export async function registerAdminModCaseRoutes(
   const sessionOf = (req: FastifyRequest) =>
     (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
 
+  /**
+   * Scope predicate for the GLOBAL admin Mod Cases tab: PLATFORM-owned cases
+   * only (`server_id IS NULL`) once the multi-server feature is live. A
+   * server's own cases (created with a `server_id` from its per-server
+   * console) live in that server's Mod Cases panel and must not surface here.
+   *
+   * FLAG-OFF: when servers are disabled this returns `undefined` → no extra
+   * predicate, so the tab shows every row exactly as today (and no row ever
+   * carries a non-NULL `server_id` with the flag off anyway). Byte-identical.
+   */
+  const platformScope = async () =>
+    areServersEnabled(await getSettings(db)) ? isNull(modCases.serverId) : undefined;
+
   /** Re-stamp a case's resolvedAt to match a status change. */
   const resolvedStamp = (status: CaseStatus) => (status === "resolved" ? new Date() : null);
 
@@ -170,7 +184,9 @@ export async function registerAdminModCaseRoutes(
     if (!(await requirePermission(req, reply, "view_admin_mod_cases"))) return;
     const status = (STATUSES as readonly string[]).includes(req.query.status ?? "") ? (req.query.status as CaseStatus) : null;
     const kind = req.query.kind === "case" || req.query.kind === "note" ? req.query.kind : null;
+    const scope = await platformScope();
     const conds = [
+      ...(scope ? [scope] : []),
       ...(status ? [eq(modCases.status, status)] : []),
       ...(kind ? [eq(modCases.kind, kind)] : []),
     ];
@@ -285,7 +301,9 @@ export async function registerAdminModCaseRoutes(
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/mod-cases/:id", async (req, reply) => {
     if (!(await requirePermission(req, reply, "manage_mod_cases"))) return;
     const body = updateSchema.parse(req.body);
-    const existing = (await db.select().from(modCases).where(eq(modCases.id, req.params.id)).limit(1))[0];
+    const scope = await platformScope();
+    const existing = (await db.select().from(modCases)
+      .where(scope ? and(eq(modCases.id, req.params.id), scope) : eq(modCases.id, req.params.id)).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "not found" }; }
 
     const patch: Record<string, unknown> = { updatedAt: new Date() };
@@ -323,7 +341,9 @@ export async function registerAdminModCaseRoutes(
   app.post<{ Params: { id: string }; Body: unknown }>("/admin/mod-cases/:id/updates", async (req, reply) => {
     if (!(await requirePermission(req, reply, "manage_mod_cases"))) return;
     const body = timelineBody.parse(req.body);
-    const existing = (await db.select().from(modCases).where(eq(modCases.id, req.params.id)).limit(1))[0];
+    const scope = await platformScope();
+    const existing = (await db.select().from(modCases)
+      .where(scope ? and(eq(modCases.id, req.params.id), scope) : eq(modCases.id, req.params.id)).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "not found" }; }
     const me = sessionOf(req);
     const statusChange = body.status && body.status !== existing.status ? body.status : null;
@@ -352,7 +372,8 @@ export async function registerAdminModCaseRoutes(
 
   app.delete<{ Params: { id: string } }>("/admin/mod-cases/:id", async (req, reply) => {
     if (!(await requirePermission(req, reply, "manage_mod_cases"))) return;
-    await db.delete(modCases).where(eq(modCases.id, req.params.id));
+    const scope = await platformScope();
+    await db.delete(modCases).where(scope ? and(eq(modCases.id, req.params.id), scope) : eq(modCases.id, req.params.id));
     const me = sessionOf(req);
     await recordAudit(db, { actorUserId: me.id, action: "mod_case_delete", metadata: { id: req.params.id } });
     return { ok: true };

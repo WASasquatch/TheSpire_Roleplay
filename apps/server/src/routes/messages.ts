@@ -15,7 +15,8 @@ import { messages, rooms, roomThreadCategories, users } from "../db/schema.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
-import { getSettings } from "../settings.js";
+import { areServersEnabled, getSettings } from "../settings.js";
+import type { ServerPermission } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -83,6 +84,58 @@ function boardCan(
   key: ForumPermission,
 ): boolean {
   return !!board && (board.isOwner || board.permissions.includes(key));
+}
+
+/**
+ * Per-SERVER moderation tier for a message's room (multi-server lift, Phase 5).
+ * The analog of {@link boardModTier} for the server layer: resolves the room's
+ * owning server and the caller's `serverAuthority` over it, so the message
+ * delete/edit gates can consult the server's granular moderation grants
+ * (`delete_others_message` / `edit_others_message`) in ADDITION to the
+ * sitewide permission keys.
+ *
+ * Returns null (→ today's global-only gates apply unchanged) when:
+ *   - the feature is OFF (`!serversEnabled`), so flag-off is byte-identical;
+ *   - the room has no server, or its server is the SYSTEM/default server
+ *     (default-server moderation stays on the global panel per plan §9.8).
+ *
+ * Owner-content invariant (mirrors forums): a server mod may never act on the
+ * server OWNER's own messages, even with the matching grant. We surface
+ * `serverOwnerUserId` so the call site can enforce that.
+ */
+async function serverModTier(
+  db: Db,
+  user: { id: string; role: Role },
+  roomId: string,
+): Promise<{
+  isOwner: boolean;
+  permissions: ServerPermission[];
+  serverOwnerUserId: string;
+} | null> {
+  if (!areServersEnabled(await getSettings(db))) return null;
+  const room = (await db.select({ serverId: rooms.serverId }).from(rooms)
+    .where(eq(rooms.id, roomId)).limit(1))[0];
+  if (!room?.serverId) return null;
+  const { serverAuthority } = await import("../servers/authority.js");
+  const a = await serverAuthority(db, user, room.serverId);
+  // System/default server keeps today's GLOBAL moderation gates; only real
+  // sub-servers route through the per-server grant set.
+  if (!a.server || a.server.isSystem) return null;
+  return {
+    isOwner: a.isOwner,
+    permissions: a.permissions,
+    serverOwnerUserId: a.server.ownerUserId,
+  };
+}
+
+/** Owner-implies-all check for a server moderation tier (mirrors
+ *  servers/authority.serverCan; kept local so messages.ts stays off that
+ *  module's static import graph — serverModTier imports it dynamically). */
+function serverTierCan(
+  tier: { isOwner: boolean; permissions: ServerPermission[] } | null,
+  key: ServerPermission,
+): boolean {
+  return !!tier && (tier.isOwner || tier.permissions.includes(key));
 }
 
 /**
@@ -225,7 +278,14 @@ export async function registerMessageRoutes(
       const board = await boardModTier(db, me, m.roomId);
       const boardOk = !!board && (board.isOwner
         || (boardCan(board, "edit_posts") && m.userId !== board.forumOwnerUserId));
-      if (!boardOk) { reply.code(403); return { error: "not yours" }; }
+      // Server rooms (non-default): the server owner may edit anything; a
+      // server mod needs the `edit_others_message` grant AND may never edit
+      // the server owner's own messages. Global admin override is already
+      // covered by `canEditOthers` above; flag-off → tier is null → no change.
+      const server = await serverModTier(db, me, m.roomId);
+      const serverOk = !!server && (server.isOwner
+        || (serverTierCan(server, "edit_others_message") && m.userId !== server.serverOwnerUserId));
+      if (!boardOk && !serverOk) { reply.code(403); return { error: "not yours" }; }
     }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
@@ -324,7 +384,14 @@ export async function registerMessageRoutes(
       const board = await boardModTier(db, me, m.roomId);
       const boardOk = !!board && (board.isOwner
         || (boardCan(board, "delete_posts") && m.userId !== board.forumOwnerUserId));
-      if (!boardOk) { reply.code(403); return { error: "not yours" }; }
+      // Server rooms (non-default): server owner deletes anything; a server
+      // mod needs the `delete_others_message` grant AND may never delete the
+      // server owner's own messages. Global admin override already handled by
+      // `canDeleteOthers`; flag-off → tier null → unchanged.
+      const server = await serverModTier(db, me, m.roomId);
+      const serverOk = !!server && (server.isOwner
+        || (serverTierCan(server, "delete_others_message") && m.userId !== server.serverOwnerUserId));
+      if (!boardOk && !serverOk) { reply.code(403); return { error: "not yours" }; }
     }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
@@ -397,6 +464,22 @@ export async function registerMessageRoutes(
                 .where(inArray(users.id, userIds))
             ).map((r) => [r.id, r.role]),
           );
+    // Server-aware `view_deleted` (Phase 5): on a non-default server room, a
+    // server mod/owner holding `view_deleted_post_body` ALSO sees the original
+    // body — not only sitewide admins. Resolve the room's server ONCE; the
+    // per-socket grant check below ORs the server tier with the global
+    // permission. Off-flag / system-server / non-server rooms → null → today's
+    // global-only reveal is unchanged.
+    const delServerId = await (async () => {
+      if (!areServersEnabled(await getSettings(db))) return null;
+      const room = (await db.select({ serverId: rooms.serverId }).from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
+      if (!room?.serverId) return null;
+      const { serverAuthority } = await import("../servers/authority.js");
+      // Resolve the server once to learn whether it's the system default (which
+      // keeps global-only reveal). We re-check membership per viewer below.
+      const probe = await serverAuthority(db, null, room.serverId);
+      return probe.server && !probe.server.isSystem ? room.serverId : null;
+    })();
     for (const s of roomSockets) {
       const uid = (s.data as { userId?: string }).userId ?? "";
       const role = roles.get(uid) ?? "user";
@@ -404,7 +487,12 @@ export async function registerMessageRoutes(
       // `view_deleted_message_body` permission. The per-viewer check
       // is per-socket so granting / revoking the permission in the
       // matrix takes effect on the next fanout without code changes.
-      const canSeeOriginal = await hasPermission({ id: uid, role: role as Role }, "view_deleted_message_body", db);
+      let canSeeOriginal = await hasPermission({ id: uid, role: role as Role }, "view_deleted_message_body", db);
+      if (!canSeeOriginal && delServerId && uid) {
+        const { serverAuthority, serverCan } = await import("../servers/authority.js");
+        const a = await serverAuthority(db, { id: uid, role: role as Role }, delServerId);
+        canSeeOriginal = serverCan(a, "view_deleted_post_body");
+      }
       s.emit("message:update", canSeeOriginal ? adminWire : plainWire);
     }
     // Cross-room whisper overlay: fan the delete out to the recipient

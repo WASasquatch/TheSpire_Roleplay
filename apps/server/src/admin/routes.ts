@@ -40,7 +40,7 @@ import {
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
 import { getSettings, updateSettings } from "../settings.js";
-import { recordAudit } from "../audit.js";
+import { globalAuditScopeWhere, recordAudit } from "../audit.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
 import { registerAdminEarningRoutes } from "./earning.js";
 import { registerAdminBackupRoutes } from "./backup.js";
@@ -2078,7 +2078,13 @@ export async function registerAdminRoutes(
     // dropped `view_audit_log` from the catalog.
     if (!(await requirePermission(req, reply, "view_admin_audit"))) return;
     const limit = Math.min(500, parseInt(req.query.limit ?? "200", 10) || 200);
-    const conditions = [] as ReturnType<typeof eq>[];
+    // The GLOBAL Audit feed is platform-owned rows only. Server-scoped
+    // moderation (stamped via `auditServerAction`) lands in the owning
+    // server's per-server Mod Log and is excluded here. Every legacy and
+    // platform row has `server_id` NULL, so this is a no-op against today's
+    // data — the feed shows exactly the same rows until a server-scoped write
+    // actually happens (flag-off path unchanged).
+    const conditions = [globalAuditScopeWhere()] as ReturnType<typeof eq>[];
     if (req.query.action) conditions.push(eq(auditLog.action, req.query.action));
     if (req.query.actions) {
       // Split + trim + filter empty. Cap at 40 entries so a runaway query

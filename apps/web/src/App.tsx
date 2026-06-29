@@ -22,6 +22,8 @@ import { ProfileEditor } from "./components/ProfileEditor.js";
 import { ProfileModal } from "./components/ProfileModal.js";
 import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
+import { ServerRail } from "./components/ServerRail.js";
+import { listServers, visitServer, type ServerSummary } from "./lib/servers.js";
 import { MessagesModal } from "./components/MessagesModal.js";
 import { RulesModal } from "./components/RulesModal.js";
 import { RulesPage } from "./components/RulesPage.js";
@@ -1102,6 +1104,12 @@ function Chat() {
   const removeForumTopic = useChat((s) => s.removeForumTopic);
 
   const currentRoomId = useChat((s) => s.currentRoomId);
+  // Server Rail (Multi-Server Lift) state. All inert when the feature flag is
+  // off: serversEnabled gates the rail render + every server-scoped fetch.
+  const serversEnabled = useChat((s) => s.branding.serversEnabled === true);
+  const currentServerId = useChat((s) => s.currentServerId);
+  const setCurrentServerId = useChat((s) => s.setCurrentServerId);
+  const setDefaultServerId = useChat((s) => s.setDefaultServerId);
   const myActiveTransitionKey = useChat((s) => s.myActiveTransitionKey);
   const setMyActiveTransitionKey = useChat((s) => s.setMyActiveTransitionKey);
   // Stable wrapper around the chat content; the room-transition orchestrator
@@ -1516,6 +1524,11 @@ function Chat() {
   const [railOpen, setRailOpen] = useState(false);
   const [roomsTree, setRoomsTree] = useState<RoomWithOccupants[]>([]);
   const [roomsTreeVersion, setRoomsTreeVersion] = useState(0);
+  // Server Rail catalog (Multi-Server Lift). null = not loaded yet; only ever
+  // fetched when the servers feature flag is on, so flag-off keeps it null and
+  // the rail never renders. Re-fetched on the same tree-version bumps that
+  // refresh the room list (joins/leaves move servers between groups).
+  const [servers, setServers] = useState<ServerSummary[] | null>(null);
   // Theme resolution layers. `activeTheme` is derived (not stored) below
   // as `characterTheme || userTheme || branding.defaultTheme`, so changing
   // ANY of the three causes the active theme to refresh, including when
@@ -2190,7 +2203,16 @@ function Chat() {
     let cancelled = false;
     async function load() {
       try {
-        const r = await fetch("/rooms", { credentials: "include" });
+        // Scope the room list to the CURRENT server only when the
+        // Multi-Server Lift is on; flag-off the URL is the exact "/rooms"
+        // it has always been (byte-identical behavior). The server ignores
+        // the param when the feature is disabled, so this is also safe if a
+        // stale flag and a fresh room ever briefly disagree.
+        const url =
+          serversEnabled && currentServerId
+            ? `/rooms?serverId=${encodeURIComponent(currentServerId)}`
+            : "/rooms";
+        const r = await fetch(url, { credentials: "include" });
         if (!r.ok) return;
         const j = (await r.json()) as { rooms: RoomWithOccupants[] };
         if (!cancelled) setRoomsTree(j.rooms);
@@ -2199,7 +2221,30 @@ function Chat() {
     load();
     const id = window.setInterval(load, 20_000);
     return () => { cancelled = true; window.clearInterval(id); };
-  }, [roomsTreeVersion, currentRoomId]);
+  }, [roomsTreeVersion, currentRoomId, serversEnabled, currentServerId]);
+
+  // Load the Server Rail catalog — ONLY when the feature flag is on, so
+  // flag-off makes zero extra requests and the rail stays unmounted. Refreshes
+  // on the same tree-version bumps that move servers between owned/joined and
+  // discover (a join/leave/visit). Learns the default server id for the shell.
+  useEffect(() => {
+    if (!serversEnabled) {
+      setServers(null);
+      setDefaultServerId(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await listServers();
+        if (cancelled) return;
+        setServers(list);
+        const sys = list.find((s) => s.isDefault || s.isSystem);
+        setDefaultServerId(sys?.id ?? null);
+      } catch { /* leave the rail in its loading/last-good state */ }
+    })();
+    return () => { cancelled = true; };
+  }, [serversEnabled, roomsTreeVersion, setDefaultServerId]);
 
   useEffect(() => {
     // Coalesced rooms-tree refetch. A presence storm (many joins/leaves/
@@ -2222,6 +2267,12 @@ function Chat() {
       setRoom(room);
       setOccupants(room.id, occupants);
       setCurrentRoom(room.id);
+      // The CURRENT server is derived ONLY from the room we're actually in, so
+      // it can never drift from a stale rail click. `serverId` rides the room
+      // payload once the Multi-Server Lift lands server-side; read it
+      // defensively so this compiles before/while that field is being added,
+      // and so flag-off (where it's absent) simply leaves currentServerId null.
+      setCurrentServerId((room as { serverId?: string | null }).serverId ?? null);
       // Joining/creating a room means the rooms tree is stale.
       setRoomsTreeVersion((v) => v + 1);
     });
@@ -3472,6 +3523,31 @@ function Chat() {
     });
   }
 
+  // Server Rail icon click (Multi-Server Lift). Already on this server ⇒ no-op.
+  // Otherwise resolve the server's landing room via /visit (which also clears
+  // its unseen dot) and join it through the SAME room-join path a RoomsTree
+  // click uses, so bans/passwords/transitions all behave identically.
+  // currentServerId then updates from the resulting room:state, never here, so
+  // it can't drift. Only ever invoked while the feature flag is on.
+  async function onServerSelect(server: ServerSummary) {
+    if (server.id === currentServerId) return;
+    try {
+      const { landingRoomId } = await visitServer(server.id);
+      // Reflect the cleared unseen dot immediately; the next catalog refetch
+      // confirms it.
+      setServers((prev) =>
+        prev ? prev.map((s) => (s.id === server.id ? { ...s, hasUnseen: false } : s)) : prev,
+      );
+      if (landingRoomId) {
+        onRoomClick(landingRoomId);
+      } else {
+        setNotice({ code: "NO_LANDING", message: `${server.name} has no room to enter yet.` });
+      }
+    } catch (e) {
+      setNotice({ code: "SERVER_VISIT_FAILED", message: e instanceof Error ? e.message : "Couldn't open that server." });
+    }
+  }
+
   // Jump-to-message flow shared by search, bookmarks, and (eventually)
   // mention navigation. Two distinct paths depending on the room's
   // reply mode:
@@ -3764,6 +3840,24 @@ function Chat() {
           COLUMN (<main>) is the room-transition snapshot target; the rail is a
           sibling, so it isn't swept into a room switch. */}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        {/* Server Rail (Multi-Server Lift) — the outermost left column, a thin
+            sibling of <main> so it isn't swept into a room-transition snapshot.
+            Rendered ONLY when the feature flag is on, so flag-off users see
+            today's exact shell (no rail, no layout shift). Hidden on mobile
+            where navigation lives in the rooms drawer. */}
+        {serversEnabled ? (
+          <div className="hidden lg:flex">
+            <ServerRail
+              servers={servers}
+              currentServerId={currentServerId}
+              canApply={!!me?.permissions?.includes("apply_create_server")}
+              onSelect={(s) => void onServerSelect(s)}
+              onDiscover={() =>
+                setNotice({ code: "SERVERS_DISCOVER", message: "Server discovery is on the way." })
+              }
+            />
+          </div>
+        ) : null}
         {/* `min-w-0` is non-negotiable: by default a flex child's
             `min-width` is `auto` (= its intrinsic content width), so a
             wide descendant, a long topic title, an action button strip,

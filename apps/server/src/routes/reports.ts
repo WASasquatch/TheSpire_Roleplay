@@ -7,6 +7,7 @@ import type { ReportEntry, ReportStatus } from "@thekeep/shared";
 import { characters, directConversations, directMessages, messages, reports, rooms, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
+import { areServersEnabled, getSettings } from "../settings.js";
 import type { Db } from "../db/index.js";
 
 /**
@@ -101,12 +102,19 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
       if (room.type !== "public") { reply.code(403); return { error: "only public-room messages can be reported" }; }
       if (m.userId === me.id) { reply.code(400); return { error: "you can't report your own message" }; }
 
+      // Scope a message/room report to the room's owning server so it lands in
+      // that server's Reports panel (there is NO server_reports table — this
+      // one column is the seam). DM/profile reports below carry no room, so
+      // they stay `server_id` NULL = platform/site staff. Only stamp when the
+      // feature is live; flag-off keeps `server_id` NULL exactly as today.
+      const serversOn = areServersEnabled(await getSettings(db));
       try {
         await db.insert(reports).values({
           id: nanoid(),
           reporterUserId: me.id,
           messageId: m.id,
           roomId: m.roomId,
+          serverId: serversOn ? (room.serverId ?? null) : null,
           reason: parsed.reason?.trim() || null,
         });
       } catch (err) {
@@ -209,9 +217,16 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
     const status = req.query.status;
     const limit = Math.min(200, parseInt(req.query.limit ?? "100", 10) || 100);
 
-    const filter = status === "open" || status === "reviewed" || status === "dismissed"
+    const statusFilter = status === "open" || status === "reviewed" || status === "dismissed"
       ? eq(reports.status, status)
       : undefined;
+    // The GLOBAL report queue is platform-owned reports only once servers are
+    // live: message/room reports stamped with a `server_id` belong to that
+    // server's Reports panel. DM/profile reports stay NULL = here. FLAG-OFF:
+    // no scoping (every row has `server_id` NULL anyway) → byte-identical.
+    const scope = areServersEnabled(await getSettings(db)) ? isNull(reports.serverId) : undefined;
+    const conds = [scope, statusFilter].filter((c): c is NonNullable<typeof c> => !!c);
+    const filter = conds.length === 0 ? undefined : conds.length === 1 ? conds[0] : and(...conds);
 
     const rows = filter
       ? await db.select().from(reports).where(filter).orderBy(desc(reports.createdAt)).limit(limit)
@@ -311,7 +326,12 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
     try { body = resolveReportBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
 
-    const r = (await db.select().from(reports).where(eq(reports.id, req.params.id)).limit(1))[0];
+    // Mirror the queue read: from the GLOBAL tab a platform mod resolves only
+    // platform-owned (server_id NULL) reports once servers are live. Flag-off
+    // keeps the bare id lookup (every row is NULL) → unchanged.
+    const scope = areServersEnabled(await getSettings(db)) ? isNull(reports.serverId) : undefined;
+    const r = (await db.select().from(reports)
+      .where(scope ? and(eq(reports.id, req.params.id), scope) : eq(reports.id, req.params.id)).limit(1))[0];
     if (!r) { reply.code(404); return { error: "not found" }; }
     if (r.status !== "open") { reply.code(409); return { error: `already ${r.status}` }; }
 

@@ -498,6 +498,13 @@ async function main() {
       // design for it. Empty object = no pinning (every theme falls
       // through to `defaultStyleKey`).
       themeDesignMap: s.themeDesignMap,
+      // Multi-server feature flag: the soft DB switch (site_settings
+      // .servers_enabled) ANDed with the SERVERS_KILL operator override.
+      // The web ServerRail and every server-scoped surface render ONLY when
+      // this is true; false keeps the chat shell byte-identical to the
+      // single-server experience. Without this field the client always
+      // defaults to false, so the feature can never light up — wire it here.
+      serversEnabled: areServersEnabled(s),
     };
   });
 

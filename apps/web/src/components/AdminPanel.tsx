@@ -595,6 +595,7 @@ interface SettingsRow {
   featuredWorldsEnabled: boolean;
   splashMessages24hEnabled: boolean;
   profileDesignerEnabled: boolean;
+  serversEnabled: boolean;
   /** Sanitized HTML for the post-login welcome modal. "" = no welcome shown. */
   newUserWelcomeHtml: string;
   /** Site-wide default theme style key. Users without an override inherit this. */
@@ -1008,6 +1009,7 @@ function SettingsTab() {
   const [featuredWorldsEnabled, setFeaturedWorldsEnabled] = useState(false);
   const [splashMessages24hEnabled, setSplashMessages24hEnabled] = useState(false);
   const [profileDesignerEnabled, setProfileDesignerEnabled] = useState(false);
+  const [serversEnabled, setServersEnabled] = useState(false);
   const [defaultStyleKey, setDefaultStyleKey] = useState<string>("medieval");
   // Per-preset design pinning. Keyed by THEME_PRESETS name. Empty
   // entry on a preset means "fall through to defaultStyleKey for
@@ -1043,6 +1045,7 @@ function SettingsTab() {
       setFeaturedWorldsEnabled(j.featuredWorldsEnabled);
       setSplashMessages24hEnabled(j.splashMessages24hEnabled);
       setProfileDesignerEnabled(j.profileDesignerEnabled);
+      setServersEnabled(j.serversEnabled);
       setDefaultStyleKey(j.defaultStyleKey || "medieval");
       setThemeDesignMap(j.themeDesignMap ?? {});
     } catch (err) {
@@ -1094,6 +1097,7 @@ function SettingsTab() {
         featuredWorldsEnabled,
         splashMessages24hEnabled,
         profileDesignerEnabled,
+        serversEnabled,
         defaultStyleKey,
         themeDesignMap,
       };
@@ -1132,6 +1136,7 @@ function SettingsTab() {
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         splashMessages24hEnabled: j.splashMessages24hEnabled,
         profileDesignerEnabled: j.profileDesignerEnabled,
+        serversEnabled: j.serversEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls
@@ -1389,6 +1394,20 @@ function SettingsTab() {
               Adds a visual drag-and-drop Designer alongside the raw-HTML Source on the profile bio tab (desktop only). Off by default. Try it on your own profile before enabling site-wide; the Source view remains available either way.
             </span>
           </label>
+          <label className="text-xs">
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Multi-server</span>
+            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+              <input
+                type="checkbox"
+                checked={serversEnabled}
+                onChange={(e) => setServersEnabled(e.target.checked)}
+              />
+              <span>{serversEnabled ? "On - server rail + join/create your own servers" : "Off - single-server chat (today's experience)"}</span>
+            </div>
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              Master switch for the multi-server feature: the round server-icon rail beside the userlist, the discover/create-a-server flow, and all per-server scoping. Off keeps the chat exactly as a single server. The SERVERS_KILL env var overrides this to off.
+            </span>
+          </label>
         </div>
       </fieldset>
 
@@ -1613,6 +1632,7 @@ function BrandingTab() {
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         splashMessages24hEnabled: j.splashMessages24hEnabled,
         profileDesignerEnabled: j.profileDesignerEnabled,
+        serversEnabled: j.serversEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls
@@ -2112,6 +2132,7 @@ function RulesTab() {
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         splashMessages24hEnabled: j.splashMessages24hEnabled,
         profileDesignerEnabled: j.profileDesignerEnabled,
+        serversEnabled: j.serversEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls

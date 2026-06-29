@@ -1236,6 +1236,7 @@ export async function registerAdminRoutes(
     customHeadHtml: z.string().max(20_000).optional(),
     /** Surfaces live community activity counters on the splash + future feed rails. Off during cold-start. */
     activityFeedsEnabled: z.boolean().optional(),
+    serversEnabled: z.boolean().optional(),
     /** Splash page featured-worlds carousel toggle. */
     featuredWorldsEnabled: z.boolean().optional(),
     /** Splash stat: rolling 24h chat message count. Independent toggle. */
@@ -1298,6 +1299,7 @@ export async function registerAdminRoutes(
       metaDescription: s.metaDescription,
       customHeadHtml: s.customHeadHtml,
       activityFeedsEnabled: s.activityFeedsEnabled,
+      serversEnabled: s.serversEnabled,
       featuredWorldsEnabled: s.featuredWorldsEnabled,
       splashMessages24hEnabled: s.splashMessages24hEnabled,
       profileDesignerEnabled: s.profileDesignerEnabled,
@@ -1415,6 +1417,11 @@ export async function registerAdminRoutes(
     }
     if (body.profileDesignerEnabled !== undefined) {
       patch.profileDesignerEnabled = body.profileDesignerEnabled;
+    }
+    // Multi-server master switch. NOT a branding field → requires
+    // edit_site_settings (it changes sitewide behavior, not just chrome).
+    if (body.serversEnabled !== undefined) {
+      patch.serversEnabled = body.serversEnabled;
     }
     if (body.newUserWelcomeHtml !== undefined) {
       // Sanitize via the bio allow-list (same trust posture as welcomeHtml /

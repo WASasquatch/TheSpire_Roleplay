@@ -441,22 +441,27 @@ async function upsertEarningRow(
   identity: ProfileIdentity,
   patch: Record<string, unknown>,
 ): Promise<void> {
+  // No per-server context on this owner-CRUD path; scope to the default
+  // server so the existence-check / update / insert all target the SAME
+  // pool row the scoped reads in readEarningRow see (flag-off: the only
+  // pool, byte-identical to today).
   if (identity.characterId) {
     const existing = (await db
       .select({ id: characterEarning.characterId })
       .from(characterEarning)
-      .where(eq(characterEarning.characterId, identity.characterId))
+      .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, identity.characterId)))
       .limit(1))[0];
     if (existing) {
       await db
         .update(characterEarning)
         .set(patch)
-        .where(eq(characterEarning.characterId, identity.characterId));
+        .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, identity.characterId)));
     } else {
       // Bare insert, the earning row carries lots of NOT-NULL
       // columns with defaults, so the patch keys + the FK key are
       // enough for SQLite to fill the rest from column defaults.
       await db.insert(characterEarning).values({
+        serverId: DEFAULT_SERVER_ID,
         characterId: identity.characterId,
         ...patch,
       } as typeof characterEarning.$inferInsert);
@@ -466,12 +471,13 @@ async function upsertEarningRow(
   const existing = (await db
     .select({ id: userEarning.userId })
     .from(userEarning)
-    .where(eq(userEarning.userId, identity.userId))
+    .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, identity.userId)))
     .limit(1))[0];
   if (existing) {
-    await db.update(userEarning).set(patch).where(eq(userEarning.userId, identity.userId));
+    await db.update(userEarning).set(patch).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, identity.userId)));
   } else {
     await db.insert(userEarning).values({
+      serverId: DEFAULT_SERVER_ID,
       userId: identity.userId,
       ...patch,
     } as typeof userEarning.$inferInsert);

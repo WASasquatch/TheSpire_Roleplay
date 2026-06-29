@@ -64,6 +64,7 @@ import {
   rooms,
   serverBans,
   serverCreationApplications,
+  serverInvites,
   serverMembers,
   serverMembershipApplications,
   serverSettings,
@@ -455,10 +456,13 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
    *  Join / leave / visit
    * ========================================================= */
 
-  /** Self-join an OPEN server (instant). Application-mode goes through the
-   *  membership-applications flow; invite-mode needs a code (Phase later);
-   *  the system/default server needs no join (implicit membership). */
-  app.post<{ Params: { id: string } }>("/servers/:id/join", async (req, reply) => {
+  const joinInviteBody = z.object({ code: z.string().trim().min(1).max(64) }).strict();
+
+  /** Self-join an OPEN server (instant), or an INVITE-mode server when the body
+   *  carries a valid invite code (mirrors room-invite redemption). Application-
+   *  mode goes through the membership-applications flow; the system/default
+   *  server needs no join (implicit membership). */
+  app.post<{ Params: { id: string }; Body: unknown }>("/servers/:id/join", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
@@ -469,7 +473,45 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
       reply.code(409); return { error: "This server reviews applications — apply to join instead." };
     }
     if (a.server.joinMode === "invite") {
-      reply.code(409); return { error: "This server is invite-only — you need an invite code to join." };
+      if (a.role) return { ok: true }; // already enrolled (idempotent)
+      let body: z.infer<typeof joinInviteBody>;
+      try { body = joinInviteBody.parse(req.body ?? {}); }
+      catch { reply.code(400); return { error: "An invite code is required to join this server." }; }
+      const code = body.code.trim();
+      // Validate: matches THIS server, live (not revoked/expired), under cap.
+      // Claim the use inside a transaction so concurrent redemptions can't blow
+      // past max_uses (the conditional UPDATE is the atomic gate).
+      const invite = (await db.select().from(serverInvites)
+        .where(and(eq(serverInvites.serverId, a.server.id), eq(serverInvites.code, code))).limit(1))[0];
+      if (!invite) { reply.code(404); return { error: "That invite code isn't valid for this server." }; }
+      if (invite.revokedAt) { reply.code(409); return { error: "That invite has been revoked." }; }
+      if (invite.expiresAt && +invite.expiresAt <= Date.now()) {
+        reply.code(409); return { error: "That invite has expired." };
+      }
+      if (invite.maxUses != null && invite.usedCount >= invite.maxUses) {
+        reply.code(409); return { error: "That invite has reached its use limit." };
+      }
+      let claimed = false;
+      db.transaction((tx) => {
+        // Atomic claim: bump used_count only while still live + under cap.
+        const claim = tx.update(serverInvites)
+          .set({ usedCount: sql`${serverInvites.usedCount} + 1` })
+          .where(and(
+            eq(serverInvites.id, invite.id),
+            isNull(serverInvites.revokedAt),
+            sql`(${serverInvites.maxUses} is null or ${serverInvites.usedCount} < ${serverInvites.maxUses})`,
+            sql`(${serverInvites.expiresAt} is null or ${serverInvites.expiresAt} > ${Date.now()})`,
+          ))
+          .run();
+        if (claim.changes === 0) return;
+        claimed = true;
+        tx.insert(serverMembers)
+          .values({ serverId: a.server!.id, userId: me.id, role: "member" })
+          .onConflictDoNothing()
+          .run();
+      });
+      if (!claimed) { reply.code(409); return { error: "That invite is no longer usable." }; }
+      return { ok: true };
     }
     if (a.role) return { ok: true }; // already enrolled (idempotent)
     await db.insert(serverMembers)
@@ -675,6 +717,108 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
       return { ok: true };
     },
   );
+
+  /* =========================================================
+   *  Invites (joinMode = "invite")
+   * ========================================================= */
+
+  /** Mint an unguessable invite code. Same alphabet/length nanoid the rest of
+   *  the routes use for opaque ids — collision odds are negligible and the
+   *  column's UNIQUE constraint is the backstop. */
+  function mintInviteCode(): string {
+    return nanoid(16);
+  }
+
+  const inviteWire = (r: typeof serverInvites.$inferSelect, origin?: string) => ({
+    code: r.code,
+    link: origin ? `${origin}/servers/join/${r.code}` : null,
+    maxUses: r.maxUses ?? null,
+    usedCount: r.usedCount,
+    expiresAt: r.expiresAt ? +r.expiresAt : null,
+    createdAt: +r.createdAt,
+  });
+
+  /** Origin for the shareable join link, derived from the request (mirrors how
+   *  the export route builds absolute URLs); null when it can't be resolved. */
+  function requestOrigin(req: { headers: Record<string, unknown>; protocol?: string }): string | null {
+    const host = req.headers["x-forwarded-host"] ?? req.headers["host"];
+    if (!host || typeof host !== "string") return null;
+    const fwdProto = req.headers["x-forwarded-proto"];
+    const proto = (typeof fwdProto === "string" ? fwdProto.split(",")[0] : null) ?? req.protocol ?? "https";
+    return `${proto}://${host}`;
+  }
+
+  const createInviteBody = z.object({
+    maxUses: z.number().int().min(1).max(100_000).nullable().optional(),
+    /** Lifetime in hours from now; null/omitted → never expires. */
+    expiresInHours: z.number().int().min(1).max(24 * 365).nullable().optional(),
+  }).strict();
+
+  /** POST /servers/:id/invites — mint a fresh invite code (manage_invites). */
+  app.post<{ Params: { id: string }; Body: unknown }>("/servers/:id/invites", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_invites");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    let body: z.infer<typeof createInviteBody>;
+    try { body = createInviteBody.parse(req.body ?? {}); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const expiresAt = body.expiresInHours ? new Date(Date.now() + body.expiresInHours * 3_600_000) : null;
+    const id = nanoid();
+    const code = mintInviteCode();
+    await db.insert(serverInvites).values({
+      id,
+      serverId: gate.server.id,
+      code,
+      createdByUserId: gate.me.id,
+      maxUses: body.maxUses ?? null,
+      expiresAt,
+    });
+    await auditServer(db, {
+      serverId: gate.server.id, actorUserId: gate.me.id, action: "server_invite_create",
+      metadata: { slug: gate.server.slug, code, maxUses: body.maxUses ?? null, expiresAt: expiresAt ? +expiresAt : null },
+    });
+    const row = (await db.select().from(serverInvites).where(eq(serverInvites.id, id)).limit(1))[0]!;
+    return { invite: inviteWire(row, requestOrigin(req) ?? undefined) };
+  });
+
+  /** GET /servers/:id/invites — list LIVE invites (non-revoked, non-expired)
+   *  with usage counts (manage_invites). */
+  app.get<{ Params: { id: string } }>("/servers/:id/invites", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_invites");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const now = Date.now();
+    const rows = await db.select().from(serverInvites)
+      .where(and(
+        eq(serverInvites.serverId, gate.server.id),
+        isNull(serverInvites.revokedAt),
+        sql`(${serverInvites.expiresAt} is null or ${serverInvites.expiresAt} > ${now})`,
+      ))
+      .orderBy(desc(serverInvites.createdAt));
+    const origin = requestOrigin(req) ?? undefined;
+    return { invites: rows.map((r) => inviteWire(r, origin)) };
+  });
+
+  /** DELETE /servers/:id/invites/:code — revoke an invite (manage_invites). */
+  app.delete<{ Params: { id: string; code: string } }>("/servers/:id/invites/:code", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_invites");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const existing = (await db.select().from(serverInvites)
+      .where(and(
+        eq(serverInvites.serverId, gate.server.id),
+        eq(serverInvites.code, req.params.code),
+        isNull(serverInvites.revokedAt),
+      )).limit(1))[0];
+    if (!existing) { reply.code(404); return { error: "no such invite" }; }
+    await db.update(serverInvites).set({ revokedAt: new Date() })
+      .where(eq(serverInvites.id, existing.id));
+    await auditServer(db, {
+      serverId: gate.server.id, actorUserId: gate.me.id, action: "server_invite_revoke",
+      metadata: { slug: gate.server.slug, code: existing.code },
+    });
+    return { ok: true };
+  });
 
   /* =========================================================
    *  Owner console gates

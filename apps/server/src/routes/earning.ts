@@ -80,6 +80,8 @@ import { buildGameRankings } from "../earning/gameRankings.js";
 import { buildFamiliarRankings } from "../earning/familiarRankings.js";
 import { buildScriptoriumRankings } from "../earning/scriptoriumRankings.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { serverAuthority } from "../servers/authority.js";
+import { getSettings, areServersEnabled } from "../settings.js";
 // creditPool is no longer called directly here, purchase endpoints
 // run their own sqlite transaction (see `runPurchaseTxn` below) for
 // atomicity. The award engine still imports it for the live earn
@@ -297,7 +299,31 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
     // single-server world, flag off) it resolves to DEFAULT_SERVER_ID, so
     // every read below is byte-identical to the legacy behavior. The
     // response SHAPE is unchanged — only the source server varies.
-    const sid = req.query.serverId ?? DEFAULT_SERVER_ID;
+    //
+    // Hardening: a NON-default `?serverId=` is only honored when the
+    // feature is live AND the caller may actually view that server's
+    // economy (the server exists and the caller is a member, with the
+    // owner/staff override folded into serverAuthority.isMember via the
+    // isMod chain). Anything else — flag off, unknown id, or a server the
+    // caller can't see — silently falls back to DEFAULT_SERVER_ID so the
+    // dashboard always renders the caller's own (default) snapshot rather
+    // than erroring or leaking a foreign pool. When the query is absent or
+    // already DEFAULT_SERVER_ID we skip the lookups entirely, keeping the
+    // flag-off / single-server path byte-identical (no extra DB hits).
+    let sid = DEFAULT_SERVER_ID;
+    const requestedServerId = req.query.serverId;
+    if (
+      requestedServerId &&
+      requestedServerId !== DEFAULT_SERVER_ID &&
+      areServersEnabled(await getSettings(db))
+    ) {
+      const authority = await serverAuthority(db, me, requestedServerId);
+      // serverAuthority.isMember already covers owner/admin/mod (isMod ⇒
+      // isMember) plus the manage_any_server staff override (isOwner), and
+      // .server is null for a non-existent id. Both failure modes degrade
+      // to the default server instead of a 4xx, never a 500.
+      if (authority.server && authority.isMember) sid = requestedServerId;
+    }
 
     const { rankRows, tierRows, rankByKey, tierByKey } = await loadRankTierLookup(db);
 

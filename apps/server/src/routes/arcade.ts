@@ -220,7 +220,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
         const e = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, ownerId))).limit(1).all()[0];
         const bal = e?.currency ?? 0;
         if (bal < amount) return { ok: false as const, balance: bal };
-        tx.update(characterEarning).set({ currency: bal - amount, updatedAt: new Date() }).where(eq(characterEarning.characterId, ownerId)).run();
+        tx.update(characterEarning).set({ currency: bal - amount, updatedAt: new Date() }).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, ownerId))).run();
         tx.insert(earningLedger).values({ id: nanoid(), scope, ownerId, xpDelta: 0, currencyDelta: -amount, reason, metadataJson: JSON.stringify({ kind: "eidolon_heal" }) }).run();
         return { ok: true as const, final: { xp: e?.xp ?? 0, currency: bal - amount, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null } };
       }
@@ -228,7 +228,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       const e = tx.select().from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, userId))).limit(1).all()[0];
       const bal = e?.currency ?? 0;
       if (bal < amount) return { ok: false as const, balance: bal };
-      tx.update(userEarning).set({ currency: bal - amount, updatedAt: new Date() }).where(eq(userEarning.userId, userId)).run();
+      tx.update(userEarning).set({ currency: bal - amount, updatedAt: new Date() }).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, userId))).run();
       tx.insert(earningLedger).values({ id: nanoid(), scope: "user", ownerId: userId, xpDelta: 0, currencyDelta: -amount, reason, metadataJson: JSON.stringify({ kind: "eidolon_heal" }) }).run();
       return { ok: true as const, final: { xp: e?.xp ?? 0, currency: bal - amount, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null } };
     });
@@ -663,14 +663,14 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
         tx.insert(characterEarning).values({ characterId: g.ownerId }).onConflictDoNothing().run();
         const e = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, g.ownerId))).limit(1).all()[0];
         const bal = e?.currency ?? 0;
-        tx.update(characterEarning).set({ currency: bal + value, updatedAt: new Date() }).where(eq(characterEarning.characterId, g.ownerId)).run();
+        tx.update(characterEarning).set({ currency: bal + value, updatedAt: new Date() }).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, g.ownerId))).run();
         tx.insert(earningLedger).values({ id: nanoid(), scope: "character", ownerId: g.ownerId, xpDelta: 0, currencyDelta: value, reason: "eidolon_sale", metadataJson: JSON.stringify({ kind: "eidolon_sale", level }) }).run();
         final = { xp: e?.xp ?? 0, currency: bal + value, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null };
       } else {
         tx.insert(userEarning).values({ userId: g.userId }).onConflictDoNothing().run();
         const e = tx.select().from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, g.userId))).limit(1).all()[0];
         const bal = e?.currency ?? 0;
-        tx.update(userEarning).set({ currency: bal + value, updatedAt: new Date() }).where(eq(userEarning.userId, g.userId)).run();
+        tx.update(userEarning).set({ currency: bal + value, updatedAt: new Date() }).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, g.userId))).run();
         tx.insert(earningLedger).values({ id: nanoid(), scope: "user", ownerId: g.userId, xpDelta: 0, currencyDelta: value, reason: "eidolon_sale", metadataJson: JSON.stringify({ kind: "eidolon_sale", level }) }).run();
         final = { xp: e?.xp ?? 0, currency: bal + value, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null };
       }

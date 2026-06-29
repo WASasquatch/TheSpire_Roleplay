@@ -66,6 +66,7 @@ import {
   serverCreationApplications,
   serverMembers,
   serverMembershipApplications,
+  serverSettings,
   serverUsergroupMembers,
   serverUsergroups,
   serverVisits,
@@ -79,7 +80,7 @@ import { serverAuthority, serverCan } from "../servers/authority.js";
 import { ensureDefaultUsergroup } from "../servers/usergroups.js";
 import { resolveIdentityArg } from "../commands/identityArg.js";
 import { notifyUser } from "../servers/notifications.js";
-import { getSettings, areServersEnabled } from "../settings.js";
+import { getSettings, areServersEnabled, invalidateServerSettings } from "../settings.js";
 import {
   broadcastPresence,
   findServerLanding,
@@ -789,6 +790,94 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_appearance_update",
       metadata: { slug: gate.server.slug, fields: Object.keys(update).filter((k) => k !== "updatedAt") },
+    });
+    return { ok: true };
+  });
+
+  /* =========================================================
+   *  Owner console: per-server settings (server_settings row)
+   * ========================================================= */
+
+  /** GET /servers/:id/settings — the RAW per-server overrides (migration 0276
+   *  columns; NULL = inherit the platform default). Track 1 consumes this to
+   *  render the settings form; the resolved/effective values live behind
+   *  getServerSettings. Visible to any member/mod (read-only). */
+  app.get<{ Params: { id: string } }>("/servers/:id/settings", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const a = await serverAuthority(db, me, req.params.id);
+    if (!a.server) { reply.code(404); return { error: "no server" }; }
+    if (!a.isMember && !a.isMod) { reply.code(403); return { error: "forbidden" }; }
+    const row = (await db.select().from(serverSettings)
+      .where(eq(serverSettings.serverId, a.server.id)).limit(1))[0];
+    return {
+      settings: {
+        messageRetentionMs: row?.messageRetentionMs ?? null,
+        maxRoomsPerOwner: row?.maxRoomsPerOwner ?? null,
+        maxMessageLength: row?.maxMessageLength ?? null,
+        editGraceMs: row?.editGraceMs ?? null,
+        rulesHtml: row?.rulesHtml ?? null,
+        securityNoticeHtml: row?.securityNoticeHtml ?? null,
+        welcomeHtml: row?.welcomeHtml ?? null,
+        newUserWelcomeHtml: row?.newUserWelcomeHtml ?? null,
+        maxForumPostLength: row?.maxForumPostLength ?? null,
+      },
+    };
+  });
+
+  /** PATCH /servers/:id/settings — upsert the per-server overrides for the
+   *  provided fields (NULL = clear the override, inherit the platform default).
+   *  Gated on manage_appearance (same chair as the appearance slice). Numeric
+   *  caps are positive ints; HTML copy is sanitized like the appearance
+   *  description. Invalidates the getServerSettings cache after the write. */
+  const patchSettingsBody = z.object({
+    messageRetentionMs: z.number().int().positive().nullable().optional(),
+    maxRoomsPerOwner: z.number().int().positive().max(10_000).nullable().optional(),
+    maxMessageLength: z.number().int().positive().max(100_000).nullable().optional(),
+    editGraceMs: z.number().int().min(0).nullable().optional(),
+    maxForumPostLength: z.number().int().positive().max(1_000_000).nullable().optional(),
+    rulesHtml: z.string().max(200_000).nullable().optional(),
+    securityNoticeHtml: z.string().max(200_000).nullable().optional(),
+    welcomeHtml: z.string().max(200_000).nullable().optional(),
+    newUserWelcomeHtml: z.string().max(200_000).nullable().optional(),
+  }).strict();
+
+  app.patch<{ Params: { id: string }; Body: unknown }>("/servers/:id/settings", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_appearance");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    let body: z.infer<typeof patchSettingsBody>;
+    try { body = patchSettingsBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    const update: Partial<typeof serverSettings.$inferInsert> = {
+      updatedAt: new Date(),
+      updatedById: gate.me.id,
+    };
+    if (body.messageRetentionMs !== undefined) update.messageRetentionMs = body.messageRetentionMs;
+    if (body.maxRoomsPerOwner !== undefined) update.maxRoomsPerOwner = body.maxRoomsPerOwner;
+    if (body.maxMessageLength !== undefined) update.maxMessageLength = body.maxMessageLength;
+    if (body.editGraceMs !== undefined) update.editGraceMs = body.editGraceMs;
+    if (body.maxForumPostLength !== undefined) update.maxForumPostLength = body.maxForumPostLength;
+    if (body.rulesHtml !== undefined || body.securityNoticeHtml !== undefined
+      || body.welcomeHtml !== undefined || body.newUserWelcomeHtml !== undefined) {
+      const { sanitizeBio } = await import("../auth/html.js");
+      const clean = (v: string | null | undefined) =>
+        v === undefined ? undefined : (v?.trim() ? sanitizeBio(v) : null);
+      if (body.rulesHtml !== undefined) update.rulesHtml = clean(body.rulesHtml) ?? null;
+      if (body.securityNoticeHtml !== undefined) update.securityNoticeHtml = clean(body.securityNoticeHtml) ?? null;
+      if (body.welcomeHtml !== undefined) update.welcomeHtml = clean(body.welcomeHtml) ?? null;
+      if (body.newUserWelcomeHtml !== undefined) update.newUserWelcomeHtml = clean(body.newUserWelcomeHtml) ?? null;
+    }
+
+    await db.insert(serverSettings)
+      .values({ serverId: gate.server.id, ...update })
+      .onConflictDoUpdate({ target: serverSettings.serverId, set: update });
+    invalidateServerSettings(gate.server.id);
+    await auditServer(db, {
+      serverId: gate.server.id, actorUserId: gate.me.id, action: "server_settings_update",
+      metadata: { slug: gate.server.slug, fields: Object.keys(update).filter((k) => k !== "updatedAt" && k !== "updatedById") },
     });
     return { ok: true };
   });

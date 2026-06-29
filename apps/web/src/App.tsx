@@ -23,6 +23,7 @@ import { ProfileModal } from "./components/ProfileModal.js";
 import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
 import { ServerRail } from "./components/ServerRail.js";
+import { ServerSettingsView } from "./components/ServerSettingsView.js";
 import { listServers, visitServer, type ServerSummary } from "./lib/servers.js";
 import { MessagesModal } from "./components/MessagesModal.js";
 import { RulesModal } from "./components/RulesModal.js";
@@ -1529,6 +1530,10 @@ function Chat() {
   // the rail never renders. Re-fetched on the same tree-version bumps that
   // refresh the room list (joins/leaves move servers between groups).
   const [servers, setServers] = useState<ServerSummary[] | null>(null);
+  // Per-server owner console (Multi-Server Lift). Holds the id of the server
+  // whose settings modal is open, opened from the rail's gear/long-press on a
+  // server the viewer manages. Flag-gated through the rail that sets it.
+  const [serverSettingsId, setServerSettingsId] = useState<string | null>(null);
   // Theme resolution layers. `activeTheme` is derived (not stored) below
   // as `characterTheme || userTheme || branding.defaultTheme`, so changing
   // ANY of the three causes the active theme to refresh, including when
@@ -3855,6 +3860,7 @@ function Chat() {
               onDiscover={() =>
                 setNotice({ code: "SERVERS_DISCOVER", message: "Server discovery is on the way." })
               }
+              onOpenSettings={(s) => setServerSettingsId(s.id)}
             />
           </div>
         ) : null}
@@ -4369,6 +4375,20 @@ function Chat() {
         />
       ) : null}
       {rulesOpen ? <RulesModal onClose={() => setRulesOpen(false)} /> : null}
+      {/* Per-server owner console (Multi-Server Lift). Only reachable when the
+          servers flag is on — the rail that opens it is itself flag-gated — and
+          re-checks the viewer's per-server permissions inside. */}
+      {serverSettingsId ? (
+        <ServerSettingsView
+          serverId={serverSettingsId}
+          onClose={() => {
+            setServerSettingsId(null);
+            // A console change (name/icon/role/ban) can shuffle the rail, so
+            // refresh the catalog the way a tree-version bump would.
+            void listServers().then(setServers).catch(() => {});
+          }}
+        />
+      ) : null}
       {earningOpen ? (
         <EarningDashboard
           onClose={() => setEarningOpen(null)}

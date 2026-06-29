@@ -24,6 +24,7 @@ import { AdminVerifyLogTab } from "./AdminVerifyLogTab.js";
 import { AdminScriptoriumTab } from "./AdminScriptoriumTab.js";
 import { AdminEmoticonsTab } from "./AdminEmoticonsTab.js";
 import { AdminForumsTab } from "./AdminForumsTab.js";
+import { AdminServersTab } from "./AdminServersTab.js";
 import { AdminPermissionsTab } from "./AdminPermissionsTab.js";
 import { AdminAnnouncementsTab } from "./AdminAnnouncementsTab.js";
 import { AdminModCasesTab } from "./AdminModCasesTab.js";
@@ -42,7 +43,7 @@ interface Props {
   onLinksChanged: () => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "mod-cases" | "verify-logs" | "scriptorium" | "forums" | "emoticons" | "audit" | "system" | "backups" | "permissions" | "announcements" | "faqs" | "email";
+type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "rooms" | "commands" | "titles" | "earning" | "users" | "reports" | "mod-cases" | "verify-logs" | "scriptorium" | "forums" | "servers" | "emoticons" | "audit" | "system" | "backups" | "permissions" | "announcements" | "faqs" | "email";
 
 /** Tab grouping for the strip's section dividers. Each tab carries
  *  the id of the group it belongs to; the render walks the list
@@ -100,6 +101,7 @@ const TAB_ITEMS: ReadonlyArray<{
   { id: "emoticons", label: "Emoticons", group: "content" },
   { id: "scriptorium", label: "Scriptorium", group: "content" },
   { id: "forums", label: "Forums", group: "content", permission: "view_admin_forums" },
+  { id: "servers", label: "Servers", group: "content", permission: "view_admin_servers" },
   { id: "commands", label: "Commands", group: "content" },
   { id: "titles", label: "Titles", group: "content" },
   // Two distinct manage keys feed this tab, banner curation vs.
@@ -446,6 +448,7 @@ export function AdminPanel({ onClose, onLinksChanged }: Props) {
             {tab === "scriptorium" ? <AdminScriptoriumTab /> : null}
             {tab === "emoticons" ? <AdminEmoticonsTab /> : null}
             {tab === "forums" && canSeeTab("view_admin_forums") ? <AdminForumsTab /> : null}
+            {tab === "servers" && canSeeTab("view_admin_servers") ? <AdminServersTab /> : null}
             {tab === "audit" ? <AuditTab /> : null}
             {tab === "system" && canSeeTab("view_system_metrics") ? <AdminSystemTab /> : null}
             {tab === "backups" && canSeeTab("view_admin_backups") ? <AdminBackupsTab /> : null}

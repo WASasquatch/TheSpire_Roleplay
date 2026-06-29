@@ -17,8 +17,8 @@
  * Icon-only buttons each carry a `title` + `aria-label` (the rail is all
  * glyphs, no text labels).
  */
-import { useMemo } from "react";
-import { Compass, Plus } from "lucide-react";
+import { useMemo, useRef } from "react";
+import { Compass, Plus, Settings as SettingsIcon } from "lucide-react";
 import type { ServerSummary } from "../lib/servers.js";
 
 /** A server is "owned/joined" (top group) when the viewer holds any role OR
@@ -27,12 +27,20 @@ function isMine(s: ServerSummary): boolean {
   return s.viewerRole != null || s.isSystem;
 }
 
+/** Whether the viewer holds a managing chair on this server, so the settings
+ *  gear should be offered. Owner/admin/mod manage; a plain member doesn't. The
+ *  console itself re-checks every action against the granular permission set. */
+function canManage(s: ServerSummary): boolean {
+  return s.viewerRole === "owner" || s.viewerRole === "admin" || s.viewerRole === "mod";
+}
+
 export function ServerRail({
   servers,
   currentServerId,
   canApply,
   onSelect,
   onDiscover,
+  onOpenSettings,
 }: {
   servers: ServerSummary[] | null;
   /** The server the viewer's CURRENT room belongs to — drives the active pill. */
@@ -43,6 +51,10 @@ export function ServerRail({
   onSelect: (server: ServerSummary) => void;
   /** Open the discover / apply-to-create surface (bottom "+"). */
   onDiscover: () => void;
+  /** Open the per-server owner console for a server the viewer manages. The
+   *  gear affordance (hover + long-press) on owned/managed icons calls this;
+   *  omit to hide the affordance entirely. */
+  onOpenSettings?: (server: ServerSummary) => void;
 }) {
   const { mine, discover } = useMemo(() => {
     const list = servers ?? [];
@@ -72,6 +84,7 @@ export function ServerRail({
                 server={s}
                 active={currentServerId === s.id}
                 onClick={() => onSelect(s)}
+                onOpenSettings={onOpenSettings && canManage(s) ? () => onOpenSettings(s) : undefined}
               />
             ))}
             {mine.length > 0 && discover.length > 0 ? (
@@ -83,6 +96,7 @@ export function ServerRail({
                 server={s}
                 active={currentServerId === s.id}
                 onClick={() => onSelect(s)}
+                onOpenSettings={onOpenSettings && canManage(s) ? () => onOpenSettings(s) : undefined}
               />
             ))}
           </>
@@ -118,10 +132,13 @@ function ServerIcon({
   server,
   active,
   onClick,
+  onOpenSettings,
 }: {
   server: ServerSummary;
   active: boolean;
   onClick: () => void;
+  /** Present only on servers the viewer manages: opens the owner console. */
+  onOpenSettings?: (() => void) | undefined;
 }) {
   // First letter (grapheme-naive but fine for the fallback glyph).
   const letter = (server.name.trim()[0] ?? "?").toUpperCase();
@@ -132,8 +149,25 @@ function ServerIcon({
       ? server.name
       : `${server.name} — visit`;
 
+  // Long-press (touch) opens settings without a visible gear, mirroring the
+  // hover gear on pointer devices. A timer started on press fires the console;
+  // a release/move before it elapses falls through to the normal tap = select.
+  const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
+  const clearLongPress = () => { if (longPress.current) { clearTimeout(longPress.current); longPress.current = null; } };
+
   return (
-    <div className="relative flex w-full items-center justify-center">
+    <div
+      className="group relative flex w-full items-center justify-center"
+      onContextMenu={onOpenSettings ? (e) => { e.preventDefault(); onOpenSettings(); } : undefined}
+      onTouchStart={onOpenSettings ? () => {
+        fired.current = false;
+        clearLongPress();
+        longPress.current = setTimeout(() => { fired.current = true; onOpenSettings(); }, 500);
+      } : undefined}
+      onTouchEnd={onOpenSettings ? () => clearLongPress() : undefined}
+      onTouchMove={onOpenSettings ? () => clearLongPress() : undefined}
+    >
       {/* Active / hover pill on the left rail edge. */}
       <span
         aria-hidden="true"
@@ -143,11 +177,13 @@ function ServerIcon({
       />
       <button
         type="button"
-        onClick={onClick}
+        // Skip the select when a long-press already opened settings, so a
+        // touch that triggered the console doesn't also navigate on release.
+        onClick={() => { if (fired.current) { fired.current = false; return; } onClick(); }}
         title={label}
         aria-label={label}
         aria-current={active ? "true" : undefined}
-        className={`group relative flex h-10 w-10 items-center justify-center overflow-hidden border text-sm font-semibold uppercase transition-all ${
+        className={`relative flex h-10 w-10 items-center justify-center overflow-hidden border text-sm font-semibold uppercase transition-all ${
           active
             ? "rounded-xl border-keep-action/70 ring-2 ring-keep-action/40"
             : "rounded-2xl border-transparent hover:rounded-xl hover:border-keep-rule"
@@ -171,6 +207,20 @@ function ServerIcon({
           />
         ) : null}
       </button>
+      {/* Settings gear: a hover/focus affordance on servers the viewer manages.
+          Sits over the tile's bottom-right; keyboard-reachable (it's a real
+          button) so the console isn't gated behind hover/long-press alone. */}
+      {onOpenSettings ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onOpenSettings(); }}
+          title={`${server.name} — settings`}
+          aria-label={`${server.name} — settings`}
+          className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-keep-rule bg-keep-panel text-keep-muted opacity-0 transition-opacity hover:text-keep-text focus:opacity-100 group-hover:opacity-100"
+        >
+          <SettingsIcon className="h-2.5 w-2.5" aria-hidden="true" />
+        </button>
+      ) : null}
     </div>
   );
 }

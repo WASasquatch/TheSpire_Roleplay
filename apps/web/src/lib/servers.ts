@@ -360,3 +360,15 @@ export async function visitServer(id: string): Promise<{ landingRoomId: string |
   });
   return jsonOrThrow<{ landingRoomId: string | null }>(r);
 }
+
+/**
+ * Resolve a `/s/<slug>` share link to a server the viewer may open, or `null`
+ * when it doesn't exist / is private to them (the server 404s those to keep a
+ * private server's existence undisclosed). Backs the SPA's `/s/:slug`
+ * deep-link.
+ */
+export async function resolveServerSlug(slug: string): Promise<{ id: string; name: string } | null> {
+  const r = await fetch(`/servers/by-slug/${encodeURIComponent(slug)}`, { credentials: "include" });
+  if (!r.ok) return null;
+  return (await r.json()) as { id: string; name: string };
+}

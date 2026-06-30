@@ -25,7 +25,7 @@ import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
 import { ServerRail } from "./components/ServerRail.js";
 import { ServerSettingsView } from "./components/ServerSettingsView.js";
 import { ServerDiscoverModal } from "./components/ServerDiscoverModal.js";
-import { listServers, visitServer, type ServerSummary } from "./lib/servers.js";
+import { listServers, resolveServerSlug, visitServer, type ServerSummary } from "./lib/servers.js";
 import { MessagesModal } from "./components/MessagesModal.js";
 import { RulesModal } from "./components/RulesModal.js";
 import { RulesPage } from "./components/RulesPage.js";
@@ -1254,6 +1254,27 @@ function Chat() {
     if (fromPath) window.history.replaceState(null, "", "/");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // /s/<slug> deep-link (Multi-Server Lift): resolve the permanent share
+  // address to a server the viewer may open and enter its rooms via the normal
+  // /visit path — including private servers a global staffer never joined.
+  // Deferred until the servers flag is known (by then the shell + socket are
+  // up); a link the viewer can't open resolves to null → a brief notice.
+  const serverDeepLinkDone = useRef(false);
+  useEffect(() => {
+    if (serverDeepLinkDone.current || !serversEnabled) return;
+    const m = /^\/s\/([a-z0-9-]{3,40})\/?$/.exec(window.location.pathname);
+    serverDeepLinkDone.current = true;
+    if (!m) return;
+    void resolveServerSlug(m[1]!)
+      .then((s) => {
+        if (s) void enterServerById(s.id, s.name);
+        else setNotice({ code: "SERVER_LINK", message: "That server link is private or no longer exists." });
+      })
+      .catch(() => { /* non-fatal */ })
+      .finally(() => { window.history.replaceState(null, "", "/"); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serversEnabled]);
 
   // Seed the forum-notification badge once per boot; the socket's
   // forum:notifications pulse keeps it live from then on.
@@ -3564,23 +3585,26 @@ function Chat() {
   // click uses, so bans/passwords/transitions all behave identically.
   // currentServerId then updates from the resulting room:state, never here, so
   // it can't drift. Only ever invoked while the feature flag is on.
-  async function onServerSelect(server: ServerSummary) {
-    if (server.id === currentServerId) return;
+  async function enterServerById(id: string, name: string) {
+    if (id === currentServerId) return;
     try {
-      const { landingRoomId } = await visitServer(server.id);
+      const { landingRoomId } = await visitServer(id);
       // Reflect the cleared unseen dot immediately; the next catalog refetch
       // confirms it.
       setServers((prev) =>
-        prev ? prev.map((s) => (s.id === server.id ? { ...s, hasUnseen: false } : s)) : prev,
+        prev ? prev.map((s) => (s.id === id ? { ...s, hasUnseen: false } : s)) : prev,
       );
       if (landingRoomId) {
         onRoomClick(landingRoomId);
       } else {
-        setNotice({ code: "NO_LANDING", message: `${server.name} has no room to enter yet.` });
+        setNotice({ code: "NO_LANDING", message: `${name} has no room to enter yet.` });
       }
     } catch (e) {
       setNotice({ code: "SERVER_VISIT_FAILED", message: e instanceof Error ? e.message : "Couldn't open that server." });
     }
+  }
+  async function onServerSelect(server: ServerSummary) {
+    await enterServerById(server.id, server.name);
   }
 
   // Top-bar rebrand + "back home" link (Multi-Server Lift). While the viewer is
@@ -4526,6 +4550,10 @@ function Chat() {
           // Oversight drill-in: open any server's per-server admin console from
           // the Servers tab (manage_any_server resolves owner-equivalent).
           onOpenServerConsole={(id) => { setAdminOpen(false); setServerSettingsId(id); }}
+          // Step into a server's chat to moderate — closes admin, then takes the
+          // normal /visit + room-join path (which already admits staff to any
+          // server's rooms, private or not, via canParticipate).
+          onEnterServer={(id, name) => { setAdminOpen(false); void enterServerById(id, name); }}
         />
       ) : null}
       {rulesOpen ? <RulesModal onClose={() => setRulesOpen(false)} /> : null}

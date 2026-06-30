@@ -36,6 +36,8 @@ interface Props {
   onLinksChanged: () => void;
   /** Open a server's per-server admin console (Servers tab oversight drill-in). */
   onOpenServerConsole?: (serverId: string) => void;
+  /** Step into a server's chat rooms to moderate (Servers tab; global staff). */
+  onEnterServer?: (serverId: string, name: string) => void;
 }
 
 type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "users" | "reports" | "mod-cases" | "verify-logs" | "scriptorium" | "forums" | "servers" | "audit" | "system" | "backups" | "permissions" | "email";
@@ -302,7 +304,7 @@ export function AdminSaveFooter({
   );
 }
 
-export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole }: Props) {
+export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnterServer }: Props) {
   const [tab, setTab] = useState<Tab>("overview");
   // Calm mode: ease each tab's body in with a soft opacity fade instead of an
   // instant snap. Only when Reduce Motion is on do we add the class + `key`
@@ -475,7 +477,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole }: Pro
             {tab === "verify-logs" && canSeeTab("verify_export_logs") ? <AdminVerifyLogTab /> : null}
             {tab === "scriptorium" ? <AdminScriptoriumTab /> : null}
             {tab === "forums" && canSeeTab("view_admin_forums") ? <AdminForumsTab /> : null}
-            {tab === "servers" && canSeeTab("view_admin_servers") ? <AdminServersTab {...(onOpenServerConsole ? { onOpenConsole: onOpenServerConsole } : {})} /> : null}
+            {tab === "servers" && canSeeTab("view_admin_servers") ? <AdminServersTab {...(onOpenServerConsole ? { onOpenConsole: onOpenServerConsole } : {})} {...(onEnterServer ? { onEnterServer } : {})} /> : null}
             {tab === "audit" ? <AuditTab /> : null}
             {tab === "system" && canSeeTab("view_system_metrics") ? <AdminSystemTab /> : null}
             {tab === "backups" && canSeeTab("view_admin_backups") ? <AdminBackupsTab /> : null}

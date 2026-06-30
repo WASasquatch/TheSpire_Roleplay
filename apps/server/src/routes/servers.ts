@@ -906,6 +906,30 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     return { ok: true, landingRoomId: landing?.id ?? null };
   });
 
+  /**
+   * Resolve a `/s/<slug>` share link to a server the viewer may actually open.
+   * Backs the SPA's `/s/:slug` deep-link (and push-notification deep-links).
+   *
+   * Visibility-preserving: the id is revealed only to someone who can
+   * participate — a member, anyone on an open server, or global staff holding
+   * `manage_any_server` (owner-equivalent in the authority check). For everyone
+   * else a private / invite-only server stays a 404 so the slug's existence
+   * isn't disclosed. The client then enters via the normal /visit + room-join
+   * path (which re-checks the same `canParticipate` gate).
+   */
+  app.get<{ Params: { slug: string } }>("/servers/by-slug/:slug", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const slug = req.params.slug.trim().toLowerCase();
+    const server = (await db.select({ id: servers.id, name: servers.name })
+      .from(servers).where(eq(servers.slug, slug)).limit(1))[0];
+    if (!server) { reply.code(404); return { error: "not found" }; }
+    const a = await serverAuthority(db, me, server.id);
+    if (!a.canParticipate) { reply.code(404); return { error: "not found" }; }
+    return { id: server.id, name: server.name };
+  });
+
   /* =========================================================
    *  Membership applications (joinMode = "application")
    * ========================================================= */

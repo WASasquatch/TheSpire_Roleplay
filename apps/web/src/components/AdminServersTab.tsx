@@ -97,7 +97,11 @@ async function adminSetServerStatus(
   await jsonOrThrow(r);
 }
 
-export function AdminServersTab({ onOpenConsole }: { onOpenConsole?: (serverId: string) => void } = {}) {
+export function AdminServersTab({ onOpenConsole, onEnterServer }: {
+  onOpenConsole?: (serverId: string) => void;
+  /** Step into a server's chat rooms to moderate (global-staff bypass). */
+  onEnterServer?: (serverId: string, name: string) => void;
+} = {}) {
   const me = useChat((s) => s.me);
   const canReview = !!me?.permissions?.includes("review_server_applications");
   const [pending, setPending] = useState<ServerCreationApplicationWire[] | null>(null);
@@ -201,7 +205,10 @@ export function AdminServersTab({ onOpenConsole }: { onOpenConsole?: (serverId: 
         )}
       </div>
 
-      <ServerCurationSection {...(onOpenConsole ? { onOpenConsole } : {})} />
+      <ServerCurationSection
+        {...(onOpenConsole ? { onOpenConsole } : {})}
+        {...(onEnterServer ? { onEnterServer } : {})}
+      />
 
       {recent.length > 0 ? (
         <div>
@@ -233,7 +240,10 @@ export function AdminServersTab({ onOpenConsole }: { onOpenConsole?: (serverId: 
  * pin to the top of the catalog rail with a star. Buttons require
  * `manage_any_server`; viewers without it get a read-only list.
  */
-function ServerCurationSection({ onOpenConsole }: { onOpenConsole?: (serverId: string) => void }) {
+function ServerCurationSection({ onOpenConsole, onEnterServer }: {
+  onOpenConsole?: (serverId: string) => void;
+  onEnterServer?: (serverId: string, name: string) => void;
+}) {
   const me = useChat((s) => s.me);
   const canCurate = !!me?.permissions?.includes("manage_any_server");
   const [rows, setRows] = useState<AdminServerRow[] | null>(null);
@@ -285,6 +295,20 @@ function ServerCurationSection({ onOpenConsole }: { onOpenConsole?: (serverId: s
               </span>
               {canCurate ? (
                 <span className="ml-auto flex gap-1.5">
+                  {/* Step into the server's CHAT to moderate. Staff hold
+                      manage_any_server, which the server's authority treats as
+                      owner-equivalent, so room entry already lets them in even
+                      for private / invite-only servers they never joined. */}
+                  {onEnterServer ? (
+                    <button
+                      type="button"
+                      onClick={() => onEnterServer(s.id, s.name)}
+                      title="Enter this server's chat to moderate"
+                      className="rounded border border-keep-action bg-keep-action/10 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
+                    >
+                      Enter
+                    </button>
+                  ) : null}
                   {/* Oversight drill-in: opens THIS server's per-server admin
                       console (manage_any_server resolves owner-equivalent), the
                       one door for chat-server controls — including the home

@@ -2350,6 +2350,11 @@ async function main() {
       // resolves it via /forums/topics/:id/locate.
       app.get("/f/:slug", publicLimit, serveSplash);
       app.get("/f/:slug/t/:topicId", publicLimit, serveSplash);
+      // Chat servers (Multi-Server Lift): the permanent `/s/<slug>` share
+      // address. Boots the SPA shell; the client resolves the slug to a server
+      // it may open and enters its rooms (see App.tsx). Without this the link
+      // would fall to the 404 page below — which is what it did before.
+      app.get("/s/:slug", publicLimit, serveSplash);
       app.get("/login", publicLimit, serveSplash);
       app.get("/register", publicLimit, serveSplash);
       // Scriptorium, public catalog of SFW stories + canonical story

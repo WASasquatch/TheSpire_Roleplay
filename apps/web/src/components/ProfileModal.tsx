@@ -22,14 +22,11 @@ import { StyledName } from "./StyledName.js";
 import { useChat } from "../state/store.js";
 import { ProfileMarquee, ProfileVisitorsChip, useTrackProfileView } from "./ProfileFlairSurfaces.js";
 import { EditBioModal } from "./EditBioModal.js";
+import { AccountBanControl } from "./AccountBanControl.js";
 import { loadViewerHiddenImageIds, saveViewerHiddenImageIds } from "../lib/viewerNsfw.js";
 import {
-  banAccount,
-  fetchUserModeration,
   saveModBio,
   setPortraitNsfw,
-  unbanAccount,
-  type UserModeration,
 } from "../lib/profileModeration.js";
 
 /**
@@ -2339,19 +2336,6 @@ function PortraitLightbox({
  *  permission-gated by the caller.
  * ============================================================ */
 
-const BAN_DURATIONS: ReadonlyArray<{ label: string; ms: number | null }> = [
-  { label: "1 day", ms: 1 * 24 * 60 * 60 * 1000 },
-  { label: "3 days", ms: 3 * 24 * 60 * 60 * 1000 },
-  { label: "7 days", ms: 7 * 24 * 60 * 60 * 1000 },
-  { label: "30 days", ms: 30 * 24 * 60 * 60 * 1000 },
-  { label: "Permanent", ms: null },
-];
-
-function fmtTs(ts: number | null): string {
-  if (ts == null) return "—";
-  try { return new Date(ts).toLocaleString(); } catch { return "—"; }
-}
-
 function ProfileModPanel({
   profile,
   isChar,
@@ -2370,52 +2354,12 @@ function ProfileModPanel({
   const userId = profile.profile.userId;
   const targetName = profile.kind === "character" ? profile.profile.name : profile.profile.username;
   const [editOpen, setEditOpen] = useState(false);
-  const [banOpen, setBanOpen] = useState(false);
-  const [mod, setMod] = useState<UserModeration | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  async function refreshMod() {
-    if (!canBan) return;
-    try { setMod(await fetchUserModeration(userId)); }
-    catch { /* leave prior state; non-fatal for the panel */ }
-  }
-  useEffect(() => {
-    let alive = true;
-    if (canBan) {
-      fetchUserModeration(userId).then((m) => { if (alive) setMod(m); }).catch(() => {});
-    } else {
-      setMod(null);
-    }
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, canBan]);
-
-  const ban = mod?.ban ?? null;
-
-  async function doUnban() {
-    if (busy) return;
-    setBusy(true); setErr(null);
-    try { await unbanAccount(userId); await refreshMod(); }
-    catch (e) { setErr(e instanceof Error ? e.message : "Unban failed."); }
-    finally { setBusy(false); }
-  }
 
   return (
     <div className="mt-2 flex flex-col gap-2">
-      {/* Active-ban banner */}
-      {ban ? (
-        <div className="rounded border border-[#e06070]/50 bg-[#e06070]/10 px-2.5 py-1.5 text-[11px] text-keep-text">
-          <span className="font-semibold text-[#e06070]">⛔ Banned</span>{" "}
-          {ban.bannedUntil ? <>until {fmtTs(ban.bannedUntil)}</> : <>permanently</>}
-          {ban.reason ? <> — “{ban.reason}”</> : null}
-          {ban.by ? <span className="text-keep-muted"> (by {ban.by})</span> : null}
-        </div>
-      ) : null}
-
-      {/* Action buttons */}
-      <div className="flex flex-wrap items-center gap-1.5">
-        {canEditBio ? (
+      {/* Edit Bio (gated separately from banning) */}
+      {canEditBio ? (
+        <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
             onClick={() => setEditOpen(true)}
@@ -2424,51 +2368,11 @@ function ProfileModPanel({
           >
             Edit Bio
           </button>
-        ) : null}
-        {canBan && ban ? (
-          <button
-            type="button"
-            onClick={() => void doUnban()}
-            disabled={busy}
-            className="rounded border border-keep-rule bg-keep-panel px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-keep-text hover:bg-keep-banner disabled:opacity-50"
-          >
-            {busy ? "Working…" : "Unban"}
-          </button>
-        ) : null}
-        {canBan && !ban ? (
-          <button
-            type="button"
-            onClick={() => setBanOpen(true)}
-            className="rounded border border-[#e06070]/60 bg-[#e06070]/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-[#e06070] hover:bg-[#e06070]/20"
-          >
-            Ban
-          </button>
-        ) : null}
-      </div>
-      {err ? <div className="text-[10px] text-[#e06070]">{err}</div> : null}
-
-      {/* History (mod-only) */}
-      {canBan && mod && mod.history.length > 0 ? (
-        <details className="text-[11px] text-keep-muted">
-          <summary className="cursor-pointer select-none uppercase tracking-widest">
-            Ban history ({mod.history.length})
-          </summary>
-          <ul className="mt-1 flex flex-col gap-0.5">
-            {mod.history.map((h, i) => (
-              <li key={i} className="leading-snug">
-                <span className="text-keep-text">{fmtTs(h.at)}</span>{" "}
-                {h.action === "account_ban" ? (
-                  <>ban{h.until ? <> (until {fmtTs(h.until)})</> : <> (permanent)</>}</>
-                ) : (
-                  <>unban</>
-                )}{" "}
-                <span className="text-keep-muted">by {h.by}</span>
-                {h.reason ? <> — “{h.reason}”</> : null}
-              </li>
-            ))}
-          </ul>
-        </details>
+        </div>
       ) : null}
+
+      {/* Account ban — shared with the Global Admin user editor. */}
+      <AccountBanControl userId={userId} targetName={targetName} canBan={canBan} onChanged={onModerated} />
 
       {editOpen ? (
         <EditBioModal
@@ -2482,118 +2386,7 @@ function ProfileModPanel({
           onClose={() => setEditOpen(false)}
         />
       ) : null}
-
-      {banOpen ? (
-        <BanDialog
-          targetName={targetName}
-          onClose={() => setBanOpen(false)}
-          onConfirm={async (durationMs, reason) => {
-            setBusy(true); setErr(null);
-            try {
-              await banAccount(userId, durationMs, reason);
-              setBanOpen(false);
-              await refreshMod();
-            } catch (e) {
-              setErr(e instanceof Error ? e.message : "Ban failed.");
-              throw e; // keep the dialog open on failure
-            } finally {
-              setBusy(false);
-            }
-          }}
-        />
-      ) : null}
     </div>
-  );
-}
-
-function BanDialog({
-  targetName,
-  onConfirm,
-  onClose,
-}: {
-  targetName: string;
-  onConfirm: (durationMs: number | null, reason: string) => Promise<void>;
-  onClose: () => void;
-}) {
-  const [durIdx, setDurIdx] = useState(0);
-  const [reason, setReason] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const trimmed = reason.trim();
-
-  async function confirm() {
-    if (submitting || !trimmed) return;
-    setSubmitting(true);
-    try {
-      await onConfirm(BAN_DURATIONS[durIdx]!.ms, trimmed);
-    } catch { /* parent surfaces the error + keeps dialog open */ }
-    finally { setSubmitting(false); }
-  }
-
-  return (
-    <Modal onClose={onClose} variant="centered" zIndex={70}>
-      <div
-        className="w-[min(440px,94vw)] rounded-lg border border-keep-rule bg-keep-bg p-4 text-keep-text shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 className="mb-1 text-base font-semibold">Ban {targetName}</h3>
-        <p className="mb-3 text-xs text-keep-muted">
-          Blocks login and chat. A timed ban lifts itself when it expires.
-        </p>
-
-        <div className="mb-3">
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">Duration</div>
-          <div className="flex flex-wrap gap-1.5">
-            {BAN_DURATIONS.map((d, i) => (
-              <button
-                key={d.label}
-                type="button"
-                onClick={() => setDurIdx(i)}
-                aria-pressed={durIdx === i}
-                className={`rounded border px-2.5 py-1 text-xs font-semibold transition-colors ${
-                  durIdx === i
-                    ? "border-keep-action bg-keep-action text-keep-bg"
-                    : "border-keep-rule bg-keep-panel text-keep-text hover:bg-keep-banner"
-                }`}
-              >
-                {d.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <label className="mb-3 block">
-          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-widest text-keep-muted">
-            Reason <span className="text-[#e06070]">(required)</span>
-          </span>
-          <textarea
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            rows={3}
-            maxLength={1000}
-            placeholder="Visible to other moderators in the ban history."
-            className="w-full resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
-          />
-        </label>
-
-        <div className="flex items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded border border-keep-rule bg-keep-panel px-3 py-1.5 text-xs text-keep-text hover:bg-keep-banner"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => void confirm()}
-            disabled={submitting || !trimmed}
-            className="rounded border border-[#e06070]/80 bg-[#e06070] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {submitting ? "Banning…" : "Ban account"}
-          </button>
-        </div>
-      </div>
-    </Modal>
   );
 }
 

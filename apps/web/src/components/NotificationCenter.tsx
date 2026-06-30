@@ -10,7 +10,8 @@
  * separate, still-live forum inbox folds in as a single count + a link row, so
  * the bell is one number without a risky data migration.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   AtSign,
   Award,
@@ -35,6 +36,24 @@ import {
   saveNotifPrefs,
 } from "../lib/notificationCenter.js";
 import { disablePush, enablePush, readPushState, type PushState } from "../lib/push.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
+
+/** Track the `lg` (1024px) breakpoint so the panel can be a dropdown on
+ *  desktop and a fullscreen modal on phones. */
+function useIsLgUp(): boolean {
+  const [lg, setLg] = useState(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(min-width: 1024px)").matches
+      : true);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const on = () => setLg(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return lg;
+}
 
 /** Categories shown in the mute preferences (skip the internal "system" kind). */
 const MUTABLE_CATEGORIES: { key: NotificationCategory; label: string }[] = [
@@ -118,7 +137,38 @@ export function NotificationCenter({
   const [pushState, setPushState] = useState<PushState | null>(null);
   const [pushBusy, setPushBusy] = useState(false);
 
+  // Anchoring: on desktop the panel is a dropdown pinned under the bell; we
+  // measure the bell's rect and place a body-portaled `fixed` popover at it
+  // (a portal sidesteps the banner's stacking context / transforms that would
+  // otherwise clip or re-anchor an in-tree dropdown). On phones it's a
+  // fullscreen modal, so no anchor is needed.
+  const bellRef = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<{ top: number; right: number } | null>(null);
+  const isLgUp = useIsLgUp();
+  const reduceMotion = useReducedMotion();
+  const close = () => setOpen(false);
+
   const total = notifUnread + forumUnread;
+
+  // Measure the bell to place the desktop dropdown; re-measure on resize.
+  useLayoutEffect(() => {
+    if (!open || !isLgUp) { setAnchor(null); return; }
+    const update = () => {
+      const r = bellRef.current?.getBoundingClientRect();
+      if (r) setAnchor({ top: Math.round(r.bottom + 8), right: Math.round(Math.max(8, window.innerWidth - r.right)) });
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, [open, isLgUp]);
+
+  // Escape closes (document-level so the panel needn't hold focus).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
 
   // On open: pull a fresh first page and acknowledge the badge as seen.
   useEffect(() => {
@@ -182,10 +232,12 @@ export function NotificationCenter({
   return (
     <>
       <button
+        ref={bellRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
         title="Notifications"
         aria-label={total > 0 ? `Notifications (${total} unread)` : "Notifications"}
+        aria-expanded={open}
         className="relative flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-keep-muted hover:text-keep-text"
       >
         <Bell className="h-4 w-4" aria-hidden="true" />
@@ -196,11 +248,21 @@ export function NotificationCenter({
         ) : null}
       </button>
 
-      {open ? (
+      {open ? createPortal(
         <>
-          {/* Backdrop (tap to close). */}
-          <div className="fixed inset-0 z-40 bg-black/40" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-sm flex-col border-l border-keep-rule bg-keep-bg shadow-2xl">
+          {/* Backdrop: dims + closes on phones; an invisible click-catcher that
+              still closes on desktop (where the panel is a small dropdown). */}
+          <div className="fixed inset-0 z-[59] bg-black/50 lg:bg-transparent" onClick={close} aria-hidden="true" />
+          {/* Phones: fullscreen modal (inset-0). Desktop: a dropdown pinned
+              under the bell via the measured `top/right`, capped height, its own
+              rounded/bordered card. Reduce Motion swaps the pop for a calm fade. */}
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Notifications"
+            style={isLgUp && anchor ? { top: anchor.top, right: anchor.right } : undefined}
+            className={`fixed inset-0 z-[60] flex flex-col overflow-hidden bg-keep-bg text-keep-text shadow-2xl lg:inset-auto lg:h-auto lg:max-h-[min(70vh,40rem)] lg:w-[22rem] lg:rounded-lg lg:border lg:border-keep-rule${reduceMotion ? " tk-fade-in" : ""}`}
+          >
             <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule px-3 py-2.5">
               <Bell className="h-4 w-4 text-keep-action" aria-hidden="true" />
               <span className="flex-1 text-sm font-semibold text-keep-text">{prefsOpen ? "Notification settings" : "Notifications"}</span>
@@ -265,7 +327,7 @@ export function NotificationCenter({
               ))}
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
               {forumUnread > 0 && onOpenForums ? (
                 <button type="button" onClick={() => { setOpen(false); onOpenForums(); }}
                   className="flex w-full items-center gap-2 border-b border-keep-rule bg-keep-panel/30 px-3 py-2 text-left hover:bg-keep-banner">
@@ -276,9 +338,13 @@ export function NotificationCenter({
               ) : null}
 
               {loading && shown.length === 0 ? (
-                <p className="px-3 py-4 text-sm italic text-keep-muted">Loading…</p>
+                <div className="flex min-h-[10rem] flex-1 items-center justify-center px-6 py-10">
+                  <p className="text-center text-sm italic text-keep-muted">Loading…</p>
+                </div>
               ) : shown.length === 0 ? (
-                <p className="px-3 py-6 text-center text-sm italic text-keep-muted">You're all caught up.</p>
+                <div className="flex min-h-[10rem] flex-1 items-center justify-center px-6 py-10">
+                  <p className="text-center text-sm italic text-keep-muted">You have no notifications yet</p>
+                </div>
               ) : (
                 <ul>
                   {shown.map((n) => (
@@ -306,7 +372,8 @@ export function NotificationCenter({
             </>
             )}
           </div>
-        </>
+        </>,
+        document.body,
       ) : null}
     </>
   );

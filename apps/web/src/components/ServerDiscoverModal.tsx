@@ -64,6 +64,7 @@ import {
   type ServerTagCount,
 } from "../lib/servers.js";
 import { Modal } from "./Modal.js";
+import { useChat } from "../state/store.js";
 import { CloseButton } from "./CloseButton.js";
 import { cropStyleFor } from "../lib/avatarCrop.js";
 import { isDarkSurface, useActiveTheme } from "../lib/theme.js";
@@ -127,9 +128,11 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
   }
 
   return (
-    <Modal onClose={onClose}>
+    <Modal onClose={onClose} variant="mobile-fullscreen">
+      {/* Sized like the app's other content modals: edge-to-edge on phones,
+          a large centred card on desktop (was a cramped max-w-2xl box). */}
       <div
-        className="keep-frame flex max-h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg"
+        className="keep-frame flex h-full w-full flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg lg:h-[88vh] lg:w-[80vw] lg:max-w-[1100px]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner/30 px-4 py-2.5">
@@ -514,6 +517,11 @@ function ServerCard({ server, onEnter, onJoined }: {
   const [applied, setApplied] = useState(false);
 
   const member = server.viewerRole != null || server.isSystem;
+  // Global staff who hold `manage_any_server` can step into ANY server to
+  // moderate without joining or an invite code — the SAME key the server's
+  // authority check treats as owner-equivalent, so room entry already lets
+  // them in (broadcast.ts canParticipate). We just surface the affordance.
+  const isGlobalStaff = useChat((s) => (s.me?.permissions ?? []).includes("manage_any_server"));
   const letter = (server.name.trim()[0] ?? "?").toUpperCase();
   const tint = server.iconColor ?? undefined;
 
@@ -648,6 +656,25 @@ function ServerCard({ server, onEnter, onJoined }: {
 
         {/* Primary action — adapts to the viewer's relationship + join mode. */}
         <div className="flex shrink-0 items-center gap-1.5">
+          {/* Global-staff bypass: enter to moderate without joining / a code.
+              Shown alongside the normal join path so staff can still join
+              properly if they want a chair here. */}
+          {!member && isGlobalStaff ? (
+            <button
+              type="button"
+              onClick={onEnter}
+              title="Global staff — enter to moderate without joining"
+              aria-label={`Enter ${server.name} as global staff`}
+              className={`group flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-widest ${
+                hasBanner
+                  ? "border-white/50 text-white hover:bg-white/10"
+                  : "border-keep-accent/60 bg-keep-accent/10 text-keep-accent hover:bg-keep-accent/20"
+              }`}
+            >
+              <Crown className="h-3.5 w-3.5" aria-hidden="true" />
+              Enter
+            </button>
+          ) : null}
           {member ? (
             <>
               {/* Favorite/default toggle — the server a global profile view of

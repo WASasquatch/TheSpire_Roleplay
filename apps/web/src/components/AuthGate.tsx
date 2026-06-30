@@ -101,14 +101,20 @@ export function SplashShell({
           tree (a theme design's glass treatment, the struck-shake animation,
           etc.) silently re-anchors a plain `fixed` child to that ancestor —
           which is what left the login wallpaper blank/white. Rendering it on
-          <body> behind everything (`zIndex:-1`) guarantees it ignores page
-          height and always fills the window. themeStyle is re-applied here
-          because the portal lives outside this subtree's CSS-var scope, and the
-          parent above intentionally drops `bg-keep-bg` so this shows through.
+          <body> guarantees it ignores page height and always fills the window;
+          themeStyle is re-applied here because the portal lives outside this
+          subtree's CSS-var scope.
+
+          z-index MUST be 0 (not -1): a `position:fixed` element escapes to the
+          ROOT stacking context, and a NEGATIVE z there is painted BEFORE the
+          <body> box — so body's own opaque `background-color: --keep-bg`
+          (styles.css `html, body {…}`) paints right over it and the wallpaper
+          stays blank. z-index:0 paints it ABOVE the body background; the splash
+          foreground below is lifted to `z-10` so the card still sits on top.
           The negative-x offset (-175px) centers the spire on portrait mobile;
           md+ uses the natural cover-center. */}
       {createPortal(
-        <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: -1 }}>
+        <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: 0 }}>
           <div
             className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
             style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
@@ -150,7 +156,7 @@ export function SplashShell({
         viewport; this max(...) replaces that without losing the
         intentional "card centered in the right third" desktop feel.
       */}
-      <div className="relative flex min-h-screen items-center justify-center">
+      <div className="relative z-10 flex min-h-screen items-center justify-center">
         <div
           // Mobile vs desktop card treatment:
           //   - <lg (default): glass / frosted treatment. The card is

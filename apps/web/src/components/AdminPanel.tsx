@@ -22,6 +22,7 @@ import { AdminPermissionsTab } from "./AdminPermissionsTab.js";
 import { AdminModCasesTab } from "./AdminModCasesTab.js";
 import { AdminEmailTab } from "./AdminEmailTab.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { AccountBanControl } from "./AccountBanControl.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useChat } from "../state/store.js";
@@ -3214,6 +3215,10 @@ function UserEditForm({
   const canResetPassword = mePermissions.includes("reset_user_password");
   const canGrantEarning = mePermissions.includes("grant_earning_award");
   const canClearCosmetic = mePermissions.includes("clear_user_cosmetic_override");
+  // Account ban (timed/permanent + reason + optional post sweep) — the same
+  // ban experience as the profile mod panel, replacing the bare "disabled"
+  // checkbox as the primary way to lock an account here.
+  const canBanAccount = mePermissions.includes("ban_account");
   // A non-masteradmin caller can't act on a masteradmin target at all
   // (no demote, no rename, etc.), the row stays read-only so they
   // don't submit a save that would 403. The "you can't outrank
@@ -3342,8 +3347,14 @@ function UserEditForm({
           `reset_user_password` sees only the reset section, not the
           earning or cosmetic ones. `locked` still hides the whole
           block when the target outranks the caller. */}
-      {!locked && (canResetPassword || canGrantEarning || canClearCosmetic) ? (
+      {!locked && (canBanAccount || canResetPassword || canGrantEarning || canClearCosmetic) ? (
         <div className="mt-4 space-y-3 border-t border-keep-rule pt-3">
+          {canBanAccount ? (
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">Account ban</div>
+              <AccountBanControl userId={user.userId} targetName={user.username} canBan={canBanAccount} />
+            </div>
+          ) : null}
           {canResetPassword ? (
             <PasswordResetSection userId={user.userId} username={user.username} />
           ) : null}

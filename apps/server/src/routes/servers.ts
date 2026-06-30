@@ -106,6 +106,7 @@ import {
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
+import { softHideUserMessages } from "../lib/purgeUserMessages.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { CommandRegistry } from "../commands/registry.js";
 // Per-server admin surfaces (Admin Partition — plan_ext.md). Each is a
@@ -2073,6 +2074,10 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     target: z.string().trim().min(1).max(120),
     hours: z.number().int().min(1).max(24 * 365).nullable().optional(),
     reason: z.string().trim().max(300).optional(),
+    // Optional anti-spam sweep: hide the user's posts IN THIS SERVER'S ROOMS —
+    // a lookback window in ms, or "all". Scoped, so the rest of the Spire is
+    // untouched (mirrors the server-ban's room-only blast radius).
+    purgePosts: z.union([z.number().int().positive().max(366 * 24 * 3_600_000), z.literal("all")]).optional(),
   }).strict();
 
   app.put<{ Params: { id: string }; Body: unknown }>("/servers/:id/bans", async (req, reply) => {
@@ -2135,12 +2140,29 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       if (landing && affected.size) await broadcastPresence(io, db, landing.id);
     }
 
+    // Optional anti-spam sweep: soft-hide their posts, scoped to THIS server's
+    // rooms only. Kept as tombstones for admin audit, removed live for others.
+    let postsHidden = 0;
+    if (body.purgePosts != null && roomIds.length) {
+      try {
+        postsHidden = await softHideUserMessages(db, io, {
+          targetUserId: target.userId,
+          window: body.purgePosts,
+          actor: { userId: gate.me.id, displayName: gate.me.username },
+          roomIds,
+        });
+      } catch { /* best-effort; the ban already committed */ }
+    }
+
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_ban",
       targetUserId: target.userId, reason: body.reason ?? null,
-      metadata: { slug: gate.server.slug, until: until ? +until : null },
+      metadata: {
+        slug: gate.server.slug, until: until ? +until : null,
+        ...(body.purgePosts != null ? { purgePosts: body.purgePosts, postsHidden } : {}),
+      },
     });
-    return { ok: true, userId: target.userId, username: target.username };
+    return { ok: true, userId: target.userId, username: target.username, postsHidden };
   });
 
   app.delete<{ Params: { id: string; userId: string } }>("/servers/:id/bans/:userId", async (req, reply) => {

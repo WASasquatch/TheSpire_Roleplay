@@ -104,9 +104,25 @@ export async function fetchUserModeration(userId: string): Promise<UserModeratio
   return (await res.json()) as UserModeration;
 }
 
-/** Issue an account ban. `durationMs: null` = permanent. */
-export async function banAccount(userId: string, durationMs: number | null, reason: string): Promise<void> {
-  await postJson(`/users/${userId}/ban`, { durationMs, reason });
+/**
+ * A "remove their recent posts" window for a ban: a lookback in
+ * milliseconds, `"all"` for everything, or `null` to leave posts alone.
+ */
+export type PurgePosts = number | "all" | null;
+
+/** Issue an account ban. `durationMs: null` = permanent. `purgePosts` opt-in
+ *  soft-hides their recent posts at ban time (kept for audit). */
+export async function banAccount(
+  userId: string,
+  durationMs: number | null,
+  reason: string,
+  purgePosts: PurgePosts = null,
+): Promise<void> {
+  await postJson(`/users/${userId}/ban`, {
+    durationMs,
+    reason,
+    ...(purgePosts != null ? { purgePosts } : {}),
+  });
 }
 
 /** Lift an account ban. */

@@ -62,6 +62,7 @@ import {
   type ServerViewerState,
 } from "@thekeep/shared";
 import { Modal } from "./Modal.js";
+import { BanModal } from "./BanModal.js";
 import { ImageCropField } from "./ImageCropField.js";
 // Per-server admin tabs (Admin Partition — plan_ext.md). Self-contained tabs
 // taking { serverId, viewer, busy, run, onSaved }.
@@ -1626,8 +1627,7 @@ function ApplicationsTab({ detail, busy, run }: TabProps) {
 function BansTab({ detail, viewer, busy, run }: TabProps) {
   const [bans, setBans] = useState<ServerBanWire[] | null>(null);
   const [targetHit, setTargetHit] = useState<ServerUserHit | null>(null);
-  const [hours, setHours] = useState<string>("168");
-  const [reason, setReason] = useState("");
+  const [banOpen, setBanOpen] = useState(false);
   const [tick, setTick] = useState(0);
   const perms = new Set(viewer.permissions);
   const canBan = viewer.isOwner || perms.has("ban_member");
@@ -1674,35 +1674,43 @@ function BansTab({ detail, viewer, busy, run }: TabProps) {
               disabledReason={(hit) => (hit.serverRole === "owner" ? "the owner" : hit.banned ? "already banned" : null)}
               onSelect={setTargetHit} />
           ) : (
-            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
-              <span className="min-w-0 flex-1 truncate text-keep-text">{targetHit.username}</span>
-              <button type="button" onClick={() => setTargetHit(null)}
-                className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Change</button>
+            <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
+                <span className="min-w-0 flex-1 truncate text-keep-text">{targetHit.username}</span>
+                <button type="button" onClick={() => setTargetHit(null)}
+                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Change</button>
+              </div>
+              <button type="button" disabled={busy} onClick={() => setBanOpen(true)}
+                className="shrink-0 rounded border border-keep-system/70 bg-keep-system/15 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-system disabled:opacity-50">Ban…</button>
             </div>
           )}
-          <div className="flex flex-wrap gap-2">
-            <select value={hours} onChange={(e) => setHours(e.target.value)}
-              className="rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action">
-              <option value="24">1 day</option>
-              <option value="168">7 days</option>
-              <option value="720">30 days</option>
-              <option value="perm">Permanent</option>
-            </select>
-            <input value={reason} onChange={(e) => setReason(e.target.value)} maxLength={300} placeholder="Reason (shown to them)"
-              className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
-            <button type="button" disabled={busy || !targetHit}
-              onClick={() => {
-                if (!targetHit) return;
-                const label = hours === "perm" ? "permanently" : `for ${hours === "24" ? "1 day" : hours === "168" ? "7 days" : "30 days"}`;
-                if (!window.confirm(`Ban ${targetHit.username} from ${detail.name} ${label}?`)) return;
-                void run(async () => {
-                  await apiBan(detail.id, { target: `@id:${targetHit.userId}`, hours: hours === "perm" ? null : parseInt(hours, 10), ...(reason.trim() ? { reason: reason.trim() } : {}) });
-                  setTargetHit(null); setReason(""); setTick((t) => t + 1);
-                });
-              }}
-              className="rounded border border-keep-system/70 bg-keep-system/15 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-system disabled:opacity-50">Ban</button>
-          </div>
         </div>
+      ) : null}
+
+      {banOpen && targetHit ? (
+        <BanModal
+          targetName={targetHit.username}
+          description={`Blocks ${detail.name}'s rooms only — the rest of the Spire is untouched. A timed ban lifts itself when it expires.`}
+          reasonRequired={false}
+          reasonPlaceholder="Reason (shown to them)"
+          reasonMaxLength={300}
+          purgeScopeLabel="posts here"
+          confirmLabel="Ban from server"
+          onClose={() => setBanOpen(false)}
+          onConfirm={async (durationMs, reason, purge) => {
+            const hours = durationMs == null ? null : Math.max(1, Math.round(durationMs / 3_600_000));
+            await run(async () => {
+              await apiBan(detail.id, {
+                target: `@id:${targetHit.userId}`,
+                hours,
+                ...(reason.trim() ? { reason: reason.trim() } : {}),
+                ...(purge != null ? { purgePosts: purge } : {}),
+              });
+              // success only — on failure `run` surfaces the error + the modal stays open
+              setBanOpen(false); setTargetHit(null); setTick((t) => t + 1);
+            });
+          }}
+        />
       ) : null}
     </div>
   );

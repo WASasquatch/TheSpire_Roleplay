@@ -144,12 +144,19 @@ export function SplashLanding({ onNavigate }: Props) {
           ancestor establishes a containing block (a `transform`/`filter`/
           `will-change` anywhere up the tree — e.g. the struck-shake or a
           design's backdrop-filter — silently re-anchors it to that ancestor,
-          which is what made the art scroll away). Rendering it on <body>,
-          behind everything (`zIndex:-1`), guarantees it ignores page height
-          and always fills the window. themeStyle is re-applied here because
-          the portal lives outside this subtree's CSS-var scope. */}
+          which is what made the art scroll away). Rendering it on <body>
+          guarantees it ignores page height and always fills the window;
+          themeStyle is re-applied here because the portal lives outside this
+          subtree's CSS-var scope.
+
+          z-index MUST be 0 (not -1): a `position:fixed` element escapes to the
+          ROOT stacking context, where a NEGATIVE z is painted BEFORE the <body>
+          box — so body's own opaque `background-color: --keep-bg` (styles.css
+          `html, body {…}`) paints over it and the art stays blank. z-index:0
+          paints it ABOVE the body background; the foreground below is lifted to
+          `z-10` so the hero + card still sit on top. */}
       {createPortal(
-        <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: -1 }}>
+        <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: 0 }}>
           <div
             className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
             style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
@@ -171,7 +178,7 @@ export function SplashLanding({ onNavigate }: Props) {
         document.body,
       )}
 
-      <div className="relative flex min-h-screen flex-col items-center justify-start py-8 lg:py-10">
+      <div className="relative z-10 flex min-h-screen flex-col items-center justify-start py-8 lg:py-10">
         {/* HERO, over the spire BG, ABOVE the card. The wordmark
             reads as the page banner this way instead of feeling
             tucked into the card content. */}

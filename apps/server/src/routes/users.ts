@@ -9,6 +9,7 @@ import { blockedUserIdsFor } from "../auth/blocks.js";
 import { recordAudit } from "../audit.js";
 import { canonicalizeNameForLookup, loweredSpaceCanonical, substringNameInsensitive } from "../lib/nameLookup.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { softHideUserMessages } from "../lib/purgeUserMessages.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -884,6 +885,9 @@ export async function registerUsersRoutes(
     const body = z.object({
       durationMs: z.number().int().positive().max(MAX_BAN_MS).nullable(),
       reason: z.string().trim().min(1).max(1000),
+      // Optional "remove their recent posts" sweep at ban time (anti-spam):
+      // a lookback window in ms, or "all" to hide everything they posted.
+      purgePosts: z.union([z.number().int().positive().max(MAX_BAN_MS), z.literal("all")]).optional(),
     }).parse(req.body);
 
     const now = new Date();
@@ -916,14 +920,32 @@ export async function registerUsersRoutes(
       await loadBannedIpCache(db); // make the new blocks live app-wide immediately
     } catch { /* IP mirroring is best-effort; the account ban already committed */ }
 
+    // Optional anti-spam sweep: soft-hide the banned user's recent posts (kept
+    // as tombstones for admin audit, blanked + removed live for everyone else).
+    let postsHidden = 0;
+    if (body.purgePosts != null) {
+      try {
+        postsHidden = await softHideUserMessages(db, io, {
+          targetUserId: id,
+          window: body.purgePosts,
+          actor: { userId: me.id, displayName: me.username },
+        });
+      } catch { /* best-effort; the account ban already committed */ }
+    }
+
     await recordAudit(db, {
       actorUserId: me.id,
       action: "account_ban",
       targetUserId: id,
       reason: body.reason,
-      metadata: { until: bannedUntil ? bannedUntil.getTime() : null, durationMs: body.durationMs, ipsBlocked: ipCount },
+      metadata: {
+        until: bannedUntil ? bannedUntil.getTime() : null,
+        durationMs: body.durationMs,
+        ipsBlocked: ipCount,
+        ...(body.purgePosts != null ? { purgePosts: body.purgePosts, postsHidden } : {}),
+      },
     });
-    return { ok: true, ipsBlocked: ipCount };
+    return { ok: true, ipsBlocked: ipCount, postsHidden };
   });
 
   /** Lift an account ban early. Gated by `unban_account`. */

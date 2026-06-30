@@ -440,8 +440,13 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
           shadow) so the links stay legible over busy server banner art, while
           the banner still shows through. relative z-10 lifts it over the banner
           image + scrim; over a server banner the links also carry a soft
-          text-shadow for the lightest (right-edge) scrim. */}
-      <nav className={`hidden items-center gap-3 text-sm uppercase tracking-widest text-keep-muted lg:flex ${hasServerBanner ? "relative z-10 rounded-[10px] border border-white/20 bg-black/50 p-2.5 shadow-[0_10px_10px_rgba(0,0,0,0.2)] [text-shadow:0_1px_2px_rgba(0,0,0,.7)]" : ""}`}>
+          text-shadow for the lightest (right-edge) scrim.
+
+          ONLY while the banner art is EXPANDED, though — once collapsed to the
+          slim bar there's no art to sit over, so the pill (bg/border/shadow/
+          padding) is dropped and the nav falls back to a plain horizontal list:
+          the slim bar itself is the container at that point. */}
+      <nav className={`hidden items-center gap-3 text-sm uppercase tracking-widest text-keep-muted lg:flex ${hasServerBanner && bannerShown ? "relative z-10 rounded-[10px] border border-white/20 bg-black/50 p-2.5 shadow-[0_10px_10px_rgba(0,0,0,0.2)] [text-shadow:0_1px_2px_rgba(0,0,0,.7)]" : ""}`}>
         {/* Admin-managed custom links collapse behind a single "More"
             popover so a busy install with many links doesn't push the
             built-in nav items off the row. `data-nav-more` is the

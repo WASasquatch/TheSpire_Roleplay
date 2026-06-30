@@ -32,29 +32,50 @@
  * own fetch helpers against the documented /servers endpoints rather than
  * widening that module.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { Settings as SettingsIcon, X } from "lucide-react";
 import {
   DEFAULT_THEME,
   SERVER_MOD_PERMISSIONS,
+  SERVER_GRANTABLE_MOD_PERMISSIONS,
   SERVER_MOD_PERMISSION_META,
   SERVER_MOD_DEFAULT_PERMISSIONS,
-  SERVER_PERMISSIONS,
-  SERVER_PERMISSION_META,
+  SERVER_ADMIN_DEFAULT_PERMISSIONS,
   SERVER_FEATURE_PERMISSIONS,
-  serverPermissionCategory,
+  SERVER_FEATURE_PERMISSION_META,
+  SERVER_AUTO_RULE_META,
+  SERVER_MAX_AUTO_RULES,
   normalizeTheme,
+  normalizeTag,
+  MAX_TAGS_PER_ENTITY,
+  AVATAR_CROP_DEFAULTS,
+  clampAvatarCrop,
+  type AvatarCrop,
   type Theme,
   type ServerModPermission,
+  type ServerFeaturePermission,
   type ServerPermission,
+  type ServerAutoRule,
+  type ServerAutoRuleKind,
   type ServerRole,
   type ServerJoinMode,
   type ServerViewerState,
 } from "@thekeep/shared";
 import { Modal } from "./Modal.js";
+import { ImageCropField } from "./ImageCropField.js";
+// Per-server admin tabs (Admin Partition — plan_ext.md). Self-contained tabs
+// taking { serverId, viewer, busy, run, onSaved }.
+import ReportsTab from "./server-admin/ReportsTab.js";
+import ModCasesTab from "./server-admin/ModCasesTab.js";
+import EmoticonsTab from "./server-admin/EmoticonsTab.js";
+import AnnouncementsTab from "./server-admin/AnnouncementsTab.js";
+import FaqsTab from "./server-admin/FaqsTab.js";
+import CommandsTitlesTab from "./server-admin/CommandsTitlesTab.js";
+import EarningTab from "./server-admin/EarningTab.js";
 import { StylePicker } from "./AdminPanel.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useActiveTheme, useScopedRootDesign } from "../lib/theme.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 /* ============================================================
  * Wire shapes (consumed read-only from the documented endpoints).
@@ -68,8 +89,18 @@ interface ServerConsoleDetail {
   name: string;
   tagline: string | null;
   descriptionHtml: string | null;
+  /** Owner-set genre/category tags for Discover search (normalizeTags). The
+   *  backend always returns this (`[]` when none); the Overview tab edits it. */
+  tags: string[];
   logoUrl: string | null;
   iconColor: string | null;
+  borderColor: string | null;
+  horizontalLogoUrl: string | null;
+  iconCrop: AvatarCrop | null;
+  bannerCrop: AvatarCrop | null;
+  bannerImageUrl: string | null;
+  bannerFocusY: number | null;
+  bannerHeight: number | null;
   themeJson: string | null;
   themeStyleKey: string | null;
   isSystem: boolean;
@@ -107,9 +138,11 @@ interface ServerUsergroupWire {
   id: string;
   name: string;
   color: string | null;
-  permissions: ServerPermission[];
+  /** Member-FEATURE perms only — moderation comes from the role tier. */
+  permissions: ServerFeaturePermission[];
   isDefault: boolean;
   sortOrder: number;
+  autoRules: ServerAutoRule[];
   memberCount: number;
 }
 
@@ -170,6 +203,8 @@ interface RoomListRow {
   name: string;
   serverId?: string | null;
   type?: string;
+  topic?: string | null;
+  messageExpiryMinutes?: number | null;
   occupants?: unknown[];
 }
 
@@ -192,6 +227,15 @@ async function apiPatchServer(id: string, body: Record<string, unknown>): Promis
   await jsonOrThrow(await fetch(`/servers/${sid(id)}`, {
     method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
   }));
+}
+/** Upload (or clear) the server's round icon / header banner / wordmark logo.
+ *  Mirrors the forum image endpoints; POST /servers/:id/logo|banner|horizontal-logo. */
+async function apiSetServerImage(id: string, kind: "logo" | "banner" | "horizontal-logo", imageDataUrl: string | null): Promise<string | null> {
+  const j = await jsonOrThrow<{ url: string | null }>(await fetch(`/servers/${sid(id)}/${kind}`, {
+    method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
+    body: JSON.stringify(imageDataUrl ? { imageDataUrl } : { clear: true }),
+  }));
+  return j.url;
 }
 async function apiGetSettings(id: string): Promise<ServerSettingsWire> {
   const j = await jsonOrThrow<{ settings: ServerSettingsWire }>(await fetch(`/servers/${sid(id)}/settings`, { credentials: "include" }));
@@ -282,11 +326,24 @@ async function apiTransfer(id: string, target: string): Promise<void> {
   }));
 }
 async function apiGetRooms(serverId: string): Promise<RoomListRow[]> {
-  // NOTE: /rooms ignores ?serverId today and omits serverId on rows, so we
-  // pass the hint and filter client-side where the field is present. A
-  // server-scoped rooms endpoint is a Track-A followup (see report).
+  // /rooms?serverId returns this server's rooms (NULL-tolerant for the default
+  // server); rows carry serverId so the tab filters precisely.
   const j = await jsonOrThrow<{ rooms: RoomListRow[] }>(await fetch(`/rooms?serverId=${sid(serverId)}`, { credentials: "include" }));
   return j.rooms;
+}
+/** Per-server room admin (manage_rooms) — POST/PATCH/DELETE /servers/:id/rooms. */
+async function apiCreateServerRoom(serverId: string, body: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/rooms`, {
+    method: "POST", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
+  }));
+}
+async function apiPatchServerRoom(serverId: string, roomId: string, body: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/rooms/${sid(roomId)}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
+  }));
+}
+async function apiDeleteServerRoom(serverId: string, roomId: string): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/rooms/${sid(roomId)}`, { method: "DELETE", credentials: "include" }));
 }
 
 /* ============================================================
@@ -368,7 +425,7 @@ function ModPermissionCheckboxes({ value, onChange, grantable, disabled }: {
   const has = new Set(value);
   return (
     <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-      {SERVER_MOD_PERMISSIONS.map((key) => {
+      {SERVER_GRANTABLE_MOD_PERMISSIONS.map((key) => {
         const meta = SERVER_MOD_PERMISSION_META[key];
         const canGrant = grantable.has(key);
         return (
@@ -396,50 +453,165 @@ function ModPermissionCheckboxes({ value, onChange, grantable, disabled }: {
   );
 }
 
-/** Full-registry grid (member features + moderation), grouped, for usergroups. */
-function ServerPermissionCheckboxes({ value, onChange, grantable, disabled }: {
-  value: ServerPermission[];
-  onChange: (next: ServerPermission[]) => void;
+/** Member-FEATURE checkbox grid for usergroups. Usergroups grant member
+ *  features only — moderation power comes from the role tier (Roles tab), never
+ *  from a group, so a group can't silently mint a moderator. */
+function ServerFeatureCheckboxes({ value, onChange, grantable, disabled }: {
+  value: ServerFeaturePermission[];
+  onChange: (next: ServerFeaturePermission[]) => void;
   grantable: Set<ServerPermission>;
   disabled?: boolean;
 }) {
   const has = new Set(value);
-  const sections: { title: string; keys: ServerPermission[] }[] = [
-    { title: "Member features", keys: SERVER_PERMISSIONS.filter((k) => serverPermissionCategory(k) === "feature") },
-    { title: "Moderation", keys: SERVER_PERMISSIONS.filter((k) => serverPermissionCategory(k) === "moderation") },
-  ];
-  function toggle(key: ServerPermission, on: boolean) {
+  function toggle(key: ServerFeaturePermission, on: boolean) {
     const next = new Set(value);
     if (on) next.add(key); else next.delete(key);
     onChange([...next]);
   }
   return (
-    <div className="space-y-2">
-      {sections.map((sec) => (
-        <div key={sec.title}>
-          <p className="mb-0.5 text-[10px] uppercase tracking-widest text-keep-muted">{sec.title}</p>
-          <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-            {sec.keys.map((key) => {
-              const meta = SERVER_PERMISSION_META[key];
-              const canGrant = grantable.has(key);
-              return (
-                <label
-                  key={key}
-                  title={canGrant ? meta.description : "You don't hold this permission yourself, so you can't grant it."}
-                  className={`flex items-start gap-2 rounded border border-keep-rule/60 px-2 py-1 text-xs ${canGrant ? "" : "opacity-50"}`}
-                >
-                  <input type="checkbox" className="mt-0.5" checked={has.has(key)} disabled={disabled || !canGrant}
-                    onChange={(e) => toggle(key, e.target.checked)} />
-                  <span className="min-w-0">
-                    <span className="block text-keep-text">{meta.label}</span>
-                    <span className="block text-[10px] text-keep-muted">{meta.description}</span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
+    <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+      {SERVER_FEATURE_PERMISSIONS.map((key) => {
+        const meta = SERVER_FEATURE_PERMISSION_META[key];
+        const canGrant = grantable.has(key);
+        return (
+          <label
+            key={key}
+            title={canGrant ? meta.description : "You don't hold this permission yourself, so you can't grant it."}
+            className={`flex items-start gap-2 rounded border border-keep-rule/60 px-2 py-1 text-xs ${canGrant ? "" : "opacity-50"}`}
+          >
+            <input type="checkbox" className="mt-0.5" checked={has.has(key)} disabled={disabled || !canGrant}
+              onChange={(e) => toggle(key, e.target.checked)} />
+            <span className="min-w-0">
+              <span className="block text-keep-text">{meta.label}</span>
+              <span className="block text-[10px] text-keep-muted">{meta.description}</span>
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Auto-join rules editor (non-default usergroups). A member joins the group
+ *  when they satisfy EVERY rule. Mirrors the forum AutoRulesEditor, with the
+ *  server rule kinds (message count, posted-in-room, account/member age). */
+function ServerAutoRulesEditor({ rules, onChange, rooms, disabled }: {
+  rules: ServerAutoRule[];
+  onChange: (next: ServerAutoRule[]) => void;
+  rooms: RoomListRow[];
+  disabled?: boolean;
+}) {
+  const KINDS: ServerAutoRuleKind[] = ["message_count", "posted_in_room", "account_age_days", "member_age_days"];
+  function defaultFor(kind: ServerAutoRuleKind): ServerAutoRule {
+    if (kind === "posted_in_room") return { kind, roomId: rooms[0]?.id ?? "" };
+    return { kind, min: kind === "message_count" ? 10 : 7 };
+  }
+  function setRule(i: number, rule: ServerAutoRule) { const next = rules.slice(); next[i] = rule; onChange(next); }
+  return (
+    <div className="space-y-1.5">
+      {rules.length === 0 ? (
+        <p className="text-[11px] italic text-keep-muted">No rules — members only join this group when added by hand.</p>
+      ) : null}
+      {rules.map((rule, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-1.5 rounded border border-keep-rule/60 px-2 py-1.5">
+          <select
+            value={rule.kind} disabled={disabled}
+            onChange={(e) => setRule(i, defaultFor(e.target.value as ServerAutoRuleKind))}
+            className="rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action"
+          >
+            {KINDS.map((k) => <option key={k} value={k}>{SERVER_AUTO_RULE_META[k].label}</option>)}
+          </select>
+          {rule.kind === "posted_in_room" ? (
+            <select
+              value={rule.roomId} disabled={disabled}
+              onChange={(e) => setRule(i, { kind: "posted_in_room", roomId: e.target.value })}
+              className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action"
+            >
+              {rooms.length === 0 ? <option value="">(no rooms)</option> : null}
+              {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          ) : (
+            <>
+              <input
+                type="number" min={1} value={rule.min} disabled={disabled}
+                onChange={(e) => setRule(i, { kind: rule.kind, min: Math.max(1, Number(e.target.value) || 1) })}
+                className="w-20 rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action"
+              />
+              <span className="text-[11px] text-keep-muted">{SERVER_AUTO_RULE_META[rule.kind].unit}</span>
+            </>
+          )}
+          <button type="button" disabled={disabled} onClick={() => onChange(rules.filter((_, j) => j !== i))}
+            className="ml-auto shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Remove</button>
         </div>
       ))}
+      {rules.length < SERVER_MAX_AUTO_RULES ? (
+        <button type="button" disabled={disabled} onClick={() => onChange([...rules, defaultFor("message_count")])}
+          className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">+ Add rule</button>
+      ) : null}
+    </div>
+  );
+}
+
+/* ============================================================
+ * Shared: Tags chip-input
+ * ============================================================ */
+
+/** Discovery-tag chip input: type a tag and Enter/comma to add a chip, click ×
+ *  to remove. Each entry is cleaned through {@link normalizeTag} (empties and
+ *  case-insensitive dupes are ignored) and the list is capped at
+ *  {@link MAX_TAGS_PER_ENTITY}. The same control the forum settings use, so the
+ *  two consoles match. */
+function TagsInput({ value, onChange, disabled }: {
+  value: string[];
+  onChange: (next: string[]) => void;
+  disabled?: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  const atCap = value.length >= MAX_TAGS_PER_ENTITY;
+
+  function add(raw: string) {
+    const t = normalizeTag(raw);
+    if (!t || atCap) return;
+    if (value.includes(t)) { setDraft(""); return; }
+    onChange([...value, t]);
+    setDraft("");
+  }
+  function remove(tag: string) {
+    onChange(value.filter((t) => t !== tag));
+  }
+  function onKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      add(draft);
+    } else if (e.key === "Backspace" && draft === "" && value.length > 0) {
+      // Backspace on an empty field pops the last chip (familiar chip-input UX).
+      const last = value[value.length - 1];
+      if (last) remove(last);
+    }
+  }
+
+  return (
+    <div className={`rounded border border-keep-rule bg-keep-bg px-2 py-1.5 ${disabled ? "opacity-60" : ""}`}>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {value.map((t) => (
+          <span key={t} className="inline-flex items-center gap-1 rounded border border-keep-rule bg-keep-panel/40 px-1.5 py-0.5 text-xs text-keep-text">
+            {t}
+            <button type="button" disabled={disabled} onClick={() => remove(t)}
+              aria-label={`Remove ${t}`} title={`Remove ${t}`}
+              className="text-keep-muted hover:text-keep-accent disabled:opacity-50">×</button>
+          </span>
+        ))}
+        <input
+          value={draft}
+          disabled={disabled || atCap}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={() => add(draft)}
+          maxLength={32}
+          placeholder={atCap ? "Tag limit reached" : value.length ? "Add another…" : "high fantasy, sci-fi, 18+"}
+          className="min-w-[8rem] flex-1 bg-transparent px-0.5 py-0.5 text-sm outline-none placeholder:text-keep-muted/70 disabled:cursor-not-allowed"
+        />
+      </div>
     </div>
   );
 }
@@ -452,13 +624,17 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
   const [name, setName] = useState(detail.name);
   const [tagline, setTagline] = useState(detail.tagline ?? "");
   const [description, setDescription] = useState(detail.descriptionHtml ?? "");
+  const [tags, setTags] = useState<string[]>(detail.tags ?? []);
   const [joinMode, setJoinMode] = useState<ServerJoinMode>(detail.joinMode);
   const [prompt, setPrompt] = useState(detail.applicationPrompt ?? "");
   const [publicBrowsing, setPublicBrowsing] = useState(detail.publicBrowsing);
 
+  const initialTags = detail.tags ?? [];
+  const tagsDirty = tags.length !== initialTags.length || tags.some((t, i) => t !== initialTags[i]);
   const dirty = name !== detail.name
     || tagline !== (detail.tagline ?? "")
     || description !== (detail.descriptionHtml ?? "")
+    || tagsDirty
     || joinMode !== detail.joinMode
     || prompt !== (detail.applicationPrompt ?? "")
     || publicBrowsing !== detail.publicBrowsing;
@@ -482,6 +658,13 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
           placeholder="The long-form welcome. Same HTML rules as profile bios; shown on the server's page."
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       </label>
+      <div className="block text-sm">
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Tags</span>
+        <TagsInput value={tags} onChange={setTags} disabled={busy} />
+        <span className="mt-0.5 block text-[10px] text-keep-muted">
+          Genres people can search by in Discover (e.g. high fantasy, sci-fi, 18+).
+        </span>
+      </div>
 
       <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
         <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">How people join</span>
@@ -537,6 +720,7 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
             name: name.trim(),
             tagline: tagline.trim() ? tagline.trim() : null,
             descriptionHtml: description.trim() ? description : null,
+            tags,
             ...(detail.isSystem ? {} : { joinMode }),
             applicationPrompt: prompt.trim() ? prompt.trim() : null,
             publicBrowsing,
@@ -562,56 +746,175 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
   }, [detail.themeJson]);
   const [theme, setTheme] = useState<Theme | null>(initialTheme);
   const [styleKey, setStyleKey] = useState<string | null>(detail.themeStyleKey);
-  const [logoUrl, setLogoUrl] = useState(detail.logoUrl ?? "");
   const [iconColor, setIconColor] = useState(detail.iconColor ?? "");
+  const [borderColor, setBorderColor] = useState(detail.borderColor ?? "");
+
+  // Crop state is seeded from the saved detail; ImageCropField is controlled by
+  // these. onCropChange updates local state immediately (so dragging feels live);
+  // the explicit Save button below persists it.
+  const [iconCrop, setIconCrop] = useState<AvatarCrop>(detail.iconCrop ?? AVATAR_CROP_DEFAULTS);
+  const [bannerCrop, setBannerCrop] = useState<AvatarCrop>(detail.bannerCrop ?? AVATAR_CROP_DEFAULTS);
+  // Top-bar banner height (px); null = the default responsive height.
+  const [bannerHeight, setBannerHeight] = useState<number | null>(detail.bannerHeight);
+  const bannerHeightDirty = bannerHeight !== detail.bannerHeight;
+  // The banner preview mirrors the ACTUAL top bar: same aspect = full window
+  // width (the bar spans it) ÷ the banner height. So `object-cover` crops the
+  // same slice the top bar will, making positioning WYSIWYG. Clamped so an
+  // extreme width:height never collapses the preview to an unusable sliver.
+  const topBarAspect = Math.max(5, Math.min(22,
+    (typeof window !== "undefined" ? window.innerWidth : 1280) / (bannerHeight ?? 96)));
 
   const themeDirty = JSON.stringify(theme) !== JSON.stringify(initialTheme);
   const styleDirty = styleKey !== detail.themeStyleKey;
-  const logoDirty = logoUrl !== (detail.logoUrl ?? "");
   const colorDirty = iconColor !== (detail.iconColor ?? "");
+  const borderDirty = borderColor !== (detail.borderColor ?? "");
+
+  /** Upload an icon/banner/wordmark image (read → POST → refetch); errors via run. */
+  function uploadImage(kind: "logo" | "banner" | "horizontal-logo", dataUrl: string) {
+    void run(async () => { await apiSetServerImage(detail.id, kind, dataUrl); onSaved(); });
+  }
+  function clearImage(kind: "logo" | "banner" | "horizontal-logo") {
+    void run(async () => { await apiSetServerImage(detail.id, kind, null); onSaved(); });
+  }
+
+  // Explicit crop save (NO silent auto-save): dirtiness compares the live crop to
+  // the saved detail (or the identity default when unset), and an in-field "Save
+  // position" button writes it. This gives the owner clear control + a visible
+  // error if the save fails, and survives the close/reopen the old debounce
+  // silently lost.
+  const cropEq = (a: AvatarCrop, b: AvatarCrop) =>
+    a.zoom === b.zoom && a.offsetX === b.offsetX && a.offsetY === b.offsetY;
+  const iconCropDirty = !cropEq(iconCrop, detail.iconCrop ?? AVATAR_CROP_DEFAULTS);
+  const bannerCropDirty = !cropEq(bannerCrop, detail.bannerCrop ?? AVATAR_CROP_DEFAULTS);
+  function saveCrop(which: "icon" | "banner") {
+    void run(async () => {
+      await apiPatchServer(detail.id, which === "icon" ? { iconCrop } : { bannerCrop });
+      onSaved();
+    });
+  }
 
   return (
     <div className="max-w-xl space-y-4">
       <section>
         <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Icon</p>
         <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
-          <div className="flex items-center gap-3">
-            {logoUrl ? (
-              <img src={logoUrl} alt="" className="h-12 w-12 rounded-2xl border border-keep-rule object-cover" />
-            ) : (
-              <span aria-hidden className="flex h-12 w-12 items-center justify-center rounded-2xl border border-keep-rule text-lg font-semibold uppercase text-keep-text"
-                style={iconColor ? { backgroundColor: iconColor, color: "#fff" } : undefined}>
-                {(detail.name.trim()[0] ?? "?").toUpperCase()}
-              </span>
-            )}
-            <div className="min-w-0 flex-1 space-y-2">
-              <label className="block text-xs">
-                <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">Logo URL</span>
-                <input value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/icon.png"
-                  className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase tracking-widest text-keep-muted">Fallback color</span>
-                <input type="color" value={iconColor || "#8a66cc"} onChange={(e) => setIconColor(e.target.value)}
-                  title="Lettered-tile color" className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
-                {iconColor ? (
-                  <button type="button" onClick={() => setIconColor("")}
-                    className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Clear</button>
-                ) : null}
-              </div>
+          <ImageCropField
+            shape="circle"
+            label="Icon"
+            url={detail.logoUrl}
+            crop={iconCrop}
+            maxBytes={512 * 1024}
+            busy={busy}
+            onPickFile={(dataUrl) => uploadImage("logo", dataUrl)}
+            onClear={() => clearImage("logo")}
+            onCropChange={setIconCrop}
+            cropDirty={iconCropDirty}
+            savingCrop={busy}
+            onSaveCrop={() => saveCrop("icon")}
+            hint="Shown as a round tile in the server rail."
+          />
+          <div className="flex flex-wrap items-center gap-3 border-t border-keep-rule/60 pt-2">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">Fallback color</span>
+              <input type="color" value={iconColor || "#8a66cc"} onChange={(e) => setIconColor(e.target.value)}
+                title="Lettered-tile color" className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
+              {iconColor ? (
+                <button type="button" onClick={() => setIconColor("")}
+                  className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Clear</button>
+              ) : null}
+              {colorDirty ? (
+                <button type="button" disabled={busy}
+                  onClick={() => void run(async () => { await apiPatchServer(detail.id, { iconColor: iconColor.trim() || null }); onSaved(); })}
+                  className="rounded border border-keep-action bg-keep-action px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save color</button>
+              ) : null}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">Border color</span>
+              <input type="color" value={borderColor || "#8a66cc"} onChange={(e) => setBorderColor(e.target.value)}
+                title="Accent ring around the rail icon" className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
+              {borderColor ? (
+                <button type="button" onClick={() => setBorderColor("")}
+                  className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Clear</button>
+              ) : null}
+              {borderDirty ? (
+                <button type="button" disabled={busy}
+                  onClick={() => void run(async () => { await apiPatchServer(detail.id, { borderColor: borderColor.trim() || null }); onSaved(); })}
+                  className="rounded border border-keep-action bg-keep-action px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save border</button>
+              ) : null}
             </div>
           </div>
-          {logoDirty || colorDirty ? (
-            <button type="button" disabled={busy}
-              onClick={() => void run(async () => {
-                await apiPatchServer(detail.id, { logoUrl: logoUrl.trim() || null, iconColor: iconColor.trim() || null });
-                onSaved();
-              })}
-              className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
-              Save icon
-            </button>
-          ) : null}
-          <p className="text-[10px] text-keep-muted">Square image works best; the rail crops to a rounded tile.</p>
+          <p className="text-[10px] text-keep-muted">The fallback color is the lettered tile when no icon is set. The border color is the accent ring around the server's rail icon.</p>
+        </div>
+      </section>
+
+      <section>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Banner</p>
+        <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
+          <ImageCropField
+            shape="rect"
+            fullWidth
+            aspect={topBarAspect}
+            label="Banner"
+            url={detail.bannerImageUrl}
+            crop={bannerCrop}
+            maxBytes={2 * 1024 * 1024}
+            busy={busy}
+            onPickFile={(dataUrl) => uploadImage("banner", dataUrl)}
+            onClear={() => clearImage("banner")}
+            onCropChange={setBannerCrop}
+            cropDirty={bannerCropDirty}
+            savingCrop={busy}
+            onSaveCrop={() => saveCrop("banner")}
+            hint="This preview matches your top bar (same shape). Position the banner here and it lands the same up top. Discover cards are taller, so they show a bit more."
+          />
+          {/* Top-bar banner height: tune the band's height in the top bar when
+              the default doesn't suit the art. Off = the default responsive height. */}
+          <div className="space-y-1 border-t border-keep-rule/60 pt-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted">Top-bar height</span>
+              <input
+                type="range"
+                min={48}
+                max={240}
+                step={4}
+                value={bannerHeight ?? 96}
+                onChange={(e) => setBannerHeight(Number(e.target.value))}
+                disabled={busy}
+                className="h-1 min-w-0 flex-1 cursor-pointer accent-keep-action"
+              />
+              <span className="shrink-0 tabular-nums text-[10px] text-keep-muted">{bannerHeight == null ? "auto" : `${bannerHeight}px`}</span>
+              {bannerHeight != null ? (
+                <button type="button" onClick={() => setBannerHeight(null)}
+                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Default</button>
+              ) : null}
+              {bannerHeightDirty ? (
+                <button type="button" disabled={busy}
+                  onClick={() => void run(async () => { await apiPatchServer(detail.id, { bannerHeight }); onSaved(); })}
+                  className="shrink-0 rounded border border-keep-action bg-keep-action px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save height</button>
+              ) : null}
+            </div>
+            <p className="text-[10px] text-keep-muted">Sets the height of the banner band in the top bar (the rest of the chat is unaffected).</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Wordmark logo</p>
+        <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
+          <ImageCropField
+            shape="rect"
+            aspect={5}
+            label="Wordmark logo"
+            url={detail.horizontalLogoUrl}
+            crop={AVATAR_CROP_DEFAULTS}
+            previewWidth={280}
+            maxBytes={1024 * 1024}
+            busy={busy}
+            onPickFile={(dataUrl) => uploadImage("horizontal-logo", dataUrl)}
+            onClear={() => clearImage("horizontal-logo")}
+            onCropChange={() => { /* no crop persisted for the wordmark */ }}
+            hint="Replaces the app logo in the top bar so members know which server they're in."
+          />
         </div>
       </section>
 
@@ -656,44 +959,148 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
  * Tab: Rooms (read-only list)
  * ============================================================ */
 
-function RoomsTab({ detail }: { detail: ServerConsoleDetail }) {
+function RoomsTab({ detail, busy, run }: TabProps) {
   const [rooms, setRooms] = useState<RoomListRow[] | null>(null);
+  const [tick, setTick] = useState(0);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+
   useEffect(() => {
     let alive = true;
     apiGetRooms(detail.id)
       .then((rs) => {
         if (!alive) return;
-        // Only keep rows tagged with this server when the field is present;
-        // otherwise (today's /rooms) show the lot rather than nothing.
         const tagged = rs.filter((r) => r.serverId != null);
         setRooms(tagged.length ? tagged.filter((r) => r.serverId === detail.id) : rs);
       })
       .catch(() => { if (alive) setRooms([]); });
     return () => { alive = false; };
-  }, [detail.id]);
+  }, [detail.id, tick]);
+
+  const refresh = () => setTick((t) => t + 1);
 
   return (
-    <div className="max-w-xl space-y-2">
-      <p className="text-[11px] text-keep-muted">
-        This server has {detail.roomCount} room{detail.roomCount === 1 ? "" : "s"}. Rooms are created and managed
-        from the chat itself; this list is for reference.
-      </p>
+    <div className="max-w-xl space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] text-keep-muted">
+          Create, rename, retopic, set message expiry, or remove this server's rooms. (Day-to-day room
+          commands like <span className="text-keep-text">/topic</span> still work in chat too.)
+        </p>
+        <button type="button" onClick={() => { setCreating((c) => !c); setEditingId(null); }}
+          className="shrink-0 rounded border border-keep-action bg-keep-action px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg">
+          {creating ? "Cancel" : "+ New room"}
+        </button>
+      </div>
+
+      {creating ? (
+        <RoomCreateForm detail={detail} busy={busy} run={run}
+          onCreated={() => { setCreating(false); refresh(); }} />
+      ) : null}
+
       {!rooms ? (
         <p className="text-sm italic text-keep-muted">Loading…</p>
       ) : rooms.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No rooms to show.</p>
+        <p className="text-xs italic text-keep-muted">No rooms yet.</p>
       ) : (
-        <ul className="space-y-1">
+        <ul className="space-y-1.5">
           {rooms.map((r) => (
-            <li key={r.id} className="flex items-center gap-2 rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5 text-sm">
-              <span className="min-w-0 flex-1 truncate text-keep-text">{r.name}</span>
-              {Array.isArray(r.occupants) ? (
-                <span className="shrink-0 text-[10px] text-keep-muted">{r.occupants.length} here</span>
+            <li key={r.id} className="rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5">
+              <div className="flex items-center gap-2">
+                <span className="min-w-0 flex-1 truncate text-sm text-keep-text">
+                  {r.name}
+                  {r.type === "private" ? <span className="ml-1.5 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">private</span> : null}
+                </span>
+                {Array.isArray(r.occupants) ? <span className="shrink-0 text-[10px] text-keep-muted">{r.occupants.length} here</span> : null}
+                <button type="button" disabled={busy} onClick={() => { setEditingId((id) => (id === r.id ? null : r.id)); setCreating(false); }}
+                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">
+                  {editingId === r.id ? "Done" : "Edit"}</button>
+                <button type="button" disabled={busy}
+                  onClick={() => { if (window.confirm(`Delete "${r.name}"? Anyone inside is moved to the landing room; its messages are removed.`)) void run(async () => { await apiDeleteServerRoom(detail.id, r.id); refresh(); }); }}
+                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Delete</button>
+              </div>
+              {editingId === r.id ? (
+                <RoomEditForm detail={detail} room={r} busy={busy} run={run}
+                  onSaved={() => { setEditingId(null); refresh(); }} />
               ) : null}
             </li>
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+/** Inline "new room" form for the Rooms tab. */
+function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsoleDetail; busy: boolean; run: (fn: () => Promise<void>) => Promise<void>; onCreated: () => void }) {
+  const [name, setName] = useState("");
+  const [type, setType] = useState<"public" | "private">("public");
+  const [password, setPassword] = useState("");
+  const [topic, setTopic] = useState("");
+  const canSave = name.trim().length >= 1 && (type === "public" || password.length >= 1);
+  return (
+    <div className="space-y-2 rounded border border-keep-action/40 bg-keep-panel/20 p-2.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} placeholder="Room name"
+          className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+        <select value={type} onChange={(e) => setType(e.target.value as "public" | "private")}
+          className="rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
+          <option value="public">Public</option>
+          <option value="private">Private</option>
+        </select>
+      </div>
+      {type === "private" ? (
+        <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={128} placeholder="Password (required for private)"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+      ) : null}
+      <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={200} placeholder="Topic (optional)"
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+      <div className="flex justify-end">
+        <button type="button" disabled={busy || !canSave}
+          onClick={() => void run(async () => {
+            await apiCreateServerRoom(detail.id, { name: name.trim(), type, ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}) });
+            onCreated();
+          })}
+          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Create room</button>
+      </div>
+    </div>
+  );
+}
+
+/** Inline per-room editor (name / topic / message expiry). */
+function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerConsoleDetail; room: RoomListRow; busy: boolean; run: (fn: () => Promise<void>) => Promise<void>; onSaved: () => void }) {
+  const [name, setName] = useState(room.name);
+  const [topic, setTopic] = useState(room.topic ?? "");
+  const [expiry, setExpiry] = useState<string>(room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "");
+  const dirty = name !== room.name || topic !== (room.topic ?? "") || expiry !== (room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "");
+  return (
+    <div className="mt-2 space-y-2 border-t border-keep-rule/60 pt-2">
+      <label className="block text-xs">
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">Name</span>
+        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
+      </label>
+      <label className="block text-xs">
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">Topic</span>
+        <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={200} placeholder="No topic set"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
+      </label>
+      <label className="block text-xs">
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">Message expiry (minutes — blank = server default)</span>
+        <input type="number" min={0} value={expiry} onChange={(e) => setExpiry(e.target.value)} placeholder="default"
+          className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
+      </label>
+      <div className="flex justify-end">
+        <button type="button" disabled={busy || !dirty}
+          onClick={() => void run(async () => {
+            await apiPatchServerRoom(detail.id, room.id, {
+              name: name.trim(),
+              topic: topic.trim() ? topic.trim() : null,
+              messageExpiryMinutes: expiry.trim() === "" ? null : Math.max(0, Number(expiry)),
+            });
+            onSaved();
+          })}
+          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save room</button>
+      </div>
     </div>
   );
 }
@@ -763,7 +1170,9 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
   const [data, setData] = useState<{ managerPermissions: ServerPermission[]; members: ServerMemberWire[] } | null>(null);
   const [tick, setTick] = useState(0);
   const [pendingHit, setPendingHit] = useState<ServerUserHit | null>(null);
+  const [pendingTier, setPendingTier] = useState<"mod" | "admin">("mod");
   const [pendingPerms, setPendingPerms] = useState<ServerModPermission[]>(SERVER_MOD_DEFAULT_PERMISSIONS);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -791,8 +1200,8 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
             <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Moderators &amp; admins ({mods.length})</p>
             {mods.length === 0 ? (
               <p className="text-xs italic text-keep-muted">
-                None yet. Appoint a helper below and pick exactly which powers they get.
-                Mods can never touch the owner's content.
+                None yet. Appoint a helper below — pick the Moderator tier for chat moderation, or
+                Admin for full management. Neither can touch the owner's content or change the server's appearance.
               </p>
             ) : (
               <ul className="space-y-1.5">
@@ -804,7 +1213,7 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
                         {m.role === "admin" ? <span className="ml-1 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">admin</span> : null}
                       </span>
                       <span className="shrink-0 text-[10px] text-keep-muted">
-                        {m.role === "admin" ? "every power" : `${m.permissions.length} ${m.permissions.length === 1 ? "power" : "powers"}`}
+                        {m.role === "admin" ? "all but appearance" : `${m.permissions.length} ${m.permissions.length === 1 ? "power" : "powers"}`}
                       </span>
                       {m.role === "mod" ? (
                         <button type="button" disabled={busy}
@@ -833,9 +1242,9 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
             )}
           </div>
 
-          {/* Appoint flow */}
+          {/* Appoint flow — pick a person, then a tier (preset), not a blank grid. */}
           <div className="rounded border border-keep-rule p-3">
-            <p className="mb-2 text-xs uppercase tracking-widest text-keep-muted">Appoint a moderator</p>
+            <p className="mb-2 text-xs uppercase tracking-widest text-keep-muted">Appoint staff</p>
             {!pendingHit ? (
               <ServerUserPicker
                 serverId={detail.id}
@@ -846,30 +1255,71 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
                     : hit.serverRole === "admin" ? "already admin"
                     : hit.banned ? "banned — lift first"
                     : null}
-                onSelect={(hit) => { setPendingHit(hit); setPendingPerms(SERVER_MOD_DEFAULT_PERMISSIONS.filter((p) => grantable.has(p))); }}
+                onSelect={(hit) => {
+                  setPendingHit(hit);
+                  setPendingTier("mod");
+                  setShowAdvanced(false);
+                  setPendingPerms(SERVER_MOD_DEFAULT_PERMISSIONS.filter((p) => grantable.has(p)));
+                }}
               />
             ) : (
-              <div className="space-y-2">
-                <p className="text-sm text-keep-text">Appoint <span className="font-semibold">{pendingHit.username}</span></p>
-                <ModPermissionCheckboxes value={pendingPerms} grantable={grantable} disabled={busy} onChange={setPendingPerms} />
+              <div className="space-y-2.5">
+                <p className="text-sm text-keep-text">Appoint <span className="font-semibold">{pendingHit.username}</span> as…</p>
+
+                {/* Tier cards */}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button" disabled={busy}
+                    onClick={() => { setPendingTier("mod"); setShowAdvanced(false); setPendingPerms(SERVER_MOD_DEFAULT_PERMISSIONS.filter((p) => grantable.has(p))); }}
+                    className={`rounded border px-2.5 py-2 text-left ${pendingTier === "mod" ? "border-keep-action bg-keep-action/10" : "border-keep-rule hover:border-keep-action/60"}`}
+                  >
+                    <span className="block text-sm font-semibold text-keep-text">Moderator</span>
+                    <span className="mt-0.5 block text-[11px] text-keep-muted">Chat moderation: handle reports, kick &amp; mute, tidy others' messages. The everyday helper.</span>
+                  </button>
+                  <button
+                    type="button" disabled={busy || !viewer.isOwner}
+                    title={viewer.isOwner ? undefined : "Only the owner can appoint an admin."}
+                    onClick={() => { setPendingTier("admin"); setShowAdvanced(false); }}
+                    className={`rounded border px-2.5 py-2 text-left ${!viewer.isOwner ? "opacity-50" : pendingTier === "admin" ? "border-keep-action bg-keep-action/10" : "border-keep-rule hover:border-keep-action/60"}`}
+                  >
+                    <span className="block text-sm font-semibold text-keep-text">Admin</span>
+                    <span className="mt-0.5 block text-[11px] text-keep-muted">Full management — members, rooms, usergroups, earning, everything. Cannot change appearance, transfer, or delete.{viewer.isOwner ? "" : " Owner-only to assign."}</span>
+                  </button>
+                </div>
+
+                {/* Moderator tier → optional advanced per-power customization. */}
+                {pendingTier === "mod" ? (
+                  <div>
+                    <button type="button" onClick={() => setShowAdvanced((v) => !v)}
+                      className="text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-action">
+                      {showAdvanced ? "▾ Hide powers" : "▸ Customize powers"}</button>
+                    {showAdvanced ? (
+                      <div className="mt-1.5">
+                        <ModPermissionCheckboxes value={pendingPerms} grantable={grantable} disabled={busy} onChange={setPendingPerms} />
+                      </div>
+                    ) : (
+                      <p className="mt-1 text-[10px] text-keep-muted">Starts with the chat-moderation preset ({pendingPerms.length} {pendingPerms.length === 1 ? "power" : "powers"}). Customize to add or remove individual powers.</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-keep-muted">Admins hold every moderation power except <span className="text-keep-text">Manage appearance</span> ({SERVER_ADMIN_DEFAULT_PERMISSIONS.length} powers), and can't transfer or delete the server.</p>
+                )}
+
                 <div className="flex justify-end gap-2">
                   <button type="button" disabled={busy} onClick={() => setPendingHit(null)}
                     className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">Cancel</button>
-                  {/* Appointing the admin lieutenant tier is owner-only (§6.2). */}
-                  {viewer.isOwner ? (
-                    <button type="button" disabled={busy}
+                  {pendingTier === "admin" ? (
+                    <button type="button" disabled={busy || !viewer.isOwner}
                       onClick={() => void run(async () => { await apiSetRole(detail.id, pendingHit.userId, "admin"); setPendingHit(null); setTick((t) => t + 1); })}
-                      className="rounded border border-keep-rule px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action disabled:opacity-50">
-                      Make admin</button>
-                  ) : null}
-                  <button type="button" disabled={busy}
-                    onClick={() => void run(async () => { await apiSetRole(detail.id, pendingHit.userId, "mod", pendingPerms); setPendingHit(null); setTick((t) => t + 1); })}
-                    className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
-                    Appoint mod</button>
+                      className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
+                      Appoint as admin</button>
+                  ) : (
+                    <button type="button" disabled={busy}
+                      onClick={() => void run(async () => { await apiSetRole(detail.id, pendingHit.userId, "mod", pendingPerms); setPendingHit(null); setTick((t) => t + 1); })}
+                      className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
+                      Appoint as moderator</button>
+                  )}
                 </div>
-                {viewer.isOwner ? (
-                  <p className="text-[10px] text-keep-muted">"Make admin" grants the lieutenant tier (every moderation power, owner-only to assign).</p>
-                ) : null}
               </div>
             )}
           </div>
@@ -961,11 +1411,22 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
   const isDefault = !!group?.isDefault;
   const [name, setName] = useState(group?.name ?? "");
   const [color, setColor] = useState(group?.color ?? "");
-  const [perms, setPerms] = useState<ServerPermission[]>(group?.permissions ?? [...SERVER_FEATURE_PERMISSIONS]);
+  const [perms, setPerms] = useState<ServerFeaturePermission[]>(group?.permissions ?? [...SERVER_FEATURE_PERMISSIONS]);
+  const [autoRules, setAutoRules] = useState<ServerAutoRule[]>(group?.autoRules ?? []);
+  const [rooms, setRooms] = useState<RoomListRow[]>([]);
+
+  // Rooms power the `posted_in_room` auto-rule selector (non-default only).
+  useEffect(() => {
+    if (isDefault) return;
+    let alive = true;
+    apiGetRooms(detail.id).then((r) => { if (alive) setRooms(r); }).catch(() => { if (alive) setRooms([]); });
+    return () => { alive = false; };
+  }, [detail.id, isDefault]);
 
   function save() {
     void run(async () => {
-      const payload = { name: name.trim(), color: color.trim() || null, permissions: perms };
+      const payload: Record<string, unknown> = { name: name.trim(), color: color.trim() || null, permissions: perms };
+      if (!isDefault) payload.autoRules = autoRules;
       if (group) await apiPatchUsergroup(detail.id, group.id, payload);
       else await apiCreateUsergroup(detail.id, payload);
       onSaved();
@@ -979,17 +1440,24 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
         <h3 className="text-sm font-semibold text-keep-text">{group ? (isDefault ? "Default group" : `Edit "${group.name}"`) : "New usergroup"}</h3>
       </div>
       {isDefault ? (
-        <p className="text-[11px] text-keep-muted">The default group applies to every participant. Editing its permissions changes what ungrouped members can do — leave the feature boxes on to keep the server fully open.</p>
+        <p className="text-[11px] text-keep-muted">The default group applies to every participant. Editing its features changes what ungrouped members can do — leave the boxes on to keep the server fully open.</p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <input type="color" value={color || "#8a66cc"} onChange={(e) => setColor(e.target.value)} title="Group color" className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
-          <input value={name} maxLength={60} onChange={(e) => setName(e.target.value)} placeholder="Group name (e.g. Veterans)" className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+          <input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder="Group name (e.g. Veterans)" className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
         </div>
       )}
       <div>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Permissions</p>
-        <ServerPermissionCheckboxes value={perms} grantable={grantable} disabled={busy} onChange={setPerms} />
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Member features</p>
+        <ServerFeatureCheckboxes value={perms} grantable={grantable} disabled={busy} onChange={setPerms} />
       </div>
+      {!isDefault ? (
+        <div>
+          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Auto-join rules</p>
+          <p className="mb-1.5 text-[11px] text-keep-muted">Members who meet every rule join this group automatically (checked when they next post). You can still add people by hand below.</p>
+          <ServerAutoRulesEditor rules={autoRules} onChange={setAutoRules} rooms={rooms} disabled={busy} />
+        </div>
+      ) : null}
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">Cancel</button>
         <button type="button" disabled={busy || (!isDefault && !name.trim())} onClick={save}
@@ -1025,8 +1493,9 @@ function UsergroupsTab({ detail, busy, run }: TabProps) {
   return (
     <div className="max-w-2xl space-y-3">
       <p className="text-[11px] text-keep-muted">
-        Usergroups bundle server permissions — moderation powers and member features (posting, images) — and
-        apply them to people. Everyone is in the default group; add more and fill them by hand.
+        Usergroups bundle member features (posting, images, invites) and a color, and apply them to people.
+        Everyone is in the default group; named groups layer extra features on top, by hand or by auto-join rules.
+        Moderation powers come from the Roles tab, never from a group.
       </p>
       <ul className="space-y-1.5">
         {data.groups.map((g) => (
@@ -1038,8 +1507,10 @@ function UsergroupsTab({ detail, busy, run }: TabProps) {
                 {g.isDefault ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">default</span> : null}
               </span>
               <span className="shrink-0 text-[10px] text-keep-muted">
-                {g.permissions.length} perm{g.permissions.length === 1 ? "" : "s"}
-                {g.isDefault ? " · everyone" : ` · ${g.memberCount} member${g.memberCount === 1 ? "" : "s"}`}
+                {g.permissions.length} feature{g.permissions.length === 1 ? "" : "s"}
+                {g.isDefault
+                  ? " · everyone"
+                  : ` · ${g.memberCount} member${g.memberCount === 1 ? "" : "s"}${g.autoRules.length ? ` · ${g.autoRules.length} rule${g.autoRules.length === 1 ? "" : "s"}` : ""}`}
               </span>
               <button type="button" disabled={busy} onClick={() => setEditing(g)}
                 className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">Edit</button>
@@ -1406,7 +1877,7 @@ function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
  * The console shell + tab router
  * ============================================================ */
 
-type ServerSettingsTab = "overview" | "appearance" | "rooms" | "members" | "roles" | "usergroups" | "applications" | "bans" | "modlog" | "settings";
+type ServerSettingsTab = "overview" | "appearance" | "rooms" | "members" | "roles" | "usergroups" | "applications" | "reports" | "modcases" | "bans" | "modlog" | "emoticons" | "announcements" | "faqs" | "commands-titles" | "earning" | "settings";
 
 interface TabProps {
   detail: ServerConsoleDetail;
@@ -1418,8 +1889,10 @@ interface TabProps {
 
 const TAB_LABEL: Record<ServerSettingsTab, string> = {
   overview: "overview", appearance: "appearance", rooms: "rooms", members: "members",
-  roles: "roles", usergroups: "usergroups", applications: "applications", bans: "bans",
-  modlog: "mod log", settings: "settings",
+  roles: "roles", usergroups: "usergroups", applications: "applications", reports: "reports",
+  modcases: "mod cases",
+  bans: "bans", modlog: "mod log", emoticons: "emoticons", announcements: "announcements",
+  faqs: "faqs", "commands-titles": "commands & titles", earning: "earning", settings: "settings",
 };
 
 /**
@@ -1437,13 +1910,24 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
     ...(can("manage_members") ? (["members", "roles"] as const) : []),
     ...(can("manage_usergroups") ? (["usergroups"] as const) : []),
     ...(can("manage_applications") ? (["applications"] as const) : []),
+    ...(can("manage_reports") ? (["reports"] as const) : []),
+    ...(can("manage_mod_cases") ? (["modcases"] as const) : []),
     ...(can("ban_member") || can("unban_member") ? (["bans"] as const) : []),
     ...(can("view_mod_log") ? (["modlog"] as const) : []),
+    ...(can("manage_emoticons") ? (["emoticons"] as const) : []),
+    ...(can("manage_announcements") ? (["announcements"] as const) : []),
+    ...(can("manage_faqs") ? (["faqs"] as const) : []),
+    ...(can("manage_commands") || can("manage_titles") ? (["commands-titles"] as const) : []),
+    ...(can("manage_earning") ? (["earning"] as const) : []),
     ...(can("manage_appearance") ? (["settings"] as const) : []),
   ];
   const [tab, setTab] = useState<ServerSettingsTab>(tabs[0] ?? "modlog");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Calm mode: ease the active tab's body in with a soft fade on each tab
+  // change. Key + class applied ONLY when Reduce Motion is on; off-path is
+  // unchanged.
+  const reduceMotion = useReducedMotion();
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setErr(null);
@@ -1465,16 +1949,30 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
         ))}
       </div>
       {err ? <p className="mb-2 text-xs text-keep-accent">{err}</p> : null}
-      {tab === "overview" ? <OverviewTab {...props} />
-        : tab === "appearance" ? <AppearanceTab {...props} />
-        : tab === "rooms" ? <RoomsTab detail={detail} />
-        : tab === "members" ? <MembersTab {...props} />
-        : tab === "roles" ? <RolesTab {...props} />
-        : tab === "usergroups" ? <UsergroupsTab {...props} />
-        : tab === "applications" ? <ApplicationsTab {...props} />
-        : tab === "bans" ? <BansTab {...props} />
-        : tab === "modlog" ? <ModLogTab detail={detail} />
-        : <SettingsTab {...props} />}
+      {(() => {
+        const body = tab === "overview" ? <OverviewTab {...props} />
+          : tab === "appearance" ? <AppearanceTab {...props} />
+          : tab === "rooms" ? <RoomsTab {...props} />
+          : tab === "members" ? <MembersTab {...props} />
+          : tab === "roles" ? <RolesTab {...props} />
+          : tab === "usergroups" ? <UsergroupsTab {...props} />
+          : tab === "applications" ? <ApplicationsTab {...props} />
+          : tab === "reports" ? <ReportsTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
+          : tab === "modcases" ? <ModCasesTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
+          : tab === "bans" ? <BansTab {...props} />
+          : tab === "modlog" ? <ModLogTab detail={detail} />
+          : tab === "emoticons" ? <EmoticonsTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
+          : tab === "announcements" ? <AnnouncementsTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
+          : tab === "faqs" ? <FaqsTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
+          : tab === "commands-titles" ? <CommandsTitlesTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
+          : tab === "earning" ? <EarningTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
+          : <SettingsTab {...props} />;
+        // Calm mode only: wrap the body in a remount-on-tab-change (key) div
+        // carrying `tk-fade-in` so the new tab eases in. When Reduce Motion is
+        // off we render the body bare — no extra wrapper, no class — so the
+        // DOM is byte-identical to before.
+        return reduceMotion ? <div key={tab} className="tk-fade-in">{body}</div> : body;
+      })()}
     </div>
   );
 }
@@ -1485,14 +1983,19 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
  * the detail + viewer state, applies the server's scoped theme/design while
  * open (CSP-nonce path), and renders the tabbed body.
  */
-export function ServerSettingsView({ serverId, onClose }: { serverId: string; onClose: () => void }) {
+export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId: string; onClose: () => void; onChanged?: () => void }) {
   const [state, setState] = useState<{ detail: ServerConsoleDetail; viewer: ServerViewerState } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
+  // Clear to the loading state ONLY when the target server changes — never on a
+  // post-save refetch. Nulling `state` on every `tick` unmounted the tabbed
+  // body (the render falls back to "Loading…"), which reset the open tab to the
+  // default on every save. Keeping the old detail mounted while the refetch is
+  // in flight preserves the active tab (and avoids a loading flash).
+  useEffect(() => { setState(null); setErr(null); }, [serverId]);
   useEffect(() => {
     let alive = true;
-    setState(null); setErr(null);
     apiGetServer(serverId)
       .then((r) => { if (!alive) return; if (!r.viewer) { setErr("You don't manage this server."); return; } setState({ detail: r.server, viewer: r.viewer }); })
       .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "Couldn't load that server."); });
@@ -1519,7 +2022,12 @@ export function ServerSettingsView({ serverId, onClose }: { serverId: string; on
 
   return (
     <Modal onClose={onClose} variant="mobile-fullscreen">
-      <div className="flex h-full w-full flex-col overflow-hidden bg-keep-bg text-keep-text lg:h-[90vh] lg:max-h-[90vh] lg:w-[75vw] lg:max-w-5xl lg:rounded-lg lg:border lg:border-keep-rule lg:shadow-2xl">
+      {/* Stop inner clicks (tabs, buttons, inputs) from bubbling to the shared
+          Modal backdrop, whose onClick fires onClose with no target guard. */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="flex h-full w-full flex-col overflow-hidden bg-keep-bg text-keep-text lg:h-[90vh] lg:max-h-[90vh] lg:w-[75vw] lg:max-w-5xl lg:rounded-lg lg:border lg:border-keep-rule lg:shadow-2xl"
+      >
         <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule px-4 py-3">
           <SettingsIcon className="h-5 w-5 text-keep-action" aria-hidden="true" />
           <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-keep-text">
@@ -1539,7 +2047,7 @@ export function ServerSettingsView({ serverId, onClose }: { serverId: string; on
           ) : !allowed ? (
             <p className="m-4 text-sm italic text-keep-muted">You don't have any management powers on this server.</p>
           ) : (
-            <ServerSettingsBody detail={state.detail} viewer={state.viewer} onSaved={() => setTick((t) => t + 1)} />
+            <ServerSettingsBody detail={state.detail} viewer={state.viewer} onSaved={() => { setTick((t) => t + 1); onChanged?.(); }} />
           )}
         </div>
       </div>

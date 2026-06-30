@@ -6,7 +6,7 @@ import { getSettings, parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
 import { isBlockedBetween } from "../../auth/blocks.js";
-import { DEFAULT_SERVER_ID } from "../../earning/pool.js";
+import { resolveProfileServerId } from "../../earning/pool.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -47,6 +47,11 @@ async function getEquippedNameStyle(
   db: import("../../db/index.js").Db,
   scope: "user" | "character",
   ownerId: string,
+  /** The profile owner's favorite server (resolveProfileServerId) — the
+   *  per-server pool the character's equipped name style is read from. The
+   *  master cosmetic (user_active_cosmetics) is not per-server, so this only
+   *  scopes the character branch. */
+  serverId: string,
 ): Promise<{ key: string | null; config: Record<string, unknown> | null }> {
   if (scope === "user") {
     const active = (await db
@@ -66,10 +71,11 @@ async function getEquippedNameStyle(
   const active = (await db
     .select({ key: characterEarning.activeNameStyleKey })
     .from(characterEarning)
-    // Profile display reads the equipped cosmetic; with no per-server
-    // viewer context here, scope to the default server (flag-off: the
-    // only pool, byte-identical to today).
-    .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, ownerId)))
+    // Profile display reads the equipped cosmetic from the profile owner's
+    // favorite server (resolveProfileServerId), so the name style matches the
+    // identity the rest of the profile renders. Flag-off / unset favorite →
+    // the default server (the only pool, byte-identical to today).
+    .where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId)))
     .limit(1))[0];
   const key = active?.key ?? null;
   if (!key) return { key: null, config: null };
@@ -98,6 +104,10 @@ async function getEquippedProfileBannerUrl(
   db: import("../../db/index.js").Db,
   scope: "user" | "character",
   ownerId: string,
+  /** Profile owner's favorite server (resolveProfileServerId); scopes the
+   *  per-server character pool read. The master banner
+   *  (user_active_cosmetics) is not per-server. */
+  serverId: string,
 ): Promise<string | null> {
   if (scope === "user") {
     const row = (await db
@@ -110,7 +120,7 @@ async function getEquippedProfileBannerUrl(
   const row = (await db
     .select({ url: characterEarning.profileBannerUrl })
     .from(characterEarning)
-    .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, ownerId)))
+    .where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId)))
     .limit(1))[0];
   return row?.url ?? null;
 }
@@ -147,6 +157,10 @@ async function listProfileCollection(
   db: import("../../db/index.js").Db,
   ownerScope: "user" | "character",
   ownerId: string,
+  /** Profile owner's favorite server (resolveProfileServerId): the per-server
+   *  collection AND item catalog the profile renders. Unset/flag-off → the
+   *  default (system) server, byte-identical to today. */
+  serverId: string,
 ): Promise<ProfileCollectionEntry[]> {
   const rows = await db
     .select({
@@ -158,8 +172,14 @@ async function listProfileCollection(
       iconUrl: items.iconUrl,
     })
     .from(identityCollection)
-    .innerJoin(items, eq(items.key, identityCollection.itemKey))
+    // Per-server catalog + collection (migration 0298): both the pinned slots
+    // and the items they reference are per-server. A global profile view has no
+    // viewer-server context, so we anchor to the profile OWNER's favorite server
+    // (resolveProfileServerId) so the showcase reflects the identity they chose.
+    // Composite join keeps a same-key item on another server from matching.
+    .innerJoin(items, and(eq(items.serverId, serverId), eq(items.key, identityCollection.itemKey)))
     .where(and(
+      eq(identityCollection.serverId, serverId),
       eq(identityCollection.ownerScope, ownerScope),
       eq(identityCollection.ownerId, ownerId),
     ))
@@ -177,6 +197,9 @@ async function listProfilePetCollection(
   db: import("../../db/index.js").Db,
   ownerScope: "user" | "character",
   ownerId: string,
+  /** Profile owner's favorite server (resolveProfileServerId): the per-server
+   *  pet collection + item catalog. Unset/flag-off → the default server. */
+  serverId: string,
 ): Promise<ProfileCollectionEntry[]> {
   const rows = await db
     .select({
@@ -189,8 +212,13 @@ async function listProfilePetCollection(
       nickname: identityPetCollection.nickname,
     })
     .from(identityPetCollection)
-    .innerJoin(items, eq(items.key, identityPetCollection.itemKey))
+    // Per-server catalog + pet collection (migration 0298): both are per-server.
+    // Anchored to the profile OWNER's favorite server (resolveProfileServerId) so
+    // it agrees with the item collection above. Composite join scopes the items
+    // lookup; unset/flag-off → the default server.
+    .innerJoin(items, and(eq(items.serverId, serverId), eq(items.key, identityPetCollection.itemKey)))
     .where(and(
+      eq(identityPetCollection.serverId, serverId),
       eq(identityPetCollection.ownerScope, ownerScope),
       eq(identityPetCollection.ownerId, ownerId),
     ))
@@ -512,7 +540,10 @@ async function buildMasterProfileView(
   u: typeof users.$inferSelect,
   viewerId?: string,
 ): Promise<ProfileView> {
-  const ns = await getEquippedNameStyle(db, "user", u.id);
+  // Resolve the profile owner's favorite server ONCE; every per-server read
+  // below (collection, pet collection, name style, banner) anchors to it.
+  const profileServerId = await resolveProfileServerId(db, u.id);
+  const ns = await getEquippedNameStyle(db, "user", u.id, profileServerId);
   const portraits = maybePrependAvatarPortrait(
     await listMasterPortraits(db, u.id),
     u.avatarUrl,
@@ -545,12 +576,12 @@ async function buildMasterProfileView(
       createdAt: +u.createdAt,
       metrics: await computeProfileMetrics(db, u.id, null, viewerId),
       scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, u.id),
-      collection: await listProfileCollection(db, "user", u.id),
-      petCollection: await listProfilePetCollection(db, "user", u.id),
+      collection: await listProfileCollection(db, "user", u.id, profileServerId),
+      petCollection: await listProfilePetCollection(db, "user", u.id, profileServerId),
       library: await listProfileLibrary(db, "user", u.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
-      profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id),
+      profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id, profileServerId),
       publicProfileBgUrl: u.publicProfileBgUrl,
       publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
     },
@@ -571,7 +602,10 @@ async function buildCharacterProfileView(
   const theme = await parseUserThemeJson(db, c.themeJson ?? owner.themeJson);
   const styleKey = await resolveProfileStyleKey(db, theme, c.styleKey, owner.styleKey);
   const showOwner = await viewerIsModerator(db, viewerId);
-  const ns = await getEquippedNameStyle(db, "character", c.id);
+  // Favorite server is an ACCOUNT-level preference (owner.id), so a character
+  // profile reads its per-server identity from the owner's favorite server.
+  const profileServerId = await resolveProfileServerId(db, c.userId);
+  const ns = await getEquippedNameStyle(db, "character", c.id, profileServerId);
   const charPortraits = maybePrependAvatarPortrait(
     await listPortraits(db, c.id),
     c.avatarUrl,
@@ -604,12 +638,12 @@ async function buildCharacterProfileView(
       updatedAt: +c.updatedAt,
       metrics: await computeProfileMetrics(db, c.userId, c.id, viewerId),
       scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, c.userId),
-      collection: await listProfileCollection(db, "character", c.id),
-      petCollection: await listProfilePetCollection(db, "character", c.id),
+      collection: await listProfileCollection(db, "character", c.id, profileServerId),
+      petCollection: await listProfilePetCollection(db, "character", c.id, profileServerId),
       library: await listProfileLibrary(db, "character", c.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
-      profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id),
+      profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id, profileServerId),
       publicProfileBgUrl: c.publicProfileBgUrl,
       publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       ...(showOwner ? { ownerUsername: owner.username } : {}),
@@ -735,7 +769,8 @@ async function resolveProfileView(
     .where(sql`lower(${users.username}) IN (${sql.join(variants.map((v) => sql`${v}`), sql`, `)})`)
     .limit(1))[0];
   if (u && !u.disabledAt) {
-    const ns = await getEquippedNameStyle(db, "user", u.id);
+    const profileServerId = await resolveProfileServerId(db, u.id);
+    const ns = await getEquippedNameStyle(db, "user", u.id, profileServerId);
     const portraits = maybePrependAvatarPortrait(
       await listMasterPortraits(db, u.id),
       u.avatarUrl,
@@ -768,12 +803,12 @@ async function resolveProfileView(
         createdAt: +u.createdAt,
         metrics: await computeProfileMetrics(db, u.id, null, viewerId),
         scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, u.id),
-        collection: await listProfileCollection(db, "user", u.id),
-        petCollection: await listProfilePetCollection(db, "user", u.id),
+        collection: await listProfileCollection(db, "user", u.id, profileServerId),
+        petCollection: await listProfilePetCollection(db, "user", u.id, profileServerId),
         library: await listProfileLibrary(db, "user", u.id),
         nameStyleKey: ns.key,
         nameStyleConfig: ns.config,
-        profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id),
+        profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id, profileServerId),
         publicProfileBgUrl: u.publicProfileBgUrl,
         publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       },
@@ -804,7 +839,8 @@ async function resolveProfileView(
   // by chained API calls), but mods on the modal need the friendly
   // username inline, this query is the one that resolves it.
   const showOwner = await viewerIsModerator(db, viewerId);
-  const ns = await getEquippedNameStyle(db, "character", c.id);
+  const profileServerId = await resolveProfileServerId(db, c.userId);
+  const ns = await getEquippedNameStyle(db, "character", c.id, profileServerId);
   const charPortraits = maybePrependAvatarPortrait(
     await listPortraits(db, c.id),
     c.avatarUrl,
@@ -837,12 +873,12 @@ async function resolveProfileView(
       updatedAt: +c.updatedAt,
       metrics: await computeProfileMetrics(db, c.userId, c.id, viewerId),
       scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, c.userId),
-      collection: await listProfileCollection(db, "character", c.id),
-      petCollection: await listProfilePetCollection(db, "character", c.id),
+      collection: await listProfileCollection(db, "character", c.id, profileServerId),
+      petCollection: await listProfilePetCollection(db, "character", c.id, profileServerId),
       library: await listProfileLibrary(db, "character", c.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
-      profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id),
+      profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id, profileServerId),
       publicProfileBgUrl: c.publicProfileBgUrl,
       publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       ...(showOwner ? { ownerUsername: owner.username } : {}),
@@ -896,7 +932,8 @@ async function lookupRandomProfile(
       .limit(1)
       .offset(idx))[0];
     if (!u) return null;
-    const ns = await getEquippedNameStyle(db, "user", u.id);
+    const profileServerId = await resolveProfileServerId(db, u.id);
+    const ns = await getEquippedNameStyle(db, "user", u.id, profileServerId);
     const portraits = maybePrependAvatarPortrait(
       await listMasterPortraits(db, u.id),
       u.avatarUrl,
@@ -929,12 +966,12 @@ async function lookupRandomProfile(
         createdAt: +u.createdAt,
         metrics: await computeProfileMetrics(db, u.id, null),
         scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, u.id),
-        collection: await listProfileCollection(db, "user", u.id),
-        petCollection: await listProfilePetCollection(db, "user", u.id),
+        collection: await listProfileCollection(db, "user", u.id, profileServerId),
+        petCollection: await listProfilePetCollection(db, "user", u.id, profileServerId),
         library: await listProfileLibrary(db, "user", u.id),
         nameStyleKey: ns.key,
         nameStyleConfig: ns.config,
-        profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id),
+        profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id, profileServerId),
         publicProfileBgUrl: u.publicProfileBgUrl,
         publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       },
@@ -957,7 +994,8 @@ async function lookupRandomProfile(
   if (!row) return null;
   const c = row.char;
   const showOwner = await viewerIsModerator(db, viewerId);
-  const ns = await getEquippedNameStyle(db, "character", c.id);
+  const profileServerId = await resolveProfileServerId(db, c.userId);
+  const ns = await getEquippedNameStyle(db, "character", c.id, profileServerId);
   const portraits = maybePrependAvatarPortrait(
     await listPortraits(db, c.id),
     c.avatarUrl,
@@ -992,12 +1030,12 @@ async function lookupRandomProfile(
       updatedAt: +c.updatedAt,
       metrics: await computeProfileMetrics(db, c.userId, c.id),
       scriptoriumAuthor: await computeScriptoriumAuthorBadge(db, c.userId),
-      collection: await listProfileCollection(db, "character", c.id),
-      petCollection: await listProfilePetCollection(db, "character", c.id),
+      collection: await listProfileCollection(db, "character", c.id, profileServerId),
+      petCollection: await listProfilePetCollection(db, "character", c.id, profileServerId),
       library: await listProfileLibrary(db, "character", c.id),
       nameStyleKey: ns.key,
       nameStyleConfig: ns.config,
-      profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id),
+      profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id, profileServerId),
       publicProfileBgUrl: c.publicProfileBgUrl,
       publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       ...(showOwner ? { ownerUsername: row.ownerUsername } : {}),

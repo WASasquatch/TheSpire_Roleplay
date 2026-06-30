@@ -5,19 +5,23 @@
  * in plan.md §6.2 is enforced in exactly one place:
  *
  *   power                                   owner   admin   mod    member/visitor
- *   edit server settings / rooms / theme     ✅      ✅*     ❌**     ❌
+ *   edit server appearance / theme / rules   ✅      ❌      ❌       ❌
+ *   manage members / rooms / earning / etc.  ✅      ✅      ✅*      ❌
  *   sticky / lock / moderate room content    ✅      ✅      ✅*      ❌
  *   edit/delete others' messages             ✅      ✅      ✅*      ❌    (*never owner-authored content)
- *   assign mods / ban / delete server        ✅      ❌      ❌       ❌
+ *   assign admins / transfer / delete server ✅      ❌      ❌       ❌
  *   review membership applications           ✅      ✅      ✅*      ❌
- *     (*) admin = the lieutenant tier: implicitly holds the FULL
- *         SERVER_MOD_PERMISSIONS set.  (**) a plain mod holds only the granular
- *         subset the owner granted in `server_members.permissions_json`.
+ *     (*) admin = the lieutenant tier: implicitly holds every moderation key
+ *         EXCEPT `manage_appearance` (SERVER_ADMIN_DEFAULT_PERMISSIONS).
+ *         A plain mod holds only the granular subset the owner granted in
+ *         `server_members.permissions_json`.
  *
- * Servers add the `admin` tier ABOVE `mod` that forums lack: an admin is a mod
- * who automatically holds every moderation key (no per-key grant needed),
- * while still ranking below the owner (can't assign mods, ban from the server,
- * or delete the server — those stay owner/staff-only at the route layer).
+ * Servers add the `admin` tier ABOVE `mod` that forums lack: an admin runs the
+ * community day-to-day (members, rooms, usergroups, earning, announcements,
+ * reports, mod cases, bans/mutes, message moderation…) but may NOT change the
+ * server's appearance/settings (`manage_appearance` stays owner-only), and may
+ * not assign other admins, transfer, or delete the server — those stay
+ * owner/staff-only at the route layer.
  *
  * Site staff with `manage_any_server` resolve as owner-equivalent, and the
  * existing sitewide message-moderation permissions are NOT diminished by server
@@ -27,12 +31,12 @@
  * posting, and membership applications, and nothing else anywhere.
  */
 import { and, eq, inArray } from "drizzle-orm";
-import type { Role, ServerPermission } from "@thekeep/shared";
+import type { Role, ServerFeaturePermission, ServerPermission } from "@thekeep/shared";
 import {
+  SERVER_ADMIN_DEFAULT_PERMISSIONS,
   SERVER_FEATURE_PERMISSIONS,
-  SERVER_MOD_PERMISSIONS,
   SERVER_PERMISSIONS,
-  parseServerPermissions,
+  parseServerFeaturePermissions,
   parseServerModPermissions,
 } from "@thekeep/shared";
 import { serverBans, serverMembers, serverUsergroupMembers, serverUsergroups, servers } from "../db/schema.js";
@@ -84,11 +88,14 @@ export function serverCan(a: ServerAuthority, key: ServerPermission): boolean {
 /**
  * Resolve a member's usergroup-derived permissions for a server: the default
  * group's baseline (every participant) UNION every non-default group the user
- * is an explicit member of. When the server has defined NO groups at all, the
- * baseline is the full feature set so behavior is unchanged. Owner/staff skip
- * this (they hold everything). `userId` null = anonymous → no perms.
+ * is an explicit member of. Usergroups grant MEMBER-FEATURE perms ONLY — a
+ * group can never confer moderation power (that comes from the role tier), so
+ * we parse with {@link parseServerFeaturePermissions}. When the server has
+ * defined NO groups at all, the baseline is the full feature set so behavior
+ * is unchanged. Owner/staff skip this (they hold everything). `userId` null =
+ * anonymous → no perms.
  */
-async function resolveUsergroupPerms(db: Db, serverId: string, userId: string | null): Promise<ServerPermission[]> {
+async function resolveUsergroupPerms(db: Db, serverId: string, userId: string | null): Promise<ServerFeaturePermission[]> {
   if (!userId) return [];
   const groups = await db
     .select({ id: serverUsergroups.id, permissionsJson: serverUsergroups.permissionsJson, isDefault: serverUsergroups.isDefault })
@@ -96,8 +103,8 @@ async function resolveUsergroupPerms(db: Db, serverId: string, userId: string | 
     .where(eq(serverUsergroups.serverId, serverId));
   if (!groups.length) return [...SERVER_FEATURE_PERMISSIONS];
   const defaultGroup = groups.find((g) => g.isDefault);
-  const out = new Set<ServerPermission>(
-    defaultGroup ? parseServerPermissions(defaultGroup.permissionsJson) : [...SERVER_FEATURE_PERMISSIONS],
+  const out = new Set<ServerFeaturePermission>(
+    defaultGroup ? parseServerFeaturePermissions(defaultGroup.permissionsJson) : [...SERVER_FEATURE_PERMISSIONS],
   );
   const nonDefaultIds = groups.filter((g) => !g.isDefault).map((g) => g.id);
   if (nonDefaultIds.length) {
@@ -107,7 +114,7 @@ async function resolveUsergroupPerms(db: Db, serverId: string, userId: string | 
       .where(and(eq(serverUsergroupMembers.userId, userId), inArray(serverUsergroupMembers.groupId, nonDefaultIds)));
     const myIds = new Set(mine.map((m) => m.groupId));
     for (const g of groups) {
-      if (!g.isDefault && myIds.has(g.id)) for (const p of parseServerPermissions(g.permissionsJson)) out.add(p);
+      if (!g.isDefault && myIds.has(g.id)) for (const p of parseServerFeaturePermissions(g.permissionsJson)) out.add(p);
     }
   }
   return [...out];
@@ -147,17 +154,18 @@ export async function serverAuthority(
   const isOwner = staffOverride || server.ownerUserId === user.id || role === "owner";
   // Servers add an `admin` lieutenant tier above `mod`; both are mods.
   const isMod = isOwner || role === "admin" || role === "mod";
-  // Owner/staff implicitly hold EVERY permission. An `admin` holds the FULL
-  // moderation set (the lieutenant) + usergroup perms; a plain `mod` holds the
-  // owner-granted subset (server_members.permissions_json) + usergroup perms; a
-  // `member` holds usergroup perms only. One unified registry.
+  // Owner/staff implicitly hold EVERY permission. An `admin` holds every
+  // moderation key EXCEPT `manage_appearance` (SERVER_ADMIN_DEFAULT_PERMISSIONS
+  // — appearance/settings stay owner-only) + usergroup perms; a plain `mod`
+  // holds the owner-granted subset (server_members.permissions_json) + usergroup
+  // perms; a `member` holds usergroup (feature) perms only. One unified registry.
   let permissions: ServerPermission[];
   if (isOwner) {
     permissions = [...SERVER_PERMISSIONS];
   } else {
     const directGrant: ServerPermission[] =
       role === "admin"
-        ? [...SERVER_MOD_PERMISSIONS]
+        ? [...SERVER_ADMIN_DEFAULT_PERMISSIONS]
         : role === "mod"
           ? parseServerModPermissions(memberRow?.permissionsJson)
           : [];

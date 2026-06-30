@@ -35,7 +35,7 @@ import {
 } from "@thekeep/shared";
 
 import { db } from "./db/index.js";
-import { bans, characters, messages, roomMembers, roomThreadCategories, rooms, sessions, userEarning, userNpcs, userServerLastRoom, users } from "./db/schema.js";
+import { bans, characters, messages, roomMembers, roomThreadCategories, rooms, serverSettings, servers, sessions, userEarning, userNpcs, userServerLastRoom, users } from "./db/schema.js";
 import { DEFAULT_SERVER_ID } from "./earning/pool.js";
 import { hasPermission } from "./auth/permissions.js";
 import { CommandRegistry } from "./commands/registry.js";
@@ -110,6 +110,7 @@ import { initPush } from "./push.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
 import { registerAnnouncementsRoutes } from "./routes/announcements.js";
 import { registerFaqRoutes } from "./routes/faqs.js";
+import { registerRegistrationRulesRoutes } from "./routes/registrationRules.js";
 import { registerUnsubscribeRoute } from "./routes/unsubscribe.js";
 import { registerProfileFlairRoutes } from "./routes/profileFlair.js";
 import { startAnnouncementScheduler } from "./admin/announcements.js";
@@ -125,7 +126,7 @@ import { registerThesaurusRoutes } from "./routes/thesaurus.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { ensureSystemSeeds, startJanitor } from "./seed.js";
-import { getSettings, areServersEnabled } from "./settings.js";
+import { getServerSettings, getSettings, areServersEnabled } from "./settings.js";
 
 // In dev: server runs on 3001, Vite dev-server on 5173 with a proxy to 3001.
 // In prod: a single Node process serves both the API and the built web bundle
@@ -350,6 +351,8 @@ async function main() {
   // /admin/announcements/* via the admin route module.
   await registerAnnouncementsRoutes(baseApp, db);
   await registerFaqRoutes(baseApp, db);
+  // Public registration-rules read (server/forum application "I agree" gate).
+  await registerRegistrationRulesRoutes(baseApp, db);
   // Public one-click unsubscribe landing for broadcast email footers.
   await registerUnsubscribeRoute(baseApp, db);
   // Profile-flair surfaces: visitor-count tracker + rotating-quote
@@ -419,14 +422,87 @@ async function main() {
   });
 
   /**
+   * Resolve the ACTIVE server for a per-server-content request, in priority:
+   *   1. an explicit `?serverId` query param (the client sends its current
+   *      server) — accepted only when it names a LIVE (non-archived) server;
+   *   2. otherwise the session user's `default_server_id` (their home/favorite),
+   *      when it still points at a live server;
+   *   3. otherwise null — no server context (e.g. the pre-login splash, or a
+   *      logged-in user who hasn't picked a favorite and sent no `?serverId`).
+   *
+   * The system/default server resolves to null too: its per-server content is a
+   * verbatim copy of the platform values, so "no active server" and "the system
+   * server" are intentionally equivalent here — both surface the global copy as
+   * `appRules` with `serverRules` null. FLAG-OFF SAFETY: with servers off no one
+   * sends a `?serverId` and no one has a favorite, so this always returns null
+   * and the responses below collapse to the legacy single-server shape.
+   */
+  async function resolveActiveServerId(req: FastifyRequest): Promise<string | null> {
+    const liveServerId = async (id: string | null | undefined): Promise<string | null> => {
+      if (!id || id === DEFAULT_SERVER_ID) return null;
+      const row = (await db
+        .select({ id: servers.id, status: servers.status, isSystem: servers.isSystem })
+        .from(servers)
+        .where(eq(servers.id, id))
+        .limit(1))[0];
+      if (!row || row.status === "archived" || row.isSystem) return null;
+      return row.id;
+    };
+    const q = (req.query as { serverId?: string } | undefined)?.serverId;
+    const fromQuery = await liveServerId(typeof q === "string" ? q : null);
+    if (fromQuery) return fromQuery;
+    const me = await getSessionUser(req, db);
+    if (!me) return null;
+    const u = (await db.select({ fav: users.defaultServerId }).from(users).where(eq(users.id, me.id)).limit(1))[0];
+    return liveServerId(u?.fav ?? null);
+  }
+
+  /**
+   * Read the RAW per-server HTML overrides off `server_settings` for the active
+   * server, or all-null when there's no active server. RAW (not merged): a NULL
+   * column means "this server set no override of its own", which the per-server
+   * surfaces below must surface as null (NOT the inherited platform copy) so the
+   * client can tell "the server has its own rules" apart from "inheriting".
+   */
+  async function activeServerHtml(req: FastifyRequest): Promise<{
+    serverId: string | null;
+    rulesHtml: string | null;
+    securityNoticeHtml: string | null;
+    welcomeHtml: string | null;
+  }> {
+    const serverId = await resolveActiveServerId(req);
+    if (!serverId) return { serverId: null, rulesHtml: null, securityNoticeHtml: null, welcomeHtml: null };
+    const row = (await db
+      .select({
+        rulesHtml: serverSettings.rulesHtml,
+        securityNoticeHtml: serverSettings.securityNoticeHtml,
+        welcomeHtml: serverSettings.welcomeHtml,
+      })
+      .from(serverSettings)
+      .where(eq(serverSettings.serverId, serverId))
+      .limit(1))[0];
+    return {
+      serverId,
+      rulesHtml: row?.rulesHtml ?? null,
+      securityNoticeHtml: row?.securityNoticeHtml ?? null,
+      welcomeHtml: row?.welcomeHtml ?? null,
+    };
+  }
+
+  /**
    * Public branding endpoint - readable without authentication so the login
    * screen, boot splash, and tab title can show the site's configured name
    * and logo styling. Returns ONLY the public-facing fields; admin-only
    * settings (retention, session TTL) live behind /admin/settings.
    */
 
-  app.get("/site", publicLimit, async () => {
+  app.get("/site", publicLimit, async (req) => {
     const s = await getSettings(db);
+    // Per-server welcome: when the request carries an active-server context
+    // (`?serverId` or the session user's favorite), prefer THAT server's own
+    // welcome copy and fall back to the global one when the server set none.
+    // No active server (the pre-login splash) → the global copy, byte-identical.
+    const serverHtml = await activeServerHtml(req);
     return {
       siteName: s.siteName,
       // Canonical site URL the banner logo links to. Empty string =
@@ -452,8 +528,10 @@ async function main() {
       defaultThemeJson: s.defaultThemeJson,
       // Surface so the unauthenticated AuthGate can hide the Register tab.
       registrationOpen: s.registrationOpen,
-      // Sanitized welcome message rendered above the splash login form.
-      welcomeHtml: s.welcomeHtml,
+      // Sanitized welcome message rendered above the splash login form. When an
+      // active server is in context, its own welcome copy takes precedence;
+      // otherwise (no active server, or the server set none) the global copy.
+      welcomeHtml: serverHtml.welcomeHtml ?? s.welcomeHtml,
       // Sanitized disclaimer rendered above the register form. Users must
       // tick an "I agree" checkbox before /auth/register accepts the request.
       registerDisclaimerHtml: s.registerDisclaimerHtml,
@@ -509,22 +587,42 @@ async function main() {
   });
 
   /**
-   * Public rules JSON endpoint, returns the admin-configured house
-   * rules and the privacy/safety notice.
+   * Public rules JSON endpoint. Serves a TWO-TAB rules contract:
    *
-   * Path moved from `/rules` to `/api/rules` in this revision because
-   * the `/rules` path is now a public SPA route rendering a dedicated
-   * landing page (so a not-yet-registered visitor can read the rules
-   * before signing up). The page route fetches THIS endpoint for its
-   * content; the rename keeps the JSON endpoint and the page URL on
-   * distinct slots so the SPA-shell catchall doesn't accidentally
-   * serve HTML in response to a fetch.
+   *   - `appRules`    — the GLOBAL "App / House Rules" that GOVERN everything
+   *                     (every server and the site). This stays platform-wide
+   *                     (`settings.rulesHtml`); empty string → null.
+   *   - `serverRules` — the ACTIVE server's own "Server Rules"
+   *                     (`server_settings.rules_html`, RAW so unset = null). The
+   *                     active server is the request's `?serverId` (the client
+   *                     sends its current server) or the session user's
+   *                     `default_server_id`; null when there's no server context
+   *                     (the pre-login splash) or the server set no rules.
+   *
+   * The two are DISTINCT and never merged: the app rules always apply; a server
+   * may ADD its own house rules on top. `rulesHtml` / `securityNoticeHtml` are
+   * retained for back-compat with the existing single-tab modal — `rulesHtml`
+   * stays the governing global copy; `securityNoticeHtml` prefers the active
+   * server's notice when set, else the global one.
+   *
+   * Path moved from `/rules` to `/api/rules` in an earlier revision because the
+   * `/rules` path is now a public SPA route rendering a dedicated landing page
+   * (so a not-yet-registered visitor can read the rules before signing up). The
+   * page route fetches THIS endpoint for its content; the rename keeps the JSON
+   * endpoint and the page URL on distinct slots so the SPA-shell catchall
+   * doesn't accidentally serve HTML in response to a fetch.
    */
-  app.get("/api/rules", publicLimit, async () => {
+  app.get("/api/rules", publicLimit, async (req) => {
     const s = await getSettings(db);
+    const serverHtml = await activeServerHtml(req);
     return {
+      // Two-tab contract (the per-server rules-modal lane consumes these two):
+      appRules: s.rulesHtml.trim() ? s.rulesHtml : null,
+      serverRules: serverHtml.rulesHtml,
+      // Back-compat fields for the current single-tab modal. `rulesHtml` is the
+      // governing global copy; the security notice prefers the active server's.
       rulesHtml: s.rulesHtml,
-      securityNoticeHtml: s.securityNoticeHtml,
+      securityNoticeHtml: serverHtml.securityNoticeHtml ?? s.securityNoticeHtml,
     };
   });
 
@@ -651,7 +749,7 @@ async function main() {
   await registerWorldRoutes(baseApp, db, io);
   await registerStoryRoutes(baseApp, db, io);
   await registerForumRoutes(baseApp, db, io, uploadsRoot);
-  await registerServerRoutes(baseApp, db, io);
+  await registerServerRoutes(baseApp, db, io, uploadsRoot, registry);
   await registerAdminServerRoutes(baseApp, db, io);
   await registerNpcRoutes(baseApp, db);
   await registerFriendsRoutes(baseApp, db, io);
@@ -1231,7 +1329,13 @@ async function main() {
           });
           return;
         }
-        const { maxForumPostLength, maxForumTopicTitleLength } = await getSettings(db);
+        // Per-server forum-post cap: the board's room→server (NULL serverId,
+        // legacy board, → DEFAULT_SERVER_ID). A NULL override inherits the
+        // platform default, so flag-off is byte-identical to `getSettings`.
+        // `maxForumTopicTitleLength` has no per-server override (platform-
+        // global), so it stays on `getSettings`.
+        const { maxForumPostLength } = await getServerSettings(db, board.serverId ?? DEFAULT_SERVER_ID);
+        const { maxForumTopicTitleLength } = await getSettings(db);
         if (text.length > maxForumPostLength) {
           ack?.({ ok: false, code: "TOO_LONG", message: `Forum posts are capped at ${maxForumPostLength} chars.` });
           return;

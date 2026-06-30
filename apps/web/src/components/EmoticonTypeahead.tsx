@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type Keyboa
 import { UNICODE_EMOJI_FLAT } from "@thekeep/shared";
 import { useEmoticons } from "../state/emoticons.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 /**
  * Inline `:emoji-name` typeahead for chat composers.
@@ -105,6 +106,10 @@ export function EmoticonTypeahead({
   const sheets = useEmoticons((s) => s.sheets);
   const [active, setActive] = useState<ActiveTrigger | null>(null);
   const [selectedIdx, setSelectedIdx] = useState(0);
+  // Calm-mode ease: the popup's horizontal placement is a JS-computed inline
+  // `left` (caret-anchored), so we fade in (opacity only) rather than slide —
+  // a slide transform would fight the inline positioning.
+  const reduceMotion = useReducedMotion();
   // The caret column to align the popup's left edge with, measured RELATIVE
   // to the composer's positioned wrapper (the popup renders `absolute
   // bottom-full` inside it — see render). Vertical placement needs no JS:
@@ -362,7 +367,7 @@ export function EmoticonTypeahead({
       // higher-specificity `[data-theme-style="…"] .keep-panel { position:
       // relative }` rule, which would clobber the `absolute` below and drop the
       // list into the document flow (dead space under the input).
-      className="pointer-events-auto absolute bottom-full z-[210] mb-1 max-h-60 w-60 overflow-y-auto rounded-lg border border-keep-rule bg-keep-bg shadow-xl"
+      className={`pointer-events-auto absolute bottom-full z-[210] mb-1 max-h-60 w-60 overflow-y-auto rounded-lg border border-keep-rule bg-keep-bg shadow-xl${reduceMotion ? " tk-fade-in" : ""}`}
       style={{ left: pos.left }}
       // Stop mousedown so clicking a suggestion doesn't steal focus
       // from the textarea, the caret needs to stay where it is so

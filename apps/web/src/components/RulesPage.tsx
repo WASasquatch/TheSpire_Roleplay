@@ -3,7 +3,13 @@ import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } f
 import { useRulesHashHighlight } from "../lib/rulesHashHighlight.js";
 
 interface RulesPayload {
-  rulesHtml: string;
+  // The app-wide governing rules. This public page mounts BEFORE auth /
+  // the chat shell, so there is no active server context here: it sends
+  // no `serverId` and the backend returns `serverRules: null`, so only
+  // these app rules show. (`serverRules` is typed for contract parity
+  // but never rendered on this anonymous page.)
+  appRules: string | null;
+  serverRules: string | null;
   securityNoticeHtml: string;
 }
 
@@ -43,7 +49,7 @@ export function RulesPage({ onBack }: Props) {
   const [error, setError] = useState<string | null>(null);
   const rulesRef = useRef<HTMLDivElement>(null);
   // Deep-link highlight (e.g. /rules#3.6) once the rules HTML is injected.
-  useRulesHashHighlight(rulesRef, !!data?.rulesHtml.trim());
+  useRulesHashHighlight(rulesRef, !!data?.appRules?.trim());
 
   useEffect(() => {
     let cancelled = false;
@@ -107,11 +113,11 @@ export function RulesPage({ onBack }: Props) {
                   dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
                 />
               ) : null}
-              {data.rulesHtml.trim() ? (
+              {data.appRules?.trim() ? (
                 <div
                   ref={rulesRef}
                   className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
-                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.rulesHtml) }}
+                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.appRules) }}
                 />
               ) : (
                 <p className="italic text-keep-muted">No rules have been posted yet.</p>

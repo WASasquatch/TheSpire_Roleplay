@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { AvatarCrop } from "@thekeep/shared";
 import { cropStyleFor } from "../lib/avatarCrop.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 /**
  * Identity suggestion from `/identities/autocomplete`. Each entry is
@@ -66,6 +67,9 @@ export function UsernameAutocomplete({
   const [highlightedIdx, setHighlightedIdx] = useState(0);
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Calm-mode ease: opens ABOVE the input (bottom-full) → slide up. Pure CSS
+  // positioning, so the slide transform is safe.
+  const reduceMotion = useReducedMotion();
   // Track the request that's currently in flight so an older response
   // doesn't overwrite a newer one (the user typed past it).
   const reqIdRef = useRef(0);
@@ -146,7 +150,7 @@ export function UsernameAutocomplete({
       {open && suggestions.length > 0 ? (
         <ul
           role="listbox"
-          className="absolute bottom-full left-0 z-30 mb-1 max-h-52 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl"
+          className={`absolute bottom-full left-0 z-30 mb-1 max-h-52 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl${reduceMotion ? " tk-slide-up-in" : ""}`}
         >
           {suggestions.map((s, i) => {
             // Identity-correct key. Two suggestions can share a

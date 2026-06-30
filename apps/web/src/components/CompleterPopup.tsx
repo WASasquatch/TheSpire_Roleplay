@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 export interface CompletionItem {
   /** Inserted into the composer when the item is accepted. */
@@ -24,6 +25,9 @@ interface Props {
  */
 export function CompleterPopup({ items, selectedIndex, onSelect, onAccept }: Props) {
   const listRef = useRef<HTMLUListElement | null>(null);
+  // Calm-mode ease: this popup opens ABOVE the textarea (bottom-full), so it
+  // slides up into place. Pure CSS positioning, so the slide transform is safe.
+  const reduceMotion = useReducedMotion();
 
   // Keep the active row scrolled into view as the parent moves selection
   // through the items.
@@ -42,7 +46,7 @@ export function CompleterPopup({ items, selectedIndex, onSelect, onAccept }: Pro
       // bottom-full pins this above the textarea; the parent wrapper is
       // `relative` so this pops in-place. Capped height with overflow so a
       // long command list doesn't push past the chat area.
-      className="absolute bottom-full left-0 right-0 z-30 mb-1 max-h-60 overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-lg"
+      className={`absolute bottom-full left-0 right-0 z-30 mb-1 max-h-60 overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-lg${reduceMotion ? " tk-slide-up-in" : ""}`}
       // Don't let mousedown inside the popup steal focus from the textarea -
       // keyboard navigation needs the textarea to retain focus.
       onMouseDown={(e) => e.preventDefault()}

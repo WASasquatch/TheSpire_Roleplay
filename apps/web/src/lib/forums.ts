@@ -19,6 +19,49 @@ export async function fetchForumDetail(idOrSlug: string): Promise<ForumDetail> {
   return (await r.json()) as ForumDetail;
 }
 
+/* ============================================================
+ * Discover: popular / new browse, tag-and-text search, tag cloud
+ * (Discovery + tags feature — mirrors the servers discover surface).
+ * ============================================================ */
+
+/** The default discover view's two rails. Both tolerate anonymous sessions
+ *  and empty catalogs (each list is `[]`, never null). */
+export async function fetchForumDiscover(): Promise<{ popular: ForumSummary[]; new: ForumSummary[] }> {
+  const r = await fetch("/forums/discover", { credentials: "include" });
+  if (!r.ok) throw new Error(`Couldn't load forum discovery (${r.status}).`);
+  const j = (await r.json()) as { popular?: ForumSummary[]; new?: ForumSummary[] };
+  return { popular: j.popular ?? [], new: j.new ?? [] };
+}
+
+/** Text + tag search. Either may be empty; the server ANDs whatever's set.
+ *  Returns the flat result list (the `.items` of the response). */
+export async function searchForums(q: string, tag?: string | null): Promise<ForumSummary[]> {
+  const params = new URLSearchParams();
+  if (q.trim()) params.set("q", q.trim());
+  if (tag?.trim()) params.set("tag", tag.trim());
+  const r = await fetch(`/forums/discover/search?${params.toString()}`, { credentials: "include" });
+  if (!r.ok) throw new Error(`Search failed (${r.status}).`);
+  const j = (await r.json()) as { items?: ForumSummary[] };
+  return j.items ?? [];
+}
+
+/** The discover tag cloud (genre chips), most-used first. Empty = no tags yet. */
+export async function fetchForumTags(): Promise<{ tag: string; count: number }[]> {
+  const r = await fetch("/forums/tags", { credentials: "include" });
+  if (!r.ok) throw new Error(`Couldn't load forum tags (${r.status}).`);
+  const j = (await r.json()) as { tags?: { tag: string; count: number }[] };
+  return j.tags ?? [];
+}
+
+/** Site-set registration rules a forum applicant must agree to (sanitized
+ *  HTML; empty string = no rules, so the create form skips the agreement). */
+export async function fetchForumRegistrationRules(): Promise<string> {
+  const r = await fetch("/api/registration-rules?kind=forum", { credentials: "include" });
+  if (!r.ok) return "";
+  const j = (await r.json().catch(() => null)) as { html?: string } | null;
+  return j?.html ?? "";
+}
+
 /** Compact relative time for activity pulses: "just now", "5m", "3h", "2d". */
 export function relTime(ms: number | null): string | null {
   if (!ms) return null;
@@ -51,6 +94,10 @@ async function jsonOrThrow<T>(r: Response): Promise<T> {
 
 export async function submitForumApplication(input: {
   name: string; slug: string; purpose: string;
+  /** Discovery/registration: true once the applicant accepts the site's
+   *  forum registration rules. Required true when rules are set (the form
+   *  gates the Submit button); omitted when there are no rules. */
+  agreedToRules?: boolean;
 }): Promise<ForumCreationApplicationWire> {
   const r = await fetch("/forums/applications", {
     method: "POST",
@@ -102,6 +149,11 @@ export async function updateForum(forumId: string, patch: {
   postingMode?: "open" | "application"; applicationPrompt?: string | null;
   themeJson?: string | null; themeStyleKey?: string | null; bannerFocusY?: number;
   publicBrowsing?: boolean; allowCustomTags?: boolean; linkedWorldId?: string | null;
+  /** Servers Lift: affiliate the forum to a chat server (null un-affiliates). */
+  serverId?: string | null;
+  /** Discovery: owner-set genre tags people can search by. Normalized
+   *  (and capped) server-side; pass the cleaned list straight through. */
+  tags?: string[];
 }): Promise<void> {
   const r = await fetch(`/forums/${encodeURIComponent(forumId)}`, {
     method: "PATCH",

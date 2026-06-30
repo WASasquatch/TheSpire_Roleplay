@@ -58,17 +58,43 @@ export function MessageVisibilityGate({ children }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(true);
   const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
+  // Pending "hide" timer (see the asymmetric show/hide handling below).
+  const hideTimerRef = useRef<number | null>(null);
 
   // Visibility tracker. rootMargin extends the trigger zone above
   // AND below the viewport so messages render slightly before they
   // scroll into view, masking the placeholder→child transition.
+  //
+  // SHOW is immediate; HIDE is deferred ~200ms. Why asymmetric: a message
+  // hovering at the rootMargin edge can be nudged across it every frame by the
+  // feed's bottom re-pin (MessageList sets scrollTop = scrollHeight while parked
+  // at the bottom). Hiding on each crossing swaps the real body for a
+  // height-preserving placeholder — but the placeholder height can't perfectly
+  // track live content (late media, reaction edits, sub-pixel rounding), so
+  // each flip changes the feed height by more than the pin's 2px settle epsilon,
+  // which re-fires the pin → the chat "bounces" and never settles, worst with a
+  // mix of differently-sized message kinds near the boundary. Deferring the hide
+  // lets a boundary message ride out the jitter mounted (stable height) so the
+  // pin settles; a genuine scroll-away still releases it ~200ms later. Showing
+  // must stay instant or the placeholder→child swap flashes.
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
     const obs = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          setVisible(entry.isIntersecting);
+          if (entry.isIntersecting) {
+            if (hideTimerRef.current != null) {
+              clearTimeout(hideTimerRef.current);
+              hideTimerRef.current = null;
+            }
+            setVisible(true);
+          } else if (hideTimerRef.current == null) {
+            hideTimerRef.current = window.setTimeout(() => {
+              hideTimerRef.current = null;
+              setVisible(false);
+            }, 200);
+          }
         }
       },
       {
@@ -76,7 +102,13 @@ export function MessageVisibilityGate({ children }: Props) {
       },
     );
     obs.observe(el);
-    return () => obs.disconnect();
+    return () => {
+      obs.disconnect();
+      if (hideTimerRef.current != null) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+    };
   }, []);
 
   // Height tracker. Only runs while the child is mounted; the most

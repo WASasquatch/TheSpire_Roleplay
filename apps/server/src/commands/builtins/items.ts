@@ -56,6 +56,7 @@ import {
   items,
 } from "../../db/schema.js";
 import { addSystemMessage, currentOccupants } from "../../realtime/broadcast.js";
+import { resolveRoomServerId } from "../../earning/pool.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 type ItemCommandKind = "give" | "throw" | "drop";
@@ -123,18 +124,20 @@ function parseItemCommandArgs(args: readonly string[]): {
  *  column simply doesn't contribute aliases to the match (json_each
  *  silently yields no rows on invalid JSON), which keeps the lookup
  *  robust against admin typos in the editor. */
-export async function findItem(db: Db, query: string): Promise<typeof items.$inferSelect | null> {
+export async function findItem(db: Db, query: string, serverId: string): Promise<typeof items.$inferSelect | null> {
   const lower = query.toLowerCase();
   const row = (await db
     .select()
     .from(items)
-    .where(sql`lower(${items.key}) = ${lower}
+    // Per-server catalog (migration 0298): resolve only within the acting
+    // server's items. Flag off ⇒ serverId is the default, byte-identical.
+    .where(and(eq(items.serverId, serverId), sql`(lower(${items.key}) = ${lower}
       OR lower(${items.name}) = ${lower}
       OR (${items.namePlural} IS NOT NULL AND lower(${items.namePlural}) = ${lower})
       OR EXISTS (
         SELECT 1 FROM json_each(${items.aliasesJson}) AS a
         WHERE lower(a.value) = ${lower}
-      )`)
+      ))`))
     .limit(1))[0];
   return row ?? null;
 }
@@ -232,7 +235,12 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
   }
   const { targetName, quantity, itemQuery } = parsed;
 
-  const item = await findItem(ctx.db, itemQuery);
+  // Per-server catalog partition (migration 0298): the room this command ran in
+  // fixes the economy, so resolve the item against THAT server's catalog. Flag
+  // off ⇒ every room homes to the default server, byte-identical to today. This
+  // is the same sid the inventory writes below use.
+  const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
+  const item = await findItem(ctx.db, itemQuery, sid);
   if (!item) {
     notice(ctx, "ITEM_NOT_FOUND", `No item called "${itemQuery}".`);
     return;
@@ -307,6 +315,13 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
   const targetScope: "user" | "character" = target.characterId ? "character" : "user";
   const targetOwnerId = target.characterId ?? target.userId;
 
+  // Per-server inventory partition (migration 0284): the room this command
+  // ran in fixes the economy. `/give` debits the sender AND credits the
+  // target on the SAME server, so items never cross economies. With the
+  // servers flag off every room homes to the default server, so this is the
+  // only inventory pool and the writes are byte-identical to today. `sid` was
+  // resolved above (it also scopes the catalog lookup) — reused here verbatim.
+
   // Atomic mutation. Wrapping the funds check + debit + (for give)
   // credit in a single transaction so two concurrent /give commands
   // by the same identity can't double-spend the same stack.
@@ -324,6 +339,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
     const senderRow = tx.select({ qty: identityInventory.quantity })
       .from(identityInventory)
       .where(and(
+        eq(identityInventory.serverId, sid),
         eq(identityInventory.ownerScope, senderScope),
         eq(identityInventory.ownerId, senderOwnerId),
         eq(identityInventory.itemKey, item.key),
@@ -343,6 +359,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
     const senderRemaining = have - quantity;
     if (senderRemaining === 0) {
       tx.delete(identityInventory).where(and(
+        eq(identityInventory.serverId, sid),
         eq(identityInventory.ownerScope, senderScope),
         eq(identityInventory.ownerId, senderOwnerId),
         eq(identityInventory.itemKey, item.key),
@@ -351,6 +368,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
       tx.update(identityInventory)
         .set({ quantity: senderRemaining, updatedAt: new Date() })
         .where(and(
+          eq(identityInventory.serverId, sid),
           eq(identityInventory.ownerScope, senderScope),
           eq(identityInventory.ownerId, senderOwnerId),
           eq(identityInventory.itemKey, item.key),
@@ -366,6 +384,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
       const tgtRow = tx.select({ qty: identityInventory.quantity })
         .from(identityInventory)
         .where(and(
+          eq(identityInventory.serverId, sid),
           eq(identityInventory.ownerScope, targetScope),
           eq(identityInventory.ownerId, targetOwnerId),
           eq(identityInventory.itemKey, item.key),
@@ -378,6 +397,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
         tx.update(identityInventory)
           .set({ quantity: newQty, updatedAt: new Date() })
           .where(and(
+            eq(identityInventory.serverId, sid),
             eq(identityInventory.ownerScope, targetScope),
             eq(identityInventory.ownerId, targetOwnerId),
             eq(identityInventory.itemKey, item.key),
@@ -385,6 +405,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
           .run();
       } else {
         tx.insert(identityInventory).values({
+          serverId: sid,
           ownerScope: targetScope,
           ownerId: targetOwnerId,
           itemKey: item.key,
@@ -405,6 +426,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
     const senderFinal = tx.select({ qty: identityInventory.quantity })
       .from(identityInventory)
       .where(and(
+        eq(identityInventory.serverId, sid),
         eq(identityInventory.ownerScope, senderScope),
         eq(identityInventory.ownerId, senderOwnerId),
         eq(identityInventory.itemKey, item.key),
@@ -413,6 +435,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
       .all()[0];
     if (!senderFinal) {
       tx.delete(identityCollection).where(and(
+        eq(identityCollection.serverId, sid),
         eq(identityCollection.ownerScope, senderScope),
         eq(identityCollection.ownerId, senderOwnerId),
         eq(identityCollection.itemKey, item.key),
@@ -422,6 +445,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
     // Sender ledger row.
     tx.insert(earningLedger).values({
       id: nanoid(),
+      serverId: sid,
       scope: senderScope,
       ownerId: senderOwnerId,
       xpDelta: 0,
@@ -443,6 +467,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
     if (kind === "give") {
       tx.insert(earningLedger).values({
         id: nanoid(),
+        serverId: sid,
         scope: targetScope,
         ownerId: targetOwnerId,
         xpDelta: 0,

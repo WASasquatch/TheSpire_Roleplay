@@ -57,6 +57,18 @@ export interface RiteCtx { swap: () => void; }
 export interface Rite { run(ctx: RiteCtx): Promise<void>; }
 
 export const RITES: Record<string, Rite> = {
+  /* —— Fade —— the built-in calm default used under Reduce Motion when no paid
+     transition is equipped. Pure opacity crossfade through the dark backdrop;
+     no movement, so it's safe for motion-sensitive viewers. Not a shop item. */
+  fade: {
+    async run({ swap }) {
+      content.style.willChange = "opacity";
+      await anim(content, [{ opacity: 1 }, { opacity: 0 }], { duration: 200, easing: "ease-out" }).finished;
+      swap();
+      await anim(content, [{ opacity: 0 }, { opacity: 1 }], { duration: 240, easing: "ease-in" }).finished;
+    },
+  },
+
   /* —— Dimensional Slide —— */
   slide: {
     async run({ swap }) {

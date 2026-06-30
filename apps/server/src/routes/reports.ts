@@ -7,6 +7,7 @@ import type { ReportEntry, ReportStatus } from "@thekeep/shared";
 import { characters, directConversations, directMessages, messages, reports, rooms, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import type { Db } from "../db/index.js";
 
@@ -104,9 +105,12 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
 
       // Scope a message/room report to the room's owning server so it lands in
       // that server's Reports panel (there is NO server_reports table — this
-      // one column is the seam). DM/profile reports below carry no room, so
-      // they stay `server_id` NULL = platform/site staff. Only stamp when the
-      // feature is live; flag-off keeps `server_id` NULL exactly as today.
+      // one column is the seam). A legacy NULL-serverId room is adopted by the
+      // default/system server (the NULL-adoption contract), so the report lands
+      // in The Spire's console, NOT the global DM/profile queue. DM/profile
+      // reports below carry no room, so they stay `server_id` NULL =
+      // platform/site staff. Only stamp when the feature is live; flag-off keeps
+      // `server_id` NULL exactly as today.
       const serversOn = areServersEnabled(await getSettings(db));
       try {
         await db.insert(reports).values({
@@ -114,7 +118,7 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
           reporterUserId: me.id,
           messageId: m.id,
           roomId: m.roomId,
-          serverId: serversOn ? (room.serverId ?? null) : null,
+          serverId: serversOn ? (room.serverId ?? DEFAULT_SERVER_ID) : null,
           reason: parsed.reason?.trim() || null,
         });
       } catch (err) {

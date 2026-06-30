@@ -97,7 +97,7 @@ async function adminSetServerStatus(
   await jsonOrThrow(r);
 }
 
-export function AdminServersTab() {
+export function AdminServersTab({ onOpenConsole }: { onOpenConsole?: (serverId: string) => void } = {}) {
   const me = useChat((s) => s.me);
   const canReview = !!me?.permissions?.includes("review_server_applications");
   const [pending, setPending] = useState<ServerCreationApplicationWire[] | null>(null);
@@ -201,7 +201,7 @@ export function AdminServersTab() {
         )}
       </div>
 
-      <ServerCurationSection />
+      <ServerCurationSection {...(onOpenConsole ? { onOpenConsole } : {})} />
 
       {recent.length > 0 ? (
         <div>
@@ -233,7 +233,7 @@ export function AdminServersTab() {
  * pin to the top of the catalog rail with a star. Buttons require
  * `manage_any_server`; viewers without it get a read-only list.
  */
-function ServerCurationSection() {
+function ServerCurationSection({ onOpenConsole }: { onOpenConsole?: (serverId: string) => void }) {
   const me = useChat((s) => s.me);
   const canCurate = !!me?.permissions?.includes("manage_any_server");
   const [rows, setRows] = useState<AdminServerRow[] | null>(null);
@@ -283,34 +283,50 @@ function ServerCurationSection() {
               }`}>
                 {s.isSystem ? "system" : s.status}
               </span>
-              {canCurate && !s.isSystem ? (
+              {canCurate ? (
                 <span className="ml-auto flex gap-1.5">
-                  {s.status !== "archived" ? (
-                    <>
-                      <button
-                        type="button" disabled={busyId !== null}
-                        onClick={() => void setStatus(s, s.status === "featured" ? "active" : "featured")}
-                        className="rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
-                      >
-                        {s.status === "featured" ? "Unfeature" : "Feature"}
-                      </button>
-                      <button
-                        type="button" disabled={busyId !== null}
-                        onClick={() => void setStatus(s, "archived")}
-                        className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50"
-                      >
-                        Archive
-                      </button>
-                    </>
-                  ) : (
+                  {/* Oversight drill-in: opens THIS server's per-server admin
+                      console (manage_any_server resolves owner-equivalent), the
+                      one door for chat-server controls — including the home
+                      server. Shown for every server. */}
+                  {onOpenConsole ? (
                     <button
-                      type="button" disabled={busyId !== null}
-                      onClick={() => void setStatus(s, "active")}
-                      className="rounded border border-keep-action/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
+                      type="button"
+                      onClick={() => onOpenConsole(s.id)}
+                      title="Open this server's admin console"
+                      className="rounded border border-keep-action/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/10"
                     >
-                      Restore
+                      Open admin
                     </button>
-                  )}
+                  ) : null}
+                  {!s.isSystem ? (
+                    s.status !== "archived" ? (
+                      <>
+                        <button
+                          type="button" disabled={busyId !== null}
+                          onClick={() => void setStatus(s, s.status === "featured" ? "active" : "featured")}
+                          className="rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
+                        >
+                          {s.status === "featured" ? "Unfeature" : "Feature"}
+                        </button>
+                        <button
+                          type="button" disabled={busyId !== null}
+                          onClick={() => void setStatus(s, "archived")}
+                          className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50"
+                        >
+                          Archive
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button" disabled={busyId !== null}
+                        onClick={() => void setStatus(s, "active")}
+                        className="rounded border border-keep-action/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
+                      >
+                        Restore
+                      </button>
+                    )
+                  ) : null}
                 </span>
               ) : null}
             </li>

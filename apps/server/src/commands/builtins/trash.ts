@@ -37,6 +37,9 @@ export const trashCommand: CommandHandler = {
   usage: "/trash <duration>   (e.g. /trash 30m - delete the last 30 minutes of messages)",
   description: "Delete this room's most recent messages by age (mod/admin only). Irreversible.",
   permission: "delete_others_message",
+  // Server staff with the per-server delete grant can /trash in their own
+  // server's rooms (the default/system server stays on the global key).
+  serverPermission: "delete_others_message",
   subcommands: [
     {
       verb: "<duration>",

@@ -15,7 +15,8 @@ import { messages, rooms, roomThreadCategories, users } from "../db/schema.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
-import { areServersEnabled, getSettings } from "../settings.js";
+import { areServersEnabled, getServerSettings, getSettings } from "../settings.js";
+import { resolveRoomServerId } from "../earning/pool.js";
 import type { ServerPermission } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 
@@ -292,8 +293,12 @@ export async function registerMessageRoutes(
     const now = Date.now();
     const forum = await isForumMessage(db, m.roomId);
     // Single settings read covers both gates (edit window + size cap)
-    // so we don't pay two getSettings round-trips per edit.
-    const { maxMessageLength, maxForumPostLength, editGraceMs } = await getSettings(db);
+    // so we don't pay two round-trips per edit. Per-server: resolve the
+    // message's room→server (NULL/legacy → DEFAULT_SERVER_ID) so a server's
+    // own caps apply; NULL overrides inherit the platform default, so flag-off
+    // is byte-identical to the old `getSettings(db)` read.
+    const { maxMessageLength, maxForumPostLength, editGraceMs } =
+      await getServerSettings(db, await resolveRoomServerId(db, m.roomId));
     // Holders of edit_others_message bypass the grace window entirely
     // (a moderation lever for touch-ups requested by an author after
     // the cap has expired).
@@ -399,8 +404,10 @@ export async function registerMessageRoutes(
     const forum = await isForumMessage(db, m.roomId);
     // Holders of `delete_others_message` bypass the grace window
     // entirely; authors only get the bypass in forum rooms (and in
-    // flat-chat rooms within the admin-configured grace window).
-    const { editGraceMs } = await getSettings(db);
+    // flat-chat rooms within the admin-configured grace window). Per-server:
+    // the grace window is the message's room→server effective value (NULL
+    // override inherits the platform default, so flag-off is byte-identical).
+    const { editGraceMs } = await getServerSettings(db, await resolveRoomServerId(db, m.roomId));
     if (!canDeleteOthers && !forum && now - +m.createdAt > editGraceMs) {
       reply.code(403);
       return { error: `Delete window has closed (${Math.round(editGraceMs / 1000)}s after sending).` };

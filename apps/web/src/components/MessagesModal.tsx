@@ -20,6 +20,7 @@ import { UsernameAutocomplete } from "./UsernameAutocomplete.js";
 import { CloseButton } from "./CloseButton.js";
 import { ReactionBar, ReactionAddButton } from "./ReactionBar.js";
 import { handlePlainTextCopy } from "../lib/chatCopy.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 interface Props {
   onClose: () => void;
@@ -1518,6 +1519,9 @@ function CharacterSwitcher({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  // Calm-mode ease: the dropdown opens BELOW the chip (top-full), pure CSS
+  // positioned, so it slides down gently. Reduce Motion only.
+  const reduceMotion = useReducedMotion();
 
   // Hide the switcher entirely when the user has no characters, the
   // only option would be OOC, which is the default. Showing a
@@ -1658,7 +1662,7 @@ function CharacterSwitcher({
       {open ? (
         <div
           role="listbox"
-          className="absolute left-3 right-3 top-full z-10 mt-1 max-h-72 overflow-y-auto rounded border border-keep-rule bg-keep-parchment shadow-lg"
+          className={`absolute left-3 right-3 top-full z-10 mt-1 max-h-72 overflow-y-auto rounded border border-keep-rule bg-keep-parchment shadow-lg${reduceMotion ? " tk-slide-down-in" : ""}`}
         >
           {row(null, "OOC", null)}
           {characters.map((c) => row(c.id, c.name, c.avatarUrl))}

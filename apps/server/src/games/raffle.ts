@@ -81,6 +81,10 @@ export interface RaffleState {
   hostScope: "user" | "character";
   hostOwnerId: string;
   hostUserId: string;
+  /** The per-server economy the prize was ESCROWED from, snapshotted at start.
+   *  The winner is credited (and refunds returned) on THIS server so currency
+   *  never crosses economies — escrow and payout must use the same pool. */
+  hostServerId: string;
   claimants: Map<IdentityKey, ParticipantRef>;
 }
 
@@ -269,6 +273,7 @@ async function resolveRaffle(session: GameSession, ctx: ResolveContext): Promise
     "raffle",
     [winner],
     { xp: 0, currency: 0, itemKey: null, itemCount: 0 },
+    { serverId: state.hostServerId },
   );
   await postRaffleResult(ctx, session.scope, session.host, lines.join("\n"));
 }
@@ -324,7 +329,7 @@ async function postRaffleResult(
 async function refundPrize(db: Db, io: import("socket.io").Server, state: RaffleState): Promise<void> {
   if (state.prize.kind === "currency") {
     await creditPool(db, io as never, {
-      serverId: DEFAULT_SERVER_ID,
+      serverId: state.hostServerId,
       scope: state.hostScope,
       ownerId: state.hostOwnerId,
       xpDelta: 0,
@@ -334,8 +339,10 @@ async function refundPrize(db: Db, io: import("socket.io").Server, state: Raffle
     });
     return;
   }
-  // Item refund.
-  creditItemToInventory(db, state.hostScope, state.hostOwnerId, state.prize.itemKey, state.prize.count);
+  // Item refund — returns to the SAME server's inventory the prize was
+  // escrowed from (hostServerId snapshotted at start), so a refund can't
+  // land the stack in a different economy than it left.
+  creditItemToInventory(db, state.hostScope, state.hostOwnerId, state.prize.itemKey, state.prize.count, state.hostServerId);
 }
 
 /**
@@ -359,7 +366,7 @@ async function awardPrize(
   const winnerOwnerId = winner.characterId ?? winner.userId;
   if (state.prize.kind === "currency") {
     await creditPool(db, io as never, {
-      serverId: DEFAULT_SERVER_ID,
+      serverId: state.hostServerId,
       scope: winnerScope,
       ownerId: winnerOwnerId,
       xpDelta: 0,
@@ -369,7 +376,10 @@ async function awardPrize(
     });
     return;
   }
-  creditItemToInventory(db, winnerScope, winnerOwnerId, state.prize.itemKey, state.prize.count);
+  // Pay the winner on the SAME server the prize was escrowed from
+  // (hostServerId), so the item never crosses economies between escrow and
+  // payout — mirrors the currency path above.
+  creditItemToInventory(db, winnerScope, winnerOwnerId, state.prize.itemKey, state.prize.count, state.hostServerId);
 }
 
 /** Module init, registers both raffle kinds with the framework.

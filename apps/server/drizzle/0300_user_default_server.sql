@@ -1,0 +1,25 @@
+-- Favorite / default server (Servers Lift — profile anchor).
+--
+-- A per-user "favorite" server: the one whose per-server identity (collection,
+-- pet collection, equipped name style, profile banner, marquee + visitor flair)
+-- a GLOBAL profile view should reflect — instead of always falling back to the
+-- app/system default. Falls back to the system server (server_spire_system) when
+-- unset.
+--
+-- The column itself ALREADY EXISTS: migration 0277 added
+-- `users.default_server_id TEXT` (the rail's "home" preference, then unused on
+-- the server). We repurpose that same column as the favorite/default anchor —
+-- a fresh `ADD COLUMN` here would error ("duplicate column name"), so this
+-- migration adds only the lookup index used by the server-delete cleanup path.
+--
+-- NO FK BY DESIGN — mirrors `users.default_forum_id` (0274) and the original
+-- `users.default_server_id` (0277): a stale id (favorite server deleted) is
+-- harmless because every read resolves the favorite through a membership /
+-- existence check and falls back to server_spire_system, exactly as if the
+-- column were NULL. `users` is the core account table; the codebase has never
+-- rebuilt it to bolt on an FK, and the read-side fallback gives the same
+-- ON DELETE SET NULL behavior without that risk. The write path validates the
+-- target is a server the caller belongs to, and the server-delete path nulls
+-- any rows that pointed at the removed server.
+CREATE INDEX IF NOT EXISTS `users_default_server_id_idx`
+  ON `users` (`default_server_id`);

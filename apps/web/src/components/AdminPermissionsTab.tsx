@@ -39,6 +39,7 @@ import {
 } from "@thekeep/shared";
 import { readError } from "../lib/http.js";
 import { useChat } from "../state/store.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 const EDITABLE_ROLES: readonly Role[] = ["user", "trusted", "mod", "admin"] as const;
 const ALL_ROLES: readonly Role[] = ["user", "trusted", "mod", "admin", "masteradmin"] as const;
@@ -899,6 +900,9 @@ function PermissionAuditFeed({
   // the parent.
   const [userQuery, setUserQuery] = useState("");
   const [userResults, setUserResults] = useState<UserSearchHit[]>([]);
+  // Calm-mode ease: the results list opens BELOW the search input (top-full),
+  // pure CSS positioned, so it slides down gently. Reduce Motion only.
+  const reduceMotion = useReducedMotion();
   // The audit feed is collapsed by default; only fire the fetch once
   // the user has opened the panel (or a deep-link forces it open).
   // `opened` flips on first open and stays true so filter changes
@@ -1038,7 +1042,7 @@ function PermissionAuditFeed({
                 className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-0.5"
               />
               {userResults.length > 0 ? (
-                <ul className="absolute left-12 top-full z-10 mt-1 max-h-48 w-48 overflow-auto rounded border border-keep-rule bg-keep-bg shadow-lg">
+                <ul className={`absolute left-12 top-full z-10 mt-1 max-h-48 w-48 overflow-auto rounded border border-keep-rule bg-keep-bg shadow-lg${reduceMotion ? " tk-slide-down-in" : ""}`}>
                   {userResults.map((u) => (
                     <li key={u.userId}>
                       <button

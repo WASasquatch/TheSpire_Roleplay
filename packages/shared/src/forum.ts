@@ -294,6 +294,10 @@ export interface ForumSummary {
   ownerUsername: string;
   boardCount: number;
   memberCount: number;
+  /** Owner-set genre/category tags for discovery search (normalizeTags).
+   *  Always present (empty array when none) so the discover UI can render +
+   *  filter without a null check. */
+  tags: string[];
   /** Most recent topic/reply activity across the forum's boards (ms), null
    *  for a freshly-created forum with no posts yet. */
   lastActivityAt: number | null;
@@ -356,6 +360,14 @@ export interface ForumDetail extends ForumSummary {
     ownerUsername: string;
     /** Truncated (~240 chars) world description for the header strip. */
     description: string | null;
+  } | null;
+  /** The chat server this forum is affiliated to (`forums.serverId`), or
+   *  null when unaffiliated. Drives per-server topic-card author flair:
+   *  when null, topic cards render bare. Owner-settable from the forum
+   *  settings (Appearance tab). */
+  affiliatedServer: {
+    id: string;
+    name: string;
   } | null;
   boards: ForumBoardSummary[];
   /** Owner-defined topic prefixes (the chip catalog). Empty when none. */
@@ -722,6 +734,32 @@ export interface ForumTopicCard {
   replyCount: number;
   createdAt: number;
   lastActivityAt: number;
+  /* ----------------------------------------------------------------
+   * Per-server author flair (Servers Lift). Resolved server-side from
+   * the cosmetics the author earned/equipped ON THE SERVER THIS FORUM
+   * IS AFFILIATED TO (`forums.serverId`). ALL of these are present
+   * together or ALL omitted: a forum with NO server affiliation
+   * (`forums.serverId IS NULL`) ships none of them, and the card MUST
+   * render bare (no sigil, no border frame, no name style) in that
+   * case. A forum WITH an affiliation always ships the set, with the
+   * individual values null when that author hasn't earned/equipped the
+   * cosmetic on that server. The renderer therefore gates flair on
+   * "did the server send the field at all", not on its value.
+   * -------------------------------------------------------------- */
+  /** Rank key in the forum's server (drives the topic-card RankSigil), or null. */
+  authorRankKey?: string | null;
+  /** Rank tier (I–IV) paired with `authorRankKey`, or null. */
+  authorTier?: number | null;
+  /** Equipped rank-tier avatar border key in the forum's server, or null. */
+  authorSelectedBorderRankKey?: string | null;
+  /** Equipped free-form avatar border key in the forum's server, or null. */
+  authorSelectedFreeformBorderKey?: string | null;
+  /** Per-identity color config for the equipped free-form border, or null. */
+  authorFreeformBorderConfig?: Record<string, string> | null;
+  /** Equipped name-style key in the forum's server, or null. */
+  authorNameStyleKey?: string | null;
+  /** Owned-style color config paired with `authorNameStyleKey`, or null. */
+  authorNameStyleConfig?: Record<string, unknown> | null;
 }
 
 /** Category chip for the in-modal board reader. */

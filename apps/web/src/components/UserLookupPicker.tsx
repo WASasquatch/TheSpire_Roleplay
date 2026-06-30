@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { ForumUserSearchHit } from "@thekeep/shared";
 import { searchForumUsers } from "../lib/forums.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 /**
  * Typeahead user picker for forum management (appoint a mod, ban a user).
@@ -33,6 +34,9 @@ export function UserLookupPicker({
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const listId = useId();
+  // Calm-mode ease: the results list opens BELOW the input (mt-1), pure CSS
+  // positioned, so it slides down gently. Reduce Motion only.
+  const reduceMotion = useReducedMotion();
 
   // Debounced search. A fresh keystroke supersedes the in-flight request via
   // the `live` latch so out-of-order responses can't clobber newer results.
@@ -85,7 +89,7 @@ export function UserLookupPicker({
       {open && (loading || hits.length > 0 || q.trim().length >= 2) ? (
         <ul
           id={listId}
-          className="absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-lg"
+          className={`absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-lg${reduceMotion ? " tk-slide-down-in" : ""}`}
         >
           {loading && hits.length === 0 ? (
             <li className="px-2 py-2 text-xs text-keep-muted">Searching…</li>

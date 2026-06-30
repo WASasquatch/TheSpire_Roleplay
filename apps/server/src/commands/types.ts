@@ -6,7 +6,7 @@ import type {
 import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "./registry.js";
 
-import type { PermissionKey, Role } from "@thekeep/shared";
+import type { PermissionKey, Role, ServerModPermission } from "@thekeep/shared";
 
 export interface SessionUser {
   id: string;
@@ -110,6 +110,12 @@ export interface CommandHandler {
    *  `dispatch.ts:321`; handlers can also call `hasPermission`
    *  directly for finer-grained checks inside their `run`. */
   permission?: PermissionKey;
+  /** Per-server fallback for the dispatcher gate: when the global `permission`
+   *  check fails, a sub-server's staff holding THIS server grant may still run
+   *  the command in their own server's rooms (the default/system server stays
+   *  on the global gate). Lets server moderators use chat moderation commands
+   *  like /trash without a global key. */
+  serverPermission?: ServerModPermission;
   run(ctx: CommandContext): CommandResult;
   /**
    * Opt-in inline expansion. When set, the registry includes this

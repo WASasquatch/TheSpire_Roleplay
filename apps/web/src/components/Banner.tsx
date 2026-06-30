@@ -1,10 +1,34 @@
 import { useEffect, useState, type CSSProperties } from "react";
+import type { AvatarCrop } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
 import { disconnect } from "../lib/socket.js";
 import { clearSessionToken } from "../lib/http.js";
+import { cropStyleFor } from "../lib/avatarCrop.js";
 import { ConnectionOrb } from "./ConnectionOrb.js";
 import { useStoryInviteCount } from "../lib/storyInvites.js";
+import { navigateToFaqIndex } from "../lib/faqUrl.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
+
+/** True at Tailwind's `lg` breakpoint (>=1024px). Drives desktop-vs-mobile
+ *  banner behavior: desktop always shows the server banner; mobile defaults to
+ *  the collapsed horizontal bar and reveals the banner on tap. */
+function useIsLgUp(): boolean {
+  const [lg, setLg] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(min-width: 1024px)").matches,
+  );
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const onChange = () => setLg(mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return lg;
+}
 
 interface NavLinkRow {
   id: string;
@@ -32,6 +56,28 @@ interface Props {
   /** Opens the Spire Arcade launcher. Permission-gated by the parent;
    *  the link only renders when the viewer holds `use_arcade`. */
   onOpenArcade: () => void;
+  /** Multi-Server Lift: when the viewer is inside a NON-home server, its
+   *  identity (name / round icon / banner) rebrands this top bar. Null on the
+   *  home server or with the servers feature off (byte-identical to today). */
+  serverBrand?: {
+    name: string;
+    logoUrl: string | null;
+    /** Wide "wordmark" logo. When set it REPLACES the app wordmark on the
+     *  left of the bar, so members read which server they're in at a glance. */
+    horizontalLogoUrl: string | null;
+    bannerImageUrl: string | null;
+    bannerCoverCss: string | null;
+    bannerFocusY: number | null;
+    /** Pan/zoom crop applied to bannerImageUrl (same renderer as avatars). */
+    bannerCrop: AvatarCrop | null;
+    /** Owner-set banner band height in px. Null ⇒ the default responsive height. */
+    bannerHeight: number | null;
+  } | null;
+  /** Open the CURRENT server's owner/mod console (the per-server admin). Passed
+   *  ONLY when the viewer can manage the server they're in, so the nav shows a
+   *  prominent "Server Admin" link — the primary path to the console, replacing
+   *  reliance on the small gear on the rail icon. */
+  onOpenServerAdmin?: () => void;
 }
 
 /**
@@ -45,7 +91,7 @@ interface Props {
  * the active theme's panel color / text color / font-action stack when not
  * overridden, so a fresh install still looks coherent.
  */
-export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds, onOpenArcade, onOpenStaff }: Props) {
+export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds, onOpenArcade, onOpenStaff, serverBrand, onOpenServerAdmin }: Props) {
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
@@ -71,6 +117,16 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   // section inside the hamburger panel.
   const [moreOpen, setMoreOpen] = useState(false);
   const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
+  // Calm-mode ease: the "More" popover and the mobile hamburger panel both
+  // open BELOW their trigger (top-full), pure CSS positioned, so they slide
+  // down gently. Reduce Motion only; OFF keeps the instant snap.
+  const reduceMotion = useReducedMotion();
+  const isLgUp = useIsLgUp();
+  // Mobile-only: the server banner is COLLAPSED to a horizontal bar by default;
+  // tapping the bar slides it open to reveal the art (and scales the logo up).
+  // Desktop always shows the banner and ignores this. Resets to collapsed on
+  // each load.
+  const [bannerOpen, setBannerOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,12 +204,74 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
     setMe(null);
   }
 
-  // Admin-supplied background CSS shorthand goes on the header itself. When
-  // unset, we fall back to the theme's panel color via the existing class.
+  // Header background. Inside a server (serverBrand set, including the home
+  // server when the flag is on) that server's banner takes over the top bar.
+  //
+  // Three render paths, in priority order:
+  //   1. bannerImageUrl  → painted as an absolutely-positioned <img> behind the
+  //      content so the pan/zoom CROP (cropStyleFor) applies, not just a focal
+  //      point. A dark scrim then sits over the art for legibility. The bar
+  //      grows taller in this mode so the banner art has room to read.
+  //   2. bannerCoverCss  → a flat CSS background on the <header> (gradients /
+  //      solid brand color); also taller, scrim optional but harmless.
+  //   3. neither         → today's bar exactly (theme panel fallback class).
+  //
+  // On the home server with the flag OFF, serverBrand is null and we keep the
+  // admin-configured site banner background exactly as before. `hasBg` decides
+  // whether to keep the theme's panel fallback class.
+  const serverBannerImg = serverBrand?.bannerImageUrl ?? null;
+  // Whether THIS server's brand HAS a banner (image or css). A null serverBrand
+  // (flag off) never has one, so the flag-off bar stays byte-identical to today.
+  const hasServerBanner = !!serverBrand && (!!serverBannerImg || !!serverBrand.bannerCoverCss);
+  // Whether the banner is currently SHOWN (tall, art visible, logo scaled up).
+  // Desktop: always, when the server has one. Mobile: only once the viewer taps
+  // the bar open. Drives the tall layout, the art, and the logo scaling.
+  const bannerShown = hasServerBanner && (isLgUp || bannerOpen);
+
   const headerStyle: CSSProperties = {};
-  if (branding.bannerCoverCss) {
+  let hasBg = false;
+  if (serverBrand) {
+    // Server banner art only paints while SHOWN; collapsed reverts to the plain
+    // theme bar (bg-keep-banner class below).
+    if (serverBannerImg && bannerShown) {
+      // Painted by the <img> layer; the header stays transparent so the cropped
+      // art shows through. `hasBg` still set so the theme panel class is dropped.
+      hasBg = true;
+    } else if (serverBrand.bannerCoverCss && bannerShown) {
+      headerStyle.background = serverBrand.bannerCoverCss;
+      hasBg = true;
+    }
+  } else if (branding.bannerCoverCss) {
     headerStyle.background = branding.bannerCoverCss;
+    hasBg = true;
   }
+
+  // Banner height: collapsed bar vs the (owner-set, 48-240px; default 96px) tall
+  // banner. Animating min-height between the two drives the mobile open/close
+  // slide. Set only when the server has a banner; otherwise the bar keeps its
+  // natural height (today's exact shell).
+  const BANNER_BAR_PX = 56; // collapsed horizontal-bar height
+  const BANNER_MAX_PX = 240; // matches the owner slider's max
+  const expandedBannerPx = serverBrand?.bannerHeight ?? 96;
+  if (hasServerBanner) {
+    headerStyle.minHeight = bannerShown ? expandedBannerPx : BANNER_BAR_PX;
+  }
+  // Logo/wordmark scales WITH the banner height: at the 240px max it's 6rem tall
+  // with a 2rem left margin; smaller banners scale both down proportionally.
+  // Collapsed (no scale applied) falls back to the existing mobile logo size.
+  const bannerScale = Math.min(1, expandedBannerPx / BANNER_MAX_PX);
+  const logoMaxHeightRem = 6 * bannerScale;
+  const logoMarginLeftRem = 2 * bannerScale;
+  const logoFontSizeRem = Math.max(1.25, logoMaxHeightRem * 0.6);
+
+  // The logo area shows the current server's identity inside a server, else the
+  // global site logo/name. logoColor/font stay the site's. When the server has
+  // a WIDE wordmark (horizontalLogoUrl) it wins over the round logo + name so
+  // the taller bar reads as that server's brand; otherwise we fall back to the
+  // round logo, then the server/site name text.
+  const effectiveLogo = serverBrand
+    ? { logoUrl: serverBrand.logoUrl ?? "", siteName: serverBrand.name, horizontalLogoUrl: serverBrand.horizontalLogoUrl }
+    : { logoUrl: branding.logoUrl, siteName: branding.siteName, horizontalLogoUrl: null as string | null };
 
   // Logo color/font come from branding too; the explicit empty string for
   // logoFont reverts to font-action's stack since the wrapper class still
@@ -183,11 +301,85 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   return (
     <header
       style={headerStyle}
-      className={`keep-app-banner relative z-30 flex items-center justify-between border-b border-keep-rule px-4 py-2 ${
-        branding.bannerCoverCss ? "" : "bg-keep-banner"
+      className={`keep-app-banner relative z-30 flex justify-between border-b border-keep-rule px-4 py-2 ${
+        // Tall art-bearing banner pins the nav to the TOP (items-start) and
+        // stretches the logo column full-height; collapsed/no-banner centers.
+        bannerShown ? "items-start" : "items-center"
+      } ${
+        // `isolate` keeps the absolute banner image + mobile dropdown stacking
+        // local to the bar; kept whenever the server has a banner (even
+        // collapsed) so the dropdown z-order is unchanged.
+        hasServerBanner ? "isolate" : ""
+      } ${hasBg ? "" : "bg-keep-banner"} ${
+        // Animate the open/close slide (mobile) + the desktop-banner min-height.
+        hasServerBanner ? "transition-[min-height] duration-300 ease-out" : ""
       }`}
     >
-      <h1 style={logoStyle} className="font-action text-xl tracking-wide">
+      {/* Server banner IMAGE layer — absolutely positioned behind the content so
+          the pan/zoom crop (cropStyleFor) applies, not just a focal point. Wrapped
+          in an `overflow-hidden` box so a zoomed crop (transform: scale) clips to
+          the bar instead of spilling — the header itself stays NON-clipping so the
+          dropdowns (More popover, mobile menu) anchored at `top-full` still render
+          below it. Sits under everything (z-0); the content carries `relative` to
+          float over it. Only the image path renders this; the bannerCoverCss path
+          paints via headerStyle.background instead. */}
+      {serverBannerImg ? (
+        <div
+          aria-hidden
+          className={`pointer-events-none absolute inset-0 z-0 overflow-hidden transition-opacity duration-300 ${
+            bannerShown ? "opacity-100" : "opacity-0"
+          }`}
+        >
+          <img
+            src={serverBannerImg}
+            alt=""
+            draggable={false}
+            className="absolute inset-0 h-full w-full select-none object-cover"
+            style={cropStyleFor(serverBrand?.bannerCrop)}
+          />
+          {/* Legibility scrim — darkens the art left-to-right so the wordmark +
+              nav stay readable over busy banners. Left side (logo) is darkest;
+              the right (nav) keeps a lighter wash so the art still shows. */}
+          <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/40 to-black/20" />
+        </div>
+      ) : null}
+      {/* Mobile tap target: tapping the bar/banner background toggles it open or
+          closed. Sits ABOVE the art (z-0) but BELOW the logo / nav / hamburger
+          (z-10), which keep their own taps. Desktop never collapses, so the
+          layer is mobile-only. */}
+      {hasServerBanner ? (
+        <button
+          type="button"
+          aria-label={bannerShown ? "Collapse banner" : "Show banner"}
+          onClick={() => setBannerOpen((o) => !o)}
+          className="absolute inset-0 z-[5] cursor-pointer lg:hidden"
+        />
+      ) : null}
+      {/* Over a server banner the bar is tall and the row is `items-start`
+          (nav pinned top), so stretch the logo column to the full bar height
+          and center the wordmark within it. `text-shadow` keeps a text/round-
+          logo fallback legible over the art; image wordmarks ignore it. */}
+      <h1
+        style={{
+          ...logoStyle,
+          // Scale the wordmark/logo with the banner height when it's shown; let
+          // it revert to the CSS-class size (current mobile size) when collapsed.
+          ...(bannerShown
+            ? { marginLeft: `${logoMarginLeftRem}rem`, fontSize: `${logoFontSizeRem}rem` }
+            : {}),
+        }}
+        className={`font-action text-xl tracking-wide transition-all duration-300 ${
+          bannerShown
+            ? "relative z-10 flex items-center self-stretch [text-shadow:0_1px_3px_rgba(0,0,0,.7)]"
+            : hasServerBanner
+              ? "relative z-10" // collapsed bar: stay above the tap layer
+              : ""
+        } ${
+          // Over a server banner the logo isn't a link, so let taps fall through
+          // to the collapse/expand tap layer behind it (mobile).
+          hasServerBanner ? "pointer-events-none lg:pointer-events-auto" : ""
+        }`}
+      >
         {/* `siteUrl` is the admin-configured canonical home for the
             site (often a marketing landing page on a sibling domain).
             When set, wrap the logo in an anchor, `color:inherit` +
@@ -198,23 +390,31 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
             (different origin) as worth `noopener noreferrer` so the
             target page can't poke `window.opener`; same-origin links
             don't need it. */}
-        {branding.siteUrl ? (
+        {!serverBrand && branding.siteUrl ? (
           <a
             href={branding.siteUrl}
             rel="home noopener noreferrer"
             className="text-inherit no-underline hover:text-inherit hover:no-underline focus:outline-none focus:ring-1 focus:ring-keep-action"
             title={branding.siteName}
           >
-            <LogoInner branding={branding} />
+            <LogoInner branding={effectiveLogo} {...(bannerShown ? { imgMaxHeight: `${logoMaxHeightRem}rem` } : {})} />
           </a>
         ) : (
-          <LogoInner branding={branding} />
+          <LogoInner branding={effectiveLogo} {...(bannerShown ? { imgMaxHeight: `${logoMaxHeightRem}rem` } : {})} />
         )}
       </h1>
 
       {/* Desktop nav. Hidden below md+; the hamburger button + dropdown
-          below handle narrow screens. */}
-      <nav className="hidden items-center gap-3 text-xs uppercase tracking-widest text-keep-muted lg:flex">
+          below handle narrow screens. `relative z-10` lifts it over the
+          banner image + scrim; over a server banner the links also carry a
+          soft text-shadow so they read against the art even where the scrim
+          is lightest (right edge). */}
+      {/* The nav sits in a translucent dark "pill" (rounded, bordered, drop
+          shadow) so the links stay legible over busy server banner art, while
+          the banner still shows through. relative z-10 lifts it over the banner
+          image + scrim; over a server banner the links also carry a soft
+          text-shadow for the lightest (right-edge) scrim. */}
+      <nav className={`hidden items-center gap-3 text-sm uppercase tracking-widest text-keep-muted lg:flex ${hasServerBanner ? "relative z-10 rounded-[10px] border border-white/20 bg-black/50 p-2.5 shadow-[0_10px_10px_rgba(0,0,0,0.2)] [text-shadow:0_1px_2px_rgba(0,0,0,.7)]" : ""}`}>
         {/* Admin-managed custom links collapse behind a single "More"
             popover so a busy install with many links doesn't push the
             built-in nav items off the row. `data-nav-more` is the
@@ -238,7 +438,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
             {moreOpen ? (
               <div
                 role="menu"
-                className="keep-menu-surface absolute right-0 top-full z-40 mt-1 flex w-56 flex-col overflow-hidden rounded border border-keep-rule text-sm normal-case tracking-normal shadow-2xl"
+                className={`keep-menu-surface absolute right-0 top-full z-40 mt-1 flex w-56 flex-col overflow-hidden rounded border border-keep-rule text-sm normal-case tracking-normal shadow-2xl${reduceMotion ? " tk-slide-down-in" : ""}`}
               >
                 {links.map((l) => (
                   <a
@@ -336,14 +536,38 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
           type="button"
           onClick={onOpenRules}
           className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-          title="House rules and privacy notice"
+          title="The app rules and this server's own rules"
         >
           Rules
         </button>
-        {/* Admin button visibility is fully gated by the parent, it
-            only passes `onOpenAdmin` when the viewer holds at least
-            one `view_admin_*` permission. Banner just trusts the
-            presence of the callback. */}
+        <span className="text-keep-rule">|</span>
+        {/* Server FAQ: the per-server FAQ page (/faqs), mounted pre-auth like
+            Rules so it's shareable. Shows the current server's entries. */}
+        <button
+          type="button"
+          onClick={navigateToFaqIndex}
+          className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
+          title="Frequently asked questions for this server"
+        >
+          FAQ
+        </button>
+        {/* The two admin doors sit on the RIGHT, just left of Exit: Server Admin
+            (the current server's console, owners/mods only) then Global Admin
+            (platform settings + cross-community oversight, site staff only).
+            Both are parent-gated — the callback is only passed when permitted. */}
+        {onOpenServerAdmin ? (
+          <>
+            <span className="text-keep-rule">|</span>
+            <button
+              type="button"
+              onClick={onOpenServerAdmin}
+              className="uppercase tracking-widest text-keep-action hover:text-keep-text"
+              title="Manage this server — settings, rooms, members, moderation"
+            >
+              Server Admin
+            </button>
+          </>
+        ) : null}
         {onOpenAdmin ? (
           <>
             <span className="text-keep-rule">|</span>
@@ -351,9 +575,9 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               type="button"
               onClick={onOpenAdmin}
               className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Admin tools"
+              title="Global Admin — platform settings and cross-community oversight"
             >
-              Admin
+              Global Admin
             </button>
           </>
         ) : null}
@@ -371,8 +595,9 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
 
       {/* Mobile hamburger trigger. The same actions live in a dropdown
           panel underneath the header so we don't overflow the narrow
-          banner with a strip of inline links. */}
-      <div className="flex items-center gap-2 lg:hidden">
+          banner with a strip of inline links. `relative z-10` floats it over
+          the banner scrim; it stays top-right in the (shorter) mobile bar. */}
+      <div className={`flex items-center gap-2 lg:hidden ${hasServerBanner ? "relative z-10" : ""}`}>
         <button
           type="button"
           onClick={() => setMenuOpen((o) => !o)}
@@ -405,7 +630,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
             className="fixed inset-0 z-30 cursor-default bg-transparent lg:hidden"
           />
           <nav
-            className="keep-menu-surface absolute right-2 top-full z-40 mt-1 flex w-56 flex-col overflow-hidden rounded border border-keep-rule text-sm shadow-2xl lg:hidden"
+            className={`keep-menu-surface absolute right-2 top-full z-40 mt-1 flex w-56 flex-col overflow-hidden rounded border border-keep-rule text-sm shadow-2xl lg:hidden${reduceMotion ? " tk-slide-down-in" : ""}`}
           >
             {/* Custom links live behind a collapsible row so a long
                 list doesn't crowd the built-in actions. Header taps
@@ -499,13 +724,31 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
             >
               Rules
             </button>
+            <button
+              type="button"
+              onClick={() => { navigateToFaqIndex(); setMenuOpen(false); }}
+              className="border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+            >
+              FAQ
+            </button>
+            {/* Server Admin then Global Admin, grouped just above Exit (mirrors
+                the desktop nav's right-side ordering). */}
+            {onOpenServerAdmin ? (
+              <button
+                type="button"
+                onClick={() => { onOpenServerAdmin(); setMenuOpen(false); }}
+                className="border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-action hover:bg-keep-banner"
+              >
+                Server Admin
+              </button>
+            ) : null}
             {onOpenAdmin ? (
               <button
                 type="button"
                 onClick={fireAdmin}
                 className="border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
               >
-                Admin
+                Global Admin
               </button>
             ) : null}
             <button
@@ -529,7 +772,33 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
  * image-vs-text branch would be duplicated under both arms of the
  * outer ternary.
  */
-function LogoInner({ branding }: { branding: { logoUrl: string; siteName: string } }) {
+function LogoInner({
+  branding,
+  imgMaxHeight,
+}: {
+  branding: { logoUrl: string; siteName: string; horizontalLogoUrl: string | null };
+  /** When set (banner shown), overrides the CSS-class max-height so the
+   *  wordmark/logo scales with the banner height. Inline beats the class. */
+  imgMaxHeight?: string;
+}) {
+  // Inline max-height wins over the Tailwind max-h-* fallback when scaling; the
+  // transition eases the scale-up/down on the mobile open/close toggle.
+  const scaleStyle = imgMaxHeight ? { maxHeight: imgMaxHeight } : undefined;
+  // Server WIDE wordmark wins when present — it's the clearest "which server
+  // am I in" cue, so it replaces the round logo + name entirely. A taller
+  // `max-h` than the round logo lets it fill the taller banner bar; w-auto
+  // keeps the aspect ratio whatever the source dimensions are.
+  if (branding.horizontalLogoUrl) {
+    return (
+      <img
+        src={branding.horizontalLogoUrl}
+        alt={branding.siteName}
+        className="max-h-10 w-auto select-none object-contain transition-[max-height] duration-300 lg:max-h-12"
+        style={scaleStyle}
+        draggable={false}
+      />
+    );
+  }
   if (branding.logoUrl) {
     // Image logo (default install ships /thespire-logo.png; admins can
     // swap it via /admin/settings or upload via the admin panel). The
@@ -540,7 +809,8 @@ function LogoInner({ branding }: { branding: { logoUrl: string; siteName: string
       <img
         src={branding.logoUrl}
         alt={branding.siteName}
-        className="max-h-8 w-auto select-none"
+        className="max-h-8 w-auto select-none transition-[max-height] duration-300"
+        style={scaleStyle}
         draggable={false}
       />
     );

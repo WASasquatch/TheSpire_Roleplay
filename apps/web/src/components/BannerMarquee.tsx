@@ -8,6 +8,7 @@ import { setMarqueeHidden } from "../lib/marqueeVisibility.js";
 import { getSocket } from "../lib/socket.js";
 import { handleUiRouteClickInHtml } from "../lib/uiRouteOpen.js";
 import { hydrateDynamicUiRouteChips } from "../lib/hydrateDynamicUiRouteChips.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 /**
  * Persistent close key, content-aware. The key is the marquee
@@ -81,6 +82,10 @@ export function BannerMarquee() {
   const dismissKey = useMemo(() => buildDismissKey(banners), [banners]);
   const dismissed = useDismissed(dismissKey, DISMISS_TTL_MS);
   const theme = useActiveTheme();
+  // Reduce Motion: when on, hold the current banner statically instead of
+  // auto-rotating. Reactive so flipping the toggle live starts/stops the
+  // rotation interval immediately (it's in the effect's dep array).
+  const reduceMotion = useReducedMotion();
 
   // Publish hidden-state to the Room Info bar's "bring back announcements"
   // button: hidden ONLY when there are banners but the viewer dismissed
@@ -146,6 +151,10 @@ export function BannerMarquee() {
   useEffect(() => {
     if (dismissed) return;
     if (banners.length < 2) return;
+    // Reduce Motion: don't start the rotation interval; the current
+    // banner is held statically (no fade either, since the fade only
+    // fires on a rotation tick).
+    if (reduceMotion) return;
     const id = window.setInterval(() => {
       setFading(true);
       window.setTimeout(() => {
@@ -154,7 +163,7 @@ export function BannerMarquee() {
       }, FADE_MS);
     }, ROTATION_MS);
     return () => window.clearInterval(id);
-  }, [banners.length, dismissed, rotationResetKey]);
+  }, [banners.length, dismissed, rotationResetKey, reduceMotion]);
 
   // Memo the chip-rendered HTML per active banner so a rotation tick
   // doesn't re-run sanitize + chip replacement on stable bodies. The

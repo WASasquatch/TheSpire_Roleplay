@@ -488,6 +488,28 @@ async function jsonOrThrow<T>(r: Response): Promise<T> {
   return (await r.json()) as T;
 }
 
+/**
+ * Multi-Server Lift: the single place that turns the active server id
+ * into the wire field every earning read/write rides on. Spread the
+ * result into a POST/PATCH/PUT JSON body (`...withServerId(serverId)`)
+ * or append {@link serverQuery} to a GET URL.
+ *
+ * When `serverId` is null/empty this returns `{}` (resp. ""), so the
+ * request is byte-identical to the legacy unscoped call — the server
+ * falls back to DEFAULT_SERVER_ID. Callers thread the SAME
+ * `currentServerId` the dashboard reads `/earning/me` with (see
+ * `state/store.ts`), so a purchase/equip lands in the same per-server
+ * pool the wallet is showing. Flag-off / no active server → unscoped.
+ */
+function withServerId(serverId: string | null | undefined): { serverId?: string } {
+  return serverId ? { serverId } : {};
+}
+
+/** GET-query twin of {@link withServerId}: `?serverId=<id>` or "". */
+function serverQuery(serverId: string | null | undefined): string {
+  return serverId ? `?serverId=${encodeURIComponent(serverId)}` : "";
+}
+
 export async function fetchEarningMe(): Promise<EarningMeResponse> {
   return jsonOrThrow<EarningMeResponse>(await fetch("/earning/me", { credentials: "include" }));
 }
@@ -520,12 +542,12 @@ export async function patchEarningSettings(body: {
    *  they're master-only privacy preferences. Null/omitted = master
    *  pool. */
   characterId?: string | null;
-}): Promise<void> {
+}, serverId?: string | null): Promise<void> {
   const r = await fetch("/earning/me/settings", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -540,8 +562,10 @@ export async function ackRankUpNotification(notificationId?: string): Promise<vo
   if (!r.ok) throw new Error(await readError(r));
 }
 
-export async function fetchEarningCatalog(): Promise<CatalogResponse> {
-  return jsonOrThrow<CatalogResponse>(await fetch("/earning/catalog", { credentials: "include" }));
+export async function fetchEarningCatalog(serverId?: string | null): Promise<CatalogResponse> {
+  return jsonOrThrow<CatalogResponse>(
+    await fetch(`/earning/catalog${serverQuery(serverId)}`, { credentials: "include" }),
+  );
 }
 
 /* ---------- flash sale ---------- */
@@ -570,8 +594,10 @@ export interface FlashSaleResponse {
   freeformBorder: FlashSalePick | null;
 }
 
-export async function fetchFlashSale(): Promise<FlashSaleResponse> {
-  return jsonOrThrow<FlashSaleResponse>(await fetch("/earning/flash-sale", { credentials: "include" }));
+export async function fetchFlashSale(serverId?: string | null): Promise<FlashSaleResponse> {
+  return jsonOrThrow<FlashSaleResponse>(
+    await fetch(`/earning/flash-sale${serverQuery(serverId)}`, { credentials: "include" }),
+  );
 }
 
 /* ---------- rankings ---------- */
@@ -999,12 +1025,13 @@ export async function purchaseCosmetic(
   /** Per-identity scope. Null = master pool drains; character id =
    *  that character pays from their own pool. */
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch(`/earning/me/cosmetics/${encodeURIComponent(key)}/purchase`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ characterId }),
+    body: JSON.stringify({ characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1015,12 +1042,13 @@ export async function equipCosmetic(
   /** Per-identity scope. Null/undefined targets master/OOC;
    *  pass a character id to write that character's slot. */
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch(`/earning/me/cosmetics/${encodeURIComponent(key)}/equip`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ enabled, characterId }),
+    body: JSON.stringify({ enabled, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1037,12 +1065,13 @@ export async function patchProfileBannerUrl(
   url: string | null,
   /** Per-identity scope. Null = master/OOC, character id = character. */
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<{ url: string | null }> {
   const r = await fetch("/earning/me/banner", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ url, characterId }),
+    body: JSON.stringify({ url, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
   return (await r.json()) as { url: string | null };
@@ -1060,12 +1089,13 @@ export async function patchTypingPhrase(
   phrase: string | null,
   /** Per-identity scope. Null = master/OOC, character id = character. */
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<{ phrase: string | null }> {
   const r = await fetch("/earning/me/typing-phrase", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ phrase, characterId }),
+    body: JSON.stringify({ phrase, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
   return (await r.json()) as { phrase: string | null };
@@ -1085,12 +1115,13 @@ export async function patchRoomPresenceTemplates(
     leaveTemplate?: string | null;
     characterId?: string | null;
   },
+  serverId?: string | null,
 ): Promise<{ joinTemplate: string | null; leaveTemplate: string | null }> {
   const r = await fetch("/earning/me/room-presence", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
   return (await r.json()) as { joinTemplate: string | null; leaveTemplate: string | null };
@@ -1106,12 +1137,13 @@ export async function patchSessionPresenceTemplates(
     connectTemplate?: string | null;
     exitTemplate?: string | null;
   },
+  serverId?: string | null,
 ): Promise<{ connectTemplate: string | null; exitTemplate: string | null }> {
   const r = await fetch("/earning/me/session-presence", {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify(body),
+    body: JSON.stringify({ ...body, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
   return (await r.json()) as { connectTemplate: string | null; exitTemplate: string | null };
@@ -1120,12 +1152,13 @@ export async function patchSessionPresenceTemplates(
 export async function purchaseBorder(
   rankKey: string,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch(`/earning/me/borders/${encodeURIComponent(rankKey)}/purchase`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ characterId }),
+    body: JSON.stringify({ characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1139,12 +1172,13 @@ export async function purchaseBorder(
 export async function purchaseFreeformBorder(
   borderKey: string,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch(`/earning/me/freeform-borders/${encodeURIComponent(borderKey)}/purchase`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ characterId }),
+    body: JSON.stringify({ characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1162,12 +1196,13 @@ export async function patchFreeformBorderConfig(
   borderKey: string,
   config: Record<string, string> | null,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch(`/earning/me/freeform-borders/${encodeURIComponent(borderKey)}/config`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ config, characterId }),
+    body: JSON.stringify({ config, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1177,12 +1212,13 @@ export async function patchFreeformBorderConfig(
 export async function purchaseNameStyle(
   styleKey: string,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch(`/earning/me/name-styles/${encodeURIComponent(styleKey)}/purchase`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ characterId }),
+    body: JSON.stringify({ characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1193,12 +1229,13 @@ export async function purchaseNameStyle(
 export async function purchaseTransition(
   key: string,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch(`/earning/me/transitions/${encodeURIComponent(key)}/purchase`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ characterId }),
+    body: JSON.stringify({ characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1208,12 +1245,13 @@ export async function purchaseTransition(
 export async function setActiveRoomTransition(
   key: string | null,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch("/earning/me/active-room-transition", {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ key, characterId }),
+    body: JSON.stringify({ key, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1222,12 +1260,13 @@ export async function patchNameStyleConfig(
   styleKey: string,
   config: Record<string, unknown> | null,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch(`/earning/me/name-styles/${encodeURIComponent(styleKey)}/config`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ config, characterId }),
+    body: JSON.stringify({ config, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1237,12 +1276,13 @@ export async function setActiveNameStyle(
   /** Per-identity scope. Null/undefined targets the master/OOC
    *  slot; pass a character id to write that character's slot. */
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch("/earning/me/active-name-style", {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ styleKey, characterId }),
+    body: JSON.stringify({ styleKey, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1250,12 +1290,13 @@ export async function setActiveNameStyle(
 export async function setInlineAvatarEnabled(
   enabled: boolean,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch("/earning/me/cosmetics/inline_avatar/equip", {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ enabled, characterId }),
+    body: JSON.stringify({ enabled, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1690,12 +1731,13 @@ export async function buyItem(
   itemKey: string,
   quantity: number,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch(`/earning/me/items/${encodeURIComponent(itemKey)}/buy`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ quantity, characterId }),
+    body: JSON.stringify({ quantity, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1827,12 +1869,13 @@ export async function adminGrantItem(
 export async function setCollectionSlots(
   slots: Array<{ slot: number; itemKey: string | null }>,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch("/earning/me/collection", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ slots, characterId }),
+    body: JSON.stringify({ slots, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1845,12 +1888,13 @@ export async function setCollectionSlots(
 export async function setPetCollectionSlots(
   slots: Array<{ slot: number; itemKey: string | null }>,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<void> {
   const r = await fetch("/earning/me/pet-collection", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ slots, characterId }),
+    body: JSON.stringify({ slots, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1865,12 +1909,13 @@ export async function setPetNickname(
   slot: number,
   nickname: string | null,
   characterId: string | null = null,
+  serverId?: string | null,
 ): Promise<{ slot: number; nickname: string | null }> {
   const r = await fetch(`/earning/me/pet-collection/${slot}/nickname`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ nickname, characterId }),
+    body: JSON.stringify({ nickname, characterId, ...withServerId(serverId) }),
   });
   if (!r.ok) throw new Error(await readError(r));
   const j = (await r.json()) as { ok: true; slot: number; nickname: string | null };

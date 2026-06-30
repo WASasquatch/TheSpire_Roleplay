@@ -30,6 +30,50 @@ import { LinkPreviewCard } from "./LinkPreviewCard.js";
 import { MessageVisibilityGate } from "./MessageVisibilityGate.js";
 import { useMentionsCache, requestMentionResolve } from "../state/mentions.js";
 import { readError } from "../lib/http.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
+
+/**
+ * Per-server topic-card author flair (Servers Lift). The flair fields ride
+ * the shared `ForumTopicCard` (`author*`), resolved server-side from the
+ * cosmetics the author earned on the server the forum is affiliated to. A
+ * topic object only carries them when its source route emitted them (i.e.
+ * the forum HAS a `serverId` affiliation); absent ⇒ the forum is
+ * unaffiliated and the card renders BARE.
+ *
+ * This reads them off whatever topic object the render site holds (the
+ * store buckets are `ChatMessage`, which doesn't declare these optional
+ * fields) and returns `null` when none are present, so the gate "did the
+ * server send flair at all" is preserved on the client too.
+ */
+function topicCardFlair(topic: unknown): {
+  authorRankKey?: string | null;
+  authorTier?: number | null;
+  authorSelectedBorderRankKey?: string | null;
+  authorSelectedFreeformBorderKey?: string | null;
+  authorFreeformBorderConfig?: Record<string, string> | null;
+  authorNameStyleKey?: string | null;
+  authorNameStyleConfig?: Record<string, unknown> | null;
+} | null {
+  if (!topic || typeof topic !== "object") return null;
+  const t = topic as Partial<ForumTopicCard>;
+  // The whole flair set is sent together or omitted together (server
+  // contract). Presence of ANY author* flair key ⇒ the forum is affiliated.
+  const hasFlair =
+    "authorRankKey" in t ||
+    "authorSelectedBorderRankKey" in t ||
+    "authorSelectedFreeformBorderKey" in t ||
+    "authorNameStyleKey" in t;
+  if (!hasFlair) return null;
+  return {
+    authorRankKey: t.authorRankKey ?? null,
+    authorTier: t.authorTier ?? null,
+    authorSelectedBorderRankKey: t.authorSelectedBorderRankKey ?? null,
+    authorSelectedFreeformBorderKey: t.authorSelectedFreeformBorderKey ?? null,
+    authorFreeformBorderConfig: t.authorFreeformBorderConfig ?? null,
+    authorNameStyleKey: t.authorNameStyleKey ?? null,
+    authorNameStyleConfig: t.authorNameStyleConfig ?? null,
+  };
+}
 
 interface Props {
   messages: ChatMessage[];
@@ -1536,6 +1580,7 @@ function ForumView({
             <TopicCard
               key={topic.id}
               topic={topic}
+              flair={topicCardFlair(topic)}
               replies={repliesByParent.get(topic.id) ?? []}
               isActive={topic.id === activeTopicId}
               onToggle={() => onSetActiveTopic(topic.id === activeTopicId ? null : topic.id)}
@@ -2099,6 +2144,7 @@ function TopicCard({
   onWorldClick,
   onTimeClick,
   canAdminEdit,
+  flair = null,
 }: {
   topic: ChatMessage;
   replies: ChatMessage[];
@@ -2149,6 +2195,26 @@ function TopicCard({
   onMentionClick: (name: string) => void;
   onWorldClick: (slug: string) => void;
   onTimeClick: (msgId: string) => void;
+  /**
+   * Per-server author flair for the topic card (Servers Lift). Resolved
+   * SERVER-SIDE from the cosmetics the topic author earned on the server
+   * the forum is affiliated to (`forums.serverId`). `null` (the default)
+   * means the forum is UNAFFILIATED — the card renders BARE: no rank
+   * sigil, no avatar-border frame, no name style. A non-null object means
+   * the forum IS affiliated; its individual fields may still be null when
+   * the author hasn't earned/equipped that cosmetic on that server.
+   *
+   * Shape mirrors the `author*` fields on the shared `ForumTopicCard`.
+   */
+  flair?: {
+    authorRankKey?: string | null;
+    authorTier?: number | null;
+    authorSelectedBorderRankKey?: string | null;
+    authorSelectedFreeformBorderKey?: string | null;
+    authorFreeformBorderConfig?: Record<string, string> | null;
+    authorNameStyleKey?: string | null;
+    authorNameStyleConfig?: Record<string, unknown> | null;
+  } | null;
 }) {
   // Reply pagination (classic forum navigation): short chains render
   // whole; past REPLIES_PER_PAGE the chain pages, defaulting to the LAST
@@ -2274,6 +2340,19 @@ function TopicCard({
           userId={topic.userId}
           characterId={topic.characterId ?? null}
           size={48}
+          // Per-server flair (Servers Lift): when the forum is affiliated
+          // (`flair` non-null) the border comes from the forum's server via
+          // forceBorder — including the bare case (all null) so an
+          // unaffiliated forum doesn't leak the author's live equip. When
+          // `flair` is null we keep the legacy occupant-cache behavior.
+          {...(flair
+            ? {
+                forceBorder: true,
+                borderRankKey: flair.authorSelectedBorderRankKey ?? null,
+                freeformBorderKey: flair.authorSelectedFreeformBorderKey ?? null,
+                freeformBorderConfig: flair.authorFreeformBorderConfig ?? null,
+              }
+            : {})}
           onClick={(e) => {
             e.stopPropagation();
             onIconClick(topic.userId, topic.displayName, topic.characterId ?? null);
@@ -2337,6 +2416,12 @@ function TopicCard({
             </span>
           </div>
           <div className="flex items-baseline gap-2 text-[11px] text-keep-muted">
+            {/* Per-server rank sigil (Servers Lift). Only when the forum is
+                affiliated AND this author holds a rank on that server.
+                Unaffiliated forums (`flair` null) render no sigil. */}
+            {flair?.authorRankKey ? (
+              <RankSigil rankKey={flair.authorRankKey} tier={flair.authorTier ?? null} size="sm" variant="gem" />
+            ) : null}
             <span>by</span>
             <button
               type="button"
@@ -2352,9 +2437,23 @@ function TopicCard({
                 // chat-line `isSenderAdmin` above.
                 (topic.characterId === null && adminUserIds.has(topic.userId) ? "italic" : "")
               }
-              style={topicAuthorColor ? { color: topicAuthorColor } : undefined}
+              // A name style owns the color, so suppress the author-color
+              // override when one is active (matches the reply-row rule).
+              style={topicAuthorColor && !flair?.authorNameStyleKey ? { color: topicAuthorColor } : undefined}
             >
-              {topic.displayName}
+              {/* Per-server name style (Servers Lift). When the forum is
+                  affiliated and the author has a style equipped on that
+                  server, render through StyledName; otherwise plain text. */}
+              {flair?.authorNameStyleKey ? (
+                <StyledName
+                  displayName={topic.displayName}
+                  styleKey={flair.authorNameStyleKey}
+                  config={flair.authorNameStyleConfig ?? null}
+                  baseColor={topicAuthorColor}
+                />
+              ) : (
+                topic.displayName
+              )}
             </button>
             <span className="tabular-nums">
               {/* Use the larger of the server-provided total (correct on a
@@ -2503,6 +2602,9 @@ export function ForumAvatar({
   userId,
   characterId,
   borderRankKey,
+  freeformBorderKey,
+  freeformBorderConfig,
+  forceBorder = false,
 }: {
   src: string | null;
   name: string;
@@ -2526,6 +2628,18 @@ export function ForumAvatar({
   characterId?: string | null;
   /** Direct border override, wins over `userId` lookup. */
   borderRankKey?: string | null;
+  /** Direct free-form border override + its color config (Servers Lift:
+   *  per-server topic flair). When `forceBorder` is set, these REPLACE the
+   *  occupant-cache lookup entirely — including the free-form slot — so an
+   *  unaffiliated forum (all three null + forceBorder) renders a bare tile
+   *  instead of leaking the author's live equipped border. */
+  freeformBorderKey?: string | null;
+  freeformBorderConfig?: Record<string, string> | null;
+  /** When true, the occupant-cache border lookup is bypassed and ONLY the
+   *  explicit `borderRankKey` / `freeformBorderKey` props drive the frame.
+   *  Used by per-server forum surfaces where the border must come from the
+   *  forum's server, not the author's current live equip. */
+  forceBorder?: boolean;
 }) {
   // Tuple-aware occupant matcher used by every cache lookup below.
   // (userId, characterId) pins a specific identity, the same way
@@ -2587,7 +2701,14 @@ export function ForumAvatar({
     }
     return null;
   });
-  const effectiveBorder = borderRankKey ?? occupantBorderRankKey;
+  // forceBorder (per-server forum flair): the explicit props are the ONLY
+  // source — the occupant cache is bypassed for every border slot so an
+  // unaffiliated forum (all border props null) renders a bare tile rather
+  // than leaking the author's live equip. Otherwise keep the legacy
+  // "explicit override else occupant cache" behavior.
+  const effectiveBorder = forceBorder ? (borderRankKey ?? null) : (borderRankKey ?? occupantBorderRankKey);
+  const effectiveFreeformBorderKey = forceBorder ? (freeformBorderKey ?? null) : occupantFreeformBorderKey;
+  const effectiveFreeformConfig = forceBorder ? (freeformBorderConfig ?? null) : occupantFreeformBorderConfig;
   // Live URL wins over the snapshot. This is the inverse of the
   // earlier `src ?? occupantAvatarUrl` order, which preferred the
   // historical snapshot, but the snapshot URL has no companion
@@ -2607,8 +2728,8 @@ export function ForumAvatar({
       avatarUrl={effectiveSrc}
       name={name}
       borderRankKey={effectiveBorder ?? null}
-      freeformBorderKey={occupantFreeformBorderKey}
-      freeformConfig={occupantFreeformBorderConfig}
+      freeformBorderKey={effectiveFreeformBorderKey}
+      freeformConfig={effectiveFreeformConfig}
       avatarCrop={effectiveCrop}
       size={mappedSize}
       {...(onClick ? { onClick } : {})}
@@ -3468,6 +3589,10 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [knownCategories, setKnownCategories] = useState<string[] | null>(null);
+  // Calm-mode ease: this popover is a desktop dropdown (md:top-full) AND a
+  // mobile bottom-sheet (fixed bottom-2), so a slide transform's direction
+  // would be wrong in one layout — fade in (opacity only) is safe for both.
+  const reduceMotion = useReducedMotion();
 
   async function openPopover() {
     setOpen(true);
@@ -3534,7 +3659,7 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
           // trigger's left edge, same as before. `max-h-[80vh]` +
           // `overflow-y-auto` keeps it usable on very short mobile
           // viewports (e.g. landscape phone with the keyboard open).
-          className="fixed inset-x-2 bottom-2 z-30 max-h-[80vh] overflow-y-auto rounded border border-keep-rule bg-keep-bg p-2 text-xs normal-case tracking-normal shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:left-0 md:top-full md:mt-1 md:max-h-none md:min-w-[16rem]"
+          className={`fixed inset-x-2 bottom-2 z-30 max-h-[80vh] overflow-y-auto rounded border border-keep-rule bg-keep-bg p-2 text-xs normal-case tracking-normal shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:left-0 md:top-full md:mt-1 md:max-h-none md:min-w-[16rem]${reduceMotion ? " tk-fade-in" : ""}`}
         >
           <div className="mb-1 font-semibold text-keep-text">Bookmark</div>
           <label className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">
@@ -5053,6 +5178,10 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
   // Lazy-load the caller's existing categories so the dropdown can
   // suggest them. Only fetched the first time the popover opens.
   const [knownCategories, setKnownCategories] = useState<string[] | null>(null);
+  // Calm-mode ease: desktop dropdown (md:top-5) AND mobile bottom-sheet (fixed
+  // bottom-2), so fade in (opacity only) — a slide direction would be wrong in
+  // one of the two layouts.
+  const reduceMotion = useReducedMotion();
 
   async function openPopover() {
     setOpen(true);
@@ -5131,7 +5260,7 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
           // to the trigger's right edge (the flat-chat hover icon
           // lives near the right of the message row, so right-0 is
           // the natural anchor for md+).
-          className="fixed inset-x-2 bottom-2 z-30 max-h-[80vh] overflow-y-auto rounded border border-keep-rule bg-keep-bg p-2 text-xs normal-case tracking-normal shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:right-0 md:top-5 md:max-h-none md:min-w-[16rem] md:normal-case md:tracking-normal"
+          className={`fixed inset-x-2 bottom-2 z-30 max-h-[80vh] overflow-y-auto rounded border border-keep-rule bg-keep-bg p-2 text-xs normal-case tracking-normal shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:right-0 md:top-5 md:max-h-none md:min-w-[16rem] md:normal-case md:tracking-normal${reduceMotion ? " tk-fade-in" : ""}`}
         >
           <div className="mb-1 font-semibold text-keep-text">Bookmark</div>
           <label className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">

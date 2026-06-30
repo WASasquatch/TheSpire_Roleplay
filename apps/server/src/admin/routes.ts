@@ -40,6 +40,7 @@ import {
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
 import { getSettings, updateSettings } from "../settings.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { globalAuditScopeWhere, recordAudit } from "../audit.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
 import { registerAdminEarningRoutes } from "./earning.js";
@@ -917,6 +918,11 @@ export async function registerAdminRoutes(
       isSystem: body.isSystem ?? true,
       isDefault: body.isDefault ?? false,
       replyMode: body.replyMode ?? "flat",
+      // Home admin-created rooms in the default (is_system) server so the row
+      // is never NULL (the column has no DB default). The site-admin "create
+      // room" surface is server-agnostic; per-server rooms come from the owner
+      // console (admin/servers.ts), which stamps its own serverId.
+      serverId: DEFAULT_SERVER_ID,
     });
     // The creating admin gets an owner row in case they want to /topic etc
     // from inside the chat without elevating to site-admin every time.
@@ -927,10 +933,10 @@ export async function registerAdminRoutes(
     }).onConflictDoNothing();
     // Live-publish the new room into every connected client's rooms tree.
     // No one is in the room yet so broadcastRoomState/Presence would be
-    // no-ops here; emit the pulse directly. Admin-created rooms carry no
-    // serverId yet, so this resolves to the bare global pulse (today's
-    // behavior) whether or not the servers feature is on.
-    emitTreeChanged(io, null);
+    // no-ops here; emit the pulse directly. The room is homed in the default
+    // server, so scope the pulse there when the flag is on; emitTreeChanged
+    // falls back to the bare global pulse when servers are off.
+    emitTreeChanged(io, DEFAULT_SERVER_ID);
     return { id, name: body.name, type: body.type };
   });
 
@@ -1226,6 +1232,10 @@ export async function registerAdminRoutes(
     securityNoticeHtml: z.string().max(500_000).optional(),
     /** HTML body of the registration disclaimer (effectively the ToS). Sanitized on save. */
     registerDisclaimerHtml: z.string().max(500_000).optional(),
+    /** HTML rules shown with an "I agree" gate when applying to register a server. Sanitized on save. */
+    serverRegistrationRulesHtml: z.string().max(500_000).optional(),
+    /** HTML rules shown with an "I agree" gate when applying to create a forum. Sanitized on save. */
+    forumRegistrationRulesHtml: z.string().max(500_000).optional(),
     /** Plain-text SEO description (meta description, OG, Twitter card). 500-char cap. */
     metaDescription: z.string().max(500).optional(),
     /**
@@ -1296,6 +1306,8 @@ export async function registerAdminRoutes(
       rulesHtml: s.rulesHtml,
       securityNoticeHtml: s.securityNoticeHtml,
       registerDisclaimerHtml: s.registerDisclaimerHtml,
+      serverRegistrationRulesHtml: s.serverRegistrationRulesHtml,
+      forumRegistrationRulesHtml: s.forumRegistrationRulesHtml,
       metaDescription: s.metaDescription,
       customHeadHtml: s.customHeadHtml,
       activityFeedsEnabled: s.activityFeedsEnabled,
@@ -1394,6 +1406,14 @@ export async function registerAdminRoutes(
     if (body.registerDisclaimerHtml !== undefined) {
       const { sanitizeBio } = await import("../auth/html.js");
       patch.registerDisclaimerHtml = sanitizeBio(body.registerDisclaimerHtml);
+    }
+    if (body.serverRegistrationRulesHtml !== undefined) {
+      const { sanitizeBio } = await import("../auth/html.js");
+      patch.serverRegistrationRulesHtml = sanitizeBio(body.serverRegistrationRulesHtml);
+    }
+    if (body.forumRegistrationRulesHtml !== undefined) {
+      const { sanitizeBio } = await import("../auth/html.js");
+      patch.forumRegistrationRulesHtml = sanitizeBio(body.forumRegistrationRulesHtml);
     }
     // metaDescription is plain text - just trim. Newlines collapse to spaces
     // since meta descriptions are single-line.

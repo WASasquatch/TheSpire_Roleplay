@@ -18,7 +18,8 @@ import { characterPortraits, characters, userPortraits, users } from "../db/sche
 import { bioHtmlForEdit, sanitizeBio } from "../auth/html.js";
 import { recordAudit } from "../audit.js";
 import { getSessionUser } from "./auth.js";
-import { getSettings, parseOwnThemeJson, parseUserThemeJson } from "../settings.js";
+import { getServerSettings, getSettings, parseOwnThemeJson, parseUserThemeJson } from "../settings.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { broadcastPresence } from "../realtime/broadcast.js";
 import { eqNameInsensitive } from "../lib/nameLookup.js";
 import type { Db } from "../db/index.js";
@@ -669,12 +670,18 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     // spammed when an admin sets or updates the welcome text). Plus the
     // usual "non-empty welcome" + "user hasn't acknowledged this hash" gates.
     const settings = await getSettings(db);
+    // The welcome COPY + its hash come from the user's home/favorite server
+    // (`default_server_id`, NULL → DEFAULT_SERVER_ID); a NULL override inherits
+    // the platform copy, so flag-off is byte-identical. `newUserWelcomeUpdatedAt`
+    // (the edit timestamp gating the audience) has no per-server analog and
+    // stays platform-global on `settings`.
+    const serverSettings = await getServerSettings(db, u.defaultServerId ?? DEFAULT_SERVER_ID);
     const userCreatedMs = +u.createdAt;
     const wantsWelcome =
-      settings.newUserWelcomeHash !== "" &&
+      serverSettings.newUserWelcomeHash !== "" &&
       settings.newUserWelcomeUpdatedAt !== null &&
       userCreatedMs > settings.newUserWelcomeUpdatedAt &&
-      u.welcomeSeenHash !== settings.newUserWelcomeHash;
+      u.welcomeSeenHash !== serverSettings.newUserWelcomeHash;
     return {
       userId: u.id,
       username: u.username,
@@ -745,7 +752,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       publicProfileBgUrl: u.publicProfileBgUrl,
       publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
       welcome: wantsWelcome
-        ? { html: settings.newUserWelcomeHtml, hash: settings.newUserWelcomeHash }
+        ? { html: serverSettings.newUserWelcomeHtml, hash: serverSettings.newUserWelcomeHash }
         : null,
       // Admin-tunable input caps surfaced to the editor so the bio counter
       // matches whatever the server will accept on save. Without these the
@@ -772,12 +779,16 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     if (!me) { reply.code(401); return { error: "auth" }; }
     let body: { hash?: string } = {};
     try { body = req.body as { hash?: string }; } catch { /* tolerate */ }
-    const settings = await getSettings(db);
-    // Default to the current hash so a client that omits the field still
-    // dismisses the live welcome. Bound the length to avoid stuffing.
+    // Default to the live hash of the user's HOME-server welcome (the same copy
+    // /me/profile served them, resolved from `default_server_id`, NULL →
+    // DEFAULT_SERVER_ID, which inherits the platform copy) so a client that
+    // omits the field still dismisses exactly the version it was shown. Bound
+    // the length to avoid stuffing.
+    const u = (await db.select({ fav: users.defaultServerId }).from(users).where(eq(users.id, me.id)).limit(1))[0];
+    const serverSettings = await getServerSettings(db, u?.fav ?? DEFAULT_SERVER_ID);
     const hash = (typeof body.hash === "string" && body.hash.length <= 64)
       ? body.hash
-      : settings.newUserWelcomeHash;
+      : serverSettings.newUserWelcomeHash;
     await db.update(users).set({ welcomeSeenHash: hash }).where(eq(users.id, me.id));
     return { ok: true };
   });

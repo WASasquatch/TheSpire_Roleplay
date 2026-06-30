@@ -59,6 +59,18 @@ export function arcadeGameByKey(key: string): ArcadeGameDef | null {
 /** The one-time unlock cosmetic key (a "Flair" in the shop). */
 export const FLAIR_EIDOLON_TAMER = "flair_eidolon_tamer";
 
+/**
+ * The `items.category` values the Eidolon Tamer consumes / requires. A server
+ * that turns on the Arcade needs exactly these item rows to function: `pet`
+ * (the familiars you can hatch), `food` (feeding), `toy` (reusable play), and
+ * `magic` (cure / revive potions). Named here so the per-server "import Arcade
+ * items" path (servers/earning.ts) copies precisely this slice of the Spire
+ * built-in `items` catalog — never the whole shop. The unlock itself
+ * (`FLAIR_EIDOLON_TAMER`) is a `cosmetics` row, imported alongside these.
+ */
+export const EIDOLON_ITEM_CATEGORIES = ["pet", "food", "toy", "magic"] as const;
+export type EidolonItemCategory = (typeof EIDOLON_ITEM_CATEGORIES)[number];
+
 /** Display cost of the Eidolon Tamer unlock. Mirrors the cosmetics seed in
  *  migration 0201; the real charge is server-side at purchase time. */
 export const EIDOLON_UNLOCK_COST = 2500;

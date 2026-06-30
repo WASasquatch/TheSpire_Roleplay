@@ -74,15 +74,19 @@ export interface PlayOptions {
 
 export async function playRoomTransition(key: string | null | undefined, opts: PlayOptions): Promise<void> {
   const { wrapperEl, swap, force = false, zIndex = 45, isReady } = opts;
-  const transition = key ? getRoomTransition(key) : null;
+  // "fade" is the built-in calm default (Reduce Motion); it has a rite but no
+  // shop-catalog entry, so don't require one for it.
+  const isBuiltin = key === "fade";
+  const transition = key && !isBuiltin ? getRoomTransition(key) : null;
   const rite = key ? getRite(key) : undefined;
   const rect = wrapperEl?.getBoundingClientRect();
   // Degrade to an instant switch on: no/unknown transition, missing or
   // zero-size wrapper, a transition already in flight, or reduced motion.
   // `busy` always blocks (concurrent runs would clash on the shared rite
-  // context); `force` (preview) only overrides reduced-motion.
+  // context); `force` (preview, or the Reduce-Motion baseline fade) only
+  // overrides reduced-motion.
   if (
-    !transition || !rite || !wrapperEl || !rect || rect.width < 10 || rect.height < 10 ||
+    (!transition && !isBuiltin) || !rite || !wrapperEl || !rect || rect.width < 10 || rect.height < 10 ||
     busy || (!force && prefersReducedMotion())
   ) {
     swap();

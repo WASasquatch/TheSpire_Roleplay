@@ -1,5 +1,5 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
-import { isAdminRole, roleRank, type PermissionKey } from "@thekeep/shared";
+import { isAdminRole, roleRank, type PermissionKey, type ServerModPermission, type ServerPermission } from "@thekeep/shared";
 import { bans, mutes, roomMembers, roomMods, rooms, users } from "../../db/schema.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { areServersEnabled, getSettings } from "../../settings.js";
@@ -107,11 +107,44 @@ async function isKeymaster(ctx: CommandContext, userId: string): Promise<boolean
  * just `kick_user` can boot people but not ban them, granular
  * matrix grants pass straight through.
  */
+/**
+ * The caller's per-server moderation tier for THIS room's server, or null when
+ * servers are off or this isn't a real sub-server (the default/system server
+ * keeps the GLOBAL moderation gates, plan §9.8). Mirrors routes/messages.ts
+ * `serverModTier` so chat commands honor server roles exactly like the HTTP
+ * path does. serverAuthority is imported dynamically to keep mod.ts off the
+ * servers module's static graph.
+ */
+async function serverModTier(
+  ctx: CommandContext,
+): Promise<{ isOwner: boolean; permissions: ServerPermission[]; serverOwnerUserId: string } | null> {
+  if (!areServersEnabled(await getSettings(ctx.db))) return null;
+  const room = (await ctx.db.select({ serverId: rooms.serverId }).from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
+  if (!room?.serverId) return null;
+  const { serverAuthority } = await import("../../servers/authority.js");
+  const a = await serverAuthority(ctx.db, ctx.user, room.serverId);
+  if (!a.server || a.server.isSystem) return null;
+  return { isOwner: a.isOwner, permissions: a.permissions, serverOwnerUserId: a.server.ownerUserId };
+}
+
+/** Owner-implies-all check for a server moderation tier (mirrors serverCan). */
+function serverTierCan(
+  tier: { isOwner: boolean; permissions: ServerPermission[] } | null,
+  key: ServerModPermission,
+): boolean {
+  return !!tier && (tier.isOwner || tier.permissions.includes(key));
+}
+
 async function callerCanModerateRoom(
   ctx: CommandContext,
   siteKey: PermissionKey,
+  serverKey?: ServerModPermission,
 ): Promise<boolean> {
   if (await hasPermission(ctx.user, siteKey, ctx.db)) return true;
+  // Per-server staff: a sub-server's owner/admin/mod holding the matching
+  // server grant can moderate that server's rooms via chat (default server
+  // stays on the global gates above).
+  if (serverKey && serverTierCan(await serverModTier(ctx), serverKey)) return true;
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === ctx.user.id) return true;
@@ -128,8 +161,12 @@ async function callerCanModerateRoom(
 async function callerOwnsRoom(
   ctx: CommandContext,
   siteKey: PermissionKey,
+  serverKey?: ServerModPermission,
 ): Promise<boolean> {
   if (await hasPermission(ctx.user, siteKey, ctx.db)) return true;
+  // Per-server staff with the matching server grant (e.g. ban_member) count as
+  // "owner-equivalent" for this gate in their own server's rooms.
+  if (serverKey && serverTierCan(await serverModTier(ctx), serverKey)) return true;
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room) return false;
   if (room.ownerId === ctx.user.id) return true;
@@ -157,7 +194,7 @@ export const kickCommand: CommandHandler = {
     },
   ],
   async run(ctx) {
-    if (!(await callerCanModerateRoom(ctx, "kick_user"))) {
+    if (!(await callerCanModerateRoom(ctx, "kick_user", "kick_member"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /kick.");
     }
     const [name, ...reasonParts] = ctx.args;
@@ -270,7 +307,7 @@ export const muteCommand: CommandHandler = {
     },
   ],
   async run(ctx) {
-    if (!(await callerCanModerateRoom(ctx, "mute_user"))) {
+    if (!(await callerCanModerateRoom(ctx, "mute_user", "mute_member"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /mute.");
     }
     const [name, durationStr, ...reasonParts] = ctx.args;
@@ -329,7 +366,7 @@ export const unmuteCommand: CommandHandler = {
   usage: "/unmute <username>",
   description: "Lift a /mute on a user in the current room.",
   async run(ctx) {
-    if (!(await callerCanModerateRoom(ctx, "unmute_user"))) {
+    if (!(await callerCanModerateRoom(ctx, "unmute_user", "unmute_member"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /unmute.");
     }
     const name = ctx.argsText.trim();
@@ -579,7 +616,7 @@ export const banCommand: CommandHandler = {
     // mods can /kick (temporary ejection) and /mute (silenced but
     // still present), those cover the day-to-day moderation surface
     // without handing out the "you can never come back" lever.
-    if (!(await callerOwnsRoom(ctx, "ban_user"))) {
+    if (!(await callerOwnsRoom(ctx, "ban_user", "ban_member"))) {
       return notice(ctx, "PERM", "Only the room owner or a site admin can /ban. Room mods can /kick or /mute instead.");
     }
     const [name, maybeDur, ...rest] = ctx.args;
@@ -681,7 +718,7 @@ export const unbanCommand: CommandHandler = {
     // can lift a ban. A room mod who could /unban but not /ban would
     // be able to override an owner's permanent ban decision, which
     // defeats the purpose of restricting /ban to the owner.
-    if (!(await callerOwnsRoom(ctx, "unban_user"))) {
+    if (!(await callerOwnsRoom(ctx, "unban_user", "unban_member"))) {
       return notice(ctx, "PERM", "Only the room owner or a site admin can /unban.");
     }
     const name = ctx.argsText.trim();
@@ -756,7 +793,7 @@ export const announceCommand: CommandHandler = {
     }
 
     // Current-room variant - owner/mod/admin only.
-    if (!(await callerCanModerateRoom(ctx, "announce_room"))) {
+    if (!(await callerCanModerateRoom(ctx, "announce_room", "manage_announcements"))) {
       return notice(ctx, "PERM", "Only room owner/mod or a site admin can /announce.");
     }
 

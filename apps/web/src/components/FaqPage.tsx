@@ -3,6 +3,14 @@ import DOMPurify from "dompurify";
 import type { FaqEntry } from "@thekeep/shared";
 import type { FaqRoute } from "../lib/faqUrl.js";
 import { navigateAwayFromFaq } from "../lib/faqUrl.js";
+import { useChat } from "../state/store.js";
+
+/** `?serverId=<active server>` so the FAQ shows THIS server's entries; empty
+ *  when there's no active server (a logged-out / shared link), where the backend
+ *  falls back to the default/system server's FAQ. */
+function faqServerQuery(serverId: string | null): string {
+  return serverId ? `?serverId=${encodeURIComponent(serverId)}` : "";
+}
 
 /**
  * Public, no-auth-required FAQ pages.
@@ -47,15 +55,16 @@ function Shell({ title, children }: { title: string; children: React.ReactNode }
 function FaqIndex() {
   const [faqs, setFaqs] = useState<FaqEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const currentServerId = useChat((s) => s.currentServerId);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/faqs", { credentials: "include" })
+    fetch(`/api/faqs${faqServerQuery(currentServerId)}`, { credentials: "include" })
       .then(async (r) => { if (!r.ok) throw new Error(`status ${r.status}`); return r.json() as Promise<{ faqs: FaqEntry[] }>; })
       .then((j) => { if (!cancelled) setFaqs(j.faqs); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
     return () => { cancelled = true; };
-  }, []);
+  }, [currentServerId]);
 
   // Group by category (uncategorized last), preserving server sort order.
   const groups = new Map<string, FaqEntry[]>();
@@ -100,11 +109,12 @@ function FaqIndex() {
 function FaqEntryView({ slug }: { slug: string }) {
   const [faq, setFaq] = useState<FaqEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const currentServerId = useChat((s) => s.currentServerId);
 
   useEffect(() => {
     let cancelled = false;
     setFaq(null); setError(null);
-    fetch(`/api/faqs/${encodeURIComponent(slug)}`, { credentials: "include" })
+    fetch(`/api/faqs/${encodeURIComponent(slug)}${faqServerQuery(currentServerId)}`, { credentials: "include" })
       .then(async (r) => {
         if (r.status === 404) throw new Error("That FAQ entry doesn't exist (or isn't published).");
         if (!r.ok) throw new Error(`status ${r.status}`);
@@ -113,7 +123,7 @@ function FaqEntryView({ slug }: { slug: string }) {
       .then((j) => { if (!cancelled) setFaq(j.faq); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
     return () => { cancelled = true; };
-  }, [slug]);
+  }, [slug, currentServerId]);
 
   return (
     <Shell title={faq ? faq.question : "FAQ"}>

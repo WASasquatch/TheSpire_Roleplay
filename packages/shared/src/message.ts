@@ -286,6 +286,35 @@ export interface ChatMessage {
    * every non-poll row.
    */
   poll?: import("./poll.js").PollState | null;
+  /* ---------------------------------------------------------------
+   * PER-SERVER TOPIC-CARD FLAIR (Servers Lift). Mirrors the
+   * `author*` set on `ForumTopicCard`. Present ONLY on the top-level
+   * topic rows from `GET /rooms/:id/topics` when the board's forum
+   * HAS a server affiliation (`forums.serverId`), and they describe
+   * the cosmetics the author earned/equipped ON THAT SERVER. ALL of
+   * these ship together or ALL are omitted: an UNAFFILIATED forum
+   * (`forums.serverId IS NULL`) sends none of them and the card MUST
+   * render bare (no sigil, no border frame, no name style). The
+   * individual values may be null when the author hasn't earned/
+   * equipped that cosmetic on that server. The renderer gates flair
+   * on "did the server send the field at all", not on its value, and
+   * prefers these over the post-time `rankKey`/`tier` snapshot so a
+   * (re)affiliated forum shows CURRENT per-server flair.
+   * --------------------------------------------------------------- */
+  /** Rank key in the forum's server (drives the topic-card RankSigil), or null. */
+  authorRankKey?: string | null;
+  /** Rank tier (I–IV) paired with `authorRankKey`, or null. */
+  authorTier?: number | null;
+  /** Equipped rank-tier avatar border key in the forum's server, or null. */
+  authorSelectedBorderRankKey?: string | null;
+  /** Equipped free-form avatar border key in the forum's server, or null. */
+  authorSelectedFreeformBorderKey?: string | null;
+  /** Per-identity color config for the equipped free-form border, or null. */
+  authorFreeformBorderConfig?: Record<string, string> | null;
+  /** Equipped name-style key in the forum's server, or null. */
+  authorNameStyleKey?: string | null;
+  /** Owned-style color config paired with `authorNameStyleKey`, or null. */
+  authorNameStyleConfig?: Record<string, unknown> | null;
 }
 
 /**

@@ -12,7 +12,8 @@ import type { CommandContext, SessionUser } from "../commands/types.js";
 import type { Db } from "../db/index.js";
 import { messages, mutes, rooms } from "../db/schema.js";
 import { formatDuration } from "../commands/duration.js";
-import { getSettings } from "../settings.js";
+import { areServersEnabled, getServerSettings, getSettings } from "../settings.js";
+import { resolveRoomServerId } from "../earning/pool.js";
 import { addMessage } from "./broadcast.js";
 import { hasPermission } from "../auth/permissions.js";
 
@@ -96,8 +97,15 @@ export async function dispatchChatInput(args: {
   // right limit early, the second forum-only post-length check
   // farther down is the "did this specific forum send fit?" gate,
   // while this one is the "is this input even sane?" pre-filter.
-  const settings = await getSettings(db);
-  const { maxMessageLength, maxForumPostLength, maxForumTopicTitleLength } = settings;
+  // Per-server caps: resolve the crediting room's server (NULL/legacy room →
+  // DEFAULT_SERVER_ID) and read its effective length caps. NULL overrides
+  // inherit the platform default, so with the flag off (single, system server)
+  // these are byte-identical to `getSettings(db)`. `maxForumTopicTitleLength`
+  // has no per-server override (platform-global), so it stays on `getSettings`.
+  const serverId = await resolveRoomServerId(db, roomId);
+  const serverSettings = await getServerSettings(db, serverId);
+  const { maxMessageLength, maxForumPostLength } = serverSettings;
+  const { maxForumTopicTitleLength } = await getSettings(db);
   // Use the larger of the two so a forum-bound long body isn't
   // rejected before we know it's destined for a forum room. The
   // forum-specific check inside the nested-mode branch enforces the
@@ -309,7 +317,8 @@ export async function dispatchChatInput(args: {
     return;
   }
 
-  const handler = registry.resolve(parsed.command);
+  // Scope custom-command resolution to the room's server (built-ins are global).
+  const handler = registry.resolve(parsed.command, (socket.data as { serverId?: string }).serverId);
   if (!handler) {
     const suggestions = registry.suggest(parsed.command);
     const tail = suggestions.length ? ` Did you mean ${suggestions.map((s) => `/${s}`).join(", ")}?` : "";
@@ -326,8 +335,20 @@ export async function dispatchChatInput(args: {
   // install can hand out `/promoteadmin` to a non-admin via the
   // matrix without touching this dispatcher.
   if (handler.permission && !(await hasPermission(user, handler.permission, db))) {
-    socket.emit("error:notice", { code: "PERM", message: "You don't have permission to use that command." });
-    return;
+    // Per-server fallback: a sub-server's staff holding the matching server
+    // grant may run this command in their server's rooms even without the
+    // global key (the default/system server stays on the global gate above).
+    let serverOk = false;
+    const sid = (socket.data as { serverId?: string }).serverId;
+    if (handler.serverPermission && sid && areServersEnabled(await getSettings(db))) {
+      const { serverAuthority, serverCan } = await import("../servers/authority.js");
+      const a = await serverAuthority(db, user, sid);
+      serverOk = !!a.server && !a.server.isSystem && serverCan(a, handler.serverPermission);
+    }
+    if (!serverOk) {
+      socket.emit("error:notice", { code: "PERM", message: "You don't have permission to use that command." });
+      return;
+    }
   }
 
   // Forum-thread auto-binding. When the composer was scoped to an

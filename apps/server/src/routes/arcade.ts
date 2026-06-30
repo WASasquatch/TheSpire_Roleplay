@@ -21,6 +21,8 @@ import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { creditPool } from "../earning/award.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { serverAuthority } from "../servers/authority.js";
+import { getSettings, areServersEnabled } from "../settings.js";
 import { fetchDisplayInfo } from "../earning/rankings.js";
 import {
   BASIC_HEAL_AMOUNT, BASIC_HEAL_COST, POTION_HEAL_AMOUNT,
@@ -39,10 +41,34 @@ const gaugeSum = (s: { satiety: number; joy: number; vigor: number; hygiene: num
 export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
   /* ---- identity + gate ---- */
   type Gate =
-    | { ok: true; userId: string; role: import("@thekeep/shared").Role; scope: Scope; ownerId: string }
+    | { ok: true; userId: string; role: import("@thekeep/shared").Role; scope: Scope; ownerId: string; serverId: string }
     | { ok: false; code: number; body: Record<string, unknown> };
 
-  async function gate(req: FastifyRequest, characterId: string | null): Promise<Gate> {
+  /** Resolve the active server this familiar lives on. The arcade routes are
+   *  NOT room-scoped, so the active server comes from an optional `?serverId`
+   *  (GET) / body.serverId (POST), validated EXACTLY like `/earning/me`
+   *  (routes/earning.ts): honored only when the servers flag is on AND the
+   *  caller may view that server's economy (it exists and they're a member,
+   *  owner/staff folded into serverAuthority.isMember). Anything else — flag
+   *  off, unknown id, foreign server — falls back to the default server, so the
+   *  flag-off / single-server path is byte-identical (no extra DB hits when the
+   *  query is absent or already the default). */
+  async function resolveActiveServerId(
+    me: { id: string; role: import("@thekeep/shared").Role },
+    requestedServerId: string | undefined,
+  ): Promise<string> {
+    if (
+      requestedServerId &&
+      requestedServerId !== DEFAULT_SERVER_ID &&
+      areServersEnabled(await getSettings(db))
+    ) {
+      const authority = await serverAuthority(db, me, requestedServerId);
+      if (authority.server && authority.isMember) return requestedServerId;
+    }
+    return DEFAULT_SERVER_ID;
+  }
+
+  async function gate(req: FastifyRequest, characterId: string | null, requestedServerId: string | undefined): Promise<Gate> {
     const me = await getSessionUser(req, db);
     if (!me) return { ok: false, code: 401, body: { error: "auth" } };
     // Two permission gates: the Arcade section, then this specific game.
@@ -59,24 +85,30 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       if (!c || c.userId !== me.id || c.deletedAt) return { ok: false, code: 403, body: { error: "not your character" } };
       scope = "character"; ownerId = characterId;
     }
-    // Purchase gate: the per-identity one-time unlock (a ledger row).
+    const serverId = await resolveActiveServerId(me, requestedServerId);
+    // Purchase gate: the per-identity, PER-SERVER one-time unlock (a ledger
+    // row). The Eidolon is a SEPARATE familiar per server, so the unlock is
+    // bought (and checked) per server. With the flag off the only server is the
+    // default, so this is byte-identical to the legacy single-pool check.
     const owned = (await db
       .select({ id: earningLedger.id })
       .from(earningLedger)
-      .where(and(eq(earningLedger.scope, scope), eq(earningLedger.ownerId, ownerId), eq(earningLedger.reason, `purchase_${FLAIR_EIDOLON_TAMER}`)))
+      .where(and(eq(earningLedger.serverId, serverId), eq(earningLedger.scope, scope), eq(earningLedger.ownerId, ownerId), eq(earningLedger.reason, `purchase_${FLAIR_EIDOLON_TAMER}`)))
       .limit(1))[0];
     if (!owned) return { ok: false, code: 402, body: { error: "locked", needsUnlock: true } };
-    return { ok: true, userId: me.id, role: me.role, scope, ownerId };
+    return { ok: true, userId: me.id, role: me.role, scope, ownerId, serverId };
   }
 
-  async function loadRow(scope: Scope, ownerId: string): Promise<Row | undefined> {
+  async function loadRow(scope: Scope, ownerId: string, serverId: string): Promise<Row | undefined> {
     return (await db.select().from(eidolonState)
-      .where(and(eq(eidolonState.ownerScope, scope), eq(eidolonState.ownerId, ownerId))).limit(1))[0];
+      .where(and(eq(eidolonState.serverId, serverId), eq(eidolonState.ownerScope, scope), eq(eidolonState.ownerId, ownerId))).limit(1))[0];
   }
 
-  async function petIconFor(petItemKey: string | null): Promise<string | null> {
+  async function petIconFor(petItemKey: string | null, serverId: string): Promise<string | null> {
     if (!petItemKey) return null;
-    const it = (await db.select({ iconUrl: items.iconUrl }).from(items).where(eq(items.key, petItemKey)).limit(1))[0];
+    // Per-server catalog (migration 0298): the icon must come from the SAME
+    // server's items row. Flag off ⇒ serverId is the default, byte-identical.
+    const it = (await db.select({ iconUrl: items.iconUrl }).from(items).where(and(eq(items.serverId, serverId), eq(items.key, petItemKey))).limit(1))[0];
     return it?.iconUrl ?? null;
   }
 
@@ -110,9 +142,9 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
 
   /** Build a Hall memorial row for a departing familiar. `peakLevel` = the
    *  level at departure, which equals the lifetime peak (XP only ever accrues). */
-  function hallValues(scope: Scope, ownerId: string, row: Row, prog: EidolonProgress, reason: "sold" | "released", nowMs: number): typeof eidolonHall.$inferInsert {
+  function hallValues(scope: Scope, ownerId: string, serverId: string, row: Row, prog: EidolonProgress, reason: "sold" | "released", nowMs: number): typeof eidolonHall.$inferInsert {
     return {
-      id: nanoid(), ownerScope: scope, ownerId, name: row.name, kind: row.kind,
+      id: nanoid(), serverId, ownerScope: scope, ownerId, name: row.name, kind: row.kind,
       speciesId: row.speciesId, trait: row.trait, variant: row.variant,
       peakLevel: eidolonLevelFromXp(prog.xp), ageHours: prog.ageHours,
       departReason: reason, departedAt: nowMs,
@@ -120,7 +152,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
   }
 
   /** Write the caught-up + effect-applied progress back. */
-  async function persist(scope: Scope, ownerId: string, row: Row, prog: EidolonProgress, nowMs: number): Promise<void> {
+  async function persist(scope: Scope, ownerId: string, serverId: string, row: Row, prog: EidolonProgress, nowMs: number): Promise<void> {
     await db.update(eidolonState).set({
       // dead -> "dormant" (frozen, revivable); otherwise alive. A persisted row
       // is never "egg" (hatch writes "alive"), so a non-dead familiar is alive —
@@ -135,16 +167,16 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       // the tend handlers; on a GET read they're unchanged (no advancement).
       streakCount: row.streakCount, bestStreak: row.bestStreak, lastCheckInDayKey: row.lastCheckInDayKey,
       lastSeenMs: nowMs, updatedAt: new Date(),
-    }).where(and(eq(eidolonState.ownerScope, scope), eq(eidolonState.ownerId, ownerId)));
+    }).where(and(eq(eidolonState.serverId, serverId), eq(eidolonState.ownerScope, scope), eq(eidolonState.ownerId, ownerId)));
   }
 
   /** Record a daily care-streak check-in. Mutates the in-memory row's streak
    *  fields (persist writes them) and grants the milestone currency reward the
    *  first time a streak reaches a milestone. Call ONLY from tend endpoints —
    *  never the polled GET read — so the streak advances on real care, once/day. */
-  async function recordCheckIn(scope: Scope, ownerId: string, userId: string, row: Row, nowMs: number): Promise<void> {
+  async function recordCheckIn(scope: Scope, ownerId: string, serverId: string, userId: string, row: Row, nowMs: number): Promise<void> {
     const todayKey = serverDayKey(new Date(nowMs));
-    const where = and(eq(eidolonState.ownerScope, scope), eq(eidolonState.ownerId, ownerId));
+    const where = and(eq(eidolonState.serverId, serverId), eq(eidolonState.ownerScope, scope), eq(eidolonState.ownerId, ownerId));
     // Advance the streak ATOMICALLY under SQLite's write lock so two concurrent
     // tends on a milestone day can't both grant the reward: the first txn writes
     // lastCheckInDayKey=today, the second re-reads it and sees the day already
@@ -168,7 +200,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     if (res.advanced && res.reward > 0) {
       // Best-effort (logs, never throws) — writes the ledger + emits earning:earned.
       await creditPool(db, io, {
-        serverId: DEFAULT_SERVER_ID,
+        serverId,
         scope, ownerId, xpDelta: 0, currencyDelta: res.reward,
         reason: "eidolon_streak", metadata: { streak: res.streakCount }, notifyUserId: userId,
       });
@@ -193,17 +225,17 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
 
   /** Decrement one unit of an item from the identity's inventory (delete
    *  the row at 0) + ledger it. Returns false when they don't hold it. */
-  function consumeOne(scope: Scope, ownerId: string, itemKey: string): boolean {
+  function consumeOne(scope: Scope, ownerId: string, serverId: string, itemKey: string): boolean {
     return db.transaction((tx): boolean => {
       const ex = tx.select({ qty: identityInventory.quantity }).from(identityInventory)
-        .where(and(eq(identityInventory.ownerScope, scope), eq(identityInventory.ownerId, ownerId), eq(identityInventory.itemKey, itemKey)))
+        .where(and(eq(identityInventory.serverId, serverId), eq(identityInventory.ownerScope, scope), eq(identityInventory.ownerId, ownerId), eq(identityInventory.itemKey, itemKey)))
         .limit(1).all()[0];
       if (!ex || ex.qty < 1) return false;
-      const whereId = and(eq(identityInventory.ownerScope, scope), eq(identityInventory.ownerId, ownerId), eq(identityInventory.itemKey, itemKey));
+      const whereId = and(eq(identityInventory.serverId, serverId), eq(identityInventory.ownerScope, scope), eq(identityInventory.ownerId, ownerId), eq(identityInventory.itemKey, itemKey));
       if (ex.qty <= 1) tx.delete(identityInventory).where(whereId).run();
       else tx.update(identityInventory).set({ quantity: ex.qty - 1, updatedAt: new Date() }).where(whereId).run();
       tx.insert(earningLedger).values({
-        id: nanoid(), scope, ownerId, xpDelta: 0, currencyDelta: 0,
+        id: nanoid(), serverId, scope, ownerId, xpDelta: 0, currencyDelta: 0,
         reason: `item_use_${itemKey}`, metadataJson: JSON.stringify({ kind: "item_use", itemKey, via: "eidolon" }),
       }).run();
       return true;
@@ -211,25 +243,25 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
   }
 
   /** Debit currency from the identity's pool (balance-checked). */
-  function debitCurrency(scope: Scope, userId: string, ownerId: string, amount: number, reason: string):
+  function debitCurrency(scope: Scope, userId: string, ownerId: string, serverId: string, amount: number, reason: string):
     | { ok: true; final: { xp: number; currency: number; rankKey: string | null; tier: number | null } }
     | { ok: false; balance: number } {
     return db.transaction((tx) => {
       if (scope === "character") {
-        tx.insert(characterEarning).values({ characterId: ownerId }).onConflictDoNothing().run();
-        const e = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, ownerId))).limit(1).all()[0];
+        tx.insert(characterEarning).values({ serverId, characterId: ownerId }).onConflictDoNothing().run();
+        const e = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId))).limit(1).all()[0];
         const bal = e?.currency ?? 0;
         if (bal < amount) return { ok: false as const, balance: bal };
-        tx.update(characterEarning).set({ currency: bal - amount, updatedAt: new Date() }).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, ownerId))).run();
-        tx.insert(earningLedger).values({ id: nanoid(), scope, ownerId, xpDelta: 0, currencyDelta: -amount, reason, metadataJson: JSON.stringify({ kind: "eidolon_heal" }) }).run();
+        tx.update(characterEarning).set({ currency: bal - amount, updatedAt: new Date() }).where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId))).run();
+        tx.insert(earningLedger).values({ id: nanoid(), serverId, scope, ownerId, xpDelta: 0, currencyDelta: -amount, reason, metadataJson: JSON.stringify({ kind: "eidolon_heal" }) }).run();
         return { ok: true as const, final: { xp: e?.xp ?? 0, currency: bal - amount, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null } };
       }
-      tx.insert(userEarning).values({ userId }).onConflictDoNothing().run();
-      const e = tx.select().from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, userId))).limit(1).all()[0];
+      tx.insert(userEarning).values({ serverId, userId }).onConflictDoNothing().run();
+      const e = tx.select().from(userEarning).where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, userId))).limit(1).all()[0];
       const bal = e?.currency ?? 0;
       if (bal < amount) return { ok: false as const, balance: bal };
-      tx.update(userEarning).set({ currency: bal - amount, updatedAt: new Date() }).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, userId))).run();
-      tx.insert(earningLedger).values({ id: nanoid(), scope: "user", ownerId: userId, xpDelta: 0, currencyDelta: -amount, reason, metadataJson: JSON.stringify({ kind: "eidolon_heal" }) }).run();
+      tx.update(userEarning).set({ currency: bal - amount, updatedAt: new Date() }).where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, userId))).run();
+      tx.insert(earningLedger).values({ id: nanoid(), serverId, scope: "user", ownerId: userId, xpDelta: 0, currencyDelta: -amount, reason, metadataJson: JSON.stringify({ kind: "eidolon_heal" }) }).run();
       return { ok: true as const, final: { xp: e?.xp ?? 0, currency: bal - amount, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null } };
     });
   }
@@ -243,27 +275,31 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
   }
 
   /* ---- GET /arcade/eidolon ---- */
-  app.get<{ Querystring: { characterId?: string } }>("/arcade/eidolon", async (req, reply) => {
-    const g = await gate(req, req.query.characterId ?? null);
+  app.get<{ Querystring: { characterId?: string; serverId?: string } }>("/arcade/eidolon", async (req, reply) => {
+    const g = await gate(req, req.query.characterId ?? null, req.query.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
-    const row = await loadRow(g.scope, g.ownerId);
+    const row = await loadRow(g.scope, g.ownerId, g.serverId);
     if (!row) return { eidolon: null };
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
-    await persist(g.scope, g.ownerId, row, prog, nowMs);
-    return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };
+    await persist(g.scope, g.ownerId, g.serverId, row, prog, nowMs);
+    return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey, g.serverId), nowMs) };
   });
 
   /* ---- GET /arcade/eidolon/summary ---- (public-view familiar summary for a
      profile card; any authed user may view any identity's familiar, like pets.
      Read-only, no persist, no purchase/permission gate — viewing, not playing.) */
-  app.get<{ Querystring: { scope?: string; ownerId?: string } }>("/arcade/eidolon/summary", async (req, reply) => {
+  app.get<{ Querystring: { scope?: string; ownerId?: string; serverId?: string } }>("/arcade/eidolon/summary", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     const scope: Scope = req.query.scope === "character" ? "character" : "user";
     const ownerId = (req.query.ownerId ?? "").trim();
     if (!ownerId) { reply.code(400); return { error: "ownerId required" }; }
-    const row = await loadRow(scope, ownerId);
+    // Which server's familiar to show. Validated against the VIEWER's
+    // membership (resolveActiveServerId) — flag off / absent ⇒ default server,
+    // so this is byte-identical to the legacy single-pool read.
+    const sid = await resolveActiveServerId(me, req.query.serverId);
+    const row = await loadRow(scope, ownerId, sid);
     if (!row) return { eidolon: null };
     // Respect the target's privacy: fetchDisplayInfo drops hidden / private /
     // disabled / deleted identities (the same gate the leaderboards use), so a
@@ -274,7 +310,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     const summary: EidolonProfileSummary = {
       kind: row.kind,
       speciesId: row.kind === "species" ? (row.speciesId as EidolonProfileSummary["speciesId"]) : null,
-      petIconUrl: await petIconFor(row.petItemKey),
+      petIconUrl: await petIconFor(row.petItemKey, sid),
       name: row.name,
       level: eidolonLevelFromXp(prog.xp),
       ageHours: prog.ageHours,
@@ -290,7 +326,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
   /* ---- POST /arcade/eidolon/visit ---- (pat another player's familiar: a small
      +joy social gesture, 24h cooldown per visitor-user per target, blocks
      patting any familiar you own). Requires use_arcade but NOT a purchase. */
-  const visitBody = z.object({ scope: z.enum(["user", "character"]), ownerId: z.string() }).strict();
+  const visitBody = z.object({ scope: z.enum(["user", "character"]), ownerId: z.string(), serverId: z.string().optional() }).strict();
   app.post<{ Body: unknown }>("/arcade/eidolon/visit", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
@@ -301,6 +337,10 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     const targetScope: Scope = body.scope;
     const targetOwnerId = body.ownerId.trim();
     if (!targetOwnerId) { reply.code(400); return { error: "target required" }; }
+    // Which server's familiar is being patted. Validated against the VISITOR's
+    // membership (resolveActiveServerId); flag off / absent ⇒ default server.
+    // The pat + its 24h cooldown are per-server (a separate familiar per server).
+    const sid = await resolveActiveServerId(me, body.serverId);
 
     // Resolve the target's owning user to block patting any of your own
     // identities' familiars (the gesture means "someone ELSE cares").
@@ -310,7 +350,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     if (!targetUserId) { reply.code(404); return { error: "no such familiar" }; }
     if (targetUserId === me.id) { reply.code(409); return { error: "you can't pat your own familiar" }; }
 
-    const row = await loadRow(targetScope, targetOwnerId);
+    const row = await loadRow(targetScope, targetOwnerId, sid);
     if (!row) { reply.code(404); return { error: "they have no familiar to pat" }; }
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
@@ -318,13 +358,18 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
 
     // Atomic cooldown claim: read last pat + write the new timestamp in one
     // transaction so a double-fire can't double-pat (the second sees the claim).
-    const visitWhere = and(eq(eidolonVisits.visitorUserId, me.id), eq(eidolonVisits.targetOwnerScope, targetScope), eq(eidolonVisits.targetOwnerId, targetOwnerId));
+    // Scoped to the active server (PK includes serverId) so the cooldown is
+    // per-server: patting a familiar on server A doesn't block patting the same
+    // person's familiar on server B.
+    const visitWhere = and(eq(eidolonVisits.serverId, sid), eq(eidolonVisits.visitorUserId, me.id), eq(eidolonVisits.targetOwnerScope, targetScope), eq(eidolonVisits.targetOwnerId, targetOwnerId));
     const claim = db.transaction((tx): { ok: boolean; retryAfterMs: number } => {
       const last = tx.select({ visitedAt: eidolonVisits.visitedAt }).from(eidolonVisits).where(visitWhere).limit(1).all()[0];
       const since = last ? nowMs - last.visitedAt : Infinity;
       if (since < EIDOLON_PAT_COOLDOWN_MS) return { ok: false, retryAfterMs: EIDOLON_PAT_COOLDOWN_MS - since };
-      tx.insert(eidolonVisits).values({ visitorUserId: me.id, targetOwnerScope: targetScope, targetOwnerId, visitedAt: nowMs })
-        .onConflictDoUpdate({ target: [eidolonVisits.visitorUserId, eidolonVisits.targetOwnerScope, eidolonVisits.targetOwnerId], set: { visitedAt: nowMs } }).run();
+      // server_id is part of the PK (migration 0284). Both the value AND the
+      // conflict target must carry it or SQLite rejects the ON CONFLICT arbiter.
+      tx.insert(eidolonVisits).values({ serverId: sid, visitorUserId: me.id, targetOwnerScope: targetScope, targetOwnerId, visitedAt: nowMs })
+        .onConflictDoUpdate({ target: [eidolonVisits.serverId, eidolonVisits.visitorUserId, eidolonVisits.targetOwnerScope, eidolonVisits.targetOwnerId], set: { visitedAt: nowMs } }).run();
       return { ok: true, retryAfterMs: 0 };
     });
     if (!claim.ok) { reply.code(429); return { error: "you've already patted this familiar today", retryAfterMs: claim.retryAfterMs }; }
@@ -333,7 +378,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // (their streak only advances when THEY tend it) — persist writes the
     // unchanged streak fields off the loaded row.
     prog.stats.joy = clamp(prog.stats.joy + EIDOLON_PAT_JOY_GAIN);
-    await persist(targetScope, targetOwnerId, row, prog, nowMs);
+    await persist(targetScope, targetOwnerId, sid, row, prog, nowMs);
     return { ok: true, joyDelta: EIDOLON_PAT_JOY_GAIN };
   });
 
@@ -344,19 +389,21 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     speciesId: z.string().optional(),
     petItemKey: z.string().optional(),
     name: z.string().trim().max(24).optional(),
+    serverId: z.string().optional(),
   }).strict();
   app.post<{ Body: unknown }>("/arcade/eidolon/hatch", async (req, reply) => {
     let body: z.infer<typeof hatchBody>;
     try { body = hatchBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const g = await gate(req, body.characterId ?? null);
+    const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
     // Refuse to hatch over an EXISTING familiar. The UI only shows egg-select
     // when there's none, so this guards the raw API: without it a hatch could
     // silently overwrite a living/dormant familiar (losing its Hall record +
     // the lineage it would feed) or be abused to reroll a trait/variant. Sell
     // and release are the only ways to clear the slot (both write the Hall row).
-    if (await loadRow(g.scope, g.ownerId)) { reply.code(409); return { error: "you already have a familiar — sell, release, or revive it first" }; }
+    // Scoped to the active server: the familiar is SEPARATE per server.
+    if (await loadRow(g.scope, g.ownerId, g.serverId)) { reply.code(409); return { error: "you already have a familiar — sell, release, or revive it first" }; }
 
     let speciesId: string | null = null;
     let petItemKey: string | null = null;
@@ -370,10 +417,10 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     } else {
       if (!body.petItemKey) { reply.code(400); return { error: "pet required" }; }
       // The identity must own at least one of that pet item.
-      const it = (await db.select({ key: items.key, name: items.name, category: items.category }).from(items).where(eq(items.key, body.petItemKey)).limit(1))[0];
+      const it = (await db.select({ key: items.key, name: items.name, category: items.category }).from(items).where(and(eq(items.serverId, g.serverId), eq(items.key, body.petItemKey))).limit(1))[0];
       if (!it || it.category !== "pet") { reply.code(400); return { error: "not a pet" }; }
       const held = (await db.select({ qty: identityInventory.quantity }).from(identityInventory)
-        .where(and(eq(identityInventory.ownerScope, g.scope), eq(identityInventory.ownerId, g.ownerId), eq(identityInventory.itemKey, body.petItemKey))).limit(1))[0];
+        .where(and(eq(identityInventory.serverId, g.serverId), eq(identityInventory.ownerScope, g.scope), eq(identityInventory.ownerId, g.ownerId), eq(identityInventory.itemKey, body.petItemKey))).limit(1))[0];
       if (!held || held.qty < 1) { reply.code(403); return { error: "you don't own that pet" }; }
       petItemKey = body.petItemKey;
       if (!name) name = it.name;
@@ -387,7 +434,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // predecessor's trait (the "bloodline"). No predecessor -> fresh roll, 0.
     const last = (await db.select({ peakLevel: eidolonHall.peakLevel, trait: eidolonHall.trait })
       .from(eidolonHall)
-      .where(and(eq(eidolonHall.ownerScope, g.scope), eq(eidolonHall.ownerId, g.ownerId)))
+      .where(and(eq(eidolonHall.serverId, g.serverId), eq(eidolonHall.ownerScope, g.scope), eq(eidolonHall.ownerId, g.ownerId)))
       .orderBy(desc(eidolonHall.departedAt)).limit(1))[0];
     const bonusXp = last ? eidolonLineageBonusXp(last.peakLevel) : 0;
     const trait = (last?.trait as string | null) ?? rollTraitId(); // bloodline, else a fresh quirk
@@ -395,6 +442,10 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // their own art). Visual prestige + a sale bump; a surprise at hatch.
     const variant = body.kind === "species" ? rollVariant() : null;
     const values = {
+      // server_id is part of the PK (migration 0284). The familiar is SEPARATE
+      // per server, so it homes to the active server (value + conflict target
+      // below). Flag off ⇒ g.serverId is the default, byte-identical to today.
+      serverId: g.serverId,
       ownerScope: g.scope, ownerId: g.ownerId, stage: "alive" as const, kind: body.kind,
       speciesId, petItemKey, name,
       satiety: fresh.satiety, joy: fresh.joy, vigor: fresh.vigor, hygiene: fresh.hygiene, health: fresh.health,
@@ -402,26 +453,27 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       hatchedAt: new Date(nowMs), updatedAt: new Date(nowMs),
     };
     await db.insert(eidolonState).values(values).onConflictDoUpdate({
-      target: [eidolonState.ownerScope, eidolonState.ownerId],
+      target: [eidolonState.serverId, eidolonState.ownerScope, eidolonState.ownerId],
       set: { stage: "alive", kind: body.kind, speciesId, petItemKey, name, ...fresh, sick: false, asleep: false, ageHours: 0, simHour, messCount: 0, xp: bonusXp, bonusXp, trait, variant, streakCount: 0, bestStreak: 0, lastCheckInDayKey: null, lastSeenMs: nowMs, hatchedAt: new Date(nowMs), updatedAt: new Date(nowMs) },
     });
-    const row = (await loadRow(g.scope, g.ownerId))!;
+    const row = (await loadRow(g.scope, g.ownerId, g.serverId))!;
     const prog = catchUp(row, nowMs);
-    return { eidolon: snapshotOf(row, prog, await petIconFor(petItemKey), nowMs) };
+    return { eidolon: snapshotOf(row, prog, await petIconFor(petItemKey, g.serverId), nowMs) };
   });
 
   /* ---- POST /arcade/eidolon/action ---- (free gestures: play / clean / rest) */
   const actionBody = z.object({
     characterId: z.string().nullable().optional(),
     kind: z.enum(["play", "clean", "rest"]),
+    serverId: z.string().optional(),
   }).strict();
   app.post<{ Body: unknown }>("/arcade/eidolon/action", async (req, reply) => {
     let body: z.infer<typeof actionBody>;
     try { body = actionBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const g = await gate(req, body.characterId ?? null);
+    const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
-    const row = await loadRow(g.scope, g.ownerId);
+    const row = await loadRow(g.scope, g.ownerId, g.serverId);
     if (!row) { reply.code(404); return { error: "no familiar" }; }
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
@@ -434,27 +486,27 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // Active-care XP: reward the net wellbeing this tend restored (0 if it was
     // already maxed, so no spam-farming). Mirrors feed/toy/remedy below.
     prog.xp += eidolonCareXp(gaugeSum(prog.stats) - before, row.streakCount);
-    await recordCheckIn(g.scope, g.ownerId, g.userId, row, nowMs);
-    await persist(g.scope, g.ownerId, row, prog, nowMs);
-    return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };
+    await recordCheckIn(g.scope, g.ownerId, g.serverId, g.userId, row, nowMs);
+    await persist(g.scope, g.ownerId, g.serverId, row, prog, nowMs);
+    return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey, g.serverId), nowMs) };
   });
 
   /* ---- POST /arcade/eidolon/feed ---- (consume a Food item) */
-  const feedBody = z.object({ characterId: z.string().nullable().optional(), itemKey: z.string() }).strict();
+  const feedBody = z.object({ characterId: z.string().nullable().optional(), itemKey: z.string(), serverId: z.string().optional() }).strict();
   app.post<{ Body: unknown }>("/arcade/eidolon/feed", async (req, reply) => {
     let body: z.infer<typeof feedBody>;
     try { body = feedBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const g = await gate(req, body.characterId ?? null);
+    const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
     // Reject a concurrent double-fire so one click can't consume two foods.
     if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment — still tending your familiar" }; }
     try {
-      const row = await loadRow(g.scope, g.ownerId);
+      const row = await loadRow(g.scope, g.ownerId, g.serverId);
       if (!row) { reply.code(404); return { error: "no familiar" }; }
-      const item = (await db.select({ key: items.key, price: items.price, category: items.category }).from(items).where(eq(items.key, body.itemKey)).limit(1))[0];
+      const item = (await db.select({ key: items.key, price: items.price, category: items.category }).from(items).where(and(eq(items.serverId, g.serverId), eq(items.key, body.itemKey))).limit(1))[0];
       if (!item || item.category !== "food") { reply.code(400); return { error: "that isn't food" }; }
-      if (!consumeOne(g.scope, g.ownerId, body.itemKey)) { reply.code(409); return { error: "you don't have that food" }; }
+      if (!consumeOne(g.scope, g.ownerId, g.serverId, body.itemKey)) { reply.code(409); return { error: "you don't have that food" }; }
       await emitToUser(g.userId, "earning:inventory_changed", { scope: g.scope, ownerId: g.ownerId, itemKey: body.itemKey, delta: -1, reason: "eidolon_feed" });
       const nowMs = Date.now();
       const prog = catchUp(row, nowMs);
@@ -468,9 +520,9 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       prog.stats.vigor = clamp(prog.stats.vigor + eff.vigor);
       prog.stats.hygiene = clamp(prog.stats.hygiene + eff.hygiene - 1);
       prog.xp += eidolonCareXp(gaugeSum(prog.stats) - before, row.streakCount);
-      await recordCheckIn(g.scope, g.ownerId, g.userId, row, nowMs);
-      await persist(g.scope, g.ownerId, row, prog, nowMs);
-      return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };
+      await recordCheckIn(g.scope, g.ownerId, g.serverId, g.userId, row, nowMs);
+      await persist(g.scope, g.ownerId, g.serverId, row, prog, nowMs);
+      return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey, g.serverId), nowMs) };
     } finally {
       endConsume(g.scope, g.ownerId);
     }
@@ -480,21 +532,21 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
      item the identity OWNS — NOT consumed — for a bigger, varied joy boost than the
      free Play gesture. Each toy has its own profile (see EIDOLON_TOY_EFFECT). Counts
      as a daily tend, like Play. Mirrors the play action's dormancy guard.) */
-  const toyBody = z.object({ characterId: z.string().nullable().optional(), itemKey: z.string() }).strict();
+  const toyBody = z.object({ characterId: z.string().nullable().optional(), itemKey: z.string(), serverId: z.string().optional() }).strict();
   app.post<{ Body: unknown }>("/arcade/eidolon/toy", async (req, reply) => {
     let body: z.infer<typeof toyBody>;
     try { body = toyBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const g = await gate(req, body.characterId ?? null);
+    const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
-    const row = await loadRow(g.scope, g.ownerId);
+    const row = await loadRow(g.scope, g.ownerId, g.serverId);
     if (!row) { reply.code(404); return { error: "no familiar" }; }
     // Must be a toy-category item the identity holds (>=1). Reusable: NOT consumed,
     // so owning one grants unlimited play; buying more is pointless (and harmless).
-    const item = (await db.select({ key: items.key, category: items.category }).from(items).where(eq(items.key, body.itemKey)).limit(1))[0];
+    const item = (await db.select({ key: items.key, category: items.category }).from(items).where(and(eq(items.serverId, g.serverId), eq(items.key, body.itemKey))).limit(1))[0];
     if (!item || item.category !== "toy") { reply.code(400); return { error: "that isn't a toy" }; }
     const held = (await db.select({ qty: identityInventory.quantity }).from(identityInventory)
-      .where(and(eq(identityInventory.ownerScope, g.scope), eq(identityInventory.ownerId, g.ownerId), eq(identityInventory.itemKey, body.itemKey))).limit(1))[0];
+      .where(and(eq(identityInventory.serverId, g.serverId), eq(identityInventory.ownerScope, g.scope), eq(identityInventory.ownerId, g.ownerId), eq(identityInventory.itemKey, body.itemKey))).limit(1))[0];
     if (!held || held.qty < 1) { reply.code(403); return { error: "you don't own that toy" }; }
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
@@ -506,24 +558,24 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     prog.stats.vigor = clamp(prog.stats.vigor + eff.vigor);
     prog.stats.hygiene = clamp(prog.stats.hygiene + eff.hygiene);
     prog.xp += eidolonCareXp(gaugeSum(prog.stats) - before, row.streakCount);
-    await recordCheckIn(g.scope, g.ownerId, g.userId, row, nowMs);
-    await persist(g.scope, g.ownerId, row, prog, nowMs);
-    return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };
+    await recordCheckIn(g.scope, g.ownerId, g.serverId, g.userId, row, nowMs);
+    await persist(g.scope, g.ownerId, g.serverId, row, prog, nowMs);
+    return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey, g.serverId), nowMs) };
   });
 
   /* ---- POST /arcade/eidolon/remedy ---- (potion = full cure; else basic heal costs currency) */
-  const remedyBody = z.object({ characterId: z.string().nullable().optional(), itemKey: z.string().optional() }).strict();
+  const remedyBody = z.object({ characterId: z.string().nullable().optional(), itemKey: z.string().optional(), serverId: z.string().optional() }).strict();
   app.post<{ Body: unknown }>("/arcade/eidolon/remedy", async (req, reply) => {
     let body: z.infer<typeof remedyBody>;
     try { body = remedyBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const g = await gate(req, body.characterId ?? null);
+    const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
     // Reject a concurrent double-fire so one click can't consume two potions
     // (or double-charge the basic heal).
     if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment — still tending your familiar" }; }
     try {
-      const row = await loadRow(g.scope, g.ownerId);
+      const row = await loadRow(g.scope, g.ownerId, g.serverId);
       if (!row) { reply.code(404); return { error: "no familiar" }; }
       const nowMs = Date.now();
       const prog = catchUp(row, nowMs);
@@ -532,15 +584,16 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
 
       if (body.itemKey) {
         // Potion path: must be a magic-category consumable they hold.
-        const item = (await db.select({ key: items.key, category: items.category }).from(items).where(eq(items.key, body.itemKey)).limit(1))[0];
+        const item = (await db.select({ key: items.key, category: items.category }).from(items).where(and(eq(items.serverId, g.serverId), eq(items.key, body.itemKey))).limit(1))[0];
         if (!item || item.category !== "magic") { reply.code(400); return { error: "that won't cure anything" }; }
-        if (!consumeOne(g.scope, g.ownerId, body.itemKey)) { reply.code(409); return { error: "you don't have that item" }; }
+        if (!consumeOne(g.scope, g.ownerId, g.serverId, body.itemKey)) { reply.code(409); return { error: "you don't have that item" }; }
         await emitToUser(g.userId, "earning:inventory_changed", { scope: g.scope, ownerId: g.ownerId, itemKey: body.itemKey, delta: -1, reason: "eidolon_remedy" });
         prog.sick = false;
         prog.stats.health = clamp(prog.stats.health + POTION_HEAL_AMOUNT);
       } else {
-        // Basic heal: small currency cost, small heal, no cure.
-        const debit = debitCurrency(g.scope, g.userId, g.ownerId, BASIC_HEAL_COST, "eidolon_basic_heal");
+        // Basic heal: small currency cost, small heal, no cure. Debited on the
+        // active server's pool (the same economy the familiar lives on).
+        const debit = debitCurrency(g.scope, g.userId, g.ownerId, g.serverId, BASIC_HEAL_COST, "eidolon_basic_heal");
         if (!debit.ok) { reply.code(402); return { error: "not enough currency", required: BASIC_HEAL_COST, balance: debit.balance }; }
         await emitToUser(g.userId, "earning:earned", {
           scope: g.scope, ownerId: g.scope === "character" ? g.ownerId : g.userId,
@@ -550,9 +603,9 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
         prog.stats.health = clamp(prog.stats.health + BASIC_HEAL_AMOUNT);
       }
       prog.xp += eidolonCareXp(gaugeSum(prog.stats) - before, row.streakCount);
-      await recordCheckIn(g.scope, g.ownerId, g.userId, row, nowMs);
-      await persist(g.scope, g.ownerId, row, prog, nowMs);
-      return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };
+      await recordCheckIn(g.scope, g.ownerId, g.serverId, g.userId, row, nowMs);
+      await persist(g.scope, g.ownerId, g.serverId, row, prog, nowMs);
+      return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey, g.serverId), nowMs) };
     } finally {
       endConsume(g.scope, g.ownerId);
     }
@@ -562,27 +615,27 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
      The chosen death model is dormancy, not permadeath: a familiar whose health
      hits 0 freezes (no decay, no XP) and a magic Potion revives it to a fragile
      second life with its level / XP / streak intact. Refuses a living familiar.) */
-  const reviveBody = z.object({ characterId: z.string().nullable().optional(), itemKey: z.string() }).strict();
+  const reviveBody = z.object({ characterId: z.string().nullable().optional(), itemKey: z.string(), serverId: z.string().optional() }).strict();
   app.post<{ Body: unknown }>("/arcade/eidolon/revive", async (req, reply) => {
     let body: z.infer<typeof reviveBody>;
     try { body = reviveBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const g = await gate(req, body.characterId ?? null);
+    const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
     // Reject a concurrent double-fire so one click can't consume two items. The
     // re-checked `!prog.dead` below also stops a SEQUENTIAL duplicate (the second
     // sees the familiar already awake).
     if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment — still tending your familiar" }; }
     try {
-      const row = await loadRow(g.scope, g.ownerId);
+      const row = await loadRow(g.scope, g.ownerId, g.serverId);
       if (!row) { reply.code(404); return { error: "no familiar" }; }
       const nowMs = Date.now();
       const prog = catchUp(row, nowMs);
       if (!prog.dead) { reply.code(409); return { error: "your familiar still lives" }; }
       // Only a magic-category consumable (a Potion) they hold can wake it.
-      const item = (await db.select({ key: items.key, category: items.category }).from(items).where(eq(items.key, body.itemKey)).limit(1))[0];
+      const item = (await db.select({ key: items.key, category: items.category }).from(items).where(and(eq(items.serverId, g.serverId), eq(items.key, body.itemKey))).limit(1))[0];
       if (!item || item.category !== "magic") { reply.code(400); return { error: "only a magical item can wake it" }; }
-      if (!consumeOne(g.scope, g.ownerId, body.itemKey)) { reply.code(409); return { error: "you don't have that item" }; }
+      if (!consumeOne(g.scope, g.ownerId, g.serverId, body.itemKey)) { reply.code(409); return { error: "you don't have that item" }; }
       await emitToUser(g.userId, "earning:inventory_changed", { scope: g.scope, ownerId: g.ownerId, itemKey: body.itemKey, delta: -1, reason: "eidolon_revive" });
       // Wake to a fragile second life: clear the dormancy/sickness, restore health,
       // and lift the collapsed upkeep stats off the floor (reviveStats) so it
@@ -592,8 +645,8 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       prog.sick = false;
       prog.asleep = false;
       prog.stats = reviveStats(prog.stats);
-      await persist(g.scope, g.ownerId, row, prog, nowMs);
-      return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };
+      await persist(g.scope, g.ownerId, g.serverId, row, prog, nowMs);
+      return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey, g.serverId), nowMs) };
     } finally {
       endConsume(g.scope, g.ownerId);
     }
@@ -605,23 +658,24 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
      familiar so a player can't accidentally abandon one; re-hatching then
      starts fresh via the upsert. Without this, the periodic GET re-loads the
      dormant row and snaps the UI back out of egg-select.) */
-  const releaseBody = z.object({ characterId: z.string().nullable().optional() }).strict();
+  const releaseBody = z.object({ characterId: z.string().nullable().optional(), serverId: z.string().optional() }).strict();
   app.post<{ Body: unknown }>("/arcade/eidolon/release", async (req, reply) => {
     let body: z.infer<typeof releaseBody>;
     try { body = releaseBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const g = await gate(req, body.characterId ?? null);
+    const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
-    const row = await loadRow(g.scope, g.ownerId);
+    const row = await loadRow(g.scope, g.ownerId, g.serverId);
     if (!row) return { eidolon: null };
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
     if (!prog.dead) { reply.code(409); return { error: "your familiar still lives" }; }
-    const where = and(eq(eidolonState.ownerScope, g.scope), eq(eidolonState.ownerId, g.ownerId));
+    const where = and(eq(eidolonState.serverId, g.serverId), eq(eidolonState.ownerScope, g.scope), eq(eidolonState.ownerId, g.ownerId));
     // Record the departure to the Hall, then clear — atomically, so the memorial
     // (and the lineage head-start it feeds the next hatch) can't be lost to a race.
+    // The Hall row is written on the SAME server the familiar lived on.
     db.transaction((tx) => {
-      tx.insert(eidolonHall).values(hallValues(g.scope, g.ownerId, row, prog, "released", nowMs)).run();
+      tx.insert(eidolonHall).values(hallValues(g.scope, g.ownerId, g.serverId, row, prog, "released", nowMs)).run();
       tx.delete(eidolonState).where(where).run();
     });
     return { eidolon: null };
@@ -630,22 +684,24 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
   /* ---- POST /arcade/eidolon/sell ---- (cash out a LIVING familiar for
      currency scaled by its level/XP, then clear it so the player can tame
      anew. A dead one has no worth — use release instead.) */
-  const sellBody = z.object({ characterId: z.string().nullable().optional() }).strict();
+  const sellBody = z.object({ characterId: z.string().nullable().optional(), serverId: z.string().optional() }).strict();
   app.post<{ Body: unknown }>("/arcade/eidolon/sell", async (req, reply) => {
     let body: z.infer<typeof sellBody>;
     try { body = sellBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const g = await gate(req, body.characterId ?? null);
+    const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
+    const sid = g.serverId;
     const nowMs = Date.now();
-    const where = and(eq(eidolonState.ownerScope, g.scope), eq(eidolonState.ownerId, g.ownerId));
+    const where = and(eq(eidolonState.serverId, sid), eq(eidolonState.ownerScope, g.scope), eq(eidolonState.ownerId, g.ownerId));
     type Final = { xp: number; currency: number; rankKey: string | null; tier: number | null };
     type Outcome =
       | { kind: "none" }
       | { kind: "dead" }
       | { kind: "sold"; value: number; level: number; final: Final };
     // Atomic: read -> catch-up -> delete -> credit in a single transaction so
-    // a double-fired sell can't double-credit (the second finds no row).
+    // a double-fired sell can't double-credit (the second finds no row). The
+    // sale proceeds land in the SAME server's pool the familiar lived on.
     const outcome: Outcome = db.transaction((tx): Outcome => {
       const row = tx.select().from(eidolonState).where(where).limit(1).all()[0];
       if (!row) return { kind: "none" };
@@ -656,22 +712,22 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       const value = eidolonSaleValueOf(prog.xp, row.bonusXp, row.variant);
       const level = eidolonLevelFromXp(prog.xp);
       // Memorialize before clearing (feeds the Hall + the next hatch's lineage).
-      tx.insert(eidolonHall).values(hallValues(g.scope, g.ownerId, row, prog, "sold", nowMs)).run();
+      tx.insert(eidolonHall).values(hallValues(g.scope, g.ownerId, sid, row, prog, "sold", nowMs)).run();
       tx.delete(eidolonState).where(where).run();
       let final: Final;
       if (g.scope === "character") {
-        tx.insert(characterEarning).values({ characterId: g.ownerId }).onConflictDoNothing().run();
-        const e = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, g.ownerId))).limit(1).all()[0];
+        tx.insert(characterEarning).values({ serverId: sid, characterId: g.ownerId }).onConflictDoNothing().run();
+        const e = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, sid), eq(characterEarning.characterId, g.ownerId))).limit(1).all()[0];
         const bal = e?.currency ?? 0;
-        tx.update(characterEarning).set({ currency: bal + value, updatedAt: new Date() }).where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, g.ownerId))).run();
-        tx.insert(earningLedger).values({ id: nanoid(), scope: "character", ownerId: g.ownerId, xpDelta: 0, currencyDelta: value, reason: "eidolon_sale", metadataJson: JSON.stringify({ kind: "eidolon_sale", level }) }).run();
+        tx.update(characterEarning).set({ currency: bal + value, updatedAt: new Date() }).where(and(eq(characterEarning.serverId, sid), eq(characterEarning.characterId, g.ownerId))).run();
+        tx.insert(earningLedger).values({ id: nanoid(), serverId: sid, scope: "character", ownerId: g.ownerId, xpDelta: 0, currencyDelta: value, reason: "eidolon_sale", metadataJson: JSON.stringify({ kind: "eidolon_sale", level }) }).run();
         final = { xp: e?.xp ?? 0, currency: bal + value, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null };
       } else {
-        tx.insert(userEarning).values({ userId: g.userId }).onConflictDoNothing().run();
-        const e = tx.select().from(userEarning).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, g.userId))).limit(1).all()[0];
+        tx.insert(userEarning).values({ serverId: sid, userId: g.userId }).onConflictDoNothing().run();
+        const e = tx.select().from(userEarning).where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, g.userId))).limit(1).all()[0];
         const bal = e?.currency ?? 0;
-        tx.update(userEarning).set({ currency: bal + value, updatedAt: new Date() }).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, g.userId))).run();
-        tx.insert(earningLedger).values({ id: nanoid(), scope: "user", ownerId: g.userId, xpDelta: 0, currencyDelta: value, reason: "eidolon_sale", metadataJson: JSON.stringify({ kind: "eidolon_sale", level }) }).run();
+        tx.update(userEarning).set({ currency: bal + value, updatedAt: new Date() }).where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, g.userId))).run();
+        tx.insert(earningLedger).values({ id: nanoid(), serverId: sid, scope: "user", ownerId: g.userId, xpDelta: 0, currencyDelta: value, reason: "eidolon_sale", metadataJson: JSON.stringify({ kind: "eidolon_sale", level }) }).run();
         final = { xp: e?.xp ?? 0, currency: bal + value, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null };
       }
       return { kind: "sold", value, level, final };
@@ -689,31 +745,32 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
   });
 
   /* ---- POST /arcade/eidolon/nudge-optin ---- (toggle opt-in "needs you" push nudges) */
-  const nudgeBody = z.object({ characterId: z.string().nullable().optional(), on: z.boolean() }).strict();
+  const nudgeBody = z.object({ characterId: z.string().nullable().optional(), on: z.boolean(), serverId: z.string().optional() }).strict();
   app.post<{ Body: unknown }>("/arcade/eidolon/nudge-optin", async (req, reply) => {
     let body: z.infer<typeof nudgeBody>;
     try { body = nudgeBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const g = await gate(req, body.characterId ?? null);
+    const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
-    const row = await loadRow(g.scope, g.ownerId);
+    const row = await loadRow(g.scope, g.ownerId, g.serverId);
     if (!row) { reply.code(404); return { error: "no familiar" }; }
     await db.update(eidolonState).set({ nudgeOptin: body.on, updatedAt: new Date() })
-      .where(and(eq(eidolonState.ownerScope, g.scope), eq(eidolonState.ownerId, g.ownerId)));
+      .where(and(eq(eidolonState.serverId, g.serverId), eq(eidolonState.ownerScope, g.scope), eq(eidolonState.ownerId, g.ownerId)));
     row.nudgeOptin = body.on;
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
-    return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey), nowMs) };
+    return { eidolon: snapshotOf(row, prog, await petIconFor(row.petItemKey, g.serverId), nowMs) };
   });
 
   /* ---- GET /arcade/eidolon/hall ---- (The Hall: this identity's departed
      familiars, most recent first — a read-only memorial gallery. Same double
-     gate as the rest: the player's own keepsake history.) */
-  app.get<{ Querystring: { characterId?: string } }>("/arcade/eidolon/hall", async (req, reply) => {
-    const g = await gate(req, req.query.characterId ?? null);
+     gate as the rest: the player's own keepsake history. Per-server: the Hall
+     is the active server's departed familiars.) */
+  app.get<{ Querystring: { characterId?: string; serverId?: string } }>("/arcade/eidolon/hall", async (req, reply) => {
+    const g = await gate(req, req.query.characterId ?? null, req.query.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
     const rows = await db.select().from(eidolonHall)
-      .where(and(eq(eidolonHall.ownerScope, g.scope), eq(eidolonHall.ownerId, g.ownerId)))
+      .where(and(eq(eidolonHall.serverId, g.serverId), eq(eidolonHall.ownerScope, g.scope), eq(eidolonHall.ownerId, g.ownerId)))
       .orderBy(desc(eidolonHall.departedAt)).limit(50);
     const hall: EidolonHallEntry[] = rows.map((r) => ({
       id: r.id, name: r.name, kind: r.kind,

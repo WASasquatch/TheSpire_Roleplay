@@ -75,14 +75,14 @@ export interface TriviaState {
   reward: BuiltinCommandReward;
 }
 
-export async function readTriviaConfig(db: Db): Promise<{
+export async function readTriviaConfig(db: Db, serverId?: string | null): Promise<{
   windowMs: number;
   reward: BuiltinCommandReward;
 }> {
   const cfg = await getBuiltinCommandConfig(db, TRIVIA_COMMAND_NAME, {
     durationMs: TRIVIA_WINDOW_MS,
     reward: TRIVIA_DEFAULT_REWARD,
-  });
+  }, serverId);
   return { windowMs: cfg.durationMs, reward: cfg.reward };
 }
 
@@ -178,13 +178,14 @@ async function resolveTrivia(session: GameSession, ctx: ResolveContext): Promise
       if (tried) lines.push(`Other tries, ${tried}.`);
     }
     if (rewardIsNonZero(state.reward)) {
-      await mintRewardForWinner(ctx.db, ctx.io, state.winner, state.reward, "trivia_win");
+      await mintRewardForWinner(ctx.db, ctx.io, state.winner, state.reward, "trivia_win", { serverId: ctx.serverId });
     }
     const winningsLine = await formatWinningsLine(
       ctx.db,
       TRIVIA_KIND,
       [state.winner],
       state.reward,
+      { serverId: ctx.serverId },
     );
     if (winningsLine) lines.push(winningsLine);
   } else {

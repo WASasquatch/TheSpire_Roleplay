@@ -25,6 +25,7 @@ import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { messages, rooms, users } from "../db/schema.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -39,8 +40,15 @@ const SYSTEM_USERNAME = "system";
  *   3. targeted system rows in THIS room, only for their recipient
  * This is the single source of truth; callers must not hand-roll the union
  * or the classes drift out of sync (the bug this replaced).
+ *
+ * `targetServerId` (the loaded room's server, NULL→default) scopes whispers to
+ * the same server, so a whisper sent in one server no longer overlays into
+ * another server's room backlog/export. Callers pass `room.serverId ??
+ * DEFAULT_SERVER_ID` (they already hold the room row). With the servers flag
+ * off every room resolves to the default server, so the predicate matches all
+ * whispers — byte-identical to before. Omitting it (legacy) skips the scope.
  */
-export function roomVisibilityWhere(roomId: string, viewerUserId: string) {
+export function roomVisibilityWhere(roomId: string, viewerUserId: string, targetServerId?: string) {
   return or(
     // 1. Ordinary public rows in this room. `targetUserId IS NULL` excludes
     //    the per-user notifications so they never show to the whole room.
@@ -49,10 +57,15 @@ export function roomVisibilityWhere(roomId: string, viewerUserId: string) {
       eq(messages.roomId, roomId),
       isNull(messages.targetUserId),
     ),
-    // 2. Whispers the viewer sent or received — overlaid across rooms.
+    // 2. Whispers the viewer sent or received — overlaid across this server's
+    //    rooms only. The same-server predicate compares the whisper's ORIGIN
+    //    room server to the loaded room's server (NULL→default on both sides).
     and(
       sql`${messages.kind} = 'whisper'`,
       or(eq(messages.userId, viewerUserId), eq(messages.toUserId, viewerUserId)),
+      ...(targetServerId
+        ? [sql`COALESCE((SELECT r.server_id FROM rooms r WHERE r.id = ${messages.roomId}), ${DEFAULT_SERVER_ID}) = ${targetServerId}`]
+        : []),
     ),
     // 3. Targeted system notifications: this room, recipient only.
     and(

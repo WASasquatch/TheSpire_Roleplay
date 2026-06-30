@@ -44,6 +44,7 @@
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
+import { DEFAULT_SERVER_ID, resolveRoomServerId } from "../earning/pool.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -116,6 +117,11 @@ export interface GameKindHandlers {
 export interface ResolveContext {
   db: Db;
   io: Io;
+  /** The per-server economy partition this game's rewards/stats land on —
+   *  the session room's server (or the default server for sitewide sessions).
+   *  Resolvers pass this to mintRewardForWinner / formatWinningsLine so a game
+   *  played in a sub-server credits that server's pool, not the default's. */
+  serverId: string;
 }
 
 const handlers = new Map<string, GameKindHandlers>();
@@ -225,14 +231,17 @@ export function findSitewideSession(): GameSession | null {
  * `onCancel` hook (so raffle refunds run) and clears the scope slot.
  * No-op when the session is already resolved.
  */
-export async function cancel(session: GameSession, ctx: ResolveContext): Promise<void> {
+export async function cancel(session: GameSession, ctx: { db: Db; io: Io }): Promise<void> {
   if (session.resolved) return;
   clearTimeout(session.timer);
   session.resolved = true;
   const hooks = handlers.get(session.kind);
   if (hooks?.onCancel) {
     try {
-      await hooks.onCancel(session, ctx);
+      const serverId = session.scope.kind === "room"
+        ? await resolveRoomServerId(ctx.db, session.scope.roomId)
+        : DEFAULT_SERVER_ID;
+      await hooks.onCancel(session, { db: ctx.db, io: ctx.io, serverId });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[games] cancel hook failed", { kind: session.kind, err });
@@ -248,7 +257,10 @@ async function fireResolve(id: string, db: Db, io: Io): Promise<void> {
   const hooks = handlers.get(session.kind);
   if (hooks) {
     try {
-      await hooks.onResolve(session, { db, io });
+      const serverId = session.scope.kind === "room"
+        ? await resolveRoomServerId(db, session.scope.roomId)
+        : DEFAULT_SERVER_ID;
+      await hooks.onResolve(session, { db, io, serverId });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[games] resolve hook failed", { kind: session.kind, err });

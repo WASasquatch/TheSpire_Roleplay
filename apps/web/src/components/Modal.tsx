@@ -1,5 +1,6 @@
 import { useEffect, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 interface ModalProps {
   onClose: () => void;
@@ -95,6 +96,11 @@ export function Modal({
   backdropStyle,
   children,
 }: ModalProps) {
+  // Under Reduce Motion, ease the whole modal (backdrop + card) in with a
+  // gentle opacity fade instead of the default instant pop. Fade is applied to
+  // the backdrop wrapper so the card rides along; pure opacity, no movement.
+  const reduceMotion = useReducedMotion();
+
   useEffect(() => {
     if (!closeOnEscape) return;
     function onKey(e: KeyboardEvent) {
@@ -125,7 +131,7 @@ export function Modal({
       // override) layer on top of the `bg-black/40` Tailwind class
       // since CSS paints background-image over background-color.
       style={{ ...backdropStyle, zIndex }}
-      className={`fixed inset-0 bg-black/40 ${VARIANT_CLASS[variant]}`}
+      className={`fixed inset-0 bg-black/40 ${VARIANT_CLASS[variant]}${reduceMotion ? " tk-fade-in" : ""}`}
       onClick={closeOnBackdrop ? onClose : undefined}
     >
       {children}

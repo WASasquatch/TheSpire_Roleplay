@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  foreignKey,
   index,
   integer,
   primaryKey,
@@ -209,12 +210,22 @@ export const users = sqliteTable(
      */
     defaultForumId: text("default_forum_id"),
     /**
-     * Default ("home") server the rail opens on (migration 0277, mirrors
-     * defaultForumId / 0274). NULL = no preference (falls back to the
-     * default/system server). A stale id (server deleted) is harmless — the
-     * client ignores ids not in the viewer's list. Also the home-server anchor
-     * for off-room earning credits (Phase 5b). No FK (kept a plain text id, as
-     * the ALTER in 0277 adds no REFERENCES — mirrors defaultForumId).
+     * Favorite / default ("home") server (migration 0277, mirrors
+     * defaultForumId / 0274; index added in 0300). NULL = no preference
+     * (falls back to the default/system server). Three roles:
+     *   - the rail's home-server preference (the icon the shell opens on),
+     *   - the home-server anchor for off-room earning credits (Phase 5b),
+     *   - the PROFILE anchor: a global profile view shows the owner's
+     *     per-server identity (collection / pet collection / equipped name
+     *     style / banner / flair) from THIS server, not the system default
+     *     (resolved via resolveProfileServerId; falls back to
+     *     DEFAULT_SERVER_ID when unset or pointing at a server the owner no
+     *     longer belongs to).
+     * A stale id (server deleted) is harmless — the read path falls back to
+     * the system server, and the server-delete path nulls any rows that
+     * pointed at it. No FK (kept a plain text id, as the ALTER in 0277 adds
+     * no REFERENCES — mirrors defaultForumId; the read-side fallback gives
+     * the same ON DELETE SET NULL behavior).
      */
     defaultServerId: text("default_server_id"),
     /**
@@ -1603,6 +1614,17 @@ export const siteSettings = sqliteTable("site_settings", {
    */
   registerDisclaimerHtml: text("register_disclaimer_html").notNull().default(""),
   /**
+   * Sanitized HTML shown WITH an "I agree" checkbox on the "Register your own
+   * Server" application form (migration 0301). Global-admin-authored in
+   * Global Admin → Rules; governs every server registration. Empty = no gate.
+   */
+  serverRegistrationRulesHtml: text("server_registration_rules_html").notNull().default(""),
+  /**
+   * Same as serverRegistrationRulesHtml for the "Create your Forum" application
+   * form (migration 0301). Empty = no gate.
+   */
+  forumRegistrationRulesHtml: text("forum_registration_rules_html").notNull().default(""),
+  /**
    * Plain-text description used by search engines and social previews
    * (rendered into <meta name="description">, og:description, and
    * twitter:description on the splash). Admins write the ~150-character SEO
@@ -1726,26 +1748,41 @@ export const siteSettings = sqliteTable("site_settings", {
  * read means "no pick for this category that day", not "use global
  * default", the resolver always materializes a number on insert.
  */
-export const flashSales = sqliteTable("flash_sales", {
-  /** ISO 'YYYY-MM-DD' UTC. Singleton per day. */
-  forDate: text("for_date").primaryKey(),
-  nameStyleKey: text("name_style_key")
-    .references(() => nameStyles.key, { onDelete: "set null" }),
-  itemKey: text("item_key")
-    .references(() => items.key, { onDelete: "set null" }),
-  cosmeticKey: text("cosmetic_key")
-    .references(() => cosmetics.key, { onDelete: "set null" }),
-  /** Free-form border pick (migration 0160). Same scope as
-   *  nameStyleKey, one row per UTC date, resolver-snapshotted
-   *  discount alongside the FK. */
-  freeformBorderKey: text("freeform_border_key")
-    .references(() => freeformBorders.key, { onDelete: "set null" }),
-  nameStyleDiscountPct: integer("name_style_discount_pct"),
-  itemDiscountPct: integer("item_discount_pct"),
-  cosmeticDiscountPct: integer("cosmetic_discount_pct"),
-  freeformBorderDiscountPct: integer("freeform_border_discount_pct"),
-  createdAt: ts("created_at"),
-});
+export const flashSales = sqliteTable(
+  "flash_sales",
+  {
+    /**
+     * Per-server economy partition (migration 0299). Flash sales are scheduled
+     * per server; the grain is (server_id, for_date). All legacy rows home to
+     * the default server.
+     */
+    serverId: text("server_id").notNull().default("server_spire_system"),
+    /** ISO 'YYYY-MM-DD' UTC. One sale per server per day. */
+    forDate: text("for_date").notNull(),
+    /**
+     * Picked SKU keys (migration 0299). The single-column FKs into
+     * name_styles / items / cosmetics / freeform_borders were DROPPED when
+     * those catalogs gained composite (server_id, key) PKs — a single-column
+     * FK into a composite-PK table raises "foreign key mismatch", and the old
+     * ON DELETE SET NULL can't be expressed as a composite FK (it would null
+     * the NOT NULL server_id). These stay plain-text keys; the resolver
+     * validates each pick against this server's live catalog when it
+     * materializes the day's sale.
+     */
+    nameStyleKey: text("name_style_key"),
+    itemKey: text("item_key"),
+    cosmeticKey: text("cosmetic_key"),
+    freeformBorderKey: text("freeform_border_key"),
+    nameStyleDiscountPct: integer("name_style_discount_pct"),
+    itemDiscountPct: integer("item_discount_pct"),
+    cosmeticDiscountPct: integer("cosmetic_discount_pct"),
+    freeformBorderDiscountPct: integer("freeform_border_discount_pct"),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.serverId, t.forDate] }),
+  }),
+);
 
 /* ---------- flash_sale_overrides ----------
  * Admin "queue a specific pick for date X" rows. Consumed (read,
@@ -1757,6 +1794,8 @@ export const flashSales = sqliteTable("flash_sales", {
 export const flashSaleOverrides = sqliteTable(
   "flash_sale_overrides",
   {
+    /** Per-server economy partition (migration 0299); overrides are queued per server. */
+    serverId: text("server_id").notNull().default("server_spire_system"),
     /** 'name_style' | 'item' | 'cosmetic'. No CHECK constraint so future categories drop in. */
     category: text("category").notNull(),
     /** ISO 'YYYY-MM-DD' UTC. */
@@ -1768,7 +1807,10 @@ export const flashSaleOverrides = sqliteTable(
     createdAt: ts("created_at"),
   },
   (t) => ({
-    pk: primaryKey({ columns: [t.category, t.forDate] }),
+    // server_id joins the existing one-pick-per-category-per-day PK
+    // (migration 0299). The live PK was (category, for_date) — NOT (for_date)
+    // — so category is preserved to keep that invariant.
+    pk: primaryKey({ columns: [t.serverId, t.category, t.forDate] }),
   }),
 );
 
@@ -3253,6 +3295,10 @@ export const forums = sqliteTable(
      * the Phase-2 backfill.
      */
     serverId: text("server_id").references(() => servers.id, { onDelete: "set null" }),
+    /** Owner-set genre/category tags for discovery search (migration 0301).
+     *  JSON string[] (lowercased/normalized via shared normalizeTags); NULL =
+     *  none. Mirrors servers.tagsJson for the identical forum discover UX. */
+    tagsJson: text("tags_json"),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },
@@ -3289,6 +3335,9 @@ export const forumCreationApplications = sqliteTable(
     reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
     reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
     reviewNote: text("review_note"),
+    /** When the applicant ticked the registration-rules agreement (migration
+     *  0301). NULL = legacy / no rules in force at submit. */
+    agreedAt: integer("agreed_at", { mode: "timestamp_ms" }),
   },
   (t) => ({
     statusIdx: index("forum_creation_apps_status_idx").on(t.status, t.submittedAt),
@@ -3695,8 +3744,24 @@ export const servers = sqliteTable(
     bannerCoverCss: text("banner_cover_css"),
     /** Monogram tint when the server has no logo image. */
     iconColor: text("icon_color"),
+    /** Owner-set accent ring around the rail icon (shows even on logo tiles). */
+    borderColor: text("border_color"),
+    /** Wide wordmark logo that replaces the app logo in the top bar inside this
+     *  server (distinct from logoUrl, the square rail icon). */
+    horizontalLogoUrl: text("horizontal_logo_url"),
+    /** Pan/zoom focus for the icon + banner — AvatarCrop JSON
+     *  ({zoom,offsetX,offsetY}); NULL = centered, no zoom. banner_crop
+     *  supersedes banner_focus_y for new positioning. */
+    iconCrop: text("icon_crop"),
+    bannerCrop: text("banner_crop"),
+    /** Owner-set top-bar banner height in px. NULL = default responsive height. */
+    bannerHeight: integer("banner_height"),
     /** JSON array of roomIds giving the owner's explicit room ordering in the rail. */
     roomOrderJson: text("room_order_json").notNull().default("[]"),
+    /** Owner-set genre/category tags for discovery search (migration 0301).
+     *  JSON string[] (lowercased/normalized via shared normalizeTags); NULL =
+     *  none. Searched alongside name in the discover modal's search mode. */
+    tagsJson: text("tags_json"),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },
@@ -3767,6 +3832,9 @@ export const serverCreationApplications = sqliteTable(
     reviewedAt: integer("reviewed_at", { mode: "timestamp_ms" }),
     reviewedByUserId: text("reviewed_by_user_id").references(() => users.id, { onDelete: "set null" }),
     reviewNote: text("review_note"),
+    /** When the applicant ticked the registration-rules agreement (migration
+     *  0301). NULL = legacy / no rules in force at submit. */
+    agreedAt: integer("agreed_at", { mode: "timestamp_ms" }),
   },
   (t) => ({
     statusIdx: index("server_creation_apps_status_idx").on(t.status, t.submittedAt),
@@ -3979,6 +4047,16 @@ export const serverSettings = sqliteTable("server_settings", {
   // per-server economy (full economy lands in Phase 5b; this is its home)
   earningConfigJson: text("earning_config_json"),
   flashSaleEnabled: integer("flash_sale_enabled", { mode: "boolean" }),
+  // Per-server EARNING SUBSYSTEM toggles (migration 0293; NULL = inherit the
+  // platform default = enabled). A server owner can turn off a whole subsystem
+  // (its catalog section hides + purchases reject). "nothing stays global" —
+  // each server runs the earning features it wants.
+  shopEnabled: integer("shop_enabled", { mode: "boolean" }),
+  ranksEnabled: integer("ranks_enabled", { mode: "boolean" }),
+  nameStylesEnabled: integer("name_styles_enabled", { mode: "boolean" }),
+  bordersEnabled: integer("borders_enabled", { mode: "boolean" }),
+  roomTransitionsEnabled: integer("room_transitions_enabled", { mode: "boolean" }),
+  cosmeticsEnabled: integer("cosmetics_enabled", { mode: "boolean" }),
   createdAt: ts("created_at"),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
@@ -4082,18 +4160,30 @@ export const bookmarks = sqliteTable(
  * "Legacy Member" which is enabled during beta then disabled after
  * GA so no future user can earn into it.
  */
-export const ranks = sqliteTable("ranks", {
-  /** Stable slug, e.g. "new_arrival". Immutable after create. */
-  key: text("key").primaryKey(),
-  /** Display name shown in chat / userlist / dashboard. Admin-editable. */
-  name: text("name").notNull(),
-  /** Display order, low → high (1 = lowest rank). */
-  order: integer("order").notNull().default(0),
-  /** Soft-close flag. 0 = skipped by the XP→rank resolver. */
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-  createdAt: ts("created_at"),
-  updatedAt: ts("updated_at"),
-});
+export const ranks = sqliteTable(
+  "ranks",
+  {
+    /**
+     * Per-server catalog partition (migration 0295). Each server owns its own
+     * rank ladder; the grain is (server_id, key). All legacy ranks home to the
+     * default server.
+     */
+    serverId: text("server_id").notNull().default("server_spire_system"),
+    /** Stable slug, e.g. "new_arrival". Immutable after create. */
+    key: text("key").notNull(),
+    /** Display name shown in chat / userlist / dashboard. Admin-editable. */
+    name: text("name").notNull(),
+    /** Display order, low → high (1 = lowest rank). */
+    order: integer("order").notNull().default(0),
+    /** Soft-close flag. 0 = skipped by the XP→rank resolver. */
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.serverId, t.key] }),
+  }),
+);
 
 /* ---------- rank_tiers ----------
  * Sub-levels within a rank (I, II, III, IV). Tier IV is the
@@ -4110,9 +4200,9 @@ export const rankTiers = sqliteTable(
   "rank_tiers",
   {
     id: id(),
-    rankKey: text("rank_key")
-      .notNull()
-      .references(() => ranks.key, { onDelete: "cascade" }),
+    /** Per-server catalog partition (migration 0295). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
+    rankKey: text("rank_key").notNull(),
     /** 1..4 by default; admins can extend a rank with more tiers. */
     tier: integer("tier").notNull(),
     /** Display label, e.g. "I", "II", "III", "IV: Verified". */
@@ -4130,7 +4220,12 @@ export const rankTiers = sqliteTable(
     updatedAt: ts("updated_at"),
   },
   (t) => ({
-    rankTierUq: uniqueIndex("rank_tiers_rank_tier_uq").on(t.rankKey, t.tier),
+    // Composite FK into the per-server rank catalog (migration 0295).
+    rankFk: foreignKey({
+      columns: [t.serverId, t.rankKey],
+      foreignColumns: [ranks.serverId, ranks.key],
+    }).onDelete("cascade"),
+    rankTierUq: uniqueIndex("rank_tiers_rank_tier_uq").on(t.serverId, t.rankKey, t.tier),
     xpIdx: index("rank_tiers_xp_idx").on(t.xpThreshold),
   }),
 );
@@ -4142,24 +4237,32 @@ export const rankTiers = sqliteTable(
  * @keyframes, eliminating any stored-XSS surface even with
  * admin-only authoring.
  */
-export const nameStyles = sqliteTable("name_styles", {
-  key: text("key").primaryKey(),
-  /** Admin-facing label, e.g. "Sunset Gradient". */
-  name: text("name").notNull(),
-  description: text("description").notNull().default(""),
-  /** HTML template, must include the literal `{username}` placeholder. */
-  template: text("template").notNull(),
-  /** Scoped CSS (animations via @keyframes). */
-  styleCss: text("style_css").notNull().default(""),
-  /** Currency cost to purchase this style. 0 = free. */
-  cost: integer("cost").notNull().default(0),
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-  /** Seed-protected styles cannot be deleted, only edited. */
-  isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
-  order: integer("order").notNull().default(0),
-  createdAt: ts("created_at"),
-  updatedAt: ts("updated_at"),
-});
+export const nameStyles = sqliteTable(
+  "name_styles",
+  {
+    /** Per-server catalog partition (migration 0296); grain is (server_id, key). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
+    key: text("key").notNull(),
+    /** Admin-facing label, e.g. "Sunset Gradient". */
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** HTML template, must include the literal `{username}` placeholder. */
+    template: text("template").notNull(),
+    /** Scoped CSS (animations via @keyframes). */
+    styleCss: text("style_css").notNull().default(""),
+    /** Currency cost to purchase this style. 0 = free. */
+    cost: integer("cost").notNull().default(0),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    /** Seed-protected styles cannot be deleted, only edited. */
+    isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
+    order: integer("order").notNull().default(0),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.serverId, t.key] }),
+  }),
+);
 
 /* ---------- cosmetics ----------
  * Purchasable feature catalog distinct from name styles and
@@ -4168,19 +4271,53 @@ export const nameStyles = sqliteTable("name_styles", {
  * for the border-purchase flow, the actual per-rank prices live
  * on `rank_tiers.borderCost`).
  */
-export const cosmetics = sqliteTable("cosmetics", {
-  /** Stable slug, e.g. "inline_avatar". Immutable after create. */
-  key: text("key").primaryKey(),
-  name: text("name").notNull(),
-  description: text("description").notNull().default(""),
-  /** Flat Currency price. For `rank_border` this is ignored; prices live on rank_tiers. */
-  cost: integer("cost").notNull().default(0),
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-  /** Per-cosmetic config JSON (e.g. avatar pixel size for `inline_avatar`). */
-  configJson: text("config_json"),
-  createdAt: ts("created_at"),
-  updatedAt: ts("updated_at"),
-});
+export const cosmetics = sqliteTable(
+  "cosmetics",
+  {
+    /** Per-server catalog partition (migration 0299); grain is (server_id, key). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
+    /** Stable slug, e.g. "inline_avatar". Immutable after create. */
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** Flat Currency price. For `rank_border` this is ignored; prices live on rank_tiers. */
+    cost: integer("cost").notNull().default(0),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    /** Per-cosmetic config JSON (e.g. avatar pixel size for `inline_avatar`). */
+    configJson: text("config_json"),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.serverId, t.key] }),
+  }),
+);
+
+/* ---------- room_transitions ----------
+ * Per-server PRICE / enabled / order for the room-switch animations. The set of
+ * animations is FIXED (impls are client-side, keyed by `key`), so label +
+ * description stay sourced from the shared ROOM_TRANSITIONS const by key — this
+ * table only lets a server owner re-price, disable, or reorder them (migration
+ * 0294, seeded for the system server from the const). Part of the "everything
+ * per-server" earning build; the read paths COALESCE per-server rows over the
+ * const so an unseeded server falls back to the default catalog/price.
+ */
+export const roomTransitions = sqliteTable(
+  "room_transitions",
+  {
+    serverId: text("server_id").notNull().default("server_spire_system"),
+    key: text("key").notNull(),
+    cost: integer("cost").notNull().default(0),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.serverId, t.key] }),
+  }),
+);
+export type DbRoomTransition = typeof roomTransitions.$inferSelect;
 
 /* ---------- user_earning ----------
  * Per-master-account pool. Created on first earn (or lazily on first
@@ -4464,13 +4601,16 @@ export const userOwnedBorders = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    rankKey: text("rank_key")
-      .notNull()
-      .references(() => ranks.key, { onDelete: "cascade" }),
+    rankKey: text("rank_key").notNull(),
     acquiredAt: ts("acquired_at"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.serverId, t.userId, t.rankKey] }),
+    // Composite FK into the per-server rank catalog (migration 0295).
+    rankFk: foreignKey({
+      columns: [t.serverId, t.rankKey],
+      foreignColumns: [ranks.serverId, ranks.key],
+    }).onDelete("cascade"),
     userIdx: index("user_owned_borders_user_idx").on(t.userId),
   }),
 );
@@ -4489,15 +4629,18 @@ export const userOwnedNameStyles = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    styleKey: text("style_key")
-      .notNull()
-      .references(() => nameStyles.key, { onDelete: "cascade" }),
+    styleKey: text("style_key").notNull(),
     /** Per-user customization JSON (color picks, glow strength, etc.). */
     configJson: text("config_json"),
     acquiredAt: ts("acquired_at"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.serverId, t.userId, t.styleKey] }),
+    // Composite FK into the per-server name-style catalog (migration 0296).
+    styleFk: foreignKey({
+      columns: [t.serverId, t.styleKey],
+      foreignColumns: [nameStyles.serverId, nameStyles.key],
+    }).onDelete("cascade"),
     userIdx: index("user_owned_name_styles_user_idx").on(t.userId),
   }),
 );
@@ -4518,14 +4661,17 @@ export const characterOwnedNameStyles = sqliteTable(
     characterId: text("character_id")
       .notNull()
       .references(() => characters.id, { onDelete: "cascade" }),
-    styleKey: text("style_key")
-      .notNull()
-      .references(() => nameStyles.key, { onDelete: "cascade" }),
+    styleKey: text("style_key").notNull(),
     configJson: text("config_json"),
     acquiredAt: ts("acquired_at"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.serverId, t.characterId, t.styleKey] }),
+    // Composite FK into the per-server name-style catalog (migration 0296).
+    styleFk: foreignKey({
+      columns: [t.serverId, t.styleKey],
+      foreignColumns: [nameStyles.serverId, nameStyles.key],
+    }).onDelete("cascade"),
     characterIdx: index("character_owned_name_styles_character_idx").on(t.characterId),
   }),
 );
@@ -4544,13 +4690,16 @@ export const characterOwnedBorders = sqliteTable(
     characterId: text("character_id")
       .notNull()
       .references(() => characters.id, { onDelete: "cascade" }),
-    rankKey: text("rank_key")
-      .notNull()
-      .references(() => ranks.key, { onDelete: "cascade" }),
+    rankKey: text("rank_key").notNull(),
     acquiredAt: ts("acquired_at"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.serverId, t.characterId, t.rankKey] }),
+    // Composite FK into the per-server rank catalog (migration 0295).
+    rankFk: foreignKey({
+      columns: [t.serverId, t.rankKey],
+      foreignColumns: [ranks.serverId, ranks.key],
+    }).onDelete("cascade"),
     characterIdx: index("character_owned_borders_character_idx").on(t.characterId),
   }),
 );
@@ -4569,26 +4718,34 @@ export const characterOwnedBorders = sqliteTable(
  * schema migration; client falls back to a 'common' palette for
  * unknown values.
  */
-export const freeformBorders = sqliteTable("freeform_borders", {
-  key: text("key").primaryKey(),
-  name: text("name").notNull(),
-  description: text("description").notNull().default(""),
-  /** PNG / APNG / WebP URL. Mutually exclusive with `template`. */
-  imageUrl: text("image_url"),
-  /** DOM template with `{avatar}` placeholder. Mutually exclusive with `imageUrl`. */
-  template: text("template"),
-  /** Scoped CSS for the `.b-<key>` class chain referenced by template. */
-  styleCss: text("style_css"),
-  /** 'rare' | 'epic' | 'legendary' | 'mythic' | 'exotic' | 'atmospheric' | ... */
-  rarity: text("rarity").notNull().default("common"),
-  cost: integer("cost").notNull().default(0),
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
-  /** Seed-protected. Admin can edit but not delete. */
-  isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
-  order: integer("order").notNull().default(0),
-  createdAt: ts("created_at"),
-  updatedAt: ts("updated_at"),
-});
+export const freeformBorders = sqliteTable(
+  "freeform_borders",
+  {
+    /** Per-server catalog partition (migration 0297); grain is (server_id, key). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
+    key: text("key").notNull(),
+    name: text("name").notNull(),
+    description: text("description").notNull().default(""),
+    /** PNG / APNG / WebP URL. Mutually exclusive with `template`. */
+    imageUrl: text("image_url"),
+    /** DOM template with `{avatar}` placeholder. Mutually exclusive with `imageUrl`. */
+    template: text("template"),
+    /** Scoped CSS for the `.b-<key>` class chain referenced by template. */
+    styleCss: text("style_css"),
+    /** 'rare' | 'epic' | 'legendary' | 'mythic' | 'exotic' | 'atmospheric' | ... */
+    rarity: text("rarity").notNull().default("common"),
+    cost: integer("cost").notNull().default(0),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    /** Seed-protected. Admin can edit but not delete. */
+    isBuiltin: integer("is_builtin", { mode: "boolean" }).notNull().default(false),
+    order: integer("order").notNull().default(0),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.serverId, t.key] }),
+  }),
+);
 
 /* ---------- user_owned_freeform_borders ---------- */
 export const userOwnedFreeformBorders = sqliteTable(
@@ -4599,9 +4756,7 @@ export const userOwnedFreeformBorders = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    borderKey: text("border_key")
-      .notNull()
-      .references(() => freeformBorders.key, { onDelete: "cascade" }),
+    borderKey: text("border_key").notNull(),
     acquiredAt: ts("acquired_at"),
     /**
      * Per-identity color customization (migration 0158). JSON map of
@@ -4615,6 +4770,11 @@ export const userOwnedFreeformBorders = sqliteTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.serverId, t.userId, t.borderKey] }),
+    // Composite FK into the per-server freeform-border catalog (migration 0297).
+    borderFk: foreignKey({
+      columns: [t.serverId, t.borderKey],
+      foreignColumns: [freeformBorders.serverId, freeformBorders.key],
+    }).onDelete("cascade"),
     userIdx: index("user_owned_freeform_borders_user_idx").on(t.userId),
   }),
 );
@@ -4628,9 +4788,7 @@ export const characterOwnedFreeformBorders = sqliteTable(
     characterId: text("character_id")
       .notNull()
       .references(() => characters.id, { onDelete: "cascade" }),
-    borderKey: text("border_key")
-      .notNull()
-      .references(() => freeformBorders.key, { onDelete: "cascade" }),
+    borderKey: text("border_key").notNull(),
     acquiredAt: ts("acquired_at"),
     /** Per-character color customization. Same shape as
      *  `user_owned_freeform_borders.configJson`. */
@@ -4638,6 +4796,11 @@ export const characterOwnedFreeformBorders = sqliteTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.serverId, t.characterId, t.borderKey] }),
+    // Composite FK into the per-server freeform-border catalog (migration 0297).
+    borderFk: foreignKey({
+      columns: [t.serverId, t.borderKey],
+      foreignColumns: [freeformBorders.serverId, freeformBorders.key],
+    }).onDelete("cascade"),
     characterIdx: index("character_owned_freeform_borders_character_idx").on(t.characterId),
   }),
 );
@@ -4670,7 +4833,9 @@ export const characterOwnedFreeformBorders = sqliteTable(
 export const items = sqliteTable(
   "items",
   {
-    key: text("key").primaryKey(),
+    /** Per-server catalog partition (migration 0298); grain is (server_id, key). */
+    serverId: text("server_id").notNull().default("server_spire_system"),
+    key: text("key").notNull(),
     name: text("name").notNull(),
     /** Plural display form. Falls back to `${name}s` when null. */
     namePlural: text("name_plural"),
@@ -4721,6 +4886,7 @@ export const items = sqliteTable(
     updatedAt: ts("updated_at"),
   },
   (t) => ({
+    pk: primaryKey({ columns: [t.serverId, t.key] }),
     orderIdx: index("items_order_idx").on(t.order),
     enabledForSaleIdx: index("items_enabled_for_sale_idx").on(t.enabled, t.forSale),
     categoryIdx: index("items_category_idx").on(t.category),
@@ -4746,15 +4912,18 @@ export const identityInventory = sqliteTable(
     /** "user" (OOC master) or "character", selects which id table ownerId points at. */
     ownerScope: text("owner_scope", { enum: ["user", "character"] }).notNull(),
     ownerId: text("owner_id").notNull(),
-    itemKey: text("item_key")
-      .notNull()
-      .references(() => items.key, { onDelete: "cascade" }),
+    itemKey: text("item_key").notNull(),
     quantity: integer("quantity").notNull().default(0),
     acquiredAt: ts("acquired_at"),
     updatedAt: ts("updated_at"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.serverId, t.ownerScope, t.ownerId, t.itemKey] }),
+    // Composite FK into the per-server item catalog (migration 0298).
+    itemFk: foreignKey({
+      columns: [t.serverId, t.itemKey],
+      foreignColumns: [items.serverId, items.key],
+    }).onDelete("cascade"),
     ownerIdx: index("identity_inventory_owner_idx").on(t.ownerScope, t.ownerId),
     itemIdx: index("identity_inventory_item_idx").on(t.itemKey),
   }),
@@ -4782,13 +4951,17 @@ export const identityCollection = sqliteTable(
     ownerId: text("owner_id").notNull(),
     /** 0..9, enforced by SQL CHECK + the route validator. */
     slot: integer("slot").notNull(),
-    itemKey: text("item_key")
-      .notNull()
-      .references(() => items.key, { onDelete: "cascade" }),
+    itemKey: text("item_key").notNull(),
     updatedAt: ts("updated_at"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.serverId, t.ownerScope, t.ownerId, t.slot] }),
+    // Composite FK into the per-server item catalog (migration 0298). The 0..9
+    // slot CHECK lives in SQL (migration 0298) + the route validator.
+    itemFk: foreignKey({
+      columns: [t.serverId, t.itemKey],
+      foreignColumns: [items.serverId, items.key],
+    }).onDelete("cascade"),
     ownerIdx: index("identity_collection_owner_idx").on(t.ownerScope, t.ownerId),
   }),
 );
@@ -4813,9 +4986,7 @@ export const identityPetCollection = sqliteTable(
     ownerId: text("owner_id").notNull(),
     /** 0..4, enforced by SQL CHECK + the route validator. */
     slot: integer("slot").notNull(),
-    itemKey: text("item_key")
-      .notNull()
-      .references(() => items.key, { onDelete: "cascade" }),
+    itemKey: text("item_key").notNull(),
     /**
      * Owner-assigned nickname for this specific pet ("Whiskers",
      * "Smaug"). The catalog `items.name` stays the breed/species label
@@ -4829,6 +5000,12 @@ export const identityPetCollection = sqliteTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.serverId, t.ownerScope, t.ownerId, t.slot] }),
+    // Composite FK into the per-server item catalog (migration 0298). The 0..4
+    // slot CHECK lives in SQL (migration 0298) + the route validator.
+    itemFk: foreignKey({
+      columns: [t.serverId, t.itemKey],
+      foreignColumns: [items.serverId, items.key],
+    }).onDelete("cascade"),
     ownerIdx: index("identity_pet_collection_owner_idx").on(t.ownerScope, t.ownerId),
   }),
 );
@@ -4850,9 +5027,15 @@ export const userActiveCosmetics = sqliteTable("user_active_cosmetics", {
    *  indicator hides this user from non-admin receivers' typer sets.
    *  Admins always see the row for moderation visibility. */
   lurkingMasterEnabled: integer("lurking_master_enabled", { mode: "boolean" }).notNull().default(false),
-  /** Currently-active name style (FK; set null on style delete). */
-  activeNameStyleKey: text("active_name_style_key")
-    .references(() => nameStyles.key, { onDelete: "set null" }),
+  /**
+   * Currently-active name style key. The FK into name_styles was DROPPED in
+   * migration 0296 (the catalog gained a composite (server_id, key) PK, which a
+   * single-column FK can't target, and the old ON DELETE SET NULL can't be a
+   * composite FK because it would null the NOT NULL server_id). Plain text now;
+   * the equip read path LEFT JOINs name_styles by key (stale key => no style,
+   * same visible outcome SET NULL gave) and the equip write path validates it.
+   */
+  activeNameStyleKey: text("active_name_style_key"),
   /**
    * Master/OOC equipped room-transition key (migration 0219). Catalog is in
    * shared code (ROOM_TRANSITIONS) so no FK. Null = instant switch.
@@ -5269,7 +5452,13 @@ export const builtinCommandConfig = sqliteTable("builtin_command_config", {
   commandName: text("command_name").primaryKey(),
   rewardXp: integer("reward_xp").notNull().default(0),
   rewardCurrency: integer("reward_currency").notNull().default(0),
-  rewardItemKey: text("reward_item_key").references(() => items.key, { onDelete: "set null" }),
+  /**
+   * Reward item key. The FK into items was DROPPED in migration 0298: this is a
+   * GLOBAL singleton-per-command table with no server_id, so it cannot compose
+   * an FK into the per-server (server_id, key) item catalog. Plain text now;
+   * the route validates the key and game-end mints tolerate a missing item.
+   */
+  rewardItemKey: text("reward_item_key"),
   rewardItemCount: integer("reward_item_count").notNull().default(0),
   /** Null = use code default for this command. Bounded at the route
    *  handler (1s..30min), the column itself is just the value. */
@@ -5278,6 +5467,33 @@ export const builtinCommandConfig = sqliteTable("builtin_command_config", {
   updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
 });
 export type DbBuiltinCommandConfig = typeof builtinCommandConfig.$inferSelect;
+
+/* ---------- server_builtin_command_config (Admin Partition) ----------
+ * Per-server override of the social-game config above, keyed by
+ * (server_id, command_name). Runtime read order: this server's row →
+ * the global default above → the code default. Each server's owner/mod
+ * tunes its own games in Server Admin → Commands & Titles. Migration 0291.
+ */
+export const serverBuiltinCommandConfig = sqliteTable("server_builtin_command_config", {
+  serverId: text("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  commandName: text("command_name").notNull(),
+  rewardXp: integer("reward_xp").notNull().default(0),
+  rewardCurrency: integer("reward_currency").notNull().default(0),
+  /**
+   * Reward item key. The FK into items was DROPPED in migration 0298: the FK was
+   * ON DELETE SET NULL, which can't be a composite FK into the per-server
+   * (server_id, key) item catalog without nulling the NOT NULL server_id. Plain
+   * text now; the route validates the key against this server's catalog.
+   */
+  rewardItemKey: text("reward_item_key"),
+  rewardItemCount: integer("reward_item_count").notNull().default(0),
+  durationMs: integer("duration_ms"),
+  updatedAt: ts("updated_at"),
+  updatedByUserId: text("updated_by_user_id").references(() => users.id, { onDelete: "set null" }),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.serverId, t.commandName] }),
+}));
+export type DbServerBuiltinCommandConfig = typeof serverBuiltinCommandConfig.$inferSelect;
 
 /**
  * Per-identity social-game win + points ledger (migration 0195).
@@ -5316,6 +5532,10 @@ export const gameStats = sqliteTable("game_stats", {
   lastWonAt: ts("last_won_at"),
 }, (t) => ({
   pk: primaryKey({ columns: [t.serverId, t.ownerScope, t.ownerId, t.gameKind] }),
+  // Leaderboard indexes (server_id-leading; recreated server-scoped in
+  // migration 0292 after the 0284 rebuild dropped the original 0195 indexes).
+  kindWins: index("idx_game_stats_kind_wins").on(t.serverId, t.gameKind, t.wins),
+  kindPoints: index("idx_game_stats_kind_points").on(t.serverId, t.gameKind, t.points),
 }));
 export type DbGameStats = typeof gameStats.$inferSelect;
 
@@ -5343,7 +5563,14 @@ export const eidolonState = sqliteTable(
     stage: text("stage", { enum: ["egg", "alive", "dead", "dormant"] }).notNull().default("alive"),
     kind: text("kind", { enum: ["species", "pet"] }).notNull().default("species"),
     speciesId: text("species_id"),
-    petItemKey: text("pet_item_key").references(() => items.key, { onDelete: "set null" }),
+    /**
+     * Owned pet item rendered as this familiar (kind='pet'). The FK into items
+     * was DROPPED in migration 0298 (catalog gained a composite (server_id, key)
+     * PK; SET NULL can't be a composite FK without nulling the NOT NULL
+     * server_id). Plain text now; the renderer shows no pet sprite for a missing
+     * key, the same outcome SET NULL produced.
+     */
+    petItemKey: text("pet_item_key"),
     name: text("name").notNull().default(""),
     satiety: real("satiety").notNull().default(80),
     joy: real("joy").notNull().default(75),

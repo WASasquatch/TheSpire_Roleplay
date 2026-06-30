@@ -22,6 +22,7 @@
  * the look is consistent regardless of how the user got there.
  */
 import { useEffect } from "react";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 export interface ItemZoomEntry {
   itemKey: string;
@@ -41,6 +42,9 @@ export function ItemZoomView({
   entry: ItemZoomEntry;
   onClose: () => void;
 }) {
+  // Calm-mode ease: this is a modal-like full-screen overlay (not the shared
+  // Modal), so fade the backdrop in under Reduce Motion to match the modals.
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -55,7 +59,7 @@ export function ItemZoomView({
       aria-modal="true"
       aria-label={`${entry.name}, full view`}
       onClick={onClose}
-      className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-black/85 p-6 backdrop-blur-sm"
+      className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-black/85 p-6 backdrop-blur-sm${reduceMotion ? " tk-fade-in" : ""}`}
     >
       {entry.iconUrl ? (
         <img

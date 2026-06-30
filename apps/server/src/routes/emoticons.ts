@@ -802,7 +802,10 @@ export async function registerEmoticonRoutes(
     const costRow = (await db
       .select({ cost: cosmetics.cost, enabled: cosmetics.enabled })
       .from(cosmetics)
-      .where(eq(cosmetics.key, "flair_reaction_sheet"))
+      // Per-server catalog (migration 0297): read the cost/enabled from the same
+      // server the debit below charges (DEFAULT-pinned). Flag off ⇒ the default
+      // server, byte-identical to today.
+      .where(and(eq(cosmetics.serverId, DEFAULT_SERVER_ID), eq(cosmetics.key, "flair_reaction_sheet")))
       .limit(1))[0];
     if (!costRow || !costRow.enabled) {
       reply.code(503);

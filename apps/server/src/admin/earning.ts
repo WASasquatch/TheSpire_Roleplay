@@ -306,8 +306,8 @@ export function registerAdminEarningRoutes(
    */
   app.get("/admin/earning/ranks", async (req, reply) => {
     if (!(await requirePermission(req, reply, "view_earning_config"))) return;
-    const rankRows = await db.select().from(ranks).orderBy(asc(ranks.order), asc(ranks.name));
-    const tierRows = await db.select().from(rankTiers).orderBy(asc(rankTiers.rankKey), asc(rankTiers.tier));
+    const rankRows = await db.select().from(ranks).where(eq(ranks.serverId, DEFAULT_SERVER_ID)).orderBy(asc(ranks.order), asc(ranks.name));
+    const tierRows = await db.select().from(rankTiers).where(eq(rankTiers.serverId, DEFAULT_SERVER_ID)).orderBy(asc(rankTiers.rankKey), asc(rankTiers.tier));
 
     // Usage counts: how many user / character earning rows currently
     // sit on each rank. Drives the delete-protected UI affordance.
@@ -358,11 +358,12 @@ export function registerAdminEarningRoutes(
     let body: z.infer<typeof createRankBody>;
     try { body = createRankBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-    const existing = (await db.select().from(ranks).where(eq(ranks.key, body.key)).limit(1))[0];
+    const existing = (await db.select().from(ranks).where(and(eq(ranks.serverId, DEFAULT_SERVER_ID), eq(ranks.key, body.key))).limit(1))[0];
     if (existing) { reply.code(409); return { error: "rank key already exists" }; }
-    const maxOrderRow = (await db.select({ m: sql<number>`MAX("order")` }).from(ranks))[0];
+    const maxOrderRow = (await db.select({ m: sql<number>`MAX("order")` }).from(ranks).where(eq(ranks.serverId, DEFAULT_SERVER_ID)))[0];
     const order = body.order ?? ((maxOrderRow?.m ?? 0) + 1);
     await db.insert(ranks).values({
+      serverId: DEFAULT_SERVER_ID,
       key: body.key,
       name: body.name,
       order,
@@ -373,6 +374,7 @@ export function registerAdminEarningRoutes(
     // value via the tier-edit form.
     for (const t of [1, 2, 3, 4]) {
       await db.insert(rankTiers).values({
+        serverId: DEFAULT_SERVER_ID,
         id: nanoid(),
         rankKey: body.key,
         tier: t,
@@ -397,13 +399,13 @@ export function registerAdminEarningRoutes(
     let body: z.infer<typeof patchRankBody>;
     try { body = patchRankBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-    const existing = (await db.select().from(ranks).where(eq(ranks.key, req.params.key)).limit(1))[0];
+    const existing = (await db.select().from(ranks).where(and(eq(ranks.serverId, DEFAULT_SERVER_ID), eq(ranks.key, req.params.key))).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "rank not found" }; }
     const update: Partial<typeof ranks.$inferInsert> = { updatedAt: new Date() };
     if (body.name !== undefined) update.name = body.name;
     if (body.order !== undefined) update.order = body.order;
     if (body.enabled !== undefined) update.enabled = body.enabled;
-    await db.update(ranks).set(update).where(eq(ranks.key, req.params.key));
+    await db.update(ranks).set(update).where(and(eq(ranks.serverId, DEFAULT_SERVER_ID), eq(ranks.key, req.params.key)));
     return { ok: true };
   });
 
@@ -424,7 +426,7 @@ export function registerAdminEarningRoutes(
         message: "Disable the rank instead, existing rank-holders should not be displaced.",
       };
     }
-    await db.delete(ranks).where(eq(ranks.key, req.params.key));
+    await db.delete(ranks).where(and(eq(ranks.serverId, DEFAULT_SERVER_ID), eq(ranks.key, req.params.key)));
     return { ok: true };
   });
 
@@ -440,7 +442,7 @@ export function registerAdminEarningRoutes(
     let body: z.infer<typeof patchTierBody>;
     try { body = patchTierBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-    const existing = (await db.select().from(rankTiers).where(eq(rankTiers.id, req.params.id)).limit(1))[0];
+    const existing = (await db.select().from(rankTiers).where(and(eq(rankTiers.serverId, DEFAULT_SERVER_ID), eq(rankTiers.id, req.params.id))).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "tier not found" }; }
     const update: Partial<typeof rankTiers.$inferInsert> = { updatedAt: new Date() };
     if (body.label !== undefined) update.label = body.label;
@@ -449,7 +451,7 @@ export function registerAdminEarningRoutes(
     if (body.borderImageUrl !== undefined) update.borderImageUrl = body.borderImageUrl;
     if (body.borderCost !== undefined) update.borderCost = body.borderCost;
     if (body.enabled !== undefined) update.enabled = body.enabled;
-    await db.update(rankTiers).set(update).where(eq(rankTiers.id, req.params.id));
+    await db.update(rankTiers).set(update).where(and(eq(rankTiers.serverId, DEFAULT_SERVER_ID), eq(rankTiers.id, req.params.id)));
     // Threshold-driven backfill. Cheap at chat scale (a few thousand
     // earning rows); future scale-out can move this to a job queue.
     if (body.xpThreshold !== undefined || body.enabled !== undefined) {
@@ -469,12 +471,13 @@ export function registerAdminEarningRoutes(
     let body: z.infer<typeof createTierBody>;
     try { body = createTierBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-    const rank = (await db.select().from(ranks).where(eq(ranks.key, req.params.key)).limit(1))[0];
+    const rank = (await db.select().from(ranks).where(and(eq(ranks.serverId, DEFAULT_SERVER_ID), eq(ranks.key, req.params.key))).limit(1))[0];
     if (!rank) { reply.code(404); return { error: "rank not found" }; }
-    const dup = (await db.select().from(rankTiers).where(and(eq(rankTiers.rankKey, req.params.key), eq(rankTiers.tier, body.tier))).limit(1))[0];
+    const dup = (await db.select().from(rankTiers).where(and(eq(rankTiers.serverId, DEFAULT_SERVER_ID), eq(rankTiers.rankKey, req.params.key), eq(rankTiers.tier, body.tier))).limit(1))[0];
     if (dup) { reply.code(409); return { error: "tier already exists for this rank" }; }
     const id = nanoid();
     await db.insert(rankTiers).values({
+      serverId: DEFAULT_SERVER_ID,
       id,
       rankKey: req.params.key,
       tier: body.tier,
@@ -495,7 +498,7 @@ export function registerAdminEarningRoutes(
    */
   app.delete<{ Params: { id: string } }>("/admin/earning/rank-tiers/:id", async (req, reply) => {
     if (!(await requirePermission(req, reply, "manage_ranks"))) return;
-    const existing = (await db.select().from(rankTiers).where(eq(rankTiers.id, req.params.id)).limit(1))[0];
+    const existing = (await db.select().from(rankTiers).where(and(eq(rankTiers.serverId, DEFAULT_SERVER_ID), eq(rankTiers.id, req.params.id))).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "tier not found" }; }
     const userCount = (await db.select({ n: sql<number>`COUNT(*)` })
       .from(userEarning)
@@ -510,7 +513,7 @@ export function registerAdminEarningRoutes(
         message: "Disable the tier or change the threshold so users move out before deleting.",
       };
     }
-    await db.delete(rankTiers).where(eq(rankTiers.id, req.params.id));
+    await db.delete(rankTiers).where(and(eq(rankTiers.serverId, DEFAULT_SERVER_ID), eq(rankTiers.id, req.params.id)));
     await backfillAllRankPlacements(db);
     return { ok: true };
   });
@@ -609,7 +612,7 @@ export function registerAdminEarningRoutes(
    */
   app.get("/admin/earning/name-styles", async (req, reply) => {
     if (!(await requirePermission(req, reply, "view_earning_config"))) return;
-    const rows = await db.select().from(nameStyles).orderBy(asc(nameStyles.order));
+    const rows = await db.select().from(nameStyles).where(eq(nameStyles.serverId, DEFAULT_SERVER_ID)).orderBy(asc(nameStyles.order));
     const ownerRows = await db.all<{ styleKey: string; n: number }>(sql`
       SELECT style_key AS styleKey, COUNT(*) AS n FROM user_owned_name_styles GROUP BY style_key
     `);
@@ -645,14 +648,15 @@ export function registerAdminEarningRoutes(
     let body: z.infer<typeof createStyleBody>;
     try { body = createStyleBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-    const dup = (await db.select().from(nameStyles).where(eq(nameStyles.key, body.key)).limit(1))[0];
+    const dup = (await db.select().from(nameStyles).where(and(eq(nameStyles.serverId, DEFAULT_SERVER_ID), eq(nameStyles.key, body.key))).limit(1))[0];
     if (dup) { reply.code(409); return { error: "style key already exists" }; }
     // Order defaults to "after the current max" so new rows render at
     // the bottom of the editor list and the buy list. Admin can
     // reorder via the order field.
-    const maxOrderRow = (await db.select({ m: sql<number>`MAX("order")` }).from(nameStyles))[0];
+    const maxOrderRow = (await db.select({ m: sql<number>`MAX("order")` }).from(nameStyles).where(eq(nameStyles.serverId, DEFAULT_SERVER_ID)))[0];
     const order = body.order ?? ((maxOrderRow?.m ?? 0) + 1);
     await db.insert(nameStyles).values({
+      serverId: DEFAULT_SERVER_ID,
       key: body.key,
       name: body.name,
       description: body.description ?? "",
@@ -673,7 +677,7 @@ export function registerAdminEarningRoutes(
       let body: z.infer<typeof styleBody>;
       try { body = styleBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-      const existing = (await db.select().from(nameStyles).where(eq(nameStyles.key, req.params.key)).limit(1))[0];
+      const existing = (await db.select().from(nameStyles).where(and(eq(nameStyles.serverId, DEFAULT_SERVER_ID), eq(nameStyles.key, req.params.key))).limit(1))[0];
       if (!existing) { reply.code(404); return { error: "style not found" }; }
       const update: Partial<typeof nameStyles.$inferInsert> = { updatedAt: new Date() };
       if (body.name !== undefined) update.name = body.name;
@@ -683,7 +687,7 @@ export function registerAdminEarningRoutes(
       if (body.cost !== undefined) update.cost = body.cost;
       if (body.enabled !== undefined) update.enabled = body.enabled;
       if (body.order !== undefined) update.order = body.order;
-      await db.update(nameStyles).set(update).where(eq(nameStyles.key, req.params.key));
+      await db.update(nameStyles).set(update).where(and(eq(nameStyles.serverId, DEFAULT_SERVER_ID), eq(nameStyles.key, req.params.key)));
       return { ok: true };
     },
   );
@@ -702,13 +706,13 @@ export function registerAdminEarningRoutes(
    */
   app.delete<{ Params: { key: string } }>("/admin/earning/name-styles/:key", async (req, reply) => {
     if (!(await requirePermission(req, reply, "manage_name_styles"))) return;
-    const existing = (await db.select().from(nameStyles).where(eq(nameStyles.key, req.params.key)).limit(1))[0];
+    const existing = (await db.select().from(nameStyles).where(and(eq(nameStyles.serverId, DEFAULT_SERVER_ID), eq(nameStyles.key, req.params.key))).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "style not found" }; }
     if (existing.isBuiltin) {
       reply.code(409);
       return { error: "built-in styles cannot be deleted", message: "Disable it instead, the seed row backs anyone who owns it." };
     }
-    await db.delete(nameStyles).where(eq(nameStyles.key, req.params.key));
+    await db.delete(nameStyles).where(and(eq(nameStyles.serverId, DEFAULT_SERVER_ID), eq(nameStyles.key, req.params.key)));
     return { ok: true };
   });
 
@@ -772,7 +776,7 @@ export function registerAdminEarningRoutes(
 
   app.get("/admin/earning/freeform-borders", async (req, reply) => {
     if (!(await requirePermission(req, reply, "view_earning_config"))) return;
-    const rows = await db.select().from(freeformBorders).orderBy(asc(freeformBorders.order));
+    const rows = await db.select().from(freeformBorders).where(eq(freeformBorders.serverId, DEFAULT_SERVER_ID)).orderBy(asc(freeformBorders.order));
     // Owner / equipped counts for the destructive-action confirmation
     // prompts. Mirrors the name-style endpoint shape, admins lean on
     // this to know whether disabling a row will yank cosmetics from
@@ -831,11 +835,12 @@ export function registerAdminEarningRoutes(
       styleCss: body.styleCss ?? null,
     });
     if (shapeError) { reply.code(400); return { error: shapeError }; }
-    const dup = (await db.select().from(freeformBorders).where(eq(freeformBorders.key, body.key)).limit(1))[0];
+    const dup = (await db.select().from(freeformBorders).where(and(eq(freeformBorders.serverId, DEFAULT_SERVER_ID), eq(freeformBorders.key, body.key))).limit(1))[0];
     if (dup) { reply.code(409); return { error: "border key already exists" }; }
-    const maxOrderRow = (await db.select({ m: sql<number>`MAX("order")` }).from(freeformBorders))[0];
+    const maxOrderRow = (await db.select({ m: sql<number>`MAX("order")` }).from(freeformBorders).where(eq(freeformBorders.serverId, DEFAULT_SERVER_ID)))[0];
     const order = body.order ?? ((maxOrderRow?.m ?? 0) + 1);
     await db.insert(freeformBorders).values({
+      serverId: DEFAULT_SERVER_ID,
       key: body.key,
       name: body.name,
       description: body.description ?? "",
@@ -858,7 +863,7 @@ export function registerAdminEarningRoutes(
       let body: z.infer<typeof patchFreeformBorderBody>;
       try { body = patchFreeformBorderBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-      const existing = (await db.select().from(freeformBorders).where(eq(freeformBorders.key, req.params.key)).limit(1))[0];
+      const existing = (await db.select().from(freeformBorders).where(and(eq(freeformBorders.serverId, DEFAULT_SERVER_ID), eq(freeformBorders.key, req.params.key))).limit(1))[0];
       if (!existing) { reply.code(404); return { error: "border not found" }; }
       // Re-validate the XOR against the resolved post-patch shape so
       // a partial PATCH can't break the invariant by clearing the
@@ -883,7 +888,7 @@ export function registerAdminEarningRoutes(
       if (body.cost !== undefined) update.cost = body.cost;
       if (body.enabled !== undefined) update.enabled = body.enabled;
       if (body.order !== undefined) update.order = body.order;
-      await db.update(freeformBorders).set(update).where(eq(freeformBorders.key, req.params.key));
+      await db.update(freeformBorders).set(update).where(and(eq(freeformBorders.serverId, DEFAULT_SERVER_ID), eq(freeformBorders.key, req.params.key)));
       return { ok: true };
     },
   );
@@ -900,7 +905,7 @@ export function registerAdminEarningRoutes(
     "/admin/earning/freeform-borders/:key",
     async (req, reply) => {
       if (!(await requirePermission(req, reply, "manage_borders"))) return;
-      const existing = (await db.select().from(freeformBorders).where(eq(freeformBorders.key, req.params.key)).limit(1))[0];
+      const existing = (await db.select().from(freeformBorders).where(and(eq(freeformBorders.serverId, DEFAULT_SERVER_ID), eq(freeformBorders.key, req.params.key))).limit(1))[0];
       if (!existing) { reply.code(404); return { error: "border not found" }; }
       if (existing.isBuiltin) {
         reply.code(409);
@@ -913,7 +918,7 @@ export function registerAdminEarningRoutes(
       // user/character_owned_freeform_borders; equip slots clear via
       // ON DELETE SET NULL (migration 0149). No manual cleanup
       // needed.
-      await db.delete(freeformBorders).where(eq(freeformBorders.key, req.params.key));
+      await db.delete(freeformBorders).where(and(eq(freeformBorders.serverId, DEFAULT_SERVER_ID), eq(freeformBorders.key, req.params.key)));
       return { ok: true };
     },
   );
@@ -941,7 +946,7 @@ export function registerAdminEarningRoutes(
 
   app.get("/admin/earning/cosmetics", async (req, reply) => {
     if (!(await requirePermission(req, reply, "view_earning_config"))) return;
-    const rows = await db.select().from(cosmetics);
+    const rows = await db.select().from(cosmetics).where(eq(cosmetics.serverId, DEFAULT_SERVER_ID));
     return {
       cosmetics: rows.map((r) => ({
         key: r.key,
@@ -961,7 +966,7 @@ export function registerAdminEarningRoutes(
       let body: z.infer<typeof patchCosmeticBody>;
       try { body = patchCosmeticBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-      const existing = (await db.select().from(cosmetics).where(eq(cosmetics.key, req.params.key)).limit(1))[0];
+      const existing = (await db.select().from(cosmetics).where(and(eq(cosmetics.serverId, DEFAULT_SERVER_ID), eq(cosmetics.key, req.params.key))).limit(1))[0];
       if (!existing) { reply.code(404); return { error: "cosmetic not found" }; }
       const update: Partial<typeof cosmetics.$inferInsert> = { updatedAt: new Date() };
       if (body.name !== undefined) update.name = body.name;
@@ -969,7 +974,7 @@ export function registerAdminEarningRoutes(
       if (body.cost !== undefined) update.cost = body.cost;
       if (body.enabled !== undefined) update.enabled = body.enabled;
       if (body.configJson !== undefined) update.configJson = body.configJson;
-      await db.update(cosmetics).set(update).where(eq(cosmetics.key, req.params.key));
+      await db.update(cosmetics).set(update).where(and(eq(cosmetics.serverId, DEFAULT_SERVER_ID), eq(cosmetics.key, req.params.key)));
       return { ok: true };
     },
   );
@@ -1064,7 +1069,7 @@ export function registerAdminEarningRoutes(
    */
   app.get("/admin/earning/items", async (req, reply) => {
     if (!(await requirePermission(req, reply, "view_earning_config"))) return;
-    const rows = await db.select().from(items).orderBy(asc(items.order));
+    const rows = await db.select().from(items).where(eq(items.serverId, DEFAULT_SERVER_ID)).orderBy(asc(items.order));
     const ownerRows = await db.all<{ itemKey: string; n: number }>(sql`
       SELECT item_key AS itemKey, COUNT(*) AS n
       FROM identity_inventory
@@ -1110,13 +1115,14 @@ export function registerAdminEarningRoutes(
     let body: z.infer<typeof itemCreateBody>;
     try { body = itemCreateBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-    const dup = (await db.select().from(items).where(eq(items.key, body.key)).limit(1))[0];
+    const dup = (await db.select().from(items).where(and(eq(items.serverId, DEFAULT_SERVER_ID), eq(items.key, body.key))).limit(1))[0];
     if (dup) { reply.code(409); return { error: "item key already exists" }; }
     // Default the order to "after the current max" so new rows render
     // at the bottom of the editor list and the shop. Admin can reorder.
-    const maxOrderRow = (await db.select({ m: sql<number>`MAX("order")` }).from(items))[0];
+    const maxOrderRow = (await db.select({ m: sql<number>`MAX("order")` }).from(items).where(eq(items.serverId, DEFAULT_SERVER_ID)))[0];
     const order = body.order ?? ((maxOrderRow?.m ?? 0) + 1);
     await db.insert(items).values({
+      serverId: DEFAULT_SERVER_ID,
       key: body.key,
       name: body.name,
       namePlural: body.namePlural ?? null,
@@ -1146,7 +1152,7 @@ export function registerAdminEarningRoutes(
       let body: z.infer<typeof itemPatchBody>;
       try { body = itemPatchBody.parse(req.body); }
       catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
-      const existing = (await db.select().from(items).where(eq(items.key, req.params.key)).limit(1))[0];
+      const existing = (await db.select().from(items).where(and(eq(items.serverId, DEFAULT_SERVER_ID), eq(items.key, req.params.key))).limit(1))[0];
       if (!existing) { reply.code(404); return { error: "item not found" }; }
       const update: Partial<typeof items.$inferInsert> = { updatedAt: new Date() };
       if (body.name !== undefined) update.name = body.name;
@@ -1169,7 +1175,7 @@ export function registerAdminEarningRoutes(
         update.saleEndsAt = body.saleEndsAt != null ? new Date(body.saleEndsAt) : null;
       }
       if (body.order !== undefined) update.order = body.order;
-      await db.update(items).set(update).where(eq(items.key, req.params.key));
+      await db.update(items).set(update).where(and(eq(items.serverId, DEFAULT_SERVER_ID), eq(items.key, req.params.key)));
       return { ok: true };
     },
   );
@@ -1184,7 +1190,7 @@ export function registerAdminEarningRoutes(
    */
   app.delete<{ Params: { key: string } }>("/admin/earning/items/:key", async (req, reply) => {
     if (!(await requirePermission(req, reply, "manage_cosmetics"))) return;
-    const existing = (await db.select().from(items).where(eq(items.key, req.params.key)).limit(1))[0];
+    const existing = (await db.select().from(items).where(and(eq(items.serverId, DEFAULT_SERVER_ID), eq(items.key, req.params.key))).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "item not found" }; }
     if (existing.isBuiltin) {
       reply.code(409);
@@ -1193,7 +1199,7 @@ export function registerAdminEarningRoutes(
         message: "Disable it instead, the seed row backs anyone who owns it.",
       };
     }
-    await db.delete(items).where(eq(items.key, req.params.key));
+    await db.delete(items).where(and(eq(items.serverId, DEFAULT_SERVER_ID), eq(items.key, req.params.key)));
     return { ok: true };
   });
 
@@ -1377,7 +1383,7 @@ export function registerAdminEarningRoutes(
     const tierRow = (await db
       .select()
       .from(rankTiers)
-      .where(and(eq(rankTiers.rankKey, body.rankKey), eq(rankTiers.tier, body.tier)))
+      .where(and(eq(rankTiers.serverId, DEFAULT_SERVER_ID), eq(rankTiers.rankKey, body.rankKey), eq(rankTiers.tier, body.tier)))
       .limit(1))[0];
     if (!tierRow) { reply.code(404); return { error: "rank/tier not found" }; }
 
@@ -1441,7 +1447,7 @@ export function registerAdminEarningRoutes(
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "user not found" }; }
-    const rank = (await db.select().from(ranks).where(eq(ranks.key, body.rankKey)).limit(1))[0];
+    const rank = (await db.select().from(ranks).where(and(eq(ranks.serverId, DEFAULT_SERVER_ID), eq(ranks.key, body.rankKey))).limit(1))[0];
     if (!rank) { reply.code(404); return { error: "rank not found" }; }
     await db.insert(userOwnedBorders).values({
       serverId: DEFAULT_SERVER_ID,
@@ -1477,7 +1483,7 @@ export function registerAdminEarningRoutes(
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "user not found" }; }
-    const style = (await db.select().from(nameStyles).where(eq(nameStyles.key, body.styleKey)).limit(1))[0];
+    const style = (await db.select().from(nameStyles).where(and(eq(nameStyles.serverId, DEFAULT_SERVER_ID), eq(nameStyles.key, body.styleKey))).limit(1))[0];
     if (!style) { reply.code(404); return { error: "style not found" }; }
     await db.insert(userOwnedNameStyles).values({
       serverId: DEFAULT_SERVER_ID,
@@ -1532,7 +1538,7 @@ export function registerAdminEarningRoutes(
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "user not found" }; }
-    const item = (await db.select().from(items).where(eq(items.key, body.itemKey)).limit(1))[0];
+    const item = (await db.select().from(items).where(and(eq(items.serverId, DEFAULT_SERVER_ID), eq(items.key, body.itemKey))).limit(1))[0];
     if (!item) { reply.code(404); return { error: "item not found" }; }
 
     const characterId = body.characterId ?? null;
@@ -1750,7 +1756,7 @@ export function registerAdminEarningRoutes(
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "user not found" }; }
-    const border = (await db.select().from(freeformBorders).where(eq(freeformBorders.key, body.borderKey)).limit(1))[0];
+    const border = (await db.select().from(freeformBorders).where(and(eq(freeformBorders.serverId, DEFAULT_SERVER_ID), eq(freeformBorders.key, body.borderKey))).limit(1))[0];
     if (!border) { reply.code(404); return { error: "freeform border not found" }; }
     const characterId = body.characterId ?? null;
     if (characterId) {
@@ -2291,12 +2297,12 @@ export function registerAdminEarningRoutes(
     // Validate the target key against the relevant catalog so a
     // typo doesn't materialize as a NULL pick on resolution day.
     const exists = body.category === "name_style"
-      ? (await db.select({ k: nameStyles.key }).from(nameStyles).where(eq(nameStyles.key, body.targetKey)).limit(1))[0]
+      ? (await db.select({ k: nameStyles.key }).from(nameStyles).where(and(eq(nameStyles.serverId, DEFAULT_SERVER_ID), eq(nameStyles.key, body.targetKey))).limit(1))[0]
       : body.category === "item"
-        ? (await db.select({ k: items.key }).from(items).where(eq(items.key, body.targetKey)).limit(1))[0]
+        ? (await db.select({ k: items.key }).from(items).where(and(eq(items.serverId, DEFAULT_SERVER_ID), eq(items.key, body.targetKey))).limit(1))[0]
         : body.category === "cosmetic"
-          ? (await db.select({ k: cosmetics.key }).from(cosmetics).where(eq(cosmetics.key, body.targetKey)).limit(1))[0]
-          : (await db.select({ k: freeformBorders.key }).from(freeformBorders).where(eq(freeformBorders.key, body.targetKey)).limit(1))[0];
+          ? (await db.select({ k: cosmetics.key }).from(cosmetics).where(and(eq(cosmetics.serverId, DEFAULT_SERVER_ID), eq(cosmetics.key, body.targetKey))).limit(1))[0]
+          : (await db.select({ k: freeformBorders.key }).from(freeformBorders).where(and(eq(freeformBorders.serverId, DEFAULT_SERVER_ID), eq(freeformBorders.key, body.targetKey))).limit(1))[0];
     if (!exists) {
       reply.code(404);
       return { error: `no ${body.category} with key '${body.targetKey}'` };
@@ -2339,6 +2345,11 @@ export function registerAdminEarningRoutes(
     characterId: z.string().nullable().optional(),
     /** Optional moderator reason recorded in the audit row. */
     reason: z.string().max(500).optional(),
+    /** Per-server economy (migrations 0295-0299): which server's cosmetic
+     *  override to clear. Defaults to the default server so a flag-off /
+     *  single-server clear is byte-identical to today (previously the wipe ran
+     *  across ALL servers; now it's scoped to one). */
+    serverId: z.string().min(1).optional(),
   }).strict();
 
   app.post<{ Body: unknown }>("/admin/earning/clear-banner", async (req, reply) => {
@@ -2347,6 +2358,7 @@ export function registerAdminEarningRoutes(
     let body: z.infer<typeof clearBannerBody>;
     try { body = clearBannerBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
+    const sid = body.serverId ?? DEFAULT_SERVER_ID;
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "no such user" }; }
     if (body.characterId) {
@@ -2364,11 +2376,11 @@ export function registerAdminEarningRoutes(
       }
       await db.update(characterEarning)
         .set({ profileBannerUrl: null, updatedAt: new Date() })
-        .where(eq(characterEarning.characterId, body.characterId));
+        .where(and(eq(characterEarning.serverId, sid), eq(characterEarning.characterId, body.characterId)));
     } else {
       await db.update(userActiveCosmetics)
         .set({ profileBannerUrl: null, updatedAt: new Date() })
-        .where(eq(userActiveCosmetics.userId, target.id));
+        .where(and(eq(userActiveCosmetics.serverId, sid), eq(userActiveCosmetics.userId, target.id)));
     }
     await recordAudit(db, {
       actorUserId: me.id,
@@ -2395,6 +2407,8 @@ export function registerAdminEarningRoutes(
     username: z.string().min(1).max(80),
     characterId: z.string().nullable().optional(),
     reason: z.string().max(500).optional(),
+    /** Per-server economy: server to clear (default server when omitted). */
+    serverId: z.string().min(1).optional(),
   }).strict();
 
   app.post<{ Body: unknown }>("/admin/earning/clear-typing-phrase", async (req, reply) => {
@@ -2403,6 +2417,7 @@ export function registerAdminEarningRoutes(
     let body: z.infer<typeof clearTypingPhraseBody>;
     try { body = clearTypingPhraseBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
+    const sid = body.serverId ?? DEFAULT_SERVER_ID;
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "no such user" }; }
     if (body.characterId) {
@@ -2416,14 +2431,14 @@ export function registerAdminEarningRoutes(
       }
       await db.update(characterEarning)
         .set({ typingPhrase: null, updatedAt: new Date() })
-        .where(eq(characterEarning.characterId, body.characterId));
+        .where(and(eq(characterEarning.serverId, sid), eq(characterEarning.characterId, body.characterId)));
     } else {
       // Master scope writes to user_earning (NOT user_active_cosmetics
       //, typing phrase lives on the earning row alongside other
       // master-pool fields).
       await db.update(userEarning)
         .set({ typingPhrase: null, updatedAt: new Date() })
-        .where(eq(userEarning.userId, target.id));
+        .where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, target.id)));
     }
     await recordAudit(db, {
       actorUserId: me.id,
@@ -2456,6 +2471,8 @@ export function registerAdminEarningRoutes(
     username: z.string().min(1).max(80),
     characterId: z.string().nullable().optional(),
     reason: z.string().max(500).optional(),
+    /** Per-server economy: server to clear (default server when omitted). */
+    serverId: z.string().min(1).optional(),
   }).strict();
 
   app.post<{ Body: unknown }>("/admin/earning/clear-room-presence", async (req, reply) => {
@@ -2464,6 +2481,7 @@ export function registerAdminEarningRoutes(
     let body: z.infer<typeof clearRoomPresenceBody>;
     try { body = clearRoomPresenceBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
+    const sid = body.serverId ?? DEFAULT_SERVER_ID;
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "no such user" }; }
     if (body.characterId) {
@@ -2477,11 +2495,11 @@ export function registerAdminEarningRoutes(
       }
       await db.update(characterEarning)
         .set({ roomJoinTemplate: null, roomLeaveTemplate: null, updatedAt: new Date() })
-        .where(eq(characterEarning.characterId, body.characterId));
+        .where(and(eq(characterEarning.serverId, sid), eq(characterEarning.characterId, body.characterId)));
     } else {
       await db.update(userEarning)
         .set({ roomJoinTemplate: null, roomLeaveTemplate: null, updatedAt: new Date() })
-        .where(eq(userEarning.userId, target.id));
+        .where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, target.id)));
     }
     await recordAudit(db, {
       actorUserId: me.id,
@@ -2496,6 +2514,8 @@ export function registerAdminEarningRoutes(
   const clearSessionPresenceBody = z.object({
     username: z.string().min(1).max(80),
     reason: z.string().max(500).optional(),
+    /** Per-server economy: server to clear (default server when omitted). */
+    serverId: z.string().min(1).optional(),
   }).strict();
 
   app.post<{ Body: unknown }>("/admin/earning/clear-session-presence", async (req, reply) => {
@@ -2504,11 +2524,12 @@ export function registerAdminEarningRoutes(
     let body: z.infer<typeof clearSessionPresenceBody>;
     try { body = clearSessionPresenceBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
+    const sid = body.serverId ?? DEFAULT_SERVER_ID;
     const target = await resolveTargetUser(body.username);
     if (!target) { reply.code(404); return { error: "no such user" }; }
     await db.update(userEarning)
       .set({ sessionConnectTemplate: null, sessionExitTemplate: null, updatedAt: new Date() })
-      .where(eq(userEarning.userId, target.id));
+      .where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, target.id)));
     await recordAudit(db, {
       actorUserId: me.id,
       action: "session_presence_clear",

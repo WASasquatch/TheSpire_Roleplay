@@ -43,6 +43,8 @@ import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { creditPool } from "../earning/award.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { serverAuthority } from "../servers/authority.js";
+import { getSettings, areServersEnabled } from "../settings.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Scope = "user" | "character";
@@ -60,7 +62,7 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
      then a one-time `flair_urugal_descent` purchase per identity (402 =
      "permission OK, not yet unlocked"). */
   type Gate =
-    | { ok: true; userId: string; scope: Scope; ownerId: string }
+    | { ok: true; userId: string; role: import("@thekeep/shared").Role; scope: Scope; ownerId: string }
     | { ok: false; code: number; body: Record<string, unknown> };
 
   async function gate(req: FastifyRequest, characterId: string | null): Promise<Gate> {
@@ -85,7 +87,31 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
       .where(and(eq(earningLedger.scope, scope), eq(earningLedger.ownerId, ownerId), eq(earningLedger.reason, `purchase_${FLAIR_URUGAL_DESCENT}`)))
       .limit(1))[0];
     if (!owned) return { ok: false, code: 402, body: { error: "locked", needsUnlock: true } };
-    return { ok: true, userId: me.id, scope, ownerId };
+    return { ok: true, userId: me.id, role: me.role, scope, ownerId };
+  }
+
+  /** Resolve the active server this run's earning lands on. The arcade routes
+   *  are NOT room-scoped, so the active server comes from an optional
+   *  `?serverId` (GET) / body.serverId (POST), validated EXACTLY like
+   *  `/earning/me` (routes/earning.ts): only honored when the servers flag is
+   *  on AND the caller may view that server's economy (it exists and they're a
+   *  member, owner/staff folded into serverAuthority.isMember). Anything else —
+   *  flag off, unknown id, foreign server — falls back to the default server,
+   *  so the cap-count + credit stay on the same pool and the flag-off path is
+   *  byte-identical (no extra DB hits when absent/default). */
+  async function resolveActiveServerId(
+    me: { id: string; role: import("@thekeep/shared").Role },
+    requestedServerId: string | undefined,
+  ): Promise<string> {
+    if (
+      requestedServerId &&
+      requestedServerId !== DEFAULT_SERVER_ID &&
+      areServersEnabled(await getSettings(db))
+    ) {
+      const authority = await serverAuthority(db, me, requestedServerId);
+      if (authority.server && authority.isMember) return requestedServerId;
+    }
+    return DEFAULT_SERVER_ID;
   }
 
   /* ---- GET /arcade/urugal ---- access probe for the launcher: 200 when
@@ -96,14 +122,17 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
     return { ok: true };
   });
 
-  /** Currency already earned from this game today (for the daily-cap clamp).
-   *  Phase 3: always 0 (no `urugal_*` ledger rows are written yet). */
-  function urugalEarnedTodayMs(scope: Scope, ownerId: string, nowMs: number): number {
+  /** Currency already earned from this game today on `serverId` (for the
+   *  daily-cap clamp). Per-server cap: count only rows credited on the SAME
+   *  server the credit will land on, so a player active on two servers gets a
+   *  full daily allowance on each (mirrors the presence cap in sweeps.ts). */
+  function urugalEarnedTodayMs(serverId: string, scope: Scope, ownerId: string, nowMs: number): number {
     const since = utcMidnightMs(nowMs);
     const row = db
       .select({ c: sql<number>`COALESCE(SUM(${earningLedger.currencyDelta}), 0)` })
       .from(earningLedger)
       .where(and(
+        eq(earningLedger.serverId, serverId),
         eq(earningLedger.scope, scope),
         eq(earningLedger.ownerId, ownerId),
         sql`${earningLedger.reason} LIKE 'urugal\\_%' ESCAPE '\\'`,
@@ -148,6 +177,7 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
     type: z.enum(["floor", "boss"]),
     floor: z.number().int().min(1).max(9999),
     characterId: z.string().nullable().optional(),
+    serverId: z.string().optional(),
   }).strict();
   app.post<{ Body: unknown }>("/arcade/urugal/event", async (req, reply) => {
     let body: z.infer<typeof eventBody>;
@@ -155,9 +185,11 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
     catch { reply.code(400); return { error: "invalid body" }; }
     const g = await gate(req, body.characterId ?? null);
     if (!g.ok) { reply.code(g.code); return g.body; }
+    // The active server the reward (and its daily-cap scan) lands on.
+    const sid = await resolveActiveServerId({ id: g.userId, role: g.role }, body.serverId);
 
     const nowMs = Date.now();
-    const earnedToday = urugalEarnedTodayMs(g.scope, g.ownerId, nowMs);
+    const earnedToday = urugalEarnedTodayMs(sid, g.scope, g.ownerId, nowMs);
     const remainingCap = Math.max(0, URUGAL_DAILY_CURRENCY_CAP - earnedToday);
 
     // Validate + dedup + reserve the milestone in one write so two racing
@@ -225,7 +257,7 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
     let credited = false;
     if (result.award.currency > 0 || result.award.xp > 0) {
       await creditPool(db, io, {
-        serverId: DEFAULT_SERVER_ID,
+        serverId: sid,
         scope: g.scope,
         ownerId: g.ownerId,
         xpDelta: result.award.xp,

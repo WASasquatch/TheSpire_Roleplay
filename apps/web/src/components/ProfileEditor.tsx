@@ -31,6 +31,7 @@ import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { CreateCharacterModal } from "./CreateCharacterModal.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "./ThemePicker.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 import { CloseButton } from "./CloseButton.js";
 import { DisplayPrivacyRow } from "./DisplayPrivacyRow.js";
 import { ScriptoriumPrivacyRow } from "./ScriptoriumPrivacyRow.js";
@@ -414,6 +415,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
     | "flair"
     | "journal";
   const [activeTab, setActiveTab] = useState<EditorTab>(initialTab ?? "description");
+  // Calm mode: fade the active tab's body in on each tab change. Applied only
+  // when Reduce Motion is on (class + remount key on the shared tab-body
+  // wrapper below); off-path render is unchanged.
+  const reduceMotion = useReducedMotion();
 
   // Journal is character-only (the schema's character_journal_entries
   // table is character-attached). If the user is on the Journal tab
@@ -1161,6 +1166,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // App.tsx to re-fetch persisted state and re-apply, naturally
   // restoring the saved theme if the user cancelled.
   useEffect(() => {
+    // Don't apply the live preview until the target's saved theme has actually
+    // loaded. Before load, `theme` is still null, so this would slam
+    // DEFAULT_THEME onto <html> OVER the already-active (correct) theme — a
+    // white/default flash across the whole app (chat shell AND the userlist),
+    // which then snaps back once the saved theme arrives. After load, `theme`
+    // equals the active theme, so applying it is a visual no-op: no flicker.
+    if (loadingTarget) return;
     const previewTheme = theme ?? DEFAULT_THEME;
     applyTheme(previewTheme);
     applyStyle(previewTheme, userStyleKey);
@@ -1204,7 +1216,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
       root.style.removeProperty("--keep-glass-tool-tint");
       root.style.removeProperty("--keep-glass-chat-tint");
     }
-  }, [theme, userStyleKey, publicProfileBgUrl, publicProfileBgMode]);
+  }, [theme, userStyleKey, publicProfileBgUrl, publicProfileBgMode, loadingTarget]);
 
   return (
     <Modal onClose={onClose} zIndex={isAdminEdit ? 60 : 50} variant="mobile-fullscreen">
@@ -1365,7 +1377,15 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         {loadingTarget ? (
           <div className="flex flex-1 items-center justify-center text-keep-muted">loading...</div>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div
+            // Calm-mode fade: remount on tab change (key) so `tk-fade-in`
+            // replays as the new tab's body eases in. Key + class applied
+            // ONLY when Reduce Motion is on; the per-tab bodies still own
+            // their own scroll (overflow-y-auto), so the scroll container is
+            // unchanged. Off-path render is byte-identical to before.
+            {...(reduceMotion ? { key: activeTab } : {})}
+            className={`flex min-h-0 flex-1 flex-col overflow-hidden${reduceMotion ? " tk-fade-in" : ""}`}
+          >
             {/* DESCRIPTION, the bio HTML editor. Was the right column on
                 desktop; now its own tab so it gets the full width too. */}
             {activeTab === "description" ? (

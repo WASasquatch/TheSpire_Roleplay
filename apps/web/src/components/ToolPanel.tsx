@@ -17,6 +17,12 @@ import {
   X,
 } from "lucide-react";
 import { useChat } from "../state/store.js";
+import {
+  getReduceMotionToggle,
+  osReduceMotionForced,
+  setReduceMotionToggle,
+  useReducedMotion,
+} from "../lib/reducedMotion.js";
 import { fetchForums } from "../lib/forums.js";
 import { fetchArchivedRooms, hideArchivedRoom } from "../lib/rooms.js";
 import type { ArchivedRoomBrief, ForumSummary } from "@thekeep/shared";
@@ -84,6 +90,10 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   const [createCharOpen, setCreateCharOpen] = useState(false);
   const openEditor = useChat((s) => s.openEditor);
   const me = useChat((s) => s.me);
+  // Reduce Motion (accessibility) — effective state (OS setting OR per-device
+  // toggle). osForced = the OS demands it, so the toggle shows on + locked.
+  const reduceMotion = useReducedMotion();
+  const reduceMotionForced = osReduceMotionForced();
   const fontStep = useChat((s) => s.fontStep);
   const setFontStep = useChat((s) => s.setFontStep);
   const refreshIntervalSec = useChat((s) => s.refreshIntervalSec);
@@ -566,6 +576,19 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
                 label={`Font Size: ${fontStep}`}
                 hint="Cycle local chat font size"
                 onClick={cycleFont}
+              />
+              <MenuItem
+                label={`Reduce Motion: ${reduceMotion ? "On" : "Off"}`}
+                hint={
+                  reduceMotionForced
+                    ? "On because your device asks for it"
+                    : "Soft fades; stops auto-playing motion. Helps if motion feels unwell"
+                }
+                active={reduceMotion}
+                onClick={() => {
+                  if (reduceMotionForced) return; // OS-locked on; nothing to toggle
+                  setReduceMotionToggle(!getReduceMotionToggle());
+                }}
               />
               <MenuItem
                 label={refreshIntervalSec > 0 ? `Refresh: every ${refreshIntervalSec}s` : "Refresh"}
@@ -1051,6 +1074,7 @@ function Section({
   badge?: number;
   children: ReactNode;
 }) {
+  const reduceMotion = useReducedMotion();
   return (
     <div ref={innerRef}>
       <button
@@ -1075,7 +1099,7 @@ function Section({
         ) : null}
         <span aria-hidden className="shrink-0 text-sm leading-none">{open ? "▾" : "▸"}</span>
       </button>
-      {open ? <div>{children}</div> : null}
+      {open ? <div className={reduceMotion ? "tk-slide-down-in" : undefined}>{children}</div> : null}
     </div>
   );
 }
@@ -1089,8 +1113,9 @@ function Section({
  * own their own internal layout.
  */
 function InlinePanel({ children }: { children: ReactNode }) {
+  const reduceMotion = useReducedMotion();
   return (
-    <div className="border-b border-keep-rule/40 bg-keep-banner/20 px-3 py-2">
+    <div className={`border-b border-keep-rule/40 bg-keep-banner/20 px-3 py-2${reduceMotion ? " tk-slide-down-in" : ""}`}>
       {children}
     </div>
   );

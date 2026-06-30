@@ -215,15 +215,189 @@ export function serializeServerModPermissions(perms: readonly ServerModPermissio
   return JSON.stringify(clean);
 }
 
+export function isServerFeaturePermission(s: string): s is ServerFeaturePermission {
+  return (SERVER_FEATURE_PERMISSIONS as readonly string[]).includes(s);
+}
+
+/** Parse a stored usergroup `permissions_json`, keeping ONLY member-feature
+ *  keys. Moderation keys are dropped — a usergroup grants features, never
+ *  moderation power (that's the role tier's job). Tolerant of bad JSON. */
+export function parseServerFeaturePermissions(json: string | null | undefined): ServerFeaturePermission[] {
+  if (!json) return [];
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return [];
+    const out = new Set<ServerFeaturePermission>();
+    for (const v of arr) if (typeof v === "string" && isServerFeaturePermission(v)) out.add(v);
+    return [...out];
+  } catch {
+    return [];
+  }
+}
+
+/** Canonical (sorted) serialization of a feature-only set for usergroup storage. */
+export function serializeServerFeaturePermissions(perms: readonly ServerFeaturePermission[]): string {
+  const clean = [...new Set(perms)].filter(isServerFeaturePermission).sort();
+  return JSON.stringify(clean);
+}
+
 /** The set a freshly-appointed mod gets when the owner doesn't customize —
  *  the everyday "room janitor" powers, minus the sensitive ones (ban,
  *  manage members, manage earning, manage appearance) which the owner must
- *  grant deliberately. The `admin` lieutenant tier ignores this and holds the
- *  full {@link SERVER_MOD_PERMISSIONS} set implicitly. */
+ *  grant deliberately. A `mod` is a CHAT MODERATOR by default; broader
+ *  management is the `admin` tier's job. */
 export const SERVER_MOD_DEFAULT_PERMISSIONS: ServerModPermission[] = [
   "manage_rooms", "manage_reports", "kick_member", "mute_member", "unmute_member",
   "delete_others_message", "edit_others_message",
 ];
+
+/** The `admin` lieutenant tier's implicit power set: EVERY moderation key
+ *  EXCEPT `manage_appearance`. An admin runs the community day-to-day —
+ *  members, rooms, usergroups, earning, announcements, emoticons, FAQs,
+ *  commands, titles, reports, mod cases, invites, applications, bans/mutes,
+ *  message moderation, the mod log — but may NOT change the server's
+ *  appearance / name / theme / rules / settings, and (structurally, never via
+ *  a permission key) may not transfer or delete the server. Those last acts
+ *  stay with the OWNER (and platform staff holding `manage_any_server`).
+ *
+ *  Defined as an explicit list (not "all mod perms") so the owner-only
+ *  boundary lives in one auditable place; `serverAuthority` grants this to
+ *  the `admin` role. */
+export const SERVER_ADMIN_DEFAULT_PERMISSIONS: ServerModPermission[] =
+  SERVER_MOD_PERMISSIONS.filter((k) => k !== "manage_appearance") as ServerModPermission[];
+
+/** The owner-only powers no `admin` or `mod` can hold via the role tier — the
+ *  settings/appearance surface plus the existential acts. Used to label the
+ *  Roles UI and to assert the boundary in tests. `manage_appearance` is the
+ *  only *permission key* in here; transfer/delete are gated structurally
+ *  (owner-only routes), not by a grantable key. */
+export const SERVER_OWNER_ONLY_PERMISSIONS: ServerModPermission[] = ["manage_appearance"];
+
+/** The moderation keys an owner/admin may actually grant to a mod — the full
+ *  mod registry minus the owner-only keys. The Roles grid renders these, and
+ *  the role/permission routes clamp grants to this set, so a mod can never be
+ *  handed `manage_appearance` (appearance stays owner-only). Identical in
+ *  membership to {@link SERVER_ADMIN_DEFAULT_PERMISSIONS} today, but kept as a
+ *  distinct name because they answer different questions (what a mod may be
+ *  granted vs what an admin holds by default). */
+export const SERVER_GRANTABLE_MOD_PERMISSIONS: ServerModPermission[] =
+  SERVER_MOD_PERMISSIONS.filter((k) => !(SERVER_OWNER_ONLY_PERMISSIONS as readonly string[]).includes(k)) as ServerModPermission[];
+
+/** Is this a moderation key an owner may grant to a mod (i.e. not owner-only)? */
+export function isGrantableServerModPermission(s: string): s is ServerModPermission {
+  return (SERVER_GRANTABLE_MOD_PERMISSIONS as readonly string[]).includes(s);
+}
+
+/* ============================================================
+ * Usergroups (member-feature bundles + auto-join rules)
+ *
+ * A usergroup is a NAMED, color-coded bundle of MEMBER-FEATURE permissions
+ * (plus an identity color) applied to ordinary members — the deliberate
+ * mirror of forum usergroups. Every participant is in the implicit DEFAULT
+ * group (the member baseline); named groups layer extra feature perks +
+ * identity on top, via manual rosters or earned auto-rules.
+ *
+ * Roles vs usergroups are kept DISTINCT: a usergroup grants member FEATURES,
+ * never moderation power. Moderation authority comes only from the role tier
+ * (owner/admin/mod) + a mod's direct grant. The server clamps a usergroup's
+ * grant to {@link SERVER_FEATURE_PERMISSIONS} so a group can never silently
+ * mint a moderator.
+ * ============================================================ */
+
+export const SERVER_USERGROUP_NAME_MAX = 40;
+export const SERVER_MAX_USERGROUPS = 25;
+/** Cap on auto-join rules per group (keeps the on-post evaluation cheap). */
+export const SERVER_MAX_AUTO_RULES = 6;
+
+/** One auto-join rule. A member joins a group when they satisfy EVERY rule on
+ *  it (AND). Evaluated lazily when a member posts in the server. The server
+ *  analogs of the forum rule kinds: messages-in-server (post_count),
+ *  posted-in-room (posted_in_category), account age, and server-member age. */
+export type ServerAutoRule =
+  | { kind: "message_count"; min: number }        // total messages sent in this server's rooms
+  | { kind: "posted_in_room"; roomId: string }    // has a message in this room
+  | { kind: "account_age_days"; min: number }     // account age
+  | { kind: "member_age_days"; min: number };     // time since joining this server
+
+export type ServerAutoRuleKind = ServerAutoRule["kind"];
+
+/** UI copy for each auto-rule kind. */
+export const SERVER_AUTO_RULE_META: Record<ServerAutoRuleKind, { label: string; unit: string | null }> = {
+  message_count: { label: "Message count at least", unit: "messages" },
+  posted_in_room: { label: "Has posted in room", unit: null },
+  account_age_days: { label: "Account age at least", unit: "days" },
+  member_age_days: { label: "Server member for at least", unit: "days" },
+};
+
+/** Tolerant parse of a stored `auto_rules_json`. Drops malformed entries. */
+export function parseServerAutoRules(json: string | null | undefined): ServerAutoRule[] {
+  if (!json) return [];
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return [];
+    const out: ServerAutoRule[] = [];
+    for (const r of arr) {
+      if (out.length >= SERVER_MAX_AUTO_RULES) break;
+      if (!r || typeof r.kind !== "string") continue;
+      if (r.kind === "posted_in_room") {
+        if (typeof r.roomId === "string" && r.roomId) out.push({ kind: "posted_in_room", roomId: r.roomId });
+      } else if (
+        (r.kind === "message_count" || r.kind === "account_age_days" || r.kind === "member_age_days") &&
+        typeof r.min === "number" && Number.isFinite(r.min) && r.min >= 1
+      ) {
+        // Floor of 1: a `min: 0` threshold matches everyone who posts (it's
+        // always true), which would silently auto-grant the group to the whole
+        // active membership the moment they speak.
+        out.push({ kind: r.kind, min: Math.floor(r.min) });
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+export function serializeServerAutoRules(rules: readonly ServerAutoRule[]): string {
+  return JSON.stringify(rules);
+}
+
+/** One usergroup as shown in the owner's Usergroups settings tab. */
+export interface ServerUsergroupWire {
+  id: string;
+  name: string;
+  color: string | null;
+  /** Member-FEATURE permissions only (the server clamps to this half). */
+  permissions: ServerFeaturePermission[];
+  /** The implicit baseline group (every participant); not manually joinable. */
+  isDefault: boolean;
+  sortOrder: number;
+  autoRules: ServerAutoRule[];
+  /** Explicit members (manual + auto). The default group reports 0 — its
+   *  membership is everyone, so it isn't enumerated. */
+  memberCount: number;
+}
+
+/** One explicit member row in a group's roster (GET .../usergroups/:gid/members). */
+export interface ServerUsergroupMemberWire {
+  userId: string;
+  username: string;
+  avatarUrl: string | null;
+  /** True = earned via auto-rules; false = added by a manager. */
+  isAuto: boolean;
+  addedAt: number;
+}
+
+/** A staff row in the Roles tab (owner / admin / mod), with the mod's direct
+ *  grant resolved for the checkbox grid. */
+export interface ServerStaffEntry {
+  userId: string;
+  username: string;
+  avatarUrl: string | null;
+  role: ServerRole;
+  /** The mod's direct granular grant (empty for owner/admin — they're preset). */
+  permissions: ServerModPermission[];
+  joinedAt: number;
+}
 
 /* ============================================================
  * Lifecycle enums (membership, status, visibility, applications)
@@ -249,9 +423,9 @@ export type ServerApplicationStatus = "pending" | "approved" | "rejected" | "wit
  * Validation constants (shared by client forms + server Zod)
  * ============================================================ */
 
-/** Slug shape: lowercase letters, digits, underscore. Short enough for a
- *  share URL, long enough for a real name: `/s/shadows_of_darkness`. */
-export const SERVER_SLUG_RE = /^[a-z0-9_]{3,40}$/;
+/** Slug shape: lowercase letters, digits, hyphens — the URL-standard slug, so
+ *  it reads as the chat's name: `/s/the-spire`, `/s/shadows-of-darkness`. */
+export const SERVER_SLUG_RE = /^[a-z0-9-]{3,40}$/;
 
 /** Slugs that must never become servers — they collide with real routes,
  *  upload paths, or future reserved surfaces. Checked case-insensitively. */
@@ -301,9 +475,10 @@ export function normalizeServerSlug(raw: string): string | null {
  *  the server re-checks every key via `serverAuthority`. */
 export interface ServerViewerState {
   role: ServerRole | null;
-  /** Owner-tier control: server owner OR platform staff with
-   *  `manage_any_server` OR the `admin` lieutenant role. Shows the
-   *  settings gear / owner console. */
+  /** Owner-tier control: ONLY the server owner OR platform staff with
+   *  `manage_any_server`. The `admin` lieutenant is NOT owner-tier — it can't
+   *  change the server's appearance/settings, transfer, or delete. Gate
+   *  owner-only acts (transfer, appoint/remove admin, appearance) on this. */
   isOwner: boolean;
   /** Holds at least one moderation power (a mod with grants, an admin, or an
    *  owner). Broader than a non-null mod role; owner/admin imply it. */

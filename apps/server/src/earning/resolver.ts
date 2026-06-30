@@ -51,7 +51,16 @@ export interface RankCrossing {
  * filter joins to `ranks` so disabled ranks fall out without a second
  * roundtrip.
  */
-export async function resolveRankForXp(db: Db, xp: number): Promise<ResolvedRank> {
+export async function resolveRankForXp(
+  db: Db,
+  xp: number,
+  /** Per-server rank ladder (migrations 0295-0299). ranks / rank_tiers now
+   *  carry (server_id, key) PKs, so resolution MUST pin the server or it would
+   *  fold every server's ladder together. Defaults to the default server so
+   *  the existing single-server callers resolve today's Spire ladder with the
+   *  flag off (byte-identical). */
+  serverId: string = DEFAULT_SERVER_ID,
+): Promise<ResolvedRank> {
   if (xp < 0) return { rankKey: null, tier: null };
   const row = (await db
     .select({
@@ -61,8 +70,14 @@ export async function resolveRankForXp(db: Db, xp: number): Promise<ResolvedRank
       rankOrder: ranks.order,
     })
     .from(rankTiers)
-    .innerJoin(ranks, eq(ranks.key, rankTiers.rankKey))
-    .where(and(eq(rankTiers.enabled, true), eq(ranks.enabled, true)))
+    // Join on BOTH server_id and key — the composite PK means a bare
+    // key-join would match the same rankKey across every server.
+    .innerJoin(ranks, and(eq(ranks.serverId, rankTiers.serverId), eq(ranks.key, rankTiers.rankKey)))
+    .where(and(
+      eq(rankTiers.serverId, serverId),
+      eq(rankTiers.enabled, true),
+      eq(ranks.enabled, true),
+    ))
     // Highest threshold the XP qualifies for. Order DESC on threshold
     // first (so we pick the strongest tier), break ties on rank order
     // DESC so a duplicate threshold at the same rank picks the higher
@@ -92,6 +107,10 @@ export async function mergeMaxEverHeld(
   db: Db,
   prior: { maxRankKeyEverHeld: string | null; maxTierEverHeld: number | null },
   candidate: ResolvedRank,
+  /** Per-server rank ladder. Defaults to the default server (flag-off
+   *  byte-identical); the order comparison must read THIS server's ladder
+   *  since the same rankKey can have a different display order per server. */
+  serverId: string = DEFAULT_SERVER_ID,
 ): Promise<{ maxRankKeyEverHeld: string | null; maxTierEverHeld: number | null }> {
   if (!candidate.rankKey || candidate.tier == null) return prior;
   if (!prior.maxRankKeyEverHeld || prior.maxTierEverHeld == null) {
@@ -100,10 +119,12 @@ export async function mergeMaxEverHeld(
       maxTierEverHeld: candidate.tier,
     };
   }
-  // Look up both ranks' display order to compare. Two-row in batch.
+  // Look up both ranks' display order to compare. Two-row in batch,
+  // scoped to this server's ladder.
   const rows = await db
     .select({ key: ranks.key, order: ranks.order })
     .from(ranks)
+    .where(eq(ranks.serverId, serverId))
     .all();
   const orderByKey = new Map(rows.map((r) => [r.key, r.order]));
   const priorOrder = orderByKey.get(prior.maxRankKeyEverHeld) ?? -1;
@@ -176,11 +197,13 @@ export function diffCrossing(
 export async function backfillAllRankPlacements(db: Db): Promise<{ users: number; characters: number }> {
   const userRows = await db.select().from(userEarning).all();
   for (const row of userRows) {
-    const placed = await resolveRankForXp(db, row.xp);
+    // Per-server ladder: each pool row carries its own server_id, so resolve
+    // + merge against THAT server's ranks/rank_tiers (not a global mix).
+    const placed = await resolveRankForXp(db, row.xp, row.serverId);
     const peak = await mergeMaxEverHeld(db, {
       maxRankKeyEverHeld: row.maxRankKeyEverHeld,
       maxTierEverHeld: row.maxTierEverHeld,
-    }, placed);
+    }, placed, row.serverId);
     await db
       .update(userEarning)
       .set({
@@ -196,11 +219,11 @@ export async function backfillAllRankPlacements(db: Db): Promise<{ users: number
   }
   const charRows = await db.select().from(characterEarning).all();
   for (const row of charRows) {
-    const placed = await resolveRankForXp(db, row.xp);
+    const placed = await resolveRankForXp(db, row.xp, row.serverId);
     const peak = await mergeMaxEverHeld(db, {
       maxRankKeyEverHeld: row.maxRankKeyEverHeld,
       maxTierEverHeld: row.maxTierEverHeld,
-    }, placed);
+    }, placed, row.serverId);
     await db
       .update(characterEarning)
       .set({
@@ -221,10 +244,16 @@ export async function backfillAllRankPlacements(db: Db): Promise<{ users: number
  * changes. Kept here so the ordering rule (ASC by `order`, then
  * `name`) lives next to the resolver that depends on it.
  */
-export async function listRanksOrdered(db: Db) {
+export async function listRanksOrdered(
+  db: Db,
+  /** Per-server rank ladder. Defaults to the default server so the existing
+   *  single-server callers list today's Spire ladder with the flag off. */
+  serverId: string = DEFAULT_SERVER_ID,
+) {
   return db
     .select()
     .from(ranks)
+    .where(eq(ranks.serverId, serverId))
     .orderBy(asc(ranks.order), asc(ranks.name))
     .all();
 }
@@ -243,15 +272,23 @@ export function placeRankForXpSync(
   rankRows: readonly DbRank[],
   tierRows: readonly DbRankTier[],
   xp: number,
+  /** Per-server rank ladder (migrations 0295-0299). When provided, the
+   *  pre-loaded rows are filtered to this server before placement so a caller
+   *  that hands in a multi-server row set still resolves the right ladder. When
+   *  omitted the rows are used as-is — existing single-server callers (which
+   *  load only one server's rows) are unaffected and byte-identical. */
+  serverId?: string,
 ): ResolvedRank {
   if (xp < 0) return { rankKey: null, tier: null };
-  const enabledRanks = new Set(rankRows.filter((r) => r.enabled).map((r) => r.key));
-  const rankOrder = new Map(rankRows.map((r) => [r.key, r.order]));
+  const scopedRanks = serverId == null ? rankRows : rankRows.filter((r) => r.serverId === serverId);
+  const scopedTiers = serverId == null ? tierRows : tierRows.filter((t) => t.serverId === serverId);
+  const enabledRanks = new Set(scopedRanks.filter((r) => r.enabled).map((r) => r.key));
+  const rankOrder = new Map(scopedRanks.map((r) => [r.key, r.order]));
   // Pick the highest-threshold enabled tier whose threshold <= xp.
   // Tie-break: rank order DESC, then tier DESC, matching the
   // resolveRankForXp behavior.
   let best: DbRankTier | null = null;
-  for (const t of tierRows) {
+  for (const t of scopedTiers) {
     if (!t.enabled) continue;
     if (!enabledRanks.has(t.rankKey)) continue;
     if (t.xpThreshold > xp) continue;
@@ -275,12 +312,16 @@ export function mergeMaxEverHeldSync(
   rankRows: readonly DbRank[],
   prior: { maxRankKeyEverHeld: string | null; maxTierEverHeld: number | null },
   candidate: ResolvedRank,
+  /** Optional per-server filter; same semantics as placeRankForXpSync.
+   *  Omitted ⇒ rows used as-is (existing single-server callers unchanged). */
+  serverId?: string,
 ): { maxRankKeyEverHeld: string | null; maxTierEverHeld: number | null } {
   if (!candidate.rankKey || candidate.tier == null) return prior;
   if (!prior.maxRankKeyEverHeld || prior.maxTierEverHeld == null) {
     return { maxRankKeyEverHeld: candidate.rankKey, maxTierEverHeld: candidate.tier };
   }
-  const orderByKey = new Map(rankRows.map((r) => [r.key, r.order]));
+  const scopedRanks = serverId == null ? rankRows : rankRows.filter((r) => r.serverId === serverId);
+  const orderByKey = new Map(scopedRanks.map((r) => [r.key, r.order]));
   const priorOrder = orderByKey.get(prior.maxRankKeyEverHeld) ?? -1;
   const candOrder = orderByKey.get(candidate.rankKey) ?? -1;
   if (candOrder > priorOrder) {

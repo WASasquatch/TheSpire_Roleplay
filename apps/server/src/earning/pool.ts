@@ -28,7 +28,10 @@ import type { Db } from "../db/index.js";
 import {
   characterEarning,
   rooms,
+  serverMembers,
+  servers,
   userEarning,
+  users,
   type DbCharacterEarning,
   type DbUserEarning,
 } from "../db/schema.js";
@@ -70,6 +73,58 @@ export async function readPool(
     .from(characterEarning)
     .where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId)))
     .limit(1))[0];
+}
+
+/**
+ * Resolve which server's per-server identity a PROFILE should render — the
+ * profile OWNER's favorite/default server (`users.default_server_id`), else the
+ * system default. A global profile view has no viewer-server context, so the
+ * owner's chosen favorite is the anchor for EVERY per-server profile read
+ * (collection, pet collection, equipped name style, banner, marquee + visitor
+ * flair) so they all agree on one server.
+ *
+ * Resolution, in order:
+ *   1. `users.default_server_id` is NULL → DEFAULT_SERVER_ID.
+ *   2. It points at the system server → DEFAULT_SERVER_ID (same id; the system
+ *      server needs no membership row, everyone is an implicit member).
+ *   3. The server exists AND the owner still belongs to it (a `server_members`
+ *      row) → that server.
+ *   4. Otherwise (server deleted, or the owner left it) → DEFAULT_SERVER_ID.
+ *
+ * Step 4 is the application-level equivalent of the column's documented
+ * "ON DELETE SET NULL": a stale / no-longer-a-member favorite reads exactly as
+ * if it were unset. FLAG-OFF SAFETY: with the servers flag off no one has a
+ * favorite set (the UI to set one is flag-gated), so every profile resolves to
+ * DEFAULT_SERVER_ID — byte-identical to today.
+ *
+ * `ownerUserId` is the MASTER account id of the profile owner (the favorite is
+ * an account-level preference; a character profile uses its owner's favorite).
+ */
+export async function resolveProfileServerId(db: Db, ownerUserId: string): Promise<string> {
+  const u = (await db
+    .select({ favorite: users.defaultServerId })
+    .from(users)
+    .where(eq(users.id, ownerUserId))
+    .limit(1))[0];
+  const favorite = u?.favorite ?? null;
+  if (!favorite || favorite === DEFAULT_SERVER_ID) return DEFAULT_SERVER_ID;
+  // The favorite must still exist, be live (servers are soft-archived, never
+  // hard-deleted), and the owner must still be a member of it (the system
+  // server is handled above; every other server needs a real membership row).
+  // A miss on any of these falls back to the system default.
+  const server = (await db
+    .select({ id: servers.id, isSystem: servers.isSystem, status: servers.status })
+    .from(servers)
+    .where(eq(servers.id, favorite))
+    .limit(1))[0];
+  if (!server || server.status === "archived") return DEFAULT_SERVER_ID;
+  if (server.isSystem) return server.id;
+  const membership = (await db
+    .select({ userId: serverMembers.userId })
+    .from(serverMembers)
+    .where(and(eq(serverMembers.serverId, favorite), eq(serverMembers.userId, ownerUserId)))
+    .limit(1))[0];
+  return membership ? favorite : DEFAULT_SERVER_ID;
 }
 
 /**

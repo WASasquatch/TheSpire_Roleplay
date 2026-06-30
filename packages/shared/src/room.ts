@@ -54,6 +54,15 @@ export interface RoomSummary {
    */
   forumId: string | null;
   /**
+   * The server this room belongs to (Multi-Server Lift). The client derives
+   * its CURRENT server purely from the room it's in, so this is what drives
+   * the server rail's active pill and the per-server rooms scoping. It is
+   * populated ONLY when the servers feature flag is on (the server stamps the
+   * effective server, treating a NULL row as the default/is_system server);
+   * with the flag off it stays null so the shell is byte-identical to today.
+   */
+  serverId: string | null;
+  /**
    * Room icon shown left of the name in the Room Info bar. Holds EITHER an
    * http(s) image URL (rendered as <img>) OR a short emoji/text glyph
    * (rendered as-is). Set via `/icon` (owner/mod/admin). Null = no icon.

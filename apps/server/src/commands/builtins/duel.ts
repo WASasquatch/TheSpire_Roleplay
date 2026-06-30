@@ -372,7 +372,7 @@ export const duelCommand: CommandHandler = {
       return notice(ctx, "DUEL_SELF", "You can't duel yourself.");
     }
     const { challengerClass, opponentClass } = parseDuelStartArgs(rest);
-    const { challengeMs, reward } = await readDuelConfig(ctx.db);
+    const { challengeMs, reward } = await readDuelConfig(ctx.db, (ctx.socket.data as { serverId?: string }).serverId);
     try {
       startSession({
         kind: DUEL_KIND,

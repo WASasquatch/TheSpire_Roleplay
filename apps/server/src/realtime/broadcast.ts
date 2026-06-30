@@ -79,6 +79,7 @@ import { loadReactionsForTargets } from "../reactions.js";
 import { emptyPollState, loadPollState } from "../polls.js";
 import { readPoolRank } from "../earning/resolver.js";
 import { DEFAULT_SERVER_ID, resolveRoomServerId } from "../earning/pool.js";
+import { serverAuthority } from "../servers/authority.js";
 import { routeMessage } from "../earning/routing.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -225,7 +226,7 @@ export async function addMessage(
   // here drops the send and notifies the user via the same
   // TOO_LONG channel the dispatcher uses for raw-input rejections.
   let body = payload.body;
-  const expanded = expandInlineCommands(body, ctx.registry, ctx.user, ctx.roomId);
+  const expanded = expandInlineCommands(body, ctx.registry, ctx.user, ctx.roomId, (ctx.socket.data as { serverId?: string }).serverId);
   if (expanded !== body) {
     const { maxMessageLength } = await getSettings(ctx.db);
     if (expanded.length > maxMessageLength) {
@@ -468,7 +469,10 @@ export async function addMessage(
       const uac = (await ctx.db
         .select({ inlineAvatarEnabled: userActiveCosmetics.inlineAvatarEnabled })
         .from(userActiveCosmetics)
-        .where(eq(userActiveCosmetics.userId, ctx.user.id))
+        // Per-server cosmetics (migrations 0295-0299): scope to the room's
+        // server like the character-scope read above + the userEarning read
+        // below already do (flag off → default server, byte-identical).
+        .where(and(eq(userActiveCosmetics.serverId, messageServerId), eq(userActiveCosmetics.userId, ctx.user.id)))
         .limit(1))[0];
       if (uac) inlineAvatarEnabledSnapshot = !!uac.inlineAvatarEnabled;
       const ue = (await ctx.db
@@ -699,6 +703,15 @@ export async function addMessage(
       console.error("[earning] award hook failed", { messageId: id, err });
     }
   })();
+  // Re-check this member's auto-join usergroups for the server (their message
+  // count / posted-in-room just changed). Flag-gated + best-effort, and a cheap
+  // no-op when the server defines no auto-rule groups (one indexed SELECT).
+  // Mirrors the forum auto-group hook on the forum:post path.
+  if (areServersEnabledCached()) {
+    void import("../servers/usergroups.js")
+      .then(({ evaluateServerAutoGroups }) => evaluateServerAutoGroups(ctx.db, messageServerId, ctx.user.id))
+      .catch(() => {});
+  }
   // Surface the inserted row's id so callers that need to attach
   // follow-up state (server-authored reactions, audit links, etc.)
   // don't have to re-query. The award hook above runs asynchronously
@@ -1410,11 +1423,14 @@ export async function sendRoomBacklogTo(
   // Per-viewer `/clear` marker: hide everything at or before the time
   // this user last cleared the room. Null when they never cleared.
   const clearedAt = await getClearedAt(db, viewerUserId, roomId);
+  // Whispers are scoped to this room's server (NULL→default), so a whisper sent
+  // in another server doesn't overlay into this backlog.
+  const backlogServerId = await resolveRoomServerId(db, roomId);
   const recentPlusOne = await db
     .select()
     .from(messages)
     .where(and(
-      roomVisibilityWhere(roomId, viewerUserId),
+      roomVisibilityWhere(roomId, viewerUserId, backlogServerId),
       clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
     ))
     .orderBy(desc(messages.createdAt))
@@ -1607,6 +1623,24 @@ async function joinRoomBody(
     return;
   }
 
+  // Per-server gate: a SUB-server's ban and join mode (application/invite) are
+  // enforced on join, mirroring the HTTP path (schema.ts contract) so a server
+  // ban isn't just a one-time live-socket eviction a reconnect can bypass. The
+  // default/system server keeps the legacy global behavior (its membership is
+  // "any signed-in user"), and the flag-off path is byte-identical.
+  if (areServersEnabledCached() && room.serverId && room.serverId !== DEFAULT_SERVER_ID) {
+    const sa = await serverAuthority(db, user, room.serverId);
+    if (!sa.canParticipate) {
+      socket.emit("error:notice", {
+        code: sa.ban ? "SERVER_BANNED" : "SERVER_NO_ACCESS",
+        message: sa.ban
+          ? "You are banned from this server."
+          : "You need to join this server before entering its rooms.",
+      });
+      return;
+    }
+  }
+
   // Private rooms: owner always in; otherwise need either a valid password OR
   // an outstanding /invite. /invite acts as a per-user whitelist that lets the
   // user skip the password prompt.
@@ -1775,6 +1809,10 @@ async function joinRoomBody(
   }
 
   socket.data.roomId = roomId;
+  // Cache the room's server on the socket so command dispatch + inline `!cmd`
+  // expansion can scope custom commands to THIS server without a per-message DB
+  // read. Updated on every join, so it never goes stale on a room switch.
+  (socket.data as { serverId?: string }).serverId = room.serverId ?? DEFAULT_SERVER_ID;
   // Persist as the account-global last-room slot on EVERY join, not
   // just on the disconnect path. Mobile suspension can lose the per-
   // tab sessionStorage cache (iOS reaping the tab from memory wipes
@@ -2065,6 +2103,12 @@ export async function buildRoomSummary(
     theaterLoop: room.theaterLoop,
     theaterPlaylist: parsePlaylist(room.theaterPlaylist),
     forumId: room.forumId ?? null,
+    // The client derives its CURRENT server from the room it occupies, which
+    // drives the rail's active pill and the per-server rooms scoping. Emit the
+    // EFFECTIVE server (a NULL row is adopted by the default/is_system server)
+    // ONLY when the flag is on; flag-off this stays null so currentServerId
+    // never engages and the shell is byte-identical to today.
+    serverId: areServersEnabledCached() ? (room.serverId ?? DEFAULT_SERVER_ID) : null,
     // Room Info bar fields (migration 0258). The lightweight ones ride the
     // broadcast so the collapsed bar renders without a follow-up fetch; the
     // heavier dossier (description, NPC list, metadata) is lazy-loaded via
@@ -2634,7 +2678,11 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
           inlineAvatarEnabled: userActiveCosmetics.inlineAvatarEnabled,
         })
         .from(userActiveCosmetics)
-        .where(inArray(userActiveCosmetics.userId, userIds))
+        // Per-server cosmetics (migrations 0295-0299): scope to THIS room's
+        // server like the character-scope read below already does, so the
+        // master/OOC name-style + inline-avatar in the userlist are per-server
+        // too (flag off → default server, byte-identical to today).
+        .where(and(eq(userActiveCosmetics.serverId, listServerId), inArray(userActiveCosmetics.userId, userIds)))
     : [];
   const masterActiveStyleByUser = new Map(
     userActiveRows

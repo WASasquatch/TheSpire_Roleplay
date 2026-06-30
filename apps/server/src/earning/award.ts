@@ -126,8 +126,11 @@ export async function creditPool(
       //    inside the transaction callback).
       const newXp = prior.xp + input.xpDelta;
       const newCurrency = Math.max(0, prior.currency + input.currencyDelta);
-      const rankRows = tx.select().from(ranks).all();
-      const tierRows = tx.select().from(rankTiers).all();
+      // Rank ladder is PER-SERVER (catalogs partitioned, migrations 0295+):
+      // place against THIS crediting server's ranks/tiers, not a mixed global
+      // ladder. Flag-off everything is the default server, so this is identical.
+      const rankRows = tx.select().from(ranks).where(eq(ranks.serverId, input.serverId)).all();
+      const tierRows = tx.select().from(rankTiers).where(eq(rankTiers.serverId, input.serverId)).all();
       const placed = placeRankForXpSync(rankRows, tierRows, newXp);
       const peak = mergeMaxEverHeldSync(rankRows, {
         maxRankKeyEverHeld: prior.maxRankKeyEverHeld,

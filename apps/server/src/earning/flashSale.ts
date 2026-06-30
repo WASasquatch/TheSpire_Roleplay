@@ -35,6 +35,7 @@ import {
   nameStyles,
   siteSettings,
 } from "../db/schema.js";
+import { DEFAULT_SERVER_ID } from "./pool.js";
 
 export type FlashSaleCategory = "name_style" | "item" | "cosmetic" | "freeform_border";
 
@@ -95,13 +96,19 @@ export function dateOffsetUtc(days: number, now: Date = new Date()): string {
 export async function resolveTodayFlashSale(
   db: Db,
   now: Date = new Date(),
+  /** Per-server economy partition (migration 0299). `flash_sales` /
+   *  `flash_sale_overrides` and the catalogs now carry a `server_id`, so the
+   *  whole resolve is scoped to one server's pool. Defaults to the default
+   *  server so the unported callers (admin queue read, flag-off routes) stay
+   *  byte-identical to the single-server behavior. */
+  serverId: string = DEFAULT_SERVER_ID,
 ): Promise<FlashSaleRow> {
   const forDate = todayUtc(now);
   // Fast path: today's row already exists.
   const existing = (await db
     .select()
     .from(flashSales)
-    .where(eq(flashSales.forDate, forDate))
+    .where(and(eq(flashSales.serverId, serverId), eq(flashSales.forDate, forDate)))
     .limit(1))[0];
   if (existing) {
     // Today's row is frozen once written, return it verbatim, NULL
@@ -134,7 +141,7 @@ export async function resolveTodayFlashSale(
   const overrideRows = await db
     .select()
     .from(flashSaleOverrides)
-    .where(eq(flashSaleOverrides.forDate, forDate));
+    .where(and(eq(flashSaleOverrides.serverId, serverId), eq(flashSaleOverrides.forDate, forDate)));
   const overrides = new Map<FlashSaleCategory, { targetKey: string; discountPct: number | null }>();
   for (const r of overrideRows) {
     overrides.set(r.category as FlashSaleCategory, {
@@ -151,17 +158,18 @@ export async function resolveTodayFlashSale(
   // Per-category pick. `pickCategory` returns the target key and
   // the effective discount (snapshotted), null target means "no
   // pick today" (category disabled or catalog empty).
-  const stylePick = await pickCategory(db, "name_style", stylesOn, overrides, defaultPct);
-  const itemPick = await pickCategory(db, "item", itemsOn, overrides, defaultPct);
-  const cosmeticPick = await pickCategory(db, "cosmetic", cosmeticsOn, overrides, defaultPct);
-  const freeformBorderPick = await pickCategory(db, "freeform_border", freeformBordersOn, overrides, defaultPct);
+  const stylePick = await pickCategory(db, "name_style", stylesOn, overrides, defaultPct, serverId);
+  const itemPick = await pickCategory(db, "item", itemsOn, overrides, defaultPct, serverId);
+  const cosmeticPick = await pickCategory(db, "cosmetic", cosmeticsOn, overrides, defaultPct, serverId);
+  const freeformBorderPick = await pickCategory(db, "freeform_border", freeformBordersOn, overrides, defaultPct, serverId);
 
-  // Atomic claim. The unique PK on (for_date) means only one
-  // INSERT can land; the loser of a race silently no-ops and
+  // Atomic claim. The unique PK on (server_id, for_date) means only one
+  // INSERT can land per server; the loser of a race silently no-ops and
   // we re-read to inherit the winner's picks.
   await db
     .insert(flashSales)
     .values({
+      serverId,
       forDate,
       nameStyleKey: stylePick.targetKey,
       itemKey: itemPick.targetKey,
@@ -172,12 +180,12 @@ export async function resolveTodayFlashSale(
       cosmeticDiscountPct: cosmeticPick.discountPct,
       freeformBorderDiscountPct: freeformBorderPick.discountPct,
     })
-    .onConflictDoNothing({ target: flashSales.forDate });
+    .onConflictDoNothing({ target: [flashSales.serverId, flashSales.forDate] });
 
   const final = (await db
     .select()
     .from(flashSales)
-    .where(eq(flashSales.forDate, forDate))
+    .where(and(eq(flashSales.serverId, serverId), eq(flashSales.forDate, forDate)))
     .limit(1))[0];
   return toFlashSaleRow(final!);
 }
@@ -202,6 +210,8 @@ async function pickCategory(
   enabled: boolean,
   overrides: Map<FlashSaleCategory, { targetKey: string; discountPct: number | null }>,
   defaultPct: number,
+  /** Catalog partition the random pick draws from (migration 0299). */
+  serverId: string,
 ): Promise<{ targetKey: string | null; discountPct: number | null }> {
   if (!enabled) return { targetKey: null, discountPct: null };
 
@@ -223,18 +233,18 @@ async function pickCategory(
   // grows past ~10k rows we can switch to a reservoir-sample
   // helper, but premature optimization isn't worth the readability
   // hit here.
-  const row = await pickEligibleRow(db, category);
+  const row = await pickEligibleRow(db, category, serverId);
   if (!row) return { targetKey: null, discountPct: null };
   return { targetKey: row, discountPct: defaultPct };
 }
 
-async function pickEligibleRow(db: Db, category: FlashSaleCategory): Promise<string | null> {
+async function pickEligibleRow(db: Db, category: FlashSaleCategory, serverId: string): Promise<string | null> {
   const now = Date.now();
   if (category === "name_style") {
     const rows = await db
       .select({ key: nameStyles.key })
       .from(nameStyles)
-      .where(and(eq(nameStyles.enabled, true), sql`${nameStyles.cost} > 0`))
+      .where(and(eq(nameStyles.serverId, serverId), eq(nameStyles.enabled, true), sql`${nameStyles.cost} > 0`))
       .orderBy(sql`random()`)
       .limit(1);
     return rows[0]?.key ?? null;
@@ -244,6 +254,7 @@ async function pickEligibleRow(db: Db, category: FlashSaleCategory): Promise<str
       .select({ key: items.key })
       .from(items)
       .where(and(
+        eq(items.serverId, serverId),
         eq(items.enabled, true),
         eq(items.forSale, true),
         sql`${items.price} > 0`,
@@ -258,7 +269,7 @@ async function pickEligibleRow(db: Db, category: FlashSaleCategory): Promise<str
     const rows = await db
       .select({ key: cosmetics.key })
       .from(cosmetics)
-      .where(and(eq(cosmetics.enabled, true), sql`${cosmetics.cost} > 0`))
+      .where(and(eq(cosmetics.serverId, serverId), eq(cosmetics.enabled, true), sql`${cosmetics.cost} > 0`))
       .orderBy(sql`random()`)
       .limit(1);
     return rows[0]?.key ?? null;
@@ -267,7 +278,7 @@ async function pickEligibleRow(db: Db, category: FlashSaleCategory): Promise<str
     const rows = await db
       .select({ key: freeformBorders.key })
       .from(freeformBorders)
-      .where(and(eq(freeformBorders.enabled, true), sql`${freeformBorders.cost} > 0`))
+      .where(and(eq(freeformBorders.serverId, serverId), eq(freeformBorders.enabled, true), sql`${freeformBorders.cost} > 0`))
       .orderBy(sql`random()`)
       .limit(1);
     return rows[0]?.key ?? null;
@@ -300,8 +311,11 @@ export async function priceWithFlashSale(
   category: FlashSaleCategory,
   forKey: string,
   basePrice: number,
+  /** Per-server economy partition (migration 0299). Defaults to the default
+   *  server so the single-server callers stay byte-identical. */
+  serverId: string = DEFAULT_SERVER_ID,
 ): Promise<{ finalPrice: number; discountPct: number | null }> {
-  const sale = await resolveTodayFlashSale(db);
+  const sale = await resolveTodayFlashSale(db, new Date(), serverId);
   const onSaleKey = category === "name_style" ? sale.nameStyleKey
                   : category === "item" ? sale.itemKey
                   : category === "cosmetic" ? sale.cosmeticKey

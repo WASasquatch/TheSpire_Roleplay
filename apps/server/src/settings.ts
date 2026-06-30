@@ -135,6 +135,10 @@ export interface SiteSettings {
   securityNoticeHtml: string;
   /** Sanitized HTML rendered above the register form. Acceptance is required. */
   registerDisclaimerHtml: string;
+  /** Sanitized HTML shown with an "I agree" gate when applying to register a server. Empty = no gate. */
+  serverRegistrationRulesHtml: string;
+  /** Sanitized HTML shown with an "I agree" gate when applying to create a forum. Empty = no gate. */
+  forumRegistrationRulesHtml: string;
   /** Plain-text SEO description (meta description, og:description, twitter:description). */
   metaDescription: string;
   /** Verbatim HTML injected into <head> on the server-rendered splash (analytics scripts). */
@@ -296,6 +300,10 @@ export interface SettingsPatch {
   securityNoticeHtml?: string;
   /** Pre-sanitized HTML; route handler sanitizes before invoking. */
   registerDisclaimerHtml?: string;
+  /** Pre-sanitized HTML; route handler sanitizes before invoking. */
+  serverRegistrationRulesHtml?: string;
+  /** Pre-sanitized HTML; route handler sanitizes before invoking. */
+  forumRegistrationRulesHtml?: string;
   /** Plain text. Admin route handler trims; storage is verbatim. */
   metaDescription?: string;
   /** Raw HTML, NOT sanitized (analytics scripts must remain intact). Admin-only. */
@@ -381,6 +389,8 @@ export async function updateSettings(
   if (patch.rulesHtml !== undefined) update.rulesHtml = patch.rulesHtml;
   if (patch.securityNoticeHtml !== undefined) update.securityNoticeHtml = patch.securityNoticeHtml;
   if (patch.registerDisclaimerHtml !== undefined) update.registerDisclaimerHtml = patch.registerDisclaimerHtml;
+  if (patch.serverRegistrationRulesHtml !== undefined) update.serverRegistrationRulesHtml = patch.serverRegistrationRulesHtml;
+  if (patch.forumRegistrationRulesHtml !== undefined) update.forumRegistrationRulesHtml = patch.forumRegistrationRulesHtml;
   if (patch.metaDescription !== undefined) update.metaDescription = patch.metaDescription;
   if (patch.customHeadHtml !== undefined) update.customHeadHtml = patch.customHeadHtml;
   if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
@@ -459,6 +469,8 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     rulesHtml: row.rulesHtml,
     securityNoticeHtml: row.securityNoticeHtml,
     registerDisclaimerHtml: row.registerDisclaimerHtml,
+    serverRegistrationRulesHtml: row.serverRegistrationRulesHtml,
+    forumRegistrationRulesHtml: row.forumRegistrationRulesHtml,
     metaDescription: row.metaDescription,
     customHeadHtml: row.customHeadHtml,
     vapidPublicKey: row.vapidPublicKey,
@@ -550,8 +562,10 @@ export async function ensureVapidKeys(db: Db): Promise<{ publicKey: string }> {
  * FLAG-OFF / DEFAULT SERVER: callers that haven't been ported still read
  * `getSettings(db)` and get byte-identical numbers; this layer is purely
  * additive and only consulted on server-scoped paths once `serversEnabled`.
- * The default (system) server has no `server_settings` row in practice, so it
- * inherits everything — identical to the platform settings either way.
+ * The default (system) server DOES get a `server_settings` row, seeded by
+ * `ensureSystemServer` (seed.ts) with the platform values copied verbatim, so
+ * its effective config is identical to the platform settings either way — and
+ * stays frozen at those values if the singleton is later edited.
  * ============================================================ */
 
 /**

@@ -52,14 +52,17 @@ apps/server/data/
 *.sqlite-shm
 *.sqlite-wal
 *.sqlite-journal
+*.sqlite.gz
 *.db
 *.db-shm
 *.db-wal
 
-# Detached-process pidfiles + ad-hoc backups.
+# Detached-process pidfiles + ad-hoc backups, plus the local backups/ dir
+# (DB + disk snapshots pulled from prod — keep them out of git AND the repo root).
 *.pid
 *.bak
 *.backup
+/backups/
 
 # =====================================================================
 # Logs
@@ -137,6 +140,7 @@ SECURITY-NOTES.md
 
 # Local-only working doc tracking in-flight feature scope across sessions.
 plan.md
+plan_ext.md
 plan_patch.md
 plan_minor.md
 plan_major.md

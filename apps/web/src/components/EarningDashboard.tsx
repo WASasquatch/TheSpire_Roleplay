@@ -159,11 +159,14 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
   const [flashSale, setFlashSale] = useState<FlashSaleResponse | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetchFlashSale()
+    // Multi-Server Lift: scope the sale to the same active server the
+    // wallet reads with so the prices match this server's catalog;
+    // null (flag-off / no server) hits the literal endpoint, unchanged.
+    fetchFlashSale(currentServerId)
       .then((r) => { if (!cancelled) setFlashSale(r); })
       .catch(() => { /* silent, sale info is decoration */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [currentServerId]);
 
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
@@ -1627,6 +1630,12 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
   const [savedFlash, setSavedFlash] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const refresh = useEarning((s) => s.refresh);
+  // Multi-Server Lift: the hide-XP / hide-Currency flags are master-only
+  // GLOBAL privacy prefs (the server ignores serverId for them), so the
+  // write stays unscoped. We still pass `currentServerId` to the refetch
+  // so the post-save snapshot keeps showing the active server's economy
+  // instead of snapping back to the default pool.
+  const currentServerId = useChat((s) => s.currentServerId);
 
   async function save(kind: "currency" | "xp", next: boolean) {
     if (kind === "currency") setHideCurrency(next); else setHideXp(next);
@@ -1637,7 +1646,7 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
         kind === "currency" ? { hideCurrencyCount: next } : { hideXpCount: next },
       );
       setSavedFlash(true);
-      void refresh();
+      void refresh(currentServerId);
       window.setTimeout(() => setSavedFlash(false), 1500);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to save");
@@ -1762,6 +1771,10 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
   // identity the user is voicing, switching characters via /char
   // re-keys this tab to that character's owned/equipped state.
   const activeCharacterId = useChat((s) => s.activeCharacterId);
+  // Multi-Server Lift: the active server whose economy this tab reads
+  // and writes. Same source the dashboard refreshes `/earning/me` with;
+  // null (flag-off / no server) keeps every call byte-identical.
+  const currentServerId = useChat((s) => s.currentServerId);
   const refresh = useEarning((s) => s.refresh);
   const [tab, setTab] = useState<"owned" | "available">("owned");
   const [err, setErr] = useState<string | null>(null);
@@ -1841,8 +1854,8 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
     try {
       // Pool drain scopes to current identity: character-active
       // debits character_earning, OOC debits user_earning.
-      await purchaseNameStyle(key, activeCharacterId);
-      await refresh();
+      await purchaseNameStyle(key, activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -1855,8 +1868,8 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
     try {
       // Scope the equip to the current identity. Server validates
       // ownership of the character before writing the slot.
-      await setActiveNameStyle(key, activeCharacterId);
-      await refresh();
+      await setActiveNameStyle(key, activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Equip failed");
     } finally {
@@ -1867,8 +1880,8 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
     setBusyKey(key);
     setErr(null);
     try {
-      await patchNameStyleConfig(key, config, activeCharacterId);
-      await refresh();
+      await patchNameStyleConfig(key, config, activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -2183,6 +2196,10 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
   // user_earning. Ownership lives in `character_owned_borders` or
   // `user_owned_borders` accordingly.
   const activeCharacterId = useChat((s) => s.activeCharacterId);
+  // Multi-Server Lift: the active server this tab buys/equips against,
+  // same source the dashboard reads `/earning/me` with. Null when the
+  // flag is off / no server resolved → calls stay unscoped (default).
+  const currentServerId = useChat((s) => s.currentServerId);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // Pull the viewer's own avatar from the room-occupant cosmetics
@@ -2286,8 +2303,8 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
     setBusyKey(rankKey);
     setErr(null);
     try {
-      await purchaseBorder(rankKey, activeCharacterId);
-      await refresh();
+      await purchaseBorder(rankKey, activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -2299,8 +2316,8 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
     setBusyKey(rankKey ?? "__unequip__");
     setErr(null);
     try {
-      await patchEarningSettings({ selectedBorderRankKey: rankKey, characterId: activeCharacterId });
-      await refresh();
+      await patchEarningSettings({ selectedBorderRankKey: rankKey, characterId: activeCharacterId }, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Equip failed");
     } finally {
@@ -2314,8 +2331,8 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
     setBusyKey(`freeform:${borderKey}`);
     setErr(null);
     try {
-      await purchaseFreeformBorder(borderKey, activeCharacterId);
-      await refresh();
+      await purchaseFreeformBorder(borderKey, activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -2327,8 +2344,8 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
     setBusyKey(borderKey ? `freeform:${borderKey}` : "__unequip_freeform__");
     setErr(null);
     try {
-      await patchEarningSettings({ selectedFreeformBorderKey: borderKey, characterId: activeCharacterId });
-      await refresh();
+      await patchEarningSettings({ selectedFreeformBorderKey: borderKey, characterId: activeCharacterId }, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Equip failed");
     } finally {
@@ -2340,8 +2357,8 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
     setBusyKey(`freeform:${borderKey}`);
     setErr(null);
     try {
-      await patchFreeformBorderConfig(borderKey, config, activeCharacterId);
-      await refresh();
+      await patchFreeformBorderConfig(borderKey, config, activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Save failed");
     } finally {
@@ -2888,6 +2905,10 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
   // wide (one ownership ledger row covers all the user's
   // identities); only the EQUIPPED toggle is per-identity.
   const activeCharacterId = useChat((s) => s.activeCharacterId);
+  // Multi-Server Lift: the active server this tab buys/equips against,
+  // same source the dashboard reads `/earning/me` with. Null (flag-off
+  // / no server) keeps the catalog read + every write byte-identical.
+  const currentServerId = useChat((s) => s.currentServerId);
   // Used by the profile-flair buy cards to deep-link the buyer to
   // Edit Profile → Flair where they actually configure the purchase.
   // Without the deep-link they had to find the editor and the right
@@ -2899,16 +2920,17 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // The cosmetic-catalog isn't on /earning/me yet; fetch it once.
+  // The cosmetic-catalog isn't on /earning/me yet; fetch it once
+  // (re-fetch if the active server changes so prices match its catalog).
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    fetchEarningCatalog()
+    fetchEarningCatalog(currentServerId)
       .then((r) => { if (!cancelled) setCatalog(r); })
       .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load catalog"); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, []);
+  }, [currentServerId]);
 
   if (loading) return <p className="text-sm text-keep-muted">Loading flair…</p>;
   const inlineAvatarRow = catalog?.cosmetics.find((c) => c.key === "inline_avatar");
@@ -2959,8 +2981,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setBusy(true);
     setErr(null);
     try {
-      await purchaseCosmetic("inline_avatar", activeCharacterId);
-      await refresh();
+      await purchaseCosmetic("inline_avatar", activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       // Server says this identity already bought it (they disabled
       // it, then clicked Buy again). Skip the cost prompt, flip
@@ -2970,8 +2992,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
       const msg = e instanceof Error ? e.message : "Purchase failed";
       if (/already owned/i.test(msg)) {
         try {
-          await equipCosmetic("inline_avatar", true, activeCharacterId);
-          await refresh();
+          await equipCosmetic("inline_avatar", true, activeCharacterId, currentServerId);
+          await refresh(currentServerId);
         } catch (eq) {
           setErr(eq instanceof Error ? eq.message : "Equip failed");
         }
@@ -2988,8 +3010,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     try {
       // Scope to the current identity, same partition as the
       // name-style equip path. Server validates character ownership.
-      await equipCosmetic("inline_avatar", next, activeCharacterId);
-      await refresh();
+      await equipCosmetic("inline_avatar", next, activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Toggle failed");
     } finally {
@@ -3025,8 +3047,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setBusy(true);
     setErr(null);
     try {
-      await purchaseCosmetic("flair_profile_banner", activeCharacterId);
-      await refresh();
+      await purchaseCosmetic("flair_profile_banner", activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -3053,8 +3075,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setBusy(true);
     setErr(null);
     try {
-      await purchaseCosmetic("flair_typing_phrase", activeCharacterId);
-      await refresh();
+      await purchaseCosmetic("flair_typing_phrase", activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -3080,8 +3102,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setBusy(true);
     setErr(null);
     try {
-      await purchaseCosmetic("flair_lurking_master", activeCharacterId);
-      await refresh();
+      await purchaseCosmetic("flair_lurking_master", activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -3092,8 +3114,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setBusy(true);
     setErr(null);
     try {
-      await equipCosmetic("flair_lurking_master", next, activeCharacterId);
-      await refresh();
+      await equipCosmetic("flair_lurking_master", next, activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Toggle failed");
     } finally {
@@ -3124,8 +3146,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setBusy(true);
     setErr(null);
     try {
-      await purchaseCosmetic("flair_room_presence", activeCharacterId);
-      await refresh();
+      await purchaseCosmetic("flair_room_presence", activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -3149,8 +3171,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setBusy(true);
     setErr(null);
     try {
-      await purchaseCosmetic("flair_session_presence", null);
-      await refresh();
+      await purchaseCosmetic("flair_session_presence", null, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -3176,8 +3198,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setBusy(true);
     setErr(null);
     try {
-      await purchaseCosmetic("flair_profile_visitors", activeCharacterId);
-      await refresh();
+      await purchaseCosmetic("flair_profile_visitors", activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -3198,8 +3220,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setBusy(true);
     setErr(null);
     try {
-      await purchaseCosmetic("flair_profile_marquee", activeCharacterId);
-      await refresh();
+      await purchaseCosmetic("flair_profile_marquee", activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -3268,10 +3290,11 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
               owned={bannerOwned}
               currentUrl={bannerUrl}
               activeCharacterId={activeCharacterId}
+              serverId={currentServerId}
               activeWallet={activeWallet}
               busy={busy}
               onBuy={() => void doBuyBanner()}
-              onSaved={() => void refresh()}
+              onSaved={() => void refresh(currentServerId)}
               onError={(message) => setErr(message)}
             />
           </div>
@@ -3285,10 +3308,11 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
               owned={typingPhraseOwned}
               currentPhrase={typingPhrase}
               activeCharacterId={activeCharacterId}
+              serverId={currentServerId}
               activeWallet={activeWallet}
               busy={busy}
               onBuy={() => void doBuyTypingPhrase()}
-              onSaved={() => void refresh()}
+              onSaved={() => void refresh(currentServerId)}
               onError={(message) => setErr(message)}
             />
           </div>
@@ -3299,7 +3323,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
             <ReactionSheetFlairCard
               row={reactionSheetRow}
               activeWallet={activeWallet}
-              onRefreshEarning={() => void refresh()}
+              onRefreshEarning={() => void refresh(currentServerId)}
             />
           </div>
         ) : null}
@@ -3328,9 +3352,9 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
                 joinTemplate: next.firstTemplate,
                 leaveTemplate: next.secondTemplate,
                 characterId: activeCharacterId,
-              });
+              }, currentServerId);
             }}
-              onSaved={() => void refresh()}
+              onSaved={() => void refresh(currentServerId)}
               onError={(message) => setErr(message)}
             />
           </div>
@@ -3361,9 +3385,9 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
                 await patchSessionPresenceTemplates({
                   connectTemplate: next.firstTemplate,
                   exitTemplate: next.secondTemplate,
-                });
+                }, currentServerId);
               }}
-              onSaved={() => void refresh()}
+              onSaved={() => void refresh(currentServerId)}
               onError={(message) => setErr(message)}
             />
           </div>
@@ -3465,6 +3489,9 @@ function RoomTransitionsTab({ snapshot }: {
 }) {
   const me = useChat((s) => s.me);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
+  // Multi-Server Lift: active server this tab buys/equips against, same
+  // source the dashboard reads `/earning/me` with. Null → unscoped.
+  const currentServerId = useChat((s) => s.currentServerId);
   const setMyActiveTransitionKey = useChat((s) => s.setMyActiveTransitionKey);
   const refresh = useEarning((s) => s.refresh);
   // Each transition's Preview plays the rite ON that transition's own card,
@@ -3490,16 +3517,16 @@ function RoomTransitionsTab({ snapshot }: {
   async function buy(t: RoomTransition) {
     if (!window.confirm(`Buy "${t.label}" for ${t.cost.toLocaleString()} Currency from ${who}'s pool?`)) return;
     setBusyKey(t.key); setErr(null);
-    try { await purchaseTransition(t.key, activeCharacterId); await refresh(); }
+    try { await purchaseTransition(t.key, activeCharacterId, currentServerId); await refresh(currentServerId); }
     catch (e) { setErr(e instanceof Error ? e.message : "Purchase failed"); }
     finally { setBusyKey(null); }
   }
   async function equip(key: string | null) {
     setBusyKey(key ?? "__off"); setErr(null);
     try {
-      await setActiveRoomTransition(key, activeCharacterId);
+      await setActiveRoomTransition(key, activeCharacterId, currentServerId);
       setMyActiveTransitionKey(key);
-      await refresh();
+      await refresh(currentServerId);
     } catch (e) { setErr(e instanceof Error ? e.message : "Equip failed"); }
     finally { setBusyKey(null); }
   }
@@ -3680,6 +3707,7 @@ function ProfileBannerFlairCard({
   owned,
   currentUrl,
   activeCharacterId,
+  serverId,
   activeWallet,
   busy,
   onBuy,
@@ -3691,6 +3719,8 @@ function ProfileBannerFlairCard({
   owned: boolean;
   currentUrl: string | null;
   activeCharacterId: string | null;
+  /** Multi-Server Lift: active server the banner write scopes to. */
+  serverId: string | null;
   activeWallet: number;
   busy: boolean;
   onBuy: () => void;
@@ -3707,7 +3737,7 @@ function ProfileBannerFlairCard({
   async function save(next: string | null) {
     setSaving(true);
     try {
-      await patchProfileBannerUrl(next, activeCharacterId);
+      await patchProfileBannerUrl(next, activeCharacterId, serverId);
       onSaved();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Save failed");
@@ -3835,6 +3865,7 @@ function TypingPhraseFlairCard({
   owned,
   currentPhrase,
   activeCharacterId,
+  serverId,
   activeWallet,
   busy,
   onBuy,
@@ -3846,6 +3877,8 @@ function TypingPhraseFlairCard({
   owned: boolean;
   currentPhrase: string | null;
   activeCharacterId: string | null;
+  /** Multi-Server Lift: active server the phrase write scopes to. */
+  serverId: string | null;
   activeWallet: number;
   busy: boolean;
   onBuy: () => void;
@@ -3873,7 +3906,7 @@ function TypingPhraseFlairCard({
   async function save(next: string | null) {
     setSaving(true);
     try {
-      await patchTypingPhrase(next, activeCharacterId);
+      await patchTypingPhrase(next, activeCharacterId, serverId);
       onSaved();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Save failed");
@@ -4298,6 +4331,9 @@ function ItemsTab({
   useShopRowFocus(focusKey);
   const me = useChat((s) => s.me);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
+  // Multi-Server Lift: active server this tab buys/pins against, same
+  // source the dashboard reads `/earning/me` with. Null → unscoped.
+  const currentServerId = useChat((s) => s.currentServerId);
   const refresh = useEarning((s) => s.refresh);
   // Flash Sale → Items deep-link lands on the shop sub-tab by default
   // (otherwise the user clicks an item-sale card and gets the
@@ -4396,8 +4432,8 @@ function ItemsTab({
     setBusyKey(itemKey);
     setErr(null);
     try {
-      await buyItem(itemKey, quantity, activeCharacterId);
-      await refresh();
+      await buyItem(itemKey, quantity, activeCharacterId, currentServerId);
+      await refresh(currentServerId);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed");
     } finally {
@@ -4728,7 +4764,7 @@ function ItemsTab({
             pickerEmpty: "No non-pet items in this inventory. Pets pin to the Pets tab instead.",
           }}
           onError={setErr}
-          onSaved={() => void refresh()}
+          onSaved={() => void refresh(currentServerId)}
         />
       ) : null}
 
@@ -4753,7 +4789,7 @@ function ItemsTab({
             pickerEmpty: "No pets in this inventory. Buy one from the Shop's Pets category to pin it here.",
           }}
           onError={setErr}
-          onSaved={() => void refresh()}
+          onSaved={() => void refresh(currentServerId)}
         />
       ) : null}
 
@@ -4799,14 +4835,16 @@ function CollectionEditor({
    *  passes `row.category === 'pet'`. */
   pickerFilter: (row: ItemCatalogRow) => boolean;
   /** Save callback. Same wire shape (slots[] + characterId) for both
-   *  collection kinds; differs only in which server endpoint is hit. */
-  commitFn: (slots: { slot: number; itemKey: string | null }[], characterId: string | null) => Promise<void>;
+   *  collection kinds; differs only in which server endpoint is hit.
+   *  The trailing `serverId` (Multi-Server Lift) scopes the write to the
+   *  active server's economy, null/omitted = unscoped (default pool). */
+  commitFn: (slots: { slot: number; itemKey: string | null }[], characterId: string | null, serverId?: string | null) => Promise<void>;
   /** Optional rename callback, when set, the editor surfaces the
    *  current nickname under each pinned slot's catalog name and adds
    *  an inline "Pet name" input in the slot's edit panel. Only the
    *  pet collection wires this; the item collection has no per-item
    *  nicknames so omits it. */
-  renameFn?: (slot: number, nickname: string | null, characterId: string | null) => Promise<{ slot: number; nickname: string | null }>;
+  renameFn?: (slot: number, nickname: string | null, characterId: string | null, serverId?: string | null) => Promise<{ slot: number; nickname: string | null }>;
   /** Per-kind UI copy, header sentence + empty-picker message.
    *  `header` is a ReactNode so callers can interpolate the identity
    *  label inline; the other two are plain strings for the empty
@@ -4819,6 +4857,9 @@ function CollectionEditor({
   onError: (msg: string) => void;
   onSaved: () => void;
 }) {
+  // Multi-Server Lift: active server the collection writes scope to,
+  // same source the dashboard reads `/earning/me` with. Null → unscoped.
+  const currentServerId = useChat((s) => s.currentServerId);
   const [editingSlot, setEditingSlot] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   // Picker filter state. Lives at the editor level (not the picker
@@ -4879,7 +4920,7 @@ function CollectionEditor({
     if (next === current) return;
     setRenaming(true);
     try {
-      await renameFn(editingSlot, next, characterId);
+      await renameFn(editingSlot, next, characterId, currentServerId);
       onSaved();
     } catch (e) {
       onError(e instanceof Error ? e.message : "Rename failed");
@@ -4915,7 +4956,7 @@ function CollectionEditor({
   async function commit(slot: number, itemKey: string | null) {
     setSaving(true);
     try {
-      await commitFn([{ slot, itemKey }], characterId);
+      await commitFn([{ slot, itemKey }], characterId, currentServerId);
       setEditingSlot(null);
       onSaved();
     } catch (e) {

@@ -15,8 +15,9 @@
  * via the store's forumActionTick (the socket echo can't reach us).
  * Forum-to-forum switches play the viewer's equipped room transition.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, BarChart3, Bell, FolderOpen, Globe, Landmark, Lock, MessagesSquare, Plus, Settings as SettingsIcon, Star, Users, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import DOMPurify from "dompurify";
+import { ArrowDown, ArrowLeft, ArrowUp, BarChart3, Bell, Compass, FolderOpen, Globe, Landmark, Lock, MessagesSquare, Plus, Search, Settings as SettingsIcon, Star, Users, X } from "lucide-react";
 import {
   DEFAULT_THEME,
   FORUM_NAME_MAX,
@@ -40,6 +41,8 @@ import {
   prefixAppliesToCategory,
   resolveMessageColor,
   normalizeTheme,
+  normalizeTag,
+  MAX_TAGS_PER_ENTITY,
   type Theme,
   type ForumPermission,
   type ForumAutoRule,
@@ -80,10 +83,14 @@ import {
   resolveForumReport,
   removeForumMember,
   fetchForumDetail,
+  fetchForumDiscover,
   fetchForumMembershipApplications,
   fetchForumNotifications,
+  fetchForumRegistrationRules,
   fetchForumRoles,
+  fetchForumTags,
   fetchForums,
+  searchForums,
   fetchMyForumApplications,
   fetchMyWorlds,
   markForumNotificationsRead,
@@ -131,6 +138,7 @@ import {
   type ForumUsergroupsResponse,
   type SlugCheck,
 } from "../lib/forums.js";
+import { listServers, type ServerSummary } from "../lib/servers.js";
 import { forumBannerInk, inkClass, isDarkSurface, themeStyle, useActiveTheme, useImageAverageColor, useScopedRootDesign } from "../lib/theme.js";
 import { ForumReportContext } from "../lib/forumReportContext.js";
 import { ForumTopicAdminContext } from "../lib/forumTopicAdminContext.js";
@@ -144,13 +152,15 @@ import { FormattingToolbar } from "./FormattingToolbar.js";
 import { MessageList } from "./MessageList.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useChat } from "../state/store.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 /** In-modal navigation. The forum view IS the full forum (header +
  *  MessageList's nested renderer; topics expand inline exactly like the
  *  deployed in-chat forums did); the owner console rides its own view. */
 type CatalogView =
   | { kind: "forum" }
-  | { kind: "settings" };
+  | { kind: "settings" }
+  | { kind: "discover" };
 
 interface Props {
   /** Land on this forum (slug or id) instead of the system default. */
@@ -411,6 +421,21 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                       <span className="text-keep-rule">›</span>
                       <span className="min-w-0 truncate text-keep-text">Settings</span>
                     </>
+                  ) : view.kind === "discover" ? (
+                    <>
+                      {detail ? (
+                        <button
+                          type="button"
+                          onClick={() => navigateView({ kind: "forum" })}
+                          className="flex items-center gap-1 rounded text-keep-muted hover:text-keep-action"
+                        >
+                          <ArrowLeft className="h-3 w-3" aria-hidden="true" />
+                          <span className="max-w-[12rem] truncate">{detail.name}</span>
+                        </button>
+                      ) : null}
+                      {detail ? <span className="text-keep-rule">›</span> : null}
+                      <span className="min-w-0 truncate font-action text-sm text-keep-text">Discover</span>
+                    </>
                   ) : (
                     <span className="min-w-0 truncate font-action text-sm text-keep-text">
                       {detail?.name ?? "Forums"}
@@ -428,6 +453,18 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     className="rounded border border-keep-rule bg-keep-bg/70 p-1.5 text-keep-muted hover:border-keep-action hover:text-keep-action lg:hidden"
                   >
                     <MessagesSquare className="h-4 w-4" aria-hidden="true" />
+                  </button>
+                  {/* Discover: search the catalog by name or tag, browse the
+                      Popular / New rails. Toggles back to the open forum. */}
+                  <button
+                    type="button"
+                    onClick={() => navigateView(view.kind === "discover" ? { kind: "forum" } : { kind: "discover" })}
+                    title="Discover forums - search by name or tag"
+                    aria-label="Discover forums"
+                    aria-pressed={view.kind === "discover"}
+                    className={`rounded border p-1.5 ${view.kind === "discover" ? "border-keep-action/60 bg-keep-action/10 text-keep-action" : "border-keep-rule bg-keep-bg/70 text-keep-muted hover:border-keep-action hover:text-keep-action"}`}
+                  >
+                    <Compass className="h-4 w-4" aria-hidden="true" />
                   </button>
                   {/* Set / unset this forum as your default landing spot. */}
                   {view.kind === "forum" && detail ? (
@@ -475,7 +512,7 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
               ) : null}
             </div>
             {/* The forum view is a flex column (MessageList owns its own
-                scroll region); the settings view scrolls as a page. */}
+                scroll region); the settings + discover views scroll as a page. */}
             {view.kind === "forum" ? (
               <div className="flex min-h-0 flex-1 flex-col">
                 {detailErr ? (
@@ -493,6 +530,13 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     onActiveTopicChange={setUrlTopicId}
                   />
                 )}
+              </div>
+            ) : view.kind === "discover" ? (
+              <div className="min-h-0 flex-1 overflow-y-auto">
+                <ForumDiscoverView
+                  activeId={detail?.id ?? selected}
+                  onOpenForum={(id) => navigateToForum(id)}
+                />
               </div>
             ) : (
               <div className="min-h-0 flex-1 overflow-y-auto">
@@ -523,6 +567,8 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
               activeId={detail?.id ?? selected}
               defaultForumId={defaultForumId}
               canApply={canApply}
+              discoverActive={view.kind === "discover"}
+              onDiscover={() => navigateView({ kind: "discover" })}
               onCreate={() => setCreateOpen(true)}
               onSelect={(id) => navigateToForum(id)}
             />
@@ -559,6 +605,8 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                 activeId={detail?.id ?? selected}
                 defaultForumId={defaultForumId}
                 canApply={canApply}
+                discoverActive={view.kind === "discover"}
+                onDiscover={() => { navigateView({ kind: "discover" }); setDrawerOpen(false); }}
                 onCreate={() => { setCreateOpen(true); setDrawerOpen(false); }}
                 onSelect={(id) => { navigateToForum(id); setDrawerOpen(false); }}
               />
@@ -589,14 +637,29 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  // Site-set forum registration rules (sanitized HTML). Empty string = none,
+  // so the form skips the agreement block and behaves as before.
+  const [rulesHtml, setRulesHtml] = useState<string>("");
+  const [agreed, setAgreed] = useState(false);
+  const hasRules = !!rulesHtml.trim();
 
   useEffect(() => {
     let alive = true;
     fetchMyForumApplications()
       .then((a) => { if (alive) setMine(a); })
       .catch(() => { if (alive) setMine([]); });
+    fetchForumRegistrationRules()
+      .then((html) => { if (alive) setRulesHtml(html); })
+      .catch(() => { if (alive) setRulesHtml(""); });
     return () => { alive = false; };
   }, []);
+
+  // Sanitize the rules HTML once for render (defense in depth — the server
+  // already sanitizes on save).
+  const sanitizedRules = useMemo(
+    () => (rulesHtml.trim() ? DOMPurify.sanitize(rulesHtml) : ""),
+    [rulesHtml],
+  );
 
   // Auto-suggest the slug from the name until the user edits it directly.
   useEffect(() => {
@@ -621,7 +684,14 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
   async function submit() {
     setBusy(true); setErr(null);
     try {
-      await submitForumApplication({ name: name.trim(), slug, purpose: purpose.trim() });
+      await submitForumApplication({
+        name: name.trim(),
+        slug,
+        purpose: purpose.trim(),
+        // Only assert agreement when rules are actually set (server requires
+        // it true in that case); omitted otherwise so behavior is unchanged.
+        ...(hasRules ? { agreedToRules: true } : {}),
+      });
       setSubmitted(true);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Submit failed.");
@@ -645,7 +715,10 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
   const canSubmit = !busy
     && name.trim().length >= FORUM_NAME_MIN && name.trim().length <= FORUM_NAME_MAX
     && slugCheck?.ok === true
-    && purposeLen >= FORUM_PURPOSE_MIN && purposeLen <= FORUM_PURPOSE_MAX;
+    && purposeLen >= FORUM_PURPOSE_MIN && purposeLen <= FORUM_PURPOSE_MAX
+    // When the site has posted registration rules, the applicant must accept
+    // them before the Submit button unlocks.
+    && (!hasRules || agreed);
 
   return (
     <Modal onClose={onClose} zIndex={50}>
@@ -720,6 +793,26 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
                 className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
               />
             </label>
+            {/* Site-set registration rules: the applicant must read and accept
+                them before applying. Only shown when rules are posted. */}
+            {hasRules ? (
+              <div className="space-y-2">
+                <span className="block text-xs uppercase tracking-widest text-keep-muted">Forum registration rules</span>
+                <div
+                  className="prose prose-sm max-h-48 max-w-none overflow-y-auto rounded border border-keep-rule bg-keep-panel/30 p-2.5 text-keep-text"
+                  dangerouslySetInnerHTML={{ __html: sanitizedRules }}
+                />
+                <label className="flex items-start gap-2 text-sm text-keep-text">
+                  <input
+                    type="checkbox"
+                    checked={agreed}
+                    onChange={(e) => setAgreed(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>I agree to these rules</span>
+                </label>
+              </div>
+            ) : null}
             {err ? <p className="text-xs text-keep-accent">{err}</p> : null}
             <div className="flex items-center justify-between gap-2">
               <p className="text-[11px] text-keep-muted">Reviewed by the site's moderators. Approved forums appear in the catalog with you as Keeper.</p>
@@ -743,12 +836,16 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
  *  the system forum) up top, then everything else folded under a collapsible
  *  "Explore" section. Shared by the desktop rail and the mobile drawer so both
  *  read identically; the list always scrolls vertically. */
-function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, onCreate, onSelect }: {
+function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, discoverActive, onDiscover, onCreate, onSelect }: {
   list: ForumSummary[] | null;
   listErr: string | null;
   activeId: string | null;
   defaultForumId: string | null;
   canApply: boolean;
+  /** The discover view is currently open — highlights the rail's Discover entry. */
+  discoverActive: boolean;
+  /** Open the discover view (search + Popular/New rails) in the content pane. */
+  onDiscover: () => void;
   onCreate: () => void;
   onSelect: (id: string) => void;
 }) {
@@ -761,6 +858,22 @@ function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, onCr
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 px-2 pt-2">
+        <button
+          type="button"
+          onClick={onDiscover}
+          title="Search and browse all forums by name or tag"
+          aria-pressed={discoverActive}
+          className={`flex w-full items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-xs font-semibold uppercase tracking-widest transition-colors ${
+            discoverActive
+              ? "border-keep-action/60 bg-keep-action/10 text-keep-action"
+              : "border-keep-rule bg-keep-bg/70 text-keep-muted hover:border-keep-action hover:text-keep-action"
+          }`}
+        >
+          <Compass className="h-3.5 w-3.5" aria-hidden="true" />
+          Discover
+        </button>
+      </div>
       {canApply ? (
         <div className="shrink-0 px-2 pt-2">
           <button
@@ -872,6 +985,225 @@ function ForumRailRow({ forum, active, isDefault = false, onClick }: {
         </span>
       </button>
     </li>
+  );
+}
+
+/**
+ * Discover view (Discovery + tags feature — the forum-side mirror of the
+ * server discover surface). A search bar with a tag-chip cloud beneath it
+ * sits at the top; below it either the default browse (two side-by-side
+ * Popular / New rails) or — once there's a query or an active tag — a single
+ * Results list. Cards reuse the rail's ForumRailRow markup verbatim so a
+ * discovered forum reads exactly like one in the rail; clicking a card opens
+ * that forum in the content pane.
+ */
+function ForumDiscoverView({ activeId, onOpenForum }: {
+  activeId: string | null;
+  onOpenForum: (id: string) => void;
+}) {
+  const [discover, setDiscover] = useState<{ popular: ForumSummary[]; new: ForumSummary[] } | null>(null);
+  const [discoverErr, setDiscoverErr] = useState<string | null>(null);
+  const [tags, setTags] = useState<{ tag: string; count: number }[]>([]);
+
+  const [query, setQuery] = useState("");
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  // Debounced text used for the actual search request (~250ms after typing).
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [results, setResults] = useState<ForumSummary[] | null>(null);
+  const [searchErr, setSearchErr] = useState<string | null>(null);
+
+  const searching = debouncedQuery.trim().length > 0 || activeTag != null;
+
+  // Default browse + tag cloud — fetched once on open. Empty catalogs come
+  // back as empty arrays, so every branch below has a graceful empty state.
+  useEffect(() => {
+    let alive = true;
+    fetchForumDiscover()
+      .then((d) => { if (alive) setDiscover(d); })
+      .catch((e) => { if (alive) setDiscoverErr(e instanceof Error ? e.message : "Couldn't load discovery."); });
+    fetchForumTags()
+      .then((t) => { if (alive) setTags(t); })
+      .catch(() => { if (alive) setTags([]); });
+    return () => { alive = false; };
+  }, []);
+
+  // Debounce the typed query (~250ms) so each keystroke doesn't fire a search.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+
+  // Run the search whenever the debounced text or the active tag changes.
+  // When neither is set we drop back to the default browse (results = null).
+  useEffect(() => {
+    if (!searching) { setResults(null); setSearchErr(null); return; }
+    let alive = true;
+    setSearchErr(null);
+    searchForums(debouncedQuery, activeTag)
+      .then((items) => { if (alive) setResults(items); })
+      .catch((e) => { if (alive) { setResults([]); setSearchErr(e instanceof Error ? e.message : "Search failed."); } });
+    return () => { alive = false; };
+  }, [debouncedQuery, activeTag, searching]);
+
+  function clearSearch() {
+    setQuery("");
+    setDebouncedQuery("");
+    setActiveTag(null);
+  }
+
+  // Top ~12 tags for the chip cloud.
+  const chipTags = tags.slice(0, 12);
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 py-4">
+      {/* Search bar */}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-keep-muted" aria-hidden="true" />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search by name or tag…"
+          aria-label="Search forums by name or tag"
+          className="w-full rounded border border-keep-rule bg-keep-bg py-2 pl-9 pr-3 text-sm outline-none focus:border-keep-action"
+        />
+      </div>
+
+      {/* Tag chip cloud — clicking a chip activates a tag filter. */}
+      {chipTags.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {chipTags.map(({ tag, count }) => {
+            const on = activeTag === tag;
+            return (
+              <button
+                key={tag}
+                type="button"
+                onClick={() => setActiveTag(on ? null : tag)}
+                aria-pressed={on}
+                className={`rounded-full border px-2.5 py-0.5 text-[11px] transition-colors ${
+                  on
+                    ? "border-keep-action/60 bg-keep-action/10 text-keep-action"
+                    : "border-keep-rule bg-keep-bg/70 text-keep-muted hover:border-keep-action hover:text-keep-action"
+                }`}
+              >
+                {tag}
+                <span className="ml-1 text-keep-rule">{count}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {/* Active-tag pill + clear affordance (search mode). */}
+      {searching ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {activeTag ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-keep-action/60 bg-keep-action/10 px-2.5 py-0.5 text-[11px] text-keep-action">
+              {activeTag}
+              <button
+                type="button"
+                onClick={() => setActiveTag(null)}
+                aria-label={`Remove the ${activeTag} tag filter`}
+                className="rounded-full hover:text-keep-text"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={clearSearch}
+            className="inline-flex items-center gap-1 rounded border border-keep-rule px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action"
+          >
+            <ArrowLeft className="h-3 w-3" aria-hidden="true" />
+            Back to browse
+          </button>
+        </div>
+      ) : null}
+
+      <div className="mt-4">
+        {searching ? (
+          /* ── Search results ── */
+          <section>
+            <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">
+              <Search className="h-3.5 w-3.5" aria-hidden="true" />
+              Results
+              {results ? <span className="text-keep-rule">({results.length})</span> : null}
+            </p>
+            {searchErr ? (
+              <p className="rounded border border-keep-rule bg-keep-panel/40 px-3 py-2 text-sm text-keep-accent">{searchErr}</p>
+            ) : !results ? (
+              <p className="py-6 text-center text-sm italic text-keep-muted">Searching…</p>
+            ) : results.length === 0 ? (
+              <p className="rounded border border-dashed border-keep-rule px-3 py-4 text-center text-sm italic text-keep-muted">
+                No forums match your search.
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {results.map((f) => (
+                  <ForumRailRow key={f.id} forum={f} active={activeId === f.id} onClick={() => onOpenForum(f.id)} />
+                ))}
+              </ul>
+            )}
+          </section>
+        ) : discoverErr ? (
+          <p className="rounded border border-keep-rule bg-keep-panel/40 px-3 py-2 text-sm text-keep-accent">{discoverErr}</p>
+        ) : !discover ? (
+          <p className="py-6 text-center text-sm italic text-keep-muted">Gathering the forums…</p>
+        ) : (
+          /* ── Default browse: Popular / New, side-by-side on desktop ── */
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+            <ForumDiscoverColumn
+              icon={<Star className="h-3.5 w-3.5" aria-hidden="true" />}
+              title="Popular"
+              forums={discover.popular}
+              activeId={activeId}
+              onOpenForum={onOpenForum}
+              emptyText="No popular forums yet."
+            />
+            <ForumDiscoverColumn
+              icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
+              title="New"
+              forums={discover.new}
+              activeId={activeId}
+              onOpenForum={onOpenForum}
+              emptyText="No new forums yet."
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** One labelled column of discover cards (Popular / New), reusing the rail's
+ *  ForumRailRow card. Renders its own empty state. */
+function ForumDiscoverColumn({ icon, title, forums, activeId, onOpenForum, emptyText }: {
+  icon: ReactNode;
+  title: string;
+  forums: ForumSummary[];
+  activeId: string | null;
+  onOpenForum: (id: string) => void;
+  emptyText: string;
+}) {
+  return (
+    <section>
+      <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">
+        {icon}
+        {title}
+        <span className="text-keep-rule">({forums.length})</span>
+      </p>
+      {forums.length === 0 ? (
+        <p className="rounded border border-dashed border-keep-rule px-3 py-4 text-center text-sm italic text-keep-muted">
+          {emptyText}
+        </p>
+      ) : (
+        <ul className="space-y-1">
+          {forums.map((f) => (
+            <ForumRailRow key={f.id} forum={f} active={activeId === f.id} onClick={() => onOpenForum(f.id)} />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
@@ -2107,6 +2439,9 @@ function ForumNotifPanel({ onOpen, onClose }: {
   const setForumNotifUnread = useChat((s) => s.setForumNotifUnread);
   const [rows, setRows] = useState<ForumNotificationWire[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Calm-mode ease: the panel opens BELOW its trigger (top-full), pure CSS
+  // positioned, so it slides down gently. Reduce Motion only.
+  const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     let alive = true;
@@ -2153,7 +2488,7 @@ function ForumNotifPanel({ onOpen, onClose }: {
     <>
       {/* Click-away backdrop (transparent; the panel sits above it). */}
       <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
-      <div className="absolute right-2 top-full z-50 mt-1 w-[22rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-keep-rule bg-keep-bg shadow-2xl">
+      <div className={`absolute right-2 top-full z-50 mt-1 w-[22rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-keep-rule bg-keep-bg shadow-2xl${reduceMotion ? " tk-slide-down-in" : ""}`}>
         <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-1.5">
           <span className="text-xs uppercase tracking-widest text-keep-muted">Notifications</span>
           <button
@@ -2387,6 +2722,9 @@ function ForumSettingsView({ detail, onSaved, onBoardArchived }: {
   const [tab, setTab] = useState<ForumSettingsTab>(tabs[0] ?? "modlog");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Calm mode: ease the active settings sub-tab's body in on each tab change.
+  // Key + class applied ONLY when Reduce Motion is on; off-path is unchanged.
+  const reduceMotion = useReducedMotion();
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setErr(null);
@@ -2412,29 +2750,38 @@ function ForumSettingsView({ detail, onSaved, onBoardArchived }: {
         ))}
       </div>
       {err ? <p className="mb-2 text-xs text-keep-accent">{err}</p> : null}
-      {tab === "overview" ? (
-        <OverviewSettings detail={detail} busy={busy} run={run} onSaved={onSaved} />
-      ) : tab === "boards" ? (
-        <BoardsSettings detail={detail} busy={busy} run={run} onSaved={onSaved} onBoardArchived={onBoardArchived} />
-      ) : tab === "members" ? (
-        <MembersSettings detail={detail} busy={busy} run={run} />
-      ) : tab === "roles" ? (
-        <RolesSettings detail={detail} busy={busy} run={run} />
-      ) : tab === "usergroups" ? (
-        <UsergroupsSettings detail={detail} busy={busy} run={run} />
-      ) : tab === "applications" ? (
-        <ApplicationsSettings detail={detail} busy={busy} run={run} />
-      ) : tab === "reports" ? (
-        <ReportsSettings detail={detail} busy={busy} run={run} />
-      ) : tab === "prefixes" ? (
-        <PrefixesSettings detail={detail} busy={busy} run={run} onSaved={onSaved} />
-      ) : tab === "modlog" ? (
-        <ModLogSettings detail={detail} />
-      ) : tab === "appearance" ? (
-        <AppearanceSettings detail={detail} busy={busy} run={run} onSaved={onSaved} />
-      ) : (
-        <BansSettings detail={detail} busy={busy} run={run} />
-      )}
+      {(() => {
+        const body = tab === "overview" ? (
+          <OverviewSettings detail={detail} busy={busy} run={run} onSaved={onSaved} />
+        ) : tab === "boards" ? (
+          <BoardsSettings detail={detail} busy={busy} run={run} onSaved={onSaved} onBoardArchived={onBoardArchived} />
+        ) : tab === "members" ? (
+          <MembersSettings detail={detail} busy={busy} run={run} />
+        ) : tab === "roles" ? (
+          <RolesSettings detail={detail} busy={busy} run={run} />
+        ) : tab === "usergroups" ? (
+          <UsergroupsSettings detail={detail} busy={busy} run={run} />
+        ) : tab === "applications" ? (
+          <ApplicationsSettings detail={detail} busy={busy} run={run} />
+        ) : tab === "reports" ? (
+          <ReportsSettings detail={detail} busy={busy} run={run} />
+        ) : tab === "prefixes" ? (
+          <PrefixesSettings detail={detail} busy={busy} run={run} onSaved={onSaved} />
+        ) : tab === "modlog" ? (
+          <ModLogSettings detail={detail} />
+        ) : tab === "appearance" ? (
+          <AppearanceSettings detail={detail} busy={busy} run={run} onSaved={onSaved} />
+        ) : (
+          <BansSettings detail={detail} busy={busy} run={run} />
+        );
+        // Calm mode only: wrap the sub-tab body in a remount-on-tab-change
+        // (key) div carrying `tk-fade-in` so the new tab eases in. When Reduce
+        // Motion is off we render the body bare — no extra wrapper, no class —
+        // so the DOM is byte-identical to before. (The primary view swap
+        // forum/settings/discover keeps its existing room-transition; we
+        // don't double up a fade on top of it.)
+        return reduceMotion ? <div key={tab} className="tk-fade-in">{body}</div> : body;
+      })()}
     </div>
   );
 }
@@ -2460,14 +2807,32 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
   const [bannerFocus, setBannerFocus] = useState<number>(detail.bannerFocusY ?? 50);
   const [worlds, setWorlds] = useState<Array<{ id: string; name: string; visibility: string }> | null>(null);
   const [worldId, setWorldId] = useState<string>(detail.linkedWorld?.id ?? "");
+  // Servers Lift: the owner's own/manageable chat servers, for the
+  // "affiliate this forum" picker. Affiliation scopes topic-card author
+  // flair to that server's earned cosmetics; "None" clears it.
+  const [servers, setServers] = useState<ServerSummary[] | null>(null);
+  const [serverId, setServerId] = useState<string>(detail.affiliatedServer?.id ?? "");
 
   useEffect(() => {
     let alive = true;
     fetchMyWorlds()
       .then((w) => { if (alive) setWorlds(w.filter((x) => x.visibility !== "private")); })
       .catch(() => { if (alive) setWorlds([]); });
+    listServers()
+      // Only servers the forum owner owns or admins — the same authority the
+      // server-side PATCH re-validates. The currently-affiliated server is
+      // kept in the list even if it somehow falls outside that filter so the
+      // dropdown never shows a blank current value.
+      .then((all) => {
+        if (!alive) return;
+        const manageable = all.filter(
+          (s) => s.viewerRole === "owner" || s.viewerRole === "admin" || s.id === detail.affiliatedServer?.id,
+        );
+        setServers(manageable);
+      })
+      .catch(() => { if (alive) setServers([]); });
     return () => { alive = false; };
-  }, []);
+  }, [detail.affiliatedServer?.id]);
 
   async function pickImage(kind: "logo" | "banner", file: File) {
     const maxBytes = kind === "logo" ? 512 * 1024 : 2 * 1024 * 1024;
@@ -2482,6 +2847,7 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
   const styleDirty = styleKey !== detail.themeStyleKey;
   const focusDirty = bannerFocus !== (detail.bannerFocusY ?? 50);
   const worldDirty = worldId !== (detail.linkedWorld?.id ?? "");
+  const serverDirty = serverId !== (detail.affiliatedServer?.id ?? "");
 
   return (
     <div className="max-w-xl space-y-4">
@@ -2661,6 +3027,39 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
             disabled={busy || !worldDirty}
             onClick={() => void run(async () => {
               await updateForum(detail.id, { linkedWorldId: worldId || null });
+              onSaved();
+            })}
+            className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
+          >
+            Save
+          </button>
+        </div>
+      </section>
+
+      <section>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Affiliated server</p>
+        <p className="mb-2 text-[11px] text-keep-muted">
+          Tie this forum to one of your chat servers so topic cards show each author's
+          rank, border, and name style as earned on that server. Pick "None" to show
+          plain author names instead. Only servers you own or help run appear here.
+        </p>
+        <div className="flex gap-2">
+          <select
+            value={serverId}
+            onChange={(e) => setServerId(e.target.value)}
+            disabled={!servers}
+            className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
+          >
+            <option value="">None</option>
+            {(servers ?? []).map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={busy || !serverDirty}
+            onClick={() => void run(async () => {
+              await updateForum(detail.id, { serverId: serverId || null });
               onSaved();
             })}
             className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
@@ -3754,12 +4153,38 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
   const [postingMode, setPostingMode] = useState<"open" | "application">(detail.postingMode);
   const [prompt, setPrompt] = useState(detail.applicationPrompt ?? "");
   const [publicBrowsing, setPublicBrowsing] = useState(detail.publicBrowsing);
+  // Discovery genre tags — seeded from the forum's current tags, edited as
+  // chips, saved with the rest of the overview via the forum-update PATCH.
+  const [tags, setTags] = useState<string[]>(detail.tags);
+  const [tagDraft, setTagDraft] = useState("");
+
+  /** Add the typed draft as one or more chips: split on commas, clean each via
+   *  normalizeTag, drop empties/dupes, cap at MAX_TAGS_PER_ENTITY. */
+  function commitTagDraft() {
+    const incoming = tagDraft.split(",").map(normalizeTag).filter(Boolean);
+    if (incoming.length === 0) { setTagDraft(""); return; }
+    setTags((cur) => {
+      const next = [...cur];
+      for (const t of incoming) {
+        if (next.length >= MAX_TAGS_PER_ENTITY) break;
+        if (!next.includes(t)) next.push(t);
+      }
+      return next;
+    });
+    setTagDraft("");
+  }
+  function removeTag(tag: string) {
+    setTags((cur) => cur.filter((t) => t !== tag));
+  }
+
+  const tagsDirty = JSON.stringify(tags) !== JSON.stringify(detail.tags);
   const dirty = name !== detail.name
     || tagline !== (detail.tagline ?? "")
     || description !== (detail.descriptionHtml ?? "")
     || postingMode !== detail.postingMode
     || prompt !== (detail.applicationPrompt ?? "")
-    || publicBrowsing !== detail.publicBrowsing;
+    || publicBrowsing !== detail.publicBrowsing
+    || tagsDirty;
   return (
     <div className="max-w-xl space-y-3">
       <label className="block text-sm">
@@ -3792,6 +4217,45 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
         />
       </label>
+      <div className="block text-sm">
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">
+          Tags <span className="normal-case text-keep-rule">({tags.length}/{MAX_TAGS_PER_ENTITY})</span>
+        </span>
+        <div className="flex flex-wrap items-center gap-1.5 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 focus-within:border-keep-action">
+          {tags.map((t) => (
+            <span key={t} className="inline-flex items-center gap-1 rounded-full border border-keep-action/40 bg-keep-action/10 px-2 py-0.5 text-[11px] text-keep-action">
+              {t}
+              <button
+                type="button"
+                onClick={() => removeTag(t)}
+                aria-label={`Remove the ${t} tag`}
+                className="rounded-full hover:text-keep-text"
+              >
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+          {tags.length < MAX_TAGS_PER_ENTITY ? (
+            <input
+              value={tagDraft}
+              onChange={(e) => setTagDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === ",") { e.preventDefault(); commitTagDraft(); }
+                else if (e.key === "Backspace" && tagDraft === "" && tags.length > 0) {
+                  // Backspace on an empty input pops the last chip.
+                  removeTag(tags[tags.length - 1]!);
+                }
+              }}
+              onBlur={commitTagDraft}
+              placeholder={tags.length === 0 ? "high fantasy, sci-fi, 18+" : "Add a tag…"}
+              className="min-w-[8rem] flex-1 bg-transparent text-sm outline-none"
+            />
+          ) : null}
+        </div>
+        <p className="mt-1 text-[11px] text-keep-muted">
+          Genres people can search by in Discover (e.g. high fantasy, sci-fi, 18+).
+        </p>
+      </div>
       <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
         <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Who may post</span>
         <label className="flex items-start gap-2 text-sm">
@@ -3855,6 +4319,15 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
         type="button"
         disabled={!dirty || busy || name.trim().length < FORUM_NAME_MIN}
         onClick={() => void run(async () => {
+          // Fold any half-typed tag in the input into the saved set (clicking
+          // Save blurs the chip input, but that state update may not have
+          // landed yet) — clean + dedupe + cap, same rules as commitTagDraft.
+          const pending = tagDraft.split(",").map(normalizeTag).filter(Boolean);
+          const finalTags = [...tags];
+          for (const t of pending) {
+            if (finalTags.length >= MAX_TAGS_PER_ENTITY) break;
+            if (!finalTags.includes(t)) finalTags.push(t);
+          }
           await updateForum(detail.id, {
             name: name.trim(),
             tagline: tagline.trim() ? tagline.trim() : null,
@@ -3862,6 +4335,7 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
             postingMode,
             applicationPrompt: prompt.trim() ? prompt.trim() : null,
             publicBrowsing,
+            tags: finalTags,
           });
           onSaved();
         })}

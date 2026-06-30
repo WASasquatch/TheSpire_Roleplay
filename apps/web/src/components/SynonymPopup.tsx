@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "../state/store.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 /**
  * Thesaurus popup that activates on text selection inside an input
@@ -32,6 +33,9 @@ export function SynonymPopup({
   // listeners, no fetches, no popup. Lives in the chat store so a
   // toggle in the profile editor takes effect immediately.
   const disableThesaurus = useChat((s) => s.inputPrefs.disableThesaurus);
+  // Calm-mode ease: opens ABOVE the input (bottom-full) → slide up. Pure CSS
+  // positioning, so the slide transform doesn't fight placement.
+  const reduceMotion = useReducedMotion();
   const [synonyms, setSynonyms] = useState<string[]>([]);
   const [open, setOpen] = useState(false);
   const [highlightedIdx, setHighlightedIdx] = useState(0);
@@ -188,7 +192,7 @@ export function SynonymPopup({
       // relatively-positioned input wrapper, matching CompleterPopup's
       // placement. `mb-1` adds a tiny gap so the panel doesn't kiss
       // the input border.
-      className="absolute bottom-full left-0 z-30 mb-1 max-h-56 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl"
+      className={`absolute bottom-full left-0 z-30 mb-1 max-h-56 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl${reduceMotion ? " tk-slide-up-in" : ""}`}
     >
       <li className="border-b border-keep-rule/40 bg-keep-banner/40 px-2 py-1 text-[10px] uppercase tracking-widest text-keep-muted">
         Synonyms for "{selRef.current?.word ?? ""}"

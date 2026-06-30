@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 import {
   Check,
   ChevronDown,
@@ -60,6 +61,10 @@ function Bevel() {
  */
 export function RoomInfoBar({ room, canEdit = false, onOpenWorld }: Props) {
   const [expanded, setExpanded] = useState(false);
+  // Calm-mode ease: the dossier pullout opens BELOW the room bar and mounts
+  // fresh on expand, so it slides down gently under Reduce Motion. Block-flow
+  // positioned (no transform placement), so the slide transform is safe.
+  const reduceMotion = useReducedMotion();
   const [info, setInfo] = useState<RoomInfo | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
@@ -173,7 +178,7 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld }: Props) {
       {/* Pullout — condensed dossier. Description and metadata sit side by side
           on wide screens; everything stacks on mobile. */}
       {expanded ? (
-        <div className="border-t border-keep-rule/60 bg-keep-bg/40 px-3 py-2">
+        <div className={`border-t border-keep-rule/60 bg-keep-bg/40 px-3 py-2${reduceMotion ? " tk-slide-down-in" : ""}`}>
           {loading ? (
             <div className="py-1 text-center text-xs text-keep-muted">Loading room details…</div>
           ) : error || !info ? (

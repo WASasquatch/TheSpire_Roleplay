@@ -42,14 +42,15 @@
 -- 1. Create the fixed-id default server. Owner = oldest REAL admin (§9.4:
 --    masteradmin-first, then created_at; EXCLUDING the 'system' sentinel by both
 --    username and id). Branding re-homed from the singleton (zero visible
---    change). slug/status mirror plan.md §5.5 ('spire-server' / 'featured').
+--    change). Slug reads as the chat name (e.g. "the-spire"), derived from the
+--    site name; status 'featured' per plan.md §5.5.
 INSERT OR IGNORE INTO `servers` (
   `id`, `slug`, `name`, `is_system`, `is_default`, `status`, `visibility`,
   `join_mode`, `owner_user_id`, `logo_url`, `theme_json`, `public_browsing`,
   `room_order_json`, `created_at`, `updated_at`)
 SELECT
   'server_spire_system',
-  'spire-server',
+  lower(replace(replace(COALESCE((SELECT `site_name` FROM `site_settings` WHERE `id` = 'singleton'), 'The Spire'), ' ', '-'), '''', '')),
   COALESCE((SELECT `site_name` FROM `site_settings` WHERE `id` = 'singleton'), 'The Spire'),
   1, 1, 'featured', 'public', 'open',
   u.`id`,

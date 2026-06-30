@@ -27,7 +27,7 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { builtinCommandConfig, gameStats, identityInventory, items } from "../db/schema.js";
+import { builtinCommandConfig, gameStats, identityInventory, items, serverBuiltinCommandConfig } from "../db/schema.js";
 import { creditPool } from "../earning/award.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
@@ -70,26 +70,48 @@ export async function getBuiltinCommandConfig(
   db: Db,
   commandName: string,
   codeDefaults: { durationMs: number; reward?: BuiltinCommandReward },
+  /** The room's server (Admin Partition). Read order: this server's override →
+   *  the global default → code default. Omitted ⇒ skip the per-server tier
+   *  (flag-off single-server behavior unchanged). */
+  serverId?: string | null,
 ): Promise<BuiltinCommandConfig> {
-  const row = (await db
+  const name = commandName.toLowerCase();
+  // 1. This server's per-server override (Server Admin → Commands & Titles).
+  if (serverId) {
+    const row = (await db
+      .select()
+      .from(serverBuiltinCommandConfig)
+      .where(and(
+        eq(serverBuiltinCommandConfig.serverId, serverId),
+        eq(serverBuiltinCommandConfig.commandName, name),
+      ))
+      .limit(1))[0];
+    if (row) return rowToConfig(row, codeDefaults);
+  }
+  // 2. Legacy global default (platform baseline / pre-partition rows).
+  const g = (await db
     .select()
     .from(builtinCommandConfig)
-    .where(eq(builtinCommandConfig.commandName, commandName.toLowerCase()))
+    .where(eq(builtinCommandConfig.commandName, name))
     .limit(1))[0];
-  if (!row) {
-    return {
-      durationMs: codeDefaults.durationMs,
-      reward: codeDefaults.reward ?? emptyReward(),
-    };
-  }
+  if (g) return rowToConfig(g, codeDefaults);
+  // 3. Code default.
+  return { durationMs: codeDefaults.durationMs, reward: codeDefaults.reward ?? emptyReward() };
+}
+
+/** Map a config row (either table shares the column shape) to the effective
+ *  config, filling gaps from the game's code defaults. */
+function rowToConfig(
+  row: { durationMs: number | null; rewardXp: number; rewardCurrency: number; rewardItemKey: string | null; rewardItemCount: number },
+  codeDefaults: { durationMs: number; reward?: BuiltinCommandReward },
+): BuiltinCommandConfig {
   return {
     durationMs: row.durationMs ?? codeDefaults.durationMs,
     reward: {
       xp: row.rewardXp,
       currency: row.rewardCurrency,
       itemKey: row.rewardItemKey,
-      // Normalize: itemCount only matters when itemKey is set. A row
-      // with a non-null key + zero count is a no-op item award.
+      // itemCount only matters when itemKey is set (non-null key + 0 = no-op).
       itemCount: row.rewardItemKey ? row.rewardItemCount : 0,
     },
   };
@@ -229,7 +251,9 @@ async function creditItem(
   // Verify the item still exists (an admin could have deleted it
   // between configuration and game-end). Silent no-op when the
   // referenced item is gone.
-  const itemRow = (await db.select().from(items).where(eq(items.key, itemKey)).limit(1))[0];
+  // Per-server catalog (migration 0298): verify the item on the SAME server the
+  // reward credits to. Flag off ⇒ serverId is the default, byte-identical.
+  const itemRow = (await db.select().from(items).where(and(eq(items.serverId, serverId), eq(items.key, itemKey))).limit(1))[0];
   if (!itemRow) return;
   const existing = (await db
     .select({ qty: identityInventory.quantity })
@@ -271,8 +295,11 @@ async function creditItem(
 export async function describeReward(
   db: Db,
   reward: BuiltinCommandReward,
-  options?: { multiplier?: number },
+  options?: { multiplier?: number; serverId?: string },
 ): Promise<string> {
+  // Per-server catalog (migration 0298): name the item from the reward's server.
+  // Defaults to the default server (flag-off = the only catalog), byte-identical.
+  const serverId = options?.serverId ?? DEFAULT_SERVER_ID;
   const multiplier = Math.max(0, options?.multiplier ?? 1);
   const scaledXp = Math.round(reward.xp * multiplier);
   const scaledCurrency = Math.round(reward.currency * multiplier);
@@ -280,7 +307,7 @@ export async function describeReward(
   if (scaledXp > 0) parts.push(`${scaledXp} XP`);
   if (scaledCurrency > 0) parts.push(`${scaledCurrency} Currency`);
   if (reward.itemKey && reward.itemCount > 0) {
-    const itemRow = (await db.select({ name: items.name }).from(items).where(eq(items.key, reward.itemKey)).limit(1))[0];
+    const itemRow = (await db.select({ name: items.name }).from(items).where(and(eq(items.serverId, serverId), eq(items.key, reward.itemKey))).limit(1))[0];
     const itemName = itemRow?.name ?? reward.itemKey;
     parts.push(reward.itemCount === 1 ? itemName : `${itemName} ×${reward.itemCount}`);
   }
@@ -329,6 +356,7 @@ async function recordGameWin(
   db: Db,
   gameKind: string,
   winner: GameWinner,
+  serverId: string,
 ): Promise<void> {
   const scope: "user" | "character" = winner.characterId ? "character" : "user";
   const ownerId = winner.characterId ?? winner.userId;
@@ -338,6 +366,7 @@ async function recordGameWin(
     await db
       .insert(gameStats)
       .values({
+        serverId,
         ownerScope: scope,
         ownerId,
         gameKind,
@@ -346,7 +375,10 @@ async function recordGameWin(
         lastWonAt: now,
       })
       .onConflictDoUpdate({
-        target: [gameStats.ownerScope, gameStats.ownerId, gameStats.gameKind],
+        // Conflict arbiter MUST match the full PK (server_id was prepended in
+        // migration 0284); the old 3-column target throws "ON CONFLICT does not
+        // match any PRIMARY KEY or UNIQUE constraint" and silently lost stats.
+        target: [gameStats.serverId, gameStats.ownerScope, gameStats.ownerId, gameStats.gameKind],
         set: {
           wins: sql`${gameStats.wins} + 1`,
           points: sql`${gameStats.points} + ${pointDelta}`,
@@ -385,13 +417,16 @@ export async function formatWinningsLine(
   gameKind: string,
   winners: ReadonlyArray<GameWinner>,
   reward: BuiltinCommandReward,
-  options?: { multiplier?: number },
+  options?: { multiplier?: number; serverId?: string },
 ): Promise<string> {
   if (winners.length === 0) return "";
+  // Per-server economy partition the win lands on; defaults to the default
+  // server (flag-off = the only pool). Resolvers pass the room's serverId.
+  const serverId = options?.serverId ?? DEFAULT_SERVER_ID;
   // Record stats for each winner. Failures are logged + swallowed
   // inside recordGameWin so a DB hiccup can't tear down the broadcast.
   for (const w of winners) {
-    await recordGameWin(db, gameKind, w);
+    await recordGameWin(db, gameKind, w, serverId);
   }
   const multiplier = Math.max(0, options?.multiplier ?? 1);
   const scaledXp = Math.round(reward.xp * multiplier);
@@ -400,7 +435,9 @@ export async function formatWinningsLine(
   if (scaledXp > 0) parts.push(`${scaledXp} XP`);
   if (scaledCurrency > 0) parts.push(`${scaledCurrency} Currency`);
   if (reward.itemKey && reward.itemCount > 0) {
-    const itemRow = (await db.select({ name: items.name }).from(items).where(eq(items.key, reward.itemKey)).limit(1))[0];
+    // Per-server catalog (migration 0298): name the item from the win's server
+    // (resolved above). Flag off ⇒ the default catalog, byte-identical.
+    const itemRow = (await db.select({ name: items.name }).from(items).where(and(eq(items.serverId, serverId), eq(items.key, reward.itemKey))).limit(1))[0];
     const itemName = itemRow?.name ?? reward.itemKey;
     parts.push(reward.itemCount === 1 ? itemName : `${itemName} ×${reward.itemCount}`);
   }

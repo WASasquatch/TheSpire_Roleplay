@@ -2047,8 +2047,13 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
     let royalty = Math.round(price * cfg.royaltyRate);
     if (royalty > 0 && cfg.dailyRoyaltyCap > 0) {
       const utcMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+      // Per-server cap scan: Scriptorium rewards stay GLOBAL (plan §9.6) — they
+      // credit the default server (see the creditPool below), so the cap count
+      // filters the SAME server. With the flag off this is the only pool, so the
+      // count is byte-identical to today.
       const paid = (await db.select({ c: sql<number>`COALESCE(SUM(${earningLedger.currencyDelta}), 0)` })
         .from(earningLedger).where(and(
+          eq(earningLedger.serverId, DEFAULT_SERVER_ID),
           eq(earningLedger.scope, authorScope), eq(earningLedger.ownerId, authorOwnerId),
           eq(earningLedger.reason, "scriptorium_royalty"), sql`${earningLedger.createdAt} >= ${utcMidnight}`,
         )))[0]?.c ?? 0;
@@ -3840,10 +3845,14 @@ async function awardChapterPublishReward(
 
   // Advance the weekly publishing streak (once per ISO week per pool) and scale.
   const weekKey = isoWeekKey(now);
+  // Scriptorium rewards stay GLOBAL (plan §9.6) — the streak lives on the
+  // default server. server_id is part of the PK (migration 0286), so it must
+  // appear in the read filter, the insert value, AND the conflict target
+  // (the old 2-column target threw + silently dropped the streak).
   const prev = (await db
     .select()
     .from(scriptoriumWriteStreaks)
-    .where(and(eq(scriptoriumWriteStreaks.ownerScope, scope), eq(scriptoriumWriteStreaks.ownerId, ownerId)))
+    .where(and(eq(scriptoriumWriteStreaks.serverId, DEFAULT_SERVER_ID), eq(scriptoriumWriteStreaks.ownerScope, scope), eq(scriptoriumWriteStreaks.ownerId, ownerId)))
     .limit(1))[0];
   const roll = rollWeeklyStreak(
     { streakCount: prev?.streakCount ?? 0, lastPublishWeekKey: prev?.lastPublishWeekKey ?? null, bestStreak: prev?.bestStreak ?? 0 },
@@ -3851,9 +3860,9 @@ async function awardChapterPublishReward(
   );
   await db
     .insert(scriptoriumWriteStreaks)
-    .values({ ownerScope: scope, ownerId, streakCount: roll.streakCount, lastPublishWeekKey: roll.lastPublishWeekKey, bestStreak: roll.bestStreak, updatedAt: now })
+    .values({ serverId: DEFAULT_SERVER_ID, ownerScope: scope, ownerId, streakCount: roll.streakCount, lastPublishWeekKey: roll.lastPublishWeekKey, bestStreak: roll.bestStreak, updatedAt: now })
     .onConflictDoUpdate({
-      target: [scriptoriumWriteStreaks.ownerScope, scriptoriumWriteStreaks.ownerId],
+      target: [scriptoriumWriteStreaks.serverId, scriptoriumWriteStreaks.ownerScope, scriptoriumWriteStreaks.ownerId],
       set: { streakCount: roll.streakCount, lastPublishWeekKey: roll.lastPublishWeekKey, bestStreak: roll.bestStreak, updatedAt: now },
     })
     .run();
@@ -3863,7 +3872,10 @@ async function awardChapterPublishReward(
   let currency = Math.round(base.currency * mult);
 
   // Per-pool, per-UTC-day cap: sum today's reward rows and clamp so the running
-  // total never exceeds the ceiling.
+  // total never exceeds the ceiling. Per-server cap scan: Scriptorium rewards
+  // stay GLOBAL (plan §9.6) — they credit the default server (see the creditPool
+  // below), so the cap count filters the SAME server. With the flag off this is
+  // the only pool, so the count is byte-identical to today.
   const utcMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   const spent = (await db
     .select({
@@ -3872,6 +3884,7 @@ async function awardChapterPublishReward(
     })
     .from(earningLedger)
     .where(and(
+      eq(earningLedger.serverId, DEFAULT_SERVER_ID),
       eq(earningLedger.scope, scope),
       eq(earningLedger.ownerId, ownerId),
       eq(earningLedger.reason, SCRIPTORIUM_CHAPTER_REWARD_REASON),

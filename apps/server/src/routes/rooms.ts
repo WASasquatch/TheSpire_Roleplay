@@ -18,11 +18,13 @@ import type {
 import { exportReceipts, forums, ignores, messages, roomMembers, roomThreadCategories, rooms, users } from "../db/schema.js";
 import { parseNpcList } from "../lib/roomStats.js";
 import { forumBoardReadGate } from "../forums/authority.js";
+import { resolveTopicAuthorFlair } from "./forums.js";
 import { loadPollState } from "../polls.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
-import { getSettings, areServersEnabled } from "../settings.js";
+import { getServerSettings, getSettings, areServersEnabled } from "../settings.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
@@ -63,9 +65,22 @@ export async function registerRoomsRoutes(
       typeof req.query.serverId === "string" && req.query.serverId.trim()
         ? req.query.serverId.trim()
         : undefined;
+    // The DEFAULT (is_system) server ADOPTS orphan rooms: a room whose
+    // `server_id` is NULL is, by the lift's documented contract (migration
+    // 0277 + serverAuthority), owned by the default server until the next
+    // boot-time sweep (seed.ts) backfills it. So when the rail asks for the
+    // default server's rooms we must include NULL rows too — otherwise a
+    // freshly-created room (the /room command stamps server_id, but a legacy
+    // path or a mid-deletion SET NULL might not) silently vanishes from the
+    // rail until a restart. Any OTHER (sub-)server gets a strict match: NULL
+    // rooms belong to the default, never to a sub-server. Mirrors the
+    // `or(eq, isNull)` adoption pattern already used for emoticon sheets,
+    // reports, and mod cases.
     const serverScope =
       wantServerId && areServersEnabled(await getSettings(db))
-        ? eq(rooms.serverId, wantServerId)
+        ? wantServerId === DEFAULT_SERVER_ID
+          ? or(eq(rooms.serverId, wantServerId), isNull(rooms.serverId))
+          : eq(rooms.serverId, wantServerId)
         : undefined;
 
     // 1. Pull every public room. Archived rows (auto-parked after the
@@ -424,7 +439,7 @@ export async function registerRoomsRoutes(
 
     // Cross-room whisper overlay, see the union in
     // sendRoomBacklogTo / GET /rooms/:id/messages for the rationale.
-    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id);
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID);
 
     // Pull `before` rows with createdAt <= target (inclusive of target via
     // <= + de-dup below), and `after` rows strictly newer.
@@ -546,7 +561,7 @@ export async function registerRoomsRoutes(
     // sendRoomBacklogTo. Non-whisper rows are scoped to THIS room;
     // whisper rows the caller is a party to are pulled regardless of
     // their original room.
-    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id);
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID);
 
     // Per-viewer `/clear` marker: never page back past the point this
     // user cleared the room. Keeps the scroll-up loader from resurrecting
@@ -654,8 +669,11 @@ export async function registerRoomsRoutes(
     }
 
     // Re-derive the window from the same rules the command used; never trust
-    // the client `ms` beyond what's actually exportable.
-    const settings = await getSettings(db);
+    // the client `ms` beyond what's actually exportable. The retention clamp is
+    // the EXPORTED ROOM's server value (NULL `room.serverId`, legacy/standalone,
+    // → DEFAULT_SERVER_ID); a NULL override inherits the platform default, so
+    // flag-off is byte-identical to the old `getSettings(db)` read.
+    const settings = await getServerSettings(db, room.serverId ?? DEFAULT_SERVER_ID);
     const reqMs = req.query.ms ? parseInt(req.query.ms, 10) : DEFAULT_EXPORT_MS;
     const windowMs = clampExportMs(
       Number.isFinite(reqMs) && reqMs > 0 ? reqMs : DEFAULT_EXPORT_MS,
@@ -676,7 +694,7 @@ export async function registerRoomsRoutes(
         .where(eq(ignores.userId, me.id))).map((r) => r.ignoredUserId),
     );
     for (const blockedId of await blockedUserIdsFor(db, me.id)) ignoredIds.add(blockedId);
-    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id);
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID);
     const clearedAt = await getClearedAt(db, me.id, room.id);
 
     // Most recent (window ∩ cap) rows DESC; overfetch one to detect that the
@@ -1162,43 +1180,90 @@ export async function registerRoomsRoutes(
 
       const pageRows = [...stickies, ...nonStickyPage];
 
+      // Per-server author flair (Servers Lift): light up each topic card with
+      // the rank sigil / avatar-border / name style the author earned ON THE
+      // SERVER THIS BOARD'S FORUM IS AFFILIATED TO (`forums.serverId`). Resolve
+      // the affiliation via the room's `forumId`. When the room isn't a forum
+      // board (`forumId` NULL) OR the forum has no affiliation (`serverId`
+      // NULL), we ship NO `author*` fields and the cards render bare — the gate
+      // is `sid !== null`. Flag-off / non-forum rooms therefore stay byte-
+      // identical. We reuse `resolveTopicAuthorFlair` (the same batched,
+      // `sid`-scoped cosmetic read the in-modal board route uses) so the two
+      // surfaces never diverge.
+      const sid = (
+        await db
+          .select({ serverId: forums.serverId })
+          .from(rooms)
+          .innerJoin(forums, eq(forums.id, rooms.forumId))
+          .where(eq(rooms.id, roomId))
+          .limit(1)
+      )[0]?.serverId ?? null;
+      const flairByIdentity = sid
+        ? await resolveTopicAuthorFlair(
+            db,
+            sid,
+            pageRows.map((m) => ({ userId: m.userId, characterId: m.characterId ?? null })),
+          )
+        : null;
+
       const canSeeOriginalBody = me ? await hasPermission(me, "view_deleted_message_body", db) : false;
-      const topics: ChatMessage[] = pageRows.map((m) => ({
-        id: m.id,
-        roomId: m.roomId,
-        userId: m.userId,
-        characterId: m.characterId,
-        displayName: m.displayName,
-        kind: m.kind,
-        body: m.body,
-        color: m.color,
-        createdAt: +m.createdAt,
-        ...(m.toUserId ? { toUserId: m.toUserId } : {}),
-        ...(m.toDisplayName ? { toDisplayName: m.toDisplayName } : {}),
-        ...(m.replyToId ? { replyToId: m.replyToId } : {}),
-        ...(m.replyToDisplayName ? { replyToDisplayName: m.replyToDisplayName } : {}),
-        ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
-        ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
-        ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
-        ...(m.npcStatsJson ? { npcStats: parseNpcStats(m.npcStatsJson) } : {}),
-        ...(m.threadCategoryId ? { threadCategoryId: m.threadCategoryId } : {}),
-        ...(m.title ? { title: m.title } : {}),
-        ...(m.prefixId ? { prefixId: m.prefixId } : {}),
-        ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
-        ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
-        ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),
-        ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
-        ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
-        ...(m.isSticky ? { isSticky: true } : {}),
-        ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
-        ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
-        ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
-        ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
-        ...mentionsField(m.mentionsJson),
-        ...(m.rankKey ? { rankKey: m.rankKey } : {}),
-        ...(m.tier != null ? { tier: m.tier } : {}),
-        ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
-      }));
+      const topics: ChatMessage[] = pageRows.map((m) => {
+        // Bare card unless the board's forum is affiliated. When affiliated,
+        // spread the resolved per-server flair (its individual values may be
+        // null for an author who hasn't earned/equipped that cosmetic there).
+        // These ship together-or-not-at-all so the client's "did the server
+        // send flair" gate holds, and the client prefers the per-server
+        // `authorRankKey`/`authorTier` over the post-time `rankKey`/`tier`
+        // snapshot below so a (re)affiliated forum shows CURRENT flair.
+        const flair = flairByIdentity?.get(`${m.userId}::${m.characterId ?? ""}`) ?? null;
+        return {
+          id: m.id,
+          roomId: m.roomId,
+          userId: m.userId,
+          characterId: m.characterId,
+          displayName: m.displayName,
+          kind: m.kind,
+          body: m.body,
+          color: m.color,
+          createdAt: +m.createdAt,
+          ...(m.toUserId ? { toUserId: m.toUserId } : {}),
+          ...(m.toDisplayName ? { toDisplayName: m.toDisplayName } : {}),
+          ...(m.replyToId ? { replyToId: m.replyToId } : {}),
+          ...(m.replyToDisplayName ? { replyToDisplayName: m.replyToDisplayName } : {}),
+          ...(m.replyToBodySnippet ? { replyToBodySnippet: m.replyToBodySnippet } : {}),
+          ...(m.moodSnapshot ? { moodSnapshot: m.moodSnapshot } : {}),
+          ...(m.npcVoicedBy ? { npcVoicedBy: m.npcVoicedBy } : {}),
+          ...(m.npcStatsJson ? { npcStats: parseNpcStats(m.npcStatsJson) } : {}),
+          ...(m.threadCategoryId ? { threadCategoryId: m.threadCategoryId } : {}),
+          ...(m.title ? { title: m.title } : {}),
+          ...(m.prefixId ? { prefixId: m.prefixId } : {}),
+          ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
+          ...(m.editedAt ? { editedAt: +m.editedAt } : {}),
+          ...(m.deletedAt ? { deletedAt: +m.deletedAt } : {}),
+          ...(m.lockedAt ? { lockedAt: +m.lockedAt } : {}),
+          ...(m.lastActivityAt ? { lastActivityAt: +m.lastActivityAt } : {}),
+          ...(m.isSticky ? { isSticky: true } : {}),
+          ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+          ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
+          ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+          ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
+          ...mentionsField(m.mentionsJson),
+          ...(m.rankKey ? { rankKey: m.rankKey } : {}),
+          ...(m.tier != null ? { tier: m.tier } : {}),
+          ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
+          ...(flair
+            ? {
+                authorRankKey: flair.rankKey,
+                authorTier: flair.tier,
+                authorSelectedBorderRankKey: flair.selectedBorderRankKey,
+                authorSelectedFreeformBorderKey: flair.selectedFreeformBorderKey,
+                authorFreeformBorderConfig: flair.freeformBorderConfig,
+                authorNameStyleKey: flair.nameStyleKey,
+                authorNameStyleConfig: flair.nameStyleConfig,
+              }
+            : {}),
+        };
+      });
       // Reply counts per topic, so the COLLAPSED topic card shows the
       // true count without first opening the thread. Forum replies always
       // attach directly to the topic (`replyToId === topicId`; reply-to-

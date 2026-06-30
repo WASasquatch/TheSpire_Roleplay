@@ -29,6 +29,12 @@ import { existsSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import type { Db } from "../db/index.js";
 import { freeformBorders, items, nameStyles, rankTiers, ranks } from "../db/schema.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+
+// The catalogs are per-server (PK (server_id, key), migrations 0295+). This
+// GLOBAL admin export/import tool operates on the SYSTEM server's catalog, so
+// every read/upsert is scoped to DEFAULT_SERVER_ID — otherwise an export would
+// leak every server's rows and an import-by-key would clobber them all.
 
 /** Current export format version. Bump on incompatible row-shape changes. */
 const EXPORT_VERSION = 1;
@@ -81,12 +87,12 @@ export async function exportCatalog(
   const referencedUploads = new Set<string>();
 
   if (kind === "name-styles") {
-    const rows = await db.select().from(nameStyles).orderBy(asc(nameStyles.order));
+    const rows = await db.select().from(nameStyles).where(eq(nameStyles.serverId, DEFAULT_SERVER_ID)).orderBy(asc(nameStyles.order));
     zip.file("rows.json", JSON.stringify(rows.map(stripTimestamps), null, 2));
     rowCount = rows.length;
     // Name styles are HTML+CSS only, no image refs.
   } else if (kind === "items") {
-    const rows = await db.select().from(items).orderBy(asc(items.order));
+    const rows = await db.select().from(items).where(eq(items.serverId, DEFAULT_SERVER_ID)).orderBy(asc(items.order));
     for (const r of rows) collectUploadPath(r.iconUrl, referencedUploads);
     zip.file("rows.json", JSON.stringify(rows.map(stripTimestamps), null, 2));
     rowCount = rows.length;
@@ -94,8 +100,8 @@ export async function exportCatalog(
     // Ranks ship with their tiers because a rank without tiers is
     // useless (the resolver requires at least Tier I to place
     // users). Bundle both tables side-by-side.
-    const rankRows = await db.select().from(ranks).orderBy(asc(ranks.order));
-    const tierRows = await db.select().from(rankTiers).orderBy(asc(rankTiers.rankKey), asc(rankTiers.tier));
+    const rankRows = await db.select().from(ranks).where(eq(ranks.serverId, DEFAULT_SERVER_ID)).orderBy(asc(ranks.order));
+    const tierRows = await db.select().from(rankTiers).where(eq(rankTiers.serverId, DEFAULT_SERVER_ID)).orderBy(asc(rankTiers.rankKey), asc(rankTiers.tier));
     for (const r of tierRows) {
       collectUploadPath(r.sigilImageUrl, referencedUploads);
       collectUploadPath(r.borderImageUrl, referencedUploads);
@@ -118,7 +124,7 @@ export async function exportCatalog(
         borderCost: rankTiers.borderCost,
       })
       .from(rankTiers)
-      .where(isNotNull(rankTiers.borderImageUrl))
+      .where(and(eq(rankTiers.serverId, DEFAULT_SERVER_ID), isNotNull(rankTiers.borderImageUrl)))
       .orderBy(asc(rankTiers.rankKey), asc(rankTiers.tier));
     for (const r of tierRows) collectUploadPath(r.borderImageUrl, referencedUploads);
     zip.file("rows.json", JSON.stringify(tierRows, null, 2));
@@ -130,7 +136,7 @@ export async function exportCatalog(
     // /uploads/* path; template-mode rows are pure text. The
     // ownership ledgers are NOT exported, they're per-user state,
     // not catalog content.
-    const rows = await db.select().from(freeformBorders).orderBy(asc(freeformBorders.order));
+    const rows = await db.select().from(freeformBorders).where(eq(freeformBorders.serverId, DEFAULT_SERVER_ID)).orderBy(asc(freeformBorders.order));
     for (const r of rows) collectUploadPath(r.imageUrl, referencedUploads);
     zip.file("rows.json", JSON.stringify(rows.map(stripTimestamps), null, 2));
     rowCount = rows.length;
@@ -225,7 +231,7 @@ export async function importCatalog(
       const row = r as Record<string, unknown>;
       const key = String(row.key ?? "");
       if (!key) { warnings.push("skipping name-style row without key"); continue; }
-      const existing = (await db.select({ k: nameStyles.key }).from(nameStyles).where(eq(nameStyles.key, key)).limit(1))[0];
+      const existing = (await db.select({ k: nameStyles.key }).from(nameStyles).where(and(eq(nameStyles.serverId, DEFAULT_SERVER_ID), eq(nameStyles.key, key))).limit(1))[0];
       const values = {
         key,
         name: String(row.name ?? key),
@@ -239,7 +245,7 @@ export async function importCatalog(
         updatedAt: new Date(),
       };
       if (existing) {
-        await db.update(nameStyles).set(values).where(eq(nameStyles.key, key));
+        await db.update(nameStyles).set(values).where(and(eq(nameStyles.serverId, DEFAULT_SERVER_ID), eq(nameStyles.key, key)));
         updated += 1;
       } else {
         await db.insert(nameStyles).values(values);
@@ -252,7 +258,7 @@ export async function importCatalog(
       const row = r as Record<string, unknown>;
       const key = String(row.key ?? "");
       if (!key) { warnings.push("skipping item row without key"); continue; }
-      const existing = (await db.select({ k: items.key }).from(items).where(eq(items.key, key)).limit(1))[0];
+      const existing = (await db.select({ k: items.key }).from(items).where(and(eq(items.serverId, DEFAULT_SERVER_ID), eq(items.key, key))).limit(1))[0];
       const values = {
         key,
         name: String(row.name ?? key),
@@ -281,7 +287,7 @@ export async function importCatalog(
         updatedAt: new Date(),
       };
       if (existing) {
-        await db.update(items).set(values).where(eq(items.key, key));
+        await db.update(items).set(values).where(and(eq(items.serverId, DEFAULT_SERVER_ID), eq(items.key, key)));
         updated += 1;
       } else {
         await db.insert(items).values(values);
@@ -295,7 +301,7 @@ export async function importCatalog(
       const row = r as Record<string, unknown>;
       const key = String(row.key ?? "");
       if (!key) { warnings.push("skipping rank without key"); continue; }
-      const existing = (await db.select({ k: ranks.key }).from(ranks).where(eq(ranks.key, key)).limit(1))[0];
+      const existing = (await db.select({ k: ranks.key }).from(ranks).where(and(eq(ranks.serverId, DEFAULT_SERVER_ID), eq(ranks.key, key))).limit(1))[0];
       const values = {
         key,
         name: String(row.name ?? key),
@@ -304,7 +310,7 @@ export async function importCatalog(
         updatedAt: new Date(),
       };
       if (existing) {
-        await db.update(ranks).set(values).where(eq(ranks.key, key));
+        await db.update(ranks).set(values).where(and(eq(ranks.serverId, DEFAULT_SERVER_ID), eq(ranks.key, key)));
         updated += 1;
       } else {
         await db.insert(ranks).values(values);
@@ -321,7 +327,7 @@ export async function importCatalog(
       const existing = (await db
         .select({ id: rankTiers.id })
         .from(rankTiers)
-        .where(and(eq(rankTiers.rankKey, rankKey), eq(rankTiers.tier, tier)))
+        .where(and(eq(rankTiers.serverId, DEFAULT_SERVER_ID), eq(rankTiers.rankKey, rankKey), eq(rankTiers.tier, tier)))
         .limit(1))[0];
       const values = {
         rankKey,
@@ -356,7 +362,7 @@ export async function importCatalog(
       const existing = (await db
         .select({ id: rankTiers.id })
         .from(rankTiers)
-        .where(and(eq(rankTiers.rankKey, rankKey), eq(rankTiers.tier, tier)))
+        .where(and(eq(rankTiers.serverId, DEFAULT_SERVER_ID), eq(rankTiers.rankKey, rankKey), eq(rankTiers.tier, tier)))
         .limit(1))[0];
       if (!existing) {
         warnings.push(`borders: no rank_tier for (${rankKey}, ${tier}); skipped`);
@@ -393,7 +399,7 @@ export async function importCatalog(
         continue;
       }
       const existing = (await db.select({ k: freeformBorders.key })
-        .from(freeformBorders).where(eq(freeformBorders.key, key)).limit(1))[0];
+        .from(freeformBorders).where(and(eq(freeformBorders.serverId, DEFAULT_SERVER_ID), eq(freeformBorders.key, key))).limit(1))[0];
       const values = {
         key,
         name: String(row.name ?? key),
@@ -409,7 +415,7 @@ export async function importCatalog(
         updatedAt: new Date(),
       };
       if (existing) {
-        await db.update(freeformBorders).set(values).where(eq(freeformBorders.key, key));
+        await db.update(freeformBorders).set(values).where(and(eq(freeformBorders.serverId, DEFAULT_SERVER_ID), eq(freeformBorders.key, key)));
         updated += 1;
       } else {
         await db.insert(freeformBorders).values(values);

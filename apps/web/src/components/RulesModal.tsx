@@ -1,11 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { CloseButton } from "./CloseButton.js";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { useRulesHashHighlight } from "../lib/rulesHashHighlight.js";
+import { useChat } from "../state/store.js";
 
+/**
+ * Multi-Server Lift rules payload. Rules are now two things:
+ *
+ *   appRules     the global, app-wide governing rules. Always shown,
+ *                on every server and on the site. Authored in the
+ *                global Admin Panel (Rules tab).
+ *   serverRules  the active server's own rules. Shown only when the
+ *                server has posted some (non-null); authored in that
+ *                server's Server Admin → Settings.
+ *
+ * `securityNoticeHtml` is the privacy/safety notice. The backend lane
+ * resolves it (and the welcome copy) per-server into the same field the
+ * client already consumes, so nothing changes for it here.
+ */
 interface RulesPayload {
-  rulesHtml: string;
+  appRules: string | null;
+  serverRules: string | null;
   securityNoticeHtml: string;
 }
 
@@ -13,26 +29,56 @@ interface Props {
   onClose: () => void;
 }
 
+type RulesTab = "app" | "server";
+
 /**
- * Rules modal - shows admin-authored house rules plus a privacy/safety
- * notice. Both bodies are sanitized server-side on save (same allow-list as
- * profile bios); we re-sanitize with DOMPurify on render as defense in depth
- * against any malicious payload that slipped through historical inserts.
+ * Rules modal - shows the app-wide governing rules and, when the active
+ * server has its own, that server's rules as a second tab, plus a
+ * privacy/safety notice. All bodies are sanitized server-side on save
+ * (same allow-list as profile bios); we re-sanitize with DOMPurify on
+ * render as defense in depth against any malicious payload that slipped
+ * through historical inserts.
  *
- * The privacy notice is rendered above the rules, in an action-tinted band,
- * so the admin-can't-read-privates contract is the first thing users see.
+ * Two tabs:
+ *   "App Rules"    the global governing rules. Always present; default tab.
+ *   "Server Rules" the active server's own rules. Shown only when the
+ *                  active server has posted rules (serverRules non-null).
+ *
+ * With no active server (or a server that hasn't posted rules) only the
+ * App Rules tab renders, so the view is byte-identical to the old
+ * single-rules modal.
+ *
+ * The privacy notice is rendered above the rules, in an action-tinted
+ * band, so the admin-can't-read-privates contract is the first thing
+ * users see.
  */
 export function RulesModal({ onClose }: Props) {
+  // Which server's rules are we resolving? Same source the earning
+  // dashboard reads `/earning/me` with. Null (flag-off / no active
+  // server) sends no `serverId`, so the backend returns appRules only
+  // and the modal collapses to the single-rules view.
+  const currentServerId = useChat((s) => s.currentServerId);
+
   const [data, setData] = useState<RulesPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [tab, setTab] = useState<RulesTab>("app");
   const rulesRef = useRef<HTMLDivElement>(null);
-  // Highlight + scroll to a rule when the hash points at one (deep link or
-  // an in-rules anchor click), once the rules HTML is injected.
-  useRulesHashHighlight(rulesRef, !!data?.rulesHtml.trim());
+
+  const hasServerRules = !!data?.serverRules?.trim();
+  const activeTab: RulesTab = tab === "server" && hasServerRules ? "server" : "app";
+  const activeHtml = activeTab === "server" ? data?.serverRules ?? "" : data?.appRules ?? "";
+
+  // Highlight + scroll to a rule when the hash points at one (deep link
+  // or an in-rules anchor click), once the active tab's rules HTML is
+  // injected.
+  useRulesHashHighlight(rulesRef, !!activeHtml.trim());
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/rules", { credentials: "include" })
+    const url = currentServerId
+      ? `/api/rules?serverId=${encodeURIComponent(currentServerId)}`
+      : "/api/rules";
+    fetch(url, { credentials: "include" })
       .then(async (r) => {
         if (!r.ok) throw new Error(`status ${r.status}`);
         return r.json() as Promise<RulesPayload>;
@@ -40,11 +86,16 @@ export function RulesModal({ onClose }: Props) {
       .then((j) => { if (!cancelled) setData(j); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
     return () => { cancelled = true; };
-  }, []);
+  }, [currentServerId]);
 
   // Sweep any orphaned scoped <style> blocks when the modal unmounts (same
   // belt-and-suspenders cleanup bios use, so admin CSS never bleeds onward).
   useEffect(() => () => sweepOrphanedUserBioStyles(), []);
+
+  const sanitizedActive = useMemo(
+    () => (activeHtml.trim() ? sanitizeUserHtml(activeHtml) : ""),
+    [activeHtml],
+  );
 
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
@@ -70,14 +121,54 @@ export function RulesModal({ onClose }: Props) {
                   dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
                 />
               ) : null}
-              {data.rulesHtml.trim() ? (
+
+              {/* Tabs. The Server Rules tab only renders when the active
+                  server has posted its own rules; otherwise the row holds
+                  the App Rules tab alone, matching the old single view. */}
+              {hasServerRules ? (
+                <div className="flex gap-1 border-b border-keep-border" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === "app"}
+                    onClick={() => setTab("app")}
+                    className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-action ${
+                      activeTab === "app"
+                        ? "border-keep-action text-keep-text"
+                        : "border-transparent text-keep-muted hover:text-keep-text"
+                    }`}
+                  >
+                    App Rules
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === "server"}
+                    onClick={() => setTab("server")}
+                    className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-action ${
+                      activeTab === "server"
+                        ? "border-keep-action text-keep-text"
+                        : "border-transparent text-keep-muted hover:text-keep-text"
+                    }`}
+                  >
+                    Server Rules
+                  </button>
+                </div>
+              ) : null}
+
+              {sanitizedActive ? (
                 <div
+                  key={activeTab}
                   ref={rulesRef}
                   className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
-                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.rulesHtml) }}
+                  dangerouslySetInnerHTML={{ __html: sanitizedActive }}
                 />
               ) : (
-                <p className="italic text-keep-muted">No rules have been posted yet.</p>
+                <p className="italic text-keep-muted">
+                  {activeTab === "server"
+                    ? "This server has not posted its own rules."
+                    : "No rules have been posted yet."}
+                </p>
               )}
             </div>
           )}

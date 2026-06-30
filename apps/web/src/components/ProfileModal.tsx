@@ -15,6 +15,7 @@ import { fetchPublicEarning, type PublicEarningResponse } from "../lib/earning.j
 import { ArcadeError, fetchEidolonSummary, patFamiliar } from "../lib/arcade.js";
 import { ItemZoomView } from "./ItemZoomView.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 import { ForumBanFromProfile } from "./ForumBanFromProfile.js";
 import { RankSigil } from "./RankSigil.js";
 import { StyledName } from "./StyledName.js";
@@ -2271,6 +2272,9 @@ function PortraitLightbox({
   alt: string;
   onClose: () => void;
 }) {
+  // Calm-mode ease: portaled full-screen overlay (not the shared Modal), so
+  // fade the backdrop in under Reduce Motion to match the shared modals.
+  const reduceMotion = useReducedMotion();
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -2295,7 +2299,7 @@ function PortraitLightbox({
       aria-modal="true"
       aria-label={`${alt}, full size`}
       onClick={onClose}
-      className="fixed inset-0 z-[70] overflow-auto overscroll-contain bg-black/85 backdrop-blur-md"
+      className={`fixed inset-0 z-[70] overflow-auto overscroll-contain bg-black/85 backdrop-blur-md${reduceMotion ? " tk-fade-in" : ""}`}
     >
       {/* Close control stays pinned to the viewport corner while the overlay
           scrolls. */}

@@ -3,6 +3,53 @@
 @tailwind utilities;
 
 /* ============================================================
+ * Reduce Motion — calm-mode fades + freezes.
+ *
+ * `tk-fade-in` is the gentle opacity ease used for modals, tab swaps,
+ * and content swaps; it is only applied (by JS) when Reduce Motion is on,
+ * so the default experience keeps its instant snap. Pure opacity — no
+ * movement — so it doesn't trigger vestibular discomfort.
+ *
+ * The `html.reduce-motion` rules below mirror the OS
+ * `@media (prefers-reduced-motion: reduce)` behavior for the in-app toggle
+ * (lib/reducedMotion.ts stamps the class), freezing the looping splash
+ * motion that the media query alone wouldn't catch for toggle users.
+ * ============================================================ */
+@keyframes tk-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.tk-fade-in {
+  animation: tk-fade-in 160ms ease-out both;
+}
+/* Gentle slide+fade for dropdowns / pop-up menus opening (Reduce Motion only,
+ * applied by JS). `down` for menus that open below their trigger, `up` for
+ * menus that open above it (e.g. the composer MENU drawer). Small 6px travel
+ * so it reads as "eased open" without being a vestibular trigger. */
+@keyframes tk-slide-down-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes tk-slide-up-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.tk-slide-down-in { animation: tk-slide-down-in 160ms ease-out both; transform-origin: top; }
+.tk-slide-up-in   { animation: tk-slide-up-in 160ms ease-out both; transform-origin: bottom; }
+html.reduce-motion .bookshelf-book:hover .float-wrap,
+html.reduce-motion .bookshelf-book:focus-visible .float-wrap,
+html.reduce-motion .bookshelf-book[data-pulled="true"] .float-wrap {
+  animation: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bookshelf-book:hover .float-wrap,
+  .bookshelf-book:focus-visible .float-wrap,
+  .bookshelf-book[data-pulled="true"] .float-wrap {
+    animation: none !important;
+  }
+}
+
+/* ============================================================
  * Theme style ornament fallbacks. Default `none` so any component
  * that opts into an `--orn-*` background gracefully renders flat
  * color when no style is active. `lib/ornaments/applyStyle` sets
@@ -53,6 +100,15 @@
   html, body {
     @apply font-chat text-sm;
     margin: 0;
+    /* Pin text scaling to 100%. Without this, Firefox for Android (and iOS
+     * Safari) auto-INFLATE font sizes on their own heuristics — which balloons
+     * every button + line of text and overflows the mobile drawer off-screen,
+     * while Chrome (which respects the -webkit- form Tailwind's preflight emits)
+     * looks fine. Tailwind only sets the -webkit- prefix, so Firefox needs the
+     * -moz-/unprefixed forms explicitly. 100% (not `none`) keeps user pinch-zoom. */
+    -webkit-text-size-adjust: 100%;
+    -moz-text-size-adjust: 100%;
+    text-size-adjust: 100%;
     background-color: rgb(var(--keep-bg) / 1);
     color: rgb(var(--keep-text) / 1);
   }

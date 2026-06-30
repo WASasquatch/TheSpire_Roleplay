@@ -169,7 +169,7 @@ export const rpsCommand: CommandHandler = {
         );
       }
       // Resolve admin overrides + snapshot rewards into the session.
-      const { windowMs, reward } = await readRpsConfig(ctx.db);
+      const { windowMs, reward } = await readRpsConfig(ctx.db, (ctx.socket.data as { serverId?: string }).serverId);
       try {
         startSession({
           kind: RPS_KIND,
@@ -224,7 +224,7 @@ export const rpsCommand: CommandHandler = {
       );
     }
     // No active session: start one and seed the host's throw.
-    const { windowMs, reward } = await readRpsConfig(ctx.db);
+    const { windowMs, reward } = await readRpsConfig(ctx.db, (ctx.socket.data as { serverId?: string }).serverId);
     try {
       startSession({
         kind: RPS_KIND,
@@ -308,7 +308,7 @@ async function runRaffleStart(
   // is registered under its own command name so the Built-ins panel
   // can tune room and sitewide windows independently.
   const cfgName = opts.scopeKind === "room" ? "raffle" : "announceraffle";
-  const cfg = await getBuiltinCommandConfig(ctx.db, cfgName, { durationMs: opts.windowMs });
+  const cfg = await getBuiltinCommandConfig(ctx.db, cfgName, { durationMs: opts.windowMs }, (ctx.socket.data as { serverId?: string }).serverId);
   const windowMs = cfg.durationMs;
   // Incognito hosts would attribute the raffle announce to their
   // display name, same leak as RPS. The cancel and status
@@ -401,20 +401,23 @@ async function runRaffleStart(
 
   let prize: Prize | null = null;
   const { scope, ownerId } = identityScope(ctx);
+  // The economy the prize is escrowed from — snapshotted so the winner is
+  // credited (and refunds returned) on the SAME server (no cross-server leak).
+  const hostServerId = await resolveRoomServerId(ctx.db, ctx.roomId);
 
   if (subLower === "item") {
     const parsed = parseItemPrizeArgs(rest);
     if (!parsed) {
       return notice(ctx, "RAFFLE_USAGE", "Usage: /raffle item <name> [count]");
     }
-    const item = await findItem(ctx.db, parsed.itemQuery);
+    const item = await findItem(ctx.db, parsed.itemQuery, hostServerId);
     if (!item) {
       return notice(ctx, "RAFFLE_ITEM_NOT_FOUND", `No item called "${parsed.itemQuery}".`);
     }
     if (!item.enabled) {
       return notice(ctx, "RAFFLE_ITEM_DISABLED", `${item.name} isn't usable right now.`);
     }
-    const debit = debitItemFromInventory(ctx.db, scope, ownerId, item.key, parsed.count);
+    const debit = debitItemFromInventory(ctx.db, scope, ownerId, item.key, parsed.count, hostServerId);
     if (!debit.ok) {
       return notice(
         ctx,
@@ -440,7 +443,7 @@ async function runRaffleStart(
     // drag the balance negative; the balance check above keeps the
     // common-case error message friendly.
     await creditPool(ctx.db, ctx.io as never, {
-      serverId: await resolveRoomServerId(ctx.db, ctx.roomId),
+      serverId: hostServerId,
       scope,
       ownerId,
       xpDelta: 0,
@@ -458,6 +461,7 @@ async function runRaffleStart(
     hostScope: scope,
     hostOwnerId: ownerId,
     hostUserId: ctx.user.id,
+    hostServerId,
     claimants: new Map(),
   };
 
@@ -600,7 +604,7 @@ function parseItemPrizeArgs(args: readonly string[]): { itemQuery: string; count
 async function refundOnStartFailure(ctx: CommandContext, state: RaffleState): Promise<void> {
   if (state.prize.kind === "currency") {
     await creditPool(ctx.db, ctx.io as never, {
-      serverId: await resolveRoomServerId(ctx.db, ctx.roomId),
+      serverId: state.hostServerId,
       scope: state.hostScope,
       ownerId: state.hostOwnerId,
       xpDelta: 0,
@@ -611,8 +615,9 @@ async function refundOnStartFailure(ctx: CommandContext, state: RaffleState): Pr
     return;
   }
   // Item refund, use the same helper the resolution path uses so
-  // we don't drift behavior between the two refund sites.
-  creditItemToInventory(ctx.db, state.hostScope, state.hostOwnerId, state.prize.itemKey, state.prize.count);
+  // we don't drift behavior between the two refund sites. Returns to the
+  // SAME server the escrow debited (hostServerId), matching the debit above.
+  creditItemToInventory(ctx.db, state.hostScope, state.hostOwnerId, state.prize.itemKey, state.prize.count, state.hostServerId);
 }
 
 /* ============================================================ *
@@ -647,7 +652,7 @@ export const triviaCommand: CommandHandler = {
         `A ${existing.kind} session is already running in this room. Wait for it to finish.`,
       );
     }
-    const { windowMs, reward } = await readTriviaConfig(ctx.db);
+    const { windowMs, reward } = await readTriviaConfig(ctx.db, (ctx.socket.data as { serverId?: string }).serverId);
     try {
       startSession({
         kind: TRIVIA_KIND,
@@ -744,7 +749,7 @@ export const storyDiceCommand: CommandHandler = {
           `A ${existing.kind} session is already running in this room. Wait for it to finish.`,
         );
       }
-      const { windowMs, reward } = await readStoryDiceConfig(ctx.db);
+      const { windowMs, reward } = await readStoryDiceConfig(ctx.db, (ctx.socket.data as { serverId?: string }).serverId);
       const state = newStoryDiceState(reward);
       try {
         startSession({
@@ -944,7 +949,7 @@ async function startScramble(
   // parseScrambleStartArgs already enforces this, but pin it here
   // so direct callers can't trip the invariant either.
   const clampedHostWords = hostWords.slice(0, clamped);
-  const { perRoundMs, reward } = await readScrambleConfig(ctx.db);
+  const { perRoundMs, reward } = await readScrambleConfig(ctx.db, (ctx.socket.data as { serverId?: string }).serverId);
   const state = newScrambleState(clamped, perRoundMs, reward, clampedHostWords);
   let session;
   try {
@@ -969,8 +974,9 @@ async function startScramble(
   }
   // Schedule the round-2 transition (and beyond) before the
   // round-1 announce, so the timer chain is live the moment players
-  // see the first letters.
-  scheduleScrambleRoundTimer(session, { db: ctx.db, io: ctx.io });
+  // see the first letters. (serverId is carried for the ResolveContext
+  // shape; the actual reward resolve recomputes it via the registry timer.)
+  scheduleScrambleRoundTimer(session, { db: ctx.db, io: ctx.io, serverId: await resolveRoomServerId(ctx.db, ctx.roomId) });
   // Mention host-pick only when the host actually supplied words;
   // games with no host words get the simpler "game picks" phrasing
   // (and the per-round letters reveal naturally as rounds advance).

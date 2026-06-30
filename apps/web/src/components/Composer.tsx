@@ -39,6 +39,7 @@ import {
   useIdentityTokensCache,
 } from "../state/identityTokens.js";
 import { getSocket } from "../lib/socket.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 interface Props {
   value: string;
@@ -442,6 +443,10 @@ export function Composer({
   const historyRef = useRef<string[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [historyIndex, setHistoryIndex] = useState(0);
+  // Calm-mode ease: the history popup opens ABOVE the textarea (bottom-full),
+  // pure CSS positioned, so it slides up gently. (CompleterPopup / SynonymPopup
+  // animate themselves; this inline list needs its own conditional class.)
+  const reduceMotion = useReducedMotion();
   // Account-level opt-out. When set, the popup never opens, ArrowUp
   // falls through to its native caret-movement behavior. Pulled from
   // the chat store so a toggle in the profile editor takes effect
@@ -1853,7 +1858,7 @@ export function Composer({
           <ul
             role="listbox"
             aria-label="Recent sends"
-            className="absolute bottom-full left-0 z-30 mb-1 max-h-56 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl"
+            className={`absolute bottom-full left-0 z-30 mb-1 max-h-56 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl${reduceMotion ? " tk-slide-up-in" : ""}`}
           >
             <li className="border-b border-keep-rule/40 bg-keep-banner/40 px-2 py-1 text-[10px] uppercase tracking-widest text-keep-muted">
               Recent sends, Enter to insert

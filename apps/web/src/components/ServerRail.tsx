@@ -2,10 +2,11 @@
  * Server Rail (Multi-Server Lift, Phase 6).
  *
  * A thin (w-14) vertical column of round server icons, the outermost
- * navigation rail of the chat shell — owned/joined servers up top, a hairline
- * divider, then discoverable servers, and a bottom-pinned "+" that opens the
- * discover / apply-to-create affordance. It is the server-level analog of the
- * Forums rail's owned/joined/discover split (ForumRailList).
+ * navigation rail of the chat shell — ONLY the servers the viewer has joined
+ * (plus the implicit-membership home server), and a bottom-pinned "+" that opens
+ * the discover / apply-to-create affordance. Discoverable (not-yet-joined)
+ * servers are NOT listed on the rail: the viewer finds and joins them from the
+ * discover surface, after which they appear here.
  *
  * This component ONLY renders when the servers feature flag is on — App gates
  * it on `branding.serversEnabled`, so with the flag off the chat shell is
@@ -20,6 +21,7 @@
 import { useMemo, useRef } from "react";
 import { Compass, Plus, Settings as SettingsIcon } from "lucide-react";
 import type { ServerSummary } from "../lib/servers.js";
+import { cropStyleFor } from "../lib/avatarCrop.js";
 
 /** A server is "owned/joined" (top group) when the viewer holds any role OR
  *  it's the implicit-membership system server; everything else is discover. */
@@ -56,50 +58,34 @@ export function ServerRail({
    *  omit to hide the affordance entirely. */
   onOpenSettings?: (server: ServerSummary) => void;
 }) {
-  const { mine, discover } = useMemo(() => {
-    const list = servers ?? [];
-    return {
-      mine: list.filter(isMine),
-      discover: list.filter((s) => !isMine(s)),
-    };
-  }, [servers]);
+  // Only servers the viewer has JOINED (plus the implicit-membership home
+  // server) ride the rail. Discoverable servers are NOT listed here — the
+  // viewer reaches them via the bottom "+" → discover surface and joins them
+  // there; once joined they appear on the rail.
+  const mine = useMemo(() => (servers ?? []).filter(isMine), [servers]);
 
   return (
     <nav
       aria-label="Servers"
-      className="flex w-14 shrink-0 flex-col items-center gap-2 border-r border-keep-rule bg-keep-panel/40 py-2"
+      className="flex w-[4.5rem] shrink-0 flex-col items-center gap-2.5 border-l border-keep-rule bg-keep-panel/40 py-2.5"
     >
-      <div className="flex min-h-0 flex-1 flex-col items-center gap-2 overflow-y-auto">
+      <div className="flex min-h-0 flex-1 flex-col items-center gap-2.5 overflow-y-auto overflow-x-hidden">
         {servers == null ? (
           // Loading: a couple of dim placeholders so the column doesn't jump.
           <>
-            <div className="h-10 w-10 animate-pulse rounded-2xl bg-keep-rule/30" aria-hidden="true" />
-            <div className="h-10 w-10 animate-pulse rounded-2xl bg-keep-rule/20" aria-hidden="true" />
+            <div className="h-12 w-12 animate-pulse rounded-full bg-keep-rule/30" aria-hidden="true" />
+            <div className="h-12 w-12 animate-pulse rounded-full bg-keep-rule/20" aria-hidden="true" />
           </>
         ) : (
-          <>
-            {mine.map((s) => (
-              <ServerIcon
-                key={s.id}
-                server={s}
-                active={currentServerId === s.id}
-                onClick={() => onSelect(s)}
-                onOpenSettings={onOpenSettings && canManage(s) ? () => onOpenSettings(s) : undefined}
-              />
-            ))}
-            {mine.length > 0 && discover.length > 0 ? (
-              <hr className="my-0.5 w-7 border-keep-rule" aria-hidden="true" />
-            ) : null}
-            {discover.map((s) => (
-              <ServerIcon
-                key={s.id}
-                server={s}
-                active={currentServerId === s.id}
-                onClick={() => onSelect(s)}
-                onOpenSettings={onOpenSettings && canManage(s) ? () => onOpenSettings(s) : undefined}
-              />
-            ))}
-          </>
+          mine.map((s) => (
+            <ServerIcon
+              key={s.id}
+              server={s}
+              active={currentServerId === s.id}
+              onClick={() => onSelect(s)}
+              onOpenSettings={onOpenSettings && canManage(s) ? () => onOpenSettings(s) : undefined}
+            />
+          ))
         )}
       </div>
 
@@ -108,15 +94,15 @@ export function ServerRail({
           members who hold the global apply_create_server permission, so the
           title copy adapts to what the viewer will actually get. */}
       <div className="flex shrink-0 flex-col items-center">
-        <hr className="mb-2 w-7 border-keep-rule" aria-hidden="true" />
+        <hr className="mb-2 w-9 border-keep-rule" aria-hidden="true" />
         <button
           type="button"
           onClick={onDiscover}
           title={canApply ? "Discover servers, or apply to create your own" : "Discover servers"}
           aria-label={canApply ? "Discover servers, or apply to create your own" : "Discover servers"}
-          className="flex h-10 w-10 items-center justify-center rounded-2xl border border-keep-action/50 bg-keep-action/10 text-keep-action transition-all hover:rounded-xl hover:bg-keep-action/20"
+          className="flex h-12 w-12 items-center justify-center rounded-full border border-keep-action/50 bg-keep-action/10 text-keep-action transition-all hover:bg-keep-action/20"
         >
-          {canApply ? <Plus className="h-5 w-5" aria-hidden="true" /> : <Compass className="h-5 w-5" aria-hidden="true" />}
+          {canApply ? <Plus className="h-6 w-6" aria-hidden="true" /> : <Compass className="h-6 w-6" aria-hidden="true" />}
         </button>
       </div>
     </nav>
@@ -143,6 +129,7 @@ function ServerIcon({
   // First letter (grapheme-naive but fine for the fallback glyph).
   const letter = (server.name.trim()[0] ?? "?").toUpperCase();
   const tint = server.iconColor ?? undefined;
+  const border = server.borderColor ?? undefined;
   const label = server.isSystem
     ? `${server.name} (home server)`
     : server.viewerRole != null
@@ -175,52 +162,67 @@ function ServerIcon({
           active ? "h-6 opacity-100" : "h-2 opacity-0 group-hover:opacity-60"
         }`}
       />
-      <button
-        type="button"
-        // Skip the select when a long-press already opened settings, so a
-        // touch that triggered the console doesn't also navigate on release.
-        onClick={() => { if (fired.current) { fired.current = false; return; } onClick(); }}
-        title={label}
-        aria-label={label}
-        aria-current={active ? "true" : undefined}
-        className={`relative flex h-10 w-10 items-center justify-center overflow-hidden border text-sm font-semibold uppercase transition-all ${
-          active
-            ? "rounded-xl border-keep-action/70 ring-2 ring-keep-action/40"
-            : "rounded-2xl border-transparent hover:rounded-xl hover:border-keep-rule"
-        }`}
-        style={tint && !server.logoUrl ? { backgroundColor: tint, color: "#fff" } : undefined}
-      >
-        {server.logoUrl ? (
-          <img
-            src={server.logoUrl}
-            alt=""
-            className="h-full w-full object-cover"
-            draggable={false}
-          />
-        ) : (
-          <span className={tint ? "" : "text-keep-text"}>{letter}</span>
-        )}
-        {server.hasUnseen && !active ? (
-          <span
-            aria-hidden="true"
-            className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-keep-accent ring-2 ring-keep-panel"
-          />
-        ) : null}
-      </button>
-      {/* Settings gear: a hover/focus affordance on servers the viewer manages.
-          Sits over the tile's bottom-right; keyboard-reachable (it's a real
-          button) so the console isn't gated behind hover/long-press alone. */}
-      {onOpenSettings ? (
+      {/* Icon + its corner affordances live in a TIGHT relative wrapper so the
+          gear and unseen dot anchor to the ICON (48px), never spilling past the
+          rail's right edge — that overflow previously forced a horizontal
+          scrollbar and clipped the tiles. The active pill stays on the outer
+          full-width row so it rides the rail's inner edge. */}
+      <div className="relative">
         <button
           type="button"
-          onClick={(e) => { e.stopPropagation(); onOpenSettings(); }}
-          title={`${server.name} — settings`}
-          aria-label={`${server.name} — settings`}
-          className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full border border-keep-rule bg-keep-panel text-keep-muted opacity-0 transition-opacity hover:text-keep-text focus:opacity-100 group-hover:opacity-100"
+          // Skip the select when a long-press already opened settings, so a
+          // touch that triggered the console doesn't also navigate on release.
+          onClick={() => { if (fired.current) { fired.current = false; return; } onClick(); }}
+          title={label}
+          aria-label={label}
+          aria-current={active ? "true" : undefined}
+          className={`relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border text-base font-semibold uppercase transition-all ${
+            border
+              ? "" // owner border color set inline below; keep ring on active
+              : active
+                ? "border-keep-action/70 ring-2 ring-keep-action/40"
+                : "border-transparent hover:border-keep-rule"
+          }`}
+          style={{
+            ...(tint && !server.logoUrl ? { backgroundColor: tint, color: "#fff" } : {}),
+            // Owner-set border color: a branded ring that shows even on logo
+            // tiles (where iconColor — the lettered-tile fill — is invisible).
+            ...(border ? { borderColor: border, boxShadow: active ? `0 0 0 2px ${border}66` : undefined } : {}),
+          }}
         >
-          <SettingsIcon className="h-2.5 w-2.5" aria-hidden="true" />
+          {server.logoUrl ? (
+            <img
+              src={server.logoUrl}
+              alt=""
+              className="h-full w-full object-cover"
+              style={cropStyleFor(server.iconCrop)}
+              draggable={false}
+            />
+          ) : (
+            <span className={tint ? "" : "text-keep-text"}>{letter}</span>
+          )}
+          {server.hasUnseen && !active ? (
+            <span
+              aria-hidden="true"
+              className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-keep-accent ring-2 ring-keep-panel"
+            />
+          ) : null}
         </button>
-      ) : null}
+        {/* Settings gear: a hover/focus affordance on servers the viewer manages.
+            Sits over the tile's bottom-right; keyboard-reachable (it's a real
+            button) so the console isn't gated behind hover/long-press alone. */}
+        {onOpenSettings ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onOpenSettings(); }}
+            title={`${server.name} — settings`}
+            aria-label={`${server.name} — settings`}
+            className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border border-keep-rule bg-keep-panel text-keep-muted shadow-sm opacity-0 transition-opacity hover:text-keep-text focus:opacity-100 group-hover:opacity-100"
+          >
+            <SettingsIcon className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }

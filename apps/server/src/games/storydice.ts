@@ -123,14 +123,14 @@ export interface StoryDiceState {
   reward: BuiltinCommandReward;
 }
 
-export async function readStoryDiceConfig(db: Db): Promise<{
+export async function readStoryDiceConfig(db: Db, serverId?: string | null): Promise<{
   windowMs: number;
   reward: BuiltinCommandReward;
 }> {
   const cfg = await getBuiltinCommandConfig(db, STORYDICE_COMMAND_NAME, {
     durationMs: STORYDICE_WINDOW_MS,
     reward: STORYDICE_DEFAULT_REWARD,
-  });
+  }, serverId);
   return { windowMs: cfg.durationMs, reward: cfg.reward };
 }
 
@@ -366,7 +366,7 @@ async function resolveStoryDice(session: GameSession, ctx: ResolveContext): Prom
 
   if (rewardIsNonZero(state.reward)) {
     for (const w of winners) {
-      await mintRewardForWinner(ctx.db, ctx.io, w, state.reward, "storydice_win");
+      await mintRewardForWinner(ctx.db, ctx.io, w, state.reward, "storydice_win", { serverId: ctx.serverId });
     }
   }
   const winningsLine = await formatWinningsLine(
@@ -374,6 +374,7 @@ async function resolveStoryDice(session: GameSession, ctx: ResolveContext): Prom
     STORYDICE_KIND,
     winners,
     state.reward,
+    { serverId: ctx.serverId },
   );
   if (winningsLine) lines.push(winningsLine);
 

@@ -1,5 +1,6 @@
 import type { CommandContext, CommandHandler } from "../types.js";
 import { findItem } from "./items.js";
+import { resolveRoomServerId } from "../../earning/pool.js";
 
 /**
  * /item <name>, open the full-screen item zoom view for a catalog item.
@@ -51,7 +52,10 @@ export const itemCommand: CommandHandler = {
       notice(ctx, "ITEM_USAGE", "Usage: /item <name-or-alias>");
       return;
     }
-    const row = await findItem(ctx.db, query);
+    // Per-server catalog (migration 0298): look the item up in the catalog of
+    // the room this command ran in. Flag off ⇒ the default server, byte-identical.
+    const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
+    const row = await findItem(ctx.db, query, sid);
     if (!row) {
       notice(ctx, "ITEM_NOT_FOUND", `No item called "${query}".`);
       return;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { VERSION } from "@thekeep/shared";
 import { isDarkPalette } from "@thekeep/shared";
 import {
@@ -136,42 +137,39 @@ export function SplashLanding({ onNavigate }: Props) {
   return (
     <div
       style={themeStyle(splashTheme)}
-      className="relative min-h-screen w-full overflow-hidden bg-keep-bg text-keep-text"
+      className="relative min-h-screen w-full overflow-hidden text-keep-text"
     >
-      {/* Background art, mirrors SplashShell so the visual identity stays
-          consistent between the landing and the auth pages. Same dark-
-          mode swap (resolved palette → bg image variant + corner glows).
-          Sized in VIEWPORT units (100vw × 100vh), not `inset-0`: `inset-0`
-          resolves right/bottom against the initial containing block, whose
-          width shrinks when a vertical scrollbar appears and whose height
-          can track content under a transformed ancestor — either makes
-          `bg-cover` re-fit and the image visibly jump as the carousels
-          change the page height. `w-screen`/`h-screen` (100vw/100vh) include
-          the scrollbar gutter and ignore content height, so the art stays
-          locked to the window. */}
-      <div
-        aria-hidden
-        className="fixed left-0 top-0 h-screen w-screen bg-cover bg-[position:-175px_center] md:bg-center"
-        style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
-      />
-      <div
-        aria-hidden
-        className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70"
-      />
-      {splashIsDark ? (
-        <>
+      {/* Background art, portaled to <body> so it is a TRUE viewport-fixed
+          layer: `position: fixed` only resolves against the viewport when no
+          ancestor establishes a containing block (a `transform`/`filter`/
+          `will-change` anywhere up the tree — e.g. the struck-shake or a
+          design's backdrop-filter — silently re-anchors it to that ancestor,
+          which is what made the art scroll away). Rendering it on <body>,
+          behind everything (`zIndex:-1`), guarantees it ignores page height
+          and always fills the window. themeStyle is re-applied here because
+          the portal lives outside this subtree's CSS-var scope. */}
+      {createPortal(
+        <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: -1 }}>
           <div
-            aria-hidden
-            className="pointer-events-none absolute -left-32 -top-32 h-[28rem] w-[28rem]"
-            style={{ background: "radial-gradient(circle, rgba(63,165,160,0.35) 0%, rgba(63,165,160,0.12) 35%, transparent 70%)" }}
+            className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
+            style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
           />
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -bottom-32 -right-32 h-[32rem] w-[32rem]"
-            style={{ background: "radial-gradient(circle, rgba(220,230,255,0.22) 0%, rgba(220,230,255,0.08) 40%, transparent 75%)" }}
-          />
-        </>
-      ) : null}
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70" />
+          {splashIsDark ? (
+            <>
+              <div
+                className="pointer-events-none absolute -left-32 -top-32 h-[28rem] w-[28rem]"
+                style={{ background: "radial-gradient(circle, rgba(63,165,160,0.35) 0%, rgba(63,165,160,0.12) 35%, transparent 70%)" }}
+              />
+              <div
+                className="pointer-events-none absolute -bottom-32 -right-32 h-[32rem] w-[32rem]"
+                style={{ background: "radial-gradient(circle, rgba(220,230,255,0.22) 0%, rgba(220,230,255,0.08) 40%, transparent 75%)" }}
+              />
+            </>
+          ) : null}
+        </div>,
+        document.body,
+      )}
 
       <div className="relative flex min-h-screen flex-col items-center justify-start py-8 lg:py-10">
         {/* HERO, over the spire BG, ABOVE the card. The wordmark

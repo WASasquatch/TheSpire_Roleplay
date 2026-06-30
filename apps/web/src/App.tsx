@@ -24,6 +24,7 @@ import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
 import { ServerRail } from "./components/ServerRail.js";
 import { ServerSettingsView } from "./components/ServerSettingsView.js";
+import { ServerDiscoverModal } from "./components/ServerDiscoverModal.js";
 import { listServers, visitServer, type ServerSummary } from "./lib/servers.js";
 import { MessagesModal } from "./components/MessagesModal.js";
 import { RulesModal } from "./components/RulesModal.js";
@@ -44,6 +45,7 @@ import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanner
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
 import { playRoomTransition } from "./lib/transitions/orchestrator.js";
+import { reduceMotionEnabled } from "./lib/reducedMotion.js";
 import { fetchSpotlightMember, fetchRoomBrief, fetchStoryBrief } from "./lib/uiRouteDynamicLabel.js";
 import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
@@ -1534,6 +1536,9 @@ function Chat() {
   // whose settings modal is open, opened from the rail's gear/long-press on a
   // server the viewer manages. Flag-gated through the rail that sets it.
   const [serverSettingsId, setServerSettingsId] = useState<string | null>(null);
+  // The server Discover surface (rail "+"). `{ create: true }` lands straight
+  // on the create-a-server application form for apply-eligible viewers.
+  const [serverDiscoverOpen, setServerDiscoverOpen] = useState<{ create?: boolean } | null>(null);
   // Theme resolution layers. `activeTheme` is derived (not stored) below
   // as `characterTheme || userTheme || branding.defaultTheme`, so changing
   // ANY of the three causes the active theme to refresh, including when
@@ -3516,13 +3521,20 @@ function Chat() {
       });
     };
     // Play the equipped room transition (self-only). Gated by the
-    // `use_room_transitions` permission; null key / unequipped / reduced-motion
-    // all fall through to an instant switch inside playRoomTransition.
+    // `use_room_transitions` permission; null key / unequipped falls through to
+    // an instant switch inside playRoomTransition.
     const permitted = !!me?.permissions?.includes("use_room_transitions");
-    const key = permitted ? myActiveTransitionKey : null;
+    const equipped = permitted ? myActiveTransitionKey : null;
+    // Reduce Motion: give a gentle baseline fade on room switch (calmer than an
+    // instant snap) — unless the viewer has a transition equipped, in which case
+    // theirs plays. `force` lets it run even under the OS reduced-motion media
+    // query, which would otherwise skip straight to an instant swap.
+    const reduceMotion = reduceMotionEnabled();
+    const key = reduceMotion ? (equipped ?? "fade") : equipped;
     void playRoomTransition(key, {
       wrapperEl: chatWrapperRef.current,
       swap: doJoin,
+      force: reduceMotion,
       // The new room has rendered once the store's currentRoomId catches up.
       isReady: () => useChat.getState().currentRoomId === roomId,
     });
@@ -3552,6 +3564,41 @@ function Chat() {
       setNotice({ code: "SERVER_VISIT_FAILED", message: e instanceof Error ? e.message : "Couldn't open that server." });
     }
   }
+
+  // Top-bar rebrand + "back home" link (Multi-Server Lift). While the viewer is
+  // inside a NON-home server, the Banner shows that server's name/icon/banner
+  // and offers a link back to the home server. Null on the home server or
+  // flag-off, so the shell is byte-identical to today.
+  const currentServer = useMemo(
+    () => (serversEnabled && currentServerId ? servers?.find((s) => s.id === currentServerId) ?? null : null),
+    [serversEnabled, currentServerId, servers],
+  );
+  // The current server's identity drives the top bar (banner + wordmark + name)
+  // for EVERY server, including the home server — so an owner's uploaded banner
+  // shows wherever they are. Banner falls back to the global site branding for
+  // any field the server leaves unset. Null only when flag-off / no server.
+  const serverBrand = useMemo(
+    () =>
+      currentServer
+        ? {
+            name: currentServer.name,
+            logoUrl: currentServer.logoUrl ?? null,
+            horizontalLogoUrl: currentServer.horizontalLogoUrl ?? null,
+            bannerImageUrl: currentServer.bannerImageUrl ?? null,
+            bannerCoverCss: currentServer.bannerCoverCss ?? null,
+            bannerFocusY: currentServer.bannerFocusY ?? null,
+            bannerCrop: currentServer.bannerCrop ?? null,
+            bannerHeight: currentServer.bannerHeight ?? null,
+          }
+        : null,
+    [currentServer],
+  );
+  // The viewer can manage the server they're currently in (owner/admin/mod) →
+  // surface the prominent "Server Admin" nav link that opens its console.
+  const canManageCurrentServer = !!currentServer
+    && (currentServer.viewerRole === "owner"
+      || currentServer.viewerRole === "admin"
+      || currentServer.viewerRole === "mod");
 
   // Jump-to-message flow shared by search, bookmarks, and (eventually)
   // mention navigation. Two distinct paths depending on the room's
@@ -3806,13 +3853,20 @@ function Chat() {
         and the composer follows instead of being pushed beneath the
         keyboard. overflow-hidden keeps any internal flex child that grows
         past its allocated height from leaking back into document overflow. */}
-    <div className="fixed inset-0 flex h-dvh flex-col overflow-hidden">
+    <div className="fixed inset-0 flex h-dvh flex-col overflow-hidden lg:flex-row">
       {/* Theme-style ambient overlay. The active StyleGenerator (medieval-
           parchment in Phase 1) emits an SVG gradient stack as a CSS var
           on <html>; this div renders it as a fixed full-viewport background
           behind every other element. When no style is active the CSS var
           falls back to `none` and this div is invisible. */}
       <div aria-hidden className="keep-bg-overlay" />
+      {/* LEFT column on desktop (lg:flex-row parent): banner + account gates +
+          chat. flex-1 so the full-height RoomsTree + ServerRail sit to its right
+          and reach the TOP of the viewport, instead of being pushed below a
+          full-width banner. On mobile (flex-col parent) the rails are a fixed
+          drawer / hidden, so this is the only in-flow child and fills the screen
+          exactly as before. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       <Banner
         navLinksVersion={navLinksVersion}
         onOpenRules={() => setRulesOpen(true)}
@@ -3821,6 +3875,8 @@ function Chat() {
         onOpenWorlds={() => setWorldCatalogOpen(true)}
         onOpenArcade={() => setArcadeOpen(true)}
         onOpenStaff={() => setStaffOpen(true)}
+        serverBrand={serverBrand}
+        {...(canManageCurrentServer && currentServer ? { onOpenServerAdmin: () => setServerSettingsId(currentServer.id) } : {})}
         {...(hasAnyAdminAccess ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
       <StaleVersionBanner />
@@ -3845,25 +3901,6 @@ function Chat() {
           COLUMN (<main>) is the room-transition snapshot target; the rail is a
           sibling, so it isn't swept into a room switch. */}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        {/* Server Rail (Multi-Server Lift) — the outermost left column, a thin
-            sibling of <main> so it isn't swept into a room-transition snapshot.
-            Rendered ONLY when the feature flag is on, so flag-off users see
-            today's exact shell (no rail, no layout shift). Hidden on mobile
-            where navigation lives in the rooms drawer. */}
-        {serversEnabled ? (
-          <div className="hidden lg:flex">
-            <ServerRail
-              servers={servers}
-              currentServerId={currentServerId}
-              canApply={!!me?.permissions?.includes("apply_create_server")}
-              onSelect={(s) => void onServerSelect(s)}
-              onDiscover={() =>
-                setNotice({ code: "SERVERS_DISCOVER", message: "Server discovery is on the way." })
-              }
-              onOpenSettings={(s) => setServerSettingsId(s.id)}
-            />
-          </div>
-        ) : null}
         {/* `min-w-0` is non-negotiable: by default a flex child's
             `min-width` is `auto` (= its intrinsic content width), so a
             wide descendant, a long topic title, an action button strip,
@@ -4112,6 +4149,8 @@ function Chat() {
             onOpenEarning={() => setEarningOpen({})}
           />
         </main>
+      </div>{/* /chat row */}
+      </div>{/* /left column — RoomsTree + ServerRail follow as full-height siblings */}
         {/* Mobile-only backdrop when rail drawer is open */}
         {railOpen ? (
           <div
@@ -4161,7 +4200,26 @@ function Chat() {
           onClose={() => setRailOpen(false)}
           fontStep={fontStep}
         />
-      </div>{/* /chat + room-list row */}
+        {/* Server Rail (Multi-Server Lift) — the OUTERMOST RIGHT column, sitting
+            just outboard of the userlist rail (RoomsTree). This app's primary
+            navigation lives on the right, so the server rail rides the far-right
+            edge as part of that cluster rather than Discord's far-left. A thin
+            sibling of <main>/RoomsTree so it isn't swept into a room-transition
+            snapshot. Rendered ONLY when the feature flag is on, so flag-off
+            users see today's exact shell (no rail, no layout shift). Hidden on
+            mobile where navigation lives in the rooms drawer. */}
+        {serversEnabled ? (
+          <div className="hidden lg:flex">
+            <ServerRail
+              servers={servers}
+              currentServerId={currentServerId}
+              canApply={!!me?.permissions?.includes("apply_create_server")}
+              onSelect={(s) => void onServerSelect(s)}
+              onDiscover={() => setServerDiscoverOpen({})}
+              onOpenSettings={(s) => setServerSettingsId(s.id)}
+            />
+          </div>
+        ) : null}
       {notice ? <Toast notice={notice} onDismiss={() => setNotice(null)} /> : null}
       {openProfile ? (
         <ProfileModal
@@ -4372,6 +4430,9 @@ function Chat() {
         <AdminPanel
           onClose={() => setAdminOpen(false)}
           onLinksChanged={() => setNavLinksVersion((v) => v + 1)}
+          // Oversight drill-in: open any server's per-server admin console from
+          // the Servers tab (manage_any_server resolves owner-equivalent).
+          onOpenServerConsole={(id) => { setAdminOpen(false); setServerSettingsId(id); }}
         />
       ) : null}
       {rulesOpen ? <RulesModal onClose={() => setRulesOpen(false)} /> : null}
@@ -4381,12 +4442,22 @@ function Chat() {
       {serverSettingsId ? (
         <ServerSettingsView
           serverId={serverSettingsId}
+          // Every save refetches the catalog so the rail icon, top-bar banner,
+          // and Discover cards update LIVE (the console is only 75vw on desktop,
+          // so the rail is visible behind it) without waiting for close/refresh.
+          onChanged={() => { void listServers().then(setServers).catch(() => {}); }}
           onClose={() => {
             setServerSettingsId(null);
-            // A console change (name/icon/role/ban) can shuffle the rail, so
-            // refresh the catalog the way a tree-version bump would.
             void listServers().then(setServers).catch(() => {});
           }}
+        />
+      ) : null}
+      {serverDiscoverOpen ? (
+        <ServerDiscoverModal
+          canApply={!!me?.permissions?.includes("apply_create_server")}
+          {...(serverDiscoverOpen.create ? { initialCreate: true } : {})}
+          onSelect={(s) => void onServerSelect(s)}
+          onClose={() => setServerDiscoverOpen(null)}
         />
       ) : null}
       {earningOpen ? (

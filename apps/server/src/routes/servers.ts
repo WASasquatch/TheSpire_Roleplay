@@ -24,12 +24,17 @@
  */
 import type { FastifyInstance } from "fastify";
 import type { Server as IoServer } from "socket.io";
-import { and, asc, desc, eq, inArray, isNull, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { createHash } from "node:crypto";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   RESERVED_SERVER_SLUGS,
+  SERVER_MAX_AUTO_RULES,
   SERVER_MAX_OWNED_DEFAULT,
+  SERVER_MAX_USERGROUPS,
   SERVER_MOD_DEFAULT_PERMISSIONS,
   SERVER_MOD_PERMISSIONS,
   SERVER_NAME_MAX,
@@ -40,18 +45,27 @@ import {
   SERVER_REAPPLY_COOLDOWN_DAYS,
   SERVER_SLUG_RE,
   SERVER_TAGLINE_MAX,
+  SERVER_USERGROUP_NAME_MAX,
+  hasTag,
+  isGrantableServerModPermission,
   isModeratorRole,
-  isServerModPermission,
-  isServerPermission,
+  isServerFeaturePermission,
   normalizeServerSlug,
   normalizeTheme,
+  parseTagsJson,
+  serializeTags,
+  parseServerAutoRules,
+  parseServerFeaturePermissions,
   parseServerModPermissions,
-  parseServerPermissions,
+  serializeServerAutoRules,
+  serializeServerFeaturePermissions,
   serializeServerModPermissions,
-  serializeServerPermissions,
 } from "@thekeep/shared";
 import type {
   ClientToServerEvents,
+  ServerAutoRule,
+  ServerFeaturePermission,
+  ServerModPermission,
   ServerPermission,
   ServerRole,
   ServerToClientEvents,
@@ -72,29 +86,182 @@ import {
   serverUsergroups,
   serverVisits,
   servers,
+  siteSettings,
   users,
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { serverAuthority, serverCan } from "../servers/authority.js";
-import { ensureDefaultUsergroup } from "../servers/usergroups.js";
+import { ensureDefaultUsergroup, serverRoomIds } from "../servers/usergroups.js";
 import { resolveIdentityArg } from "../commands/identityArg.js";
 import { notifyUser } from "../servers/notifications.js";
 import { getSettings, areServersEnabled, invalidateServerSettings } from "../settings.js";
 import {
   broadcastPresence,
+  broadcastRoomState,
+  emitTreeChanged,
+  findCanonicalLanding,
   findServerLanding,
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
+import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import type { CommandRegistry } from "../commands/registry.js";
+// Per-server admin surfaces (Admin Partition — plan_ext.md). Each is a
+// self-contained, self-gated module registered below.
+import { registerServerReportRoutes } from "../servers/reports.js";
+import { registerServerModCaseRoutes } from "../servers/modCases.js";
+import { registerServerEmoticonRoutes } from "../servers/emoticons.js";
+import { registerServerAnnouncementRoutes } from "../servers/announcements.js";
+import { registerServerFaqRoutes } from "../servers/faqs.js";
+import { registerServerCommandTitleRoutes } from "../servers/commandsTitles.js";
+import { registerServerEarningRoutes } from "../servers/earning.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
+
+/* ----- Server identity images (icon / banner). Mirrors the forum image
+ *  pipeline (routes/forums.ts): base64 data URL in, magic-byte sniffed,
+ *  content-hashed, served from /uploads/servers/. Kept server-local because
+ *  the forum helpers are private closures over the forums dir. ----- */
+const SERVER_IMAGE_TYPES: Array<{ mime: string; ext: string; magic: number[] }> = [
+  { mime: "image/png", ext: "png", magic: [0x89, 0x50, 0x4e, 0x47] },
+  { mime: "image/jpeg", ext: "jpg", magic: [0xff, 0xd8, 0xff] },
+  { mime: "image/webp", ext: "webp", magic: [0x52, 0x49, 0x46, 0x46] },
+  { mime: "image/gif", ext: "gif", magic: [0x47, 0x49, 0x46, 0x38] },
+];
+
+function decodeServerDataUrl(dataUrl: string, maxBytes: number): Buffer | { error: string } {
+  const m = /^data:image\/[a-z+]+;base64,(.+)$/i.exec(dataUrl.trim());
+  if (!m) return { error: "expected a base64 image data URL" };
+  let bytes: Buffer;
+  try { bytes = Buffer.from(m[1]!, "base64"); }
+  catch { return { error: "bad base64 payload" }; }
+  if (bytes.length === 0) return { error: "empty image" };
+  if (bytes.length > maxBytes) return { error: `image too large (max ${Math.round(maxBytes / 1024)}KB)` };
+  return bytes;
+}
+
+function sniffServerImage(bytes: Buffer): { mime: string; ext: string } | null {
+  for (const t of SERVER_IMAGE_TYPES) {
+    if (bytes.length >= t.magic.length && t.magic.every((b, i) => bytes[i] === b)) return t;
+  }
+  return null;
+}
+
+/** Parse a stored icon/banner crop (AvatarCrop JSON) to an object, or null when
+ *  unset/malformed. Mirrors the {zoom,offsetX,offsetY} shape user avatars use. */
+function parseCrop(json: string | null | undefined): { zoom: number; offsetX: number; offsetY: number } | null {
+  if (!json) return null;
+  try {
+    const o = JSON.parse(json) as Record<string, unknown>;
+    if (o && typeof o.zoom === "number" && typeof o.offsetX === "number" && typeof o.offsetY === "number") {
+      return { zoom: o.zoom, offsetX: o.offsetX, offsetY: o.offsetY };
+    }
+  } catch { /* malformed → treat as unset */ }
+  return null;
+}
 
 /** Catalog sort: the system server first, then featured, then name A→Z. */
 function catalogRank(s: { isSystem: boolean; status: string }): number {
   if (s.isSystem) return 0;
   if (s.status === "featured") return 1;
   return 2;
+}
+
+/** The servers-table columns every ServerSummary builder reads. Selected
+ *  identically by the catalog, discover, search, and tags endpoints so they
+ *  all hand back the exact same card shape. */
+const SERVER_SUMMARY_COLUMNS = {
+  id: servers.id,
+  slug: servers.slug,
+  name: servers.name,
+  tagline: servers.tagline,
+  logoUrl: servers.logoUrl,
+  iconColor: servers.iconColor,
+  borderColor: servers.borderColor,
+  iconCrop: servers.iconCrop,
+  // Banner + horizontal-logo fields ride the catalog so the chat shell can
+  // rebrand its top bar to the current server's identity without a detail
+  // fetch.
+  bannerImageUrl: servers.bannerImageUrl,
+  bannerCoverCss: servers.bannerCoverCss,
+  bannerFocusY: servers.bannerFocusY,
+  bannerCrop: servers.bannerCrop,
+  bannerHeight: servers.bannerHeight,
+  horizontalLogoUrl: servers.horizontalLogoUrl,
+  isSystem: servers.isSystem,
+  isDefault: servers.isDefault,
+  status: servers.status,
+  visibility: servers.visibility,
+  joinMode: servers.joinMode,
+  ownerUserId: servers.ownerUserId,
+  tagsJson: servers.tagsJson,
+  createdAt: servers.createdAt,
+} as const;
+
+type ServerSummaryRow = {
+  [K in keyof typeof SERVER_SUMMARY_COLUMNS]: (typeof servers.$inferSelect)[K];
+};
+
+/** The viewer-relative enrichment the catalog/discover/search summaries layer
+ *  on top of a row (one batched read each per request). Null `me` ⇒ anonymous
+ *  viewer: viewerRole stays null and the favorite/unseen flags are omitted. */
+interface SummaryViewerCtx {
+  me: { id: string } | null;
+  rolesBy: Map<string, ServerRole> | null;
+  visitsBy: Map<string, number> | null;
+  myDefaultServerId: string | null;
+  activityBy: Map<string, number | null>;
+}
+
+/** Map ONE server row + viewer context to the ServerSummary wire shape. The
+ *  single source of truth for the card shape — `tags` rides every surface. */
+function buildServerSummary(s: ServerSummaryRow, ctx: SummaryViewerCtx) {
+  const { me, rolesBy, visitsBy, myDefaultServerId, activityBy } = ctx;
+  // viewerRole: the relational role, with the owner short-circuit, and the
+  // system/default server treated as implicit-member for signed-in users
+  // (mirrors serverAuthority.isMember) so the rail's owned/joined split
+  // doesn't nag everyone to "join" The Spire.
+  const role: ServerRole | null = me
+    ? (rolesBy?.get(s.id)
+        ?? (s.ownerUserId === me.id
+          ? "owner"
+          : s.isSystem
+            ? "member"
+            : null))
+    : null;
+  const last = activityBy.get(s.id) ?? null;
+  const seen = visitsBy?.get(s.id);
+  return {
+    id: s.id,
+    slug: s.slug,
+    name: s.name,
+    tagline: s.tagline ?? null,
+    logoUrl: s.logoUrl ?? null,
+    iconColor: s.iconColor ?? null,
+    borderColor: s.borderColor ?? null,
+    iconCrop: parseCrop(s.iconCrop),
+    bannerImageUrl: s.bannerImageUrl ?? null,
+    bannerCoverCss: s.bannerCoverCss ?? null,
+    bannerFocusY: s.bannerFocusY ?? null,
+    bannerCrop: parseCrop(s.bannerCrop),
+    bannerHeight: s.bannerHeight ?? null,
+    horizontalLogoUrl: s.horizontalLogoUrl ?? null,
+    isSystem: !!s.isSystem,
+    isDefault: !!s.isDefault,
+    status: s.status,
+    visibility: s.visibility,
+    joinMode: s.joinMode,
+    viewerRole: role,
+    // Owner-set discovery tags (migration 0301); [] when unset.
+    tags: parseTagsJson(s.tagsJson),
+    // The viewer's chosen favorite/default server (users.default_server_id)
+    // — the rail/discover surface marks it + offers the set/clear toggle.
+    // Only meaningful for signed-in viewers.
+    ...(me ? { isMyDefault: myDefaultServerId === s.id } : {}),
+    ...(me ? { hasUnseen: !!last && (!seen || last > seen) } : {}),
+  };
 }
 
 /**
@@ -134,7 +301,43 @@ async function auditServer(
   }
 }
 
-export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
+export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io, uploadsRoot: string, registry: CommandRegistry): Promise<void> {
+  // Per-server admin surfaces (Admin Partition — plan_ext.md §7). Self-contained
+  // modules, each gated on its own SERVER_MOD_PERMISSION via serverAuthority.
+  await registerServerReportRoutes(app, db, io);
+  await registerServerModCaseRoutes(app, db, io);
+  await registerServerEmoticonRoutes(app, db, io, uploadsRoot);
+  await registerServerAnnouncementRoutes(app, db, io);
+  await registerServerFaqRoutes(app, db, io);
+  await registerServerCommandTitleRoutes(app, db, io, registry);
+  await registerServerEarningRoutes(app, db, io, uploadsRoot);
+
+  const serversImgDir = join(uploadsRoot, "servers");
+
+  /** Write a content-hashed server image; returns its public URL. */
+  async function writeServerImage(
+    prefix: string,
+    dataUrl: string,
+    maxBytes: number,
+  ): Promise<{ url: string } | { error: string; status: number }> {
+    const decoded = decodeServerDataUrl(dataUrl, maxBytes);
+    if ("error" in decoded) return { error: decoded.error, status: 400 };
+    const detected = sniffServerImage(decoded);
+    if (!detected) return { error: "unsupported image type (png, jpg, webp, gif only)", status: 415 };
+    const hash = createHash("sha256").update(decoded).digest("hex").slice(0, 16);
+    const filename = `${prefix}-${hash}.${detected.ext}`;
+    await mkdir(serversImgDir, { recursive: true });
+    await writeFile(join(serversImgDir, filename), decoded);
+    return { url: `/uploads/servers/${filename}` };
+  }
+
+  /** Best-effort removal of a replaced /uploads/servers/ file. */
+  function unlinkServerImage(url: string | null | undefined): void {
+    if (!url?.startsWith("/uploads/servers/")) return;
+    const filename = url.slice("/uploads/servers/".length);
+    if (filename) unlink(join(serversImgDir, filename)).catch(() => { /* best-effort */ });
+  }
+
   /** Single gate the top of every handler runs: when the feature is off the
    *  route 404s exactly like a disabled feature, keeping flag-off byte-
    *  identical to today. Returns false (and sets the 404) when off. */
@@ -150,6 +353,50 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
    *  Catalog + detail
    * ========================================================= */
 
+  /** Last activity per server: max over its rooms' message rows. Legacy
+   *  NULL-serverId rooms are adopted into the default server (coalesced group
+   *  key) so the default server's activity isn't dropped. Shared by the
+   *  catalog + discover surfaces. */
+  async function loadActivityBy(): Promise<Map<string, number | null>> {
+    const activity = await db
+      .select({
+        serverId: sql<string>`coalesce(${rooms.serverId}, ${DEFAULT_SERVER_ID})`,
+        last: sql<number | null>`max(coalesce(${messages.lastActivityAt}, ${messages.createdAt}))`,
+      })
+      .from(messages)
+      .innerJoin(rooms, eq(rooms.id, messages.roomId))
+      .where(isNull(messages.deletedAt))
+      .groupBy(sql`coalesce(${rooms.serverId}, ${DEFAULT_SERVER_ID})`);
+    return new Map(activity.map((r) => [r.serverId, r.last]));
+  }
+
+  /** Load the per-request viewer enrichment (roles, visit markers, favorite)
+   *  that {@link buildServerSummary} layers onto each row. One indexed read
+   *  each; all null/empty for an anonymous viewer. */
+  async function loadSummaryViewerCtx(
+    me: { id: string } | null,
+    activityBy: Map<string, number | null>,
+  ): Promise<SummaryViewerCtx> {
+    const rolesBy = me
+      ? new Map((await db
+          .select({ serverId: serverMembers.serverId, role: serverMembers.role })
+          .from(serverMembers)
+          .where(eq(serverMembers.userId, me.id))).map((r) => [r.serverId, r.role] as const))
+      : null;
+    const visitsBy = me
+      ? new Map((await db
+          .select({ serverId: serverVisits.serverId, at: serverVisits.lastVisitAt })
+          .from(serverVisits)
+          .where(eq(serverVisits.userId, me.id))).map((v) => [v.serverId, +v.at] as const))
+      : null;
+    // The viewer's chosen favorite/default server (not on the session-user
+    // shape, so read it once here for the per-row `isMyDefault` flag).
+    const myDefaultServerId = me
+      ? (await db.select({ d: users.defaultServerId }).from(users).where(eq(users.id, me.id)).limit(1))[0]?.d ?? null
+      : null;
+    return { me, rolesBy, visitsBy, myDefaultServerId, activityBy };
+  }
+
   app.get("/servers", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
     // Session optional (mirrors the forum catalog): logged-in viewers also get
@@ -157,82 +404,112 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     const me = await getSessionUser(req, db).catch(() => null);
 
     const rows = await db
-      .select({
-        id: servers.id,
-        slug: servers.slug,
-        name: servers.name,
-        tagline: servers.tagline,
-        logoUrl: servers.logoUrl,
-        iconColor: servers.iconColor,
-        isSystem: servers.isSystem,
-        isDefault: servers.isDefault,
-        status: servers.status,
-        visibility: servers.visibility,
-        joinMode: servers.joinMode,
-        ownerUserId: servers.ownerUserId,
-      })
+      .select(SERVER_SUMMARY_COLUMNS)
       .from(servers)
       .where(sql`${servers.status} != 'archived'`);
 
-    // Last activity per server: max over its rooms' message rows.
-    const activity = await db
-      .select({
-        serverId: rooms.serverId,
-        last: sql<number | null>`max(coalesce(${messages.lastActivityAt}, ${messages.createdAt}))`,
-      })
-      .from(messages)
-      .innerJoin(rooms, eq(rooms.id, messages.roomId))
-      .where(and(isNotNull(rooms.serverId), isNull(messages.deletedAt)))
-      .groupBy(rooms.serverId);
-    const activityBy = new Map(activity.map((r) => [r.serverId, r.last]));
+    const activityBy = await loadActivityBy();
+    const ctx = await loadSummaryViewerCtx(me, activityBy);
 
-    // The viewer's membership roles + visit markers (one indexed read each).
-    const rolesBy = me
-      ? new Map((await db
-          .select({ serverId: serverMembers.serverId, role: serverMembers.role })
-          .from(serverMembers)
-          .where(eq(serverMembers.userId, me.id))).map((r) => [r.serverId, r.role]))
-      : null;
-    const visitsBy = me
-      ? new Map((await db
-          .select({ serverId: serverVisits.serverId, at: serverVisits.lastVisitAt })
-          .from(serverVisits)
-          .where(eq(serverVisits.userId, me.id))).map((v) => [v.serverId, +v.at]))
-      : null;
-
-    const out = rows.map((s) => {
-      // viewerRole: the relational role, with the owner short-circuit, and the
-      // system/default server treated as implicit-member for signed-in users
-      // (mirrors serverAuthority.isMember) so the rail's owned/joined split
-      // doesn't nag everyone to "join" The Spire.
-      const role: ServerRole | null = me
-        ? (rolesBy?.get(s.id)
-            ?? (s.ownerUserId === me.id
-              ? "owner"
-              : s.isSystem
-                ? "member"
-                : null))
-        : null;
-      const last = activityBy.get(s.id) ?? null;
-      const seen = visitsBy?.get(s.id);
-      return {
-        id: s.id,
-        slug: s.slug,
-        name: s.name,
-        tagline: s.tagline ?? null,
-        logoUrl: s.logoUrl ?? null,
-        iconColor: s.iconColor ?? null,
-        isSystem: !!s.isSystem,
-        isDefault: !!s.isDefault,
-        status: s.status,
-        visibility: s.visibility,
-        joinMode: s.joinMode,
-        viewerRole: role,
-        ...(me ? { hasUnseen: !!last && (!seen || last > seen) } : {}),
-      };
-    });
+    const out = rows.map((s) => buildServerSummary(s, ctx));
     out.sort((a, b) => catalogRank(a) - catalogRank(b) || a.name.localeCompare(b.name));
     return { servers: out };
+  });
+
+  /* =========================================================
+   *  Discovery: browse / search / tag cloud (migration 0301)
+   *
+   *  Public-facing surfaces for finding a community by activity, recency, name,
+   *  or genre tag. Same flag gate + the SAME ServerSummary shape the catalog
+   *  emits (so the discover cards reuse the rail card). Limited to JOINABLE,
+   *  BROWSABLE servers: visibility 'public' and not archived.
+   * ========================================================= */
+
+  /** WHERE for the discover surfaces: public, non-archived servers only. */
+  const discoverableWhere = and(
+    eq(servers.visibility, "public"),
+    sql`${servers.status} != 'archived'`,
+  );
+
+  /** GET /servers/discover — { popular, new }. `popular` is member-count desc
+   *  then most-recent-activity/createdAt desc; `new` is createdAt desc. Each
+   *  capped at 12 and built with the full catalog summary shape. */
+  app.get("/servers/discover", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const me = await getSessionUser(req, db).catch(() => null);
+
+    const rows = await db.select(SERVER_SUMMARY_COLUMNS).from(servers).where(discoverableWhere);
+    const activityBy = await loadActivityBy();
+    const ctx = await loadSummaryViewerCtx(me, activityBy);
+
+    // Member counts per discoverable server (one grouped read) — drives the
+    // popular sort. Not part of the summary shape, used only for ordering.
+    const ids = rows.map((r) => r.id);
+    const memberCountBy = new Map<string, number>();
+    if (ids.length) {
+      const counts = await db
+        .select({ serverId: serverMembers.serverId, n: sql<number>`count(*)` })
+        .from(serverMembers)
+        .where(inArray(serverMembers.serverId, ids))
+        .groupBy(serverMembers.serverId);
+      for (const c of counts) memberCountBy.set(c.serverId, Number(c.n));
+    }
+    const recencyOf = (s: ServerSummaryRow) => activityBy.get(s.id) ?? +s.createdAt;
+
+    const popular = [...rows]
+      .sort((a, b) =>
+        (memberCountBy.get(b.id) ?? 0) - (memberCountBy.get(a.id) ?? 0)
+        || recencyOf(b) - recencyOf(a))
+      .slice(0, 12)
+      .map((s) => buildServerSummary(s, ctx));
+    const fresh = [...rows]
+      .sort((a, b) => +b.createdAt - +a.createdAt)
+      .slice(0, 12)
+      .map((s) => buildServerSummary(s, ctx));
+    return { popular, new: fresh };
+  });
+
+  /** GET /servers/discover/search?q=&tag= — { items }. Public non-archived
+   *  servers where (q empty OR name/tagline contains q, case-insensitive) AND
+   *  (tag empty OR the server carries that tag). Capped at 50. */
+  app.get<{ Querystring: { q?: string; tag?: string } }>("/servers/discover/search", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const me = await getSessionUser(req, db).catch(() => null);
+
+    const q = (req.query.q ?? "").trim().toLowerCase();
+    const tag = (req.query.tag ?? "").trim();
+    const rows = await db.select(SERVER_SUMMARY_COLUMNS).from(servers).where(discoverableWhere);
+    const activityBy = await loadActivityBy();
+    const ctx = await loadSummaryViewerCtx(me, activityBy);
+
+    const items = rows
+      .filter((s) => {
+        const textHit = !q
+          || s.name.toLowerCase().includes(q)
+          || (s.tagline ?? "").toLowerCase().includes(q);
+        const tagHit = !tag || hasTag(parseTagsJson(s.tagsJson), tag);
+        return textHit && tagHit;
+      })
+      .sort((a, b) => catalogRank(a) - catalogRank(b) || a.name.localeCompare(b.name))
+      .slice(0, 50)
+      .map((s) => buildServerSummary(s, ctx));
+    return { items };
+  });
+
+  /** GET /servers/tags — { tags: [{ tag, count }] }. Distinct tags across
+   *  public non-archived servers with their occurrence counts, count desc then
+   *  tag asc. Tallied in JS from each server's parsed tags_json. */
+  app.get("/servers/tags", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const rows = await db.select({ tagsJson: servers.tagsJson }).from(servers).where(discoverableWhere);
+    const tally = new Map<string, number>();
+    for (const r of rows) {
+      for (const t of parseTagsJson(r.tagsJson)) tally.set(t, (tally.get(t) ?? 0) + 1);
+    }
+    const tags = [...tally.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    return { tags };
   });
 
   app.get<{ Params: { id: string } }>("/servers/:id", async (req, reply) => {
@@ -250,14 +527,14 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
       .where(eq(users.id, server.ownerUserId)).limit(1))[0];
 
     const roomCount = (await db.select({ n: sql<number>`count(*)` }).from(rooms)
-      .where(and(eq(rooms.serverId, server.id), isNull(rooms.archivedAt))))[0]?.n ?? 0;
+      .where(and(roomsOfServerWhere(server.id), isNull(rooms.archivedAt))))[0]?.n ?? 0;
     const memberCount = (await db.select({ n: sql<number>`count(*)` }).from(serverMembers)
       .where(eq(serverMembers.serverId, server.id)))[0]?.n ?? 0;
     const activity = (await db
       .select({ last: sql<number | null>`max(coalesce(${messages.lastActivityAt}, ${messages.createdAt}))` })
       .from(messages)
       .innerJoin(rooms, eq(rooms.id, messages.roomId))
-      .where(and(eq(rooms.serverId, server.id), isNull(messages.deletedAt))))[0]?.last ?? null;
+      .where(and(roomsOfServerWhere(server.id), isNull(messages.deletedAt))))[0]?.last ?? null;
 
     const a = await serverAuthority(db, me, server.id);
     let viewer: ServerViewerState | null = null;
@@ -293,7 +570,12 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
         bannerImageUrl: server.bannerImageUrl ?? null,
         bannerFocusY: server.bannerFocusY ?? 50,
         bannerCoverCss: server.bannerCoverCss ?? null,
+        bannerCrop: parseCrop(server.bannerCrop),
+        bannerHeight: server.bannerHeight ?? null,
         iconColor: server.iconColor ?? null,
+        borderColor: server.borderColor ?? null,
+        iconCrop: parseCrop(server.iconCrop),
+        horizontalLogoUrl: server.horizontalLogoUrl ?? null,
         themeJson: server.themeJson ?? null,
         themeStyleKey: server.themeStyleKey ?? null,
         isSystem: !!server.isSystem,
@@ -373,6 +655,10 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     requestedName: z.string().trim().min(SERVER_NAME_MIN).max(SERVER_NAME_MAX),
     requestedSlug: z.string().trim().min(3).max(40),
     purpose: z.string().trim().min(SERVER_PURPOSE_MIN).max(SERVER_PURPOSE_MAX),
+    /** "I agree to the registration rules" — required (true) only when the
+     *  admin has authored non-empty serverRegistrationRulesHtml (migration
+     *  0301). Optional in the schema for back-compat; enforced in the handler. */
+    agreedToRules: z.boolean().optional(),
   }).strict();
 
   app.post<{ Body: unknown }>("/servers/applications", async (req, reply) => {
@@ -385,6 +671,19 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     let body: z.infer<typeof submitBody>;
     try { body = submitBody.parse(req.body); }
     catch { reply.code(400); return { error: `Check the fields: name ${SERVER_NAME_MIN}-${SERVER_NAME_MAX} chars, purpose ${SERVER_PURPOSE_MIN}-${SERVER_PURPOSE_MAX} chars.` }; }
+
+    // Registration-rules agreement gate (migration 0301). When the admin has
+    // authored non-empty serverRegistrationRulesHtml, the applicant must tick
+    // "I agree" (agreedToRules === true); we then stamp agreedAt on the row.
+    // Empty rules ⇒ no new requirement (back-compat). Read the column straight
+    // off the site_settings singleton — getSettings' typed shape doesn't carry
+    // it yet (a sibling track owns that surface).
+    const rulesHtml = (await db.select({ html: siteSettings.serverRegistrationRulesHtml })
+      .from(siteSettings).where(eq(siteSettings.id, "singleton")).limit(1))[0]?.html ?? "";
+    const rulesInForce = rulesHtml.trim().length > 0;
+    if (rulesInForce && body.agreedToRules !== true) {
+      reply.code(400); return { error: "Please read and agree to the server registration rules before applying." };
+    }
 
     const slug = normalizeServerSlug(body.requestedSlug);
     if (!slug) { reply.code(400); return { error: "That slug isn't usable - lowercase letters, numbers, and _ only (3-40), and not a reserved word." }; }
@@ -432,6 +731,9 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
         requestedName: body.requestedName,
         requestedSlug: slug,
         purpose: body.purpose,
+        // Record the moment of agreement only when rules were actually in force
+        // at submit; NULL otherwise (legacy / no gate).
+        agreedAt: rulesInForce ? new Date() : null,
       });
     } catch {
       reply.code(409); return { error: "You already have an application pending review." };
@@ -536,6 +838,53 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     await db.delete(serverMembers)
       .where(and(eq(serverMembers.serverId, a.server.id), eq(serverMembers.userId, me.id)));
     return { ok: true };
+  });
+
+  /* =========================================================
+   *  Favorite / default server (the caller's own preference)
+   *
+   *  Sets `users.default_server_id` — the server whose per-server identity a
+   *  GLOBAL profile view of the caller reflects (collection / pet collection /
+   *  equipped name style / banner / flair), resolved by resolveProfileServerId.
+   *  Also the rail's home-server preference + the off-room earning anchor.
+   *  Self-service: a caller only ever sets/clears their OWN favorite, and only
+   *  to a server they belong to.
+   * ========================================================= */
+
+  /** POST /servers/:id/favorite — mark this server as the caller's favorite /
+   *  default. Must be a server they're a member of (the system server counts as
+   *  implicit membership). Idempotent. */
+  app.post<{ Params: { id: string } }>("/servers/:id/favorite", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const a = await serverAuthority(db, me, req.params.id);
+    if (!a.server) { reply.code(404); return { error: "no server" }; }
+    // Only a server you belong to can be your default — otherwise the profile
+    // would anchor to a server you have no identity on. isMember folds in the
+    // owner short-circuit + the system server's implicit membership.
+    if (!a.isMember) { reply.code(403); return { error: "You can only set a server you belong to as your default." }; }
+    await db.update(users).set({ defaultServerId: a.server.id }).where(eq(users.id, me.id));
+    await auditServer(db, {
+      serverId: a.server.id, actorUserId: me.id, action: "server_favorite_set",
+      metadata: { slug: a.server.slug },
+    });
+    return { ok: true, defaultServerId: a.server.id };
+  });
+
+  /** DELETE /servers/:id/favorite — clear the caller's favorite back to NULL
+   *  (the profile then falls back to the system server). The :id is advisory —
+   *  we clear regardless, so a stale id still lets the user reset. */
+  app.delete<{ Params: { id: string } }>("/servers/:id/favorite", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    await db.update(users).set({ defaultServerId: null }).where(eq(users.id, me.id));
+    await auditServer(db, {
+      serverId: req.params.id, actorUserId: me.id, action: "server_favorite_clear",
+      metadata: {},
+    });
+    return { ok: true, defaultServerId: null };
   });
 
   /** Stamp "viewer looked at this server now" — clears the rail's unseen dot. */
@@ -869,18 +1218,34 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
    *  Owner console: appearance (PATCH /servers/:id)
    * ========================================================= */
 
+  // Pan/zoom focus for the icon + banner — the same AvatarCrop shape user
+  // avatars use ({zoom,offsetX,offsetY}); persisted as JSON.
+  const cropSchema = z.object({
+    zoom: z.number().min(1).max(4),
+    offsetX: z.number().min(0).max(100),
+    offsetY: z.number().min(0).max(100),
+  }).strict();
+
   const patchServerBody = z.object({
     name: z.string().trim().min(SERVER_NAME_MIN).max(SERVER_NAME_MAX).optional(),
     tagline: z.string().trim().max(SERVER_TAGLINE_MAX).nullable().optional(),
     descriptionHtml: z.string().max(5000 * 4).nullable().optional(),
     logoUrl: z.string().trim().max(2048).nullable().optional(),
     iconColor: z.string().trim().max(32).nullable().optional(),
+    borderColor: z.string().trim().max(32).nullable().optional(),
+    iconCrop: cropSchema.nullable().optional(),
+    bannerCrop: cropSchema.nullable().optional(),
     themeJson: z.string().max(4000).nullable().optional(),
     themeStyleKey: z.string().trim().min(1).max(64).nullable().optional(),
     bannerFocusY: z.number().int().min(0).max(100).optional(),
+    bannerHeight: z.number().int().min(48).max(240).nullable().optional(),
     publicBrowsing: z.boolean().optional(),
     joinMode: z.enum(["open", "application", "invite"]).optional(),
     applicationPrompt: z.string().trim().max(300).nullable().optional(),
+    /** Owner-set discovery tags (migration 0301). normalizeTags/serializeTags
+     *  do the real sanitizing on persist — the loose array bound just rejects
+     *  absurd payloads before we touch the normalizer. */
+    tags: z.array(z.string()).max(64).optional(),
     /** Welcome + rules HTML live in the per-server settings row (Track owns
      *  that surface separately); appearance here is the servers-table slice. */
     roomOrder: z.array(z.string()).max(200).optional(),
@@ -903,6 +1268,9 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     }
     if (body.logoUrl !== undefined) update.logoUrl = body.logoUrl?.trim() ? body.logoUrl.trim() : null;
     if (body.iconColor !== undefined) update.iconColor = body.iconColor?.trim() ? body.iconColor.trim() : null;
+    if (body.borderColor !== undefined) update.borderColor = body.borderColor?.trim() ? body.borderColor.trim() : null;
+    if (body.iconCrop !== undefined) update.iconCrop = body.iconCrop ? JSON.stringify(body.iconCrop) : null;
+    if (body.bannerCrop !== undefined) update.bannerCrop = body.bannerCrop ? JSON.stringify(body.bannerCrop) : null;
     if (body.themeJson !== undefined) {
       if (body.themeJson === null || !body.themeJson.trim()) {
         update.themeJson = null;
@@ -913,10 +1281,14 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     }
     if (body.themeStyleKey !== undefined) update.themeStyleKey = body.themeStyleKey;
     if (body.bannerFocusY !== undefined) update.bannerFocusY = body.bannerFocusY;
+    if (body.bannerHeight !== undefined) update.bannerHeight = body.bannerHeight;
     if (body.publicBrowsing !== undefined) update.publicBrowsing = body.publicBrowsing;
     if (body.applicationPrompt !== undefined) {
       update.applicationPrompt = body.applicationPrompt?.trim() ? body.applicationPrompt.trim() : null;
     }
+    // serializeTags normalizes (lowercase/dedupe/clamp) and returns NULL when
+    // the list is empty, so an empty array clears the column.
+    if (body.tags !== undefined) update.tagsJson = serializeTags(body.tags);
     // The system/default server is the platform home: its join mode stays open
     // (everyone is an implicit member) — refuse to gate it.
     if (body.joinMode !== undefined) {
@@ -927,7 +1299,7 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     }
     if (body.roomOrder !== undefined) {
       const own = new Set((await db.select({ id: rooms.id }).from(rooms)
-        .where(eq(rooms.serverId, gate.server.id))).map((r) => r.id));
+        .where(roomsOfServerWhere(gate.server.id))).map((r) => r.id));
       update.roomOrderJson = JSON.stringify(body.roomOrder.filter((id) => own.has(id)));
     }
     await db.update(servers).set(update).where(eq(servers.id, gate.server.id));
@@ -935,6 +1307,202 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_appearance_update",
       metadata: { slug: gate.server.slug, fields: Object.keys(update).filter((k) => k !== "updatedAt") },
     });
+    return { ok: true };
+  });
+
+  /* ---------- Identity images: icon (logo) / banner upload ---------- */
+
+  const serverImageBody = z.union([
+    z.object({ imageDataUrl: z.string().min(32).max(4_000_000) }).strict(),
+    z.object({ clear: z.literal(true) }).strict(),
+  ]);
+
+  // POST /servers/:id/{logo,banner,horizontal-logo} — upload (or clear) the
+  // server's round icon / header banner / wide top-bar wordmark. Mirrors the
+  // forum image endpoints; gated on manage_appearance (the same key the
+  // appearance PATCH uses).
+  const IMAGE_COLUMN = { logo: "logoUrl", banner: "bannerImageUrl", "horizontal-logo": "horizontalLogoUrl" } as const;
+  for (const kind of ["logo", "banner", "horizontal-logo"] as const) {
+    const maxBytes = kind === "logo" ? 512 * 1024 : kind === "horizontal-logo" ? 1024 * 1024 : 2 * 1024 * 1024;
+    const column = IMAGE_COLUMN[kind];
+    app.post<{ Params: { id: string }; Body: unknown }>(`/servers/:id/${kind}`, async (req, reply) => {
+      if (!(await serversLive(reply))) return { error: "not found" };
+      const gate = await requireServerPermission(req, req.params.id, "manage_appearance");
+      if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+      let body: z.infer<typeof serverImageBody>;
+      try { body = serverImageBody.parse(req.body); }
+      catch { reply.code(400); return { error: "invalid body" }; }
+      const prev = gate.server[column];
+      if ("clear" in body) {
+        await db.update(servers).set({ [column]: null, updatedAt: new Date() }).where(eq(servers.id, gate.server.id));
+        unlinkServerImage(prev);
+      } else {
+        const written = await writeServerImage(`${gate.server.id}-${kind}`, body.imageDataUrl, maxBytes);
+        if ("error" in written) { reply.code(written.status); return { error: written.error }; }
+        await db.update(servers).set({ [column]: written.url, updatedAt: new Date() }).where(eq(servers.id, gate.server.id));
+        if (prev !== written.url) unlinkServerImage(prev);
+        await auditServer(db, {
+          serverId: gate.server.id, actorUserId: gate.me.id, action: "server_appearance_update",
+          metadata: { slug: gate.server.slug, fields: [column] },
+        });
+        return { ok: true, url: written.url };
+      }
+      await auditServer(db, {
+        serverId: gate.server.id, actorUserId: gate.me.id, action: "server_appearance_update",
+        metadata: { slug: gate.server.slug, fields: [column], cleared: true },
+      });
+      return { ok: true, url: null };
+    });
+  }
+
+  /* =========================================================
+   *  Owner console: per-server ROOM admin (manage_rooms)
+   *  The per-server analog of /admin/rooms — a server owner/mod manages THIS
+   *  server's rooms (create/edit/delete) from the console instead of the global
+   *  admin panel (plan.md §4 partition: "Rooms are a server's content").
+   * ========================================================= */
+
+  const serverRoomCreateBody = z.object({
+    name: z.string().trim().min(1).max(40),
+    type: z.enum(["public", "private"]).default("public"),
+    password: z.string().min(1).max(128).optional(),
+    topic: z.string().max(200).nullable().optional(),
+    description: z.string().max(2000).nullable().optional(),
+    replyMode: z.enum(["flat", "nested"]).optional(),
+  }).strict();
+
+  /** Does this room belong to the gated server? NULL serverId is adopted by the
+   *  default/system server (the documented contract), so the default server's
+   *  console manages legacy NULL rooms too. */
+  function roomInServer(room: { serverId: string | null }, serverId: string): boolean {
+    return (room.serverId ?? DEFAULT_SERVER_ID) === serverId;
+  }
+
+  /** SQL WHERE counterpart of {@link roomInServer}: matches a server's rooms,
+   *  adopting legacy NULL-serverId rooms into the default/system server so the
+   *  default server's counts/activity/eviction/reorder/clear queries don't
+   *  silently drop un-homed rooms (the prior "lost rooms" bug class). */
+  function roomsOfServerWhere(serverId: string) {
+    return serverId === DEFAULT_SERVER_ID
+      ? or(eq(rooms.serverId, serverId), isNull(rooms.serverId))
+      : eq(rooms.serverId, serverId);
+  }
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/servers/:id/rooms", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    let body: z.infer<typeof serverRoomCreateBody>;
+    try { body = serverRoomCreateBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    if (body.type === "private" && !body.password) { reply.code(400); return { error: "a private room needs a password" }; }
+    const dup = (await db.select({ id: rooms.id }).from(rooms)
+      .where(sql`lower(${rooms.name}) = ${body.name.toLowerCase()}`).limit(1))[0];
+    if (dup) { reply.code(409); return { error: "a room with that name already exists" }; }
+    const id = nanoid();
+    const argon2 = (await import("argon2")).default;
+    await db.insert(rooms).values({
+      id,
+      name: body.name,
+      slug: await deriveUniqueRoomSlug(db, body.name),
+      type: body.type,
+      passwordHash: body.type === "private" && body.password ? await argon2.hash(body.password) : null,
+      topic: body.topic?.trim() ? body.topic.trim() : null,
+      description: body.description?.trim() ? body.description : null,
+      ownerId: gate.me.id,
+      originalOwnerUserId: gate.me.id,
+      lastOwnerUserId: gate.me.id,
+      replyMode: body.replyMode ?? "flat",
+      serverId: gate.server.id,
+    });
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_create", targetRoomId: id, metadata: { name: body.name } });
+    emitTreeChanged(io, gate.server.id);
+    return { ok: true, id };
+  });
+
+  const serverRoomPatchBody = z.object({
+    name: z.string().trim().min(1).max(40).optional(),
+    topic: z.string().max(200).nullable().optional(),
+    description: z.string().max(2000).nullable().optional(),
+    type: z.enum(["public", "private"]).optional(),
+    password: z.string().max(128).nullable().optional(),
+    replyMode: z.enum(["flat", "nested"]).optional(),
+    messageExpiryMinutes: z.number().int().min(0).max(100_000).nullable().optional(),
+    isDefault: z.boolean().optional(),
+  }).strict();
+
+  app.patch<{ Params: { id: string; roomId: string }; Body: unknown }>("/servers/:id/rooms/:roomId", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.roomId)).limit(1))[0];
+    if (!room || !roomInServer(room, gate.server.id)) { reply.code(404); return { error: "no such room in this server" }; }
+    let body: z.infer<typeof serverRoomPatchBody>;
+    try { body = serverRoomPatchBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    if (body.name && body.name.toLowerCase() !== room.name.toLowerCase()) {
+      const dup = (await db.select({ id: rooms.id }).from(rooms)
+        .where(and(sql`lower(${rooms.name}) = ${body.name.toLowerCase()}`, ne(rooms.id, room.id))).limit(1))[0];
+      if (dup) { reply.code(409); return { error: "a room with that name already exists" }; }
+    }
+    const update: Partial<typeof rooms.$inferInsert> = {};
+    if (body.name !== undefined) update.name = body.name;
+    if (body.topic !== undefined) update.topic = body.topic?.trim() ? body.topic.trim() : null;
+    if (body.description !== undefined) update.description = body.description?.trim() ? body.description : null;
+    if (body.replyMode !== undefined) update.replyMode = body.replyMode;
+    if (body.messageExpiryMinutes !== undefined) update.messageExpiryMinutes = body.messageExpiryMinutes;
+    // One default room PER server (rooms_one_default_per_server). Flag-on first
+    // clears whichever room in THIS server currently holds it.
+    if (body.isDefault === true && !room.isDefault) {
+      await db.update(rooms).set({ isDefault: false })
+        .where(and(roomsOfServerWhere(gate.server.id), eq(rooms.isDefault, true)));
+      update.isDefault = true;
+    } else if (body.isDefault === false) {
+      update.isDefault = false;
+    }
+    if (body.type !== undefined && body.type !== room.type) {
+      update.type = body.type;
+      const argon2 = (await import("argon2")).default;
+      if (body.type === "private") {
+        if (body.password) update.passwordHash = await argon2.hash(body.password);
+        else if (!room.passwordHash) { reply.code(400); return { error: "switching to private requires a password" }; }
+      } else { update.passwordHash = null; }
+    } else if (body.password !== undefined) {
+      const argon2 = (await import("argon2")).default;
+      update.passwordHash = body.password ? await argon2.hash(body.password) : null;
+    }
+    await db.update(rooms).set(update).where(eq(rooms.id, room.id));
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_update", targetRoomId: room.id, metadata: { fields: Object.keys(update) } });
+    await broadcastRoomState(io, db, room.id);
+    emitTreeChanged(io, gate.server.id);
+    return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string; roomId: string } }>("/servers/:id/rooms/:roomId", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.roomId)).limit(1))[0];
+    if (!room || !roomInServer(room, gate.server.id)) { reply.code(404); return { error: "no such room in this server" }; }
+    if (room.isSystem) { reply.code(400); return { error: "this room is the server's system room and can't be deleted" }; }
+    // Relocate live occupants to this server's landing (then canonical), mirror
+    // the global admin hatchet; cascade FKs clean up members/messages/bans.
+    const landing = (await findServerLanding(db, gate.server.id)) ?? (await findCanonicalLanding(db));
+    const remoteSockets = await io.in(`room:${room.id}`).fetchSockets();
+    for (const s of remoteSockets) {
+      s.leave(`room:${room.id}`);
+      s.emit("error:notice", { code: "ROOM_DELETED", message: `Room "${room.name}" was removed.` });
+      if (landing) {
+        s.join(`room:${landing.id}`);
+        (s.data as { roomId?: string }).roomId = landing.id;
+        const uid = (s.data as { userId?: string }).userId;
+        if (uid) await sendRoomBacklogTo(s, db, landing.id, uid);
+      }
+    }
+    await db.delete(rooms).where(eq(rooms.id, room.id));
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_delete", metadata: { roomId: room.id, roomName: room.name } });
+    if (landing && remoteSockets.length > 0) await broadcastRoomState(io, db, landing.id);
+    emitTreeChanged(io, gate.server.id);
     return { ok: true };
   });
 
@@ -1101,13 +1669,15 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
       if (ban && (!ban.until || +ban.until > Date.now())) {
         reply.code(409); return { error: "That user is banned from this server - lift the ban first." };
       }
+      // A mod's grant excludes owner-only keys (manage_appearance) — appearance
+      // stays owner-only, so even the owner can't hand it to a mod here.
       const permsJson = body.role === "mod"
         ? serializeServerModPermissions(
             (clampGrant(
-              (body.permissions ? body.permissions.filter(isServerModPermission) : SERVER_MOD_DEFAULT_PERMISSIONS) as ServerPermission[],
+              (body.permissions ? body.permissions.filter(isGrantableServerModPermission) : SERVER_MOD_DEFAULT_PERMISSIONS) as ServerPermission[],
               gate.authority.permissions,
               gate.authority.isOwner,
-            ).filter(isServerModPermission)),
+            ).filter(isGrantableServerModPermission)),
           )
         : "[]";
       await db.insert(serverMembers)
@@ -1143,8 +1713,16 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
           eq(serverMembers.role, "mod"),
         )).limit(1))[0];
       if (!row) { reply.code(404); return { error: "not a mod here" }; }
-      const requested = body.permissions.filter(isServerModPermission) as ServerPermission[];
-      const perms = clampGrant(requested, gate.authority.permissions, gate.authority.isOwner).filter(isServerModPermission);
+      // Owner-only keys (manage_appearance) are never grantable to a mod.
+      const requested = body.permissions.filter(isGrantableServerModPermission) as ServerPermission[];
+      const clamped = clampGrant(requested, gate.authority.permissions, gate.authority.isOwner).filter(isGrantableServerModPermission);
+      // Preserve grantable powers the mod already holds that a lesser manager
+      // can't grant — like the usergroup PATCH, a non-owner manager can only
+      // add/remove within their OWN powers, never strip a power the owner gave.
+      const preserved = gate.authority.isOwner
+        ? []
+        : parseServerModPermissions(row.permissionsJson).filter((p) => isGrantableServerModPermission(p) && !gate.authority.permissions.includes(p));
+      const perms = [...new Set<ServerModPermission>([...clamped, ...preserved])];
       await db.update(serverMembers).set({ permissionsJson: serializeServerModPermissions(perms) })
         .where(and(eq(serverMembers.serverId, gate.server.id), eq(serverMembers.userId, req.params.userId)));
       await auditServer(db, {
@@ -1228,25 +1806,47 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
   });
 
   /* =========================================================
-   *  Usergroups (the unified permission registry)
+   *  Usergroups (member-feature bundles + auto-join rules)
+   *  Moderation power comes from the role tier, never a group.
    * ========================================================= */
 
-  function clampPerms(requested: ServerPermission[], actorPerms: ServerPermission[], isOwner: boolean): ServerPermission[] {
-    if (isOwner) return requested;
+  /** Usergroups grant MEMBER-FEATURE perms only — moderation power comes from
+   *  the role tier, never from a group (so a group can't silently mint a mod).
+   *  Clamp the request to the feature half AND to the actor's own powers. */
+  function clampFeaturePerms(requested: ServerFeaturePermission[], actorPerms: ServerPermission[], isOwner: boolean): ServerFeaturePermission[] {
+    const featureOnly = requested.filter(isServerFeaturePermission);
+    if (isOwner) return featureOnly;
     const allowed = new Set(actorPerms);
-    return requested.filter((p) => allowed.has(p));
+    return featureOnly.filter((p) => allowed.has(p));
+  }
+
+  /** Validate a group's auto-join rules against THIS server: parse to the
+   *  canonical shape (floor min:1, cap) and drop `posted_in_room` rules whose
+   *  room isn't one of this server's rooms. */
+  async function validServerAutoRules(serverId: string, raw: unknown): Promise<ServerAutoRule[]> {
+    const parsed = parseServerAutoRules(JSON.stringify(raw ?? []));
+    const roomRuleIds = parsed.filter((r) => r.kind === "posted_in_room").map((r) => (r as { roomId: string }).roomId);
+    let validRooms = new Set<string>();
+    if (roomRuleIds.length) {
+      // Reuse serverRoomIds so room validation adopts legacy NULL-serverId rooms
+      // on the default server identically to the auto-group evaluator.
+      validRooms = new Set(await serverRoomIds(db, serverId));
+    }
+    return parsed.filter((r) => r.kind !== "posted_in_room" || validRooms.has((r as { roomId: string }).roomId)).slice(0, SERVER_MAX_AUTO_RULES);
   }
 
   const groupBody = z.object({
-    name: z.string().trim().min(1).max(60),
+    name: z.string().trim().min(1).max(SERVER_USERGROUP_NAME_MAX),
     color: z.string().trim().max(32).nullable().optional(),
     permissions: z.array(z.string()).max(SERVER_PERMISSIONS.length + 5).optional(),
+    autoRules: z.array(z.unknown()).max(SERVER_MAX_AUTO_RULES + 4).optional(),
     sortOrder: z.number().int().min(0).max(999).optional(),
   }).strict();
   const patchGroupBody = z.object({
-    name: z.string().trim().min(1).max(60).optional(),
+    name: z.string().trim().min(1).max(SERVER_USERGROUP_NAME_MAX).optional(),
     color: z.string().trim().max(32).nullable().optional(),
     permissions: z.array(z.string()).max(SERVER_PERMISSIONS.length + 5).optional(),
+    autoRules: z.array(z.unknown()).max(SERVER_MAX_AUTO_RULES + 4).optional(),
     sortOrder: z.number().int().min(0).max(999).optional(),
   }).strict();
 
@@ -1271,9 +1871,10 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
         id: g.id,
         name: g.name,
         color: g.color ?? null,
-        permissions: parseServerPermissions(g.permissionsJson),
+        permissions: parseServerFeaturePermissions(g.permissionsJson),
         isDefault: !!g.isDefault,
         sortOrder: g.sortOrder,
+        autoRules: parseServerAutoRules(g.autoRulesJson),
         memberCount: g.isDefault ? 0 : (countMap.get(g.id) ?? 0),
       })),
     };
@@ -1287,14 +1888,15 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     try { body = groupBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
     const count = Number((await db.select({ n: sql<number>`count(*)` }).from(serverUsergroups).where(eq(serverUsergroups.serverId, gate.server.id)))[0]?.n ?? 0);
-    if (count >= 25) { reply.code(409); return { error: "A server can have at most 25 usergroups." }; }
-    const requested = (body.permissions ?? []).filter(isServerPermission) as ServerPermission[];
-    const perms = clampPerms(requested, gate.authority.permissions, gate.authority.isOwner);
+    if (count >= SERVER_MAX_USERGROUPS) { reply.code(409); return { error: `A server can have at most ${SERVER_MAX_USERGROUPS} usergroups.` }; }
+    const requested = (body.permissions ?? []).filter(isServerFeaturePermission) as ServerFeaturePermission[];
+    const perms = clampFeaturePerms(requested, gate.authority.permissions, gate.authority.isOwner);
+    const autoRules = await validServerAutoRules(gate.server.id, body.autoRules);
     const id = nanoid();
     await db.insert(serverUsergroups).values({
       id, serverId: gate.server.id, name: body.name, color: body.color ?? null,
-      permissionsJson: serializeServerPermissions(perms),
-      isDefault: false, sortOrder: body.sortOrder ?? count, autoRulesJson: "[]",
+      permissionsJson: serializeServerFeaturePermissions(perms),
+      isDefault: false, sortOrder: body.sortOrder ?? count, autoRulesJson: serializeServerAutoRules(autoRules),
     });
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_usergroup_change",
@@ -1317,14 +1919,19 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     if (body.name !== undefined) update.name = body.name;
     if (body.color !== undefined) update.color = body.color ?? null;
     if (body.permissions !== undefined) {
-      const requested = body.permissions.filter(isServerPermission) as ServerPermission[];
-      const clamped = clampPerms(requested, gate.authority.permissions, gate.authority.isOwner);
-      // Preserve perms the group already holds that a lesser manager can't
-      // grant — they can only add/remove within their own powers.
+      const requested = body.permissions.filter(isServerFeaturePermission) as ServerFeaturePermission[];
+      const clamped = clampFeaturePerms(requested, gate.authority.permissions, gate.authority.isOwner);
+      // Preserve feature perms the group already holds that a lesser manager
+      // can't grant — they can only add/remove within their own powers.
       const preserved = gate.authority.isOwner
         ? []
-        : parseServerPermissions(group.permissionsJson).filter((p) => !gate.authority.permissions.includes(p));
-      update.permissionsJson = serializeServerPermissions([...new Set([...clamped, ...preserved])]);
+        : parseServerFeaturePermissions(group.permissionsJson).filter((p) => !gate.authority.permissions.includes(p));
+      update.permissionsJson = serializeServerFeaturePermissions([...new Set([...clamped, ...preserved])]);
+    }
+    // Auto-rules are meaningless on the default group (its membership is
+    // everyone) — only honored on named groups.
+    if (body.autoRules !== undefined && !group.isDefault) {
+      update.autoRulesJson = serializeServerAutoRules(await validServerAutoRules(gate.server.id, body.autoRules));
     }
     if (body.sortOrder !== undefined) update.sortOrder = body.sortOrder;
     if (Object.keys(update).length) {
@@ -1483,7 +2090,7 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io)
     // Evict live sockets from this server's rooms (mirrors the forum ban):
     // leave the room, notify, land them in the server's landing room (or none).
     const roomIds = (await db.select({ id: rooms.id }).from(rooms)
-      .where(eq(rooms.serverId, gate.server.id))).map((r) => r.id);
+      .where(roomsOfServerWhere(gate.server.id))).map((r) => r.id);
     if (roomIds.length) {
       const roomSet = new Set(roomIds);
       const landing = await findServerLanding(db, gate.server.id);

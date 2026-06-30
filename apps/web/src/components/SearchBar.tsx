@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { MessageSearchHit } from "@thekeep/shared";
 import { readError } from "../lib/http.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 interface Props {
   /** Current room. Search is scoped to this room only; null disables. */
@@ -30,6 +31,9 @@ export function SearchBar({ roomId, onJump, onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Calm-mode ease: results float ABOVE the input (bottom-full) → slide up.
+  // Pure CSS positioning, so the slide transform is safe.
+  const reduceMotion = useReducedMotion();
 
   // Debounced fetch. Each keystroke restarts the timer; in-flight requests
   // from prior keystrokes are dropped via the `cancelled` flag so we don't
@@ -107,7 +111,7 @@ export function SearchBar({ roomId, onJump, onClose }: Props) {
   return (
     <div className="relative">
       {showPopup ? (
-        <div className="absolute inset-x-0 bottom-full mb-1 max-h-80 overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-lg">
+        <div className={`absolute inset-x-0 bottom-full mb-1 max-h-80 overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-lg${reduceMotion ? " tk-slide-up-in" : ""}`}>
           {loading && ordered.length === 0 ? (
             <div className="px-2 py-1.5 text-[11px] italic text-keep-muted">searching…</div>
           ) : null}

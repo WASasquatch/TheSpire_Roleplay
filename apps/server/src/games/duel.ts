@@ -218,14 +218,14 @@ export interface DuelState {
   reward: BuiltinCommandReward;
 }
 
-export async function readDuelConfig(db: Db): Promise<{
+export async function readDuelConfig(db: Db, serverId?: string | null): Promise<{
   challengeMs: number;
   reward: BuiltinCommandReward;
 }> {
   const cfg = await getBuiltinCommandConfig(db, DUEL_COMMAND_NAME, {
     durationMs: DUEL_CHALLENGE_MS,
     reward: DUEL_DEFAULT_REWARD,
-  });
+  }, serverId);
   return { challengeMs: cfg.durationMs, reward: cfg.reward };
 }
 
@@ -513,7 +513,9 @@ export function forfeitDuel(session: GameSession, forfeiter: ParticipantRef): vo
  */
 export function scheduleTurnTimeout(
   session: GameSession,
-  ctx: ResolveContext,
+  // Only forwards to `cancel` (which derives serverId itself), so it needs
+  // just db+io — NOT the full ResolveContext with serverId.
+  ctx: Pick<ResolveContext, "db" | "io">,
 ): void {
   const state = session.state as DuelState;
   if (state.turnTimer) clearTimeout(state.turnTimer);
@@ -606,9 +608,9 @@ async function resolveDuel(session: GameSession, ctx: ResolveContext): Promise<v
       itemCount: 0,
     };
     if (rewardIsNonZero(state.reward)) {
-      await mintRewardForWinner(ctx.db, ctx.io, winner, state.reward, "duel_win", { multiplier: winnerMult });
+      await mintRewardForWinner(ctx.db, ctx.io, winner, state.reward, "duel_win", { multiplier: winnerMult, serverId: ctx.serverId });
       if (loserReward.xp > 0 || loserReward.currency > 0) {
-        await mintRewardForWinner(ctx.db, ctx.io, loser, loserReward, "duel_loss", { multiplier: loserMult });
+        await mintRewardForWinner(ctx.db, ctx.io, loser, loserReward, "duel_loss", { multiplier: loserMult, serverId: ctx.serverId });
       }
     }
     const winningsLine = await formatWinningsLine(
@@ -616,7 +618,7 @@ async function resolveDuel(session: GameSession, ctx: ResolveContext): Promise<v
       DUEL_KIND,
       [winner],
       state.reward,
-      { multiplier: winnerMult },
+      { multiplier: winnerMult, serverId: ctx.serverId },
     );
     if (winningsLine) lines.push(winningsLine);
     // Loser consolation line, mirrors the winnings line for XP + Currency.

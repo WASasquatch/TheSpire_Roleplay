@@ -128,11 +128,24 @@ for (const file of files) {
 
   console.log(`applying ${file} (${stmts.length} statements)`);
   try {
+    // SQLite makes `PRAGMA foreign_keys` a NO-OP inside a transaction, so we
+    // toggle FK enforcement OFF around each migration's transaction. This is
+    // SQLite's recommended posture for schema migrations: a per-server catalog
+    // table rebuild (CREATE __new / copy / DROP / RENAME) that DROPs a table
+    // referenced by enforced FKs would otherwise trip a constraint/cascade.
+    // Only affects not-yet-applied migrations (applied ones are skipped above);
+    // the migration SQL is authored to leave valid refs, and the runtime
+    // connection (db/index.ts) keeps FK ON. We deliberately do NOT run a global
+    // `foreign_key_check` (it would throw on any pre-existing tolerated row and
+    // break boot); each migration is responsible for its own integrity.
+    db.pragma("foreign_keys = OFF");
     db.transaction(() => {
       for (const s of stmts) db.exec(s);
     })();
+    db.pragma("foreign_keys = ON");
     recordApplied.run(file);
   } catch (err) {
+    db.pragma("foreign_keys = ON");
     if (err instanceof Error && ALREADY_APPLIED.test(err.message)) {
       console.log(`  (already-applied detected, baselining ${file})`);
       recordApplied.run(file);

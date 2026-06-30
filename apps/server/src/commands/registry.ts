@@ -6,6 +6,7 @@ import {
   stripVerificationMarkers,
 } from "@thekeep/shared";
 import { customCommandAliases, customCommands } from "../db/schema.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
 import type { CommandContext, CommandHandler, SessionUser } from "./types.js";
 
@@ -62,6 +63,11 @@ export class CommandRegistry {
   private readonly builtinNames = new Set<string>();
   /** names contributed by custom commands - tracked so we can hot-swap on edit */
   private readonly customNames = new Set<string>();
+  /** Owning server for each custom name+alias (multi-server: a custom command
+   *  only resolves in its own server). `null` = a shared/global custom command
+   *  (no server_id); otherwise the serverId that owns it. Built-ins are never
+   *  in here — they're always global. */
+  private readonly customServerByName = new Map<string, string | null>();
   /** Inline-eligible custom commands, keyed by every alias + canonical name. */
   private readonly inlineByName = new Map<string, InlineCommandEntry>();
   /** Canonical names of inline-enabled commands, for the `allowInline` flag
@@ -101,6 +107,7 @@ export class CommandRegistry {
   async reloadCustom(db: Db): Promise<void> {
     for (const name of this.customNames) this.byName.delete(name);
     this.customNames.clear();
+    this.customServerByName.clear();
     // Drop ONLY custom inline entries, builtin inlines (`!roll`,
     // `!dice`) were registered once at boot and aren't re-added by
     // this path, so a blanket clear killed them silently. The bug
@@ -143,6 +150,9 @@ export class CommandRegistry {
         if (this.builtinNames.has(n)) continue; // never shadow built-ins
         this.byName.set(n, handler);
         this.customNames.add(n);
+        // Multi-server: remember which server owns this name so resolve() can
+        // scope it. NULL server_id = shared/global (resolves everywhere).
+        this.customServerByName.set(n, (c as { serverId?: string | null }).serverId ?? null);
       }
       // Inline registration: only when the admin opted this command in
       // *and* it survived the builtin-shadow filter above (an inline
@@ -196,8 +206,22 @@ export class CommandRegistry {
    *  Returns undefined when the name doesn't exist OR the command isn't
    *  inline-enabled (callers should fall through, leaving `!name` as
    *  literal text in the message). */
-  resolveInline(name: string): InlineCommandEntry | undefined {
-    return this.inlineByName.get(name.toLowerCase());
+  resolveInline(name: string, serverId?: string | null): InlineCommandEntry | undefined {
+    const k = name.toLowerCase();
+    const entry = this.inlineByName.get(k);
+    if (!entry) return undefined;
+    if (entry.builtin) return entry; // builtin inlines (!roll, !dice) are global
+    return this.customMatchesServer(k, serverId) ? entry : undefined;
+  }
+
+  /** A custom command resolves only in its OWNING server (multi-server). NULL
+   *  owner = shared/global (resolves everywhere). When the caller passes no
+   *  serverId we treat it as the default/home server — so the global admin and
+   *  flag-off single-server behavior are byte-identical. */
+  private customMatchesServer(name: string, serverId: string | null | undefined): boolean {
+    const owner = this.customServerByName.get(name);
+    if (owner === undefined) return true; // not a tracked custom name
+    return owner === null || owner === (serverId ?? DEFAULT_SERVER_ID);
   }
 
   /** True iff this canonical-name custom command has the inline toggle on.
@@ -206,8 +230,12 @@ export class CommandRegistry {
     return this.inlineCanonicalNames.has(canonicalName.toLowerCase());
   }
 
-  resolve(name: string): CommandHandler | undefined {
-    return this.byName.get(name.toLowerCase());
+  resolve(name: string, serverId?: string | null): CommandHandler | undefined {
+    const k = name.toLowerCase();
+    const h = this.byName.get(k);
+    if (!h) return undefined;
+    if (this.builtinNames.has(k)) return h; // built-ins are global
+    return this.customMatchesServer(k, serverId) ? h : undefined;
   }
 
   /** Best-effort suggestion for unknown commands ("did you mean..."). */
@@ -442,6 +470,9 @@ export function expandInlineCommands(
   registry: CommandRegistry,
   user: SessionUser,
   roomId: string,
+  /** The room's server — scopes which custom `!cmd` inlines resolve. Omitted →
+   *  the default/home server (flag-off single-server behavior unchanged). */
+  serverId?: string | null,
 ): string {
   // Always strip pre-existing markers first, this is what guarantees
   // every marker the client sees came from this function on this call.
@@ -456,7 +487,7 @@ export function expandInlineCommands(
         (match: string, prefix: string, name: string, arg: string | undefined) => {
           // Backslash escape, strip the `\`, keep the literal `!name[:arg]`.
           if (prefix === "\\") return arg ? `!${name}:${arg}` : `!${name}`;
-          const entry = registry.resolveInline(name);
+          const entry = registry.resolveInline(name, serverId);
           if (!entry) return match;
           const rendered = entry.render(arg ?? "", user, roomId);
           if (rendered === null) return match;

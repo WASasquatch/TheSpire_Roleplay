@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, sql } from "drizzle-orm";
 import { faqs } from "../db/schema.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
 
 /**
@@ -9,10 +10,15 @@ import type { Db } from "../db/index.js";
  * ENABLED rows are exposed; drafts stay invisible. Mounted under `/api/` so the
  * JSON routes don't shadow the `/faq/:slug` + `/faqs` SPA pages.
  *
- * Order is `sort_order ASC, created_at ASC` (admin-chosen, insertion tiebreak).
+ * FAQs are PER-SERVER (faqs.serverId). The viewer scopes to the requested
+ * `?serverId` (the in-app FAQ link passes the active server) and falls back to
+ * the default/system server when none is given (a bare/shared link, or a
+ * logged-out visitor). So each server shows its OWN FAQ, and The Spire's FAQ is
+ * the default. Order is `sort_order ASC, created_at ASC`.
  */
 export async function registerFaqRoutes(app: FastifyInstance, db: Db): Promise<void> {
-  app.get("/api/faqs", async () => {
+  app.get<{ Querystring: { serverId?: string } }>("/api/faqs", async (req) => {
+    const serverId = req.query.serverId || DEFAULT_SERVER_ID;
     const rows = await db
       .select({
         id: faqs.id,
@@ -23,12 +29,14 @@ export async function registerFaqRoutes(app: FastifyInstance, db: Db): Promise<v
         sortOrder: faqs.sortOrder,
       })
       .from(faqs)
-      .where(eq(faqs.enabled, true))
+      .where(and(eq(faqs.enabled, true), eq(faqs.serverId, serverId)))
       .orderBy(asc(faqs.sortOrder), asc(faqs.createdAt));
     return { faqs: rows };
   });
 
-  app.get<{ Params: { slug: string } }>("/api/faqs/:slug", async (req, reply) => {
+  app.get<{ Params: { slug: string }; Querystring: { serverId?: string } }>("/api/faqs/:slug", async (req, reply) => {
+    // Slugs are unique per server, so the slug lookup must be server-scoped too.
+    const serverId = req.query.serverId || DEFAULT_SERVER_ID;
     const row = (await db
       .select({
         id: faqs.id,
@@ -39,7 +47,7 @@ export async function registerFaqRoutes(app: FastifyInstance, db: Db): Promise<v
         sortOrder: faqs.sortOrder,
       })
       .from(faqs)
-      .where(sql`lower(${faqs.slug}) = ${req.params.slug.toLowerCase()} AND ${faqs.enabled} = 1`)
+      .where(sql`lower(${faqs.slug}) = ${req.params.slug.toLowerCase()} AND ${faqs.enabled} = 1 AND ${faqs.serverId} = ${serverId}`)
       .limit(1))[0];
     if (!row) { reply.code(404); return { error: "not found" }; }
     return { faq: row };

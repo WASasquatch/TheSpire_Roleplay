@@ -36,3 +36,4 @@ export * from "./faq.js";
 export * from "./email.js";
 export * from "./poll.js";
 export * from "./dynamicCheck.js";
+export * from "./tags.js";

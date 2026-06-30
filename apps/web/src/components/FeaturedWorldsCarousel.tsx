@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { WorldCatalogEntry, WorldGenre } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 const ROTATE_MS = 7000;
 
@@ -110,6 +111,13 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
   const [paused, setPaused] = useState(false);
   const [fading, setFading] = useState(false);
   const activityFeedsEnabled = useChat((s) => s.branding.activityFeedsEnabled);
+  // Reduce Motion: when on, don't auto-advance worlds and don't run the
+  // perpetual canvas animation loop — draw a single static frame instead.
+  // Reactive + in the relevant effect dep arrays so flipping the toggle
+  // starts/stops both the rotation timer and the rAF loop immediately.
+  // Manual prev/next/dots still work (they re-run the canvas effect, which
+  // paints one fresh static frame for the newly-selected world).
+  const reduceMotion = useReducedMotion();
 
   const SWIPE_THRESHOLD_PX = 40;
   const swipeStartX = useRef<number | null>(null);
@@ -129,11 +137,14 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
   const restartRef = useRef(0);
   useEffect(() => {
     if (!items || items.length <= 1 || paused) return;
+    // Reduce Motion: don't auto-advance; the viewer stays on the
+    // current world until they use the arrows / dots / swipe.
+    if (reduceMotion) return;
     const id = window.setInterval(() => {
       setIndex((i) => (i + 1) % items.length);
     }, ROTATE_MS);
     return () => window.clearInterval(id);
-  }, [items, paused, restartRef.current]);
+  }, [items, paused, restartRef.current, reduceMotion]);
 
   // Trigger the text fade-out when the active world changes.
   // 350ms matches the transition we orchestrate in the canvas.
@@ -191,6 +202,12 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
   // early-return below gates the section). The loop reads refs so
   // it picks up theme + index changes without needing to restart.
   const hasItems = items !== null && items.length > 0;
+  // Static-repaint trigger. When Reduce Motion is OFF this is a constant,
+  // so the perpetual rAF loop is started exactly once (no behavior change —
+  // it keeps drawing every world change via its refs). When Reduce Motion
+  // is ON the loop is a one-shot static frame, so we re-run the effect on
+  // each `index` change to repaint the newly-selected world's static frame.
+  const staticFrameKey = reduceMotion ? index : 0;
   useEffect(() => {
     if (!hasItems) return;
     const canvas = canvasRef.current;
@@ -484,14 +501,21 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
       ctx!.fill();
 
       if (transitionTRef.current < 1) {
-        transitionTRef.current = Math.min(1, transitionTRef.current + 0.018);
+        // Reduce Motion: snap the crossfade straight to the current
+        // world (no animated transition) instead of stepping it.
+        transitionTRef.current = reduceMotion ? 1 : Math.min(1, transitionTRef.current + 0.018);
       }
 
+      // Reduce Motion: this is a one-shot static frame — do NOT schedule
+      // another animation frame, so the perpetual decorative loop stops.
+      // (A manual prev/next/dot changes `index`, which re-runs this effect
+      // and paints a fresh static frame for the new world.)
+      if (reduceMotion) return;
       raf = requestAnimationFrame(render);
     }
     raf = requestAnimationFrame(render);
     return () => { cancelAnimationFrame(raf); };
-  }, [hasItems]);
+  }, [hasItems, reduceMotion, staticFrameKey]);
 
   if (!items || items.length === 0) return null;
   const active = items[Math.min(index, items.length - 1)]!;

@@ -121,14 +121,14 @@ export interface ScrambleState {
   hostWords: ReadonlyArray<string>;
 }
 
-export async function readScrambleConfig(db: Db): Promise<{
+export async function readScrambleConfig(db: Db, serverId?: string | null): Promise<{
   perRoundMs: number;
   reward: BuiltinCommandReward;
 }> {
   const cfg = await getBuiltinCommandConfig(db, SCRAMBLE_COMMAND_NAME, {
     durationMs: SCRAMBLE_PER_ROUND_MS,
     reward: SCRAMBLE_DEFAULT_REWARD,
-  });
+  }, serverId);
   return { perRoundMs: cfg.durationMs, reward: cfg.reward };
 }
 
@@ -458,13 +458,14 @@ async function resolveScramble(session: GameSession, ctx: ResolveContext): Promi
     lines.push("Nobody scored any points. Drawn at random.");
     const pick = ranked[Math.floor(Math.random() * ranked.length)]!;
     if (rewardIsNonZero(state.reward)) {
-      await mintRewardForWinner(ctx.db, ctx.io, pick.participant, state.reward, "scramble_win");
+      await mintRewardForWinner(ctx.db, ctx.io, pick.participant, state.reward, "scramble_win", { serverId: ctx.serverId });
     }
     const winningsLine = await formatWinningsLine(
       ctx.db,
       SCRAMBLE_KIND,
       [{ ...pick.participant, points: 0 }],
       state.reward,
+      { serverId: ctx.serverId },
     );
     if (winningsLine) lines.push(winningsLine);
     await addSystemMessage(ctx.io, ctx.db, session.scope.roomId, lines.join("\n"));
@@ -486,7 +487,7 @@ async function resolveScramble(session: GameSession, ctx: ResolveContext): Promi
         w.participant,
         state.reward,
         "scramble_win",
-        { multiplier },
+        { multiplier, serverId: ctx.serverId },
       );
     }
   }
@@ -497,7 +498,7 @@ async function resolveScramble(session: GameSession, ctx: ResolveContext): Promi
     SCRAMBLE_KIND,
     winners.map((w) => ({ ...w.participant, points: topPoints })),
     state.reward,
-    { multiplier },
+    { multiplier, serverId: ctx.serverId },
   );
   if (winningsLine) lines.push(winningsLine);
 

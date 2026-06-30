@@ -1,4 +1,4 @@
-import { and, eq, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
@@ -18,7 +18,8 @@ import {
 } from "./db/schema.js";
 import { hashPassword } from "./auth/passwords.js";
 import { ensureDefaultUsergroup } from "./servers/usergroups.js";
-import { ensureSiteSettings, getSettings, setWorldsSeedVersion } from "./settings.js";
+import { ensureSiteSettings, getServerSettings, getSettings, setWorldsSeedVersion } from "./settings.js";
+import { DEFAULT_SERVER_ID } from "./earning/pool.js";
 import { recordAudit } from "./audit.js";
 import { sanitizeBio } from "./auth/html.js";
 import { DEFAULT_WORLDS, WORLDS_SEED_VERSION } from "./seed_worlds.js";
@@ -306,7 +307,7 @@ async function ensureSystemServer(db: Db): Promise<void> {
   // is_system + is_default mark it undeletable and the auto-join target.
   await db.insert(servers).values({
     id: "server_spire_system",
-    slug: "spire",
+    slug: "the-spire",
     name: "The Spire",
     tagline: "The beacon-tower where the universe arrives.",
     ownerUserId: owner.id,
@@ -740,22 +741,42 @@ export function startJanitor(
 
   async function sweepMessages() {
     try {
-      const { messageRetentionMs } = await getSettings(db);
-      if (messageRetentionMs > 0) {
+      // Retention is now PER-SERVER: each server's rooms purge at that server's
+      // own `messageRetentionMs` (NULL override inherits the platform default).
+      // We bucket the live, non-nested rooms by their effective server (a NULL
+      // `rooms.serverId`, legacy/standalone, homes to DEFAULT_SERVER_ID) and run
+      // one scoped DELETE per server with that server's cutoff. With the flag
+      // off there is only the system server, whose seeded settings equal the
+      // platform values, so this purges exactly what the old single global
+      // sweep did — byte-identical.
+      //
+      // Nested-mode rooms are forum threads, by design persistent ("Persistent
+      // forum topics for long-lived games"). Exempt them unconditionally so a
+      // retention sweep can never gut a forum overnight regardless of how short
+      // a server's retention is configured. Flipping a room flat → nested is
+      // the admin's signal that its history must not be auto-purged.
+      const sweepRooms = await db
+        .select({ id: rooms.id, serverId: rooms.serverId })
+        .from(rooms)
+        .where(sql`${rooms.replyMode} != 'nested' OR ${rooms.replyMode} IS NULL`);
+      const roomsByServer = new Map<string, string[]>();
+      for (const room of sweepRooms) {
+        const sid = room.serverId ?? DEFAULT_SERVER_ID;
+        const list = roomsByServer.get(sid);
+        if (list) list.push(room.id);
+        else roomsByServer.set(sid, [room.id]);
+      }
+      for (const [serverId, roomIds] of roomsByServer) {
+        const { messageRetentionMs } = await getServerSettings(db, serverId);
+        if (messageRetentionMs <= 0 || roomIds.length === 0) continue;
         const cutoff = new Date(Date.now() - messageRetentionMs);
-        // Nested-mode rooms are forum threads, by design persistent
-        // ("Persistent forum topics for long-lived games"). Exempt them
-        // unconditionally so the global retention sweep can never gut a
-        // forum overnight regardless of how short the site retention is
-        // configured. Flipping a room from flat → nested is the admin's
-        // signal that its history must not be auto-purged.
         const r = await db.delete(messages).where(
           and(
             lt(messages.createdAt, cutoff),
-            sql`${messages.roomId} NOT IN (SELECT id FROM ${rooms} WHERE ${rooms.replyMode} = 'nested')`,
+            inArray(messages.roomId, roomIds),
           ),
         );
-        if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages older than retention window`);
+        if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages older than retention window (server ${serverId})`);
       }
 
       // Per-room expiry sweep. Only rooms with messageExpiryMinutes set

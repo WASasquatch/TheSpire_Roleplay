@@ -56,7 +56,7 @@ async function readUserPool(
   if (!row) {
     return { scopeLabel: "master", currency: 0, xp: 0, rankName: null, tierLabel: null };
   }
-  const rt = await resolveRankLabels(db, row.rankKey, row.tier);
+  const rt = await resolveRankLabels(db, row.rankKey, row.tier, sid);
   return {
     scopeLabel: "master",
     currency: row.currency,
@@ -80,7 +80,7 @@ async function readCharacterPool(
   if (!row) {
     return { scopeLabel: characterName, currency: 0, xp: 0, rankName: null, tierLabel: null };
   }
-  const rt = await resolveRankLabels(db, row.rankKey, row.tier);
+  const rt = await resolveRankLabels(db, row.rankKey, row.tier, sid);
   return {
     scopeLabel: characterName,
     currency: row.currency,
@@ -94,17 +94,21 @@ async function resolveRankLabels(
   db: import("../../db/index.js").Db,
   rankKey: string | null,
   tier: number | null,
+  sid: string,
 ): Promise<{ rankName: string | null; tierLabel: string | null }> {
   if (!rankKey || tier == null) return { rankName: null, tierLabel: null };
+  // Per-server catalog (migrations 0295-0296): resolve the rank/tier labels from
+  // the pool's own server, so a same-key rank on another server can't supply a
+  // wrong name/label. Flag off ⇒ sid is the default, byte-identical to today.
   const rankRow = (await db
     .select({ name: ranks.name })
     .from(ranks)
-    .where(eq(ranks.key, rankKey))
+    .where(and(eq(ranks.serverId, sid), eq(ranks.key, rankKey)))
     .limit(1))[0];
   const tierRow = (await db
     .select({ label: rankTiers.label })
     .from(rankTiers)
-    .where(and(eq(rankTiers.rankKey, rankKey), eq(rankTiers.tier, tier)))
+    .where(and(eq(rankTiers.serverId, sid), eq(rankTiers.rankKey, rankKey), eq(rankTiers.tier, tier)))
     .limit(1))[0];
   return { rankName: rankRow?.name ?? null, tierLabel: tierRow?.label ?? null };
 }
@@ -145,28 +149,31 @@ async function unpurchasedEligibleBorders(
     // tier captures only the highest rank's tier; lower ranks were
     // necessarily fully traversed to reach the peak.
     if (peak?.maxRankKeyEverHeld) {
-      const peakOrder = await rankOrderOf(db, peak.maxRankKeyEverHeld);
+      const peakOrder = await rankOrderOf(db, peak.maxRankKeyEverHeld, sid);
       if (peakOrder !== null) {
         // User climbed past these; all qualify.
-        return await listEligibleBordersUpTo(db, userId, peakOrder, /* includePeak */ false);
+        return await listEligibleBordersUpTo(db, userId, peakOrder, /* includePeak */ false, sid);
       }
     }
     return [];
   }
   // Peak holds Tier IV: include all ranks at or below the peak.
-  const peakOrder = await rankOrderOf(db, peak.maxRankKeyEverHeld);
+  const peakOrder = await rankOrderOf(db, peak.maxRankKeyEverHeld, sid);
   if (peakOrder === null) return [];
-  return await listEligibleBordersUpTo(db, userId, peakOrder, /* includePeak */ true);
+  return await listEligibleBordersUpTo(db, userId, peakOrder, /* includePeak */ true, sid);
 }
 
 async function rankOrderOf(
   db: import("../../db/index.js").Db,
   rankKey: string,
+  sid: string,
 ): Promise<number | null> {
+  // Per-server catalog (migration 0295): read the rank's order from the pool's
+  // own server. Flag off ⇒ sid is the default, byte-identical to today.
   const r = (await db
     .select({ order: ranks.order })
     .from(ranks)
-    .where(eq(ranks.key, rankKey))
+    .where(and(eq(ranks.serverId, sid), eq(ranks.key, rankKey)))
     .limit(1))[0];
   return r?.order ?? null;
 }
@@ -176,8 +183,12 @@ async function listEligibleBordersUpTo(
   userId: string,
   peakOrder: number,
   includePeak: boolean,
+  sid: string,
 ): Promise<Array<{ rankKey: string; rankName: string; cost: number | null }>> {
   const cmp = includePeak ? sql`${ranks.order} <= ${peakOrder}` : sql`${ranks.order} < ${peakOrder}`;
+  // Per-server catalog (migrations 0295-0296): join on the composite (server_id,
+  // key) and pin both tables to the pool's server, so a same-key rank/tier on
+  // another server can't match (or multiply rows). Flag off ⇒ sid is the default.
   const rows = await db
     .select({
       rankKey: ranks.key,
@@ -187,8 +198,9 @@ async function listEligibleBordersUpTo(
       order: ranks.order,
     })
     .from(rankTiers)
-    .innerJoin(ranks, eq(ranks.key, rankTiers.rankKey))
+    .innerJoin(ranks, and(eq(ranks.serverId, rankTiers.serverId), eq(ranks.key, rankTiers.rankKey)))
     .where(and(
+      eq(rankTiers.serverId, sid),
       eq(rankTiers.tier, 4),
       eq(rankTiers.enabled, true),
       eq(ranks.enabled, true),

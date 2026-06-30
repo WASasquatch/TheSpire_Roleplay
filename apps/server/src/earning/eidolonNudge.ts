@@ -24,6 +24,7 @@ export async function sweepEidolonNudgesOnce(db: Db, io: Io): Promise<void> {
   const today = serverDayKey();
   const rows = await db
     .select({
+      serverId: eidolonState.serverId,
       ownerScope: eidolonState.ownerScope,
       ownerId: eidolonState.ownerId,
       lastCheckInDayKey: eidolonState.lastCheckInDayKey,
@@ -34,7 +35,9 @@ export async function sweepEidolonNudgesOnce(db: Db, io: Io): Promise<void> {
     // not a "you haven't tended it today" nudge.
     .where(and(notInArray(eidolonState.stage, ["dead", "dormant"]), eq(eidolonState.nudgeOptin, true)));
 
-  // Not tended today, and not already nudged today.
+  // Not tended today, and not already nudged today — both day-keys live PER
+  // FAMILIAR (per server row), so a familiar on server A and the same person's
+  // familiar on server B each get their own "needs you today" pass.
   const due = rows.filter((r) => r.lastCheckInDayKey !== today && r.lastNudgeDayKey !== today);
   if (due.length === 0) return;
 
@@ -54,17 +57,21 @@ export async function sweepEidolonNudgesOnce(db: Db, io: Io): Promise<void> {
   for (const s of sockets) { const uid = (s.data as { userId?: string }).userId; if (uid) online.add(uid); }
 
   // Group due familiars by owning user (push subscriptions are per-user, so we
-  // nudge a user once and mark all their due familiars).
-  const byUser = new Map<string, Array<{ ownerScope: "user" | "character"; ownerId: string }>>();
+  // nudge a user once and mark all their due familiars). Each entry carries the
+  // familiar's serverId so the per-server row is the one marked.
+  const byUser = new Map<string, Array<{ serverId: string; ownerScope: "user" | "character"; ownerId: string }>>();
   for (const r of due) {
     const uid = userIdOf(r);
     if (!uid) continue;
-    (byUser.get(uid) ?? byUser.set(uid, []).get(uid)!).push({ ownerScope: r.ownerScope, ownerId: r.ownerId });
+    (byUser.get(uid) ?? byUser.set(uid, []).get(uid)!).push({ serverId: r.serverId, ownerScope: r.ownerScope, ownerId: r.ownerId });
   }
 
   // Nudge each OFFLINE user once + mark all their due familiars. Online users
   // are left unmarked on purpose, so they're caught on a later sweep once
   // they go offline (they can see the state in-app while online). Parallel.
+  // The day-key write keys on (serverId, ownerScope, ownerId) so the dedup is
+  // PER FAMILIAR (per server) — marking one server's familiar doesn't suppress
+  // a still-due familiar of the same identity on another server.
   await Promise.all([...byUser.entries()].map(async ([userId, fams]) => {
     if (online.has(userId)) return;
     await pushToUser(db, userId, {
@@ -75,7 +82,7 @@ export async function sweepEidolonNudgesOnce(db: Db, io: Io): Promise<void> {
     });
     await Promise.all(fams.map((f) =>
       db.update(eidolonState).set({ lastNudgeDayKey: today })
-        .where(and(eq(eidolonState.ownerScope, f.ownerScope), eq(eidolonState.ownerId, f.ownerId)))));
+        .where(and(eq(eidolonState.serverId, f.serverId), eq(eidolonState.ownerScope, f.ownerScope), eq(eidolonState.ownerId, f.ownerId)))));
   }));
 }
 

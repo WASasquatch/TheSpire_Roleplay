@@ -87,14 +87,14 @@ export interface RpsState {
  * session state so the resolver doesn't re-read DB rows under the
  * timer callback.
  */
-export async function readRpsConfig(db: import("../db/index.js").Db): Promise<{
+export async function readRpsConfig(db: import("../db/index.js").Db, serverId?: string | null): Promise<{
   windowMs: number;
   reward: BuiltinCommandReward;
 }> {
   const cfg = await getBuiltinCommandConfig(db, RPS_COMMAND_NAME, {
     durationMs: RPS_WINDOW_MS,
     reward: RPS_DEFAULT_REWARD,
-  });
+  }, serverId);
   return { windowMs: cfg.durationMs, reward: cfg.reward };
 }
 
@@ -216,7 +216,7 @@ async function resolveRps(session: GameSession, ctx: ResolveContext): Promise<vo
   // group-elim ties don't split, by design.
   if (winners.length > 0 && rewardIsNonZero(state.reward)) {
     for (const w of winners) {
-      await mintRewardForWinner(ctx.db, ctx.io, w, state.reward, "rps_win");
+      await mintRewardForWinner(ctx.db, ctx.io, w, state.reward, "rps_win", { serverId: ctx.serverId });
     }
   }
   // Always broadcast a winnings line when there's at least one
@@ -230,6 +230,7 @@ async function resolveRps(session: GameSession, ctx: ResolveContext): Promise<vo
       RPS_KIND,
       winners,
       state.reward,
+      { serverId: ctx.serverId },
     );
     if (line) lines.push(line);
   }

@@ -25,7 +25,7 @@ import {
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
-import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { resolveProfileServerId } from "../earning/pool.js";
 
 /**
  * Two profile-customization Flair surfaces (migration 0192):
@@ -411,6 +411,13 @@ interface EarningRowSnapshot {
   showProfileVisitorsCount: boolean;
 }
 async function readEarningRow(db: Db, identity: ProfileIdentity): Promise<EarningRowSnapshot | null> {
+  // Profile flair (marquee + visitor counter) is read from the pool snapshot on
+  // the profile OWNER's favorite server (resolveProfileServerId), so it agrees
+  // with the collection / name-style / banner the rest of the profile renders.
+  // The favorite is an account-level preference, so it resolves off the master
+  // id (identity.userId) for both the master and character branches.
+  // Flag-off / unset favorite → the default server (byte-identical to today).
+  const serverId = await resolveProfileServerId(db, identity.userId);
   if (identity.characterId) {
     const r = (await db
       .select({
@@ -418,10 +425,7 @@ async function readEarningRow(db: Db, identity: ProfileIdentity): Promise<Earnin
         showProfileVisitorsCount: characterEarning.showProfileVisitorsCount,
       })
       .from(characterEarning)
-      // Profile flair display reads the pool snapshot; with no per-server
-      // context here, scope to the default server (flag-off: the only
-      // pool, byte-identical to today).
-      .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, identity.characterId)))
+      .where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, identity.characterId)))
       .limit(1))[0];
     return r ?? null;
   }
@@ -431,7 +435,7 @@ async function readEarningRow(db: Db, identity: ProfileIdentity): Promise<Earnin
       showProfileVisitorsCount: userEarning.showProfileVisitorsCount,
     })
     .from(userEarning)
-    .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, identity.userId)))
+    .where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, identity.userId)))
     .limit(1))[0];
   return r ?? null;
 }
@@ -441,27 +445,28 @@ async function upsertEarningRow(
   identity: ProfileIdentity,
   patch: Record<string, unknown>,
 ): Promise<void> {
-  // No per-server context on this owner-CRUD path; scope to the default
-  // server so the existence-check / update / insert all target the SAME
-  // pool row the scoped reads in readEarningRow see (flag-off: the only
-  // pool, byte-identical to today).
+  // The owner edits the flair on the pool their PROFILE renders — their
+  // favorite server (resolveProfileServerId, off the master id) — so the
+  // existence-check / update / insert all target the SAME row readEarningRow
+  // reads. Flag-off / unset favorite → the default server (byte-identical).
+  const serverId = await resolveProfileServerId(db, identity.userId);
   if (identity.characterId) {
     const existing = (await db
       .select({ id: characterEarning.characterId })
       .from(characterEarning)
-      .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, identity.characterId)))
+      .where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, identity.characterId)))
       .limit(1))[0];
     if (existing) {
       await db
         .update(characterEarning)
         .set(patch)
-        .where(and(eq(characterEarning.serverId, DEFAULT_SERVER_ID), eq(characterEarning.characterId, identity.characterId)));
+        .where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, identity.characterId)));
     } else {
       // Bare insert, the earning row carries lots of NOT-NULL
       // columns with defaults, so the patch keys + the FK key are
       // enough for SQLite to fill the rest from column defaults.
       await db.insert(characterEarning).values({
-        serverId: DEFAULT_SERVER_ID,
+        serverId,
         characterId: identity.characterId,
         ...patch,
       } as typeof characterEarning.$inferInsert);
@@ -471,13 +476,13 @@ async function upsertEarningRow(
   const existing = (await db
     .select({ id: userEarning.userId })
     .from(userEarning)
-    .where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, identity.userId)))
+    .where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, identity.userId)))
     .limit(1))[0];
   if (existing) {
-    await db.update(userEarning).set(patch).where(and(eq(userEarning.serverId, DEFAULT_SERVER_ID), eq(userEarning.userId, identity.userId)));
+    await db.update(userEarning).set(patch).where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, identity.userId)));
   } else {
     await db.insert(userEarning).values({
-      serverId: DEFAULT_SERVER_ID,
+      serverId,
       userId: identity.userId,
       ...patch,
     } as typeof userEarning.$inferInsert);

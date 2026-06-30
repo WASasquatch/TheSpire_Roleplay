@@ -47,6 +47,15 @@ export default defineConfig({
       // the public forum PAGE route, which the SPA renders client-side
       // in dev exactly like /p/ profile links.
       "/forums": "http://localhost:3001",
+      // Servers Catalog API (multi-server lift): rail catalog (GET /servers),
+      // detail, visit markers, join/leave/apply, and the owner console
+      // (/servers/:id/...). Without this entry the rail's fetch("/servers")
+      // falls through to Vite's SPA fallback and gets index.html — which
+      // JSON.parse rejects, so `servers` stays null and the rail shows
+      // forever-pulsing placeholders. `/s` is deliberately NOT proxied:
+      // that's the public server PAGE route the SPA renders client-side,
+      // mirroring /f (forums) and /p (profiles).
+      "/servers": "http://localhost:3001",
       // Spire Arcade game endpoints (Eidolon Tamer: GET state, hatch,
       // action, feed, remedy, release). Without this the GET falls through
       // to the SPA index.html (parses as 200 with no `eidolon` field, so the

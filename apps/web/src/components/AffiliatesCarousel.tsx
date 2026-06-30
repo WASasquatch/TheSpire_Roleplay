@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useReducedMotion } from "../lib/reducedMotion.js";
 
 interface PublicAffiliate {
   id: string;
@@ -29,6 +30,10 @@ export function AffiliatesCarousel() {
   const [items, setItems] = useState<PublicAffiliate[] | null>(null);
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
+  // Reduce Motion: when on, hold the current item statically instead of
+  // auto-rotating. Reactive so the toggle starts/stops the timer live.
+  // Hover/focus pause logic below is left untouched.
+  const reduceMotion = useReducedMotion();
 
   // Fetch once. The list rarely changes; admins rotate items via the panel
   // and visitors get the new set on next splash hit.
@@ -47,11 +52,14 @@ export function AffiliatesCarousel() {
   const restart = useRef(0);
   useEffect(() => {
     if (!items || items.length <= 1 || paused) return;
+    // Reduce Motion: don't start the auto-rotate interval; the current
+    // item stays put (manual dot clicks still work).
+    if (reduceMotion) return;
     const id = window.setInterval(() => {
       setIndex((i) => (i + 1) % items.length);
     }, ROTATE_MS);
     return () => window.clearInterval(id);
-  }, [items, paused, restart.current]);
+  }, [items, paused, restart.current, reduceMotion]);
 
   if (!items || items.length === 0) return null;
 

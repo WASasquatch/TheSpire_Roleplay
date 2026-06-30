@@ -4,9 +4,10 @@ import { nanoid } from "nanoid";
 import { deriveSlug } from "@thekeep/shared";
 import { bans, roomInvites, roomMembers, rooms } from "../../db/schema.js";
 import { joinRoom } from "../../realtime/broadcast.js";
-import { getSettings } from "../../settings.js";
+import { getServerSettings } from "../../settings.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { deriveUniqueRoomSlug } from "../../lib/roomSlug.js";
+import { resolveRoomServerId } from "../../earning/pool.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 /**
@@ -16,7 +17,13 @@ import type { CommandContext, CommandHandler } from "../types.js";
  */
 async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
   if (await hasPermission(ctx.user, "bypass_room_cap", ctx.db)) return true;
-  const { maxRoomsPerOwner } = await getSettings(ctx.db);
+  // Cap is the value configured on the server the new room will land in — the
+  // creator's current room→server (`resolveRoomServerId`, NULL/legacy →
+  // DEFAULT_SERVER_ID), the same id stamped on the fresh row below. A NULL
+  // override inherits the platform default, so flag-off (single, system
+  // server) reads byte-identically to the old `getSettings(db)` value.
+  const serverId = await resolveRoomServerId(ctx.db, ctx.roomId);
+  const { maxRoomsPerOwner } = await getServerSettings(ctx.db, serverId);
   if (maxRoomsPerOwner === 0) {
     ctx.socket.emit("error:notice", {
       code: "ROOM_DISABLED",
@@ -157,6 +164,10 @@ async function joinOrCreatePublic(ctx: CommandContext, name: string) {
       name,
       slug: await deriveUniqueRoomSlug(ctx.db, name),
       type: "public",
+      // Home the room in the creator's current server (default server when
+      // standalone). Without this the column lands NULL and the room is
+      // invisible to the rail until the next boot-time adoption sweep.
+      serverId: await resolveRoomServerId(ctx.db, ctx.roomId),
       ownerId: ctx.user.id,
       // Owner-history seeds: both equal the creator on a fresh room.
       // `originalOwnerUserId` is locked in here and never updated
@@ -210,6 +221,9 @@ async function createPrivateRoom(ctx: CommandContext, name: string, password: st
     slug: await deriveUniqueRoomSlug(ctx.db, name),
     type: "private",
     passwordHash,
+    // See joinOrCreatePublic: stamp the creator's server so the row is never
+    // NULL (the column has no DB default).
+    serverId: await resolveRoomServerId(ctx.db, ctx.roomId),
     ownerId: ctx.user.id,
     // See joinOrCreatePublic comment, both seed to the creator on a
     // fresh room; only `lastOwnerUserId` ever shifts on transfer.

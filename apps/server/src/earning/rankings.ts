@@ -309,7 +309,10 @@ async function queryRankBoard(db: Db): Promise<RawEntry[]> {
     })
     .from(userEarning)
     .innerJoin(users, eq(users.id, userEarning.userId))
-    .leftJoin(ranks, eq(ranks.key, userEarning.rankKey))
+    // Per-server catalog (migration 0295): join the rank on the composite
+    // (server_id, key). userEarning is already pinned to RANKINGS_SERVER_ID, so
+    // this keeps a same-key rank on another server from multiplying rows.
+    .leftJoin(ranks, and(eq(ranks.serverId, userEarning.serverId), eq(ranks.key, userEarning.rankKey)))
     .where(and(eq(userEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), eq(userEarning.hideXpCount, false), isNotNull(userEarning.rankKey)))
     .orderBy(desc(ranks.order), desc(userEarning.tier))
     .limit(TOP_N);
@@ -324,7 +327,10 @@ async function queryRankBoard(db: Db): Promise<RawEntry[]> {
     .innerJoin(characters, eq(characters.id, characterEarning.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
     .leftJoin(userEarning, and(eq(userEarning.userId, characters.userId), eq(userEarning.serverId, RANKINGS_SERVER_ID)))
-    .leftJoin(ranks, eq(ranks.key, characterEarning.rankKey))
+    // Per-server catalog (migration 0295): join the rank on the composite
+    // (server_id, key). characterEarning is pinned to RANKINGS_SERVER_ID below,
+    // so a same-key rank on another server can't multiply rows.
+    .leftJoin(ranks, and(eq(ranks.serverId, characterEarning.serverId), eq(ranks.key, characterEarning.rankKey)))
     .where(and(eq(characterEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideXpCount, false), isNotNull(characterEarning.rankKey)))
     .orderBy(desc(ranks.order), desc(characterEarning.tier))
     .limit(TOP_N);
@@ -746,7 +752,12 @@ async function loadRankTierDisplay(db: Db): Promise<Map<string, RankTierDisplay>
         rankName: ranks.name,
       })
       .from(rankTiers)
-      .innerJoin(ranks, eq(ranks.key, rankTiers.rankKey))
+      // Per-server catalog (migrations 0295-0296): the rankings page reads the
+      // default server's ladder. Filter rankTiers to that server and join on the
+      // composite (server_id, key) so a same-key rank/tier on another server
+      // can't leak in or multiply rows. RANKINGS_SERVER_ID == the default server.
+      .innerJoin(ranks, and(eq(ranks.serverId, rankTiers.serverId), eq(ranks.key, rankTiers.rankKey)))
+      .where(eq(rankTiers.serverId, RANKINGS_SERVER_ID))
       .orderBy(asc(ranks.order), asc(rankTiers.tier));
     const out = new Map<string, RankTierDisplay>();
     for (const r of rows) {

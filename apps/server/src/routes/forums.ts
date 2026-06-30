@@ -26,8 +26,12 @@ import {
   FORUM_PURPOSE_MIN,
   FORUM_REAPPLY_COOLDOWN_DAYS,
   FORUM_SLUG_RE,
+  MAX_TAGS_PER_ENTITY,
   RESERVED_FORUM_SLUGS,
+  hasTag,
   normalizeForumSlug,
+  parseTagsJson,
+  serializeTags,
 } from "@thekeep/shared";
 import type {
   ClientToServerEvents,
@@ -38,11 +42,12 @@ import type {
   ForumViewerState,
   ServerToClientEvents,
 } from "@thekeep/shared";
-import { auditLog, characters, forumBans, forumCreationApplications, forumMembers, forumMembershipApplications, forumPrefixes, forumReports, forumUsergroupMembers, forumUsergroups, forums, messages, roomThreadCategories, rooms, users, worlds } from "../db/schema.js";
+import { auditLog, characterEarning, characterOwnedFreeformBorders, characterOwnedNameStyles, characters, forumBans, forumCreationApplications, forumMembers, forumMembershipApplications, forumPrefixes, forumReports, forumUsergroupMembers, forumUsergroups, forums, messages, roomThreadCategories, rooms, servers, siteSettings, userActiveCosmetics, userEarning, userOwnedFreeformBorders, userOwnedNameStyles, users, worlds } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { forumAuthority, forumCan } from "../forums/authority.js";
+import { serverAuthority } from "../servers/authority.js";
 import { ensureDefaultUsergroup } from "../forums/usergroups.js";
 import { resolveIdentityArg } from "../commands/identityArg.js";
 import { recordAudit } from "../audit.js";
@@ -119,6 +124,212 @@ function sniffForumImage(bytes: Buffer): { mime: string; ext: string } | null {
   return null;
 }
 
+/* =====================================================================
+ *  Per-server topic-card author flair (Servers Lift).
+ *
+ *  Resolves each topic author's rank sigil, avatar-border frame, and
+ *  name style from the cosmetics they earned/equipped ON THE SERVER THE
+ *  FORUM IS AFFILIATED TO (`forums.serverId`). This is the SAME per-
+ *  server read `realtime/broadcast.ts` `currentOccupants` runs for the
+ *  chat userlist, lifted to the forum topic list and BATCHED over the
+ *  set of (userId, characterId) author identities so a 30-card page is
+ *  a fixed handful of queries, not N+1.
+ *
+ *  Scope rule mirrors the rest of the engine: a topic authored AS a
+ *  character reads the character pool (`character_earning` + the
+ *  character-owned cosmetic tables); an OOC topic (characterId null)
+ *  reads the master pool (`user_earning` / `user_active_cosmetics` +
+ *  the user-owned cosmetic tables). Every read is scoped
+ *  `eq(serverId, sid)`.
+ *
+ *  CALLER CONTRACT: only call this when the forum HAS a server
+ *  affiliation. A forum with `serverId === null` ships NO flair (the
+ *  card renders bare) — that gate lives at the call site.
+ * ===================================================================== */
+interface TopicAuthorFlair {
+  rankKey: string | null;
+  tier: number | null;
+  selectedBorderRankKey: string | null;
+  selectedFreeformBorderKey: string | null;
+  freeformBorderConfig: Record<string, string> | null;
+  nameStyleKey: string | null;
+  nameStyleConfig: Record<string, unknown> | null;
+}
+
+function parseStyleConfig(json: string | null): Record<string, unknown> | null {
+  if (!json) return null;
+  try { return JSON.parse(json) as Record<string, unknown>; }
+  catch { return null; }
+}
+
+function parseFreeformBorderConfig(json: string | null): Record<string, string> | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof v === "string" && v.length > 0) out[k] = v;
+    }
+    return Object.keys(out).length > 0 ? out : null;
+  } catch { return null; }
+}
+
+/**
+ * Batch-resolve per-server flair for a set of topic authors, keyed by the
+ * `${userId}::${characterId ?? ""}` identity tuple. Returns an empty map
+ * when there are no authors. Identities absent from a given cosmetic
+ * table simply resolve to null for that slot (fresh / unequipped on this
+ * server), so a card always renders gracefully.
+ */
+export async function resolveTopicAuthorFlair(
+  db: Db,
+  sid: string,
+  authors: ReadonlyArray<{ userId: string; characterId: string | null }>,
+): Promise<Map<string, TopicAuthorFlair>> {
+  const out = new Map<string, TopicAuthorFlair>();
+  if (!authors.length) return out;
+
+  // Dedupe the identity set; the page can repeat an author across cards.
+  const seen = new Set<string>();
+  const ids: Array<{ userId: string; characterId: string | null }> = [];
+  for (const a of authors) {
+    const key = `${a.userId}::${a.characterId ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    ids.push(a);
+  }
+  const userIds = [...new Set(ids.map((i) => i.userId))];
+  const charIds = [...new Set(ids.map((i) => i.characterId).filter((v): v is string => !!v))];
+
+  /* ---- Master (OOC) pool: user_earning + user_active_cosmetics ---- */
+  const userEarningRows = userIds.length
+    ? await db
+        .select({
+          userId: userEarning.userId,
+          rankKey: userEarning.rankKey,
+          tier: userEarning.tier,
+          selectedBorderRankKey: userEarning.selectedBorderRankKey,
+          selectedFreeformBorderKey: userEarning.selectedFreeformBorderKey,
+        })
+        .from(userEarning)
+        .where(and(eq(userEarning.serverId, sid), inArray(userEarning.userId, userIds)))
+    : [];
+  const userEarningBy = new Map(userEarningRows.map((r) => [r.userId, r]));
+  // user_active_cosmetics is ALSO per-server partitioned (migration 0285),
+  // so scope to `sid` — without it the identity-keyed map below would
+  // collapse multiple servers' rows for the same user (last write wins).
+  const userActiveRows = userIds.length
+    ? await db
+        .select({ userId: userActiveCosmetics.userId, activeNameStyleKey: userActiveCosmetics.activeNameStyleKey })
+        .from(userActiveCosmetics)
+        .where(and(eq(userActiveCosmetics.serverId, sid), inArray(userActiveCosmetics.userId, userIds)))
+    : [];
+  const masterStyleKeyByUser = new Map(
+    userActiveRows
+      .filter((r): r is { userId: string; activeNameStyleKey: string } => r.activeNameStyleKey !== null)
+      .map((r) => [r.userId, r.activeNameStyleKey]),
+  );
+
+  /* ---- Character pool: character_earning ---- */
+  const charEarningRows = charIds.length
+    ? await db
+        .select({
+          characterId: characterEarning.characterId,
+          rankKey: characterEarning.rankKey,
+          tier: characterEarning.tier,
+          selectedBorderRankKey: characterEarning.selectedBorderRankKey,
+          selectedFreeformBorderKey: characterEarning.selectedFreeformBorderKey,
+          activeNameStyleKey: characterEarning.activeNameStyleKey,
+        })
+        .from(characterEarning)
+        .where(and(eq(characterEarning.serverId, sid), inArray(characterEarning.characterId, charIds)))
+    : [];
+  const charEarningBy = new Map(charEarningRows.map((r) => [r.characterId, r]));
+
+  /* ---- Owned name-style configs. These ownership tables are ALSO
+   *      per-server partitioned (migration 0285, serverId in the PK), so
+   *      we scope the config read to `sid` — an identity may have tuned a
+   *      style's colors differently per server, and scoping also keeps the
+   *      `(identity, styleKey)`-keyed map from collapsing two servers'
+   *      rows into one. ---- */
+  const usersWithStyle = [...masterStyleKeyByUser.keys()];
+  const charsWithStyle = charEarningRows
+    .filter((r) => r.activeNameStyleKey !== null)
+    .map((r) => r.characterId);
+  const masterStyleRows = usersWithStyle.length
+    ? await db
+        .select({ userId: userOwnedNameStyles.userId, styleKey: userOwnedNameStyles.styleKey, configJson: userOwnedNameStyles.configJson })
+        .from(userOwnedNameStyles)
+        .where(and(eq(userOwnedNameStyles.serverId, sid), inArray(userOwnedNameStyles.userId, usersWithStyle)))
+    : [];
+  const charStyleRows = charsWithStyle.length
+    ? await db
+        .select({ characterId: characterOwnedNameStyles.characterId, styleKey: characterOwnedNameStyles.styleKey, configJson: characterOwnedNameStyles.configJson })
+        .from(characterOwnedNameStyles)
+        .where(and(eq(characterOwnedNameStyles.serverId, sid), inArray(characterOwnedNameStyles.characterId, charsWithStyle)))
+    : [];
+  const styleConfigByKey = new Map<string, Record<string, unknown> | null>();
+  for (const r of masterStyleRows) styleConfigByKey.set(`u::${r.userId}::${r.styleKey}`, parseStyleConfig(r.configJson));
+  for (const r of charStyleRows) styleConfigByKey.set(`c::${r.characterId}::${r.styleKey}`, parseStyleConfig(r.configJson));
+
+  /* ---- Owned free-form border color configs (same ownership rule). ---- */
+  const usersWithFreeform = userEarningRows
+    .filter((r) => r.selectedFreeformBorderKey !== null)
+    .map((r) => r.userId);
+  const charsWithFreeform = charEarningRows
+    .filter((r) => r.selectedFreeformBorderKey !== null)
+    .map((r) => r.characterId);
+  const masterBorderRows = usersWithFreeform.length
+    ? await db
+        .select({ userId: userOwnedFreeformBorders.userId, borderKey: userOwnedFreeformBorders.borderKey, configJson: userOwnedFreeformBorders.configJson })
+        .from(userOwnedFreeformBorders)
+        .where(and(eq(userOwnedFreeformBorders.serverId, sid), inArray(userOwnedFreeformBorders.userId, usersWithFreeform)))
+    : [];
+  const charBorderRows = charsWithFreeform.length
+    ? await db
+        .select({ characterId: characterOwnedFreeformBorders.characterId, borderKey: characterOwnedFreeformBorders.borderKey, configJson: characterOwnedFreeformBorders.configJson })
+        .from(characterOwnedFreeformBorders)
+        .where(and(eq(characterOwnedFreeformBorders.serverId, sid), inArray(characterOwnedFreeformBorders.characterId, charsWithFreeform)))
+    : [];
+  const freeformConfigByKey = new Map<string, Record<string, string> | null>();
+  for (const r of masterBorderRows) freeformConfigByKey.set(`u::${r.userId}::${r.borderKey}`, parseFreeformBorderConfig(r.configJson));
+  for (const r of charBorderRows) freeformConfigByKey.set(`c::${r.characterId}::${r.borderKey}`, parseFreeformBorderConfig(r.configJson));
+
+  /* ---- Assemble one flair record per author identity. ---- */
+  for (const id of ids) {
+    const key = `${id.userId}::${id.characterId ?? ""}`;
+    if (id.characterId) {
+      const e = charEarningBy.get(id.characterId);
+      const styleKey = e?.activeNameStyleKey ?? null;
+      const freeformKey = e?.selectedFreeformBorderKey ?? null;
+      out.set(key, {
+        rankKey: e?.rankKey ?? null,
+        tier: e?.tier ?? null,
+        selectedBorderRankKey: e?.selectedBorderRankKey ?? null,
+        selectedFreeformBorderKey: freeformKey,
+        freeformBorderConfig: freeformKey ? (freeformConfigByKey.get(`c::${id.characterId}::${freeformKey}`) ?? null) : null,
+        nameStyleKey: styleKey,
+        nameStyleConfig: styleKey ? (styleConfigByKey.get(`c::${id.characterId}::${styleKey}`) ?? null) : null,
+      });
+    } else {
+      const e = userEarningBy.get(id.userId);
+      const styleKey = masterStyleKeyByUser.get(id.userId) ?? null;
+      const freeformKey = e?.selectedFreeformBorderKey ?? null;
+      out.set(key, {
+        rankKey: e?.rankKey ?? null,
+        tier: e?.tier ?? null,
+        selectedBorderRankKey: e?.selectedBorderRankKey ?? null,
+        selectedFreeformBorderKey: freeformKey,
+        freeformBorderConfig: freeformKey ? (freeformConfigByKey.get(`u::${id.userId}::${freeformKey}`) ?? null) : null,
+        nameStyleKey: styleKey,
+        nameStyleConfig: styleKey ? (styleConfigByKey.get(`u::${id.userId}::${styleKey}`) ?? null) : null,
+      });
+    }
+  }
+  return out;
+}
+
 export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, uploadsRoot: string): Promise<void> {
   const forumsDir = join(uploadsRoot, "forums");
 
@@ -163,6 +374,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
         isSystem: forums.isSystem,
         ownerUserId: forums.ownerUserId,
         ownerUsername: users.username,
+        tagsJson: forums.tagsJson,
         createdAt: forums.createdAt,
       })
       .from(forums)
@@ -229,6 +441,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       ownerUsername: f.ownerUsername ?? "unknown",
       boardCount: boardsBy.get(f.id) ?? 0,
       memberCount: membersBy.get(f.id) ?? 0,
+      tags: parseTagsJson(f.tagsJson),
       lastActivityAt: activityBy.get(f.id) ?? null,
       createdAt: +f.createdAt,
       ...(visitsBy
@@ -251,6 +464,131 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     out.sort((a, b) =>
       catalogRank(a) - catalogRank(b) || a.name.localeCompare(b.name));
     return { forums: out };
+  });
+
+  /* =========================================================
+   *  Forum DISCOVER (mirrors the chat-server discover UX 1:1)
+   *
+   *    GET /forums/discover         → { popular, new }   (rails)
+   *    GET /forums/discover/search  → { items }          (?q, ?tag)
+   *    GET /forums/tags             → { tags }            (facet list)
+   *
+   *  All three browse the same surface as the catalog: browsable =
+   *  status != 'archived' AND visibility = 'public' (v1 forums are
+   *  public-only; the explicit check future-proofs a hidden tier the
+   *  same way the catalog will). Anonymous-tolerant like the catalog —
+   *  they expose only public ForumSummary fields and carry none of the
+   *  viewer-specific flags (unseen/viewerRole/visited).
+   * ========================================================= */
+
+  /** Build full ForumSummary[] for every browsable forum, with the same
+   *  board/member/activity aggregates the catalog computes. Shared by the
+   *  discover rails, search, and tag facets so they stay consistent. */
+  async function browsableForumSummaries(): Promise<ForumSummary[]> {
+    const rows = await db
+      .select({
+        id: forums.id,
+        slug: forums.slug,
+        name: forums.name,
+        tagline: forums.tagline,
+        logoUrl: forums.logoUrl,
+        status: forums.status,
+        postingMode: forums.postingMode,
+        isSystem: forums.isSystem,
+        ownerUserId: forums.ownerUserId,
+        ownerUsername: users.username,
+        tagsJson: forums.tagsJson,
+        createdAt: forums.createdAt,
+      })
+      .from(forums)
+      .leftJoin(users, eq(users.id, forums.ownerUserId))
+      .where(and(sql`${forums.status} != 'archived'`, eq(forums.visibility, "public")));
+
+    const boardCounts = await db
+      .select({ forumId: rooms.forumId, n: sql<number>`count(*)` })
+      .from(rooms)
+      .where(and(isNotNull(rooms.forumId), isNull(rooms.archivedAt)))
+      .groupBy(rooms.forumId);
+    const memberCounts = await db
+      .select({ forumId: forumMembers.forumId, n: sql<number>`count(*)` })
+      .from(forumMembers)
+      .groupBy(forumMembers.forumId);
+    const activity = await db
+      .select({
+        forumId: rooms.forumId,
+        last: sql<number | null>`max(coalesce(${messages.lastActivityAt}, ${messages.createdAt}))`,
+      })
+      .from(messages)
+      .innerJoin(rooms, eq(rooms.id, messages.roomId))
+      .where(and(isNotNull(rooms.forumId), isNotNull(messages.title), isNull(messages.deletedAt)))
+      .groupBy(rooms.forumId);
+
+    const boardsBy = new Map(boardCounts.map((r) => [r.forumId, r.n]));
+    const membersBy = new Map(memberCounts.map((r) => [r.forumId, r.n]));
+    const activityBy = new Map(activity.map((r) => [r.forumId, r.last]));
+
+    return rows.map((f) => ({
+      id: f.id,
+      slug: f.slug,
+      name: f.name,
+      tagline: f.tagline ?? null,
+      logoUrl: f.logoUrl ?? null,
+      status: f.status,
+      postingMode: f.postingMode,
+      isSystem: !!f.isSystem,
+      ownerUserId: f.ownerUserId,
+      ownerUsername: f.ownerUsername ?? "unknown",
+      boardCount: boardsBy.get(f.id) ?? 0,
+      memberCount: membersBy.get(f.id) ?? 0,
+      tags: parseTagsJson(f.tagsJson),
+      lastActivityAt: activityBy.get(f.id) ?? null,
+      createdAt: +f.createdAt,
+    }));
+  }
+
+  app.get("/forums/discover", async () => {
+    const all = await browsableForumSummaries();
+    // popular: most members first, then most-recent activity (nulls last).
+    const popular = [...all]
+      .sort((a, b) =>
+        b.memberCount - a.memberCount ||
+        (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
+      .slice(0, 12);
+    // new: youngest forums first.
+    const fresh = [...all]
+      .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, 12);
+    return { popular, new: fresh };
+  });
+
+  app.get<{ Querystring: { q?: string; tag?: string } }>(
+    "/forums/discover/search",
+    async (req) => {
+      const q = (req.query.q ?? "").trim().toLowerCase();
+      const tag = (req.query.tag ?? "").trim();
+      const all = await browsableForumSummaries();
+      const items = all.filter((f) => {
+        const matchesQ =
+          !q ||
+          f.name.toLowerCase().includes(q) ||
+          (f.tagline ?? "").toLowerCase().includes(q);
+        const matchesTag = !tag || hasTag(f.tags, tag);
+        return matchesQ && matchesTag;
+      }).slice(0, 50);
+      return { items };
+    },
+  );
+
+  app.get("/forums/tags", async () => {
+    const all = await browsableForumSummaries();
+    const counts = new Map<string, number>();
+    for (const f of all) {
+      for (const t of f.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    const tags = [...counts.entries()]
+      .map(([tag, count]) => ({ tag, count }))
+      .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    return { tags };
   });
 
   app.get<{ Params: { idOrSlug: string } }>("/forums/:idOrSlug", async (req, reply) => {
@@ -399,6 +737,17 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
         })()
       : null;
 
+    // Affiliated chat server (Servers Lift): drives per-server topic-card
+    // flair + the owner's "affiliate this forum" settings control. Null
+    // when `forums.serverId` is unset.
+    const affiliatedServer = forum.serverId
+      ? await (async () => {
+          const s = (await db.select({ id: servers.id, name: servers.name })
+            .from(servers).where(eq(servers.id, forum.serverId!)).limit(1))[0];
+          return s ? { id: s.id, name: s.name } : null;
+        })()
+      : null;
+
     // Viewer gates (advisory for the client; every mutation re-checks).
     let viewer: ForumViewerState | null = null;
     if (me && viewerAuthority) {
@@ -466,6 +815,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       ownerUsername: owner?.username ?? "unknown",
       boardCount,
       memberCount,
+      tags: parseTagsJson(forum.tagsJson),
       lastActivityAt,
       createdAt: +forum.createdAt,
       descriptionHtml: forum.descriptionHtml ?? null,
@@ -477,6 +827,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       publicBrowsing: !!forum.publicBrowsing,
       allowCustomTags: !!forum.allowCustomTags,
       linkedWorld,
+      affiliatedServer,
       boards,
       prefixes: prefixRows,
       categories: categoryRefs,
@@ -549,6 +900,10 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     name: z.string().trim().min(FORUM_NAME_MIN).max(FORUM_NAME_MAX),
     slug: z.string().trim().min(3).max(40),
     purpose: z.string().trim().min(FORUM_PURPOSE_MIN).max(FORUM_PURPOSE_MAX),
+    /** Acceptance of the global "Create your Forum" registration rules.
+     *  Only enforced when site_settings.forumRegistrationRulesHtml is set
+     *  (migration 0301); empty rules impose no new requirement. */
+    agreedToRules: z.boolean().optional(),
   }).strict();
 
   app.post<{ Body: unknown }>("/forums/applications", async (req, reply) => {
@@ -560,6 +915,17 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     let body: z.infer<typeof submitBody>;
     try { body = submitBody.parse(req.body); }
     catch { reply.code(400); return { error: `Check the fields: name ${FORUM_NAME_MIN}-${FORUM_NAME_MAX} chars, purpose ${FORUM_PURPOSE_MIN}-${FORUM_PURPOSE_MAX} chars.` }; }
+
+    // Registration rules gate (migration 0301). When the global admin has set
+    // forum-registration rules HTML, the applicant must tick "I agree" before
+    // the application is accepted. Empty rules = no gate (back-compat).
+    const rulesHtml = (await db.select({ html: siteSettings.forumRegistrationRulesHtml })
+      .from(siteSettings).where(eq(siteSettings.id, "singleton")).limit(1))[0]?.html ?? "";
+    const rulesActive = rulesHtml.trim().length > 0;
+    if (rulesActive && body.agreedToRules !== true) {
+      reply.code(400);
+      return { error: "You must agree to the forum registration rules before applying." };
+    }
 
     const slug = normalizeForumSlug(body.slug);
     if (!slug) { reply.code(400); return { error: "That slug isn't usable - lowercase letters, numbers, and _ only (3-40), and not a reserved word." }; }
@@ -611,6 +977,8 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
         requestedName: body.name,
         requestedSlug: slug,
         purpose: body.purpose,
+        // Stamp the acceptance time when the rules gate applied and was met.
+        agreedAt: rulesActive ? new Date() : null,
       });
     } catch {
       // UNIQUE race on the partial pending index - same friendly 409.
@@ -893,6 +1261,21 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
       (m) => !(m.threadCategoryId && lockedCatIds.has(m.threadCategoryId)),
     );
 
+    // Per-server author flair (Servers Lift): resolve each topic author's
+    // rank sigil / avatar-border / name style from the cosmetics they
+    // earned ON THE SERVER THIS FORUM IS AFFILIATED TO. When the forum has
+    // NO affiliation (`forums.serverId` NULL) we ship NO flair fields and
+    // the cards render bare — the gate is `sid !== null`.
+    const sid = (await db.select({ serverId: forums.serverId })
+      .from(forums).where(eq(forums.id, room.forumId)).limit(1))[0]?.serverId ?? null;
+    const flairByIdentity = sid
+      ? await resolveTopicAuthorFlair(
+          db,
+          sid,
+          visibleTopics.map((m) => ({ userId: m.userId, characterId: m.characterId ?? null })),
+        )
+      : null;
+
     return {
       boardName: room.name,
       categories: cats.map((c) => ({
@@ -900,23 +1283,40 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
         membersOnly: !!c.membersOnly,
         locked: !!c.membersOnly && !isMember,
       })),
-      topics: visibleTopics.map((m) => ({
-        id: m.id,
-        title: m.title ?? "",
-        snippet: m.body.replace(/\s+/g, " ").slice(0, 200),
-        authorUserId: m.userId,
-        authorDisplayName: m.displayName,
-        authorAvatarUrl: m.avatarUrl ?? null,
-        authorColor: m.color ?? null,
-        characterId: m.characterId ?? null,
-        categoryId: m.threadCategoryId ?? null,
-        prefixId: m.prefixId ?? null,
-        isSticky: !!m.isSticky,
-        locked: !!m.lockedAt,
-        replyCount: repliesBy.get(m.id) ?? 0,
-        createdAt: +m.createdAt,
-        lastActivityAt: +(m.lastActivityAt ?? m.createdAt),
-      })),
+      topics: visibleTopics.map((m) => {
+        // Bare card unless the forum is affiliated. When affiliated, spread
+        // the resolved per-server flair (values may individually be null
+        // for an author who hasn't earned/equipped that cosmetic there).
+        const flair = flairByIdentity?.get(`${m.userId}::${m.characterId ?? ""}`) ?? null;
+        return {
+          id: m.id,
+          title: m.title ?? "",
+          snippet: m.body.replace(/\s+/g, " ").slice(0, 200),
+          authorUserId: m.userId,
+          authorDisplayName: m.displayName,
+          authorAvatarUrl: m.avatarUrl ?? null,
+          authorColor: m.color ?? null,
+          characterId: m.characterId ?? null,
+          categoryId: m.threadCategoryId ?? null,
+          prefixId: m.prefixId ?? null,
+          isSticky: !!m.isSticky,
+          locked: !!m.lockedAt,
+          replyCount: repliesBy.get(m.id) ?? 0,
+          createdAt: +m.createdAt,
+          lastActivityAt: +(m.lastActivityAt ?? m.createdAt),
+          ...(flair
+            ? {
+                authorRankKey: flair.rankKey,
+                authorTier: flair.tier,
+                authorSelectedBorderRankKey: flair.selectedBorderRankKey,
+                authorSelectedFreeformBorderKey: flair.selectedFreeformBorderKey,
+                authorFreeformBorderConfig: flair.freeformBorderConfig,
+                authorNameStyleKey: flair.nameStyleKey,
+                authorNameStyleConfig: flair.nameStyleConfig,
+              }
+            : {}),
+        };
+      }),
       hasMore,
     };
   });
@@ -979,6 +1379,10 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     publicBrowsing: z.boolean().optional(),
     /** Allow mods with create_tags to mint tags on the fly while tagging. */
     allowCustomTags: z.boolean().optional(),
+    /** Owner-set discovery tags (genre/category). Round-tripped through
+     *  serializeTags on write (lowercased/deduped/clamped); absent = unchanged,
+     *  [] clears. Mirrors the chat-server discover tagging. */
+    tags: z.array(z.string()).max(MAX_TAGS_PER_ENTITY * 2).optional(),
     /** Phase 6 identity: per-forum theme (JSON string, normalized before
      *  storage; null clears) + linked world (must belong to the FORUM
      *  OWNER and not be private; null unlinks). */
@@ -990,6 +1394,11 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     /** Vertical banner focus, 0-100 (percent down the image). */
     bannerFocusY: z.number().int().min(0).max(100).optional(),
     linkedWorldId: z.string().nullable().optional(),
+    /** Servers Lift: affiliate this forum to a chat server (`forums.serverId`),
+     *  which scopes topic-card author flair to that server's earned cosmetics.
+     *  Must be a server the FORUM OWNER owns or can manage. Null un-affiliates
+     *  (topic cards go bare). */
+    serverId: z.string().nullable().optional(),
   }).strict();
 
   app.patch<{ Params: { id: string }; Body: unknown }>("/forums/:id", async (req, reply) => {
@@ -1018,6 +1427,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     if (body.postingMode !== undefined) update.postingMode = body.postingMode;
     if (body.publicBrowsing !== undefined) update.publicBrowsing = body.publicBrowsing;
     if (body.allowCustomTags !== undefined) update.allowCustomTags = body.allowCustomTags;
+    if (body.tags !== undefined) update.tagsJson = serializeTags(body.tags);
     if (body.applicationPrompt !== undefined) {
       update.applicationPrompt = body.applicationPrompt?.trim() ? body.applicationPrompt.trim() : null;
     }
@@ -1057,6 +1467,28 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
           reply.code(409); return { error: "Private worlds can't be linked - the strip would expose them." };
         }
         update.linkedWorldId = w.id;
+      }
+    }
+    if (body.serverId !== undefined) {
+      if (body.serverId === null) {
+        // Un-affiliate: topic cards drop their per-server flair and render bare.
+        update.serverId = null;
+      } else {
+        // Affiliate to a chat server the FORUM OWNER may manage. Validated
+        // against the forum OWNER (not the caller) — same posture as the
+        // linked-world check — so managing site staff can't bind someone's
+        // forum to a server the owner has no authority over. serverAuthority
+        // folds in the owner short-circuit + site `manage_any_server`.
+        const ownerRow = (await db.select({ id: users.id, role: users.role })
+          .from(users).where(eq(users.id, gate.forum.ownerUserId)).limit(1))[0];
+        if (!ownerRow) { reply.code(404); return { error: "forum owner not found" }; }
+        const sa = await serverAuthority(db, { id: ownerRow.id, role: ownerRow.role }, body.serverId);
+        if (!sa.server) { reply.code(404); return { error: "no such server" }; }
+        if (!sa.isOwner) {
+          reply.code(403);
+          return { error: "You can only affiliate this forum to a server you own or manage." };
+        }
+        update.serverId = sa.server.id;
       }
     }
     await db.update(forums).set(update).where(eq(forums.id, gate.forum.id));

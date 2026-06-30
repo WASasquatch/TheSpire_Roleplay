@@ -81,11 +81,9 @@ interface Props {
    *  Rooms title). Boards — rooms with a forumId — are filtered out of
    *  the room list and live in the catalog instead. */
   onOpenForums?: () => void;
-  /**
-   * Mobile drawer state. On md+ screens the rail is always visible regardless;
-   * isOpen only controls the slide-in/out at sub-md widths.
-   */
-  isOpen?: boolean;
+  /** Mobile-menu close affordance. The drawer's open/slide is owned by the
+   *  wrapper in App (the full-screen Menu overlay); this just lets the in-rail
+   *  ✕ button dismiss it. */
   onClose?: () => void;
   /**
    * Same 0–3 reading-size step the Tools menu cycles for the chat
@@ -154,14 +152,9 @@ export function RoomsTree({
   onOpenEarning,
   onOpenArcade,
   onOpenForums,
-  isOpen,
   onClose,
   fontStep = 1,
 }: Props) {
-  // Mobile drawer: fixed-positioned slide-out from the right. md+ falls
-  // back to the original static, always-visible rail. We avoid a separate
-  // mobile component by toggling via Tailwind's responsive variants.
-  const drawerOpen = isOpen ?? false;
 
   // "Create Room" prompt, opened from the Rooms header button. Local to the
   // rail since it only needs `onCommand` (already threaded through) to fire
@@ -248,12 +241,15 @@ export function RoomsTree({
       // `md:relative` (not the previous `md:static`) so the absolute-
       // positioned resize handle below positions against the aside
       // instead of walking up the layout tree.
+      // Drawer open/close + slide is now owned by the wrapper in App (the
+      // full-screen Menu overlay that also carries the server rail). Here the
+      // rail is just an in-flow flex child: on mobile it FILLS the space left of
+      // the server rail (flex-1); on desktop it returns to its fixed, resizable
+      // width via the --keep-rail-width CSS variable.
       className={`
         keep-app-sidebar
-        flex h-full w-72 flex-col border-l border-keep-rule bg-keep-bg text-sm shadow-2xl
-        fixed inset-y-0 right-0 z-40 transform transition-transform
-        ${drawerOpen ? "translate-x-0" : "translate-x-full"}
-        lg:relative lg:w-[var(--keep-rail-width)] lg:translate-x-0 lg:transform-none lg:transition-none
+        flex h-full min-w-0 flex-1 flex-col border-l border-keep-rule bg-keep-bg text-sm
+        lg:relative lg:flex-none lg:w-[var(--keep-rail-width)]
         lg:bg-keep-banner/30 lg:shadow-none
       `}
       style={{

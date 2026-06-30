@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import DOMPurify from "dompurify";
 import { VERSION } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
@@ -91,69 +92,47 @@ export function SplashShell({
     // user land on the Darkness palette automatically.
     <div
       style={themeStyle(splashTheme)}
-      className="relative min-h-screen w-full overflow-hidden bg-keep-bg text-keep-text"
+      className="relative min-h-screen w-full overflow-hidden text-keep-text"
     >
-      {/*
-        Background layer - absolute so the card sits above it without
-        affecting its sizing. Cover keeps the spire fully visible on common
-        16:9 / 16:10 viewports; the image's right edge fades to parchment
-        (or to deep blue in the dark variant) which blends into the modal
-        seamlessly. A subtle background-color overlay on the right boosts
-        modal legibility on smaller / wider viewports where the natural
-        fade isn't quite enough.
-      */}
-      <div
-        aria-hidden
-        // On portrait mobile the artwork is much wider than the viewport.
-        // `bg-center` would crop both edges and show the boring middle;
-        // pinning to `bg-left` shifts the spire too far right within the
-        // visible frame. The negative-x offset (-175px) splits the
-        // difference - the spire sits roughly centered in the viewport
-        // with mountains trailing below. On md+ the viewport is wide
-        // enough that the natural cover-center works.
-        //
-        // Sized in VIEWPORT units, not `inset-0`: the parent expands to
-        // fit the SpireScroll + any below-the-fold content, and `inset-0`
-        // resolves right/bottom against a containing block that can track
-        // that content height (and a vertical scrollbar narrows the width),
-        // so cover would scale the 2.65:1 panoramic art up to span the full
-        // page height and crop everything but a thin center band — the
-        // "zoomed in" look. `fixed` + `w-screen`/`h-screen` (100vw/100vh)
-        // pin the layer to the window so cover sizes against the viewport.
-        className="fixed left-0 top-0 h-screen w-screen bg-cover bg-[position:-175px_center] md:bg-center"
-        style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
-      />
-      <div
-        aria-hidden
-        // Right-side veil so the desktop card sits on a calm
-        // background even where the bg image itself has detail. On mobile
-        // the card switches to a translucent glass treatment (see below)
-        // and we WANT the artwork showing through, so the veil is much
-        // lighter - just enough to keep the right edge of the screen
-        // from competing with the card.
-        className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70"
-      />
-      {/* Dark-mode corner glows. Cyan top-left echoes the spire star's
-          neon halo in the artwork; moon-white bottom-right echoes the
-          moonlit ridge highlight. Pure decorative overlays, pointer
-          events disabled so they never intercept clicks. Painted only
-          when the resolved splash palette reads as dark (Darkness
-          preset, Twilight, Ember, Ocean, etc.); the light artwork
-          doesn't need them. */}
-      {splashIsDark ? (
-        <>
+      {/* Background art, portaled to <body> so it is a TRUE viewport-fixed
+          layer (mirrors SplashLanding). `position: fixed` only resolves against
+          the viewport when NO ancestor establishes a containing block; a
+          `transform`/`filter`/`will-change`/`backdrop-filter` anywhere up the
+          tree (a theme design's glass treatment, the struck-shake animation,
+          etc.) silently re-anchors a plain `fixed` child to that ancestor —
+          which is what left the login wallpaper blank/white. Rendering it on
+          <body> behind everything (`zIndex:-1`) guarantees it ignores page
+          height and always fills the window. themeStyle is re-applied here
+          because the portal lives outside this subtree's CSS-var scope, and the
+          parent above intentionally drops `bg-keep-bg` so this shows through.
+          The negative-x offset (-175px) centers the spire on portrait mobile;
+          md+ uses the natural cover-center. */}
+      {createPortal(
+        <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: -1 }}>
           <div
-            aria-hidden
-            className="pointer-events-none absolute -left-32 -top-32 h-[28rem] w-[28rem]"
-            style={{ background: "radial-gradient(circle, rgba(63,165,160,0.35) 0%, rgba(63,165,160,0.12) 35%, transparent 70%)" }}
+            className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
+            style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
           />
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -bottom-32 -right-32 h-[32rem] w-[32rem]"
-            style={{ background: "radial-gradient(circle, rgba(220,230,255,0.22) 0%, rgba(220,230,255,0.08) 40%, transparent 75%)" }}
-          />
-        </>
-      ) : null}
+          {/* Right-side veil so the card sits on a calm background; lighter on
+              mobile where the glass card wants the artwork showing through. */}
+          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70" />
+          {/* Dark-mode corner glows (cyan star halo / moonlit ridge), only when
+              the resolved splash palette reads as dark. */}
+          {splashIsDark ? (
+            <>
+              <div
+                className="pointer-events-none absolute -left-32 -top-32 h-[28rem] w-[28rem]"
+                style={{ background: "radial-gradient(circle, rgba(63,165,160,0.35) 0%, rgba(63,165,160,0.12) 35%, transparent 70%)" }}
+              />
+              <div
+                className="pointer-events-none absolute -bottom-32 -right-32 h-[32rem] w-[32rem]"
+                style={{ background: "radial-gradient(circle, rgba(220,230,255,0.22) 0%, rgba(220,230,255,0.08) 40%, transparent 75%)" }}
+              />
+            </>
+          ) : null}
+        </div>,
+        document.body,
+      )}
 
       {/*
         Card position. On wide desktops (lg+) we visually center the

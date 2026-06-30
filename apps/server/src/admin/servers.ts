@@ -230,11 +230,22 @@ export async function registerAdminServerRoutes(app: FastifyInstance, db: Db, io
         await ensureDefaultUsergroup(db, serverId);
       }
 
-      await notifyUser(io, appRow.applicantUserId,
-        nextStatus === "approved" ? "SERVER_APP_APPROVED" : "SERVER_APP_REJECTED",
-        nextStatus === "approved"
+      await notifyUser(io, db, appRow.applicantUserId, {
+        code: nextStatus === "approved" ? "SERVER_APP_APPROVED" : "SERVER_APP_REJECTED",
+        message: nextStatus === "approved"
           ? `Your server "${appRow.requestedName}" was approved - find it on the server rail!`
-          : `Your server application "${appRow.requestedName}" was declined${body.note ? `: ${body.note}` : "."}`);
+          : `Your server application "${appRow.requestedName}" was declined${body.note ? `: ${body.note}` : "."}`,
+        persist: {
+          category: "server",
+          kind: nextStatus === "approved" ? "server_app_approved" : "server_app_rejected",
+          serverId: nextStatus === "approved" ? serverId : null,
+          title: nextStatus === "approved" ? `Server approved: ${appRow.requestedName}` : "Server application declined",
+          snippet: nextStatus === "approved"
+            ? "Find it on the server rail."
+            : (body.note ? body.note : `Your application for "${appRow.requestedName}" was declined.`),
+          ...(nextStatus === "approved" ? { target: { kind: "server", id: serverId } } : {}),
+        },
+      });
 
       const rows = await db.select().from(serverCreationApplications)
         .where(eq(serverCreationApplications.id, appRow.id)).limit(1);

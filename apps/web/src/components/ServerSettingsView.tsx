@@ -205,6 +205,8 @@ interface RoomListRow {
   type?: string;
   topic?: string | null;
   messageExpiryMinutes?: number | null;
+  /** When true the channel is exempt from the empty-room archival sweep. */
+  persistent?: boolean;
   occupants?: unknown[];
 }
 
@@ -1036,6 +1038,7 @@ function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsol
   const [type, setType] = useState<"public" | "private">("public");
   const [password, setPassword] = useState("");
   const [topic, setTopic] = useState("");
+  const [persistent, setPersistent] = useState(true);
   const canSave = name.trim().length >= 1 && (type === "public" || password.length >= 1);
   return (
     <div className="space-y-2 rounded border border-keep-action/40 bg-keep-panel/20 p-2.5">
@@ -1054,10 +1057,17 @@ function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsol
       ) : null}
       <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={200} placeholder="Topic (optional)"
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+      <label className="flex items-start gap-2 text-xs text-keep-text">
+        <input type="checkbox" className="mt-0.5" checked={persistent} onChange={(e) => setPersistent(e.target.checked)} />
+        <span>
+          <span className="block">Keep this room even when empty</span>
+          <span className="block text-[10px] text-keep-muted">On (recommended): the channel stays put. Off: it's removed automatically once everyone leaves.</span>
+        </span>
+      </label>
       <div className="flex justify-end">
         <button type="button" disabled={busy || !canSave}
           onClick={() => void run(async () => {
-            await apiCreateServerRoom(detail.id, { name: name.trim(), type, ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}) });
+            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}) });
             onCreated();
           })}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Create room</button>
@@ -1071,7 +1081,8 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
   const [name, setName] = useState(room.name);
   const [topic, setTopic] = useState(room.topic ?? "");
   const [expiry, setExpiry] = useState<string>(room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "");
-  const dirty = name !== room.name || topic !== (room.topic ?? "") || expiry !== (room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "");
+  const [persistent, setPersistent] = useState(room.persistent ?? true);
+  const dirty = name !== room.name || topic !== (room.topic ?? "") || expiry !== (room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "") || persistent !== (room.persistent ?? true);
   return (
     <div className="mt-2 space-y-2 border-t border-keep-rule/60 pt-2">
       <label className="block text-xs">
@@ -1089,6 +1100,13 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
         <input type="number" min={0} value={expiry} onChange={(e) => setExpiry(e.target.value)} placeholder="default"
           className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
       </label>
+      <label className="flex items-start gap-2 text-xs text-keep-text">
+        <input type="checkbox" className="mt-0.5" checked={persistent} onChange={(e) => setPersistent(e.target.checked)} />
+        <span>
+          <span className="block">Keep this room even when empty</span>
+          <span className="block text-[10px] text-keep-muted">Off: the room is removed automatically once everyone leaves.</span>
+        </span>
+      </label>
       <div className="flex justify-end">
         <button type="button" disabled={busy || !dirty}
           onClick={() => void run(async () => {
@@ -1096,6 +1114,7 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
               name: name.trim(),
               topic: topic.trim() ? topic.trim() : null,
               messageExpiryMinutes: expiry.trim() === "" ? null : Math.max(0, Number(expiry)),
+              persistent,
             });
             onSaved();
           })}
@@ -1745,8 +1764,46 @@ function ModLogTab({ detail }: { detail: ServerConsoleDetail }) {
 }
 
 /* ============================================================
- * Tab: Settings (welcome/rules/caps)
+ * Tabs: Rules (welcome/rules copy) + Settings (caps & durations)
  * ============================================================ */
+
+/**
+ * Format ms as the most natural unit ("5d", "2h", "30m", "45s") so durations
+ * read like the Global Admin console instead of a raw millisecond count.
+ * `0` means "disabled" (only meaningful for the edit window). Mirrors the
+ * helper in AdminPanel; kept local per this file's inline-helper convention.
+ */
+function formatMs(ms: number): string {
+  if (ms === 0) return "0";
+  if (ms % 86_400_000 === 0) return `${ms / 86_400_000}d`;
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
+  if (ms % 60_000 === 0) return `${ms / 60_000}m`;
+  return `${Math.round(ms / 1000)}s`;
+}
+
+/** Inverse of {@link formatMs}. Accepts "5m", "1h30m", "30d", or a bare ms
+ *  number; returns null when the (non-blank) text parses to nothing. The caller
+ *  treats a blank field as "inherit", so blank is handled before this. */
+function parseDurationMs(s: string): number | null {
+  const trimmed = s.trim();
+  if (trimmed === "") return null;
+  if (/^\d+$/.test(trimmed)) {
+    const n = parseInt(trimmed, 10);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+  let total = 0;
+  let any = false;
+  const re = /(\d+)\s*([smhd])/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(trimmed)) !== null) {
+    any = true;
+    const n = parseInt(m[1] ?? "0", 10);
+    const unit = (m[2] ?? "").toLowerCase();
+    const ms = unit === "d" ? 86_400_000 : unit === "h" ? 3_600_000 : unit === "m" ? 60_000 : 1_000;
+    total += n * ms;
+  }
+  return any ? total : null;
+}
 
 /** One number-or-inherit field over the per-server settings row. */
 function NumberSetting({ label, hint, value, onChange, min }: {
@@ -1763,14 +1820,110 @@ function NumberSetting({ label, hint, value, onChange, min }: {
   );
 }
 
-function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
+/** One duration-or-inherit field (friendly text like "30d" / "5m"), the
+ *  per-server analog of the Global Admin duration inputs. Stored as ms on the
+ *  wire; blank = inherit the platform default. */
+function DurationSetting({ label, hint, value, onChange, placeholder }: {
+  label: string; hint: string; value: string; onChange: (v: string) => void; placeholder?: string;
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">{label}</span>
+      <input type="text" value={value} onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder ?? "(inherit platform default)"}
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 font-mono text-sm outline-none focus:border-keep-action" />
+      <span className="mt-0.5 block text-[10px] text-keep-muted">{hint}</span>
+    </label>
+  );
+}
+
+/* ------------------------------------------------------------
+ * Tab: Rules — the server's welcome / rules HTML copy. Split out of the old
+ * combined Settings tab so copy and numeric caps live on their own screens
+ * (mirrors the Global Admin Rules vs Settings split). Saves only the HTML
+ * fields; the PATCH route is partial so the Settings tab's caps are untouched.
+ * ------------------------------------------------------------ */
+function RulesTab({ detail, busy, run, onSaved }: TabProps) {
   const [loaded, setLoaded] = useState<ServerSettingsWire | null>(null);
-  // Local string copies (empty = inherit / clear the override).
   const [welcome, setWelcome] = useState("");
   const [newUserWelcome, setNewUserWelcome] = useState("");
   const [rules, setRules] = useState("");
   const [security, setSecurity] = useState("");
-  const [retentionMs, setRetentionMs] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    apiGetSettings(detail.id).then((s) => {
+      if (!alive) return;
+      setLoaded(s);
+      setWelcome(s.welcomeHtml ?? "");
+      setNewUserWelcome(s.newUserWelcomeHtml ?? "");
+      setRules(s.rulesHtml ?? "");
+      setSecurity(s.securityNoticeHtml ?? "");
+    }).catch(() => { if (alive) setLoaded(null); });
+    return () => { alive = false; };
+  }, [detail.id]);
+
+  if (!loaded) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+
+  const htmlOrNull = (s: string): string | null => (s.trim() ? s : null);
+
+  function save() {
+    void run(async () => {
+      await apiPatchSettings(detail.id, {
+        welcomeHtml: htmlOrNull(welcome),
+        newUserWelcomeHtml: htmlOrNull(newUserWelcome),
+        rulesHtml: htmlOrNull(rules),
+        securityNoticeHtml: htmlOrNull(security),
+      });
+      onSaved();
+    });
+  }
+
+  return (
+    <div className="max-w-xl space-y-4">
+      <p className="text-[11px] text-keep-muted">
+        Your server's welcome and rules. Leave any field blank to inherit the platform default. HTML copy follows the same rules as profile bios.
+      </p>
+      <label className="block text-sm">
+        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">Welcome</span>
+        <textarea value={welcome} onChange={(e) => setWelcome(e.target.value)} rows={4} maxLength={200_000}
+          placeholder="Shown to members when they enter the server."
+          className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+      </label>
+      <label className="block text-sm">
+        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">New-user welcome</span>
+        <textarea value={newUserWelcome} onChange={(e) => setNewUserWelcome(e.target.value)} rows={4} maxLength={200_000}
+          placeholder="Shown the first time someone joins."
+          className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+      </label>
+      <label className="block text-sm">
+        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">House rules</span>
+        <textarea value={rules} onChange={(e) => setRules(e.target.value)} rows={6} maxLength={200_000}
+          placeholder="The server's rules."
+          className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+      </label>
+      <label className="block text-sm">
+        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">Security notice</span>
+        <textarea value={security} onChange={(e) => setSecurity(e.target.value)} rows={3} maxLength={200_000}
+          placeholder="An optional safety / privacy notice."
+          className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+      </label>
+      <button type="button" disabled={busy} onClick={save}
+        className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save rules</button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------
+ * Tab: Settings — the numeric caps + durations. Durations (retention, edit
+ * window) are entered friendly ("30d" / "5m") and stored as ms, matching the
+ * Global Admin console; blank inherits the platform default. Saves only these
+ * fields, leaving the Rules tab's copy untouched (partial PATCH).
+ * ------------------------------------------------------------ */
+function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
+  const [loaded, setLoaded] = useState<ServerSettingsWire | null>(null);
+  // Local string copies (empty = inherit / clear the override).
+  const [retention, setRetention] = useState("");
   const [maxRooms, setMaxRooms] = useState("");
   const [maxMsg, setMaxMsg] = useState("");
   const [editGrace, setEditGrace] = useState("");
@@ -1781,43 +1934,49 @@ function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
     apiGetSettings(detail.id).then((s) => {
       if (!alive) return;
       setLoaded(s);
-      const str = (n: number | null) => (n == null ? "" : String(n));
-      setWelcome(s.welcomeHtml ?? "");
-      setNewUserWelcome(s.newUserWelcomeHtml ?? "");
-      setRules(s.rulesHtml ?? "");
-      setSecurity(s.securityNoticeHtml ?? "");
-      setRetentionMs(str(s.messageRetentionMs));
-      setMaxRooms(str(s.maxRoomsPerOwner));
-      setMaxMsg(str(s.maxMessageLength));
-      setEditGrace(str(s.editGraceMs));
-      setMaxForumPost(str(s.maxForumPostLength));
+      const dur = (n: number | null) => (n == null ? "" : formatMs(n));
+      const num = (n: number | null) => (n == null ? "" : String(n));
+      setRetention(dur(s.messageRetentionMs));
+      setMaxRooms(num(s.maxRoomsPerOwner));
+      setMaxMsg(num(s.maxMessageLength));
+      setEditGrace(dur(s.editGraceMs));
+      setMaxForumPost(num(s.maxForumPostLength));
     }).catch(() => { if (alive) setLoaded(null); });
     return () => { alive = false; };
   }, [detail.id]);
 
   if (!loaded) return <p className="text-sm italic text-keep-muted">Loading…</p>;
 
-  // Build the partial PATCH: a number field maps to null when blank (clear the
-  // override) or its parsed value; an HTML field to null when blank or its text.
+  // A number field maps to null when blank (clear the override) or its int value.
   const numOrNull = (s: string): number | null => {
     const t = s.trim();
     if (!t) return null;
     const n = Number(t);
     return Number.isFinite(n) ? Math.trunc(n) : null;
   };
-  const htmlOrNull = (s: string): string | null => (s.trim() ? s : null);
 
   function save() {
     void run(async () => {
+      // Durations are entered friendly and sent as ms; blank clears the
+      // override (inherit), so validation runs only on a non-blank value.
+      let messageRetentionMs: number | null = null;
+      if (retention.trim()) {
+        const ms = parseDurationMs(retention);
+        if (ms === null || ms <= 0) throw new Error("Message retention must be a duration like 30d (leave blank to inherit).");
+        messageRetentionMs = ms;
+      }
+      let editGraceMs: number | null = null;
+      if (editGrace.trim()) {
+        const ms = parseDurationMs(editGrace);
+        if (ms === null || ms < 0) throw new Error("Edit window must be a duration like 5m, or 0 to disable edits (leave blank to inherit).");
+        if (ms > 7 * 24 * 60 * 60 * 1000) throw new Error("Edit window must be 7 days or less.");
+        editGraceMs = ms;
+      }
       await apiPatchSettings(detail.id, {
-        welcomeHtml: htmlOrNull(welcome),
-        newUserWelcomeHtml: htmlOrNull(newUserWelcome),
-        rulesHtml: htmlOrNull(rules),
-        securityNoticeHtml: htmlOrNull(security),
-        messageRetentionMs: numOrNull(retentionMs),
+        messageRetentionMs,
         maxRoomsPerOwner: numOrNull(maxRooms),
         maxMessageLength: numOrNull(maxMsg),
-        editGraceMs: numOrNull(editGrace),
+        editGraceMs,
         maxForumPostLength: numOrNull(maxForumPost),
       });
       onSaved();
@@ -1827,43 +1986,18 @@ function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
   return (
     <div className="max-w-xl space-y-4">
       <p className="text-[11px] text-keep-muted">
-        Leave any field blank to inherit the platform default. HTML copy follows the same rules as profile bios.
+        Leave any field blank to inherit the platform default. Durations take friendly values like <span className="text-keep-text">30d</span>, <span className="text-keep-text">12h</span>, or <span className="text-keep-text">5m</span>.
       </p>
 
       <section className="space-y-3">
-        <p className="text-xs uppercase tracking-widest text-keep-muted">Welcome &amp; rules</p>
-        <label className="block text-sm">
-          <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">Welcome</span>
-          <textarea value={welcome} onChange={(e) => setWelcome(e.target.value)} rows={4} maxLength={200_000}
-            placeholder="Shown to members when they enter the server."
-            className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">New-user welcome</span>
-          <textarea value={newUserWelcome} onChange={(e) => setNewUserWelcome(e.target.value)} rows={4} maxLength={200_000}
-            placeholder="Shown the first time someone joins."
-            className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">House rules</span>
-          <textarea value={rules} onChange={(e) => setRules(e.target.value)} rows={6} maxLength={200_000}
-            placeholder="The server's rules."
-            className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">Security notice</span>
-          <textarea value={security} onChange={(e) => setSecurity(e.target.value)} rows={3} maxLength={200_000}
-            placeholder="An optional safety / privacy notice."
-            className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
-        </label>
-      </section>
-
-      <section className="space-y-3">
-        <p className="text-xs uppercase tracking-widest text-keep-muted">Limits</p>
-        <NumberSetting label="Message retention (ms)" hint="How long messages are kept before pruning." value={retentionMs} onChange={setRetentionMs} min={1} />
+        <DurationSetting label="Message retention" value={retention} onChange={setRetention}
+          placeholder="e.g. 30d — blank inherits"
+          hint="How long messages are kept before pruning. Use a duration like 90d or 12h." />
         <NumberSetting label="Max rooms per owner" hint="Cap on rooms a member may open here." value={maxRooms} onChange={setMaxRooms} min={1} />
         <NumberSetting label="Max message length" hint="Character cap for a chat message." value={maxMsg} onChange={setMaxMsg} min={1} />
-        <NumberSetting label="Edit grace (ms)" hint="Window in which a message can still be edited." value={editGrace} onChange={setEditGrace} min={0} />
+        <DurationSetting label="Edit window" value={editGrace} onChange={setEditGrace}
+          placeholder="e.g. 5m — 0 disables, blank inherits"
+          hint="How long after sending an author can still edit a message. Use a duration like 30s / 5m / 1h, or 0 to disable edits." />
         <NumberSetting label="Max forum post length" hint="Character cap for a forum post." value={maxForumPost} onChange={setMaxForumPost} min={1} />
       </section>
 
@@ -1877,7 +2011,7 @@ function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
  * The console shell + tab router
  * ============================================================ */
 
-type ServerSettingsTab = "overview" | "appearance" | "rooms" | "members" | "roles" | "usergroups" | "applications" | "reports" | "modcases" | "bans" | "modlog" | "emoticons" | "announcements" | "faqs" | "commands-titles" | "earning" | "settings";
+type ServerSettingsTab = "overview" | "appearance" | "rooms" | "members" | "roles" | "usergroups" | "applications" | "reports" | "modcases" | "bans" | "modlog" | "emoticons" | "announcements" | "faqs" | "commands-titles" | "earning" | "rules" | "settings";
 
 interface TabProps {
   detail: ServerConsoleDetail;
@@ -1892,7 +2026,7 @@ const TAB_LABEL: Record<ServerSettingsTab, string> = {
   roles: "roles", usergroups: "usergroups", applications: "applications", reports: "reports",
   modcases: "mod cases",
   bans: "bans", modlog: "mod log", emoticons: "emoticons", announcements: "announcements",
-  faqs: "faqs", "commands-titles": "commands & titles", earning: "earning", settings: "settings",
+  faqs: "faqs", "commands-titles": "commands & titles", earning: "earning", rules: "rules", settings: "settings",
 };
 
 /**
@@ -1919,7 +2053,7 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
     ...(can("manage_faqs") ? (["faqs"] as const) : []),
     ...(can("manage_commands") || can("manage_titles") ? (["commands-titles"] as const) : []),
     ...(can("manage_earning") ? (["earning"] as const) : []),
-    ...(can("manage_appearance") ? (["settings"] as const) : []),
+    ...(can("manage_appearance") ? (["rules", "settings"] as const) : []),
   ];
   const [tab, setTab] = useState<ServerSettingsTab>(tabs[0] ?? "modlog");
   const [err, setErr] = useState<string | null>(null);
@@ -1966,6 +2100,7 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
           : tab === "faqs" ? <FaqsTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
           : tab === "commands-titles" ? <CommandsTitlesTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
           : tab === "earning" ? <EarningTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
+          : tab === "rules" ? <RulesTab {...props} />
           : <SettingsTab {...props} />;
         // Calm mode only: wrap the body in a remount-on-tab-change (key) div
         // carrying `tk-fade-in` so the new tab eases in. When Reduce Motion is

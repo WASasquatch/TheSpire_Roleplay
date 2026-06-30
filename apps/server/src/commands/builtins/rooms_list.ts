@@ -1,8 +1,29 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
-import { roomMembers, rooms } from "../../db/schema.js";
+import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { messages, roomMembers, rooms } from "../../db/schema.js";
 import { listArchivedOwnedRooms } from "../../lib/archivedRooms.js";
 import { setRoomCleared } from "../../lib/roomClears.js";
-import type { CommandHandler } from "../types.js";
+import { formatDuration, parseDuration } from "../duration.js";
+import { hasPermission } from "../../auth/permissions.js";
+import { areServersEnabled, getSettings } from "../../settings.js";
+import type { CommandContext, CommandHandler } from "../types.js";
+
+const CLEAR_CHUNK = 400; // keep each UPDATE under SQLite's bound-variable cap
+
+/**
+ * Can the caller moderate (hide for everyone) in THIS room? Mirrors the
+ * dispatcher's two-tier gate: the global `delete_others_message` permission, OR
+ * — on a non-system sub-server room — the matching per-server grant.
+ */
+async function canModerateClear(ctx: CommandContext): Promise<boolean> {
+  if (await hasPermission(ctx.user, "delete_others_message", ctx.db)) return true;
+  const sid = (ctx.socket.data as { serverId?: string }).serverId;
+  if (sid && areServersEnabled(await getSettings(ctx.db))) {
+    const { serverAuthority, serverCan } = await import("../../servers/authority.js");
+    const a = await serverAuthority(ctx.db, ctx.user, sid);
+    return !!a.server && !a.server.isSystem && serverCan(a, "delete_others_message");
+  }
+  return false;
+}
 
 /**
  * /list - show all public rooms (name, topic, occupant count). Mirrors the
@@ -93,23 +114,103 @@ export const myRoomsCommand: CommandHandler = {
 };
 
 /**
- * /clear - hide your scrollback in the current room from this point on.
+ * /clear - two behaviors, by argument:
  *
- * Records a per-viewer `cleared_at = now` marker (room_clears) so the
- * clear is DURABLE: every backlog source filters to messages newer than
- * it for this user. Previously this only emitted the UI hint below, so
- * the wipe was cosmetic - the next backlog resend (rejoin / resync /
- * scroll-up) handed the full history straight back. No message rows are
- * deleted and other users are unaffected; use /trash to actually delete.
+ *   /clear              (anyone) hide YOUR OWN scrollback in this room from
+ *                       here on. Records a per-viewer `cleared_at = now` marker
+ *                       (room_clears) so it's DURABLE: every backlog source
+ *                       filters to messages newer than it for this user. No
+ *                       rows are deleted and other users are unaffected.
+ *
+ *   /clear <duration>   (mods) hide the last N of chat from EVERYONE's view —
+ *                       the moderation tool for cleaning up after a harassment
+ *                       incident. SOFT: rows are kept (marked removed), so they
+ *                       vanish live for everyone yet stay readable to admins for
+ *                       reports/bans. Use /trash to delete permanently instead.
+ *                       Gated by `delete_others_message` (global OR per-server).
  */
 export const clearCommand: CommandHandler = {
   name: "clear",
   aliases: ["cls"],
-  usage: "/clear",
-  description: "Hide earlier messages in the current room from your own view (durable; doesn't delete).",
+  usage: "/clear  (your view)  ·  /clear <duration>  (mods: hide the last N from everyone)",
+  description: "No args: hide earlier messages from your OWN view. With a duration (mods): hide the last N (e.g. 30m, 2h) from EVERYONE — kept for moderators to review.",
+  subcommands: [
+    { verb: "(none)", usage: "/clear", description: "Hide earlier messages in this room from your own view (durable; doesn't delete)." },
+    { verb: "<duration>", usage: "/clear 30m", description: "Mods: hide the last N from everyone's view (30s, 5m, 2h, 1h30m, 1d). Kept for moderators; use /trash to delete permanently." },
+  ],
   async run(ctx) {
-    await setRoomCleared(ctx.db, ctx.user.id, ctx.roomId, new Date());
-    ctx.socket.emit("ui:hint", { kind: "clear-room-messages" });
+    const arg = ctx.argsText.trim();
+
+    // No duration → the classic per-viewer clear (available to anyone).
+    if (!arg) {
+      await setRoomCleared(ctx.db, ctx.user.id, ctx.roomId, new Date());
+      ctx.socket.emit("ui:hint", { kind: "clear-room-messages" });
+      return;
+    }
+
+    // A duration → the moderation soft-clear. Gate it here (not on the handler)
+    // so the no-arg personal clear stays open to everyone.
+    const ms = parseDuration(arg);
+    if (ms == null) {
+      ctx.socket.emit("error:notice", {
+        code: "BAD_DURATION",
+        message: "Bad duration. Use forms like 5m, 30m, 1h, 1h30m, 1d — or just /clear to clear your own view.",
+      });
+      return;
+    }
+    if (!(await canModerateClear(ctx))) {
+      ctx.socket.emit("error:notice", {
+        code: "NO_PERMISSION",
+        message: "Only moderators can clear messages for everyone. Plain /clear hides earlier messages from your own view.",
+      });
+      return;
+    }
+    const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
+    if (!room) { ctx.socket.emit("error:notice", { code: "NO_ROOM", message: "Room not found." }); return; }
+    if (room.replyMode === "nested") {
+      ctx.socket.emit("error:notice", { code: "FORUM", message: "/clear <duration> isn't available in forum rooms — remove topics individually there." });
+      return;
+    }
+
+    const cutoff = new Date(Date.now() - ms);
+    // Snapshot the ids first so the live removal matches what we hide. Skip
+    // whispers (private) and system lines (join/leave/announcements aren't the
+    // harassment we're clearing), and rows already removed.
+    const doomed = await ctx.db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(and(
+        eq(messages.roomId, ctx.roomId),
+        sql`${messages.kind} != 'whisper'`,
+        sql`${messages.kind} != 'system'`,
+        gte(messages.createdAt, cutoff),
+        isNull(messages.deletedAt),
+      ));
+    const ids = doomed.map((r) => r.id);
+    if (ids.length === 0) {
+      ctx.socket.emit("error:notice", { code: "CLEAR", message: `No messages in the last ${formatDuration(ms)} to hide.` });
+      return;
+    }
+
+    // SOFT remove: keep the rows (admins keep the evidence + who/when) but blank
+    // them for everyone else. We snapshot the actor's ACCOUNT name for audit
+    // transparency, matching the single-message delete path.
+    const now = new Date();
+    for (let i = 0; i < ids.length; i += CLEAR_CHUNK) {
+      await ctx.db.update(messages)
+        .set({ deletedAt: now, deletedByUserId: ctx.user.id, deletedByDisplayName: ctx.user.username })
+        .where(inArray(messages.id, ids.slice(i, i + CLEAR_CHUNK)));
+    }
+
+    // Live-remove from every client's buffer (reload then shows the standard
+    // "[message removed]" tombstones; admins still see the originals), then a
+    // system summary whose own row is newer than the cutoff, so it survives.
+    ctx.io.to(`room:${ctx.roomId}`).emit("message:bulk-delete", { roomId: ctx.roomId, ids });
+    const { addMessage } = await import("../../realtime/broadcast.js");
+    await addMessage(ctx, {
+      kind: "system",
+      body: `${ctx.user.displayName} hid ${ids.length} message${ids.length === 1 ? "" : "s"} from the last ${formatDuration(ms)} from everyone's view.`,
+    });
   },
 };
 

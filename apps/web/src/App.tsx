@@ -60,6 +60,8 @@ import { StoryCatalogModal } from "./components/StoryCatalogModal.js";
 import { ForumsCatalogModal } from "./components/ForumsCatalogModal.js";
 import { ForumPublicLanding, readReturnForum, RETURN_FORUM_STORAGE_KEY } from "./components/ForumPublicLanding.js";
 import { fetchForumNotifications, locateForumTopic } from "./lib/forums.js";
+import { fetchNotifBadge } from "./lib/notificationCenter.js";
+import { NotificationCenter } from "./components/NotificationCenter.js";
 import { StoryEditorModal } from "./components/StoryEditorModal.js";
 import { StoryReaderModal } from "./components/StoryReaderModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
@@ -1259,6 +1261,15 @@ function Chat() {
     let alive = true;
     fetchForumNotifications(1)
       .then((r) => { if (alive) useChat.getState().setForumNotifUnread(r.unread); })
+      .catch(() => { /* badge stays 0 until the first pulse */ });
+    return () => { alive = false; };
+  }, []);
+  // Seed the Notification Center badge once per boot; the socket's
+  // notifications:badge pulse keeps it live from then on.
+  useEffect(() => {
+    let alive = true;
+    fetchNotifBadge()
+      .then((b) => { if (alive) useChat.getState().setNotifBadge(b.unread, b.unreadByServer); })
       .catch(() => { /* badge stays 0 until the first pulse */ });
     return () => { alive = false; };
   }, []);
@@ -2535,6 +2546,13 @@ function Chat() {
     socket.on("forum:notifications", ({ unread }) => {
       useChat.getState().setForumNotifUnread(unread);
     });
+    // Notification Center (unified inbox): a fresh row + the live badge.
+    socket.on("notifications:new", (n) => {
+      useChat.getState().prependNotif(n);
+    });
+    socket.on("notifications:badge", ({ unread, unreadByServer }) => {
+      useChat.getState().setNotifBadge(unread, unreadByServer);
+    });
     // Reasoned forced logout (account disabled, admin site-kick).
     // Registered BEFORE auth:expired's generic handler matters: the
     // server sends BOTH (this one for the reason, auth:expired for
@@ -3573,6 +3591,67 @@ function Chat() {
     () => (serversEnabled && currentServerId ? servers?.find((s) => s.id === currentServerId) ?? null : null),
     [serversEnabled, currentServerId, servers],
   );
+  // Light the server-rail "unseen" dot from the Notification Center: a server
+  // with unread notifications shows the dot even if its own activity feed is
+  // quiet. ORs the per-server unread into each summary's hasUnseen.
+  const notifUnreadByServer = useChat((s) => s.notifUnreadByServer);
+  const serversForRail = useMemo(
+    () => servers?.map((s) => ((notifUnreadByServer[s.id] ?? 0) > 0 && !s.hasUnseen ? { ...s, hasUnseen: true } : s)) ?? null,
+    [servers, notifUnreadByServer],
+  );
+
+  // Resolve a notification target into an in-app navigation. Shared by the bell
+  // (clicking a row), the service-worker push click (postMessage from sw.js),
+  // and the boot-time `?n=<kind>:<id>` marker (a push opened a fresh tab).
+  const openNotifTarget = useCallback((kind: string, id: string | null, serverId?: string | null) => {
+    if (kind === "server") {
+      const sid = id ?? serverId ?? null;
+      const srv = servers?.find((s) => s.id === sid);
+      if (srv) void onServerSelect(srv);
+    } else if (kind === "dm") {
+      setMessagesOpen(true);
+    } else if (kind === "earning") {
+      setEarningOpen({});
+    } else if (kind === "forum" || kind === "topic" || kind === "message") {
+      setForumsOpen({});
+    }
+  }, [servers, onServerSelect]);
+
+  // Parse the server-encoded "/?n=<kind>:<id>" deep-link marker.
+  const parseNotifMarker = (rawUrl: string): { kind: string; id: string } | null => {
+    try {
+      const n = new URL(rawUrl, window.location.origin).searchParams.get("n");
+      if (!n) return null;
+      const idx = n.indexOf(":");
+      return idx < 0 ? { kind: n, id: "" } : { kind: n.slice(0, idx), id: n.slice(idx + 1) };
+    } catch { return null; }
+  };
+
+  // Service-worker push click: a focused tab gets a message telling it where to
+  // deep-link (a SPA can't navigate from the URL change alone).
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data as { type?: string; url?: string } | undefined;
+      if (d?.type !== "tk-notification-click" || typeof d.url !== "string") return;
+      const t = parseNotifMarker(d.url);
+      if (t) openNotifTarget(t.kind, t.id || null);
+    };
+    navigator.serviceWorker.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker.removeEventListener("message", onMsg);
+  }, [openNotifTarget]);
+
+  // Boot: if a push opened a fresh tab at "/?n=...", deep-link once signed in,
+  // then strip the marker so a refresh doesn't replay it.
+  useEffect(() => {
+    if (!me) return;
+    const t = parseNotifMarker(window.location.href);
+    if (!t) return;
+    openNotifTarget(t.kind, t.id || null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("n");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, [me, openNotifTarget]);
   // The current server's identity drives the top bar (banner + wordmark + name)
   // for EVERY server, including the home server — so an owner's uploaded banner
   // shows wherever they are. Banner falls back to the global site branding for
@@ -3876,6 +3955,12 @@ function Chat() {
         onOpenArcade={() => setArcadeOpen(true)}
         onOpenStaff={() => setStaffOpen(true)}
         serverBrand={serverBrand}
+        notificationBell={
+          <NotificationCenter
+            onOpen={(n) => openNotifTarget(n.targetKind, n.targetId, n.serverId)}
+            onOpenForums={() => setForumsOpen({})}
+          />
+        }
         {...(canManageCurrentServer && currentServer ? { onOpenServerAdmin: () => setServerSettingsId(currentServer.id) } : {})}
         {...(hasAnyAdminAccess ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
       />
@@ -4159,6 +4244,16 @@ function Chat() {
             aria-hidden="true"
           />
         ) : null}
+        {/* Right-side navigation cluster: userlist + server rail.
+            MOBILE: one FULL-WIDTH sliding overlay (the "Menu") laid out as a row —
+            the userlist fills the space and the server rail pins to its right edge,
+            so phones can finally switch/create servers. DESKTOP (lg:contents): the
+            wrapper box dissolves and RoomsTree + ServerRail become the shell row's
+            own static columns exactly as before (the room-transition snapshot keys
+            off the chat wrapper ref, so this added node never enters a snapshot). */}
+        <div
+          className={`fixed inset-y-0 right-0 z-40 flex w-full flex-row bg-keep-bg shadow-2xl transition-transform lg:contents ${railOpen ? "translate-x-0" : "translate-x-full"}`}
+        >
         <RoomsTree
           rooms={roomsTree}
           currentRoomId={currentRoomId}
@@ -4196,30 +4291,28 @@ function Chat() {
           onOpenEarning={() => { setEarningOpen({}); setRailOpen(false); }}
           onOpenArcade={() => { setArcadeOpen(true); setRailOpen(false); }}
           onOpenForums={() => { setForumsOpen({}); setRailOpen(false); }}
-          isOpen={railOpen}
           onClose={() => setRailOpen(false)}
           fontStep={fontStep}
         />
         {/* Server Rail (Multi-Server Lift) — the OUTERMOST RIGHT column, sitting
             just outboard of the userlist rail (RoomsTree). This app's primary
             navigation lives on the right, so the server rail rides the far-right
-            edge as part of that cluster rather than Discord's far-left. A thin
-            sibling of <main>/RoomsTree so it isn't swept into a room-transition
-            snapshot. Rendered ONLY when the feature flag is on, so flag-off
-            users see today's exact shell (no rail, no layout shift). Hidden on
-            mobile where navigation lives in the rooms drawer. */}
+            edge as part of that cluster rather than Discord's far-left. Rendered
+            ONLY when the feature flag is on, so flag-off users see today's exact
+            shell (no rail, no layout shift). On mobile it rides the right edge of
+            the full-screen Menu overlay (above); on desktop lg:contents lifts it
+            back out as the shell row's own far-right column. */}
         {serversEnabled ? (
-          <div className="hidden lg:flex">
-            <ServerRail
-              servers={servers}
-              currentServerId={currentServerId}
-              canApply={!!me?.permissions?.includes("apply_create_server")}
-              onSelect={(s) => void onServerSelect(s)}
-              onDiscover={() => setServerDiscoverOpen({})}
-              onOpenSettings={(s) => setServerSettingsId(s.id)}
-            />
-          </div>
+          <ServerRail
+            servers={serversForRail}
+            currentServerId={currentServerId}
+            canApply={!!me?.permissions?.includes("apply_create_server")}
+            onSelect={(s) => { void onServerSelect(s); setRailOpen(false); }}
+            onDiscover={() => { setServerDiscoverOpen({}); setRailOpen(false); }}
+            onOpenSettings={(s) => { setServerSettingsId(s.id); setRailOpen(false); }}
+          />
         ) : null}
+        </div>{/* /right-side navigation cluster */}
       {notice ? <Toast notice={notice} onDismiss={() => setNotice(null)} /> : null}
       {openProfile ? (
         <ProfileModal

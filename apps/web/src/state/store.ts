@@ -3,6 +3,7 @@ import type {
   ChatMessage,
   DirectConversationSummary,
   DirectMessage,
+  NotificationWire,
   PermissionKey,
   PollUpdate,
   ProfileView,
@@ -618,6 +619,20 @@ interface ChatState {
    *  `forum:notifications` socket pulse. Drives the rail + bell badges. */
   forumNotifUnread: number;
   setForumNotifUnread: (n: number) => void;
+  /**
+   * Notification Center (unified inbox). `notifUnread`/`notifUnreadByServer`
+   * are seeded by a boot fetch (/me/notifications/unread) and kept live by the
+   * `notifications:badge` pulse; `notifItems` is the loaded slide-over list,
+   * prepended by `notifications:new`. The bell badge shows notifUnread +
+   * forumNotifUnread so the forum inbox folds into one number.
+   */
+  notifUnread: number;
+  notifUnreadByServer: Record<string, number>;
+  notifItems: NotificationWire[];
+  setNotifBadge: (unread: number, byServer?: Record<string, number>) => void;
+  prependNotif: (n: NotificationWire) => void;
+  setNotifItems: (items: NotificationWire[]) => void;
+  markNotifReadLocal: (ids: string[] | "all") => void;
   /** Prepend a brand-new topic that the *viewer themselves* just created. Inserts directly, no pill. */
   prependOwnForumTopic: (roomId: string, categoryKey: string, topic: ChatMessage) => void;
   /** Queue a topic that arrived from another user behind the "new topics" pill. */
@@ -1205,6 +1220,22 @@ export const useChat = create<ChatState>((set) => ({
   bumpForumActionTick: () => set((s) => ({ forumActionTick: s.forumActionTick + 1 })),
   forumNotifUnread: 0,
   setForumNotifUnread: (n) => set({ forumNotifUnread: n }),
+  notifUnread: 0,
+  notifUnreadByServer: {},
+  notifItems: [],
+  setNotifBadge: (unread, byServer) =>
+    set((s) => ({ notifUnread: unread, notifUnreadByServer: byServer ?? s.notifUnreadByServer })),
+  prependNotif: (n) =>
+    set((s) => ({ notifItems: [n, ...s.notifItems.filter((x) => x.id !== n.id)].slice(0, 100) })),
+  setNotifItems: (items) => set({ notifItems: items }),
+  markNotifReadLocal: (ids) =>
+    set((s) => ({
+      notifItems: s.notifItems.map((x) =>
+        ids === "all" || ids.includes(x.id)
+          ? { ...x, readAt: x.readAt ?? Date.now(), seenAt: x.seenAt ?? Date.now() }
+          : x,
+      ),
+    })),
 
   setForumTopicsPage: (roomId, categoryKey, topics, pageInfo) =>
     set((s) => {

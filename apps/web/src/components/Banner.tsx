@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { AvatarCrop } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
@@ -78,6 +78,10 @@ interface Props {
    *  prominent "Server Admin" link — the primary path to the console, replacing
    *  reliance on the small gear on the rail icon. */
   onOpenServerAdmin?: () => void;
+  /** Notification Center bell, rendered into the top-bar icon cluster (next to
+   *  the connection orb) on both desktop and mobile. Passed from App so the
+   *  deep-link navigation stays there. */
+  notificationBell?: ReactNode;
 }
 
 /**
@@ -91,7 +95,7 @@ interface Props {
  * the active theme's panel color / text color / font-action stack when not
  * overridden, so a fresh install still looks coherent.
  */
-export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds, onOpenArcade, onOpenStaff, serverBrand, onOpenServerAdmin }: Props) {
+export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds, onOpenArcade, onOpenStaff, serverBrand, onOpenServerAdmin, notificationBell }: Props) {
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
@@ -122,11 +126,20 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   // down gently. Reduce Motion only; OFF keeps the instant snap.
   const reduceMotion = useReducedMotion();
   const isLgUp = useIsLgUp();
-  // Mobile-only: the server banner is COLLAPSED to a horizontal bar by default;
-  // tapping the bar slides it open to reveal the art (and scales the logo up).
-  // Desktop always shows the banner and ignores this. Resets to collapsed on
-  // each load.
-  const [bannerOpen, setBannerOpen] = useState(false);
+  // The server banner can be COLLAPSED to a horizontal bar on BOTH breakpoints
+  // (mobile collapses by default to save space; desktop opens by default). The
+  // bar/chevron toggles it. We seed `bannerOpen` from the current breakpoint and
+  // keep following the breakpoint on resize UNTIL the user toggles by hand
+  // (`bannerUserToggled`), after which their choice sticks.
+  const bannerUserToggled = useRef(false);
+  const [bannerOpen, setBannerOpen] = useState(
+    () => typeof window !== "undefined" && typeof window.matchMedia === "function"
+      && window.matchMedia("(min-width: 1024px)").matches,
+  );
+  useEffect(() => {
+    if (!bannerUserToggled.current) setBannerOpen(isLgUp);
+  }, [isLgUp]);
+  const toggleBanner = () => { bannerUserToggled.current = true; setBannerOpen((o) => !o); };
 
   useEffect(() => {
     let cancelled = false;
@@ -226,7 +239,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   // Whether the banner is currently SHOWN (tall, art visible, logo scaled up).
   // Desktop: always, when the server has one. Mobile: only once the viewer taps
   // the bar open. Drives the tall layout, the art, and the logo scaling.
-  const bannerShown = hasServerBanner && (isLgUp || bannerOpen);
+  const bannerShown = hasServerBanner && bannerOpen;
 
   const headerStyle: CSSProperties = {};
   let hasBg = false;
@@ -343,17 +356,31 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
           <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-black/40 to-black/20" />
         </div>
       ) : null}
-      {/* Mobile tap target: tapping the bar/banner background toggles it open or
-          closed. Sits ABOVE the art (z-0) but BELOW the logo / nav / hamburger
-          (z-10), which keep their own taps. Desktop never collapses, so the
-          layer is mobile-only. */}
+      {/* Tap target: clicking the bar/banner background toggles it open or
+          closed, on BOTH breakpoints now. Sits ABOVE the art (z-0) but BELOW the
+          logo / nav / hamburger (z-10), which keep their own taps. */}
       {hasServerBanner ? (
         <button
           type="button"
           aria-label={bannerShown ? "Collapse banner" : "Show banner"}
-          onClick={() => setBannerOpen((o) => !o)}
-          className="absolute inset-0 z-[5] cursor-pointer lg:hidden"
+          onClick={toggleBanner}
+          className="absolute inset-0 z-[5] cursor-pointer"
         />
+      ) : null}
+      {/* Visible collapse/expand handle, centered on the bottom edge so the
+          toggle is discoverable on desktop (the full-area tap is invisible).
+          z-20 floats it above the nav; the chevron points down to expand a
+          collapsed bar, up to collapse an open one. */}
+      {hasServerBanner ? (
+        <button
+          type="button"
+          onClick={toggleBanner}
+          aria-label={bannerShown ? "Collapse banner" : "Show banner"}
+          title={bannerShown ? "Collapse banner" : "Show banner"}
+          className="absolute bottom-0 left-1/2 z-20 -translate-x-1/2 translate-y-1/2 rounded-full border border-keep-rule bg-keep-bg/85 px-2.5 py-0.5 text-[11px] leading-none text-keep-muted shadow hover:text-keep-text"
+        >
+          <span aria-hidden>{bannerShown ? "▴" : "▾"}</span>
+        </button>
       ) : null}
       {/* Over a server banner the bar is tall and the row is `items-start`
           (nav pinned top), so stretch the logo column to the full bar height
@@ -590,6 +617,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
         >
           Exit
         </button>
+        {notificationBell}
         <ConnectionOrb />
       </nav>
 
@@ -608,6 +636,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
         >
           {menuOpen ? "✕" : "☰"}
         </button>
+        {notificationBell}
         <ConnectionOrb />
       </div>
 

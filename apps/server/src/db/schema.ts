@@ -128,6 +128,14 @@ export const users = sqliteTable(
       .notNull()
       .default("mentions"),
     /**
+     * Notification Center preferences (migration 0305). JSON
+     * `{ mutedCategories: NotificationCategory[] }` — categories the user has
+     * silenced get NO inbox row, badge, or push. Null/absent = nothing muted.
+     * Distinct from `notifyPref` above, which governs the live desktop toast for
+     * chat messages, not the unified bell.
+     */
+    notificationPrefsJson: text("notification_prefs_json"),
+    /**
      * Per-user DM opt-out. `true` (default) lets other users start a
      * direct message thread; `false` makes /me/dms/with/:target return
      * 403 with `error: "dms_disabled"` so the client can render a
@@ -589,6 +597,16 @@ export const rooms = sqliteTable(
     description: text("description"),
     /** system-rooms (The_Spire and any admin-flagged landings) survive owner deletion and admin sweeps */
     isSystem: integer("is_system", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Persistent room (migration 0302). EXEMPT from the empty-room archival
+     * sweep just like isSystem, but grants NO other powers — the room stays
+     * owner-deletable and is not a landing. A server's CHANNELS are created
+     * persistent so the server's structure doesn't vanish when a channel
+     * empties (Discord-like); the owner can opt a channel back to auto-archive
+     * from the Rooms console. Ad-hoc user rooms stay non-persistent (false), so
+     * they still park when the last occupant leaves.
+     */
+    persistent: integer("persistent", { mode: "boolean" }).notNull().default(false),
     /**
      * Admin-flagged default landing room. Exactly one row in the table is
      * expected to carry isDefault=true (enforced by partial unique index in
@@ -1432,6 +1450,34 @@ export const userIpLog = sqliteTable(
     userIpUnique: uniqueIndex("user_ip_log_user_ip_idx").on(t.userId, t.ip),
     ipIdx: index("user_ip_log_ip_idx").on(t.ip),
     userSeenIdx: index("user_ip_log_user_seen_idx").on(t.userId, t.lastSeenAt),
+  }),
+);
+
+/* ---------- banned_ips ----------
+ * IP-level block list (migration 0304). When a global admin bans a user, their
+ * recent public IPs (from user_ip_log + sessions) are mirrored here so the same
+ * person can't immediately spin up burner accounts to keep harassing. Checked
+ * at REGISTRATION and LOGIN; one row per address (unique ip), upserted so a
+ * shared/re-banned IP keeps the latest expiry/reason. `bannedUntil` null =
+ * permanent; a timed ban produces a timed IP block. Cleared on unban via
+ * target_user_id. Private/loopback addresses are never inserted (see
+ * auth/ipBan.ts) so dev and NAT hops don't self-block.
+ */
+export const bannedIps = sqliteTable(
+  "banned_ips",
+  {
+    id: id(),
+    ip: text("ip").notNull(),
+    bannedAt: ts("banned_at"),
+    bannedUntil: integer("banned_until", { mode: "timestamp_ms" }),
+    reason: text("reason"),
+    bannedById: text("banned_by_id").references(() => users.id, { onDelete: "set null" }),
+    /** The banned account whose ban produced this row; lets unban clear it. */
+    targetUserId: text("target_user_id").references(() => users.id, { onDelete: "set null" }),
+  },
+  (t) => ({
+    ipUnique: uniqueIndex("banned_ips_ip_idx").on(t.ip),
+    targetIdx: index("banned_ips_target_idx").on(t.targetUserId),
   }),
 );
 
@@ -3650,6 +3696,49 @@ export const forumNotifications = sqliteTable(
   (t) => ({
     userIdx: index("forum_notifications_user_idx").on(t.userId, t.createdAt),
     unreadIdx: index("forum_notifications_unread_idx").on(t.userId, t.readAt),
+  }),
+);
+
+/**
+ * Notification Center (migration 0303). The unified inbox that generalizes
+ * forumNotifications above: server approvals, @mentions (chat + forum), DMs,
+ * friend requests, earning milestones, announcements, and report outcomes all
+ * land here. Display fields are SNAPSHOTS (actorName, title, snippet) so the
+ * inbox survives renames; FKs SET NULL (not cascade) on actor/character/server
+ * so a deleted actor or server leaves the historical row readable. A click
+ * navigates via targetKind/targetId; web-push taps use `url`.
+ *   - characterId: recipient identity for DM/@mention scoping; null = account-level.
+ *   - serverId: originating server for grouping + rail dots; null = global.
+ *   - seenAt: badge cleared (bell opened); readAt: row opened/acknowledged.
+ *   - dedupeKey: collapses repeats from noisy sources within a short window.
+ */
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: id(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    characterId: text("character_id").references(() => characters.id, { onDelete: "set null" }),
+    category: text("category").notNull(),
+    kind: text("kind").notNull(),
+    serverId: text("server_id").references(() => servers.id, { onDelete: "set null" }),
+    actorUserId: text("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    actorName: text("actor_name"),
+    title: text("title").notNull().default(""),
+    snippet: text("snippet").notNull().default(""),
+    targetKind: text("target_kind").notNull().default("none"),
+    targetId: text("target_id"),
+    url: text("url"),
+    metadataJson: text("metadata_json"),
+    dedupeKey: text("dedupe_key"),
+    createdAt: ts("created_at"),
+    seenAt: integer("seen_at", { mode: "timestamp_ms" }),
+    readAt: integer("read_at", { mode: "timestamp_ms" }),
+  },
+  (t) => ({
+    userIdx: index("notifications_user_idx").on(t.userId, t.createdAt),
+    unreadIdx: index("notifications_unread_idx").on(t.userId, t.readAt),
+    serverUnreadIdx: index("notifications_server_unread_idx").on(t.userId, t.serverId, t.readAt),
+    dedupeIdx: index("notifications_dedupe_idx").on(t.userId, t.dedupeKey),
   }),
 );
 

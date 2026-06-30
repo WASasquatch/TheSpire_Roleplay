@@ -17,29 +17,63 @@
  * route action it accompanies (the DB write already committed).
  */
 import type { Server as IoServer } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
+import type {
+  ClientToServerEvents,
+  ServerToClientEvents,
+  NotificationCategory,
+  NotificationKind,
+} from "@thekeep/shared";
+import type { Db } from "../db/index.js";
+import { notify, type NotifyTarget } from "../notifications/engine.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
+/** Persistent-inbox half of a {@link notifyUser} call (the live toast always
+ *  fires; this lands the durable Notification Center row when supplied). */
+export interface NotifyUserPersist {
+  category: NotificationCategory;
+  kind: NotificationKind;
+  serverId?: string | null;
+  /** Inbox headline; defaults to the toast `message`. */
+  title?: string;
+  snippet?: string;
+  target?: NotifyTarget;
+  actor?: { id: string; name: string } | null;
+}
+
 /**
- * Push a one-off `error:notice` toast to every live socket of `userId`.
- * `error:notice` is the site's generic client toast channel (same one the
- * forum approve/ban paths use); the `code` lets the client theme the toast and
- * the `message` is shown verbatim. Swallows any failure.
+ * Nudge a user about a decision that just landed (creation/membership approval,
+ * transfer, ban, …). Always fires the live `error:notice` toast (the site's
+ * generic toast channel) to every live socket of `userId`; when `persist` is
+ * supplied it ALSO writes a durable Notification Center row (badge + offline
+ * web push) via the engine, so the user finds out even if they were away.
+ * Best-effort: never throws back into the route action.
  */
 export async function notifyUser(
   io: Io,
+  db: Db,
   userId: string,
-  code: string,
-  message: string,
+  args: { code: string; message: string; persist?: NotifyUserPersist },
 ): Promise<void> {
   try {
     const sockets = await io.fetchSockets();
     for (const s of sockets) {
       if ((s.data as { userId?: string }).userId !== userId) continue;
-      s.emit("error:notice", { code, message });
+      s.emit("error:notice", { code: args.code, message: args.message });
     }
   } catch {
-    /* live toast is best-effort; the persisted state is the source of truth */
+    /* live toast is best-effort; the persisted row is the source of truth */
+  }
+  if (args.persist) {
+    await notify(db, io, {
+      userId,
+      category: args.persist.category,
+      kind: args.persist.kind,
+      serverId: args.persist.serverId ?? null,
+      title: args.persist.title ?? args.message,
+      snippet: args.persist.snippet ?? "",
+      ...(args.persist.actor ? { actor: args.persist.actor } : {}),
+      ...(args.persist.target ? { target: args.persist.target } : {}),
+    });
   }
 }

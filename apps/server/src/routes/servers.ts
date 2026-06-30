@@ -1058,11 +1058,22 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
         }
       });
       if (lostRace) { reply.code(409); return { error: "application was already decided" }; }
-      await notifyUser(io, appRow.applicantUserId,
-        nextStatus === "approved" ? "SERVER_MEMBER_APPROVED" : "SERVER_MEMBER_REJECTED",
-        nextStatus === "approved"
+      await notifyUser(io, db, appRow.applicantUserId, {
+        code: nextStatus === "approved" ? "SERVER_MEMBER_APPROVED" : "SERVER_MEMBER_REJECTED",
+        message: nextStatus === "approved"
           ? `You're in - "${gate.server.name}" approved your application.`
-          : `"${gate.server.name}" declined your application${body.reviewNote ? `: ${body.reviewNote}` : "."}`);
+          : `"${gate.server.name}" declined your application${body.reviewNote ? `: ${body.reviewNote}` : "."}`,
+        persist: {
+          category: "server",
+          kind: nextStatus === "approved" ? "membership_approved" : "membership_rejected",
+          serverId: gate.server.id,
+          title: nextStatus === "approved" ? `Joined ${gate.server.name}` : `Application to ${gate.server.name} declined`,
+          snippet: nextStatus === "approved"
+            ? "Your membership was approved."
+            : (body.reviewNote ? body.reviewNote : "Your application was declined."),
+          ...(nextStatus === "approved" ? { target: { kind: "server", id: gate.server.id } } : {}),
+        },
+      });
       return { ok: true };
     },
   );
@@ -1369,6 +1380,9 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     topic: z.string().max(200).nullable().optional(),
     description: z.string().max(2000).nullable().optional(),
     replyMode: z.enum(["flat", "nested"]).optional(),
+    // A server channel persists when empty by default (Discord-like); the owner
+    // can untick this to make an ephemeral, park-when-empty room instead.
+    persistent: z.boolean().default(true),
   }).strict();
 
   /** Does this room belong to the gated server? NULL serverId is adopted by the
@@ -1414,6 +1428,9 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       lastOwnerUserId: gate.me.id,
       replyMode: body.replyMode ?? "flat",
       serverId: gate.server.id,
+      // Channels persist when empty so the server's structure survives a quiet
+      // moment; without this the zombie sweep parks them within ~60s.
+      persistent: body.persistent,
     });
     await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_create", targetRoomId: id, metadata: { name: body.name } });
     emitTreeChanged(io, gate.server.id);
@@ -1429,6 +1446,7 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     replyMode: z.enum(["flat", "nested"]).optional(),
     messageExpiryMinutes: z.number().int().min(0).max(100_000).nullable().optional(),
     isDefault: z.boolean().optional(),
+    persistent: z.boolean().optional(),
   }).strict();
 
   app.patch<{ Params: { id: string; roomId: string }; Body: unknown }>("/servers/:id/rooms/:roomId", async (req, reply) => {
@@ -1450,6 +1468,7 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     if (body.topic !== undefined) update.topic = body.topic?.trim() ? body.topic.trim() : null;
     if (body.description !== undefined) update.description = body.description?.trim() ? body.description : null;
     if (body.replyMode !== undefined) update.replyMode = body.replyMode;
+    if (body.persistent !== undefined) update.persistent = body.persistent;
     if (body.messageExpiryMinutes !== undefined) update.messageExpiryMinutes = body.messageExpiryMinutes;
     // One default room PER server (rooms_one_default_per_server). Flag-on first
     // clears whichever room in THIS server currently holds it.
@@ -2233,8 +2252,18 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_transfer",
       targetUserId: target.userId, metadata: { slug: gate.server.slug, from: oldOwnerId, to: target.userId },
     });
-    await notifyUser(io, target.userId, "SERVER_TRANSFERRED",
-      `You are now the owner of "${gate.server.name}".`);
+    await notifyUser(io, db, target.userId, {
+      code: "SERVER_TRANSFERRED",
+      message: `You are now the owner of "${gate.server.name}".`,
+      persist: {
+        category: "server",
+        kind: "system",
+        serverId: gate.server.id,
+        title: `You now own ${gate.server.name}`,
+        snippet: "Ownership was transferred to you.",
+        target: { kind: "server", id: gate.server.id },
+      },
+    });
     return { ok: true, ownerUserId: target.userId, ownerUsername: target.username };
   });
 }

@@ -49,6 +49,7 @@ import {
 import { inArray } from "drizzle-orm";
 import type { LinkedWorldRef } from "@thekeep/shared";
 import { pushToUser } from "../push.js";
+import { notify as notifyCenter } from "../notifications/engine.js";
 import type { Db } from "../db/index.js";
 import {
   persistRoomDescriptionOnce,
@@ -766,6 +767,23 @@ export async function pushTriggers(
       if (!targetUserId || disabled || targetUserId === sender.id) return;
       if (seen.has(targetUserId)) return;
       seen.add(targetUserId);
+      // Persist a Notification Center row + live bell pulse for everyone
+      // mentioned (online or not). The engine's own push is suppressed
+      // (push:false) because the offline web-push just below is this surface's
+      // established path; the dedupeKey keeps one chatty author from flooding
+      // the inbox with a ping per line.
+      await notifyCenter(db, io, {
+        userId: targetUserId,
+        category: "mention",
+        kind: "chat_mention",
+        actor: { id: sender.id, name: sender.displayName },
+        title: `${sender.displayName} mentioned you`,
+        snippet: msg.body.slice(0, 140),
+        target: { kind: "room", id: msg.roomId },
+        dedupeKey: `mention:${msg.roomId}:${sender.id}`,
+        dedupeWindowMs: 2 * 60 * 1000,
+        push: false,
+      });
       if (await userIsOnline(io, targetUserId)) return;
       await pushToUser(db, targetUserId, {
         title: `Mention from ${sender.displayName}`,
@@ -2096,6 +2114,7 @@ export async function buildRoomSummary(
     ownerId: room.ownerId,
     memberCount: memberCountRows[0]?.n ?? 0,
     npcDisabled: room.npcDisabled,
+    persistent: room.persistent,
     linkedWorld: await loadLinkedWorld(db, room.id),
     messageExpiryMinutes: room.messageExpiryMinutes,
     replyMode: room.replyMode,
@@ -2451,6 +2470,9 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room) return false;
   if (room.isSystem) return false;
+  // Persistent rooms (server channels by default) survive an empty moment the
+  // same way system rooms do — they're the server's structure, not throwaways.
+  if (room.persistent) return false;
   if (room.archivedAt) return false;
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   if (sockets.length > 0) return false;

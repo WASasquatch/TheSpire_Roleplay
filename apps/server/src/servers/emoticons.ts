@@ -60,6 +60,7 @@ import {
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "../routes/auth.js";
+import { notify } from "../notifications/engine.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import { parseSheetCells } from "../reactions.js";
@@ -539,6 +540,17 @@ export async function registerServerEmoticonRoutes(
       });
 
       io.emit("emoticons:updated");
+      if (row.createdByUserId) {
+        await notify(db, io, {
+          userId: row.createdByUserId,
+          category: "server",
+          kind: "emoticon_approved",
+          serverId: g.serverId,
+          title: "Emoticon approved",
+          snippet: `Your emoticon :${row.slug}: was approved.`,
+          target: { kind: "server", id: g.serverId },
+        });
+      }
       return { ok: true };
     },
   );
@@ -636,6 +648,20 @@ export async function registerServerEmoticonRoutes(
       // Mirror approve/create/update/delete: refresh other open admin clients'
       // pending list so a rejected submission doesn't linger as stale.
       io.emit("emoticons:updated");
+
+      if (row.createdByUserId) {
+        await notify(db, io, {
+          userId: row.createdByUserId,
+          category: "server",
+          kind: "emoticon_rejected",
+          serverId: g.serverId,
+          title: "Emoticon declined",
+          snippet: body.reason
+            ? body.reason
+            : `Your emoticon :${row.slug}: was declined${refundAmount > 0 ? " and your currency refunded" : ""}.`,
+          target: { kind: "server", id: g.serverId },
+        });
+      }
 
       return { ok: true, refundedAmount: refundAmount };
     },

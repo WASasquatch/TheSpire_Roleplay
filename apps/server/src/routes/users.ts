@@ -906,14 +906,24 @@ export async function registerUsersRoutes(
     const untilNote = bannedUntil ? ` until ${bannedUntil.toISOString().slice(0, 16).replace("T", " ")} UTC` : "";
     await forceLogoutUser(io, db, id, `Your account has been banned${untilNote}. Reason: ${body.reason}`);
 
+    // Mirror the ban onto the user's recent public IPs so they can't just
+    // register burner accounts from the same network to keep harassing. Timed
+    // bans produce a timed IP block; unban clears it. Best-effort.
+    let ipCount = 0;
+    try {
+      const { banIpsForUser, loadBannedIpCache } = await import("../auth/ipBan.js");
+      ipCount = await banIpsForUser(db, id, { until: bannedUntil, reason: body.reason, bannedById: me.id });
+      await loadBannedIpCache(db); // make the new blocks live app-wide immediately
+    } catch { /* IP mirroring is best-effort; the account ban already committed */ }
+
     await recordAudit(db, {
       actorUserId: me.id,
       action: "account_ban",
       targetUserId: id,
       reason: body.reason,
-      metadata: { until: bannedUntil ? bannedUntil.getTime() : null, durationMs: body.durationMs },
+      metadata: { until: bannedUntil ? bannedUntil.getTime() : null, durationMs: body.durationMs, ipsBlocked: ipCount },
     });
-    return { ok: true };
+    return { ok: true, ipsBlocked: ipCount };
   });
 
   /** Lift an account ban early. Gated by `unban_account`. */
@@ -940,6 +950,12 @@ export async function registerUsersRoutes(
       })
       .where(eq(users.id, id));
     if (wasBanned) {
+      // Lift the IP blocks this user's ban produced.
+      try {
+        const { unbanIpsForUser, loadBannedIpCache } = await import("../auth/ipBan.js");
+        await unbanIpsForUser(db, id);
+        await loadBannedIpCache(db); // drop the lifted blocks from the live gate at once
+      } catch { /* best-effort */ }
       await recordAudit(db, { actorUserId: me.id, action: "account_unban", targetUserId: id });
     }
     return { ok: true };

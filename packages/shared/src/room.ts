@@ -18,6 +18,13 @@ export interface RoomSummary {
   memberCount: number;
   /** When true, /npc is rejected in this room. Owners/mods toggle. */
   npcDisabled: boolean;
+  /**
+   * When true the room is EXEMPT from the empty-room archival sweep (server
+   * channels default to this so the server's structure doesn't vanish when a
+   * channel empties). Owners toggle it from the Rooms console; ad-hoc user
+   * rooms stay false and still park when the last occupant leaves.
+   */
+  persistent: boolean;
   /** World linked to this room (one per room). Surfaced as a banner in chat. Null when no world is linked. */
   linkedWorld: LinkedWorldRef | null;
   /**

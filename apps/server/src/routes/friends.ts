@@ -9,6 +9,7 @@ import { getSessionUser } from "./auth.js";
 import { characterIdFromQuery, eqIdentity, ownsCharacter, type Identity } from "../auth/identity.js";
 import { eqNameInsensitive } from "../lib/nameLookup.js";
 import { blockedUserIdsFor, isBlockedBetween } from "../auth/blocks.js";
+import { notify as notifyCenter } from "../notifications/engine.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -493,7 +494,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     const targetUserId = targetIdentity.userId;
     const meId = me.id;
     const meUsername = me.username;
-    async function notifyTarget() {
+    async function notifyTarget(kind: "friend_request" | "friend_accept") {
       const sockets = await io.fetchSockets();
       for (const s of sockets) {
         const uid = (s.data as { userId?: string }).userId;
@@ -504,6 +505,23 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
           frienderDisplayName: meUsername,
         });
       }
+      await notifyCenter(db, io, {
+        userId: targetUserId,
+        category: "friend",
+        kind,
+        actor: { id: meId, name: meUsername },
+        title: kind === "friend_accept"
+          ? `${meUsername} accepted your friend request`
+          : `${meUsername} sent you a friend request`,
+        snippet: kind === "friend_accept" ? "You're now friends." : "Open your friends list to respond.",
+        target: { kind: "profile", id: meId },
+        push: {
+          title: kind === "friend_accept" ? "Friend request accepted" : "New friend request",
+          body: kind === "friend_accept"
+            ? `${meUsername} accepted your request.`
+            : `${meUsername} sent you a friend request.`,
+        },
+      });
     }
 
     if (existing) {
@@ -525,7 +543,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
           eqIdentity(friends.frienderUserId, friends.frienderCharacterId, targetIdentity),
           eqIdentity(friends.friendedUserId, friends.friendedCharacterId, meIdentity),
         ));
-      await notifyTarget();
+      await notifyTarget("friend_accept");
       reply.code(200);
       return { ok: true, status: "accepted" as const, username: targetDisplay };
     }
@@ -539,7 +557,7 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
         friendedCharacterId: targetIdentity.characterId,
         status: "pending",
       });
-    await notifyTarget();
+    await notifyTarget("friend_request");
     reply.code(201);
     return { ok: true, status: "sent" as const, username: targetDisplay };
   });
@@ -688,6 +706,20 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
           frienderDisplayName: me.username,
         });
       }
+      // Durable "your request was accepted" row for the sender. Deduped on the
+      // pair so a re-accept (other tab / already-resolved) can't double-notify.
+      await notifyCenter(db, io, {
+        userId: frienderIdentity.userId,
+        category: "friend",
+        kind: "friend_accept",
+        actor: { id: me.id, name: me.username },
+        title: `${me.username} accepted your friend request`,
+        snippet: "You're now friends.",
+        target: { kind: "profile", id: me.id },
+        dedupeKey: `friend_accept:${me.id}:${frienderIdentity.userId}`,
+        dedupeWindowMs: 24 * 60 * 60 * 1000,
+        push: { title: "Friend request accepted", body: `${me.username} accepted your request.` },
+      });
       // Echo to the acceptor's own sockets too. The client's listener
       // bumps `friendsVersion` on every `friend:request` event, which
       // is what triggers MessagesModal to refetch its friends list.

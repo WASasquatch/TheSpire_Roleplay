@@ -4,6 +4,7 @@ import type { TheaterSync } from "./theater.js";
 import type { IdentityRef, ProfileView } from "./profile.js";
 import type { WatchOnlineEvent } from "./moderation.js";
 import type { DirectMessage } from "./directMessage.js";
+import type { NotificationWire, NotificationBadge } from "./notifications.js";
 
 /** Events emitted by the client → server. */
 export interface ClientToServerEvents {
@@ -414,6 +415,17 @@ export interface ServerToClientEvents {
    * without a refetch.
    */
   "forum:notifications": (payload: { unread: number }) => void;
+  /**
+   * Notification Center: a fresh inbox row landed for this user. Pushed to all
+   * their sockets so the bell + slide-over update live without a refetch.
+   */
+  "notifications:new": (payload: NotificationWire) => void;
+  /**
+   * Notification Center badge pulse: the recipient's fresh unread total (and,
+   * when servers are on, per-server unread for the rail dots). Sent after any
+   * notification write OR mark-read so every open tab stays in sync.
+   */
+  "notifications:badge": (payload: NotificationBadge) => void;
   /**
    * Pushed to a watcher's sockets when one of their watched accounts comes
    * online (transitions from no-sockets to first-socket). Carries no

@@ -223,6 +223,18 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       return { error: "registration failed" };
     }
 
+    // IP block: a banned user can't just register a burner account from the
+    // same network to keep harassing. Checked early (before captcha + the DB
+    // lookups). Honest-but-not-naming message so a shared-network bystander can
+    // seek help without it confirming who was banned.
+    {
+      const { isIpBanned } = await import("../auth/ipBan.js");
+      if (await isIpBanned(db, req.ip)) {
+        reply.code(403);
+        return { error: "Registration isn't available from your network right now." };
+      }
+    }
+
     // Captcha. Validated before the more expensive DB queries so a bad
     // answer doesn't cost us a username/email lookup.
     if (!consumeCaptcha(body.captchaId, body.captchaAnswer)) {
@@ -367,6 +379,18 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       identifier: z.string().min(1),
       password: z.string().min(1),
     }).parse(req.body);
+
+    // IP block (global ban → IP block). A banned person can't sign into ANY
+    // account (including alts) from a blocked network. Timed bans expire on
+    // their own; an admin unban clears it. Distinguishable from a wrong-password
+    // 401 so a shared-network bystander knows to seek help, not retype.
+    {
+      const { isIpBanned } = await import("../auth/ipBan.js");
+      if (await isIpBanned(db, req.ip)) {
+        reply.code(403);
+        return { error: "Access from your network is currently restricted." };
+      }
+    }
 
     // NFKC-normalize the identifier so a user who types in a different Unicode
     // form (e.g. their phone autocompleted full-width letters) still finds

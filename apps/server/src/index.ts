@@ -86,6 +86,7 @@ import {
 import { readFile } from "node:fs/promises";
 import { extendSession, loadSessionUser, resolveDisplayName } from "./auth/session.js";
 import { recordHttpIp, recordSocketIp, extractSocketIp } from "./auth/ipLog.js";
+import { isIpBanned, isIpBannedCachedSync, loadBannedIpCache } from "./auth/ipBan.js";
 import { registerAuthRoutes, getSessionUser, userIdFromSessionId, slugToUsername, readBearerToken } from "./routes/auth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
 import { registerAffiliateRoutes } from "./routes/affiliates.js";
@@ -106,6 +107,7 @@ import { registerNpcRoutes } from "./routes/npcs.js";
 import { registerMessageRoutes } from "./routes/messages.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerPushRoutes } from "./routes/push.js";
+import { registerNotificationRoutes } from "./routes/notifications.js";
 import { initPush } from "./push.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
 import { registerAnnouncementsRoutes } from "./routes/announcements.js";
@@ -322,6 +324,18 @@ async function main() {
   // recordHttpIp, so a busy tab never turns this into a write storm.
   // `trustProxy` (set above) makes `req.ip` the real client address behind
   // Fly's edge. Fire-and-forget: never blocks or fails the request.
+  // HARDENED IP ban — the FIRST onRequest hook, so a globally-banned user's
+  // recent IPs get NOTHING from the app: no API, no static SPA shell, no public
+  // pages. (The socket.io handshake bypasses Fastify hooks, so it's gated
+  // separately in `io.use` below.) Checked against an in-memory cache (refreshed
+  // on a timer + on every ban/unban) so it costs a Set lookup, not a DB hit, per
+  // request. Private/loopback IPs are never cached, so dev + NAT hops are
+  // unaffected. Returns a plain 403 so a direct request still shows a reason.
+  app.addHook("onRequest", async (req, reply) => {
+    if (isIpBannedCachedSync(req.ip)) {
+      return reply.code(403).type("text/plain").send("Access from your network has been restricted.");
+    }
+  });
   app.addHook("onRequest", async (req) => {
     recordHttpIp(db, readBearerToken(req), req.ip, req.headers["user-agent"] ?? null);
   });
@@ -722,6 +736,12 @@ async function main() {
   // consume-pending-disconnect) only fire when there's a live
   // event to ride on; a "nobody is here and nobody is coming"
   // room produces no events to fire on.
+  // Hydrate the hardened IP-ban cache at boot, then keep it fresh on a timer
+  // (ban/unban refresh it immediately too) so the global request gate works off
+  // an in-memory Set instead of a per-request DB hit.
+  await loadBannedIpCache(db).catch(() => {});
+  setInterval(() => { void loadBannedIpCache(db).catch(() => {}); }, 60_000);
+
   const ZOMBIE_SWEEP_DELAY_MS = 60_000;
   setTimeout(() => {
     void (async () => {
@@ -729,7 +749,7 @@ async function main() {
         const candidates = await db
           .select({ id: rooms.id })
           .from(rooms)
-          .where(and(eq(rooms.isSystem, false), isNull(rooms.archivedAt)));
+          .where(and(eq(rooms.isSystem, false), eq(rooms.persistent, false), isNull(rooms.archivedAt)));
         for (const r of candidates) {
           try { await expireIfEmpty(io, db, r.id); }
           catch { /* swallow, one bad row shouldn't stop the sweep */ }
@@ -760,6 +780,7 @@ async function main() {
   await registerMessageRoutes(baseApp, db, io);
   await registerReportRoutes(baseApp, db);
   await registerPushRoutes(baseApp, db);
+  await registerNotificationRoutes(baseApp, db, io);
   // Generate VAPID keys at first boot if missing, then configure web-push.
   // Idempotent on subsequent starts; survives deploys via the persisted keys.
   await initPush(db);
@@ -816,6 +837,12 @@ async function main() {
    */
   io.use(async (socket, next) => {
     try {
+      // HARDENED IP ban — reject the handshake outright from a blocked IP, so a
+      // pre-ban session token can't keep a banned network connected. Exact
+      // (async DB) check; the handshake bypasses Fastify's onRequest gate.
+      if (await isIpBanned(db, extractSocketIp(socket.handshake))) {
+        return next(new Error("restricted"));
+      }
       const a = socket.handshake.auth as {
         token?: unknown;
         sid?: unknown;

@@ -49,7 +49,7 @@ export function ForgotPasswordPage({ onNavigate }: { onNavigate: (p: string) => 
         <div className="space-y-3">
           <h2 className="text-sm font-semibold tracking-wide">Check your email</h2>
           <div className={noticeBox}>
-            If an account exists for that email, a password reset link is on its way. It expires in 1 hour — check your inbox (and spam folder).
+            If an account exists for that email, a password reset link is on its way. It expires in 1 hour. Check your inbox (and spam folder).
           </div>
         </div>
       ) : (

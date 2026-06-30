@@ -189,7 +189,7 @@ export async function forumGateForBoard(
     return {
       ok: false,
       code: "FORUM_MEMBERS_ONLY",
-      message: `"${authority.forum.name}" accepts posts from approved members — apply from the forum's page.`,
+      message: `"${authority.forum.name}" accepts posts from approved members. Apply from the forum's page.`,
     };
   }
   return { ok: true, authority };

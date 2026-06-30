@@ -537,7 +537,7 @@ function RoomGroup({
                       // /away message is shown via the existing
                       // UserNameTag tooltip, so we don't compound the
                       // signals.
-                      className={`flex items-center justify-between gap-2 px-3 py-1.5 pl-5 lg:py-0.5 ${o.idle ? "opacity-50" : ""}`}
+                      className={`keep-occupant-row flex items-center justify-between gap-2 px-3 py-1.5 pl-5 lg:py-0.5 ${o.idle ? "opacity-50" : ""}`}
                     >
                       {/* Scale the username + its em-sized icons down
                           a touch relative to the rail's font-size so

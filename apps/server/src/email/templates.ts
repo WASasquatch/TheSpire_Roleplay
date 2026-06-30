@@ -25,7 +25,7 @@ export async function sendPasswordResetEmail(
       `<p style="margin:0 0 12px;">Hi ${esc(username)},</p>` +
       `<p style="margin:0;">We got a request to reset the password on your ${esc(settings.siteName)} account. Choose a new one with the button below.</p>`,
     cta: { label: "Reset password", url },
-    footnote: "This link expires in 1 hour. If you didn't ask for this, you can ignore this email — your password won't change.",
+    footnote: "This link expires in 1 hour. If you didn't ask for this, you can ignore this email. Your password won't change.",
   });
   return sendEmail({ to, toName: username, subject: `Reset your ${settings.siteName} password`, html });
 }

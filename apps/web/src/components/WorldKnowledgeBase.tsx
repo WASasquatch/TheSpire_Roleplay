@@ -381,7 +381,7 @@ function JoinCard({ detail, membership }: { detail: WorldDetail; membership: KbM
   if (!membership.isAuthenticated) return wrap("Sign in to join this world.", null);
   const joinMode = w.joinMode ?? "open";
   if (joinMode === "invite-only") {
-    return wrap("This world is invite-only — the author adds members directly. Message them if you'd like in.", null);
+    return wrap("This world is invite-only. The author adds members directly. Message them if you'd like in.", null);
   }
   if (joinMode === "application") {
     const app = detail.viewerApplication;
@@ -390,7 +390,7 @@ function JoinCard({ detail, membership }: { detail: WorldDetail; membership: KbM
       <button type="button" disabled={membership.busy} onClick={membership.onApply} className={btn}>{app && app.status === "rejected" ? "Reapply" : "Apply to join"}</button>
     ));
   }
-  return wrap("This world is open — join as your current identity.", (
+  return wrap("This world is open. Join as your current identity.", (
     <button type="button" disabled={membership.busy} onClick={membership.onJoin} className={btn}>Join world</button>
   ));
 }

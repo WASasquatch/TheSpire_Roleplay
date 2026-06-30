@@ -211,7 +211,7 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
         {/* One-line greeting (replaces the old standalone welcome block that
             pushed the feature layout down). Welcomes everyone in a breath. */}
         <p className="mx-auto mt-2 max-w-xl text-sm text-keep-text/75 sm:text-base">
-          Welcome, every writer, dreamer, and creature from all walks of life — there's a place for your stories here.
+          Welcome, every writer, dreamer, and creature from all walks of life. There's a place for your stories here.
         </p>
       </header>
 

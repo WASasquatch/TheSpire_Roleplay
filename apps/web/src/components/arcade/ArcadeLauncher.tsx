@@ -173,7 +173,7 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
             <div className="min-w-0 flex-1">
               <div style={{ fontSize: 16, fontWeight: 700 }}>Eidolon Tamer</div>
               <div style={{ fontSize: 12.5, color: T(0.7), lineHeight: 1.45 }}>
-                Hatch a gothic familiar — one of four eggs, or hatch one of your own pets — then keep it fed, played
+                Hatch a gothic familiar, one of four eggs, or hatch one of your own pets, then keep it fed, played
                 with, clean, and well. It lives on while you're away. Feed it food from your bag, cure it with a potion.
               </div>
             </div>
@@ -228,7 +228,7 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
                 </span>
               </div>
               <div style={{ fontSize: 12.5, color: T(0.7), lineHeight: 1.45 }}>
-                A gothic roguelike. Pick a class and delve a procedurally-built dungeon — fight, loot,
+                A gothic roguelike. Pick a class and delve a procedurally-built dungeon: fight, loot,
                 and descend as deep as you dare. Every run is different, and every floor is a fresh gamble.
               </div>
             </div>
@@ -275,7 +275,7 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
             <div className="min-w-0 flex-1">
               <div style={{ fontSize: 16, fontWeight: 700 }}>Grimhold</div>
               <div style={{ fontSize: 12.5, color: T(0.7), lineHeight: 1.45 }}>
-                A cabinet of six cursed amusements — Runefall, Loong, Arrowstorm, The Spire,
+                A cabinet of six cursed amusements: Runefall, Loong, Arrowstorm, The Spire,
                 Graveward, and Voidwake. Quick arcade runs that trickle Currency and XP, daily-capped.
               </div>
             </div>

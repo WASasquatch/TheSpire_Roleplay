@@ -247,7 +247,7 @@ async function ensureSystemForum(db: Db): Promise<void> {
     id: "forum_spire_system",
     slug: "spire",
     name: "The Spire Forums",
-    tagline: "The Spire's town square — announcements, roleplay boards, and community talk.",
+    tagline: "The Spire's town square: announcements, roleplay boards, and community talk.",
     ownerUserId: owner.id,
     isSystem: true,
     status: "active",

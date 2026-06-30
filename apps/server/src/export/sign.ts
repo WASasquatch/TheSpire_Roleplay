@@ -97,7 +97,7 @@ export function verifyExportManifest(manifest: ExportManifest): VerifyResult {
   const expected = Buffer.from(hmacHex(canonical), "hex");
   const got = Buffer.from(manifest.signature, "hex");
   if (expected.length !== got.length || !timingSafeEqual(expected, got)) {
-    return { valid: false, reason: "Signature does not match — the file was altered or not produced by this server.", contentHash };
+    return { valid: false, reason: "Signature does not match. The file was altered or not produced by this server.", contentHash };
   }
   return { valid: true, contentHash };
 }

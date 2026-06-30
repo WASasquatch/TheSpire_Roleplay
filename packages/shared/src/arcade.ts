@@ -263,9 +263,9 @@ export type EidolonTraitId = (typeof EIDOLON_TRAIT_IDS)[number];
  *  resilient (trait) and fast-fading (species). label/flavor are display-only. */
 export const EIDOLON_TRAITS: Record<EidolonTraitId, { label: string; flavor: string; mods: Partial<EidolonTraits> }> = {
   hardy: { label: "Hardy", flavor: "Shrugs off illness and clings to life.", mods: { healthDrain: 0.6, sickChance: 0.6 } },
-  gluttonous: { label: "Gluttonous", flavor: "Always hungry — but food delights it.", mods: { satiety: 1.5, joyGain: 1.25 } },
+  gluttonous: { label: "Gluttonous", flavor: "Always hungry, but food delights it.", mods: { satiety: 1.5, joyGain: 1.25 } },
   stoic: { label: "Stoic", flavor: "Even-tempered; slow to sadden, slow to cheer.", mods: { joy: 0.6, joyGain: 0.7 } },
-  vivacious: { label: "Vivacious", flavor: "Big feelings — dips fast, but cheers fast.", mods: { joy: 1.35, joyGain: 1.4 } },
+  vivacious: { label: "Vivacious", flavor: "Big feelings: dips fast, but cheers fast.", mods: { joy: 1.35, joyGain: 1.4 } },
   pristine: { label: "Pristine", flavor: "Fastidiously, impossibly clean.", mods: { hygiene: 0.5, messChance: 0.4 } },
   feral: { label: "Feral", flavor: "Wild and spirited; high upkeep.", mods: { vigor: 1.4, hygiene: 1.4, sickChance: 1.2, joyGain: 1.2 } },
 };
@@ -312,13 +312,13 @@ export const EIDOLON_MOOD_LABEL: Record<EidolonMood, string> = {
 export const EIDOLON_STATUS_LINE: Record<EidolonMood, (n: string) => string> = {
   happy: (n) => `${n} hums with quiet contentment.`,
   sad: (n) => `${n} droops, longing to be played with.`,
-  angry: (n) => `${n} seethes — tend to it, mortal.`,
+  angry: (n) => `${n} seethes; tend to it, mortal.`,
   hungry: (n) => `${n} grumbles with hunger.`,
   sick: (n) => `${n} festers. It needs a remedy.`,
   dirty: (n) => `${n} is caked in grime.`,
   tired: (n) => `${n}'s eyes grow heavy.`,
   sleeping: (n) => `${n} slumbers in the void.`,
-  dead: (n) => `${n} lies dormant — a magical item would wake it.`,
+  dead: (n) => `${n} lies dormant; a magical item would wake it.`,
 };
 
 /** The familiar's dominant mood from its current stats. Pure; mirrors the
@@ -352,7 +352,7 @@ export function eidolonMoodLine(name: string, stats: EidolonStats, ctx: { asleep
 export const EIDOLON_MOOD_ACTION: Record<EidolonMood, string> = {
   happy: "hums with quiet contentment.",
   sad: "droops, longing to be played with.",
-  angry: "seethes — tend to it, mortal.",
+  angry: "seethes; tend to it, mortal.",
   hungry: "grumbles with hunger.",
   sick: "festers, in need of a remedy.",
   dirty: "is caked in grime.",

@@ -155,10 +155,10 @@ export function AdminSystemTab() {
 
           {metrics.fly.machineId || metrics.fly.app ? (
             <Panel title="Fly.io">
-              <Stat label="App" value={metrics.fly.app ?? "—"} />
-              <Stat label="Region" value={metrics.fly.region ?? "—"} />
-              <Stat label="Machine" value={metrics.fly.machineId ?? "—"} />
-              <Stat label="Image" value={metrics.fly.imageRef ?? "—"} hint={metrics.fly.imageRef ?? undefined} />
+              <Stat label="App" value={metrics.fly.app ?? "-"} />
+              <Stat label="Region" value={metrics.fly.region ?? "-"} />
+              <Stat label="Machine" value={metrics.fly.machineId ?? "-"} />
+              <Stat label="Image" value={metrics.fly.imageRef ?? "-"} hint={metrics.fly.imageRef ?? undefined} />
             </Panel>
           ) : null}
         </>

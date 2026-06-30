@@ -29,7 +29,7 @@ export function VerifyEmailGate() {
     setError(null);
     try {
       const r = await fetch("/auth/resend-verification", { method: "POST" });
-      if (!r.ok) throw new Error("Couldn't send right now — try again in a minute.");
+      if (!r.ok) throw new Error("Couldn't send right now. Try again in a minute.");
       setSent(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Try again in a minute.");

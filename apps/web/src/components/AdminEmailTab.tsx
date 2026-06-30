@@ -35,7 +35,7 @@ function CampaignRow({ c, onCancel }: { c: Campaign; onCancel: (id: string) => v
       <span className="min-w-0 truncate">
         {c.category ? <span className="mr-1 rounded bg-keep-panel px-1 text-[10px] uppercase tracking-wide text-keep-muted">{emailCategoryLabel(c.category)}</span> : null}
         {c.subject}
-        {c.status === "scheduled" && c.scheduledAt ? <span className="ml-1 text-keep-muted">— scheduled {fmtWhen(c.scheduledAt)}</span> : null}
+        {c.status === "scheduled" && c.scheduledAt ? <span className="ml-1 text-keep-muted">- scheduled {fmtWhen(c.scheduledAt)}</span> : null}
       </span>
       <span className="flex shrink-0 items-center gap-2 text-keep-muted">
         <span>{c.sentCount}/{c.total} sent{c.failedCount ? `, ${c.failedCount} failed` : ""} · {c.status}</span>
@@ -211,7 +211,7 @@ export function AdminEmailTab() {
     <div className="space-y-5 text-sm">
       {status && !status.configured ? (
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 px-3 py-2 text-xs text-keep-accent">
-          Email isn't configured yet — set the <code>BREVO_API_KEY</code> secret. Sending will be skipped until it's set.
+          Email isn't configured yet. Set the <code>BREVO_API_KEY</code> secret. Sending will be skipped until it's set.
         </div>
       ) : null}
 
@@ -329,8 +329,8 @@ export function AdminEmailTab() {
             <label className="block">
               <span className="mb-1 block text-xs text-keep-muted">Enforcement</span>
               <select className={input} value={verifyMode} disabled={!verifyEnabled} onChange={(e) => setVerifyMode(e.target.value === "block" ? "block" : "nudge")}>
-                <option value="nudge">Nudge — account works, dismissible reminder banner</option>
-                <option value="block">Block — can't chat until verified</option>
+                <option value="nudge">Nudge: account works, dismissible reminder banner</option>
+                <option value="block">Block: can't chat until verified</option>
               </select>
             </label>
           </div>

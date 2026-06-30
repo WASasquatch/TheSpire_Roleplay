@@ -263,7 +263,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   review_server_applications: "Approve or reject server-creation applications in the admin Servers tab.",
   manage_any_server: "Admin override on any community server: edit, archive, transfer, delete, and lift server bans.",
   manage_faqs: "Create, edit, and delete public FAQ entries (question/answer with a shareable slug).",
-  send_admin_email: "Send email from the admin Email tab — to a single user or a throttled broadcast to all users.",
+  send_admin_email: "Send email from the admin Email tab, to a single user or a throttled broadcast to all users.",
 
   // audit_view
   view_room_messages_as_admin: "Open the admin message scroll-through for a public room.",

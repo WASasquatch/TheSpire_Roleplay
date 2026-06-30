@@ -2793,7 +2793,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     if (!a.forum) { reply.code(404); return { error: "no forum" }; }
     if (a.ban) { reply.code(403); return { error: "You are banned from this forum." }; }
     if (a.forum.postingMode === "application") {
-      reply.code(409); return { error: "This forum reviews applications — apply to join instead." };
+      reply.code(409); return { error: "This forum reviews applications. Apply to join instead." };
     }
     // Idempotent: owner/mods/existing members already have access.
     if (a.isMember) return { ok: true };

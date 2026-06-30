@@ -319,7 +319,7 @@ export async function registerAdminRoutes(
     const underTsxWatch = (process.env.npm_lifecycle_script ?? "").includes("tsx watch");
     await recordAudit(db, { actorUserId: actor?.id ?? "system", action: "system_restart", metadata: { underTsxWatch } });
     req.log.warn({ by: actor?.id, underTsxWatch }, "[system] admin-triggered process restart");
-    void reply.send({ ok: true, message: "Restarting — the server will be back in a few seconds." });
+    void reply.send({ ok: true, message: "Restarting, the server will be back in a few seconds." });
     setTimeout(() => {
       if (underTsxWatch) {
         // Bump our own mtime so the watcher sees a change and restarts us.

@@ -419,7 +419,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
                 so a mod knows the book is normally purchase-to-read. */}
             {detail.paywallBypassed ? (
               <div className="shrink-0 border-b border-amber-400/40 bg-amber-400/10 px-4 py-2 text-center text-xs text-amber-200">
-                ⚠️ This book is marked <b>Buy to Read</b>. You're viewing it in full via moderator access — readers must buy a copy to read past a sample.
+                ⚠️ This book is marked <b>Buy to Read</b>. You're viewing it in full via moderator access. Readers must buy a copy to read past a sample.
               </div>
             ) : null}
             <div
@@ -1158,8 +1158,8 @@ function BuyCopyBar({ storyId }: { storyId: string }) {
       disabled={busy}
       title={owned
         ? (state.showcased
-            ? "Showing on your profile — tap to hide"
-            : "You own this — tap to show it on your profile")
+            ? "Showing on your profile, tap to hide"
+            : "You own this, tap to show it on your profile")
         : `Buy a copy for ${state.price} (adds it to your profile Library)`}
       className={`mt-2 flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold uppercase tracking-widest shadow-inner transition disabled:opacity-50 ${
         active
@@ -1404,7 +1404,7 @@ function LockedReadingPane({
           <h3 className="mt-1 font-action text-lg text-keep-text">Buy to keep reading</h3>
           <p className="mt-1 text-sm text-keep-muted">
             This is a preview. Buy a copy to read all {chapterCount} {chapterCount === 1 ? "chapter" : "chapters"}
-            {" "}— it's added to your Library and you can show it on your profile.
+            {". "}It's added to your Library and you can show it on your profile.
           </p>
           {me ? (
             <button

@@ -773,7 +773,7 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     if (!a.server) { reply.code(404); return { error: "no server" }; }
     if (a.ban) { reply.code(403); return { error: "You are banned from this server." }; }
     if (a.server.joinMode === "application") {
-      reply.code(409); return { error: "This server reviews applications — apply to join instead." };
+      reply.code(409); return { error: "This server reviews applications. Apply to join instead." };
     }
     if (a.server.joinMode === "invite") {
       if (a.role) return { ok: true }; // already enrolled (idempotent)
@@ -830,7 +830,7 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     const a = await serverAuthority(db, me, req.params.id);
     if (!a.server) { reply.code(404); return { error: "no server" }; }
     if (a.server.ownerUserId === me.id) {
-      reply.code(409); return { error: "The owner can't leave their own server — transfer it first." };
+      reply.code(409); return { error: "The owner can't leave their own server. Transfer it first." };
     }
     if (a.server.isSystem) {
       reply.code(409); return { error: "You can't leave the home server." };

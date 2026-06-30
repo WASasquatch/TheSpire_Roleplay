@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import type { AvatarCrop } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
@@ -126,20 +126,37 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   // down gently. Reduce Motion only; OFF keeps the instant snap.
   const reduceMotion = useReducedMotion();
   const isLgUp = useIsLgUp();
-  // The server banner can be COLLAPSED to a horizontal bar on BOTH breakpoints
-  // (mobile collapses by default to save space; desktop opens by default). The
-  // bar/chevron toggles it. We seed `bannerOpen` from the current breakpoint and
-  // keep following the breakpoint on resize UNTIL the user toggles by hand
-  // (`bannerUserToggled`), after which their choice sticks.
-  const bannerUserToggled = useRef(false);
-  const [bannerOpen, setBannerOpen] = useState(
-    () => typeof window !== "undefined" && typeof window.matchMedia === "function"
-      && window.matchMedia("(min-width: 1024px)").matches,
-  );
+  // The server banner can be COLLAPSED to a horizontal bar on BOTH breakpoints.
+  // The collapsed/expanded choice is REMEMBERED PER SERVER (localStorage, per
+  // device): collapse a server's banner and it stays collapsed for THAT server
+  // across visits and reloads. With no saved choice yet, it follows the
+  // breakpoint default (desktop opens, mobile collapses) and keeps following it
+  // on resize. The bar/chevron toggles the state and saves it for this server.
+  const currentServerId = useChat((s) => s.currentServerId);
+  const bannerPrefKey = `bannerOpen:${currentServerId ?? "home"}`;
+  const [bannerOpen, setBannerOpen] = useState<boolean>(() => {
+    try {
+      const v = window.localStorage.getItem(bannerPrefKey);
+      if (v != null) return v === "1";
+    } catch { /* private mode / no storage */ }
+    return typeof window !== "undefined" && typeof window.matchMedia === "function"
+      && window.matchMedia("(min-width: 1024px)").matches;
+  });
   useEffect(() => {
-    if (!bannerUserToggled.current) setBannerOpen(isLgUp);
-  }, [isLgUp]);
-  const toggleBanner = () => { bannerUserToggled.current = true; setBannerOpen((o) => !o); };
+    let saved: boolean | null = null;
+    try {
+      const v = window.localStorage.getItem(bannerPrefKey);
+      saved = v == null ? null : v === "1";
+    } catch { /* private mode / no storage */ }
+    setBannerOpen(saved ?? isLgUp);
+  }, [bannerPrefKey, isLgUp]);
+  const toggleBanner = () => {
+    setBannerOpen((o) => {
+      const next = !o;
+      try { window.localStorage.setItem(bannerPrefKey, next ? "1" : "0"); } catch { /* private mode */ }
+      return next;
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -446,7 +463,20 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
           slim bar there's no art to sit over, so the pill (bg/border/shadow/
           padding) is dropped and the nav falls back to a plain horizontal list:
           the slim bar itself is the container at that point. */}
-      <nav className={`hidden items-center gap-3 text-sm uppercase tracking-widest text-keep-muted lg:flex ${hasServerBanner && bannerShown ? "relative z-10 rounded-[10px] border border-white/20 bg-black/50 p-2.5 shadow-[0_10px_10px_rgba(0,0,0,0.2)] [text-shadow:0_1px_2px_rgba(0,0,0,.7)]" : ""}`}>
+      <nav className={`hidden items-center gap-3 text-sm uppercase tracking-widest text-keep-muted lg:flex ${
+        // `relative z-10` must apply whenever there's a server banner — NOT only
+        // when expanded — so the nav stays ABOVE the full-area `toggleBanner` tap
+        // layer (absolute z-[5]). When collapsed the nav was a static, unpositioned
+        // element, so the z-[5] tap layer painted over it and swallowed every link
+        // click (the banner just expanded instead). Mirrors the mobile hamburger,
+        // which already lifts on `hasServerBanner` alone.
+        hasServerBanner ? "relative z-10" : ""
+      } ${
+        // The decorative pill (border/bg/shadow/padding/text-shadow) is only for
+        // sitting over banner ART, so it stays gated to the EXPANDED state — the
+        // collapsed slim bar has no art and falls back to a plain link row.
+        hasServerBanner && bannerShown ? "rounded-[10px] border border-white/20 bg-black/50 p-2.5 shadow-[0_10px_10px_rgba(0,0,0,0.2)] [text-shadow:0_1px_2px_rgba(0,0,0,.7)]" : ""
+      }`}>
         {/* Admin-managed custom links collapse behind a single "More"
             popover so a busy install with many links doesn't push the
             built-in nav items off the row. `data-nav-more` is the
@@ -594,7 +624,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               type="button"
               onClick={onOpenServerAdmin}
               className="uppercase tracking-widest text-keep-action hover:text-keep-text"
-              title="Manage this server — settings, rooms, members, moderation"
+              title="Manage this server: settings, rooms, members, moderation"
             >
               Server Admin
             </button>
@@ -607,7 +637,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               type="button"
               onClick={onOpenAdmin}
               className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Global Admin — platform settings and cross-community oversight"
+              title="Global Admin: platform settings and cross-community oversight"
             >
               Global Admin
             </button>

@@ -134,7 +134,7 @@ function ServerIcon({
     ? `${server.name} (home server)`
     : server.viewerRole != null
       ? server.name
-      : `${server.name} — visit`;
+      : `${server.name} (visit)`;
 
   // Long-press (touch) opens settings without a visible gear, mirroring the
   // hover gear on pointer devices. A timer started on press fires the console;
@@ -215,8 +215,8 @@ function ServerIcon({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onOpenSettings(); }}
-            title={`${server.name} — settings`}
-            aria-label={`${server.name} — settings`}
+            title={`${server.name} (settings)`}
+            aria-label={`${server.name} (settings)`}
             className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border border-keep-rule bg-keep-panel text-keep-muted shadow-sm opacity-0 transition-opacity hover:text-keep-text focus:opacity-100 group-hover:opacity-100"
           >
             <SettingsIcon className="h-3.5 w-3.5" aria-hidden="true" />

@@ -133,7 +133,7 @@ export const clearCommand: CommandHandler = {
   name: "clear",
   aliases: ["cls"],
   usage: "/clear  (your view)  ·  /clear <duration>  (mods: hide the last N from everyone)",
-  description: "No args: hide earlier messages from your OWN view. With a duration (mods): hide the last N (e.g. 30m, 2h) from EVERYONE — kept for moderators to review.",
+  description: "No args: hide earlier messages from your OWN view. With a duration (mods): hide the last N (e.g. 30m, 2h) from EVERYONE, kept for moderators to review.",
   subcommands: [
     { verb: "(none)", usage: "/clear", description: "Hide earlier messages in this room from your own view (durable; doesn't delete)." },
     { verb: "<duration>", usage: "/clear 30m", description: "Mods: hide the last N from everyone's view (30s, 5m, 2h, 1h30m, 1d). Kept for moderators; use /trash to delete permanently." },
@@ -154,7 +154,7 @@ export const clearCommand: CommandHandler = {
     if (ms == null) {
       ctx.socket.emit("error:notice", {
         code: "BAD_DURATION",
-        message: "Bad duration. Use forms like 5m, 30m, 1h, 1h30m, 1d — or just /clear to clear your own view.",
+        message: "Bad duration. Use forms like 5m, 30m, 1h, 1h30m, 1d, or just /clear to clear your own view.",
       });
       return;
     }
@@ -168,7 +168,7 @@ export const clearCommand: CommandHandler = {
     const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
     if (!room) { ctx.socket.emit("error:notice", { code: "NO_ROOM", message: "Room not found." }); return; }
     if (room.replyMode === "nested") {
-      ctx.socket.emit("error:notice", { code: "FORUM", message: "/clear <duration> isn't available in forum rooms — remove topics individually there." });
+      ctx.socket.emit("error:notice", { code: "FORUM", message: "/clear <duration> isn't available in forum rooms. Remove topics individually there." });
       return;
     }
 

@@ -114,7 +114,7 @@ async function callerCanSetDc(ctx: CommandContext): Promise<boolean> {
  */
 function formatDcSuffix(finalTotal: number, dc: number | null): string {
   if (dc == null) return "";
-  return `  — vs DC ${dc} ${finalTotal >= dc ? "✓ Pass" : "✗ Fail"}`;
+  return `  - vs DC ${dc} ${finalTotal >= dc ? "✓ Pass" : "✗ Fail"}`;
 }
 
 /**

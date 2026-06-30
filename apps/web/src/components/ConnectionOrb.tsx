@@ -75,9 +75,9 @@ export function ConnectionOrb() {
   }
 
   const label =
-    status === "online" ? "Connected — click to resync"
+    status === "online" ? "Connected, click to resync"
     : status === "reconnecting" ? "Reconnecting… click to retry now"
-    : "Offline — click to reconnect";
+    : "Offline, click to reconnect";
 
   return (
     <button

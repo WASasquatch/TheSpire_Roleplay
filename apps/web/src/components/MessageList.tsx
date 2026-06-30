@@ -1769,7 +1769,7 @@ function ForumView({
                   {s.locked ? (
                     <span
                       className="rounded border border-keep-rule/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-muted"
-                      title="Members only — join the forum to post here"
+                      title="Members only: join the forum to post here"
                     >
                       Members only
                     </span>
@@ -1864,7 +1864,7 @@ function ForumView({
                           {sub.locked ? (
                             <span
                               className="rounded border border-keep-rule/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-muted"
-                              title="Members only — join the forum to post here"
+                              title="Members only: join the forum to post here"
                             >
                               Members only
                             </span>

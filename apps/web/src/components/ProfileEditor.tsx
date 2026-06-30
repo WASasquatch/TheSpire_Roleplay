@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type { AvatarCrop, CharacterAttribute, CharacterJournalEntry, CharacterPortrait, CharacterStats, CharacterStatsVisibility, CharacterVibeAxisKey, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
-import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, DEFAULT_THEME, STAT_FIELD_MAX, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
+import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, STAT_FIELD_MAX, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
 import { Code2, HelpCircle, Paintbrush2 } from "lucide-react";
 import { applyStyle } from "../lib/ornaments/index.js";
 import { DesignerTour } from "./DesignerTour.js";
@@ -253,6 +253,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // isn't available the Source textarea renders regardless of this value.
   const [bioMode, setBioMode] = useState<"source" | "designer">("designer");
   const designerSiteEnabled = useChat((s) => s.branding.profileDesignerEnabled);
+  // The SITE default palette (admin-configured `branding.defaultTheme`), which
+  // is what a user with NO personal theme actually sees in chat. The live
+  // preview + profile-card preview fall back to THIS when `theme` is null —
+  // never to the hard-coded light `DEFAULT_THEME`, which would slam Parchment
+  // onto <html> for every freshly-registered (no-theme) user the moment they
+  // open the editor, and stick because the editor applies it directly.
+  const siteDefaultTheme = useChat((s) => s.branding.defaultTheme);
   const [isWideViewport, setIsWideViewport] = useState(isDesignerViewport);
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -1008,7 +1015,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   }, [earningSnapshot, target]);
 
   const previewProfile: ProfileView | null = useMemo(() => {
-    const previewTheme = theme ?? DEFAULT_THEME;
+    const previewTheme = theme ?? siteDefaultTheme;
     // Metrics come from the server-side fetch above (cached per
     // target). Until that lands, fall through to null placeholders
     // so the modal renders "private" briefly rather than fake zeros.
@@ -1141,7 +1148,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         publicProfileBgMode,
       },
     };
-  }, [target, master, myUserId, name, bioHtml, avatarUrl, includeAvatarInGallery, gender, stats, theme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle, publicProfileBgUrl, publicProfileBgMode, earningSnapshot]);
+  }, [target, master, myUserId, name, bioHtml, avatarUrl, includeAvatarInGallery, gender, stats, theme, siteDefaultTheme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle, publicProfileBgUrl, publicProfileBgMode, earningSnapshot]);
 
   const targetOptions = useMemo(() => {
     return [
@@ -1167,13 +1174,20 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // restoring the saved theme if the user cancelled.
   useEffect(() => {
     // Don't apply the live preview until the target's saved theme has actually
-    // loaded. Before load, `theme` is still null, so this would slam
-    // DEFAULT_THEME onto <html> OVER the already-active (correct) theme — a
-    // white/default flash across the whole app (chat shell AND the userlist),
-    // which then snaps back once the saved theme arrives. After load, `theme`
-    // equals the active theme, so applying it is a visual no-op: no flicker.
+    // loaded. Before load, `theme` is still null, so this would slam the
+    // fallback onto <html> OVER the already-active (correct) theme — a flash
+    // across the whole app (chat shell AND the userlist), which then snaps back
+    // once the saved theme arrives.
+    //
+    // The fallback is the SITE default palette, NOT the hard-coded light
+    // `DEFAULT_THEME`. A user with no personal theme already sees
+    // `branding.defaultTheme` in chat, so for them applying it here is a visual
+    // no-op. Using `DEFAULT_THEME` instead was the "open the editor and the
+    // whole app turns light" bug: every freshly-registered (no-theme) user got
+    // Parchment forced onto <html>, and since the editor applies the preview
+    // directly it stuck (clicking "Default" → setTheme(null) reproduced it too).
     if (loadingTarget) return;
-    const previewTheme = theme ?? DEFAULT_THEME;
+    const previewTheme = theme ?? siteDefaultTheme;
     applyTheme(previewTheme);
     applyStyle(previewTheme, userStyleKey);
     const root = document.documentElement;
@@ -1216,7 +1230,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
       root.style.removeProperty("--keep-glass-tool-tint");
       root.style.removeProperty("--keep-glass-chat-tint");
     }
-  }, [theme, userStyleKey, publicProfileBgUrl, publicProfileBgMode, loadingTarget]);
+  }, [theme, siteDefaultTheme, userStyleKey, publicProfileBgUrl, publicProfileBgMode, loadingTarget]);
 
   return (
     <Modal onClose={onClose} zIndex={isAdminEdit ? 60 : 50} variant="mobile-fullscreen">
@@ -1634,7 +1648,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                       : "Applied to your chat when no character is active, and to your master profile modal."}
                   </p>
                   <ThemePicker
-                    theme={theme ?? DEFAULT_THEME}
+                    theme={theme ?? siteDefaultTheme}
                     onChange={setTheme}
                     onReset={() => setTheme(null)}
                   />

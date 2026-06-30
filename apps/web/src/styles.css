@@ -5020,3 +5020,218 @@ aside.margin-note {
   0%, 100% { transform: scale(1);    box-shadow: 0 0 3px 1px rgba(248, 114, 114, 0.5); }
   50%      { transform: scale(1.35); box-shadow: 0 0 9px 3px rgba(248, 114, 114, 0.95); }
 }
+
+/* ============================================================
+ * CONTENT-VISIBILITY: skip paint/layout for off-screen rows
+ * ============================================================
+ *
+ * Equipped name styles (Embers, Magma, ns-pan, ...) and animated
+ * avatar borders (b-aurora-v2, b-hearth-flame, ...) each run a
+ * handful of `infinite` CSS animations PER occurrence. With 100+
+ * messages of scrollback (or a long occupant list), the renderer
+ * repaints every off-screen styled name/border every frame even
+ * though nobody can see it — Firefox profiling showed ~73s GPU
+ * render time over a 47s window with ~155 concurrent animations.
+ *
+ * `content-visibility: auto` tells the browser to skip layout,
+ * paint, and the compositor for an element whose box is outside
+ * the viewport (it applies size/layout/paint containment only
+ * while skipped). When the row scrolls back in, the browser
+ * renders it normally — full visuals, animations resume. This is
+ * a pure rendering optimization: it is invisible to the user and
+ * unrelated to motion preference, so it applies ALWAYS (NOT gated
+ * on `calm-cosmetics`), unlike the animation-freezing overrides.
+ *
+ * GLASS NOTE: content-visibility does not touch backdrop-filter,
+ * blur, or any glass effect on visible rows — those render exactly
+ * as before. Containment only takes effect while a row is fully
+ * off-screen and therefore not painted at all.
+ *
+ * `contain-intrinsic-size: auto <h>` supplies a placeholder size
+ * for the skipped box so the scrollbar/document height stays
+ * stable. The `auto` keyword makes the browser REMEMBER the last
+ * actually-rendered size once a row has been laid out once, so the
+ * stored size (not the <h> guess) drives the box after first
+ * paint — minimizing layout shift. The <h> value is only the
+ * first-time estimate, picked to match a typical row.
+ */
+
+/* Chat message row. `[data-message-id]` is the outermost div of a
+ * rendered message (both the plain and reply-quote variants in
+ * MessageList.tsx). It sits INSIDE the MessageVisibilityGate host
+ * div, which already unmounts the whole subtree past a 1500px
+ * buffer and holds a measured-height placeholder while unmounted.
+ *
+ * Applying content-visibility here (the gate's child) rather than
+ * on the gate wrapper is deliberate and conservative:
+ *   - It never fights the gate's placeholder: when the gate hides a
+ *     message the child isn't rendered, so this rule is inert; the
+ *     gate's exact measured height drives the box.
+ *   - While a message is mounted-but-off-screen (within the 1500px
+ *     buffer, outside the real viewport) the browser still skips
+ *     its paint — which is exactly the band where the animated
+ *     names/borders were burning paint.
+ *   - The scroll container itself (overflow-y:auto, with the
+ *     hand-managed bottom re-pin and `overflow-anchor:none`) is
+ *     NOT given content-visibility, so the bottom-pin and
+ *     load-older scroll-preservation logic are untouched.
+ *
+ * Intrinsic-size 60px ≈ one chat line (text + padding/margins);
+ * `auto` lets the browser override it with the real height after
+ * the row's first paint, so taller messages (media, reactions,
+ * link previews) don't cause a lasting layout shift. */
+[data-message-id] {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 60px;
+}
+
+/* Userlist occupant row. The occupants `<ul>` renders one flat
+ * `<li>` per identity with no virtualization; when the rail is
+ * scrollable (rooms with many members) the off-screen rows kept
+ * repainting their styled names + animated borders. Skipping their
+ * paint frees GPU time with no visible change.
+ *
+ * The row wrapper is intentionally overflow:visible so avatar VFX
+ * (Phoenix feathers, Aurora glow) can bleed into the gutter; that
+ * is preserved — content-visibility only contains a row while it is
+ * fully off-screen and not painted, and imposes no clipping on a
+ * visible, rendered row.
+ *
+ * Intrinsic-size 50px ≈ a typical occupant row (name baseline +
+ * status icons + padding; mobile is the taller end). `auto`
+ * remembers the real height after first paint. */
+.keep-occupant-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 50px;
+}
+
+/* ============================================================
+ * CALM COSMETICS — freeze perpetual catalog animations + drop
+ * the expensive per-frame effects on equipped name styles and
+ * avatar borders. CONDITIONAL: applies ONLY under the
+ * `html.calm-cosmetics` gate (Reduce Motion, auto-detected
+ * low-perf device, or the manual "Reduce cosmetic effects"
+ * toggle — see lib/calmCosmetics.ts). Capable machines on full
+ * motion get the unchanged, full-fidelity visuals.
+ * ============================================================
+ *
+ * WHY: equipped name styles (ns-pan, ns-embers, ns-hearth-fire …)
+ * and template avatar borders (.b-aurora-v2, .b-magma, .b-galaxy-v3 …)
+ * each run a handful of `infinite` CSS animations per occurrence —
+ * spinning conic-gradients, animated background-position pans on
+ * background-clip:text, animated drop-shadow() / blurred box-shadow,
+ * mix-blend-mode layers, and particle pseudo-elements (::before /
+ * ::after, plus .feather / .star / .petal / .ember / .ray … children).
+ * None of those composite; they force a full repaint EVERY frame,
+ * for every styled name/border on the page (Firefox profiling showed
+ * ~73s GPU render over a 47s window at ~155 concurrent animations).
+ *
+ * WHAT WE DO under the gate:
+ *   1. Freeze the motion — `animation: none` on the styled element,
+ *      its descendants, and its ::before/::after. StyledName already
+ *      bakes a correct STATIC fallback (gradient mask + stroke) for
+ *      the paused/reduced-motion state, so frozen names still read
+ *      with their full color; borders keep their static gradient ring.
+ *   2. Drop the costly compositing work — `filter: none` (kills
+ *      animated/blurred drop-shadow re-rasterized per frame),
+ *      `box-shadow: none` on the frame (kills animated blurred glow),
+ *      and `mix-blend-mode: normal` on border layers (kills the
+ *      per-frame blend recomposite). The base gradient / border art
+ *      stays, only the expensive halo/blur/blend is removed.
+ *
+ * `filter: none !important` is REQUIRED with !important on name
+ * styles: StyledName bakes the drop-shadow into the element's inline
+ * `style` attribute (setAttribute), and inline styles outrank an
+ * un-flagged class rule — only !important wins. The `animation`
+ * lives on the catalog class rule (not inline), but we flag it too
+ * for parity and to beat the single-class catalog specificity.
+ *
+ * GLASS IS SACRED — NOT TOUCHED. `.ns-glassy` is the frosted-glass
+ * name style; it is static (no animation) and its modest drop-shadow
+ * IS the frosted look, so it is explicitly EXCLUDED from the
+ * filter-stripping rules below (we re-assert its baked static shadow
+ * after the broad name-style reset). There is no `backdrop-filter`
+ * anywhere in the catalog; nothing here gates blur/backdrop-filter,
+ * frosted panels, or any glass surface. Those remain full-fidelity
+ * under the gate by design — if glass is expensive the user switches
+ * theme, we never weaken it.
+ */
+
+/* --- Name styles: freeze the animated ones ----------------------
+ * Enumerated (NOT a `[class*="ns-"]` wildcard) so we never touch
+ * unrelated app classes that happen to contain "ns-" (e.g.
+ * .ns-card-controls). These are exactly the name styles that ship an
+ * `infinite` animation per the catalog inventory. */
+html.calm-cosmetics .ns-pulse,
+html.calm-cosmetics .ns-pan,
+html.calm-cosmetics .ns-hearth-fire,
+html.calm-cosmetics .ns-embers,
+html.calm-cosmetics .ns-neon-sign,
+html.calm-cosmetics .ns-marquee,
+html.calm-cosmetics .ns-aurora-borealis,
+html.calm-cosmetics .ns-embers::before,
+html.calm-cosmetics .ns-embers::after {
+  animation: none !important;
+}
+
+/* Name styles: drop the expensive drop-shadow() filter halos. These
+ * carry a baked INLINE filter from StyledName, so !important is
+ * mandatory to override it. `.ns-glassy` is deliberately absent —
+ * its frosted drop-shadow is the look and must stay. */
+html.calm-cosmetics .ns-gradient-shadow,
+html.calm-cosmetics .ns-gradient-glow,
+html.calm-cosmetics .ns-gradient-sg,
+html.calm-cosmetics .ns-billboard,
+html.calm-cosmetics .ns-comic-pop,
+html.calm-cosmetics .ns-synthwave,
+html.calm-cosmetics .ns-pulse,
+html.calm-cosmetics .ns-pan,
+html.calm-cosmetics .ns-hearth-fire,
+html.calm-cosmetics .ns-embers,
+html.calm-cosmetics .ns-neon-sign,
+html.calm-cosmetics .ns-marquee {
+  filter: none !important;
+}
+
+/* GLASS EXCLUSION (re-assert): keep ns-glassy's static frosted
+ * drop-shadow intact even though it shares the gate. This mirrors the
+ * exact baked stack in StyledName's bakeStyleForClassName. */
+html.calm-cosmetics .ns-glassy {
+  filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.5)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.35)) !important;
+}
+
+/* --- Avatar borders: freeze + de-cost --------------------------
+ * Scoped under `.av`, the unique frame-wrapper class every
+ * template-mode border emits (`<div class="av b-…">`). This reaches
+ * the frame, the inner `.pic`, every decorative child (.feather,
+ * .star, .petal, .ember, .ray, .glyph, .fog-band, leaves, bolts …),
+ * and all ::before/::after particle/halo pseudo-elements — without a
+ * broad `[class*="b-"]` wildcard that would wrongly hit Tailwind
+ * utilities (mb-*, border-*, tab-*, …). */
+html.calm-cosmetics .av,
+html.calm-cosmetics .av *,
+html.calm-cosmetics .av::before,
+html.calm-cosmetics .av::after,
+html.calm-cosmetics .av *::before,
+html.calm-cosmetics .av *::after {
+  /* Freeze every spin / drift / twinkle / ripple / flicker loop. */
+  animation: none !important;
+  /* Kill animated/blurred drop-shadow filters (re-rasterized/frame). */
+  filter: none !important;
+  /* Kill per-frame blend recompositing on overlay/screen layers. */
+  mix-blend-mode: normal !important;
+}
+
+/* Drop the animated, blurred box-shadow glow on the frame + its
+ * pseudo/child layers (sakura pulse, dragon breath, neon flicker …),
+ * which re-rasterizes a blur every frame. The static border art /
+ * conic-gradient ring on the element's background is untouched, so
+ * the frame still reads; only the expensive glow is removed. */
+html.calm-cosmetics .av,
+html.calm-cosmetics .av *,
+html.calm-cosmetics .av::before,
+html.calm-cosmetics .av::after,
+html.calm-cosmetics .av *::before,
+html.calm-cosmetics .av *::after {
+  box-shadow: none !important;
+}

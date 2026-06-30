@@ -95,6 +95,13 @@ function subscribe(listener: Listener): () => void {
   return () => listeners.delete(listener);
 }
 
+/** Plain-module subscription to Reduce Motion changes (OS flip or in-app
+ *  toggle), so combiners like {@link import('./calmCosmetics')} can re-derive
+ *  without React. Returns an unsubscribe. */
+export function onReduceMotionChange(listener: Listener): () => void {
+  return subscribe(listener);
+}
+
 // React to OS-level changes live (a user toggling Reduce Motion in their OS
 // while the tab is open).
 if (typeof window !== "undefined" && typeof window.matchMedia === "function") {

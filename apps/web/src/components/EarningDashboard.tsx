@@ -1052,7 +1052,7 @@ function BookRankingEntry({ rank, book, boardKey }: { rank: number; book: Script
   const setOpenStoryReader = useChat((s) => s.setOpenStoryReader);
   const byline = book.author.characterName ?? book.author.masterUsername;
   const primary = boardKey === "rated"
-    ? (book.avgRating != null ? `${book.avgRating.toFixed(1)}★` : "—")
+    ? (book.avgRating != null ? `${book.avgRating.toFixed(1)}★` : "-")
     : book.applauseCount.toLocaleString();
   const primaryLabel = boardKey === "rated" ? `${book.reviewCount} reviews` : "applause";
   return (
@@ -3535,7 +3535,7 @@ function RoomTransitionsTab({ snapshot }: {
     <section>
       <h3 className="font-action text-lg text-keep-text">Room Transitions</h3>
       <p className="mt-1 text-xs text-keep-muted">
-        A flourish that plays for YOU when you switch rooms — only you see it. Equipped per identity
+        A flourish that plays for YOU when you switch rooms, only you see it. Equipped per identity
         ({activeCharacterId ? "this character" : "your OOC / master account"}). Off = instant.
         Hit Preview on any rite to watch it play right on its card.
       </p>

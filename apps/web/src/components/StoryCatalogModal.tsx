@@ -882,7 +882,7 @@ function CatalogBuyButton({
       type="button"
       onClick={buy}
       disabled={busy}
-      title={`Buy a copy for ${price} — adds it to your profile Library`}
+      title={`Buy a copy for ${price}, adds it to your profile Library`}
       className="mt-1 inline-flex items-center justify-center gap-1 self-start rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action transition hover:bg-keep-action/25 disabled:opacity-50"
     >
       <span aria-hidden>📖</span> Buy · {price}

@@ -8,8 +8,8 @@ import {
 import { BanModal } from "./BanModal.js";
 
 function fmtTs(ts: number | null): string {
-  if (ts == null) return "—";
-  try { return new Date(ts).toLocaleString(); } catch { return "—"; }
+  if (ts == null) return "-";
+  try { return new Date(ts).toLocaleString(); } catch { return "-"; }
 }
 
 /**
@@ -69,7 +69,7 @@ export function AccountBanControl({
         <div className="rounded border border-[#e06070]/50 bg-[#e06070]/10 px-2.5 py-1.5 text-[11px] text-keep-text">
           <span className="font-semibold text-[#e06070]">⛔ Banned</span>{" "}
           {ban.bannedUntil ? <>until {fmtTs(ban.bannedUntil)}</> : <>permanently</>}
-          {ban.reason ? <> — “{ban.reason}”</> : null}
+          {ban.reason ? <>, “{ban.reason}”</> : null}
           {ban.by ? <span className="text-keep-muted"> (by {ban.by})</span> : null}
         </div>
       ) : null}
@@ -112,7 +112,7 @@ export function AccountBanControl({
                   <>unban</>
                 )}{" "}
                 <span className="text-keep-muted">by {h.by}</span>
-                {h.reason ? <> — “{h.reason}”</> : null}
+                {h.reason ? <>, “{h.reason}”</> : null}
               </li>
             ))}
           </ul>

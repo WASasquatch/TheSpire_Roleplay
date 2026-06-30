@@ -36,7 +36,7 @@ function fmtCreated(ms: number): string {
   try {
     return new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
   } catch {
-    return "—";
+    return "-";
   }
 }
 
@@ -142,7 +142,7 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld }: Props) {
             <span className="truncate italic text-keep-muted">{bannerText}</span>
           ) : (
             <span className="truncate text-keep-muted/50">
-              No topic set{canEdit ? " — add one with /topic" : ""}
+              No topic set{canEdit ? " - add one with /topic" : ""}
             </span>
           )}
         </div>

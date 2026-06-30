@@ -1275,7 +1275,7 @@ function ProfileBody({
                         onClick={() => void doPat()}
                         disabled={patState !== "idle"}
                         className="ml-auto shrink-0 self-center rounded border border-keep-action/50 px-2.5 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
-                        title="Pat this familiar — a little joy, once a day"
+                        title="Pat this familiar, a little joy, once a day"
                       >
                         {patState === "done" ? "Patted ♥" : patState === "cooldown" ? "Patted today" : patState === "busy" ? "…" : "Pat ♥"}
                       </button>
@@ -1774,7 +1774,7 @@ function CopyIdentityToken({ token }: { token: string }) {
     <button
       type="button"
       onClick={copy}
-      title={`Copy ${token} — paste into /whisper, /currency send, /friend, /title, etc.`}
+      title={`Copy ${token}. Paste into /whisper, /currency send, /friend, /title, etc.`}
       className="rounded border border-keep-rule/60 px-1 font-mono text-[10px] hover:border-keep-action hover:text-keep-action"
     >
       {copied ? "copied!" : preview}
@@ -1976,7 +1976,7 @@ function LibraryPin({ entry }: { entry: ProfileLibraryEntry }) {
     <button
       type="button"
       onClick={() => setOpenStoryReader(entry.storyId)}
-      title={`${entry.title} — by ${entry.authorName}`}
+      title={`${entry.title}, by ${entry.authorName}`}
       className="flex w-full flex-col items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg/40 p-2 text-center text-[11px] transition hover:border-keep-action hover:bg-keep-banner"
     >
       {entry.coverImageUrl ? (

@@ -50,7 +50,7 @@ export const eidolonCommand: CommandHandler = {
 
     const row = (await ctx.db.select().from(eidolonState)
       .where(and(eq(eidolonState.ownerScope, scope), eq(eidolonState.ownerId, ownerId))).limit(1))[0];
-    if (!row) { notice(ctx, "NO_EIDOLON", "You don't have a familiar yet — hatch one in the Spire Arcade."); return; }
+    if (!row) { notice(ctx, "NO_EIDOLON", "You don't have a familiar yet. Hatch one in the Spire Arcade."); return; }
 
     // Live mood from the caught-up stats (matches the in-game sprite).
     const prog = catchUp(row, Date.now());

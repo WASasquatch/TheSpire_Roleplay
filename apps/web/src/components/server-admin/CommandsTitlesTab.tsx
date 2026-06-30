@@ -371,7 +371,7 @@ function SocialGameCard({ game: g, serverId, busy, run, onSaved }: {
       </header>
       <p className="text-[11px] text-keep-muted">{g.description}</p>
       <label className="block">
-        <span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{g.durationLabel} (seconds — blank = default {formatMs(g.defaultDurationMs)})</span>
+        <span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{g.durationLabel} (seconds, blank = default {formatMs(g.defaultDurationMs)})</span>
         <input type="number" min={1} value={durationSec} onChange={(e) => setDurationSec(e.target.value)} placeholder="default" className={`${inputCls} w-28`} />
       </label>
       {g.supportsReward ? (

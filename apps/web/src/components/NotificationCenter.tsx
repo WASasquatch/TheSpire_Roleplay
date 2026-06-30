@@ -286,7 +286,7 @@ export function NotificationCenter({
 
             {prefsOpen ? (
               <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                <p className="mb-2 text-xs text-keep-muted">Choose what lands in your bell. A muted type makes no alert at all — no row, badge, or push.</p>
+                <p className="mb-2 text-xs text-keep-muted">Choose what lands in your bell. A muted type makes no alert at all: no row, badge, or push.</p>
                 <ul className="space-y-1">
                   {MUTABLE_CATEGORIES.map((c) => {
                     const on = !muted.has(c.key);
@@ -303,10 +303,10 @@ export function NotificationCenter({
                 <div className="mt-4 rounded border border-keep-rule/60 p-2.5">
                   <p className="text-sm text-keep-text">Browser notifications</p>
                   <p className="mt-0.5 text-[11px] text-keep-muted">
-                    {pushState === "subscribed" ? "On — you'll be pinged even when the app is closed."
+                    {pushState === "subscribed" ? "On: you'll be pinged even when the app is closed."
                       : pushState === "denied" ? "Blocked in your browser settings. Allow notifications for this site to enable."
                       : pushState === "unsupported" ? "Your browser doesn't support push notifications."
-                      : "Off — turn on to be pinged when the app is closed."}
+                      : "Off: turn on to be pinged when the app is closed."}
                   </p>
                   {pushState !== "unsupported" && pushState !== "denied" ? (
                     <button type="button" onClick={togglePush} disabled={pushBusy}

@@ -322,7 +322,7 @@ export function buildChatLogHtml(o: ChatLogExportOptions): string {
   const verifyFooter = o.manifest
     ? `<footer class="verify">
   <div class="verify-id">Verification ID: <strong>${escapeHtml(o.manifest.receiptId)}</strong></div>
-  <div class="verify-note">This log is digitally signed. Staff can verify it is authentic and unaltered against the server. Editing any part of the file will fail that check — keep the original if you may need to submit it.</div>
+  <div class="verify-note">This log is digitally signed. Staff can verify it is authentic and unaltered against the server. Editing any part of the file will fail that check, so keep the original if you may need to submit it.</div>
 </footer>
 ${manifestBlock(o.manifest)}`
     : "";
@@ -334,7 +334,7 @@ ${manifestBlock(o.manifest)}`
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(o.roomName)} — chat log</title>
+<title>${escapeHtml(o.roomName)} - chat log</title>
 <style>
   :root {
     --keep-text: ${pal.text};

@@ -170,7 +170,7 @@ export function BanModal({
             </div>
             {purgeIdx > 0 ? (
               <p className="mt-1 text-[10px] text-keep-muted">
-                Their {purgeScopeLabel} are hidden, not deleted — admins keep them for audit.
+                Their {purgeScopeLabel} are hidden, not deleted: admins keep them for audit.
               </p>
             ) : null}
           </div>

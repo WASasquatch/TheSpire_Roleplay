@@ -1398,7 +1398,7 @@ async function main() {
               ack?.({
                 ok: false,
                 code: "FORUM_BOARD_MEMBERS_ONLY",
-                message: "That category is for forum members only — join the forum first to post here.",
+                message: "That category is for forum members only. Join the forum first to post here.",
               });
               return;
             }

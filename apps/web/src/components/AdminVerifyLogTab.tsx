@@ -52,7 +52,7 @@ interface VerifyResponse {
 }
 
 function fmtTime(ms: number): string {
-  if (!Number.isFinite(ms)) return "—";
+  if (!Number.isFinite(ms)) return "-";
   const d = new Date(ms);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
@@ -110,12 +110,12 @@ export function AdminVerifyLogTab() {
     if (!result.found) return { tone: "bad", label: "No verification data", detail: result.reason } as const;
     if (!result.valid) return { tone: "bad", label: "Altered or not from this server", detail: result.reason } as const;
     if (result.stored?.exists && result.stored.matchesHash) {
-      return { tone: "good", label: "Authentic — signature valid, matches server record", detail: undefined } as const;
+      return { tone: "good", label: "Authentic: signature valid, matches server record", detail: undefined } as const;
     }
     if (result.stored?.exists && !result.stored.matchesHash) {
       return { tone: "bad", label: "Signature valid but does NOT match the server's recorded export", detail: "The receipt exists but its content hash differs. Treat with suspicion." } as const;
     }
-    return { tone: "warn", label: "Signature valid — no server receipt on file", detail: "The signature checks out, but no matching receipt was found (it may have predated receipts or been pruned)." } as const;
+    return { tone: "warn", label: "Signature valid: no server receipt on file", detail: "The signature checks out, but no matching receipt was found (it may have predated receipts or been pruned)." } as const;
   })();
 
   const toneClass = verdict?.tone === "good"
@@ -198,7 +198,7 @@ export function AdminVerifyLogTab() {
         <fieldset className="rounded border border-keep-rule p-3">
           <legend className="px-1 uppercase tracking-widest text-keep-muted">Export details</legend>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
-            <Field label="Verification ID" value={result.receiptId ?? "—"} mono />
+            <Field label="Verification ID" value={result.receiptId ?? "-"} mono />
             <Field label="Room" value={result.meta.roomName} />
             <Field label="Exported by" value={result.meta.exportedByUsername} />
             <Field label="Generated" value={fmtTime(result.meta.generatedAtMs)} />

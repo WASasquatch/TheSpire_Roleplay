@@ -403,7 +403,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // the lineage it would feed) or be abused to reroll a trait/variant. Sell
     // and release are the only ways to clear the slot (both write the Hall row).
     // Scoped to the active server: the familiar is SEPARATE per server.
-    if (await loadRow(g.scope, g.ownerId, g.serverId)) { reply.code(409); return { error: "you already have a familiar — sell, release, or revive it first" }; }
+    if (await loadRow(g.scope, g.ownerId, g.serverId)) { reply.code(409); return { error: "you already have a familiar: sell, release, or revive it first" }; }
 
     let speciesId: string | null = null;
     let petItemKey: string | null = null;
@@ -477,7 +477,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     if (!row) { reply.code(404); return { error: "no familiar" }; }
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
-    if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant — revive it with a magical item" }; }
+    if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant: revive it with a magical item" }; }
     const jg = effectiveTraits(row.kind, row.speciesId, row.trait).joyGain;
     const before = gaugeSum(prog.stats);
     if (body.kind === "play") { prog.stats.joy = clamp(prog.stats.joy + 14 * jg); prog.stats.vigor = clamp(prog.stats.vigor - 2); }
@@ -500,7 +500,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
     // Reject a concurrent double-fire so one click can't consume two foods.
-    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment — still tending your familiar" }; }
+    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment, still tending your familiar" }; }
     try {
       const row = await loadRow(g.scope, g.ownerId, g.serverId);
       if (!row) { reply.code(404); return { error: "no familiar" }; }
@@ -550,7 +550,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     if (!held || held.qty < 1) { reply.code(403); return { error: "you don't own that toy" }; }
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
-    if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant — revive it with a magical item" }; }
+    if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant: revive it with a magical item" }; }
     const jg = effectiveTraits(row.kind, row.speciesId, row.trait).joyGain;
     const before = gaugeSum(prog.stats);
     const eff = toyEffect(body.itemKey);
@@ -573,13 +573,13 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     if (!g.ok) { reply.code(g.code); return g.body; }
     // Reject a concurrent double-fire so one click can't consume two potions
     // (or double-charge the basic heal).
-    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment — still tending your familiar" }; }
+    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment, still tending your familiar" }; }
     try {
       const row = await loadRow(g.scope, g.ownerId, g.serverId);
       if (!row) { reply.code(404); return { error: "no familiar" }; }
       const nowMs = Date.now();
       const prog = catchUp(row, nowMs);
-      if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant — revive it with a magical item" }; }
+      if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant: revive it with a magical item" }; }
       const before = gaugeSum(prog.stats);
 
       if (body.itemKey) {
@@ -625,7 +625,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // Reject a concurrent double-fire so one click can't consume two items. The
     // re-checked `!prog.dead` below also stops a SEQUENTIAL duplicate (the second
     // sees the familiar already awake).
-    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment — still tending your familiar" }; }
+    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment, still tending your familiar" }; }
     try {
       const row = await loadRow(g.scope, g.ownerId, g.serverId);
       if (!row) { reply.code(404); return { error: "no familiar" }; }
@@ -733,7 +733,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       return { kind: "sold", value, level, final };
     });
     if (outcome.kind === "none") { reply.code(404); return { error: "no familiar" }; }
-    if (outcome.kind === "dead") { reply.code(409); return { error: "a dormant familiar can't be sold — revive it first, or release it" }; }
+    if (outcome.kind === "dead") { reply.code(409); return { error: "a dormant familiar can't be sold: revive it first, or release it" }; }
     if (outcome.value > 0) {
       await emitToUser(g.userId, "earning:earned", {
         scope: g.scope, ownerId: g.scope === "character" ? g.ownerId : g.userId,

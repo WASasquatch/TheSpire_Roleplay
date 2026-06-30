@@ -369,6 +369,9 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       // (mirrors the insert above). Lets the client raise the verify
       // banner/gate straight off the register response.
       emailVerifiedAt: (settings.emailVerificationEnabled && !isFirstUser) ? null : Date.now(),
+      // Carry the policy too so the gate shows immediately after sign-up.
+      emailVerificationEnabled: settings.emailVerificationEnabled,
+      emailVerificationMode: settings.emailVerificationMode,
       sessionToken,
       ...(isFirstUser ? { bootstrap: true } : {}),
     };
@@ -432,6 +435,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, u.id));
     const sessionToken = await issueSession(db, u.id, req);
     const permissions = await permissionsFor({ id: u.id, role: u.role }, db);
+    const settings = await getSettings(db);
     return {
       id: u.id,
       username: u.username,
@@ -443,6 +447,12 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       incognitoMode: u.incognitoMode,
       incognitoAlias: u.incognitoAlias,
       emailVerifiedAt: u.emailVerifiedAt ? +u.emailVerifiedAt : null,
+      // Mirror the verify policy on the login response so the nudge banner /
+      // block gate can show the INSTANT the user signs in, instead of only
+      // after the first /auth/me poll lands (which left them wandering /
+      // trying to chat with no idea they needed to verify).
+      emailVerificationEnabled: settings.emailVerificationEnabled,
+      emailVerificationMode: settings.emailVerificationMode,
       sessionToken,
     };
   });

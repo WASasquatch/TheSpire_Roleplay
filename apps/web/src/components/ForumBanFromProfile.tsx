@@ -108,7 +108,7 @@ export function ForumBanFromProfile({ targetUserId, targetName }: {
               <>
                 <h2 className="font-action text-lg">Ban from {chosen?.name}</h2>
                 <p className="mt-1 text-sm text-keep-muted">
-                  Bans <b>{targetName}</b> from this forum's boards only — not the rest of the Spire.
+                  Bans <b>{targetName}</b> from this forum's boards only, not the rest of the Spire.
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <select

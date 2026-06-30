@@ -651,6 +651,8 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           incognitoMode: j.incognitoMode === true,
           incognitoAlias: typeof j.incognitoAlias === "string" ? j.incognitoAlias : null,
           emailVerifiedAt: typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null,
+          emailVerificationEnabled: j.emailVerificationEnabled ?? false,
+          emailVerificationMode: j.emailVerificationMode === "block" ? "block" : "nudge",
         });
       } else {
         const res = await fetch("/auth/login", {
@@ -679,6 +681,8 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           incognitoMode: j.incognitoMode === true,
           incognitoAlias: typeof j.incognitoAlias === "string" ? j.incognitoAlias : null,
           emailVerifiedAt: typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null,
+          emailVerificationEnabled: j.emailVerificationEnabled ?? false,
+          emailVerificationMode: j.emailVerificationMode === "block" ? "block" : "nudge",
         });
       }
     } catch (err) {

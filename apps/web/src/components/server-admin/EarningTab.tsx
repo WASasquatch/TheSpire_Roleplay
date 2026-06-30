@@ -280,7 +280,7 @@ function ConfigSection({
 
       <label className="flex items-center gap-2 text-xs text-keep-text">
         <input type="checkbox" disabled={!canManage} checked={config.enabled} onChange={(e) => edit((c) => { c.enabled = e.target.checked; })} />
-        Earning enabled on this server (master switch — off means nothing earns here)
+        Earning enabled on this server (master switch: off means nothing earns here)
       </label>
 
       <div className="space-y-2">
@@ -433,7 +433,7 @@ function GrantsSection({
       <div>
         <h3 className="text-sm font-semibold text-keep-text">Grant and revoke</h3>
         <p className="text-[11px] text-keep-muted">
-          Awards land on this server only. Cosmetic keys (style / border / item / rank) are the shared catalog keys from the platform admin panel —
+          Awards land on this server only. Cosmetic keys (style / border / item / rank) are the shared catalog keys from the platform admin panel:
           enter the exact key; an unknown key is rejected.
         </p>
       </div>
@@ -581,7 +581,7 @@ function ClawbackSection({
 
   async function resetUser() {
     if (!data) return;
-    if (!window.confirm(`Reset ALL of ${data.username}'s earning state on this server (XP, Currency, ranks, owned cosmetics, equipped cosmetics)? This server only — other servers are untouched.`)) return;
+    if (!window.confirm(`Reset ALL of ${data.username}'s earning state on this server (XP, Currency, ranks, owned cosmetics, equipped cosmetics)? This server only. Other servers are untouched.`)) return;
     await run(async () => {
       const r = await fetch(`/servers/${sid(serverId)}/earning/reset-user`, {
         method: "POST", credentials: "include",
@@ -884,7 +884,7 @@ function RanksEditor({ serverId, busy, run, onSaved, setError, data, reload }: C
                 <input type="checkbox" checked={rk.enabled} onChange={(e) => void mut(`ranks/${encodeURIComponent(rk.key)}`, "PATCH", { enabled: e.target.checked })} /> enabled
               </label>
               <span className="text-[10px] text-keep-muted">{rk.key} · {rk.users + rk.characters} holders</span>
-              <button type="button" disabled={busy || inUse} title={inUse ? "Disable instead — holders on this rank" : "Delete rank"}
+              <button type="button" disabled={busy || inUse} title={inUse ? "Disable instead: holders on this rank" : "Delete rank"}
                 className={`${btnClass} ml-auto`}
                 onClick={() => { if (window.confirm(`Delete rank ${rk.key}?`)) void mut(`ranks/${encodeURIComponent(rk.key)}`, "DELETE", null); }}>Delete</button>
             </div>

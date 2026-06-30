@@ -513,7 +513,7 @@ function ServerAutoRulesEditor({ rules, onChange, rooms, disabled }: {
   return (
     <div className="space-y-1.5">
       {rules.length === 0 ? (
-        <p className="text-[11px] italic text-keep-muted">No rules — members only join this group when added by hand.</p>
+        <p className="text-[11px] italic text-keep-muted">No rules. Members only join this group when added by hand.</p>
       ) : null}
       {rules.map((rule, i) => (
         <div key={i} className="flex flex-wrap items-center gap-1.5 rounded border border-keep-rule/60 px-2 py-1.5">
@@ -672,7 +672,7 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
       <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
         <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">How people join</span>
         {detail.isSystem ? (
-          <p className="text-xs text-keep-muted">This is the home server — everyone is a member, so it can't be gated.</p>
+          <p className="text-xs text-keep-muted">This is the home server. Everyone is a member, so it can't be gated.</p>
         ) : (
           <>
             {(["open", "application", "invite"] as const).map((mode) => (
@@ -683,7 +683,7 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
                   <span className="block text-xs text-keep-muted">
                     {mode === "open" ? "Anyone signed in can join instantly."
                       : mode === "application" ? "People apply; you (or your mods) approve them."
-                      : "Hidden — entered only with an invite code."}
+                      : "Hidden: entered only with an invite code."}
                   </span>
                 </span>
               </label>
@@ -923,7 +923,7 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
 
       <section>
         <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Theme</p>
-        <p className="mb-2 text-[11px] text-keep-muted">A palette for this server's pages only — chat and the userlist are untouched.</p>
+        <p className="mb-2 text-[11px] text-keep-muted">A palette for this server's pages only. Chat and the userlist are untouched.</p>
         {theme === null ? (
           <button type="button" onClick={() => setTheme(DEFAULT_THEME)}
             className="rounded border border-keep-rule bg-keep-banner px-2 py-1 text-xs hover:bg-keep-banner/80">Add a custom theme</button>
@@ -944,7 +944,7 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
       <section>
         <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Design style</p>
         <p className="mb-2 text-[11px] text-keep-muted">
-          The visual treatment — ornaments, borders, textures. Applies to this server's pages for every visitor.
+          The visual treatment: ornaments, borders, textures. Applies to this server's pages for every visitor.
           "Use default" follows each visitor's own design.
         </p>
         <StylePicker value={styleKey} onChange={setStyleKey} allowInherit />
@@ -1097,7 +1097,7 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
       </label>
       <label className="block text-xs">
-        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">Message expiry (minutes — blank = server default)</span>
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">Message expiry (minutes, blank = server default)</span>
         <input type="number" min={0} value={expiry} onChange={(e) => setExpiry(e.target.value)} placeholder="default"
           className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
       </label>
@@ -1220,7 +1220,7 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
             <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Moderators &amp; admins ({mods.length})</p>
             {mods.length === 0 ? (
               <p className="text-xs italic text-keep-muted">
-                None yet. Appoint a helper below — pick the Moderator tier for chat moderation, or
+                None yet. Appoint a helper below: pick the Moderator tier for chat moderation, or
                 Admin for full management. Neither can touch the owner's content or change the server's appearance.
               </p>
             ) : (
@@ -1273,7 +1273,7 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
                   hit.serverRole === "owner" ? "the owner"
                     : hit.serverRole === "mod" ? "already a mod"
                     : hit.serverRole === "admin" ? "already admin"
-                    : hit.banned ? "banned — lift first"
+                    : hit.banned ? "banned, lift first"
                     : null}
                 onSelect={(hit) => {
                   setPendingHit(hit);
@@ -1303,7 +1303,7 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
                     className={`rounded border px-2.5 py-2 text-left ${!viewer.isOwner ? "opacity-50" : pendingTier === "admin" ? "border-keep-action bg-keep-action/10" : "border-keep-rule hover:border-keep-action/60"}`}
                   >
                     <span className="block text-sm font-semibold text-keep-text">Admin</span>
-                    <span className="mt-0.5 block text-[11px] text-keep-muted">Full management — members, rooms, usergroups, earning, everything. Cannot change appearance, transfer, or delete.{viewer.isOwner ? "" : " Owner-only to assign."}</span>
+                    <span className="mt-0.5 block text-[11px] text-keep-muted">Full management: members, rooms, usergroups, earning, everything. Cannot change appearance, transfer, or delete.{viewer.isOwner ? "" : " Owner-only to assign."}</span>
                   </button>
                 </div>
 
@@ -1460,7 +1460,7 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
         <h3 className="text-sm font-semibold text-keep-text">{group ? (isDefault ? "Default group" : `Edit "${group.name}"`) : "New usergroup"}</h3>
       </div>
       {isDefault ? (
-        <p className="text-[11px] text-keep-muted">The default group applies to every participant. Editing its features changes what ungrouped members can do — leave the boxes on to keep the server fully open.</p>
+        <p className="text-[11px] text-keep-muted">The default group applies to every participant. Editing its features changes what ungrouped members can do. Leave the boxes on to keep the server fully open.</p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <input type="color" value={color || "#8a66cc"} onChange={(e) => setColor(e.target.value)} title="Group color" className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
@@ -1642,7 +1642,7 @@ function BansTab({ detail, viewer, busy, run }: TabProps) {
   return (
     <div className="max-w-xl space-y-3">
       <p className="text-[11px] text-keep-muted">
-        A server ban blocks this server's rooms only — the rest of the Spire is untouched. Banning strips any role the
+        A server ban blocks this server's rooms only. The rest of the Spire is untouched. Banning strips any role the
         user held here and evicts them from its rooms.
       </p>
       {!bans ? (
@@ -1690,7 +1690,7 @@ function BansTab({ detail, viewer, busy, run }: TabProps) {
       {banOpen && targetHit ? (
         <BanModal
           targetName={targetHit.username}
-          description={`Blocks ${detail.name}'s rooms only — the rest of the Spire is untouched. A timed ban lifts itself when it expires.`}
+          description={`Blocks ${detail.name}'s rooms only. The rest of the Spire is untouched. A timed ban lifts itself when it expires.`}
           reasonRequired={false}
           reasonPlaceholder="Reason (shown to them)"
           reasonMaxLength={300}
@@ -1999,12 +1999,12 @@ function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
 
       <section className="space-y-3">
         <DurationSetting label="Message retention" value={retention} onChange={setRetention}
-          placeholder="e.g. 30d — blank inherits"
+          placeholder="e.g. 30d, blank inherits"
           hint="How long messages are kept before pruning. Use a duration like 90d or 12h." />
         <NumberSetting label="Max rooms per owner" hint="Cap on rooms a member may open here." value={maxRooms} onChange={setMaxRooms} min={1} />
         <NumberSetting label="Max message length" hint="Character cap for a chat message." value={maxMsg} onChange={setMaxMsg} min={1} />
         <DurationSetting label="Edit window" value={editGrace} onChange={setEditGrace}
-          placeholder="e.g. 5m — 0 disables, blank inherits"
+          placeholder="e.g. 5m, 0 disables, blank inherits"
           hint="How long after sending an author can still edit a message. Use a duration like 30s / 5m / 1h, or 0 to disable edits." />
         <NumberSetting label="Max forum post length" hint="Character cap for a forum post." value={maxForumPost} onChange={setMaxForumPost} min={1} />
       </section>

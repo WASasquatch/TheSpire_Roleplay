@@ -23,6 +23,11 @@ import {
   setReduceMotionToggle,
   useReducedMotion,
 } from "../lib/reducedMotion.js";
+import {
+  getReduceCosmeticsToggle,
+  setReduceCosmeticsToggle,
+  useCalmCosmetics,
+} from "../lib/calmCosmetics.js";
 import { fetchForums } from "../lib/forums.js";
 import { fetchArchivedRooms, hideArchivedRoom } from "../lib/rooms.js";
 import type { ArchivedRoomBrief, ForumSummary } from "@thekeep/shared";
@@ -94,6 +99,11 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   // toggle). osForced = the OS demands it, so the toggle shows on + locked.
   const reduceMotion = useReducedMotion();
   const reduceMotionForced = osReduceMotionForced();
+  // "Reduce cosmetic effects" — the cosmetics-only manual toggle. `calmActive`
+  // is the effective unified gate (reduce-motion OR low-perf OR this toggle);
+  // we surface it so the row reads as "On" when an upstream gate already
+  // quiets cosmetics, and so the row reflects the user's own choice.
+  const calmActive = useCalmCosmetics();
   const fontStep = useChat((s) => s.fontStep);
   const setFontStep = useChat((s) => s.setFontStep);
   const refreshIntervalSec = useChat((s) => s.refreshIntervalSec);
@@ -589,6 +599,16 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
                   if (reduceMotionForced) return; // OS-locked on; nothing to toggle
                   setReduceMotionToggle(!getReduceMotionToggle());
                 }}
+              />
+              <MenuItem
+                label={`Reduce cosmetic effects: ${calmActive ? "On" : "Off"}`}
+                hint={
+                  calmActive && !getReduceCosmeticsToggle()
+                    ? "On already from your motion or performance settings. Quiets name-style and avatar-border animations"
+                    : "Quiets name-style and avatar-border animations for smoother, lighter chat"
+                }
+                active={calmActive}
+                onClick={() => setReduceCosmeticsToggle(!getReduceCosmeticsToggle())}
               />
               <MenuItem
                 label={refreshIntervalSec > 0 ? `Refresh: every ${refreshIntervalSec}s` : "Refresh"}
@@ -1243,7 +1263,7 @@ function ArchivedRoomRow({ room, onRecreate, onHide }: { room: ArchivedRoomBrief
         <span className="min-w-0 flex-1 truncate">
           <span className="text-keep-text">{room.name}</span>
           {room.topic ? (
-            <span className="ml-1.5 truncate text-xs text-keep-muted">— {room.topic}</span>
+            <span className="ml-1.5 truncate text-xs text-keep-muted">- {room.topic}</span>
           ) : null}
         </span>
         <span className="flex shrink-0 items-center gap-1 text-[10px] font-action uppercase tracking-wider text-keep-muted">
@@ -1254,7 +1274,7 @@ function ArchivedRoomRow({ room, onRecreate, onHide }: { room: ArchivedRoomBrief
       <button
         type="button"
         onClick={onHide}
-        title={`Remove ${room.name} from this list — doesn't delete it; recreate any time with /go`}
+        title={`Remove ${room.name} from this list, doesn't delete it; recreate any time with /go`}
         aria-label={`Remove ${room.name} from your rooms list`}
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-keep-muted hover:bg-keep-banner/60 hover:text-keep-text"
       >

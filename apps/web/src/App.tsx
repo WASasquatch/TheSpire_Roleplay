@@ -46,6 +46,9 @@ import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
 import { playRoomTransition } from "./lib/transitions/orchestrator.js";
 import { reduceMotionEnabled } from "./lib/reducedMotion.js";
+// Side-effect: stamps the unified `calm-cosmetics` class on <html> at boot so
+// expensive equipped cosmetics are gated even before Settings is opened.
+import "./lib/calmCosmetics.js";
 import { fetchSpotlightMember, fetchRoomBrief, fetchStoryBrief } from "./lib/uiRouteDynamicLabel.js";
 import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
@@ -2727,10 +2730,10 @@ function Chat() {
           const meId = useChat.getState().me?.id ?? "system";
           const body = h.rooms.length
             ? [
-                `Your archived rooms (${h.rooms.length}) — tap one to load its /go command into your message box:`,
+                `Your archived rooms (${h.rooms.length}). Tap one to load its /go command into your message box:`,
                 ...h.rooms.map((r) => {
                   const lock = r.type === "private" ? "🔒 " : "";
-                  const topic = r.topic ? ` — ${r.topic}` : "";
+                  const topic = r.topic ? ` - ${r.topic}` : "";
                   return `${lock}[${r.name}](compose:/go ${r.name})${topic}`;
                 }),
               ].join("\n")
@@ -3187,6 +3190,12 @@ function Chat() {
       // shared user row, etc.). The server validates the claim
       // against owned characters before honoring it.
       asCharacterId: activeCharacterId,
+    }, (res) => {
+      // Surface a rejected send as a toast. Previously the server's ack (e.g.
+      // EMAIL_UNVERIFIED in block mode) was dropped on the floor, so the
+      // message just silently vanished with no hint why. The server only acks
+      // on rejection, so a successful send never reaches here.
+      if (res && res.ok === false) setNotice({ code: res.code, message: res.message });
     });
   }
 

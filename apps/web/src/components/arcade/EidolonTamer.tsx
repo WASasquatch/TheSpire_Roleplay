@@ -491,7 +491,7 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
                   );
                 })}
               </div>
-              <span className="select-title" style={{ marginTop: 4 }}>{ownedPets.length ? "— or hatch with a pet —" : "— acquire a pet to hatch one as a familiar —"}</span>
+              <span className="select-title" style={{ marginTop: 4 }}>{ownedPets.length ? "- or hatch with a pet -" : "- acquire a pet to hatch one as a familiar -"}</span>
               {ownedPets.length > 0 && (
                 <div className="select-grid">
                   {ownedPets.slice(0, 4).map((p) => (
@@ -503,7 +503,7 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
                   ))}
                 </div>
               )}
-              <button className="ei-hall-link" onClick={() => setHallOpen(true)}>📖 The Hall — familiars past</button>
+              <button className="ei-hall-link" onClick={() => setHallOpen(true)}>📖 The Hall, familiars past</button>
             </div>
           ) : (
             <div className={`stage-pet ${growth.tier === "elder" ? "is-elder" : ""} ${variant === "prismatic" ? "is-prismatic" : ""}`} onClick={onStageClick} style={{ transform: `translate(-50%,-50%) translateX(${lean}px) scale(${growth.scale})` }}>
@@ -571,7 +571,7 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
             </span>
             {traitInfo ? <span className="ei-trait" title={traitInfo.flavor}>{traitInfo.label}</span> : null}
             <div className="ei-xptrack" title={`${Math.floor(intoLevel)} / ${levelSpan} to next level`}><div className="ei-xpfill" style={{ width: xpPct + "%" }} /></div>
-            <button className="ei-bell" onClick={() => setHallOpen(true)} title="The Hall — familiars past" aria-label="Open the Hall">📖</button>
+            <button className="ei-bell" onClick={() => setHallOpen(true)} title="The Hall, familiars past" aria-label="Open the Hall">📖</button>
             <button className={`ei-bell ${nudgeOptin ? "is-on" : ""}`} disabled={nudgeBusy} onClick={() => void toggleNudge()} title={nudgeOptin ? "Daily reminders on" : "Daily reminders off"} aria-label="Toggle daily reminders">
               {nudgeOptin ? "🔔" : "🔕"}
             </button>

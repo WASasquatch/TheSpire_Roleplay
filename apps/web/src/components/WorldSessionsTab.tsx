@@ -153,7 +153,7 @@ function SessionEditor({
           <input type="date" value={dateStr} onChange={(e) => setDateStr(e.target.value)} className="mt-0.5 block rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm" /></label>
         <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Arc</span>
           <select value={arcId} onChange={(e) => setArcId(e.target.value)} className="mt-0.5 block rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
-            <option value="">— none —</option>
+            <option value="">(none)</option>
             {detail.arcs.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}
           </select></label>
       </div>

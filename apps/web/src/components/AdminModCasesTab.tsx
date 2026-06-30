@@ -132,7 +132,7 @@ function Party({
     );
   }
   if (text) return <span className="text-keep-text">{text}</span>;
-  return <span className="italic text-keep-muted/60">—</span>;
+  return <span className="italic text-keep-muted/60">-</span>;
 }
 
 /** One case (or note) row with its evidence, timeline, and update composer. */
@@ -378,7 +378,7 @@ export function AdminModCasesTab() {
       const requested = payload.evidenceMessageIds ? payload.evidenceMessageIds.split(/[\s,]+/).filter(Boolean).length : 0;
       if (requested > 0) {
         const found = j.evidenceSnapshotted ?? 0;
-        setInfo(found < requested ? `Backed up ${found} of ${requested} messages (${requested - found} not found — already purged?).` : `Backed up ${found} message${found === 1 ? "" : "s"}.`);
+        setInfo(found < requested ? `Backed up ${found} of ${requested} messages (${requested - found} not found, already purged?).` : `Backed up ${found} message${found === 1 ? "" : "s"}.`);
       }
       setEditing(null);
       setForm(EMPTY_FORM);
@@ -397,7 +397,7 @@ export function AdminModCasesTab() {
       <div>
         <h2 className="mb-1 text-xs font-semibold uppercase tracking-widest text-keep-muted">Moderation case log</h2>
         <p className="text-xs text-keep-muted">
-          A record of complaints, reports, disputes, and notes handled by staff — who complained, about whom or what,
+          A record of complaints, reports, disputes, and notes handled by staff: who complained, about whom or what,
           and how it was resolved. Reporter and subject accept a plain name or an <code>@id:</code>/<code>@cid:</code> token
           to link the exact identity. This is separate from the user-filed Reports queue.
         </p>
@@ -480,7 +480,7 @@ export function AdminModCasesTab() {
             </label>
           ) : null}
           <label className="block text-xs text-keep-muted">
-            Back up message IDs <span className="opacity-70">(comma-separated — the IDs you'd /reply to)</span>
+            Back up message IDs <span className="opacity-70">(comma-separated, the IDs you'd /reply to)</span>
             <input className={inputClass} value={form.evidenceMessageIds} onChange={(e) => setForm({ ...form, evidenceMessageIds: e.target.value })} placeholder="msg_abc, msg_def …" maxLength={4000} />
             <span className="mt-0.5 block text-[10px] text-keep-muted/80">Snapshots those chat messages onto the case so they survive cleanup. Add more anytime by editing.</span>
           </label>

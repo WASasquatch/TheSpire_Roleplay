@@ -210,7 +210,7 @@ function PublicBoardReader({ detail, slug, initialTopicId, initialPostId, onRequ
               key={b.roomId}
               type="button"
               onClick={() => setBoardId(b.roomId)}
-              title={b.locked ? `${b.name} — members only` : b.name}
+              title={b.locked ? `${b.name} (members only)` : b.name}
               className={`inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs ${
                 b.roomId === active.roomId
                   ? "border-keep-action text-keep-action"
@@ -231,7 +231,7 @@ function PublicBoardReader({ detail, slug, initialTopicId, initialPostId, onRequ
           </div>
           <p className="text-sm font-semibold text-keep-text">This board is for members only</p>
           <p className="max-w-sm text-xs text-keep-muted">
-            Sign in to read it — and if the forum takes applications, apply to join from this page.
+            Sign in to read it, and if the forum takes applications, apply to join from this page.
           </p>
           <button
             type="button"
@@ -569,7 +569,7 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
               <span><b className="tabular-nums text-keep-text">{stats.replies.toLocaleString()}</b> replies</span>
               <span><b className="tabular-nums text-keep-text">{stats.writers.toLocaleString()}</b> writers</span>
               <span>
-                <b className="tabular-nums text-keep-text">{detail.memberCount > 0 ? detail.memberCount.toLocaleString() : "—"}</b>{" "}
+                <b className="tabular-nums text-keep-text">{detail.memberCount > 0 ? detail.memberCount.toLocaleString() : "-"}</b>{" "}
                 {detail.memberCount > 0 ? "members" : "open to all"}
               </span>
               <span><b className="tabular-nums text-keep-text">{onlineTotal.toLocaleString()}</b> online now</span>

@@ -26,7 +26,7 @@ export const exportCommand: CommandHandler = {
   aliases: ["savelog"],
   usage: "/export [duration] [dark|light]",
   description:
-    "Download the recent chat as a formatted HTML log — timestamps, names (OOC or character), and colours intact. e.g. /export 5h, /export 90m, /export 2d. Add 'dark' or 'light' for the page theme (default dark). No duration = last 12h. The range is capped at how long messages are kept here.",
+    "Download the recent chat as a formatted HTML log: timestamps, names (OOC or character), and colours intact. e.g. /export 5h, /export 90m, /export 2d. Add 'dark' or 'light' for the page theme (default dark). No duration = last 12h. The range is capped at how long messages are kept here.",
   async run(ctx) {
     // Args are order-independent: a `dark`/`light` token picks the page theme,
     // everything else is the duration (e.g. `/export 5h dark`, `/export light`).
@@ -73,7 +73,7 @@ export const exportCommand: CommandHandler = {
     if (windowMs < requestedMs) {
       ctx.socket.emit("error:notice", {
         code: "EXPORT_CLAMPED",
-        message: `That's longer than chat is kept here — exporting the last ${formatDurationShort(windowMs)} instead.`,
+        message: `That's longer than chat is kept here, so exporting the last ${formatDurationShort(windowMs)} instead.`,
       });
     }
   },

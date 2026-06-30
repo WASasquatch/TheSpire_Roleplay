@@ -119,7 +119,7 @@ export async function loadPollTallies(
       ? {
           voters: (votersByOption.get(o.id) ?? []).map((uid) => ({
             userId: uid,
-            displayName: info.get(uid)?.displayName ?? "—",
+            displayName: info.get(uid)?.displayName ?? "-",
             avatarUrl: info.get(uid)?.avatarUrl ?? null,
           })),
         }

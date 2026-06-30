@@ -482,7 +482,7 @@ function CreateServerCta({
       </div>
       {rejected?.reviewNote ? (
         <p className="border-t border-keep-action/30 bg-keep-bg/40 px-4 py-2 text-xs text-keep-muted">
-          Your last application for <strong className="text-keep-text">{rejected.requestedName}</strong> wasn't approved: "{rejected.reviewNote}" — you're welcome to revise it and apply again.
+          Your last application for <strong className="text-keep-text">{rejected.requestedName}</strong> wasn't approved: "{rejected.reviewNote}". You're welcome to revise it and apply again.
         </p>
       ) : null}
     </section>
@@ -663,7 +663,7 @@ function ServerCard({ server, onEnter, onJoined }: {
             <button
               type="button"
               onClick={onEnter}
-              title="Global staff — enter to moderate without joining"
+              title="Global staff: enter to moderate without joining"
               aria-label={`Enter ${server.name} as global staff`}
               className={`group flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-widest ${
                 hasBanner
@@ -685,8 +685,8 @@ function ServerCard({ server, onEnter, onJoined }: {
                 onClick={() => void toggleDefault()}
                 disabled={busy}
                 aria-pressed={!!server.isMyDefault}
-                title={server.isMyDefault ? "Your default server — your profile shows this server's identity. Click to clear." : "Set as my default — your profile will show this server's rank, border, and name style."}
-                aria-label={server.isMyDefault ? `${server.name} is your default server — click to clear` : `Set ${server.name} as your default server`}
+                title={server.isMyDefault ? "Your default server: your profile shows this server's identity. Click to clear." : "Set as my default: your profile will show this server's rank, border, and name style."}
+                aria-label={server.isMyDefault ? `${server.name} is your default server, click to clear` : `Set ${server.name} as your default server`}
                 className={`flex h-8 w-8 items-center justify-center rounded border transition-colors disabled:opacity-50 ${
                   server.isMyDefault
                     ? "border-keep-accent bg-keep-accent/15 text-keep-accent"
@@ -943,7 +943,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
               <span className="text-keep-muted"> (/s/{pending.requestedSlug})</span> is
               <span className="text-keep-action"> pending review</span>.
             </p>
-            <p className="text-xs text-keep-muted">One application at a time — you can apply again once it's decided.</p>
+            <p className="text-xs text-keep-muted">One application at a time. You can apply again once it's decided.</p>
           </div>
         ) : (
           <div className="space-y-3">

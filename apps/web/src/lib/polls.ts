@@ -17,7 +17,7 @@ function emitWithAck(
       if (res && "ok" in res && res.ok) resolve();
       else reject(new Error(res && "message" in res && res.message ? res.message : "That didn't go through."));
     });
-    setTimeout(() => reject(new Error("The poll timed out — check your connection.")), 12_000);
+    setTimeout(() => reject(new Error("The poll timed out, check your connection.")), 12_000);
   });
 }
 

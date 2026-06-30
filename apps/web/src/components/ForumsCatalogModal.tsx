@@ -471,7 +471,7 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     <button
                       type="button"
                       onClick={toggleDefaultForum}
-                      title={isDefaultForum ? "Your default forum — opens here. Click to unset." : "Set as your default forum (opens here next time)"}
+                      title={isDefaultForum ? "Your default forum: opens here. Click to unset." : "Set as your default forum (opens here next time)"}
                       aria-label={isDefaultForum ? "Unset default forum" : "Set as default forum"}
                       aria-pressed={isDefaultForum}
                       className={`rounded border p-1.5 ${isDefaultForum ? "border-keep-action/60 bg-keep-action/10 text-keep-action" : "border-keep-rule bg-keep-bg/70 text-keep-muted hover:border-keep-action hover:text-keep-action"}`}
@@ -1251,7 +1251,7 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
     <div className="border-b border-keep-rule bg-keep-system/10 px-4 py-2 text-sm text-keep-system">
       You are banned from this forum
       {detail.viewer.ban.until ? ` until ${new Date(detail.viewer.ban.until).toLocaleDateString()}` : ""}
-      {detail.viewer.ban.reason ? ` — ${detail.viewer.ban.reason}` : ""}.
+      {detail.viewer.ban.reason ? `: ${detail.viewer.ban.reason}` : ""}.
     </div>
   ) : null;
 
@@ -1354,7 +1354,7 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
           forum:post, and the store's forumActionTick refetches after
           toolbar mutations since the socket echo can't reach us. */}
       {detail.boards.length === 0 ? (
-        <p className="px-4 py-3 text-sm italic text-keep-muted">No boards yet — the owner hasn't raised any.</p>
+        <p className="px-4 py-3 text-sm italic text-keep-muted">No boards yet. The owner hasn't raised any.</p>
       ) : (
         <ForumBoards
           detail={detail}
@@ -1408,7 +1408,7 @@ function ForumFooter({ detail }: { detail: ForumDetail }) {
         <span><b className="tabular-nums text-keep-text">{s.replies.toLocaleString()}</b> replies</span>
         <span><b className="tabular-nums text-keep-text">{s.writers.toLocaleString()}</b> writers</span>
         <span>
-          <b className="tabular-nums text-keep-text">{detail.memberCount > 0 ? detail.memberCount.toLocaleString() : "—"}</b>{" "}
+          <b className="tabular-nums text-keep-text">{detail.memberCount > 0 ? detail.memberCount.toLocaleString() : "-"}</b>{" "}
           {detail.memberCount > 0 ? "members" : "open to all"}
         </span>
         <span><b className="tabular-nums text-keep-text">{onlineTotal.toLocaleString()}</b> online now</span>
@@ -1507,7 +1507,7 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
               key={b.roomId}
               type="button"
               onClick={() => setBoardId(b.roomId)}
-              title={b.locked ? `${b.name} — members only` : (b.topic ?? b.name)}
+              title={b.locked ? `${b.name} (members only)` : (b.topic ?? b.name)}
               className={`inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs ${
                 b.roomId === active.roomId
                   ? "border-keep-action text-keep-action"
@@ -1538,7 +1538,7 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
                 const reason = window.prompt(`Report ${authorName}'s post to the moderators of ${detail.name}. What's wrong with it?`);
                 if (!reason || !reason.trim()) return;
                 void reportForumPost(detail.id, messageId, reason.trim())
-                  .then(() => window.alert("Reported — the forum's moderators will review it."))
+                  .then(() => window.alert("Reported. The forum's moderators will review it."))
                   .catch((e) => window.alert(e instanceof Error ? e.message : "Report failed."));
               }
             : null
@@ -1634,7 +1634,7 @@ function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumC
         {applicable.length === 0 ? (
           <p className="mt-2 text-xs italic text-keep-muted">
             {canCreateCustom
-              ? "No tags for this category yet — add one below."
+              ? "No tags for this category yet. Add one below."
               : canManagePrefixes
                 ? "No tags for this category yet. Add or scope tags in forum settings → Prefixes."
                 : "No tags are available here yet. The keeper curates the list."}
@@ -1647,7 +1647,7 @@ function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumC
             </li>
             {applicable.map((p) => (
               <li key={p.id}>
-                <button type="button" disabled={busy} onClick={() => assign(p.id)} title={p.staffOnly ? `${p.tooltip ? p.tooltip + " — " : ""}Staff only` : (p.tooltip ?? undefined)}
+                <button type="button" disabled={busy} onClick={() => assign(p.id)} title={p.staffOnly ? `${p.tooltip ? p.tooltip + " - " : ""}Staff only` : (p.tooltip ?? undefined)}
                   className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-bold uppercase tracking-wide"
                   style={{ backgroundColor: `${p.color}22`, color: resolveMessageColor(p.color, themeBg) ?? p.color, border: `1px solid ${current === p.id ? p.color : `${p.color}66`}` }}>
                   {p.staffOnly ? <Lock className="h-3 w-3" aria-hidden /> : null}{p.label}
@@ -1705,7 +1705,7 @@ function LockedSection({ kind, canApply, signedIn }: {
           ? canApply
             ? "Apply to join this forum from its front page, and the keeper can give you access."
             : "Only the forum's members can read it. Ask the keeper about joining."
-          : "Sign in to read it — and if the forum takes applications, apply to join from its front page."}
+          : "Sign in to read it, and if the forum takes applications, apply to join from its front page."}
       </p>
     </div>
   );
@@ -3390,7 +3390,7 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
       </div>
 
       {isDefault ? (
-        <p className="text-[11px] text-keep-muted">The default group applies to every participant. Editing its permissions changes what ungrouped members can do — leave the feature boxes on to keep the forum fully open.</p>
+        <p className="text-[11px] text-keep-muted">The default group applies to every participant. Editing its permissions changes what ungrouped members can do. Leave the feature boxes on to keep the forum fully open.</p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
           <input type="color" value={color || "#8a66cc"} onChange={(e) => setColor(e.target.value)} title="Group color" className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
@@ -3458,8 +3458,8 @@ function UsergroupsSettings({ detail, busy, run }: {
   return (
     <div className="max-w-2xl space-y-3">
       <p className="text-[11px] text-keep-muted">
-        Usergroups bundle forum permissions — both moderation powers and member features (posting,
-        images, polls) — and apply them to people. Everyone is in the default group; add more groups
+        Usergroups bundle forum permissions, both moderation powers and member features (posting,
+        images, polls), and apply them to people. Everyone is in the default group; add more groups
         and fill them by hand or with auto-join rules (post count, age, posting in a category…).
       </p>
       <ul className="space-y-1.5">
@@ -3591,7 +3591,7 @@ function RolesSettings({ detail, busy, run }: {
                 disabledReason={(hit) =>
                   hit.forumRole === "owner" ? "the keeper"
                     : hit.forumRole === "mod" ? "already a mod"
-                    : hit.banned ? "banned — lift first"
+                    : hit.banned ? "banned, lift first"
                     : null}
                 onSelect={(hit) => {
                   setPendingHit(hit);
@@ -3961,7 +3961,7 @@ function ReportsSettings({ detail, busy, run }: {
                 </div>
               ) : (
                 <p className="mt-1 text-[10px] text-keep-muted">
-                  {r.status} by {r.resolvedByUsername ?? "—"}{r.resolvedAt ? ` · ${new Date(r.resolvedAt).toLocaleDateString()}` : ""}
+                  {r.status} by {r.resolvedByUsername ?? "-"}{r.resolvedAt ? ` · ${new Date(r.resolvedAt).toLocaleDateString()}` : ""}
                 </p>
               )}
             </li>
@@ -4032,12 +4032,12 @@ function PrefixesSettings({ detail, busy, run, onSaved }: {
         </div>
         <input
           value={tooltip} maxLength={FORUM_PREFIX_TOOLTIP_MAX} onChange={(e) => setTooltip(e.target.value)}
-          placeholder="Tooltip — short hover explanation (optional)"
+          placeholder="Tooltip: short hover explanation (optional)"
           className="mt-2 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action"
         />
         <label className="mt-2 flex items-center gap-2 text-xs text-keep-muted">
           <input type="checkbox" checked={staffOnly} disabled={busy} onChange={(e) => setStaffOnly(e.target.checked)} />
-          <span><span className="font-semibold text-keep-text">Staff only</span> — only mods/owners can put this tag on a topic (members can't self-apply it). Good for "Announcement", "Official", etc.</span>
+          <span><span className="font-semibold text-keep-text">Staff only</span>: only mods/owners can put this tag on a topic (members can't self-apply it). Good for "Announcement", "Official", etc.</span>
         </label>
       </div>
     </div>
@@ -4091,12 +4091,12 @@ function PrefixRow({ detail, prefix: p, busy, run, onSaved }: {
         <span className="rounded px-1.5 py-0 text-[10px] font-bold uppercase tracking-wide" style={{ backgroundColor: `${p.color}22`, color: resolveMessageColor(p.color, themeBg) ?? p.color, border: `1px solid ${p.color}66` }} title={p.tooltip ?? undefined}>{p.label}</span>
         <span className="min-w-0 flex-1 truncate text-sm text-keep-text">
           {p.label}
-          {p.staffOnly ? <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] uppercase tracking-widest text-keep-muted" title="Staff only — members can't put this tag on a topic"><Lock className="h-2.5 w-2.5" aria-hidden /> staff</span> : null}
+          {p.staffOnly ? <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] uppercase tracking-widest text-keep-muted" title="Staff only: members can't put this tag on a topic"><Lock className="h-2.5 w-2.5" aria-hidden /> staff</span> : null}
         </span>
         <button
           type="button" disabled={busy} onClick={() => void run(async () => { await updateForumPrefix(detail.id, p.id, { staffOnly: !p.staffOnly }); onSaved(); })}
           className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${p.staffOnly ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}
-          title={p.staffOnly ? "Staff only — click to let members apply it too" : "Anyone can apply this tag — click to make it staff only"}
+          title={p.staffOnly ? "Staff only, click to let members apply it too" : "Anyone can apply this tag, click to make it staff only"}
         >Staff only</button>
         {hasCategories ? (
           <button
@@ -4115,7 +4115,7 @@ function PrefixRow({ detail, prefix: p, busy, run, onSaved }: {
         <input
           value={tip} maxLength={FORUM_PREFIX_TOOLTIP_MAX} disabled={busy}
           onChange={(e) => setTip(e.target.value)} onBlur={saveTip}
-          placeholder="Tooltip — short hover explanation (optional)"
+          placeholder="Tooltip: short hover explanation (optional)"
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action"
         />
       </div>
@@ -4426,7 +4426,7 @@ function BoardsSettings({ detail, busy, run, onSaved, onBoardArchived }: {
                 <button
                   type="button" disabled={busy}
                   onClick={() => void run(async () => { await updateBoard(detail.id, b.roomId, { membersOnly: !b.membersOnly }); onSaved(); })}
-                  title={b.membersOnly ? "Private board (members only) — click to make it public" : "Public board — click to make it members only"}
+                  title={b.membersOnly ? "Private board (members only), click to make it public" : "Public board, click to make it members only"}
                   aria-pressed={b.membersOnly}
                   className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
                     b.membersOnly
@@ -4650,7 +4650,7 @@ function BoardCategoriesEditor({ detail, boardId, busy, run }: {
     <div className="space-y-2">
       {all.length === 0 ? (
         <p className="text-xs italic text-keep-muted">
-          No categories yet — topics land in one flat list. Add one to group them into sections.
+          No categories yet. Topics land in one flat list. Add one to group them into sections.
         </p>
       ) : (
         <div className="space-y-1.5">

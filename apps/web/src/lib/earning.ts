@@ -490,22 +490,22 @@ async function jsonOrThrow<T>(r: Response): Promise<T> {
 
 /**
  * Multi-Server Lift: the single place that turns the active server id
- * into the wire field every earning read/write rides on. Spread the
- * result into a POST/PATCH/PUT JSON body (`...withServerId(serverId)`)
- * or append {@link serverQuery} to a GET URL.
+ * into the wire field every earning read/write rides on. Append it to
+ * the request URL (`fetch(`/earning/...${serverQuery(serverId)}`)`) for
+ * BOTH reads and writes — every earning route reads `serverId` off the
+ * query string (`req.query.serverId`), and the write routes' `.strict()`
+ * body schemas reject a stray `serverId` key (a 400 that silently
+ * reverted every purchase/equip on a community server, AND on the home
+ * server, whose `currentServerId` is the non-null system-server id). So
+ * it MUST ride the URL, never the JSON body.
  *
- * When `serverId` is null/empty this returns `{}` (resp. ""), so the
- * request is byte-identical to the legacy unscoped call — the server
- * falls back to DEFAULT_SERVER_ID. Callers thread the SAME
- * `currentServerId` the dashboard reads `/earning/me` with (see
- * `state/store.ts`), so a purchase/equip lands in the same per-server
- * pool the wallet is showing. Flag-off / no active server → unscoped.
+ * When `serverId` is null/empty this returns "", so the request is
+ * byte-identical to the legacy unscoped call — the server falls back to
+ * DEFAULT_SERVER_ID. Callers thread the SAME `currentServerId` the
+ * dashboard reads `/earning/me` with (see `state/store.ts`), so a
+ * purchase/equip lands in the same per-server pool the wallet is
+ * showing. Flag-off / no active server → unscoped.
  */
-function withServerId(serverId: string | null | undefined): { serverId?: string } {
-  return serverId ? { serverId } : {};
-}
-
-/** GET-query twin of {@link withServerId}: `?serverId=<id>` or "". */
 function serverQuery(serverId: string | null | undefined): string {
   return serverId ? `?serverId=${encodeURIComponent(serverId)}` : "";
 }
@@ -543,11 +543,11 @@ export async function patchEarningSettings(body: {
    *  pool. */
   characterId?: string | null;
 }, serverId?: string | null): Promise<void> {
-  const r = await fetch("/earning/me/settings", {
+  const r = await fetch(`/earning/me/settings${serverQuery(serverId)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ ...body, ...withServerId(serverId) }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1027,11 +1027,11 @@ export async function purchaseCosmetic(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch(`/earning/me/cosmetics/${encodeURIComponent(key)}/purchase`, {
+  const r = await fetch(`/earning/me/cosmetics/${encodeURIComponent(key)}/purchase${serverQuery(serverId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1044,11 +1044,11 @@ export async function equipCosmetic(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch(`/earning/me/cosmetics/${encodeURIComponent(key)}/equip`, {
+  const r = await fetch(`/earning/me/cosmetics/${encodeURIComponent(key)}/equip${serverQuery(serverId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ enabled, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ enabled, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1067,11 +1067,11 @@ export async function patchProfileBannerUrl(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<{ url: string | null }> {
-  const r = await fetch("/earning/me/banner", {
+  const r = await fetch(`/earning/me/banner${serverQuery(serverId)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ url, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ url, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
   return (await r.json()) as { url: string | null };
@@ -1091,11 +1091,11 @@ export async function patchTypingPhrase(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<{ phrase: string | null }> {
-  const r = await fetch("/earning/me/typing-phrase", {
+  const r = await fetch(`/earning/me/typing-phrase${serverQuery(serverId)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ phrase, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ phrase, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
   return (await r.json()) as { phrase: string | null };
@@ -1117,11 +1117,11 @@ export async function patchRoomPresenceTemplates(
   },
   serverId?: string | null,
 ): Promise<{ joinTemplate: string | null; leaveTemplate: string | null }> {
-  const r = await fetch("/earning/me/room-presence", {
+  const r = await fetch(`/earning/me/room-presence${serverQuery(serverId)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ ...body, ...withServerId(serverId) }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(await readError(r));
   return (await r.json()) as { joinTemplate: string | null; leaveTemplate: string | null };
@@ -1139,11 +1139,11 @@ export async function patchSessionPresenceTemplates(
   },
   serverId?: string | null,
 ): Promise<{ connectTemplate: string | null; exitTemplate: string | null }> {
-  const r = await fetch("/earning/me/session-presence", {
+  const r = await fetch(`/earning/me/session-presence${serverQuery(serverId)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ ...body, ...withServerId(serverId) }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(await readError(r));
   return (await r.json()) as { connectTemplate: string | null; exitTemplate: string | null };
@@ -1154,11 +1154,11 @@ export async function purchaseBorder(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch(`/earning/me/borders/${encodeURIComponent(rankKey)}/purchase`, {
+  const r = await fetch(`/earning/me/borders/${encodeURIComponent(rankKey)}/purchase${serverQuery(serverId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1174,11 +1174,11 @@ export async function purchaseFreeformBorder(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch(`/earning/me/freeform-borders/${encodeURIComponent(borderKey)}/purchase`, {
+  const r = await fetch(`/earning/me/freeform-borders/${encodeURIComponent(borderKey)}/purchase${serverQuery(serverId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1198,11 +1198,11 @@ export async function patchFreeformBorderConfig(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch(`/earning/me/freeform-borders/${encodeURIComponent(borderKey)}/config`, {
+  const r = await fetch(`/earning/me/freeform-borders/${encodeURIComponent(borderKey)}/config${serverQuery(serverId)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ config, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ config, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1214,11 +1214,11 @@ export async function purchaseNameStyle(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch(`/earning/me/name-styles/${encodeURIComponent(styleKey)}/purchase`, {
+  const r = await fetch(`/earning/me/name-styles/${encodeURIComponent(styleKey)}/purchase${serverQuery(serverId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1231,11 +1231,11 @@ export async function purchaseTransition(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch(`/earning/me/transitions/${encodeURIComponent(key)}/purchase`, {
+  const r = await fetch(`/earning/me/transitions/${encodeURIComponent(key)}/purchase${serverQuery(serverId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1247,11 +1247,11 @@ export async function setActiveRoomTransition(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch("/earning/me/active-room-transition", {
+  const r = await fetch(`/earning/me/active-room-transition${serverQuery(serverId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ key, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ key, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1262,11 +1262,11 @@ export async function patchNameStyleConfig(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch(`/earning/me/name-styles/${encodeURIComponent(styleKey)}/config`, {
+  const r = await fetch(`/earning/me/name-styles/${encodeURIComponent(styleKey)}/config${serverQuery(serverId)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ config, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ config, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1278,11 +1278,11 @@ export async function setActiveNameStyle(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch("/earning/me/active-name-style", {
+  const r = await fetch(`/earning/me/active-name-style${serverQuery(serverId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ styleKey, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ styleKey, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1292,11 +1292,11 @@ export async function setInlineAvatarEnabled(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch("/earning/me/cosmetics/inline_avatar/equip", {
+  const r = await fetch(`/earning/me/cosmetics/inline_avatar/equip${serverQuery(serverId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ enabled, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ enabled, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1733,11 +1733,11 @@ export async function buyItem(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch(`/earning/me/items/${encodeURIComponent(itemKey)}/buy`, {
+  const r = await fetch(`/earning/me/items/${encodeURIComponent(itemKey)}/buy${serverQuery(serverId)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ quantity, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ quantity, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1871,11 +1871,11 @@ export async function setCollectionSlots(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch("/earning/me/collection", {
+  const r = await fetch(`/earning/me/collection${serverQuery(serverId)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ slots, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ slots, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1890,11 +1890,11 @@ export async function setPetCollectionSlots(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<void> {
-  const r = await fetch("/earning/me/pet-collection", {
+  const r = await fetch(`/earning/me/pet-collection${serverQuery(serverId)}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ slots, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ slots, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
 }
@@ -1911,11 +1911,11 @@ export async function setPetNickname(
   characterId: string | null = null,
   serverId?: string | null,
 ): Promise<{ slot: number; nickname: string | null }> {
-  const r = await fetch(`/earning/me/pet-collection/${slot}/nickname`, {
+  const r = await fetch(`/earning/me/pet-collection/${slot}/nickname${serverQuery(serverId)}`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     credentials: "include",
-    body: JSON.stringify({ nickname, characterId, ...withServerId(serverId) }),
+    body: JSON.stringify({ nickname, characterId }),
   });
   if (!r.ok) throw new Error(await readError(r));
   const j = (await r.json()) as { ok: true; slot: number; nickname: string | null };

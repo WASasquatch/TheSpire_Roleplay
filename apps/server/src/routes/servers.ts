@@ -93,6 +93,7 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { serverAuthority, serverCan } from "../servers/authority.js";
+import { isServerModerationActive, serverModerationNotice } from "../servers/moderation.js";
 import { ensureDefaultUsergroup, serverRoomIds } from "../servers/usergroups.js";
 import { resolveIdentityArg } from "../commands/identityArg.js";
 import { notifyUser } from "../servers/notifications.js";
@@ -199,6 +200,12 @@ const SERVER_SUMMARY_COLUMNS = {
   ownerUserId: servers.ownerUserId,
   tagsJson: servers.tagsJson,
   createdAt: servers.createdAt,
+  // Global-admin moderation state (migration 0306). Rides every summary so the
+  // rail can badge a suspended/banned server for its owner/staff and the
+  // catalog/discover filters can hide it from everyone else (lazy-expiry aware).
+  moderationState: servers.moderationState,
+  moderationUntil: servers.moderationUntil,
+  moderationNote: servers.moderationNote,
 } as const;
 
 type ServerSummaryRow = {
@@ -214,12 +221,17 @@ interface SummaryViewerCtx {
   visitsBy: Map<string, number> | null;
   myDefaultServerId: string | null;
   activityBy: Map<string, number | null>;
+  /** Owner account id → display name, batched once per request over the rows
+   *  in play. Drives the discover card's "by <owner>" link so a viewer can open
+   *  the owner's profile (e.g. to message them for an invite to a closed
+   *  server). */
+  ownerNamesBy: Map<string, string>;
 }
 
 /** Map ONE server row + viewer context to the ServerSummary wire shape. The
  *  single source of truth for the card shape — `tags` rides every surface. */
 function buildServerSummary(s: ServerSummaryRow, ctx: SummaryViewerCtx) {
-  const { me, rolesBy, visitsBy, myDefaultServerId, activityBy } = ctx;
+  const { me, rolesBy, visitsBy, myDefaultServerId, activityBy, ownerNamesBy } = ctx;
   // viewerRole: the relational role, with the owner short-circuit, and the
   // system/default server treated as implicit-member for signed-in users
   // (mirrors serverAuthority.isMember) so the rail's owned/joined split
@@ -255,8 +267,20 @@ function buildServerSummary(s: ServerSummaryRow, ctx: SummaryViewerCtx) {
     visibility: s.visibility,
     joinMode: s.joinMode,
     viewerRole: role,
+    // Server owner identity for the discover card's "by <owner>" link. Null on
+    // the system/home server (no human owner to message). ownerName is null
+    // when the owner row couldn't be resolved (deleted account).
+    ownerUserId: s.ownerUserId ?? null,
+    ownerName: s.ownerUserId ? ownerNamesBy.get(s.ownerUserId) ?? null : null,
     // Owner-set discovery tags (migration 0301); [] when unset.
     tags: parseTagsJson(s.tagsJson),
+    // Global-admin moderation state — surfaced so the owner/staff (the only ones
+    // this card is shown to when moderated) can badge SUSPENDED/BANNED and open
+    // the server to fix it. A ban past its until is treated as 'none' (lazy
+    // expiry, row not deleted). Timestamps normalized to ms (or null).
+    moderationState: s.moderationState,
+    moderationUntil: s.moderationUntil ? +s.moderationUntil : null,
+    moderationNote: s.moderationNote ?? null,
     // The viewer's chosen favorite/default server (users.default_server_id)
     // — the rail/discover surface marks it + offers the set/clear toggle.
     // Only meaningful for signed-in viewers.
@@ -377,6 +401,7 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
   async function loadSummaryViewerCtx(
     me: { id: string } | null,
     activityBy: Map<string, number | null>,
+    rows: ServerSummaryRow[],
   ): Promise<SummaryViewerCtx> {
     const rolesBy = me
       ? new Map((await db
@@ -395,7 +420,16 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     const myDefaultServerId = me
       ? (await db.select({ d: users.defaultServerId }).from(users).where(eq(users.id, me.id)).limit(1))[0]?.d ?? null
       : null;
-    return { me, rolesBy, visitsBy, myDefaultServerId, activityBy };
+    // Owner display names for the cards (one batched read over the distinct
+    // owner ids in this row set). Lets a viewer click "by <owner>" to open the
+    // owner's profile and message them — e.g. to ask for an invite.
+    const ownerIds = [...new Set(rows.map((r) => r.ownerUserId).filter((x): x is string => !!x))];
+    const ownerNamesBy = new Map<string, string>();
+    if (ownerIds.length) {
+      const names = await db.select({ id: users.id, username: users.username }).from(users).where(inArray(users.id, ownerIds));
+      for (const n of names) ownerNamesBy.set(n.id, n.username);
+    }
+    return { me, rolesBy, visitsBy, myDefaultServerId, activityBy, ownerNamesBy };
   }
 
   app.get("/servers", async (req, reply) => {
@@ -410,9 +444,31 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       .where(sql`${servers.status} != 'archived'`);
 
     const activityBy = await loadActivityBy();
-    const ctx = await loadSummaryViewerCtx(me, activityBy);
+    const ctx = await loadSummaryViewerCtx(me, activityBy, rows);
 
-    const out = rows.map((s) => buildServerSummary(s, ctx));
+    // Hide a MODERATED server (suspended, or banned with an unexpired until)
+    // from the rail — EXCEPT for the people who need to enter and fix it: the
+    // server's owner, the owner's admins/mods, and global staff. The system
+    // server is never moderated (guarded at the admin endpoints). A ban past its
+    // until is treated as 'none' (visible to all — lazy expiry). Non-moderated
+    // servers pass through unchanged, so flag-off / clean-state is byte-identical.
+    const manageAny = me ? await hasPermission(me, "manage_any_server", db) : false;
+    const canSeeModerated = (s: ServerSummaryRow): boolean => {
+      if (manageAny) return true;                       // global staff
+      if (!me) return false;                            // anonymous
+      if (s.ownerUserId === me.id) return true;         // owner
+      const role = ctx.rolesBy?.get(s.id);              // owner's admin/mod
+      return role === "owner" || role === "admin" || role === "mod";
+    };
+    const visible = rows.filter((s) => {
+      // moderation active? (mirrors isServerModerationActive on the row subset)
+      const active = s.moderationState === "suspended"
+        || (s.moderationState === "banned"
+            && (!s.moderationUntil || +s.moderationUntil > Date.now()));
+      return !active || canSeeModerated(s);
+    });
+
+    const out = visible.map((s) => buildServerSummary(s, ctx));
     out.sort((a, b) => catalogRank(a) - catalogRank(b) || a.name.localeCompare(b.name));
     return { servers: out };
   });
@@ -426,10 +482,17 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
    *  BROWSABLE servers: visibility 'public' and not archived.
    * ========================================================= */
 
-  /** WHERE for the discover surfaces: public, non-archived servers only. */
+  /** WHERE for the discover surfaces: public, non-archived, non-moderated
+   *  servers only. Moderated = suspended (always) OR banned with an unexpired
+   *  until (NULL until = indefinite). A ban past its until is treated as 'none'
+   *  (still discoverable) — lazy expiry mirrors serverAuthority's ban check, so
+   *  the row is filtered in SQL rather than deleted. Evaluated per-request with
+   *  Date.now() so an expiring ban re-appears without a cron. */
   const discoverableWhere = and(
     eq(servers.visibility, "public"),
     sql`${servers.status} != 'archived'`,
+    sql`${servers.moderationState} != 'suspended'`,
+    sql`not (${servers.moderationState} = 'banned' and (${servers.moderationUntil} is null or ${servers.moderationUntil} > ${Date.now()}))`,
   );
 
   /** GET /servers/discover — { popular, new }. `popular` is member-count desc
@@ -441,7 +504,7 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
 
     const rows = await db.select(SERVER_SUMMARY_COLUMNS).from(servers).where(discoverableWhere);
     const activityBy = await loadActivityBy();
-    const ctx = await loadSummaryViewerCtx(me, activityBy);
+    const ctx = await loadSummaryViewerCtx(me, activityBy, rows);
 
     // Member counts per discoverable server (one grouped read) — drives the
     // popular sort. Not part of the summary shape, used only for ordering.
@@ -481,7 +544,7 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     const tag = (req.query.tag ?? "").trim();
     const rows = await db.select(SERVER_SUMMARY_COLUMNS).from(servers).where(discoverableWhere);
     const activityBy = await loadActivityBy();
-    const ctx = await loadSummaryViewerCtx(me, activityBy);
+    const ctx = await loadSummaryViewerCtx(me, activityBy, rows);
 
     const items = rows
       .filter((s) => {
@@ -538,6 +601,15 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       .where(and(roomsOfServerWhere(server.id), isNull(messages.deletedAt))))[0]?.last ?? null;
 
     const a = await serverAuthority(db, me, server.id);
+    // Hide a moderated server's detail from non-staff, mirroring the rail-
+    // catalog hide + /servers/by-slug: a suspended/banned server's card (name,
+    // banner, counts, description) is only visible to its owner/staff and
+    // global staff (isMod). Everyone else 404s so the server's existence and
+    // metadata stay hidden — the "users can't see it" contract. Expired bans
+    // read as inactive, so this no-ops there.
+    if (isServerModerationActive(server) && !a.isMod) {
+      reply.code(404); return { error: "no server" };
+    }
     let viewer: ServerViewerState | null = null;
     if (me) {
       viewer = {
@@ -772,6 +844,13 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     const a = await serverAuthority(db, me, req.params.id);
     if (!a.server) { reply.code(404); return { error: "no server" }; }
     if (a.ban) { reply.code(403); return { error: "You are banned from this server." }; }
+    // A suspended/banned server accepts no new members (only owner/staff may
+    // touch it while it's under moderation). Blocks the "membership accrues on
+    // a frozen server" gap; expired bans read as inactive so this no-ops.
+    if (isServerModerationActive(a.server) && !a.isMod) {
+      const notice = serverModerationNotice(a.server);
+      reply.code(403); return { error: notice?.message ?? "This server is unavailable.", code: notice?.code ?? null };
+    }
     if (a.server.joinMode === "application") {
       reply.code(409); return { error: "This server reviews applications. Apply to join instead." };
     }
@@ -893,6 +972,18 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     if (!(await serversLive(reply))) return { error: "not found" };
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
+    // A moderated server (suspended, or banned with an unexpired until) is
+    // enterable ONLY by the people who can fix it: the owner, the owner's
+    // admins/mods (a.isMod folds owner + staff via isOwner), and global staff.
+    // Everyone else gets a 403 carrying the confirmed user-facing notice. A ban
+    // past its until reads as 'none' (isServerModerationActive returns false),
+    // so this whole block no-ops and the visit proceeds — lazy expiry, no cron.
+    const a = await serverAuthority(db, me, req.params.id);
+    if (a.server && isServerModerationActive(a.server) && !a.isMod) {
+      const notice = serverModerationNotice(a.server);
+      reply.code(403);
+      return { error: notice?.message ?? "This server is unavailable.", code: notice?.code ?? null };
+    }
     const now = new Date();
     await db.insert(serverVisits)
       .values({ userId: me.id, serverId: req.params.id, lastVisitAt: now })
@@ -946,6 +1037,12 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       if (!me) { reply.code(401); return { error: "auth" }; }
       const a = await serverAuthority(db, me, req.params.id);
       if (!a.server) { reply.code(404); return { error: "no server" }; }
+      // No new applications to a suspended/banned server (only owner/staff may
+      // touch it while under moderation). Expired bans read as inactive.
+      if (isServerModerationActive(a.server) && !a.isMod) {
+        const notice = serverModerationNotice(a.server);
+        reply.code(403); return { error: notice?.message ?? "This server is unavailable.", code: notice?.code ?? null };
+      }
       if (a.server.joinMode !== "application") {
         reply.code(409); return { error: "This server isn't application-gated." };
       }

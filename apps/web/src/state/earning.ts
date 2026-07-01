@@ -30,6 +30,7 @@ import {
   ackRankUpNotification,
   fetchEarningMe,
 } from "../lib/earning.js";
+import { useChat } from "./store.js";
 
 /**
  * Fetch `/earning/me` for a specific server (Multi-Server Lift). When
@@ -79,10 +80,14 @@ interface EarningState {
 
   /**
    * Trigger a fresh fetch. Safe to call multiple times, guards against
-   * overlap. Pass the active `serverId` (Multi-Server Lift) to scope the
-   * snapshot to that server's economy; omit it (or pass null) for the
-   * legacy unscoped `/earning/me` read used flag-off / when no server is
-   * resolved.
+   * overlap. Multi-Server Lift: OMITTING `serverId` (undefined) scopes
+   * the snapshot to the server the user is currently in (read live from
+   * the chat store), so every caller — sign-in, socket inventory events,
+   * the arcade, the profile editor — stays on the active server without
+   * threading the id through. Pass an explicit id to override (the
+   * dashboard does), or an explicit `null` for a deliberate unscoped
+   * read. Flag-off / no active server → currentServerId is null → the
+   * legacy unscoped `/earning/me` read.
    */
   refresh: (serverId?: string | null) => Promise<void>;
   /** Reset to initial state (call on logout). */
@@ -131,18 +136,38 @@ const INITIAL = {
 };
 
 let inFlight: Promise<void> | null = null;
+let inFlightServerId: string | null = null;
+// Monotonic request token so a slow fetch for a server the user has
+// since left can't clobber the snapshot of the server they're now in.
+let latestRefreshReq = 0;
 
 export const useEarning = create<EarningState>((set, get) => ({
   ...INITIAL,
 
   refresh: async (serverId?: string | null) => {
-    // Coalesce concurrent calls, multiple components mounting at the
-    // same time should share one network round trip.
-    if (inFlight) return inFlight;
+    // Multi-Server Lift: default an omitted `serverId` to the server the
+    // user is currently in, read LIVE from the chat store. This scopes
+    // every unscoped caller (sign-in, `earning:inventory_changed`, the
+    // arcade, the profile editor) to the active server without a stale
+    // closure at socket-registration time, and matches whatever server
+    // the dashboard shows. An explicit `null` still forces an unscoped
+    // read; flag-off leaves currentServerId null → unscoped.
+    const sid = serverId === undefined ? useChat.getState().currentServerId : serverId;
+    // Coalesce concurrent calls for the SAME server (simultaneous mounts
+    // share one round trip), but never let an in-flight fetch for the
+    // OLD server swallow a refresh for a server the user just switched
+    // to — that was the bug where the wallet strip stuck on the home
+    // server after a switch.
+    if (inFlight && inFlightServerId === (sid ?? null)) return inFlight;
+    const reqId = ++latestRefreshReq;
     set({ loading: true, error: null });
+    inFlightServerId = sid ?? null;
     inFlight = (async () => {
       try {
-        const snap = await fetchEarningMeForServer(serverId);
+        const snap = await fetchEarningMeForServer(sid);
+        // A newer refresh (e.g. another server switch) superseded us
+        // while this fetch was in flight — drop the stale result.
+        if (reqId !== latestRefreshReq) return;
         set({
           snapshot: snap,
           unackRankUps: snap.notifications,
@@ -150,12 +175,15 @@ export const useEarning = create<EarningState>((set, get) => ({
           error: null,
         });
       } catch (err) {
+        if (reqId !== latestRefreshReq) return;
         set({
           loading: false,
           error: err instanceof Error ? err.message : "Failed to load Earning.",
         });
       } finally {
-        inFlight = null;
+        // Only clear the shared slot if we're still the latest request;
+        // a superseding refresh already installed its own promise here.
+        if (reqId === latestRefreshReq) inFlight = null;
       }
     })();
     return inFlight;

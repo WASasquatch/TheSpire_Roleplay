@@ -59,6 +59,10 @@ export interface NotifyInput {
   title: string;
   snippet?: string;
   target?: NotifyTarget;
+  /** Extra deep-link coordinates stored as JSON and surfaced on the wire's
+   *  `metadata` (e.g. a mention's `{ messageId }`, a DM's `{ otherCharacterId }`)
+   *  so the click can jump to the exact message / open the exact DM thread. */
+  metadata?: Record<string, string | number | null> | null;
   /** Collapse repeats: a same-key row within `dedupeWindowMs` is skipped. */
   dedupeKey?: string | null;
   dedupeWindowMs?: number;
@@ -134,6 +138,7 @@ async function insertOne(db: Db, input: NotifyInput): Promise<string | null> {
     targetKind: input.target?.kind ?? "none",
     targetId: input.target?.id ?? null,
     url: input.target?.url ?? null,
+    metadataJson: input.metadata ? JSON.stringify(input.metadata) : null,
     dedupeKey: input.dedupeKey ?? null,
   });
   // Prune past the cap (cheap bounded subquery, mirrors the forum engine).
@@ -167,6 +172,18 @@ export async function badgeFor(db: Db, userId: string): Promise<NotificationBadg
 
 type NotificationRow = typeof notifications.$inferSelect;
 
+/** Parse the stored metadata JSON into the wire's `metadata` object. Returns
+ *  null on absent/garbage so a stray value can't break the inbox fetch. */
+function parseMetadata(raw: string | null): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as unknown;
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Hydrate stored rows into wire shape: join the actor's CURRENT avatar and the
  *  server's CURRENT name (everything else is a stored snapshot). */
 async function serializeRows(db: Db, rows: NotificationRow[]): Promise<NotificationWire[]> {
@@ -199,6 +216,7 @@ async function serializeRows(db: Db, rows: NotificationRow[]): Promise<Notificat
     targetKind: r.targetKind as NotificationTargetKind,
     targetId: r.targetId,
     url: r.url,
+    metadata: parseMetadata(r.metadataJson),
     createdAt: +r.createdAt,
     seenAt: r.seenAt ? +r.seenAt : null,
     readAt: r.readAt ? +r.readAt : null,

@@ -23,7 +23,13 @@ export async function fetchGrimholdAccess(characterId: string | null): Promise<G
   return "ok";
 }
 
-/** Buy the one-time cabinet unlock (a Flair) for this identity. */
+/**
+ * Buy the one-time cabinet unlock (a Flair) for this identity. INTENTIONALLY
+ * global (Multi-Server Lift): no serverId is passed, so the flair is bought
+ * on the home/default economy — matching the home-scoped access probe above
+ * — which keeps the arcade a cross-server feature. Don't scope this to
+ * serverId alone; the access check + rewards would have to move with it.
+ */
 export async function unlockGrimhold(characterId: string | null): Promise<void> {
   await purchaseCosmetic(FLAIR_GRIMHOLD, characterId);
 }

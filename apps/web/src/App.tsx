@@ -1596,13 +1596,33 @@ function Chat() {
   useEffect(() => {
     if (!me) { setMyActiveTransitionKey(null); return; }
     let cancelled = false;
-    const qs = activeCharacterId ? `?characterId=${encodeURIComponent(activeCharacterId)}` : "";
-    fetch(`/earning/me/active-room-transition${qs}`, { credentials: "include" })
+    // Multi-Server Lift: the equipped room transition is per-server (the
+    // WRITE via setActiveRoomTransition scopes to the active server), so
+    // this read must too — otherwise it always reflects the home server
+    // and a transition equipped on a community server never plays.
+    const params = new URLSearchParams();
+    if (activeCharacterId) params.set("characterId", activeCharacterId);
+    if (currentServerId) params.set("serverId", currentServerId);
+    const qs = params.toString();
+    fetch(`/earning/me/active-room-transition${qs ? `?${qs}` : ""}`, { credentials: "include" })
       .then((r) => (r.ok ? (r.json() as Promise<{ key: string | null }>) : null))
       .then((j) => { if (!cancelled && j) setMyActiveTransitionKey(j.key); })
       .catch(() => { /* non-fatal; the switch just stays instant */ });
     return () => { cancelled = true; };
-  }, [me?.id, activeCharacterId, setMyActiveTransitionKey]);
+  }, [me?.id, activeCharacterId, currentServerId, setMyActiveTransitionKey]);
+
+  // Multi-Server Lift: re-scope the cached Earning snapshot whenever the
+  // user moves to a different server. `refresh()` reads currentServerId
+  // itself, but only fires on its own triggers (sign-in, socket events);
+  // this drives the refetch on a plain server switch so the wallet / XP /
+  // rank shown OUTSIDE the dashboard (composer strip, arcade, profile
+  // editor) follows the server the user is actually in. Coalescing keys on
+  // the resolved server id, so the sign-in refresh and this one share a
+  // single round trip when they resolve to the same server.
+  useEffect(() => {
+    if (!me) return;
+    void useEarning.getState().refresh(currentServerId);
+  }, [me?.id, currentServerId]);
   // Wrapper that mirrors local state into the Zustand store so any
   // component / fetch can read the active identity via useChat. The
   // friend + DM endpoints scope responses by this id (server filters
@@ -3990,7 +4010,27 @@ function Chat() {
         serverBrand={serverBrand}
         notificationBell={
           <NotificationCenter
-            onOpen={(n) => openNotifTarget(n.targetKind, n.targetId, n.serverId)}
+            onOpen={(n) => {
+              const md = n.metadata ?? {};
+              if (n.targetKind === "room" && n.targetId) {
+                // Chat mention → jump to and flash the exact message. jumpToMessage
+                // switches into the right server + room via room:join first, then
+                // scrolls, mirroring the quoted-post jump. Empty messageId (e.g. a
+                // web-push deep-link with no metadata) just enters the room.
+                const mid = typeof md.messageId === "string" ? md.messageId : "";
+                void jumpToMessage(n.targetId, mid);
+              } else if (n.targetKind === "dm") {
+                // DM → open the messenger straight to the sender's thread (their
+                // identity), scoped to the identity that received it — not the
+                // default inbox/friends list.
+                const oc = typeof md.otherCharacterId === "string" ? md.otherCharacterId : null;
+                useChat.getState().setDmInboxFilterCharId(n.characterId ?? null);
+                if (n.actorUserId) setOpenDmOtherUser(n.actorUserId, oc);
+                setMessagesOpen(true);
+              } else {
+                openNotifTarget(n.targetKind, n.targetId, n.serverId);
+              }
+            }}
             onOpenForums={() => setForumsOpen({})}
           />
         }

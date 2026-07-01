@@ -166,7 +166,13 @@ export async function fetchEidolonHall(characterId: string | null): Promise<Eido
   } catch { return []; }
 }
 
-/** Buy the one-time unlock (a Flair) for this identity. */
+/**
+ * Buy the one-time unlock (a Flair) for this identity. INTENTIONALLY
+ * global (Multi-Server Lift): no serverId is passed, so the flair is
+ * bought on the home/default economy — matching the home-scoped access
+ * probe — which keeps the arcade a cross-server feature. Don't scope this
+ * to serverId alone; the access check + rewards would have to move with it.
+ */
 export async function unlockEidolon(characterId: string | null): Promise<void> {
   await purchaseCosmetic(FLAIR_EIDOLON_TAMER, characterId);
 }

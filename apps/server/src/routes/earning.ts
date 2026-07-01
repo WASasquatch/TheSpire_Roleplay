@@ -81,7 +81,7 @@ import { buildRankings } from "../earning/rankings.js";
 import { buildGameRankings } from "../earning/gameRankings.js";
 import { buildFamiliarRankings } from "../earning/familiarRankings.js";
 import { buildScriptoriumRankings } from "../earning/scriptoriumRankings.js";
-import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { DEFAULT_SERVER_ID, resolveProfileServerId } from "../earning/pool.js";
 import { serverAuthority } from "../servers/authority.js";
 import { getSettings, areServersEnabled } from "../settings.js";
 // creditPool is no longer called directly here, purchase endpoints
@@ -1148,10 +1148,18 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
         character = { id: c.id, name: c.name };
       }
 
+      // Multi-Server Lift: anchor this profile slice to the OWNER's favorite
+      // server (resolveProfileServerId), matching profileFlair.ts and the
+      // /profile command — so the rank / XP / currency / border a profile
+      // card shows all come from the SAME server as its equipped flair,
+      // instead of always the home server. The hide-currency / hide-xp flags
+      // stay on the master row below; they're account-level privacy prefs,
+      // not per-server.
+      const profileServerId = await resolveProfileServerId(db, target.id);
       const { rankByKey, tierByKey } = await loadRankTierLookup(db);
       const view = character
-        ? await buildCharacterPoolView(db, character.id, character.name, rankByKey, tierByKey)
-        : await buildUserPoolView(db, target.id, target.username, rankByKey, tierByKey);
+        ? await buildCharacterPoolView(db, character.id, character.name, rankByKey, tierByKey, profileServerId)
+        : await buildUserPoolView(db, target.id, target.username, rankByKey, tierByKey, profileServerId);
       if (!view) { reply.code(404); return { error: "no earning" }; }
 
       // Privacy flags live on the master row (per-account preference),
@@ -1200,7 +1208,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               .select({ rankKey: characterOwnedBorders.rankKey })
               .from(characterOwnedBorders)
               .where(and(
-                eq(characterOwnedBorders.serverId, DEFAULT_SERVER_ID),
+                eq(characterOwnedBorders.serverId, profileServerId),
                 eq(characterOwnedBorders.characterId, character.id),
                 eq(characterOwnedBorders.rankKey, resolvedRankBorderKey),
               ))
@@ -1209,7 +1217,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               .select({ rankKey: userOwnedBorders.rankKey })
               .from(userOwnedBorders)
               .where(and(
-                eq(userOwnedBorders.serverId, DEFAULT_SERVER_ID),
+                eq(userOwnedBorders.serverId, profileServerId),
                 eq(userOwnedBorders.userId, target.id),
                 eq(userOwnedBorders.rankKey, resolvedRankBorderKey),
               ))
@@ -1222,7 +1230,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               .select({ borderKey: characterOwnedFreeformBorders.borderKey })
               .from(characterOwnedFreeformBorders)
               .where(and(
-                eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
+                eq(characterOwnedFreeformBorders.serverId, profileServerId),
                 eq(characterOwnedFreeformBorders.characterId, character.id),
                 eq(characterOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
               ))
@@ -1231,7 +1239,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
               .select({ borderKey: userOwnedFreeformBorders.borderKey })
               .from(userOwnedFreeformBorders)
               .where(and(
-                eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
+                eq(userOwnedFreeformBorders.serverId, profileServerId),
                 eq(userOwnedFreeformBorders.userId, target.id),
                 eq(userOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
               ))
@@ -1252,7 +1260,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             .select({ configJson: characterOwnedFreeformBorders.configJson })
             .from(characterOwnedFreeformBorders)
             .where(and(
-              eq(characterOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
+              eq(characterOwnedFreeformBorders.serverId, profileServerId),
               eq(characterOwnedFreeformBorders.characterId, character.id),
               eq(characterOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
             ))
@@ -1263,7 +1271,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
             .select({ configJson: userOwnedFreeformBorders.configJson })
             .from(userOwnedFreeformBorders)
             .where(and(
-              eq(userOwnedFreeformBorders.serverId, DEFAULT_SERVER_ID),
+              eq(userOwnedFreeformBorders.serverId, profileServerId),
               eq(userOwnedFreeformBorders.userId, target.id),
               eq(userOwnedFreeformBorders.borderKey, resolvedFreeformBorderKey),
             ))
@@ -3459,30 +3467,17 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
           if (item.saleEndsAt && nowMs >= +item.saleEndsAt) {
             return { ok: false, status: 403, error: "sale has ended" };
           }
-          // Stack-cap check against the buying identity's current
-          // holdings. Reject the whole transaction rather than
-          // partial-buying, the client should disable the Buy button
-          // when at cap, so a 409 here is a defensive backstop.
-          const existing = tx.select({ qty: identityInventory.quantity })
-            .from(identityInventory)
-            .where(and(
-              eq(identityInventory.serverId, sid),
-              eq(identityInventory.ownerScope, ownerScope),
-              eq(identityInventory.ownerId, ownerId),
-              eq(identityInventory.itemKey, req.params.key),
-            )).limit(1).all()[0];
-          const have = existing?.qty ?? 0;
-          if (have + body.quantity > item.stackLimit) {
-            return {
-              ok: false,
-              status: 409,
-              error: `would exceed stack limit (${item.stackLimit})`,
-            };
-          }
-          // Flash-sale discount applies per UNIT (not per stack), a
-          // bulk-buy of an on-sale item gets the discount on every
-          // unit. Done after the stack-cap check so the discounted
-          // cost reflects the actual quantity going through.
+          // No stack-cap gate: players accumulate without ceiling, by
+          // design — matching the /give, raffle, and admin-grant paths
+          // (the catalog's `stackLimit` is an admin-facing hint only, NOT
+          // a runtime purchase limit). Enforcing it here was the lone
+          // straggler: a second buy of a low-`stackLimit` item (e.g. a
+          // Bat) hit a 409 the client — which caps nothing and shows the
+          // error only in a top-of-tab box — surfaced merely as the Buy
+          // button snapping back with the owned count stuck.
+          //
+          // Flash-sale discount applies per UNIT (not per stack), so a
+          // bulk-buy of an on-sale item gets the discount on every unit.
           const unitPrice = flashSale.itemKey === req.params.key
             ? applyDiscount(item.price, flashSale.itemDiscountPct)
             : item.price;

@@ -64,12 +64,30 @@ export interface ServerSummary {
   tags: string[];
   /** The viewer's role on this server, or null when not a member. */
   viewerRole: ServerRole | null;
+  /** Server owner's account id + display name, for the discover card's
+   *  "by <owner>" link (open their profile to message them — e.g. to ask for an
+   *  invite to a closed server). Null on the system/home server, or when the
+   *  owner account can't be resolved. */
+  ownerUserId?: string | null;
+  ownerName?: string | null;
   /** True when this is the viewer's chosen favorite/default server
    *  (users.default_server_id) — the rail/discover marks it and a global
    *  profile view of the viewer renders its per-server identity. */
   isMyDefault?: boolean;
   /** Activity the viewer hasn't seen since their last visit. */
   hasUnseen?: boolean;
+  /** Global-admin moderation state (migration 0306). 'suspended' = indefinite
+   *  "under review" hold; 'banned' = auto-expires once {@link moderationUntil}
+   *  passes. Absent/"none"/null ⇒ not moderated. The catalog only surfaces a
+   *  non-"none" value to the server's owner/staff + global staff (so they can
+   *  enter and rectify, with a SUSPENDED/BANNED badge); normal users never see
+   *  a moderated server in the rail or discovery. */
+  moderationState?: "none" | "suspended" | "banned" | null;
+  /** When a 'banned' state auto-expires (timestamp ms; null = indefinite, or the
+   *  server isn't banned). A ban past this behaves as "none" everywhere. */
+  moderationUntil?: number | null;
+  /** Optional staff note shown beneath the suspend/ban notice. */
+  moderationNote?: string | null;
 }
 
 /**

@@ -17,6 +17,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ServerStatus, ServerVisibility, ServerJoinMode } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { BanModal } from "./BanModal.js";
+import { Modal } from "./Modal.js";
 
 /** One creation application as the `/admin/servers/applications` route returns
  *  it. Mirrors the forum `ForumCreationApplicationWire`. */
@@ -47,6 +49,14 @@ interface AdminServerRow {
   isDefault: boolean;
   ownerUsername: string;
   createdAt: number;
+  /** Global-admin moderation state (migration 0306). The server already applies
+   *  lazy ban expiry in `GET /admin/servers`, so a "banned" row past its
+   *  `moderationUntil` arrives here as "none" — no client re-evaluation needed. */
+  moderationState?: "none" | "suspended" | "banned";
+  /** Ban auto-expiry (timestamp ms; null = permanent / indefinite). */
+  moderationUntil?: number | null;
+  /** Optional staff note attached to the suspend/ban. */
+  moderationNote?: string | null;
 }
 
 /** Pull `{ error }` out of a non-OK response, falling back to the status. */
@@ -93,6 +103,45 @@ async function adminSetServerStatus(
     headers: { "content-type": "application/json" },
     credentials: "include",
     body: JSON.stringify({ status }),
+  });
+  await jsonOrThrow(r);
+}
+
+/**
+ * Global-admin moderation: suspend (indefinite hold), ban (auto-expiring),
+ * or lift (state "none"). `manage_any_server` only; the server 409s the
+ * system/home server. `untilMs` is honored only for `state: "banned"`
+ * (null = permanent); the note is optional (shown to blocked users beneath
+ * the notice). POST /admin/servers/:id/moderation.
+ */
+async function adminSetServerModeration(
+  serverId: string,
+  state: "suspended" | "banned" | "none",
+  untilMs?: number | null,
+  note?: string | null,
+): Promise<void> {
+  const body: { state: typeof state; untilMs?: number | null; note?: string } = { state };
+  if (state === "banned") body.untilMs = untilMs ?? null;
+  const trimmedNote = note?.trim();
+  if (trimmedNote) body.note = trimmedNote;
+  const r = await fetch(`/admin/servers/${encodeURIComponent(serverId)}/moderation`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  await jsonOrThrow(r);
+}
+
+/**
+ * Hard, irreversible delete of a server + all its data. `manage_any_server`
+ * only; the server 409s the system/home server. The type-the-slug confirm is
+ * a client-side guard only (the server keys off the id). DELETE /admin/servers/:id.
+ */
+async function adminDeleteServer(serverId: string): Promise<void> {
+  const r = await fetch(`/admin/servers/${encodeURIComponent(serverId)}`, {
+    method: "DELETE",
+    credentials: "include",
   });
   await jsonOrThrow(r);
 }
@@ -250,6 +299,10 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  /** The server whose Ban modal (duration picker + note) is open, if any. */
+  const [banRow, setBanRow] = useState<AdminServerRow | null>(null);
+  /** The server whose type-the-slug delete confirm is open, if any. */
+  const [deleteRow, setDeleteRow] = useState<AdminServerRow | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -267,6 +320,48 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
     try { await adminSetServerStatus(row.id, status); setTick((t) => t + 1); }
     catch (e) { setErr(e instanceof Error ? e.message : "update failed"); }
     finally { setBusyId(null); }
+  }
+
+  /** Suspend (indefinite) with an optional note, or lift back to "none". Ban
+   *  goes through the {@link BanModal} instead (it needs the duration picker). */
+  async function moderate(
+    row: AdminServerRow,
+    state: "suspended" | "none",
+    note?: string | null,
+  ) {
+    setBusyId(row.id); setErr(null);
+    try { await adminSetServerModeration(row.id, state, null, note); setTick((t) => t + 1); }
+    catch (e) { setErr(e instanceof Error ? e.message : "update failed"); }
+    finally { setBusyId(null); }
+  }
+
+  function askSuspend(row: AdminServerRow) {
+    const v = window.prompt(
+      `Suspend "${row.name}"? It's put under review and blocked to everyone but its owner, that server's staff, and global staff (who can enter to fix it). Optional note shown to blocked users:`,
+      "",
+    );
+    if (v === null) return; // cancelled = no change
+    void moderate(row, "suspended", v.trim() || null);
+  }
+
+  function askLift(row: AdminServerRow) {
+    if (!window.confirm(
+      `Lift the ${row.moderationState === "banned" ? "ban" : "suspension"} on "${row.name}"? It becomes fully accessible again.`,
+    )) return;
+    void moderate(row, "none");
+  }
+
+  async function confirmDelete(row: AdminServerRow) {
+    setBusyId(row.id); setErr(null);
+    try {
+      await adminDeleteServer(row.id);
+      setDeleteRow(null);
+      setTick((t) => t + 1);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "delete failed");
+    } finally {
+      setBusyId(null);
+    }
   }
 
   return (
@@ -293,6 +388,20 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
               }`}>
                 {s.isSystem ? "system" : s.status}
               </span>
+              {/* Moderation badge — the server already lazy-expires bans in
+                  GET /admin/servers, so "banned" here is always still-active. */}
+              {s.moderationState === "suspended" ? (
+                <span className="rounded border border-[#e0a020] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#e0a020]">
+                  Suspended
+                </span>
+              ) : s.moderationState === "banned" ? (
+                <span
+                  className="rounded border border-[#e06070] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#e06070]"
+                  title={s.moderationNote ?? undefined}
+                >
+                  Banned{s.moderationUntil ? ` until ${new Date(s.moderationUntil).toLocaleDateString()}` : ""}
+                </span>
+              ) : null}
               {canCurate ? (
                 <span className="ml-auto flex gap-1.5">
                   {/* Step into the server's CHAT to moderate. Staff hold
@@ -351,12 +460,150 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
                       </button>
                     )
                   ) : null}
+                  {/* Moderation (suspend / ban / lift) + hard delete — global
+                      staff only, and NEVER the system/home server (it's sacred:
+                      the server 409s it too, this just hides the buttons). When
+                      a hold is active only Lift shows; otherwise Suspend + Ban. */}
+                  {!s.isSystem ? (
+                    <>
+                      {s.moderationState === "suspended" || s.moderationState === "banned" ? (
+                        <button
+                          type="button" disabled={busyId !== null}
+                          onClick={() => askLift(s)}
+                          title="Lift the suspension / ban — the server becomes accessible again"
+                          className="rounded border border-keep-action/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
+                        >
+                          Lift
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button" disabled={busyId !== null}
+                            onClick={() => askSuspend(s)}
+                            title="Put under review — block everyone but the owner and staff"
+                            className="rounded border border-[#e0a020]/70 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-[#e0a020] hover:bg-[#e0a020]/10 disabled:opacity-50"
+                          >
+                            Suspend
+                          </button>
+                          <button
+                            type="button" disabled={busyId !== null}
+                            onClick={() => setBanRow(s)}
+                            title="Ban for a set duration — auto-lifts when it expires"
+                            className="rounded border border-[#e06070]/70 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-[#e06070] hover:bg-[#e06070]/10 disabled:opacity-50"
+                          >
+                            Ban
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button" disabled={busyId !== null}
+                        onClick={() => setDeleteRow(s)}
+                        title="Permanently delete this server and all its data"
+                        className="rounded border border-[#e06070] bg-[#e06070]/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#e06070] hover:bg-[#e06070]/20 disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    </>
+                  ) : null}
                 </span>
               ) : null}
             </li>
           ))}
         </ul>
       )}
+
+      {/* Ban modal — reuses the shared duration picker; note is optional and
+          shown to blocked users. No post-sweep for servers (showPurge=false). */}
+      {banRow ? (
+        <BanModal
+          targetName={`server "${banRow.name}"`}
+          description="Blocks everyone but the owner, that server's staff, and global staff. Auto-lifts when the duration elapses."
+          reasonRequired={false}
+          reasonPlaceholder="Optional note shown to blocked users beneath the ban notice."
+          showPurge={false}
+          confirmLabel="Ban server"
+          busyLabel="Banning…"
+          onConfirm={async (durationMs, reason) => {
+            const untilMs = durationMs === null ? null : Date.now() + durationMs;
+            await adminSetServerModeration(banRow.id, "banned", untilMs, reason);
+            setBanRow(null);
+            setTick((t) => t + 1);
+          }}
+          onClose={() => setBanRow(null)}
+        />
+      ) : null}
+
+      {/* Type-the-slug delete confirm — irreversible, so the exact slug must be
+          retyped before the button unlocks. */}
+      {deleteRow ? (
+        <DeleteServerModal
+          row={deleteRow}
+          busy={busyId === deleteRow.id}
+          onConfirm={() => void confirmDelete(deleteRow)}
+          onClose={() => setDeleteRow(null)}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * Type-the-slug confirm for the hard, irreversible server delete. The
+ * destructive button stays disabled until the operator retypes the exact
+ * `/s/<slug>` — a deliberate speed bump, since delete wipes the server and all
+ * of its data with no undo. Mirrors the ban dialog's centered-modal chrome.
+ */
+function DeleteServerModal({ row, busy, onConfirm, onClose }: {
+  row: AdminServerRow;
+  busy: boolean;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const matches = typed.trim() === row.slug;
+  return (
+    <Modal onClose={onClose} variant="centered" zIndex={70}>
+      <div
+        className="w-[min(440px,94vw)] rounded-lg border border-keep-rule bg-keep-bg p-4 text-keep-text shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="mb-1 text-base font-semibold text-[#e06070]">Delete "{row.name}"</h3>
+        <p className="mb-3 text-xs text-keep-muted">
+          This permanently removes the server, its rooms and messages, members,
+          invites, and every scrap of its data. There is no undo.
+        </p>
+        <label className="mb-3 block">
+          <span className="mb-1 block text-[11px] font-semibold uppercase tracking-widest text-keep-muted">
+            Type <span className="font-mono text-keep-text">{row.slug}</span> to confirm
+          </span>
+          <input
+            value={typed}
+            onChange={(e) => setTyped(e.target.value)}
+            autoFocus
+            spellCheck={false}
+            autoComplete="off"
+            placeholder={row.slug}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-sm outline-none focus:border-[#e06070]"
+          />
+        </label>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded border border-keep-rule bg-keep-panel px-3 py-1.5 text-xs text-keep-text hover:bg-keep-banner"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy || !matches}
+            className="rounded border border-[#e06070]/80 bg-[#e06070] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {busy ? "Deleting…" : "Delete server"}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }

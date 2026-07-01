@@ -35,9 +35,10 @@ import {
  *   - action  : communicate (Message / Whisper / Switch identity)
  *   - accent  : caution, reversible        (Ignore)
  *   - system  : strongest, account-level   (Block)
- * `ACT_PILL_*` are the desktop pills; `ACT_SEG_*` are the mobile full-width
- * segmented bar. Keep these as the single source so the buttons can't drift
- * back into the four-different-designs state they were in.
+ * `ACT_PILL_*` are the action pills used across the profile's unified action
+ * bar (which wraps instead of switching to a separate mobile layout). Keep
+ * these as the single source so the buttons can't drift back into the
+ * four-different-designs state they were in.
  *
  * The buttons render Lucide icons only (compact), so each carries an
  * `aria-label` + `title` to supply the name/tooltip the visible text used to
@@ -54,13 +55,6 @@ const ACT_PILL_ACTION = `${ACT_PILL} border-keep-action/50 text-keep-action hove
 const ACT_PILL_NEUTRAL = `${ACT_PILL} border-keep-rule text-keep-text hover:bg-keep-panel`;
 const ACT_PILL_ACCENT = `${ACT_PILL} border-keep-accent/60 text-keep-accent hover:bg-keep-accent/10`;
 const ACT_PILL_SYSTEM = `${ACT_PILL} border-keep-system/60 text-keep-system hover:bg-keep-system/10`;
-
-const ACT_SEG = "flex flex-1 items-center justify-center px-2 py-2.5 transition-colors";
-const ACT_SEG_ACTION = `${ACT_SEG} text-keep-action hover:bg-keep-action/10`;
-const ACT_SEG_NEUTRAL = `${ACT_SEG} text-keep-text hover:bg-keep-panel`;
-const ACT_SEG_ACCENT = `${ACT_SEG} text-keep-accent hover:bg-keep-accent/10`;
-const ACT_SEG_SYSTEM = `${ACT_SEG} text-keep-system hover:bg-keep-system/10`;
-const ACT_SEG_DIVIDER = "border-r border-keep-rule";
 
 interface Props {
   profile: ProfileView;
@@ -953,119 +947,6 @@ function ProfileBody({
                 ) : null}
               </div>
             ) : null}
-            {/* Moderator actions: edit this user's bio, and issue/lift a
-                timed account ban (with the ban status + history for review).
-                Each affordance hides unless the viewer holds the matching
-                permission. */}
-            {canEditBio || canBanAccount ? (
-              <ProfileModPanel
-                profile={profile}
-                isChar={isChar}
-                editTarget={
-                  isChar
-                    ? { kind: "character", characterId: (profile.profile as { id: string }).id }
-                    : { kind: "master", userId: profile.profile.userId }
-                }
-                canEditBio={canEditBio}
-                canBan={canBanAccount}
-                onModerated={onModerated}
-              />
-            ) : null}
-            {/* Action row, desktop only. Mobile moves the same
-                actions into the full-width segmented bar that sits
-                below the avatar/content row (see further down). Self-
-                views (App suppresses whisper/ignore) still surface
-                this when there's a Switch / Disable action to take. */}
-            {hasActions ? (
-              <div className="mt-3 hidden flex-wrap gap-1.5 text-xs sm:flex">
-                {activeCharacterAction ? (
-                  <button
-                    type="button"
-                    onClick={activeCharacterAction.onClick}
-                    title="Change your active identity - chat name and theme update immediately."
-                    style={{ color: inkAction, borderColor: inkAction }}
-                    className="keep-button rounded border px-2 py-1 hover:bg-keep-action/10"
-                  >
-                    {activeCharacterAction.label}
-                  </button>
-                ) : null}
-                {onMessage ? (
-                  <button
-                    type="button"
-                    onClick={() => onMessage(profile.profile.userId, name, avatar)}
-                    title="Open a direct message thread with this user."
-                    aria-label="Message"
-                    style={{ color: inkAction, borderColor: inkAction }}
-                    className={ACT_PILL_ACTION}
-                  >
-                    <MessageSquare className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                ) : null}
-                {onWhisper ? (
-                  <button
-                    type="button"
-                    onClick={() => onWhisper(name)}
-                    title="Send a one-off private message in chat."
-                    aria-label="Whisper"
-                    style={{ color: inkNeutral, borderColor: inkNeutral }}
-                    className={ACT_PILL_NEUTRAL}
-                  >
-                    <Send className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                ) : null}
-                {onIgnore ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (window.confirm(`Ignore ${name}? You won't see their messages until you /unignore.`)) {
-                        onIgnore(name);
-                      }
-                    }}
-                    title="Hide this user's messages from you (one-way, reversible)."
-                    aria-label="Ignore"
-                    style={{ color: inkAccent, borderColor: inkAccent }}
-                    className={ACT_PILL_ACCENT}
-                  >
-                    <EyeOff className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                ) : null}
-                {onBlock ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (window.confirm(`Block ${name}? You won't see each other anywhere - chat, userlist, whispers, DMs, friends, or search. Undo later in Profile -> Privacy.`)) {
-                        onBlock(name);
-                      }
-                    }}
-                    title="Block: you and this user become invisible to each other everywhere."
-                    aria-label="Block"
-                    style={{ color: inkSystem, borderColor: inkSystem }}
-                    className={ACT_PILL_SYSTEM}
-                  >
-                    <Ban className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                ) : null}
-                {/* Report: any signed-in viewer (not the owner) can flag a
-                    profile for moderator review (e.g. explicit imagery). */}
-                {canReport ? (
-                  <button
-                    type="button"
-                    onClick={() => setReportOpen(true)}
-                    title="Report this profile for moderator review"
-                    aria-label="Report profile"
-                    className={ACT_PILL_ACCENT}
-                  >
-                    <Flag className="h-4 w-4" aria-hidden="true" />
-                  </button>
-                ) : null}
-                {/* Forum owners/mods (with ban_users) can ban this user from a
-                    forum they run, straight from the profile. Self-hides for
-                    everyone else. */}
-                {canReport ? (
-                  <ForumBanFromProfile targetUserId={profile.profile.userId} targetName={name} />
-                ) : null}
-              </div>
-            ) : null}
           </div>
           {/* Disposition used to live as a header sidecar here; it
               now lives in the body as a 25%-width right-side column
@@ -1082,23 +963,23 @@ function ProfileBody({
               with it. */}
           <CloseButton onClick={onClose} className="ml-auto self-start" />
         </div>
-        {/* Mobile action bar, full-width segmented row pinned to the
-            bottom of the hero band on phones. Each visible button
-            takes an equal share via `flex-1`, separator borders sit
-            between them, and the row carries a top border so it reads
-            as the footer of the band. Hidden on `sm+` where the
-            inline action row inside the content column takes over.
-            Skipped entirely when there are no actions to offer (e.g.
-            a self-view with no Switch action). */}
-        {hasActions ? (
-          <div className="relative flex border-t border-keep-rule text-sm sm:hidden">
+        {/* Action bar — full-width footer of the hero band, below the avatar
+            and profile info. ALL affordances (switch identity, message /
+            whisper / ignore / block / report, forum ban, and the mod edit-bio
+            / account-ban controls) sit inline on one row that wraps cleanly on
+            narrow / mobile widths instead of stacking into separate clumps.
+            `items-center` keeps text and icon buttons aligned; `flex-wrap`
+            does the even, natural wrapping. Hidden entirely when there are no
+            actions to offer (e.g. a self-view with no Switch action). */}
+        {hasActions || canEditBio || canBanAccount ? (
+          <div className="relative flex flex-wrap items-center gap-2 border-t border-keep-rule px-3 py-2.5 text-xs sm:px-5">
             {activeCharacterAction ? (
               <button
                 type="button"
                 onClick={activeCharacterAction.onClick}
                 title="Change your active identity - chat name and theme update immediately."
-                style={{ color: inkAction }}
-                className="keep-button flex-1 border-r border-keep-rule px-2 py-2.5 hover:bg-keep-action/10"
+                style={{ color: inkAction, borderColor: inkAction }}
+                className="keep-button rounded border px-2 py-1 hover:bg-keep-action/10"
               >
                 {activeCharacterAction.label}
               </button>
@@ -1109,8 +990,8 @@ function ProfileBody({
                 onClick={() => onMessage(profile.profile.userId, name, avatar)}
                 title="Open a direct message thread with this user."
                 aria-label="Message"
-                style={{ color: inkAction }}
-                className={`${ACT_SEG_ACTION} ${ACT_SEG_DIVIDER}`}
+                style={{ color: inkAction, borderColor: inkAction }}
+                className={ACT_PILL_ACTION}
               >
                 <MessageSquare className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -1121,8 +1002,8 @@ function ProfileBody({
                 onClick={() => onWhisper(name)}
                 title="Send a one-off private message in chat."
                 aria-label="Whisper"
-                style={{ color: inkNeutral }}
-                className={`${ACT_SEG_NEUTRAL} ${ACT_SEG_DIVIDER}`}
+                style={{ color: inkNeutral, borderColor: inkNeutral }}
+                className={ACT_PILL_NEUTRAL}
               >
                 <Send className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -1137,8 +1018,8 @@ function ProfileBody({
                 }}
                 title="Hide this user's messages from you (one-way, reversible)."
                 aria-label="Ignore"
-                style={{ color: inkAccent }}
-                className={`${ACT_SEG_ACCENT} ${ACT_SEG_DIVIDER}`}
+                style={{ color: inkAccent, borderColor: inkAccent }}
+                className={ACT_PILL_ACCENT}
               >
                 <EyeOff className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -1153,34 +1034,49 @@ function ProfileBody({
                 }}
                 title="Block: you and this user become invisible to each other everywhere."
                 aria-label="Block"
-                style={{ color: inkSystem }}
-                // Right-border separator only when the Report segment follows;
-                // otherwise Block is the last segment and gets no trailing rule.
-                className={`${ACT_SEG_SYSTEM}${canReport ? ` ${ACT_SEG_DIVIDER}` : ""}`}
+                style={{ color: inkSystem, borderColor: inkSystem }}
+                className={ACT_PILL_SYSTEM}
               >
                 <Ban className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
+            {/* Report: any signed-in viewer (not the owner) can flag a
+                profile for moderator review (e.g. explicit imagery). */}
             {canReport ? (
               <button
                 type="button"
                 onClick={() => setReportOpen(true)}
                 title="Report this profile for moderator review"
                 aria-label="Report profile"
-                style={{ color: inkAccent }}
-                className={ACT_SEG_ACCENT}
+                className={ACT_PILL_ACCENT}
               >
                 <Flag className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
-          </div>
-        ) : null}
-        {/* Forum-ban: full-width row below the mobile action segments (the
-            desktop placement lives in the hero row above). Self-hides unless
-            the viewer runs a forum they can ban from. */}
-        {canReport ? (
-          <div className="mt-2 sm:hidden">
-            <ForumBanFromProfile targetUserId={profile.profile.userId} targetName={name} />
+            {/* Forum owners/mods (with ban_users) can ban this user from a
+                forum they run, straight from the profile. Self-hides for
+                everyone else. */}
+            {canReport ? (
+              <ForumBanFromProfile targetUserId={profile.profile.userId} targetName={name} />
+            ) : null}
+            {/* Mod controls (edit bio + account ban) render inline as the last
+                items so the row reads user actions then mod actions, left to
+                right. An active-ban banner / history surfaces beneath their
+                button within this same wrapping bar. */}
+            {canEditBio || canBanAccount ? (
+              <ProfileModPanel
+                profile={profile}
+                isChar={isChar}
+                editTarget={
+                  isChar
+                    ? { kind: "character", characterId: (profile.profile as { id: string }).id }
+                    : { kind: "master", userId: profile.profile.userId }
+                }
+                canEditBio={canEditBio}
+                canBan={canBanAccount}
+                onModerated={onModerated}
+              />
+            ) : null}
           </div>
         ) : null}
         </div>
@@ -2356,19 +2252,18 @@ function ProfileModPanel({
   const [editOpen, setEditOpen] = useState(false);
 
   return (
-    <div className="mt-2 flex flex-col gap-2">
-      {/* Edit Bio (gated separately from banning) */}
+    <>
+      {/* Edit Bio (gated separately from banning). Renders inline so it sits in
+          the profile's unified action bar alongside the user-facing actions. */}
       {canEditBio ? (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setEditOpen(true)}
-            className="rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-keep-action hover:bg-keep-action/20"
-            title={`Edit ${targetName}'s bio`}
-          >
-            Edit Bio
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setEditOpen(true)}
+          className="rounded border border-keep-action/60 bg-keep-action/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-keep-action hover:bg-keep-action/20"
+          title={`Edit ${targetName}'s bio`}
+        >
+          Edit Bio
+        </button>
       ) : null}
 
       {/* Account ban — shared with the Global Admin user editor. */}
@@ -2386,7 +2281,7 @@ function ProfileModPanel({
           onClose={() => setEditOpen(false)}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 

@@ -3851,6 +3851,29 @@ export const servers = sqliteTable(
      *  JSON string[] (lowercased/normalized via shared normalizeTags); NULL =
      *  none. Searched alongside name in the discover modal's search mode. */
     tagsJson: text("tags_json"),
+    /** Global-admin moderation state (migration 0306). 'suspended' = indefinite
+     *  "under review" hold; 'banned' = auto-expires once moderationUntil passes
+     *  (lazy expiry — the row is never cleaned up). A ban past its until behaves
+     *  exactly like 'none' EVERYWHERE. Only the server owner, the owner's
+     *  admins/mods, and global staff (manage_any_server) may enter while active;
+     *  everyone else is blocked at serverAuthority.canParticipate and hidden from
+     *  discovery/catalog. The isSystem/home server can NEVER be moderated. */
+    moderationState: text("moderation_state", { enum: ["none", "suspended", "banned"] })
+      .notNull()
+      .default("none"),
+    /** When a 'banned' state auto-expires (timestamp ms; NULL = indefinite).
+     *  Ignored for 'suspended' (which never expires without a manual lift).
+     *  Lazy-evaluated at read time — see isServerModerationActive. */
+    moderationUntil: integer("moderation_until", { mode: "timestamp_ms" }),
+    /** Optional free-text note from the global admin (shown after the notice). */
+    moderationNote: text("moderation_note"),
+    /** FK to the global admin who issued the moderation. SET NULL on account
+     *  delete so the moderation record survives the actor's removal. */
+    moderationByUserId: text("moderation_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    /** When the moderation was issued (timestamp ms; NULL for legacy rows). */
+    moderationAt: integer("moderation_at", { mode: "timestamp_ms" }),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),
   },

@@ -13,6 +13,7 @@ import { EIDOLON_BASIC_HEAL_COST, eidolonFoodEffect, eidolonToyEffect } from "@t
 import { buyItem } from "../../lib/earning";
 import type { ItemCatalogRow } from "../../lib/earning";
 import { useEarning } from "../../state/earning";
+import { useChat } from "../../state/store";
 import { CoinAmount } from "../CoinAmount";
 
 interface Props {
@@ -29,6 +30,10 @@ interface Props {
 export function ItemDrawer({ mode, characterId, onClose, onFeed, onUsePotion, onBasicHeal }: Props): React.JSX.Element {
   const earning = useEarning((s) => s.snapshot);
   const refresh = useEarning((s) => s.refresh);
+  // Multi-Server Lift: buy against the SAME server the drawer's wallet /
+  // inventory snapshot is scoped to, so currency is debited and the item
+  // granted on the server the player is actually in (not the home pool).
+  const currentServerId = useChat((s) => s.currentServerId);
   const [buyingKey, setBuyingKey] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -85,7 +90,7 @@ export function ItemDrawer({ mode, characterId, onClose, onFeed, onUsePotion, on
     if (buyingKey) return;
     setBuyingKey(key); setErr(null);
     try {
-      await buyItem(key, 1, characterId);
+      await buyItem(key, 1, characterId, currentServerId);
       await refresh();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Purchase failed.");

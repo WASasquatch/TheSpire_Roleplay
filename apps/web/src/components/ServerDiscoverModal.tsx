@@ -34,6 +34,7 @@ import {
   Search,
   Sparkles,
   Star,
+  User,
   X,
 } from "lucide-react";
 import {
@@ -68,6 +69,7 @@ import { useChat } from "../state/store.js";
 import { CloseButton } from "./CloseButton.js";
 import { cropStyleFor } from "../lib/avatarCrop.js";
 import { isDarkSurface, useActiveTheme } from "../lib/theme.js";
+import { getSocket } from "../lib/socket.js";
 
 /** A server is "mine" (top group) when the viewer holds any role OR it's the
  *  implicit-membership system/home server. Mirrors ServerRail.isMine. */
@@ -522,6 +524,7 @@ function ServerCard({ server, onEnter, onJoined }: {
   // authority check treats as owner-equivalent, so room entry already lets
   // them in (broadcast.ts canParticipate). We just surface the affordance.
   const isGlobalStaff = useChat((s) => (s.me?.permissions ?? []).includes("manage_any_server"));
+  const setOpenProfile = useChat((s) => s.setOpenProfile);
   const letter = (server.name.trim()[0] ?? "?").toUpperCase();
   const tint = server.iconColor ?? undefined;
 
@@ -596,6 +599,26 @@ function ServerCard({ server, onEnter, onJoined }: {
     }
   }
 
+  // Open the server owner's profile so the viewer can read it and message them
+  // (e.g. to ask for an invite to an invite-only/application server). Mirrors
+  // the chat username-click path: an `@id:` token fetch, then the global
+  // ProfileModal (App renders it off `openProfile`, with its Message / whisper
+  // actions wired) stacks over this modal.
+  function openOwner() {
+    const ownerId = server.ownerUserId;
+    if (!ownerId) return;
+    getSocket().emit("profile:fetch", { username: `@id:${ownerId}` }, (res) => {
+      if (res.ok) setOpenProfile(res.profile);
+      else setErr(res.message ?? "Couldn't open that profile.");
+    });
+  }
+
+  // Show the owner link on real (human-owned) servers only — never the
+  // system/home server, and only once the owner name resolved.
+  const owner = !server.isSystem && server.ownerUserId && server.ownerName
+    ? { id: server.ownerUserId, name: server.ownerName }
+    : null;
+
   return (
     <li
       className={`relative overflow-hidden rounded border border-keep-rule p-3 ${hasBanner ? "" : "bg-keep-panel/30"}`}
@@ -652,6 +675,22 @@ function ServerCard({ server, onEnter, onJoined }: {
             <p className={`truncate text-xs ${hasBanner ? "text-white/85" : "text-keep-muted"}`}>{server.tagline}</p>
           ) : null}
           {!member ? <JoinModeBadge mode={server.joinMode} onBanner={hasBanner} /> : null}
+          {/* Owner link — opens the owner's profile (with its Message action)
+              so a viewer can ask about joining a closed server. */}
+          {owner ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); openOwner(); }}
+              title={`View ${owner.name}'s profile — message them to ask about joining`}
+              aria-label={`View ${owner.name}'s profile`}
+              className={`mt-1 flex max-w-full items-center gap-1 text-[11px] ${hasBanner ? "text-white/85 hover:text-white" : "text-keep-muted hover:text-keep-action"}`}
+            >
+              <User className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">
+                by <span className="font-medium underline decoration-dotted underline-offset-2">{owner.name}</span>
+              </span>
+            </button>
+          ) : null}
         </div>
 
         {/* Primary action — adapts to the viewer's relationship + join mode. */}
@@ -921,7 +960,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
   return (
     <Modal onClose={onClose} zIndex={50}>
       <div
-        className="keep-frame w-full max-w-lg rounded border border-keep-rule bg-keep-bg p-4"
+        className="keep-frame max-h-[88vh] w-full max-w-2xl overflow-y-auto rounded border border-keep-rule bg-keep-bg p-4"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
@@ -998,7 +1037,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
               <div className="space-y-2">
                 <span className="block text-xs uppercase tracking-widest text-keep-muted">Before you apply</span>
                 <div
-                  className="prose prose-sm max-h-48 max-w-none overflow-y-auto break-words rounded border border-keep-rule bg-keep-panel/30 px-3 py-2 text-keep-text"
+                  className="prose prose-sm max-h-72 max-w-none overflow-y-auto break-words rounded border border-keep-rule bg-keep-panel/30 px-3 py-2 text-keep-text sm:max-h-96"
                   dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(rulesHtml!) }}
                 />
                 <label className="flex items-start gap-2 text-sm text-keep-text">

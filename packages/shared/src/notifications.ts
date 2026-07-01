@@ -87,6 +87,12 @@ export interface NotificationWire {
   targetId: string | null;
   /** Deep-link path used by the web-push notificationclick handler (e.g. "/s/ashfall"). */
   url: string | null;
+  /** Extra deep-link coordinates a click needs beyond `targetId`. Kind-specific:
+   *  a chat mention (`targetKind:"room"`) carries `{ messageId }` so the click
+   *  jumps to and flashes the exact message; a DM (`targetKind:"dm"`) carries
+   *  `{ otherCharacterId }` (the sender's identity) so it opens the exact thread.
+   *  Absent/`{}` for notifications that only need `targetId`. */
+  metadata: Record<string, unknown> | null;
   createdAt: number;
   /** When the badge was cleared (the bell was opened past this row). */
   seenAt: number | null;

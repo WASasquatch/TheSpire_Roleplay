@@ -41,6 +41,7 @@ import {
 } from "@thekeep/shared";
 import { serverBans, serverMembers, serverUsergroupMembers, serverUsergroups, servers } from "../db/schema.js";
 import { hasPermission } from "../auth/permissions.js";
+import { isServerModerationActive } from "./moderation.js";
 import type { Db } from "../db/index.js";
 
 type ServerRow = typeof servers.$inferSelect;
@@ -181,12 +182,23 @@ export async function serverAuthority(
   // elevates logged-in users.
   const isMember = isMod || role === "member" || server.isSystem === true;
 
+  // Global-admin moderation gate (migration 0306): a suspended/banned server is
+  // enterable ONLY by the owner, the owner's server admins/mods, and global
+  // staff (all of whom pass via `isOwner`/`isMod` below) so they can review and
+  // rectify it. Everyone else is blocked. Lazy expiry is handled inside the
+  // helper: an expired ban reads as inactive, so this is byte-identical to the
+  // prior formula whenever moderation is 'none' (or a ban has lapsed).
+  const moderationActive = isServerModerationActive(server);
+
   // Owner/staff can always act (even on a server they were oddly banned in — a
   // ban row against the owner is a data bug, not a lockout). Open servers admit
   // any signed-in non-banned user; application/invite servers require
-  // membership (or mod/admin/owner, folded into isMember above).
+  // membership (or mod/admin/owner, folded into isMember above). A moderated
+  // server additionally blocks non-mod participants (owner/admin/mod/staff are
+  // allowed through so they can fix it — they satisfy isOwner or isMod).
   const canParticipate =
-    isOwner || (!ban && (server.joinMode === "open" || isMember));
+    isOwner ||
+    ((isMod || !moderationActive) && !ban && (server.joinMode === "open" || isMember));
 
   return { server, role, isOwner, isMod, isMember, permissions, ban, canParticipate };
 }

@@ -80,7 +80,7 @@ export function AccountBanControl({
             type="button"
             onClick={() => void doUnban()}
             disabled={busy}
-            className="rounded border border-keep-rule bg-keep-panel px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-keep-text hover:bg-keep-banner disabled:opacity-50"
+            className="rounded border border-keep-rule bg-keep-panel px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-keep-text hover:bg-keep-banner disabled:opacity-50"
           >
             {busy ? "Working…" : "Unban"}
           </button>
@@ -88,7 +88,7 @@ export function AccountBanControl({
           <button
             type="button"
             onClick={() => setBanOpen(true)}
-            className="rounded border border-[#e06070]/60 bg-[#e06070]/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-[#e06070] hover:bg-[#e06070]/20"
+            className="rounded border border-[#e06070]/60 bg-[#e06070]/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-[#e06070] hover:bg-[#e06070]/20"
           >
             Ban
           </button>

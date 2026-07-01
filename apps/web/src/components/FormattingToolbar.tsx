@@ -91,7 +91,20 @@ export function FormattingToolbar({
   function openColorPicker() {
     const el = inputRef.current;
     if (el) colorSelRef.current = { start: el.selectionStart ?? value.length, end: el.selectionEnd ?? value.length };
-    colorInputRef.current?.click();
+    const picker = colorInputRef.current;
+    if (!picker) return;
+    // Open via `showPicker()` — Firefox silently ignores a programmatic
+    // `.click()` on this hidden (zero-size / pointer-events:none) color
+    // input, so the button did nothing there. `.click()` stays as the
+    // fallback for engines without showPicker. Local cast so we don't
+    // depend on the ambient lib.dom version typing showPicker.
+    const withPicker = picker as HTMLInputElement & { showPicker?: () => void };
+    try {
+      if (typeof withPicker.showPicker === "function") withPicker.showPicker();
+      else picker.click();
+    } catch {
+      picker.click();
+    }
   }
   function applyColor(hex: string) {
     const el = inputRef.current;

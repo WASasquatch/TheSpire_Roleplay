@@ -110,6 +110,11 @@ export type AuditAction =
   | "forum_member_remove"
   | "forum_report_resolve"
   | "forum_usergroup_change"   // create/edit/delete a usergroup, or change its membership
+  // Server moderation (Global Admin suspend/ban/delete of a whole server)
+  | "server_moderation_suspend" // indefinite "under review" hold placed on a server
+  | "server_moderation_ban"     // timed (auto-expiring) or permanent ban placed on a server
+  | "server_moderation_lift"    // suspension/ban cleared (state → 'none')
+  | "server_delete"             // hard cascade delete of a server + all its data
   // System tab (live-ops maintenance)
   | "system_restart"           // admin restarted the server process
   | "system_purge_messages";   // admin purged ALL chat messages site-wide

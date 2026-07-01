@@ -1346,7 +1346,22 @@ export function Composer({
       const end = el.selectionEnd ?? start;
       colorSelRef.current = { start, end };
     }
-    colorInputRef.current?.click();
+    const picker = colorInputRef.current;
+    if (!picker) return;
+    // Open via `showPicker()`, the dedicated API for surfacing a native
+    // picker from a user gesture. A bare `.click()` on the hidden input is
+    // silently ignored by Firefox (a zero-size / pointer-events:none color
+    // input never opens, so the button looked completely dead there — no
+    // dialog, nothing injected). `.click()` stays as the fallback for any
+    // engine without showPicker. Cast locally so we don't depend on the
+    // ambient lib.dom version typing showPicker.
+    const withPicker = picker as HTMLInputElement & { showPicker?: () => void };
+    try {
+      if (typeof withPicker.showPicker === "function") withPicker.showPicker();
+      else picker.click();
+    } catch {
+      picker.click();
+    }
   }
 
   /**

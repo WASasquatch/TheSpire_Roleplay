@@ -25,6 +25,8 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { getServerSettings, getSettings, areServersEnabled } from "../settings.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { serverAuthority } from "../servers/authority.js";
+import { isServerModerationActive } from "../servers/moderation.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
@@ -173,6 +175,19 @@ export async function registerRoomsRoutes(
       .where(and(sql`lower(${rooms.slug}) = ${slug}`, isNull(rooms.archivedAt)))
       .limit(1))[0];
     if (!room) { reply.code(404); return { error: "not found" }; }
+    // Rooms inside a moderated (suspended/banned) server are hidden from anyone
+    // who isn't that server's staff — the same "users can't see it" contract the
+    // rail/discovery + /servers/by-slug + /servers/:id enforce. Without this a
+    // {room:slug} chip would resolve a frozen server's public room to a live
+    // link instead of degrading to plain text. Default-server / server-less
+    // rooms and non-moderated servers are unaffected (expired bans read as
+    // inactive), so this is a no-op off the moderated path.
+    if (room.serverId && room.serverId !== DEFAULT_SERVER_ID) {
+      const sa = await serverAuthority(db, me, room.serverId);
+      if (sa.server && isServerModerationActive(sa.server) && !sa.isMod) {
+        reply.code(404); return { error: "not found" };
+      }
+    }
     const openToAll = room.type === "public" && !room.forumMembersOnly;
     if (!openToAll) {
       // Gated room: require a logged-in viewer who is staff, the owner,

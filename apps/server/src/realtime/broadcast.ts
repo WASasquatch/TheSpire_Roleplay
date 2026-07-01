@@ -759,6 +759,15 @@ export async function pushTriggers(
     const names = extractMentions(msg.body);
     if (names.length === 0 && tokenRefs.length === 0) return;
 
+    // The room's server, so the mention notification is grouped under it (rail
+    // unseen dot) and a click lands the viewer in the right server. Looked up
+    // once (ChatMessage carries no serverId); null on the default/home server.
+    const roomServerId = (await db
+      .select({ serverId: rooms.serverId })
+      .from(rooms)
+      .where(eq(rooms.id, msg.roomId))
+      .limit(1))[0]?.serverId ?? null;
+
     // Push to a resolved target once, gated on offline + not-self + not-already-
     // notified. Shared by the exact token path and the legacy name path so a
     // message can't double-ping someone it mentions two ways.
@@ -776,10 +785,14 @@ export async function pushTriggers(
         userId: targetUserId,
         category: "mention",
         kind: "chat_mention",
+        serverId: roomServerId,
         actor: { id: sender.id, name: sender.displayName },
         title: `${sender.displayName} mentioned you`,
         snippet: msg.body.slice(0, 140),
         target: { kind: "room", id: msg.roomId },
+        // Carry the exact message so the click jumps to and flashes it (the
+        // room switch is handled by jumpToMessage's room:join on the client).
+        metadata: { messageId: msg.id },
         dedupeKey: `mention:${msg.roomId}:${sender.id}`,
         dedupeWindowMs: 2 * 60 * 1000,
         push: false,

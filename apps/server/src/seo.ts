@@ -3,8 +3,8 @@ import { randomBytes } from "node:crypto";
 import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import type { FastifyRequest } from "fastify";
 import type { Db } from "./db/index.js";
-import { characters, stories, users, worlds } from "./db/schema.js";
-import { getSettings } from "./settings.js";
+import { characters, forums, servers, stories, users, worlds } from "./db/schema.js";
+import { areServersEnabled, getSettings } from "./settings.js";
 
 /**
  * Site-wide keyword shelf shared across every public route. Lead with
@@ -14,9 +14,10 @@ import { getSettings } from "./settings.js";
  * first, broader synonyms later.
  */
 const DEFAULT_KEYWORDS =
-  "roleplay chat, online roleplay, RP chat, writing community, " +
-  "collaborative fiction, story writing, character roleplay, " +
-  "forum roleplay, The Spire chat, The Spire RP";
+  "host your own roleplay community, create a roleplay forum, roleplay chat server hosting, " +
+  "roleplay chat, RP chat, online roleplay, play-by-post forum, community hosting, forum hosting, " +
+  "Discord alternative for roleplay, character roleplay, collaborative fiction, " +
+  "writing community, worldbuilding, The Spire chat, The Spire RP";
 
 /**
  * Homepage tagline appended after the admin-configured siteName. Keeps
@@ -26,7 +27,7 @@ const DEFAULT_KEYWORDS =
  * `apps/web/index.html` so the rewritten and bare-GET copies of the
  * page tell the same story to indexers.
  */
-const HOMEPAGE_TAGLINE = "Roleplay Chat & Collaborative Writing";
+const HOMEPAGE_TAGLINE = "Roleplay Chat, Communities & Forums";
 
 /**
  * Generate a fresh nonce for a single HTTP response. Base64 of 16 random
@@ -192,7 +193,7 @@ export async function renderSplashHtml(
   const siteDescription =
     s.metaDescription?.trim() ||
     (s.welcomeHtml ? stripToText(s.welcomeHtml) : "") ||
-    "A roleplay-focused chat sanctuary.";
+    "Host your own roleplay chat community or forum, or dive into live RP chat, character profiles, worlds, and collaborative writing.";
 
   // Per-route SEO. Every public bookmarkable page gets its own title,
   // description, canonical URL, and keyword shelf, otherwise crawlers
@@ -213,6 +214,16 @@ export async function renderSplashHtml(
   const descAttr = escapeHtmlAttr(description);
   const urlAttr = escapeHtmlAttr(canonicalUrl);
   const keywordsAttr = escapeHtmlAttr(keywords);
+  // og:site_name owns the BARE brand across every page (not the tagged
+  // per-page title) — that's what the OG spec wants in that slot.
+  const siteNameAttr = escapeHtmlAttr(siteName);
+  // Per-route social image (a forum/server banner). Absolutized to the request
+  // origin when root-relative; null falls back to absolutizing the default card.
+  const routeOgImage = perRoute.imageUrl
+    ? (/^https?:\/\//i.test(perRoute.imageUrl)
+        ? perRoute.imageUrl
+        : `${origin}${perRoute.imageUrl.startsWith("/") ? "" : "/"}${perRoute.imageUrl}`)
+    : null;
 
   // Replace tags by exact-attribute match. Each replace is targeted to a
   // specific tag name + attribute so they don't trip over each other.
@@ -248,7 +259,7 @@ export async function renderSplashHtml(
     )
     .replace(
       /<meta property="og:site_name" content="[^"]*"\s*\/?>/,
-      `<meta property="og:site_name" content="${titleAttr}" />`,
+      `<meta property="og:site_name" content="${siteNameAttr}" />`,
     )
     .replace(
       /<meta name="twitter:title" content="[^"]*"\s*\/?>/,
@@ -257,21 +268,68 @@ export async function renderSplashHtml(
     .replace(
       /<meta name="twitter:description" content="[^"]*"\s*\/?>/,
       `<meta name="twitter:description" content="${descAttr}" />`,
+    )
+    // Absolutize the social-card image: some scrapers (older Facebook /
+    // LinkedIn, some Slack paths) reject a root-relative og:image. Prepend
+    // the live request origin to whatever root-relative path index.html ships.
+    .replace(
+      /<meta property="og:image" content="(\/[^"]*)"\s*\/?>/,
+      (_m, p: string) => `<meta property="og:image" content="${escapeHtmlAttr(routeOgImage ?? (origin + p))}" />`,
+    )
+    .replace(
+      /<meta name="twitter:image" content="(\/[^"]*)"\s*\/?>/,
+      (_m, p: string) => `<meta name="twitter:image" content="${escapeHtmlAttr(routeOgImage ?? (origin + p))}" />`,
     );
 
   // JSON-LD: replace the whole script block. We rebuild it rather than
   // surgically edit fields because the Schema.org payload is short and
   // the alternative (multiple regex substitutions inside a JSON literal)
   // would be more fragile than a one-shot rewrite.
-  const ldJson = JSON.stringify({
-    "@context": "https://schema.org",
-    "@type": "WebApplication",
-    name: title,
-    description,
-    applicationCategory: "SocialNetworkingApplication",
-    operatingSystem: "Web",
-    url: canonicalUrl,
-  });
+  // A small entity @graph rather than a lone WebApplication: Organization +
+  // WebSite establish the brand/site entity (helps Google's knowledge panel +
+  // sitelinks), WebApplication describes the running app, and on the homepage a
+  // Service node maps the new "host your own community/forum" offering. Nodes
+  // are cross-linked by @id. No SearchAction — there's no public GET search
+  // endpoint to point it at, and a dangling one is worse than none.
+  const orgId = `${origin}/#organization`;
+  const siteId = `${origin}/#website`;
+  const graph: Array<Record<string, unknown>> = [
+    {
+      "@type": "Organization",
+      "@id": orgId,
+      name: siteName,
+      url: `${origin}/`,
+      logo: `${origin}/favicon-196x196.png`,
+    },
+    {
+      "@type": "WebSite",
+      "@id": siteId,
+      name: siteName,
+      url: `${origin}/`,
+      publisher: { "@id": orgId },
+    },
+    {
+      "@type": "WebApplication",
+      name: title,
+      description,
+      applicationCategory: "SocialNetworkingApplication",
+      operatingSystem: "Web",
+      url: canonicalUrl,
+      isPartOf: { "@id": siteId },
+    },
+  ];
+  if (pathname === "/") {
+    graph.push({
+      "@type": "Service",
+      name: `Community & forum hosting on ${siteName}`,
+      serviceType: "Online community and forum hosting",
+      description: `Create and run your own roleplay chat community or forum on ${siteName}, with rooms, members, roles, moderation, and a shareable public page.`,
+      provider: { "@id": orgId },
+      areaServed: "Worldwide",
+      url: `${origin}/`,
+    });
+  }
+  const ldJson = JSON.stringify({ "@context": "https://schema.org", "@graph": graph });
   html = html.replace(
     /<script type="application\/ld\+json">[\s\S]*?<\/script>/,
     `<script type="application/ld+json">${ldJson}</script>`,
@@ -289,6 +347,33 @@ export async function renderSplashHtml(
       // <script> tags through.
       s.customHeadHtml,
     );
+  }
+
+  // Crawlable homepage body: the SPA boots into an empty `<div id="root">`, so a
+  // crawler that doesn't execute JS (some Bing paths + a long tail of niche /
+  // non-rendering agents) sees no headings, prose, or internal links on `/`.
+  // Inject a <noscript> hero with the positioning copy + the key public links so
+  // those agents get real indexable content and link equity flows to /register,
+  // /f/spire, and /scriptorium. JS clients never render <noscript> (no FOUC),
+  // and Google renders the full app. Homepage only — deep routes carry their own
+  // content and their own per-route <head> meta.
+  if (pathname === "/") {
+    const nameText = escapeHtmlAttr(siteName);
+    const noscript =
+      `<noscript>` +
+      `<main>` +
+      `<h1>${nameText}</h1>` +
+      `<p>${nameText} is a home for live, text-based roleplay, and a platform where anyone can host their own community. Join the roleplay, or create your own chat community and forums with your own rooms, members, roles, and moderation.</p>` +
+      `<p>Step into live roleplay chat rooms, build characters, explore shared worlds, write collaborative stories in the Scriptorium, or host your own community or forum.</p>` +
+      `<ul>` +
+      `<li><a href="/register">Create your free account</a></li>` +
+      `<li><a href="/login">Log in</a></li>` +
+      `<li><a href="/f/spire">Browse the ${nameText} forums</a></li>` +
+      `<li><a href="/scriptorium">Read stories in the Scriptorium</a></li>` +
+      `</ul>` +
+      `<p>This page needs JavaScript enabled for the full experience.</p>` +
+      `</main></noscript>`;
+    html = html.replace('<div id="root"></div>', `<div id="root"></div>\n    ${noscript}`);
   }
 
   // Surface the CSP nonce to runtime JS via a `<meta>` tag so client
@@ -344,6 +429,10 @@ export function renderRobotsTxt(origin: string): string {
  */
 export async function renderSitemapXml(db: Db, origin: string): Promise<string> {
   const today = new Date().toISOString().slice(0, 10);
+  // /s/ community pages only exist when the servers feature is on; skip them in
+  // the sitemap otherwise so we never advertise URLs that 404. Forums (/f/) are
+  // always available.
+  const serversOn = areServersEnabled(await getSettings(db));
   const lines: string[] = [
     `<?xml version="1.0" encoding="UTF-8"?>`,
     `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`,
@@ -466,6 +555,56 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
     }
   } catch { /* swallow */ }
 
+  // Public community forums: owner opted into public browsing, or the system
+  // forum. These are the "host your own" landing pages we most want indexed.
+  try {
+    const rows = await db
+      .select({ slug: forums.slug })
+      .from(forums)
+      .where(and(
+        ne(forums.status, "archived"),
+        or(eq(forums.publicBrowsing, true), eq(forums.isSystem, true)),
+      ))
+      .orderBy(desc(forums.createdAt))
+      .limit(1000);
+    for (const r of rows) {
+      lines.push(
+        `  <url>`,
+        `    <loc>${origin}/f/${encodeURIComponent(r.slug.toLowerCase())}</loc>`,
+        `    <changefreq>daily</changefreq>`,
+        `    <priority>0.6</priority>`,
+        `  </url>`,
+      );
+    }
+  } catch { /* swallow */ }
+
+  // Public, non-archived, non-moderated community servers (mirrors the discover
+  // filter; suspended / banned-unexpired hidden via lazy expiry). Flag-gated.
+  if (serversOn) {
+    try {
+      const rows = await db
+        .select({ slug: servers.slug })
+        .from(servers)
+        .where(and(
+          eq(servers.visibility, "public"),
+          sql`${servers.status} != 'archived'`,
+          sql`${servers.moderationState} != 'suspended'`,
+          sql`not (${servers.moderationState} = 'banned' and (${servers.moderationUntil} is null or ${servers.moderationUntil} > ${Date.now()}))`,
+        ))
+        .orderBy(desc(servers.createdAt))
+        .limit(1000);
+      for (const r of rows) {
+        lines.push(
+          `  <url>`,
+          `    <loc>${origin}/s/${encodeURIComponent(r.slug.toLowerCase())}</loc>`,
+          `    <changefreq>daily</changefreq>`,
+          `    <priority>0.6</priority>`,
+          `  </url>`,
+        );
+      }
+    } catch { /* swallow */ }
+  }
+
   lines.push(`</urlset>`, "");
   return lines.join("\n");
 }
@@ -481,6 +620,10 @@ interface RouteMeta {
   description: string;
   keywords: string;
   canonicalUrl: string;
+  /** Optional per-route social-card image (e.g. a forum/server banner). Root-
+   *  relative or absolute; absolutized to the request origin before use. When
+   *  omitted, the default card baked into index.html is used. */
+  imageUrl?: string | null;
 }
 
 /**
@@ -690,6 +833,101 @@ async function resolveRouteMeta(
           description: desc,
           keywords: `${row.name}, roleplay world, worldbuilding, lore, ${DEFAULT_KEYWORDS}`,
           canonicalUrl: `${origin}/w/${encodeURIComponent(slug)}`,
+        };
+      }
+    } catch { /* fall through */ }
+    return {
+      title: `${siteName} - ${HOMEPAGE_TAGLINE}`,
+      description: siteDescription,
+      keywords: DEFAULT_KEYWORDS,
+      canonicalUrl: `${origin}/`,
+    };
+  }
+
+  // ---- Forum: /f/:slug (and topic permalinks /f/:slug/t/:topicId) ----
+  // A shared forum link is a core "host your own" surface, so it earns its own
+  // card. Only forums the OWNER opted into public browsing (plus the system
+  // forum) produce route-specific meta; application/private forums fall through
+  // so their name/tagline never leaks into a share preview. A topic permalink
+  // canonicalizes to the parent forum (don't index every topic as a near-dup).
+  const forumMatch = pathname.match(/^\/f\/([^/]+)(?:\/t\/[^/]+)?\/?$/);
+  if (forumMatch) {
+    const slug = decodeURIComponent(forumMatch[1]!);
+    try {
+      const row = (await db
+        .select({
+          name: forums.name,
+          tagline: forums.tagline,
+          descriptionHtml: forums.descriptionHtml,
+          bannerImageUrl: forums.bannerImageUrl,
+          logoUrl: forums.logoUrl,
+          publicBrowsing: forums.publicBrowsing,
+          isSystem: forums.isSystem,
+        })
+        .from(forums)
+        .where(and(
+          sql`lower(${forums.slug}) = lower(${slug})`,
+          ne(forums.status, "archived"),
+        ))
+        .limit(1))[0];
+      if (row && (row.publicBrowsing || row.isSystem)) {
+        const desc = row.tagline?.trim()
+          || (row.descriptionHtml ? stripToText(row.descriptionHtml) : "")
+          || `${row.name} is a community forum on ${siteName}, with boards for play-by-post and discussion.`;
+        return {
+          title: `${row.name} - Forum · ${siteName}`,
+          description: desc,
+          keywords: `${row.name}, forum, play-by-post, community, ${DEFAULT_KEYWORDS}`,
+          canonicalUrl: `${origin}/f/${encodeURIComponent(slug.toLowerCase())}`,
+          imageUrl: row.bannerImageUrl || row.logoUrl || null,
+        };
+      }
+    } catch { /* fall through */ }
+    return {
+      title: `${siteName} - ${HOMEPAGE_TAGLINE}`,
+      description: siteDescription,
+      keywords: DEFAULT_KEYWORDS,
+      canonicalUrl: `${origin}/`,
+    };
+  }
+
+  // ---- Community server: /s/:slug ----
+  // The other flagship "host your own" surface. Only PUBLIC, non-archived,
+  // non-moderated servers get a card; suspended/banned (unexpired) or unlisted/
+  // invite-only servers fall through, mirroring the discover/rail hiding rules
+  // so a moderated or private community's existence isn't leaked in a preview.
+  const serverMatch = pathname.match(/^\/s\/([^/]+)\/?$/);
+  if (serverMatch) {
+    const slug = decodeURIComponent(serverMatch[1]!);
+    try {
+      const row = (await db
+        .select({
+          name: servers.name,
+          tagline: servers.tagline,
+          descriptionHtml: servers.descriptionHtml,
+          bannerImageUrl: servers.bannerImageUrl,
+          logoUrl: servers.logoUrl,
+          visibility: servers.visibility,
+          status: servers.status,
+          moderationState: servers.moderationState,
+          moderationUntil: servers.moderationUntil,
+        })
+        .from(servers)
+        .where(sql`lower(${servers.slug}) = lower(${slug})`)
+        .limit(1))[0];
+      const moderated = !!row && (row.moderationState === "suspended"
+        || (row.moderationState === "banned"
+            && (!row.moderationUntil || +row.moderationUntil > Date.now())));
+      if (row && row.visibility === "public" && row.status !== "archived" && !moderated) {
+        const desc = row.tagline?.trim()
+          || (row.descriptionHtml ? stripToText(row.descriptionHtml) : "")
+          || `${row.name} is a roleplay community on ${siteName}, with its own chat rooms and forums.`;
+        return {
+          title: `${row.name} - Community · ${siteName}`,
+          description: desc,
+          keywords: `${row.name}, roleplay community, roleplay chat, ${DEFAULT_KEYWORDS}`,
+          canonicalUrl: `${origin}/s/${encodeURIComponent(slug.toLowerCase())}`,
+          imageUrl: row.bannerImageUrl || row.logoUrl || null,
         };
       }
     } catch { /* fall through */ }

@@ -53,6 +53,10 @@ interface Props {
   onOpenWorlds: () => void;
   /** Opens the Staff directory modal. */
   onOpenStaff: () => void;
+  /** Opens the Roleplay Communities (affiliates) portal so members can manage
+   *  their listings and copy their link-backs. Signed-in only, matching the
+   *  other member-facing nav entries. */
+  onOpenAffiliates: () => void;
   /** Opens the Spire Arcade launcher. Permission-gated by the parent;
    *  the link only renders when the viewer holds `use_arcade`. */
   onOpenArcade: () => void;
@@ -95,7 +99,7 @@ interface Props {
  * the active theme's panel color / text color / font-action stack when not
  * overridden, so a fresh install still looks coherent.
  */
-export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds, onOpenArcade, onOpenStaff, serverBrand, onOpenServerAdmin, notificationBell }: Props) {
+export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds, onOpenArcade, onOpenStaff, onOpenAffiliates, serverBrand, onOpenServerAdmin, notificationBell }: Props) {
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
@@ -321,6 +325,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   function fireWorlds() { onOpenWorlds(); setMenuOpen(false); }
   function fireArcade() { onOpenArcade(); setMenuOpen(false); }
   function fireStaff() { onOpenStaff(); setMenuOpen(false); }
+  function fireAffiliates() { onOpenAffiliates(); setMenuOpen(false); }
   function fireLogout() { setMenuOpen(false); void logout(); }
 
   // Arcade is auth-gated AND permission-gated, the launcher itself 403s
@@ -578,6 +583,15 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
             >
               Staff
             </button>
+            <span className="text-keep-rule">|</span>
+            <button
+              type="button"
+              onClick={onOpenAffiliates}
+              className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
+              title="Top RP Communities. List your own and copy your link-back"
+            >
+              Top Communities
+            </button>
             {canArcade ? (
               <>
                 <span className="text-keep-rule">|</span>
@@ -769,6 +783,13 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                   className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
                 >
                   <span>Staff</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={fireAffiliates}
+                  className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
+                >
+                  <span>Top Communities</span>
                 </button>
                 {canArcade ? (
                   <button

@@ -3,6 +3,7 @@ import type { WorldCatalogEntry, WorldGenre } from "@thekeep/shared";
 import { WORLD_VIBE_AXES } from "@thekeep/shared";
 import { ChevronLeft, ChevronRight, FileText, Globe, Users } from "lucide-react";
 import { useChat } from "../state/store.js";
+import { SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../lib/splashPanel.js";
 
 /**
  * Splash-page featured-worlds CARD carousel. Replaces the scrying-orb
@@ -86,6 +87,7 @@ export function FeaturedWorldCards({ onNavigate }: Props) {
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
       onBlur={() => setPaused(false)}
+      className={`${SPLASH_PANEL} ${SPLASH_PANEL_HOVER} p-4 sm:p-5`}
     >
       <header className="mb-3 text-center">
         <p className="text-[11px] uppercase tracking-[0.3em] text-keep-muted">
@@ -105,7 +107,7 @@ export function FeaturedWorldCards({ onNavigate }: Props) {
             enter();
           }
         }}
-        className="group cursor-pointer rounded-md border border-keep-border/50 bg-keep-panel/30 p-4 transition hover:border-keep-accent/50 sm:p-5"
+        className="group cursor-pointer rounded-md border border-keep-border/40 bg-keep-bg/30 p-4 transition hover:border-keep-accent/50 sm:p-5"
       >
         {/* Cover thumb inline with the title block. */}
         <div className="flex items-start gap-3">

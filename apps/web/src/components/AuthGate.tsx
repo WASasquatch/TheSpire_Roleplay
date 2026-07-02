@@ -8,7 +8,6 @@ import { setSessionToken } from "../lib/http.js";
 import { markLoginIntent } from "../lib/socket.js";
 import { resolveSplashTheme, splashBgUrl, themeStyle } from "../lib/theme.js";
 import { isDarkPalette } from "@thekeep/shared";
-import { AffiliatesCarousel } from "./AffiliatesCarousel.js";
 
 const PROJECT_URL = "https://github.com/WASasquatch/TheSpire_Roleplay";
 
@@ -171,8 +170,8 @@ export function SplashShell({
           // The outer container is `overflow-hidden` (so the bg image
           // can't bleed outside the viewport when the artwork is taller
           // than the available space). That clips anything growing past
-          // the viewport - including the optional AffiliatesCarousel
-          // row below the form. Cap the card's
+          // the viewport - including the Roleplay Communities
+          // section below the form. Cap the card's
           // height to the viewport (less margin) and let the card scroll
           // internally so additional sections stay reachable on shorter
           // screens.
@@ -274,14 +273,6 @@ export function SplashShell({
               <div>{children}</div>
 
               {footer ? <div className="mt-4">{footer}</div> : null}
-            </div>
-
-            {/* Affiliates carousel spans the full card width
-                (col-span-2 in the landscape grid). It honors its admin
-                toggle and renders nothing when empty, so empty installs
-                don't show a strip of blank rows. */}
-            <div className="max-lg:landscape:col-span-2">
-              <AffiliatesCarousel />
             </div>
           </div>
 
@@ -589,7 +580,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           throw new Error("Passwords don't match. Please retype them.");
         }
         if (!accepted) {
-          throw new Error("Please accept the disclaimer to register.");
+          throw new Error("Please read and agree to the house rules to register.");
         }
         if (!acceptedAgeMature) {
           throw new Error("Please confirm you are 18+ and understand this site may contain mature content.");
@@ -715,14 +706,15 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
     }
   }
 
-  // Server enforces this too; the gate here is UX. Empty disclaimer text =
-  // nothing to agree to, so we don't block the user behind a meaningless tick.
+  // Registrants must always agree to the house rules (plus the disclaimer when
+  // the admin has set one) — the checkbox is shown in register mode either way.
+  // Server enforces `accepted` too; this is the UX gate.
   const disclaimerText = branding.registerDisclaimerHtml.trim();
-  const needsAcceptance = mode === "register" && disclaimerText !== "";
+  const needsAcceptance = mode === "register";
   const canSubmit = !submitting && (
     mode === "login"
       ? true
-      : (!needsAcceptance || accepted) && acceptedAgeMature && !!captcha && captchaAnswer.trim() !== ""
+      : accepted && acceptedAgeMature && !!captcha && captchaAnswer.trim() !== ""
   );
 
   return (
@@ -865,15 +857,22 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           </div>
         ) : null}
 
-        {needsAcceptance ? (
+        {mode === "register" ? (
           <div className="space-y-2 rounded border border-keep-border/60 bg-keep-bg/40 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-[0.25em] text-keep-muted">
-              before you register
-            </div>
-            <div
-              className="prose prose-sm max-h-48 max-w-none overflow-y-auto pr-1 text-xs text-keep-text/90"
-              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(disclaimerText) }}
-            />
+            {/* Admin-set disclaimer, shown above the agreement checkbox when
+                present. When there's none, the checkbox alone carries the
+                (always-required) house-rules agreement. */}
+            {disclaimerText ? (
+              <>
+                <div className="text-[10px] uppercase tracking-[0.25em] text-keep-muted">
+                  before you register
+                </div>
+                <div
+                  className="prose prose-sm max-h-48 max-w-none overflow-y-auto pr-1 text-xs text-keep-text/90"
+                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(disclaimerText) }}
+                />
+              </>
+            ) : null}
             <label className="flex cursor-pointer items-start gap-2 text-xs">
               <input
                 type="checkbox"
@@ -882,7 +881,19 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
                 className="mt-0.5"
               />
               <span>
-                I have read and accept the disclaimer above and the house rules.
+                I have read and agree to the{" "}
+                {/* stopPropagation so opening the rules to REVIEW them doesn't
+                    also toggle the checkbox via the wrapping label. */}
+                <a
+                  href="/rules"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="underline underline-offset-2 hover:text-keep-action"
+                >
+                  house rules
+                </a>
+                {disclaimerText ? " and the disclaimer above" : ""}.
               </span>
             </label>
           </div>
@@ -965,7 +976,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           disabled={!canSubmit}
           title={
             needsAcceptance && !accepted
-              ? "Tick the box above to confirm you accept the disclaimer."
+              ? "Tick the box to confirm you agree to the house rules."
               : undefined
           }
           className="w-full rounded border border-keep-border bg-keep-panel py-2 text-sm font-semibold tracking-wide hover:bg-keep-panel/80 disabled:opacity-50"
@@ -975,26 +986,6 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             : mode === "login" ? "Log in" : "Register"}
         </button>
 
-        {/* Rules link, register-mode only. Opens the public /rules
-            page in a new tab so the half-filled registration form
-            isn't lost when the visitor wants to read the rules
-            before agreeing to the disclaimer above. The page is
-            served without auth (see App.tsx's onRulesPage branch +
-            server/src/index.ts's apiPrefixes exclusion). */}
-        {mode === "register" ? (
-          <p className="text-center text-[11px] text-keep-muted">
-            By registering you agree to{" "}
-            <a
-              href="/rules"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline underline-offset-2 hover:text-keep-action"
-            >
-              the house rules
-            </a>
-            .
-          </p>
-        ) : null}
       </form>
     </SplashShell>
   );

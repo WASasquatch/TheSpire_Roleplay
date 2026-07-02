@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
 import { useRulesHashHighlight } from "../lib/rulesHashHighlight.js";
+import { useChat } from "../state/store.js";
+import { resolveSplashTheme, themeStyle } from "../lib/theme.js";
 
 interface RulesPayload {
   // The app-wide governing rules. This public page mounts BEFORE auth /
@@ -47,6 +49,10 @@ interface Props {
 export function RulesPage({ onBack }: Props) {
   const [data, setData] = useState<RulesPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Apply the site's splash palette so this standalone public page matches the
+  // rest of the site rather than the flat light :root defaults (keep-* vars are
+  // otherwise unset here — the authed shell never mounts on this route).
+  const branding = useChat((s) => s.branding);
   const rulesRef = useRef<HTMLDivElement>(null);
   // Deep-link highlight (e.g. /rules#3.6) once the rules HTML is injected.
   useRulesHashHighlight(rulesRef, !!data?.appRules?.trim());
@@ -85,7 +91,10 @@ export function RulesPage({ onBack }: Props) {
   };
 
   return (
-    <main className="min-h-screen w-full bg-keep-bg px-4 py-6 text-keep-text md:py-10">
+    <main
+      style={themeStyle(resolveSplashTheme(branding))}
+      className="min-h-screen w-full bg-keep-bg px-4 py-6 text-keep-text md:py-10"
+    >
       <div className="mx-auto flex max-w-3xl flex-col gap-4">
         <header className="flex items-baseline justify-between gap-2 border-b border-keep-border pb-3">
           <h1 className="font-action text-2xl">Rules</h1>

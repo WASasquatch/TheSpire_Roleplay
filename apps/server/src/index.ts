@@ -340,6 +340,32 @@ async function main() {
     recordHttpIp(db, readBearerToken(req), req.ip, req.headers["user-agent"] ?? null);
   });
 
+  // Canonical-domain 301: consolidate the free *.fly.dev hostname onto the
+  // custom domain so search engines don't split ranking across two domains.
+  // OPT-IN via env (`CANONICAL_HOST`, e.g. "thespire.games") — unset ⇒ no-op, so
+  // dev/localhost and any non-configured deploy are byte-identical to before.
+  // Scoped to *.fly.dev hosts only (never localhost, internal fly health-check
+  // hosts, or the canonical host itself) and to safe GET/HEAD navigations, so it
+  // can't loop or break API/POST flows. Low-level 301 + Location to stay
+  // independent of Fastify's version-specific reply.redirect() argument order.
+  const CANONICAL_HOST = (process.env.CANONICAL_HOST ?? "").trim().toLowerCase();
+  if (CANONICAL_HOST) {
+    app.addHook("onRequest", async (req, reply) => {
+      if (req.method !== "GET" && req.method !== "HEAD") return;
+      const host = (
+        (req.headers["x-forwarded-host"] as string | undefined)?.split(",")[0]?.trim()
+        || (req.headers.host as string | undefined)
+        || ""
+      ).toLowerCase();
+      if (host.endsWith(".fly.dev") && host !== CANONICAL_HOST) {
+        return reply
+          .code(301)
+          .header("location", `https://${CANONICAL_HOST}${req.url}`)
+          .send();
+      }
+    });
+  }
+
   // ZodError → 400 with a readable list of issues. Without this, our routes'
   // `schema.parse(req.body)` calls bubble up as 500s.
   app.setErrorHandler((err, _req, reply) => {
@@ -2378,6 +2404,9 @@ async function main() {
       // `/api/faqs*` (under the `/api` apiPrefix) so it doesn't shadow these.
       app.get("/faqs", publicLimit, serveSplash);
       app.get("/faq/:slug", publicLimit, serveSplash);
+      // Public Top Communities board (topsite / webring). Renders the SPA shell
+      // for anyone; the JSON lives at `/affiliates` (its own apiPrefix).
+      app.get("/top-communities", publicLimit, serveSplash);
       // Transactional email landing pages for logged-out visitors: the
       // forgot-password request form, the password-reset form, and the
       // email-verification handler all render the SPA shell so a refresh /
@@ -2425,7 +2454,7 @@ async function main() {
         // SPA route rendering a dedicated rules page. The JSON endpoint
         // moved to `/api/rules` (in the list below) so the SPA shell
         // doesn't shadow it.
-        const apiPrefixes = ["/api", "/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/affiliates", "/worlds", "/me", "/health", "/users", "/site", "/socket.io", "/thesaurus"];
+        const apiPrefixes = ["/api", "/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/affiliates", "/a", "/worlds", "/me", "/health", "/users", "/site", "/socket.io", "/thesaurus"];
         if (apiPrefixes.some((p) => req.url === p || req.url.startsWith(p + "/") || req.url.startsWith(p + "?"))) {
           reply.code(404);
           return reply.send({ error: "not found" });

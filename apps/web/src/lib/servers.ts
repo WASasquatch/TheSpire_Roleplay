@@ -106,6 +106,66 @@ export interface ServerDetail extends ServerSummary {
   createdAt?: number;
 }
 
+/**
+ * A popular community for the public homepage — the minimal shape returned by
+ * GET /servers/popular. `memberCount` reflects the whole registered base for
+ * the system server (The Spire), which is implicit-membership.
+ */
+export interface PopularServer {
+  slug: string;
+  name: string;
+  tagline: string | null;
+  logoUrl: string | null;
+  iconColor: string | null;
+  isSystem: boolean;
+  memberCount: number;
+}
+
+/**
+ * GET /servers/popular — top public communities by membership, for the splash.
+ * Anonymous-safe. Swallows failures (and the flag-off 404) into [] so the
+ * caller renders nothing rather than an error on a cold-start / flag-off site.
+ */
+export async function fetchPopularServers(): Promise<PopularServer[]> {
+  try {
+    const r = await fetch("/servers/popular", { credentials: "include" });
+    if (!r.ok) return [];
+    const j = (await r.json()) as { servers?: PopularServer[] };
+    return j.servers ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Anonymous public-landing data for a community (`GET /servers/public/:slug`) —
+ * the shareable `/s/<slug>` face for logged-out visitors. Only PUBLIC, non-
+ * moderated servers resolve; anything else throws (404 → "not found").
+ */
+export interface PublicServerLanding {
+  slug: string;
+  name: string;
+  tagline: string | null;
+  descriptionHtml: string | null;
+  bannerImageUrl: string | null;
+  bannerFocusY: number;
+  logoUrl: string | null;
+  iconColor: string | null;
+  ownerUsername: string | null;
+  memberCount: number;
+  joinMode: string;
+  isSystem: boolean;
+  createdAt: number;
+  themeJson: string | null;
+  themeStyleKey: string | null;
+}
+
+export async function fetchPublicServer(slug: string): Promise<PublicServerLanding> {
+  const r = await fetch(`/servers/public/${encodeURIComponent(slug)}`, { credentials: "include" });
+  if (!r.ok) throw new Error(r.status === 404 ? "not found" : `Couldn't load this community (${r.status}).`);
+  return (await r.json()) as PublicServerLanding;
+}
+
 /** Pull `{ error }` out of a non-OK response, falling back to the status. */
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   const j = (await r.json().catch(() => null)) as ({ error?: string } & T) | null;

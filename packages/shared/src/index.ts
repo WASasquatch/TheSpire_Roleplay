@@ -38,3 +38,4 @@ export * from "./poll.js";
 export * from "./dynamicCheck.js";
 export * from "./tags.js";
 export * from "./notifications.js";
+export * from "./affiliate.js";

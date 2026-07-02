@@ -11,7 +11,7 @@ import {
 import { legibleAgainstBg, type RoomOccupant, type RoomSummary, type Theme } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
 import { useChat } from "../state/store.js";
-import { Landmark, Plus } from "lucide-react";
+import { Clapperboard, Landmark, MessagesSquare, Plus, ScrollText } from "lucide-react";
 import { AdminIcon, CharacterMaskIcon, MasterAdminIcon, ModIcon } from "./StaffIcons.js";
 import { CreateRoomModal } from "./CreateRoomModal.js";
 import { ToolPanel } from "./ToolPanel.js";
@@ -464,6 +464,10 @@ function RoomGroup({
   // background to read. The rail container uses `bg-keep-bg`, so we
   // contrast each icon's slot color against `theme.bg`.
   const theme = useActiveTheme();
+  // Site name for the "<site> Owner" role badge (keeps the top site role
+  // distinct from a community-server owner). Reactive so a branding rename
+  // repaints the crowns.
+  const siteName = useChat((s) => s.branding.siteName);
 
   return (
     <li
@@ -479,39 +483,37 @@ function RoomGroup({
         }`}
       >
         <span className="truncate">
-          {/* Room-shape glyph. Flat rooms behave like ephemeral chats;
-              nested rooms persist their conversations as threaded
-              replies (forum-style) so newcomers know which mode the
-              room is in before they enter. */}
-          {/* Room-mode glyph. PNG icons (board.png / scroll.png) replace
-              the emoji equivalents (🧵 / 💬) per the Earning asset
-              pack so the rail reads consistently across platforms
-              regardless of OS emoji font. */}
-          {room.replyMode === "nested" ? (
-            <img
-              src="/assets/icons/board.png"
-              alt=""
-              aria-hidden
-              title="threaded conversations, replies persist as forum-style threads"
-              className="mr-1 inline-block shrink-0 select-none align-middle"
-              // em-sized so the icon scales with the rail's fontSize
-              // (driven by the Tools-menu font-step setting). 1.4em is
-              // a tad larger than the room-name's cap-height so the
-              // icon reads as a label glyph at every step.
-              style={{ minWidth: "1.4em", minHeight: "1.4em", width: "1.4em", height: "1.4em" }}
-              draggable={false}
-            />
-          ) : (
-            <img
-              src="/assets/icons/scroll.png"
-              alt=""
-              aria-hidden
-              title="flat chat, chronological, ephemeral feel"
-              className="mr-1 inline-block shrink-0 select-none align-middle"
-              style={{ minWidth: "1.4em", minHeight: "1.4em", width: "1.4em", height: "1.4em" }}
-              draggable={false}
-            />
-          )}
+          {/* Room-mode glyph (lucide, `currentColor` — lighter than the old
+              board.png / scroll.png). A room in Theater Mode shows a
+              clapperboard so the rail flags the watch-party at a glance;
+              otherwise threaded (nested, forum-style) vs flat (chronological,
+              ephemeral). em-sized so it scales with the Tools-menu font step. */}
+          {(() => {
+            const glyphStyle: CSSProperties = { width: "1.4em", height: "1.4em" };
+            if (room.theaterMode) {
+              return (
+                <span
+                  title="theater mode: a shared video plays above the chat"
+                  className="mr-1 inline-flex shrink-0 align-middle text-keep-accent"
+                >
+                  <Clapperboard aria-hidden style={glyphStyle} />
+                </span>
+              );
+            }
+            const nested = room.replyMode === "nested";
+            const Icon = nested ? MessagesSquare : ScrollText;
+            const title = nested
+              ? "threaded conversations, replies persist as forum-style threads"
+              : "flat chat, chronological, ephemeral feel";
+            return (
+              <span
+                title={title}
+                className="mr-1 inline-flex shrink-0 align-middle text-keep-muted"
+              >
+                <Icon aria-hidden style={glyphStyle} />
+              </span>
+            );
+          })()}
           {isPrivate ? <span title="private - password required" className="mr-1">🔒</span> : null}
           {room.name}
         </span>
@@ -526,7 +528,7 @@ function RoomGroup({
             // characters in two tabs renders as two occupant rows
             // (one per identity). Keying on userId alone would
             // dup-React-key in that case.
-            const chip = resolveStaffChip(o, theme);
+            const chip = resolveStaffChip(o, theme, siteName);
             return (
                     <li
                       key={`${o.userId}:${o.characterId ?? ""}`}
@@ -717,7 +719,7 @@ interface StaffChip {
  * so a custom palette that happens to pick a slot color too close to
  * the bg gets nudged toward legibility before the icon paints.
  */
-function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
+function resolveStaffChip(o: RoomOccupant, theme: Theme, siteName: string): StaffChip | null {
   // SITE-staff badges (masteradmin / admin / site-mod) are suppressed
   // on character rows so an admin/mod can RP without the public
   // signaling "this character belongs to staff." The OOC ↔ character
@@ -759,19 +761,19 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
 
   if (o.accountRole === "masteradmin") {
     return {
-      label: "Master admin",
+      label: `${siteName} Owner`,
       Icon: MasterAdminIcon,
       color: legibleAgainstBg(theme.accent, theme.bg),
       title:
-        "Master admin, site-wide authority including settings, branding, and account management.",
+        `${siteName} Owner, site-wide authority including settings, branding, and account management.`,
     };
   }
   if (o.accountRole === "admin") {
     return {
-      label: "Admin",
+      label: `${siteName} Admin`,
       Icon: AdminIcon,
       color: legibleAgainstBg(theme.action, theme.bg),
-      title: "Site admin, site-wide moderation across every room.",
+      title: `${siteName} Admin, site-wide moderation across every room.`,
     };
   }
   // Site-mod beats per-room badges in label / tooltip if both apply
@@ -782,7 +784,7 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
     return {
       label:
         isSiteMod
-          ? "Global Moderator"
+          ? `${siteName} Moderator`
           : o.role === "owner"
           ? "Room owner"
           : "Room Mod",
@@ -790,7 +792,7 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme): StaffChip | null {
       color: legibleAgainstBg(theme.system, theme.bg),
       title:
         isSiteMod
-          ? "Global Moderator, moderation across every room."
+          ? `${siteName} Moderator, moderation across every room.`
           : o.role === "owner"
           ? "Room owner, moderation authority in this room."
           : "Room Mod, moderation authority in this room.",

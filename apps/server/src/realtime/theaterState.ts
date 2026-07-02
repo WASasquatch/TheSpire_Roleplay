@@ -44,6 +44,16 @@ export type TheaterAction = "play" | "pause" | "seek" | "next" | "prev" | "selec
 
 const ENDED_DEBOUNCE_MS = 2000;
 
+// Max distance (sec) a `progress` heartbeat may move the anchor from the
+// current EXTRAPOLATED position. A genuine drift correction from the active
+// controller is only a few seconds of buffer creep per ~10s beat; a just-joined
+// or still-buffering session reports a position far from the shared timeline
+// (usually well behind it). Ignoring large jumps stops another browser/session
+// from yanking everyone's playback back — deliberate repositioning is a `seek`,
+// which is always honored. (Matches: "once playing, sync shouldn't change
+// because someone opened the room in another browser, only on a manual seek.")
+const PROGRESS_REANCHOR_MAX_JUMP_SEC = 30;
+
 const byRoom = new Map<string, TheaterState>();
 
 function defaultState(now: number): TheaterState {
@@ -245,7 +255,16 @@ export function applyControl(
       // source that's already been advanced past.
       if (opts.index !== undefined && opts.index !== prev.index) break;
       if (opts.positionSec === undefined) break;
-      next.positionSec = Math.max(0, opts.positionSec);
+      const reported = Math.max(0, opts.positionSec);
+      // Only accept a SMALL correction near where the timeline actually is
+      // right now. A far-off report is a just-joined / buffering session that
+      // hasn't caught up to the shared position; honoring it re-anchors (often
+      // backward) and yanks every other viewer, which froze the seek bar and
+      // bounced playback back on a second browser opening. Large intentional
+      // moves come through `seek`, not the passive heartbeat.
+      const expected = Math.max(0, livePosition(prev, now));
+      if (Math.abs(reported - expected) > PROGRESS_REANCHOR_MAX_JUMP_SEC) break;
+      next.positionSec = reported;
       next.updatedAtMs = now;
       break;
     }

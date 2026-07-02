@@ -761,7 +761,7 @@ export async function registerUsersRoutes(
     // No catalog key, putting it on the matrix would let a misclick
     // strand the install with no top-tier authority.
     if ((body.role === "masteradmin" || target.role === "masteradmin") && !canTouchMasteradminTier) {
-      reply.code(403); return { error: "master admin only: changing the masteradmin role" };
+      reply.code(403); return { error: "owner only: changing the owner role" };
     }
     // Role-hierarchy gate. The granular `edit_user_basic` key makes
     // the endpoint callable, but the actor still can't grant a role
@@ -1063,7 +1063,7 @@ export async function registerUsersRoutes(
    */
   app.patch<{ Params: { id: string }; Body: unknown }>("/admin/users/:id/password", async (req, reply) => {
     const me = await getSessionUser(req, db);
-    if (!me || !(await hasPermission(me, "reset_user_password", db))) { reply.code(403); return { error: "master admin only" }; }
+    if (!me || !(await hasPermission(me, "reset_user_password", db))) { reply.code(403); return { error: "owner only" }; }
     const { id } = req.params;
     const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];
     if (!target || target.username === "system") { reply.code(404); return { error: "not found" }; }
@@ -1103,7 +1103,7 @@ export async function registerUsersRoutes(
     const me = await getSessionUser(req, db);
     // Master-only by default: hard-deleting a user cascades through every FK and
     // is the most destructive single-row action in the system.
-    if (!me || !(await hasPermission(me, "hard_delete_user", db))) { reply.code(403); return { error: "master admin only" }; }
+    if (!me || !(await hasPermission(me, "hard_delete_user", db))) { reply.code(403); return { error: "owner only" }; }
     const { id } = req.params;
     if (id === me.id) { reply.code(400); return { error: "you cannot delete your own account" }; }
     const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];

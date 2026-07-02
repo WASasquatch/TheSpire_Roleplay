@@ -15,6 +15,7 @@ import {
   Image as ImageIcon,
   Italic,
   Link as LinkIcon,
+  MessagesSquare,
   Palette,
   Quote,
   Strikethrough,
@@ -1667,9 +1668,9 @@ export function Composer({
           it only renders for the legacy / flat case. */}
       {!isForumRoom && showCategoryPicker ? (
         <label className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
-          {/* board.png replaces the 🧵 sewing-thread emoji for forum/
-              thread affordances per the Earning asset pack. */}
-          <img src="/assets/icons/board.png" alt="" aria-hidden className="h-3.5 w-3.5 select-none" draggable={false} />
+          {/* Threaded-conversation glyph (lucide, currentColor — replaces the
+              old board.png). */}
+          <MessagesSquare aria-hidden className="h-3.5 w-3.5 shrink-0" />
           <span>Thread:</span>
           <select
             value={effectiveCategoryId ?? ""}

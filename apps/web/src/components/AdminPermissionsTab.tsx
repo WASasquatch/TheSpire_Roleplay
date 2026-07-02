@@ -52,7 +52,7 @@ const ROLE_LABEL: Record<Role, string> = {
   // local role and never appears in this account-role matrix.
   mod: "Global Moderator",
   admin: "Admin",
-  masteradmin: "Masteradmin",
+  masteradmin: "Owner",
 };
 
 const GROUP_LABEL: Record<PermissionGroup, string> = {
@@ -256,6 +256,18 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Site-prefixed labels for the staff columns so the SITE-wide roles aren't
+  // read as a community server's own owner/admin/mods. Role keys are unchanged.
+  const siteName = useChat((s) => s.branding.siteName);
+  const ownerLabel = `${siteName} Owner`;
+  const siteRoleLabel = (r: Role): string =>
+    r === "masteradmin"
+      ? ownerLabel
+      : r === "admin"
+      ? `${siteName} Admin`
+      : r === "mod"
+      ? `${siteName} Moderator`
+      : ROLE_LABEL[r];
 
   useEffect(() => {
     let cancelled = false;
@@ -365,9 +377,9 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
                 <th
                   key={role}
                   className="px-2 py-1 text-center"
-                  title={role === "masteradmin" ? "Masteradmin holds every permission by definition." : undefined}
+                  title={role === "masteradmin" ? `${ownerLabel} holds every permission by definition.` : undefined}
                 >
-                  {ROLE_LABEL[role]}
+                  {siteRoleLabel(role)}
                   {role === "masteradmin" ? (
                     <span className="ml-1 text-[10px] uppercase tracking-widest text-keep-muted">(locked)</span>
                   ) : null}
@@ -393,7 +405,7 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
       </div>
 
       <p className="text-[11px] italic text-keep-muted">
-        Masteradmin row is locked-on by definition, the bypass is hardcoded in the
+        Owner row is locked-on by definition, the bypass is hardcoded in the
         server. Toggling any cell takes effect immediately; affected users see the new
         permissions on their next /auth/me poll (within 60 seconds, no re-login).
         Click the <span className="not-italic">log</span> button next to a permission
@@ -776,7 +788,7 @@ function UserOverridesEditor({
       </header>
       {isSelf ? (
         <p className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
-          You cannot edit your own overrides. Use a different masteradmin account.
+          You cannot edit your own overrides. Use a different owner account.
         </p>
       ) : null}
       <div className="space-y-2">
@@ -1164,7 +1176,7 @@ function DiagnosticsPanel() {
         <div>
           <h4 className="font-action text-sm">Integrity check</h4>
           <p className="text-keep-muted">
-            Runs every safety invariant (resolver precedence, masteradmin-only key leaks,
+            Runs every safety invariant (resolver precedence, owner-only key leaks,
             orphan catalog keys, fallback engagement) against the live cache.
           </p>
         </div>
@@ -1419,13 +1431,13 @@ function SensitiveGrantsAdvisory() {
       {pivot ? (
         <div className="mt-3 space-y-3">
           <p className="rounded border border-keep-rule/60 bg-keep-bg/40 p-2 text-[11px] text-keep-muted">
-            <span className="font-action text-keep-fg">Masteradmin</span> holds every permission by
+            <span className="font-action text-keep-fg">Owner</span> holds every permission by
             bypass, including all keys listed below, and is not enumerated here.
           </p>
 
           {pivot.byRole.length === 0 && pivot.byUser.length === 0 ? (
             <p className="italic text-keep-muted">
-              No role or user currently holds any sensitive key. Only masteradmin has them.
+              No role or user currently holds any sensitive key. Only owners have them.
             </p>
           ) : null}
 

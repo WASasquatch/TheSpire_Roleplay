@@ -11,6 +11,7 @@ import {
   normalizeFaqSlug,
 } from "@thekeep/shared";
 import { faqs } from "../db/schema.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { sanitizeBio } from "../auth/html.js";
@@ -111,6 +112,10 @@ export async function registerAdminFaqRoutes(
       sortOrder: body.sortOrder ?? 0,
       enabled: body.enabled ?? true,
       createdByUserId: me.id,
+      // The global FAQ admin manages the PLATFORM FAQ; scope it to the default
+      // server so the public /faqs read (which filters to DEFAULT_SERVER_ID)
+      // shows it. Per-server FAQs are created via the per-server admin.
+      serverId: DEFAULT_SERVER_ID,
     });
     await recordAudit(db, { actorUserId: me.id, action: "faq_create", metadata: { id, slug } });
     return { id, slug };

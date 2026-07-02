@@ -241,7 +241,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   manage_custom_commands: "Create, edit, or delete admin-authored `!cmd` commands.",
   manage_title_kinds: "Manage the mutual-title catalog (marriage, partner, etc.).",
   manage_nav_links: "Manage the banner-navigation link rows.",
-  manage_affiliates: "Create, edit, or delete partner / sponsor / affiliate entries on the splash.",
+  manage_affiliates: "Create, edit, approve, or delete Top RP Communities listings shown on the splash.",
   edit_branding: "Edit branding fields: site name + URL, banner cover CSS, logo color/font/URL, splash welcome HTML, SEO meta description, custom head HTML, and the theme-design map.",
 
   // content_admin
@@ -281,7 +281,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   view_admin_settings: "See the admin Site Settings tab.",
   view_admin_branding: "See the admin Branding tab.",
   view_admin_rules: "See the admin Rules tab.",
-  view_admin_affiliates: "See the admin Affiliates tab.",
+  view_admin_affiliates: "See the admin Top Communities tab.",
   view_admin_scriptorium: "See the admin Scriptorium tab.",
   view_admin_forums: "See the admin Forums tab (forum-creation queue + forum oversight).",
   view_admin_servers: "See the admin Servers tab (server-creation queue + server oversight).",

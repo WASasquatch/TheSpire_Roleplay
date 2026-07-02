@@ -4,6 +4,7 @@ import type { FaqEntry } from "@thekeep/shared";
 import type { FaqRoute } from "../lib/faqUrl.js";
 import { navigateAwayFromFaq } from "../lib/faqUrl.js";
 import { useChat } from "../state/store.js";
+import { resolveSplashTheme, themeStyle } from "../lib/theme.js";
 
 /** `?serverId=<active server>` so the FAQ shows THIS server's entries; empty
  *  when there's no active server (a logged-out / shared link), where the backend
@@ -26,13 +27,20 @@ export function FaqPage({ route }: { route: FaqRoute }) {
 }
 
 function Shell({ title, children }: { title: string; children: React.ReactNode }) {
+  // Apply the site's splash palette so this standalone public page matches the
+  // rest of the site instead of the flat light :root defaults (keep-* vars are
+  // otherwise unset on this route, since the authed shell never mounts here).
+  const branding = useChat((s) => s.branding);
   useEffect(() => {
     const previous = document.title;
     document.title = title;
     return () => { document.title = previous; };
   }, [title]);
   return (
-    <main className="min-h-screen w-full bg-keep-bg px-4 py-6 text-keep-text md:py-10">
+    <main
+      style={themeStyle(resolveSplashTheme(branding))}
+      className="min-h-screen w-full bg-keep-bg px-4 py-6 text-keep-text md:py-10"
+    >
       <div className="mx-auto flex max-w-3xl flex-col gap-4">
         <header className="flex items-baseline justify-between gap-2 border-b border-keep-border pb-3">
           <h1 className="font-action text-2xl">{title}</h1>

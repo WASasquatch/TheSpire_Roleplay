@@ -3679,6 +3679,26 @@ aside.margin-note {
 }
 
 /* ============================================================
+ * Splash section flash (SplashNav anchor jump target)
+ * ============================================================
+ * When a splash tab scrolls to a section, we briefly pulse an accent
+ * ring + glow around that section so it's obvious where you landed
+ * (especially on a long mobile page). The target keeps its own
+ * border-radius, so the ring hugs the panel. Under reduce-motion the
+ * pulse is replaced by a plain static ring that clears on the same
+ * JS timeout. */
+@keyframes splash-flash-kf {
+  0%   { box-shadow: 0 0 0 0 rgb(var(--keep-action) / 0); }
+  18%  { box-shadow: 0 0 0 3px rgb(var(--keep-action) / 0.6), 0 0 30px 3px rgb(var(--keep-action) / 0.35); }
+  100% { box-shadow: 0 0 0 0 rgb(var(--keep-action) / 0); }
+}
+.splash-flash { animation: splash-flash-kf 1.6s ease-out; }
+html.reduce-motion .splash-flash { animation: none; box-shadow: 0 0 0 3px rgb(var(--keep-action) / 0.5); }
+@media (prefers-reduced-motion: reduce) {
+  .splash-flash { animation: none; box-shadow: 0 0 0 3px rgb(var(--keep-action) / 0.5); }
+}
+
+/* ============================================================
  * Splash bookshelf, antique 3D pull-out volumes (BookshelfStrip)
  * ============================================================
  * The shelf chrome (wood, brass, vignette) reads as a constant
@@ -4264,18 +4284,24 @@ aside.margin-note {
   z-index: 50;
   outline: none;
 }
-/* Pan the outermost books toward center while drawn so their (wide) cover
- * lands fully in the frame instead of off the edge. Applied to the INNER 3D
- * book (the pull transform), NOT the button — the button's hit area must stay
- * put, or the pan slides it out from under the cursor and `:hover` flickers.
- * Magnitude scales with cover depth (--d) so it tracks the per-breakpoint
- * book size. */
+/* Nudge the outermost books toward center while drawn so their (wide) cover
+ * clears the shelf frame instead of clipping off the edge.
+ *
+ * The pan lives on the INNER 3D book, not the button, so the button's layout box
+ * stays put. But the DRAWN book is what the cursor chases, and its projected
+ * cover receives the pointer (bubbling to the button). If the pan is large the
+ * drawn book lands a full slot-and-a-half inward, on top of the NEIGHBOUR's
+ * button — so the moment the cursor moves to follow the cover it hovers the
+ * neighbour instead, this book loses `:hover`, and it re-shelves (the flicker).
+ * Keep the pan small enough that the drawn book stays over its own slot: middle
+ * books draw at net translateX -0.5·--w and never flicker, so a comparable
+ * magnitude here is safe. (Trades a sliver of edge-clip for a stable hover.) */
 .bookshelf-book[data-edge="r"]:hover,
 .bookshelf-book[data-edge="r"]:focus-visible,
-.bookshelf-book[data-edge="r"][data-pulled="true"] { --pan-x: calc(var(--d) * -0.5); }
+.bookshelf-book[data-edge="r"][data-pulled="true"] { --pan-x: calc(var(--d) * -0.22); }
 .bookshelf-book[data-edge="l"]:hover,
 .bookshelf-book[data-edge="l"]:focus-visible,
-.bookshelf-book[data-edge="l"][data-pulled="true"] { --pan-x: calc(var(--d) * 0.5); }
+.bookshelf-book[data-edge="l"][data-pulled="true"] { --pan-x: calc(var(--d) * 0.22); }
 .bookshelf-book:hover .book-3d,
 .bookshelf-book:focus-visible .book-3d,
 .bookshelf-book[data-pulled="true"] .book-3d {

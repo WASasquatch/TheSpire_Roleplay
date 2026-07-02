@@ -44,7 +44,7 @@ type IconProps = SVGProps<SVGSVGElement> & {
  * three paths with `currentColor`.
  */
 export function MasterAdminIcon({
-  title = "Master admin",
+  title = "Owner",
   ...rest
 }: IconProps): JSX.Element {
   return (

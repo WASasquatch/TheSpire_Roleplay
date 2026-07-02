@@ -3191,7 +3191,7 @@ function TestGrantsSection() {
           Quick path to preview ranks, borders, and styles in chat /
           userlist / profile without grinding XP. Every grant goes
           through the live engine (ledger + socket events), so the
-          recipient's dashboard updates immediately. Master admin only.
+          recipient's dashboard updates immediately. Owner only.
         </p>
       </header>
 

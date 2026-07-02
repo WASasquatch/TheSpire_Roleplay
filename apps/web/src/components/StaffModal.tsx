@@ -5,6 +5,7 @@ import { CloseButton } from "./CloseButton.js";
 import { BorderedAvatar } from "./BorderedAvatar.js";
 import { StyledName } from "./StyledName.js";
 import { readError } from "../lib/http.js";
+import { useChat } from "../state/store.js";
 
 /** One staff member's card, as returned by GET /staff. */
 interface StaffCard {
@@ -27,8 +28,15 @@ const MAX_BIO = 120;
 const MAX_INTRO = 256;
 
 /** Friendly label + theme color slot per staff role. */
-function roleLabel(role: Role): string {
-  return role === "masteradmin" ? "Master Admin" : role === "admin" ? "Admin" : "Moderator";
+function roleLabel(role: Role, siteName: string): string {
+  // Site-wide staff read as "<site> Owner/Admin/Moderator" (e.g. "The Spire
+  // Admin") so they're not mistaken for a community server's own owner/staff.
+  // The role KEYS (masteradmin/admin/mod) are unchanged.
+  return role === "masteradmin"
+    ? `${siteName} Owner`
+    : role === "admin"
+    ? `${siteName} Admin`
+    : `${siteName} Moderator`;
 }
 function roleClasses(role: Role): string {
   // Tiered tint so the hierarchy reads at a glance: accent (warmest)
@@ -143,6 +151,7 @@ function StaffCardView({
   onSaved: (bio: string | null, intro: string | null) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  const siteName = useChat((s) => s.branding.siteName);
 
   return (
     <div className="keep-frame flex h-full flex-col items-center rounded border border-keep-rule bg-keep-panel/40 p-4 text-center">
@@ -150,7 +159,7 @@ function StaffCardView({
       <span
         className={`mb-3 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${roleClasses(card.role)}`}
       >
-        {roleLabel(card.role)}
+        {roleLabel(card.role, siteName)}
       </span>
 
       <BorderedAvatar

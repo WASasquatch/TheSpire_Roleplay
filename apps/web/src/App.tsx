@@ -31,6 +31,7 @@ import { RulesModal } from "./components/RulesModal.js";
 import { RulesPage } from "./components/RulesPage.js";
 import { isRulesUrl, navigateAwayFromRules } from "./lib/rulesUrl.js";
 import { FaqPage } from "./components/FaqPage.js";
+import { TopCommunitiesPage, isTopCommunitiesUrl, consumeAddCommunityIntent } from "./components/TopCommunitiesPage.js";
 import { faqRoute, type FaqRoute } from "./lib/faqUrl.js";
 import { EarningDashboard } from "./components/EarningDashboard.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -59,9 +60,11 @@ import { WorldEditorModal } from "./components/WorldEditorModal.js";
 import { WorldViewerModal } from "./components/WorldViewerModal.js";
 import { WorldsListModal } from "./components/WorldsListModal.js";
 import { StaffModal } from "./components/StaffModal.js";
+import { AffiliateSubmitPortal } from "./components/AffiliateSubmitPortal.js";
 import { StoryCatalogModal } from "./components/StoryCatalogModal.js";
 import { ForumsCatalogModal } from "./components/ForumsCatalogModal.js";
 import { ForumPublicLanding, readReturnForum, RETURN_FORUM_STORAGE_KEY } from "./components/ForumPublicLanding.js";
+import { ServerPublicLanding, readReturnServer, RETURN_SERVER_STORAGE_KEY } from "./components/ServerPublicLanding.js";
 import { fetchForumNotifications, locateForumTopic } from "./lib/forums.js";
 import { fetchNotifBadge } from "./lib/notificationCenter.js";
 import { NotificationCenter } from "./components/NotificationCenter.js";
@@ -429,6 +432,14 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  // Public /top-communities topsite board. Same pre-auth early-return pattern.
+  const [onTopCommunities, setOnTopCommunities] = useState<boolean>(() => isTopCommunitiesUrl());
+  useEffect(() => {
+    const onPop = () => setOnTopCommunities(isTopCommunitiesUrl());
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
   // Mount-time fetch for the deep-link target. Uses HTTP (works whether the
   // viewer is authed or not) so the AuthGate can decide what banner to show
   // before any session is established.
@@ -647,6 +658,13 @@ export function App() {
     return <FaqPage route={faqPage} />;
   }
 
+  // Public Top Communities board (/top-communities). Renders regardless of auth;
+  // "Add Your Site" navigates to registration or into the app (firing popstate,
+  // which resets this state) and opens the Add-Your-Community modal on entry.
+  if (onTopCommunities) {
+    return <TopCommunitiesPage />;
+  }
+
   // Deep-link still resolving, show the standalone shell with a loading
   // indicator so authed users don't see Chat flash for ~100ms before the
   // modal pops in. Without this, the render between auth-check completion
@@ -803,6 +821,7 @@ function UnauthRouter(props: {
   // "this profile is private, sign in to view" banner regardless of
   // which URL slot they happen to be on.
   const hasDeepLinkHint = !!(props.pendingProfileHint || props.pendingWorldHint);
+  const serversEnabled = useChat((s) => s.branding.serversEnabled);
 
   // Scriptorium public surfaces, render the catalog / reader inside
   // the standalone PublicViewerShell so anonymous visitors can browse
@@ -856,6 +875,21 @@ function UnauthRouter(props: {
             initialPostId={anonPost ?? null}
             onNavigate={navigate}
           />
+        </PublicViewerShell>
+      );
+    }
+  }
+
+  // Community landing (/s/<slug>): the shareable public face of a hosted
+  // community. Logged-out visitors get the branded page + login/register
+  // entrance; signed-in visitors enter the server directly (handled in App).
+  // Gated on the servers flag; server slugs use hyphens (vs forum underscores).
+  if (!hasDeepLinkHint && serversEnabled) {
+    const sm = /^\/s\/([a-z0-9-]{3,40})\/?$/.exec(path);
+    if (sm?.[1]) {
+      return (
+        <PublicViewerShell isAuthenticated={false}>
+          <ServerPublicLanding slug={sm[1]} onNavigate={navigate} />
         </PublicViewerShell>
       );
     }
@@ -1205,6 +1239,17 @@ function Chat() {
   const [pendingWorldApplicationId, setPendingWorldApplicationId] = useState<string | null>(null);
   const [worldCatalogOpen, setWorldCatalogOpen] = useState(false);
   const [staffOpen, setStaffOpen] = useState(false);
+  // Roleplay Communities (Affiliates v2) self-service portal. Logged-in members
+  // reopen it from the nav to manage their listings and copy their link-backs
+  // without hunting the splash CTA. The portal owns its own inner state; this is
+  // just the open/close latch.
+  const [affiliatesOpen, setAffiliatesOpen] = useState<null | "list" | "add">(null);
+  // Honor the "Add Your Site" intent set on the public /top-communities page:
+  // when the member lands in the app (fresh sign-in or already signed in) with
+  // the flag set, open the modal straight to the Add-Your-Community form.
+  useEffect(() => {
+    if (consumeAddCommunityIntent()) setAffiliatesOpen("add");
+  }, []);
   // Scriptorium catalog state. Object → open; null → closed. The
   // optional `tab` lets `/scriptorium my` etc. land on a specific tab.
   const [scriptoriumOpen, setScriptoriumOpen] = useState<{ tab?: "find" | "my" | "reading" | "following" } | null>(null);
@@ -1268,8 +1313,17 @@ function Chat() {
     if (serverDeepLinkDone.current || !serversEnabled) return;
     const m = /^\/s\/([a-z0-9-]{3,40})\/?$/.exec(window.location.pathname);
     serverDeepLinkDone.current = true;
-    if (!m) return;
-    void resolveServerSlug(m[1]!)
+    let slug = m?.[1] ?? null;
+    if (!slug) {
+      // Consume the return key the public /s/ landing stored before its
+      // login/register round-trip, so the visitor lands in the community.
+      try {
+        const pending = readReturnServer();
+        if (pending) { slug = pending.slug; window.localStorage.removeItem(RETURN_SERVER_STORAGE_KEY); }
+      } catch { /* private mode */ }
+    }
+    if (!slug) return;
+    void resolveServerSlug(slug)
       .then((s) => {
         if (s) void enterServerById(s.id, s.name);
         else setNotice({ code: "SERVER_LINK", message: "That server link is private or no longer exists." });
@@ -4007,6 +4061,7 @@ function Chat() {
         onOpenWorlds={() => setWorldCatalogOpen(true)}
         onOpenArcade={() => setArcadeOpen(true)}
         onOpenStaff={() => setStaffOpen(true)}
+        onOpenAffiliates={() => setAffiliatesOpen("list")}
         serverBrand={serverBrand}
         notificationBell={
           <NotificationCenter
@@ -4771,6 +4826,15 @@ function Chat() {
             setStaffOpen(false);
             openDmWithUser(userId, null);
           }}
+        />
+      ) : null}
+      {affiliatesOpen ? (
+        // Top RP Communities portal. Self-contained: the board (list view) plus
+        // the Add-Your-Community form + "my submissions" for signed-in members
+        // (a log-in prompt otherwise), so it's safe to mount without an `me` gate.
+        <AffiliateSubmitPortal
+          onClose={() => setAffiliatesOpen(null)}
+          initialView={affiliatesOpen}
         />
       ) : null}
       {worldEditorId ? (

@@ -554,7 +554,7 @@ export const demoteAdminCommand: CommandHandler = {
     // demoted via the admin panel by another master, since /demoteadmin
     // has no way to ask "demote to admin" vs "demote to user" anyway.
     if (target.role === "masteradmin") {
-      return notice(ctx, "NOT_ADMIN", `${target.username} is a master admin - demote via the admin panel.`);
+      return notice(ctx, "NOT_ADMIN", `${target.username} is an owner - demote via the admin panel.`);
     }
     if (target.role !== "admin") return notice(ctx, "NOT_ADMIN", `${target.username} isn't a site admin.`);
     if (await isKeymaster(ctx, target.id)) {

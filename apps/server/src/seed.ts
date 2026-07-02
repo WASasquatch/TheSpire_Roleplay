@@ -1,9 +1,11 @@
-import { and, eq, inArray, lt, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
+import { markdownToHtml, DEFAULT_FAQS } from "@thekeep/shared";
 import {
   emoticonSheets,
+  faqs,
   forums,
   messages,
   rooms,
@@ -108,6 +110,54 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
 
   const skipDefaults = /^(1|true|yes)$/i.test(process.env.SKIP_DEFAULT_SEED ?? "");
   if (!skipDefaults) {
+    // FAQs are PER-SERVER (migration 0278f: faqs.server_id) and the public read
+    // (routes/faqs.ts) scopes to DEFAULT_SERVER_ID. Any FAQ with a NULL serverId
+    // — the pre-per-server seed, or a global-admin create that didn't set it — is
+    // therefore INVISIBLE on /faqs. So we adopt those onto the default (platform)
+    // server and seed the starter set scoped to it. `faqs.server_id` FKs to
+    // servers(id) with foreign_keys=ON, and the default server row only exists
+    // once migration 0279 / ensureSystemServer has run (needs a real admin), so
+    // gate the whole thing on that row existing — a truly fresh install defers to
+    // a later boot rather than tripping the FK.
+    const defaultServerRow = (await db
+      .select({ id: servers.id })
+      .from(servers)
+      .where(eq(servers.id, DEFAULT_SERVER_ID))
+      .limit(1))[0];
+    if (defaultServerRow) {
+      // Adopt orphaned platform FAQs onto the default server (idempotent: only
+      // touches NULL rows) so already-seeded / admin-created ones become visible.
+      await db.update(faqs).set({ serverId: DEFAULT_SERVER_ID }).where(isNull(faqs.serverId));
+
+      // Seed the starter set ONLY when the default server has none yet (scoped
+      // so a per-server FAQ elsewhere doesn't suppress the platform seed), so a
+      // fresh install ships real /faqs content (and the splash FAQ has a matching
+      // basis) while any admin edit/reorder/delete is never clobbered on later
+      // boots. Markdown → sanitized HTML mirrors the FAQ admin route.
+      const hasDefaultFaq = (await db
+        .select({ id: faqs.id })
+        .from(faqs)
+        .where(eq(faqs.serverId, DEFAULT_SERVER_ID))
+        .limit(1))[0];
+      if (!hasDefaultFaq) {
+        let faqOrder = 0;
+        for (const def of DEFAULT_FAQS) {
+          await db.insert(faqs).values({
+            id: nanoid(),
+            slug: def.slug,
+            question: def.question,
+            answerMarkdown: def.answerMarkdown,
+            answerHtml: sanitizeBio(markdownToHtml(def.answerMarkdown)),
+            category: def.category,
+            sortOrder: faqOrder++,
+            enabled: true,
+            createdByUserId: "system",
+            serverId: DEFAULT_SERVER_ID,
+          }).onConflictDoNothing();
+        }
+      }
+    }
+
     // One-time migration: existing installs were seeded with a room called
     // "MainHall" before The Spire became the canonical landing. If it still
     // exists as a system room, rename it in place so message history,

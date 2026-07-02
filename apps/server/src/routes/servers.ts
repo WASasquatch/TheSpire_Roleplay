@@ -533,6 +533,65 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     return { popular, new: fresh };
   });
 
+  /** GET /servers/popular — anonymous, lightweight "popular communities" list
+   *  for the public homepage (no auth, no viewer context). Same discoverable
+   *  filter as /discover (public, non-archived, non-moderated), ranked by member
+   *  count. The system server (The Spire) is implicit-membership — everyone's a
+   *  member without a `server_members` row — so its explicit count is ~1; we
+   *  substitute the total registered-user count for it, so The Spire surfaces as
+   *  the flagship community instead of ranking near-empty. Minimal shape; capped
+   *  at 8. Gated on the servers flag like the rest of discovery. */
+  app.get("/servers/popular", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const rows = await db
+      .select({
+        id: servers.id,
+        slug: servers.slug,
+        name: servers.name,
+        tagline: servers.tagline,
+        logoUrl: servers.logoUrl,
+        iconColor: servers.iconColor,
+        isSystem: servers.isSystem,
+      })
+      .from(servers)
+      .where(discoverableWhere);
+    if (!rows.length) return { servers: [] };
+
+    const ids = rows.map((r) => r.id);
+    const memberCountBy = new Map<string, number>();
+    const counts = await db
+      .select({ serverId: serverMembers.serverId, n: sql<number>`count(*)` })
+      .from(serverMembers)
+      .where(inArray(serverMembers.serverId, ids))
+      .groupBy(serverMembers.serverId);
+    for (const c of counts) memberCountBy.set(c.serverId, Number(c.n));
+
+    // Only pay for the total-users count when a system server is actually in the
+    // list (it always is on a normal install, but the query stays honest if not).
+    let totalRegistered = 0;
+    if (rows.some((r) => r.isSystem)) {
+      const t = (await db
+        .select({ n: sql<number>`count(*)` })
+        .from(users)
+        .where(isNull(users.disabledAt)))[0];
+      totalRegistered = Number(t?.n ?? 0);
+    }
+
+    const out = rows
+      .map((s) => ({
+        slug: s.slug,
+        name: s.name,
+        tagline: s.tagline ?? null,
+        logoUrl: s.logoUrl ?? null,
+        iconColor: s.iconColor ?? null,
+        isSystem: !!s.isSystem,
+        memberCount: s.isSystem ? totalRegistered : (memberCountBy.get(s.id) ?? 0),
+      }))
+      .sort((a, b) => b.memberCount - a.memberCount || a.name.localeCompare(b.name))
+      .slice(0, 8);
+    return { servers: out };
+  });
+
   /** GET /servers/discover/search?q=&tag= — { items }. Public non-archived
    *  servers where (q empty OR name/tagline contains q, case-insensitive) AND
    *  (tag empty OR the server carries that tag). Capped at 50. */
@@ -1019,6 +1078,74 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     const a = await serverAuthority(db, me, server.id);
     if (!a.canParticipate) { reply.code(404); return { error: "not found" }; }
     return { id: server.id, name: server.name };
+  });
+
+  /** GET /servers/public/:slug — ANONYMOUS public landing data for a community,
+   *  the shareable face of `/s/<slug>` for logged-out visitors (mirrors the
+   *  forum public landing). PUBLIC, non-archived, non-moderated servers only
+   *  (same gate as discover + the per-route SEO): a private / unlisted / invite-
+   *  only / suspended / banned server 404s so its existence isn't leaked. No
+   *  auth, no viewer state; the client renders identity + a join/login CTA. */
+  app.get<{ Params: { slug: string } }>("/servers/public/:slug", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const slug = req.params.slug.trim().toLowerCase();
+    const s = (await db
+      .select({
+        id: servers.id,
+        name: servers.name,
+        tagline: servers.tagline,
+        descriptionHtml: servers.descriptionHtml,
+        bannerImageUrl: servers.bannerImageUrl,
+        bannerFocusY: servers.bannerFocusY,
+        logoUrl: servers.logoUrl,
+        iconColor: servers.iconColor,
+        ownerUserId: servers.ownerUserId,
+        isSystem: servers.isSystem,
+        status: servers.status,
+        visibility: servers.visibility,
+        joinMode: servers.joinMode,
+        moderationState: servers.moderationState,
+        moderationUntil: servers.moderationUntil,
+        themeJson: servers.themeJson,
+        themeStyleKey: servers.themeStyleKey,
+        createdAt: servers.createdAt,
+      })
+      .from(servers)
+      .where(eq(servers.slug, slug))
+      .limit(1))[0];
+    const moderated = !!s && (s.moderationState === "suspended"
+      || (s.moderationState === "banned"
+          && (!s.moderationUntil || +s.moderationUntil > Date.now())));
+    if (!s || s.visibility !== "public" || s.status === "archived" || moderated) {
+      reply.code(404); return { error: "not found" };
+    }
+    const owner = (await db
+      .select({ username: users.username })
+      .from(users)
+      .where(eq(users.id, s.ownerUserId))
+      .limit(1))[0];
+    // System server is implicit-membership (no explicit rows) — count the whole
+    // registered base, matching /servers/popular. Others count their members.
+    const memberCount = s.isSystem
+      ? Number((await db.select({ n: sql<number>`count(*)` }).from(users).where(isNull(users.disabledAt)))[0]?.n ?? 0)
+      : Number((await db.select({ n: sql<number>`count(*)` }).from(serverMembers).where(eq(serverMembers.serverId, s.id)))[0]?.n ?? 0);
+    return {
+      slug,
+      name: s.name,
+      tagline: s.tagline,
+      descriptionHtml: s.descriptionHtml,
+      bannerImageUrl: s.bannerImageUrl,
+      bannerFocusY: s.bannerFocusY ?? 50,
+      logoUrl: s.logoUrl,
+      iconColor: s.iconColor,
+      ownerUsername: owner?.username ?? null,
+      memberCount,
+      joinMode: s.joinMode,
+      isSystem: !!s.isSystem,
+      createdAt: +s.createdAt,
+      themeJson: s.themeJson,
+      themeStyleKey: s.themeStyleKey,
+    };
   });
 
   /* =========================================================

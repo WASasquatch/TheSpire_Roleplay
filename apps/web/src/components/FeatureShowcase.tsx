@@ -8,9 +8,11 @@ import {
   Landmark,
   MessagesSquare,
   Palette,
+  Server,
   VenetianMask,
   type LucideIcon,
 } from "lucide-react";
+import { SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../lib/splashPanel.js";
 
 /**
  * Splash-page feature showcase. Replaces the animated parchment
@@ -55,6 +57,20 @@ const FEATURES: ReadonlyArray<Feature> = [
       "Per-character account management",
     ],
     cta: { label: "Create your cast", path: "/register" },
+    ctaNeedsRegistration: true,
+  },
+  {
+    key: "communities",
+    icon: Server,
+    title: "Communities",
+    tagline: "Host your own community, or join one",
+    desc: "Beyond the native Spire, anyone can create their own community: a space with its own chat rooms, members, roles, economy, and moderation. Run it your way, or join communities other people have built.",
+    points: [
+      "Your own rooms, members & roles",
+      "Per-community economy & cosmetics",
+      "Moderation tools you control",
+    ],
+    cta: { label: "Start a community", path: "/register" },
     ctaNeedsRegistration: true,
   },
   {
@@ -200,6 +216,7 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
       aria-label="What you can do here"
       onFocus={() => setPaused(true)}
       onBlur={resume}
+      className={`${SPLASH_PANEL} ${SPLASH_PANEL_HOVER} p-5 sm:p-6`}
     >
       <header className="mb-5 text-center">
         <p className="text-[11px] uppercase tracking-[0.3em] text-keep-muted">
@@ -269,7 +286,7 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
             other slide is a feature (icon-inline header + copy + bullets).
             Keyed on the slide so the slide-in replays on every advance. */}
         {isIntro ? (
-          <div key="overview" className="feature-panel-in overflow-hidden rounded-md border border-keep-border/50 bg-keep-panel/30 p-5 sm:p-6">
+          <div key="overview" className="feature-panel-in overflow-hidden">
             {/* Themed headline above the screenshot (the baked-in image text
                 didn't match the palette). */}
             <h3 className="font-action mb-4 text-center text-2xl uppercase tracking-[0.12em] text-keep-text sm:text-3xl lg:text-4xl">
@@ -285,7 +302,7 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
         ) : (
           <div
             key={active!.key}
-            className="feature-panel-in rounded-md border border-keep-border/50 bg-keep-panel/30 p-5 sm:p-6"
+            className="feature-panel-in"
           >
             {/* Header: icon inline with the title + tagline. */}
             <div className="mb-4 flex items-center gap-3 sm:gap-4">

@@ -2078,6 +2078,20 @@ export const affiliates = sqliteTable(
     /** Top-sites traffic: inbound link-back hits / outbound card click-throughs. */
     clicksIn: integer("clicks_in").notNull().default(0),
     clicksOut: integer("clicks_out").notNull().default(0),
+    /** Traffic padding (global-admin only): optional SYNTHETIC in/out traffic so a
+     *  quiet listing still shows some life. Kept separate from clicks_in/out; a
+     *  per-day random target (0..max) is spread across the day and banked as it
+     *  completes. See affiliates/padding.ts + migration 0311. */
+    padInEnabled: integer("pad_in_enabled", { mode: "boolean" }).notNull().default(false),
+    padInMax: integer("pad_in_max").notNull().default(0),
+    padInBanked: integer("pad_in_banked").notNull().default(0),
+    padInTarget: integer("pad_in_target").notNull().default(0),
+    padOutEnabled: integer("pad_out_enabled", { mode: "boolean" }).notNull().default(false),
+    padOutMax: integer("pad_out_max").notNull().default(0),
+    padOutBanked: integer("pad_out_banked").notNull().default(0),
+    padOutTarget: integer("pad_out_target").notNull().default(0),
+    /** Shared YYYY-MM-DD the current pad targets belong to; NULL until first set. */
+    padDay: text("pad_day"),
     /** Discovery tags (JSON string[]); NULL when empty. Mirrors server/forum tags;
      *  round-trip through serializeTags/parseTagsJson. */
     tagsJson: text("tags_json"),

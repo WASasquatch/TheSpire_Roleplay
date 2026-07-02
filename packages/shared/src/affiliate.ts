@@ -21,6 +21,7 @@ export const AFFILIATE_LIMITS = {
   maxPerUser: 10, // total entries a member may own
   maxPendingPerUser: 3, // simultaneous un-reviewed
   clickThrottleMs: 12 * 60 * 60 * 1000, // one counted hit per IP/direction per 12h
+  padDailyMax: 100000, // upper bound on synthetic clicks/day an admin may set
 } as const;
 
 /** Public card shape (no owner/PII). Shown in the Top RP Communities board. */
@@ -75,6 +76,19 @@ export interface AdminAffiliate extends MyAffiliate {
   reviewedBy: string | null;
   reviewedAt: number | null;
   updatedAt: number;
+  /**
+   * Traffic padding (global-admin only). `clicksIn`/`clicksOut` (inherited) carry
+   * the SHOWN totals (real + synthetic); these break that down so the admin sees
+   * what's genuine vs padded, plus the per-direction config.
+   */
+  padInEnabled: boolean;
+  padInMax: number;
+  padOutEnabled: boolean;
+  padOutMax: number;
+  realClicksIn: number;
+  realClicksOut: number;
+  padClicksIn: number;
+  padClicksOut: number;
 }
 
 export interface AffiliateSubmitInput {

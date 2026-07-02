@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { and, asc, desc, eq, gt, sql } from "drizzle-orm";
+import { and, desc, eq, gt, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type {
@@ -18,6 +18,7 @@ import {
 } from "@thekeep/shared";
 import { affiliateClickLog, affiliates, users } from "../db/schema.js";
 import type { DbAffiliate } from "../db/schema.js";
+import { computePad, padDayKey, type PadResult } from "../affiliates/padding.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import { hasPermission } from "../auth/permissions.js";
@@ -62,6 +63,11 @@ const adminCreateBody = z.object({
   html: z.string().min(1).max(8000).optional(),
   enabled: z.boolean().optional(),
   sortOrder: z.number().int().min(0).max(1000).optional(),
+  // Traffic padding (synthetic in/out; global-admin only).
+  padInEnabled: z.boolean().optional(),
+  padInMax: z.number().int().min(0).max(AFFILIATE_LIMITS.padDailyMax).optional(),
+  padOutEnabled: z.boolean().optional(),
+  padOutMax: z.number().int().min(0).max(AFFILIATE_LIMITS.padDailyMax).optional(),
 }).strict();
 
 /** Admin edit: any field, incl. review state + visibility. */
@@ -78,6 +84,13 @@ const adminUpdateBody = z.object({
   tags: z.array(z.string()).max(50).nullable().optional(),
   enabled: z.boolean().optional(),
   sortOrder: z.number().int().min(0).max(1000).optional(),
+  // Traffic padding (synthetic in/out; global-admin only). `resetPad` wipes the
+  // accumulated synthetic totals back to zero.
+  padInEnabled: z.boolean().optional(),
+  padInMax: z.number().int().min(0).max(AFFILIATE_LIMITS.padDailyMax).optional(),
+  padOutEnabled: z.boolean().optional(),
+  padOutMax: z.number().int().min(0).max(AFFILIATE_LIMITS.padDailyMax).optional(),
+  resetPad: z.boolean().optional(),
 }).strict();
 
 interface SessionUserCtx {
@@ -113,26 +126,44 @@ async function loadRow(db: Db, id: string): Promise<DbAffiliate> {
   return row;
 }
 
+/* ---------- traffic padding ---------- */
+
+/**
+ * Settle a card's padding at `now`: compute the effective (real + synthetic)
+ * counts and, when the day rolled over (or padding was just (re)configured),
+ * persist the rollover patch — at most once per day per card. Mutates `row` in
+ * place with the persisted values so the mappers see a consistent snapshot.
+ */
+async function applyPad(db: Db, row: DbAffiliate, now: Date): Promise<PadResult> {
+  const res = computePad(row, now);
+  if (res.patch) {
+    await db.update(affiliates).set(res.patch).where(eq(affiliates.id, row.id));
+    Object.assign(row, res.patch);
+  }
+  return res;
+}
+
 /* ---------- shape mappers ---------- */
 
-/** Public card projection (no owner/PII); only approved `card` rows reach it. */
-function toPublicCard(r: DbAffiliate): PublicAffiliateCard {
+/** Public card projection (no owner/PII); only approved `card` rows reach it.
+ *  `clicksIn`/`clicksOut` carry the SHOWN totals (real + any synthetic pad). */
+function toPublicCard(r: DbAffiliate, pad: PadResult): PublicAffiliateCard {
   return {
     id: r.id,
     title: r.title ?? "",
     description: r.description ?? "",
     iconUrl: r.iconUrl ?? null,
     bannerUrl: r.bannerUrl ?? null,
-    clicksIn: r.clicksIn,
-    clicksOut: r.clicksOut,
+    clicksIn: pad.effIn,
+    clicksOut: pad.effOut,
     tags: parseTagsJson(r.tagsJson),
   };
 }
 
 /** Owner projection: adds status + link-back (present only once approved). */
-function toMyAffiliate(r: DbAffiliate, origin: string): MyAffiliate {
+function toMyAffiliate(r: DbAffiliate, origin: string, pad: PadResult): MyAffiliate {
   return {
-    ...toPublicCard(r),
+    ...toPublicCard(r, pad),
     status: r.status,
     targetUrl: r.targetUrl ?? "",
     reviewNote: r.reviewNote ?? null,
@@ -143,14 +174,16 @@ function toMyAffiliate(r: DbAffiliate, origin: string): MyAffiliate {
   };
 }
 
-/** Full admin projection: every column plus the joined owner display name. */
+/** Full admin projection: every column plus the joined owner display name and the
+ *  real-vs-padded traffic breakdown + pad config. */
 function toAdminAffiliate(
   r: DbAffiliate,
   ownerName: string | null,
   origin: string,
+  pad: PadResult,
 ): AdminAffiliate {
   return {
-    ...toMyAffiliate(r, origin),
+    ...toMyAffiliate(r, origin, pad),
     kind: r.kind,
     label: r.label,
     html: r.html ?? null,
@@ -161,6 +194,14 @@ function toAdminAffiliate(
     reviewedBy: r.reviewedBy ?? null,
     reviewedAt: r.reviewedAt ? +r.reviewedAt : null,
     updatedAt: +r.updatedAt,
+    padInEnabled: r.padInEnabled,
+    padInMax: r.padInMax,
+    padOutEnabled: r.padOutEnabled,
+    padOutMax: r.padOutMax,
+    realClicksIn: r.clicksIn,
+    realClicksOut: r.clicksOut,
+    padClicksIn: pad.padIn,
+    padClicksOut: pad.padOut,
   };
 }
 
@@ -262,12 +303,17 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
     const cards = await db
       .select()
       .from(affiliates)
-      .where(and(eq(affiliates.kind, "card"), eq(affiliates.status, "approved")))
-      .orderBy(
-        desc(sql`${affiliates.clicksIn} + ${affiliates.clicksOut}`),
-        asc(affiliates.createdAt),
-      );
-    return { affiliates: cards.map(toPublicCard) };
+      .where(and(eq(affiliates.kind, "card"), eq(affiliates.status, "approved")));
+    // Rank by the SHOWN totals (real + synthetic pad), busiest first, newest as
+    // the tiebreak. Sorting in JS because the padded amount is computed per-read.
+    const now = new Date();
+    const items: Array<{ card: PublicAffiliateCard; total: number; createdAt: number }> = [];
+    for (const r of cards) {
+      const pad = await applyPad(db, r, now);
+      items.push({ card: toPublicCard(r, pad), total: pad.effIn + pad.effOut, createdAt: +r.createdAt });
+    }
+    items.sort((a, b) => b.total - a.total || a.createdAt - b.createdAt);
+    return { affiliates: items.map((i) => i.card) };
   });
 
   /**
@@ -370,8 +416,9 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
       sortOrder: 0,
     });
     const row = await loadRow(db, id);
+    const pad = await applyPad(db, row, new Date());
     reply.code(201);
-    return toMyAffiliate(row, originFromRequest(req));
+    return toMyAffiliate(row, originFromRequest(req), pad);
   });
 
   /** Owner's own entries, newest first, with link-back once approved. */
@@ -384,7 +431,13 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
       .where(eq(affiliates.ownerUserId, me.id))
       .orderBy(desc(affiliates.createdAt));
     const origin = originFromRequest(req);
-    return { affiliates: rows.map((r) => toMyAffiliate(r, origin)) };
+    const now = new Date();
+    const out: MyAffiliate[] = [];
+    for (const r of rows) {
+      const pad = await applyPad(db, r, now);
+      out.push(toMyAffiliate(r, origin, pad));
+    }
+    return { affiliates: out };
   });
 
   /**
@@ -434,7 +487,8 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
 
     await db.update(affiliates).set(patch).where(eq(affiliates.id, existing.id));
     const row = await loadRow(db, existing.id);
-    return toMyAffiliate(row, originFromRequest(req));
+    const pad = await applyPad(db, row, new Date());
+    return toMyAffiliate(row, originFromRequest(req), pad);
   });
 
   /** Owner withdraw. */
@@ -465,14 +519,22 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
     const rows = await db
       .select({ affiliate: affiliates, ownerName: users.username })
       .from(affiliates)
-      .leftJoin(users, eq(users.id, affiliates.ownerUserId))
-      .orderBy(
-        desc(sql`${affiliates.clicksIn} + ${affiliates.clicksOut}`),
-        asc(affiliates.createdAt),
-      );
+      .leftJoin(users, eq(users.id, affiliates.ownerUserId));
     const origin = originFromRequest(req);
-    const mapped = rows.map((r) => toAdminAffiliate(r.affiliate, r.ownerName ?? null, origin));
-    // Pending first (approval queue), preserving the sort within each bucket.
+    const now = new Date();
+    const items: Array<{ a: AdminAffiliate; total: number; createdAt: number }> = [];
+    for (const r of rows) {
+      const pad = await applyPad(db, r.affiliate, now);
+      items.push({
+        a: toAdminAffiliate(r.affiliate, r.ownerName ?? null, origin, pad),
+        total: pad.effIn + pad.effOut,
+        createdAt: +r.affiliate.createdAt,
+      });
+    }
+    // Busiest first by SHOWN traffic (real + pad), newest as tiebreak; then a
+    // stable pass floats pending rows to the top as the approval queue.
+    items.sort((x, y) => y.total - x.total || x.createdAt - y.createdAt);
+    const mapped = items.map((i) => i.a);
     mapped.sort((a, b) => (a.status === "pending" ? 0 : 1) - (b.status === "pending" ? 0 : 1));
     return { affiliates: mapped };
   });
@@ -530,6 +592,10 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
         reviewedAt: new Date(),
         enabled: body.enabled ?? true,
         sortOrder: body.sortOrder ?? 0,
+        padInEnabled: body.padInEnabled ?? false,
+        padInMax: body.padInMax ?? 0,
+        padOutEnabled: body.padOutEnabled ?? false,
+        padOutMax: body.padOutMax ?? 0,
       });
     }
 
@@ -539,8 +605,9 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
       metadata: { kind: "affiliate_create", id, affiliateKind: kind },
     });
     const row = await loadRow(db, id);
+    const pad = await applyPad(db, row, new Date());
     reply.code(201);
-    return toAdminAffiliate(row, null, originFromRequest(req));
+    return toAdminAffiliate(row, null, originFromRequest(req), pad);
   });
 
   /**
@@ -586,6 +653,33 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
     if (body.enabled !== undefined) patch.enabled = body.enabled;
     if (body.sortOrder !== undefined) patch.sortOrder = body.sortOrder;
 
+    // Traffic padding config. Any change re-stamps the pad day to NULL so the next
+    // read re-seeds today's target (a config change takes effect the same day) —
+    // banking an un-banked prior day first so accumulated synthetic traffic isn't
+    // lost. `resetPad` wipes the accumulated totals entirely.
+    if (body.padInEnabled !== undefined) patch.padInEnabled = body.padInEnabled;
+    if (body.padInMax !== undefined) patch.padInMax = body.padInMax;
+    if (body.padOutEnabled !== undefined) patch.padOutEnabled = body.padOutEnabled;
+    if (body.padOutMax !== undefined) patch.padOutMax = body.padOutMax;
+    const padTouched =
+      body.padInEnabled !== undefined || body.padInMax !== undefined ||
+      body.padOutEnabled !== undefined || body.padOutMax !== undefined;
+    if (padTouched) {
+      const today = padDayKey(new Date());
+      if (existing.padDay && existing.padDay !== today) {
+        patch.padInBanked = existing.padInBanked + existing.padInTarget;
+        patch.padOutBanked = existing.padOutBanked + existing.padOutTarget;
+      }
+      patch.padDay = null;
+    }
+    if (body.resetPad) {
+      patch.padInBanked = 0;
+      patch.padOutBanked = 0;
+      patch.padInTarget = 0;
+      patch.padOutTarget = 0;
+      patch.padDay = null;
+    }
+
     if (body.status !== undefined) {
       patch.status = body.status;
       if (body.status === "approved") {
@@ -617,7 +711,8 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
       },
     });
     const row = await loadRow(db, existing.id);
-    return toAdminAffiliate(row, null, originFromRequest(req));
+    const pad = await applyPad(db, row, new Date());
+    return toAdminAffiliate(row, null, originFromRequest(req), pad);
   });
 
   /** Admin delete (cascades the click log). */

@@ -4938,11 +4938,29 @@ function AffiliateCardItem({
             </span>
           </div>
 
-          {/* Read-only traffic counters (both directions). */}
-          <div className="flex gap-4 text-[11px] text-keep-muted">
-            <span title="Visits sent to us">in: <span className="text-keep-text">{row.clicksIn.toLocaleString()}</span></span>
-            <span title="Visits we sent them">out: <span className="text-keep-text">{row.clicksOut.toLocaleString()}</span></span>
+          {/* Traffic counters. clicksIn/Out are the SHOWN totals (real + any
+              synthetic padding); the breakdown appears only when padding is live. */}
+          <div className="flex flex-wrap gap-4 text-[11px] text-keep-muted">
+            <span title="Shown = real + padded">
+              in: <span className="text-keep-text">{row.clicksIn.toLocaleString()}</span>
+              {row.padClicksIn > 0 ? (
+                <span> ({row.realClicksIn.toLocaleString()} real + {row.padClicksIn.toLocaleString()} padded)</span>
+              ) : null}
+            </span>
+            <span title="Shown = real + padded">
+              out: <span className="text-keep-text">{row.clicksOut.toLocaleString()}</span>
+              {row.padClicksOut > 0 ? (
+                <span> ({row.realClicksOut.toLocaleString()} real + {row.padClicksOut.toLocaleString()} padded)</span>
+              ) : null}
+            </span>
           </div>
+          {row.padInEnabled || row.padOutEnabled ? (
+            <div className="text-[10px] text-keep-muted">
+              Padding on
+              {row.padInEnabled ? ` · in up to ${row.padInMax.toLocaleString()}/day` : ""}
+              {row.padOutEnabled ? ` · out up to ${row.padOutMax.toLocaleString()}/day` : ""}
+            </div>
+          ) : null}
 
           {row.reviewNote ? (
             <div className="text-[11px] text-keep-muted">Last note: {row.reviewNote}</div>
@@ -4969,6 +4987,16 @@ function AffiliateCardItem({
             >
               Edit
             </button>
+            {row.padClicksIn > 0 || row.padClicksOut > 0 ? (
+              <button
+                type="button"
+                onClick={() => onPatch({ resetPad: true })}
+                title="Zero out the accumulated synthetic traffic"
+                className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+              >
+                Reset padding
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onDelete}
@@ -5003,6 +5031,11 @@ function AffiliateCardForm({
   const [bannerUrl, setBannerUrl] = useState(initial?.bannerUrl ?? "");
   const [targetUrl, setTargetUrl] = useState(initial?.targetUrl ?? "");
   const [tags, setTags] = useState<string[]>(initial?.tags ?? []);
+  // Traffic padding (synthetic in/out visits).
+  const [padInEnabled, setPadInEnabled] = useState(initial?.padInEnabled ?? false);
+  const [padInMax, setPadInMax] = useState(initial?.padInMax ?? 0);
+  const [padOutEnabled, setPadOutEnabled] = useState(initial?.padOutEnabled ?? false);
+  const [padOutMax, setPadOutMax] = useState(initial?.padOutMax ?? 0);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -5025,6 +5058,10 @@ function AffiliateCardForm({
       bannerUrl: bannerUrl.trim() || null,
       targetUrl: targetUrl.trim(),
       tags,
+      padInEnabled,
+      padInMax: Math.max(0, Math.round(padInMax) || 0),
+      padOutEnabled,
+      padOutMax: Math.max(0, Math.round(padOutMax) || 0),
     };
     try {
       if (mode === "create") {
@@ -5115,6 +5152,62 @@ function AffiliateCardForm({
         <span className="mb-1 block uppercase tracking-widest text-keep-muted">Tags</span>
         <TagInput tags={tags} onChange={setTags} />
       </label>
+
+      {/* Traffic padding: optional synthetic in/out visits so a quiet listing
+          still shows some life. Real counters are never touched. */}
+      <fieldset className="rounded border border-keep-rule/60 p-2">
+        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">
+          Traffic padding (synthetic)
+        </legend>
+        <p className="mb-2 text-[10px] leading-relaxed text-keep-muted">
+          Adds fake daily visits, a random amount up to the max each day, spread out
+          through the day, so a quiet community still shows some traffic. Real visit
+          counts are never changed.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={padInEnabled}
+                onChange={(e) => setPadInEnabled(e.target.checked)}
+              />
+              <span>Pad incoming visits</span>
+            </label>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Max in / day</span>
+            <input
+              type="number"
+              min={0}
+              max={AFFILIATE_LIMITS.padDailyMax}
+              value={padInMax}
+              onChange={(e) => setPadInMax(Number(e.target.value))}
+              disabled={!padInEnabled}
+              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action disabled:opacity-50"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={padOutEnabled}
+                onChange={(e) => setPadOutEnabled(e.target.checked)}
+              />
+              <span>Pad outgoing visits</span>
+            </label>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Max out / day</span>
+            <input
+              type="number"
+              min={0}
+              max={AFFILIATE_LIMITS.padDailyMax}
+              value={padOutMax}
+              onChange={(e) => setPadOutMax(Number(e.target.value))}
+              disabled={!padOutEnabled}
+              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action disabled:opacity-50"
+            />
+          </div>
+        </div>
+      </fieldset>
+
       <div className="flex justify-end gap-2">
         <button
           type="button"

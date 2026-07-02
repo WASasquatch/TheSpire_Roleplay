@@ -15,6 +15,11 @@ import type { Db } from "../db/index.js";
  * the default/system server when none is given (a bare/shared link, or a
  * logged-out visitor). So each server shows its OWN FAQ, and The Spire's FAQ is
  * the default. Order is `sort_order ASC, created_at ASC`.
+ *
+ * This is a pure DB read: the platform's default FAQ set is SEEDED into the
+ * `faqs` table on boot (`ensureDefaultFaqs` in seed.ts) as real, admin-editable
+ * rows — so there is no display fallback here. An empty result means the admin
+ * genuinely has no (enabled) FAQ, and "delete every FAQ" stays honored.
  */
 export async function registerFaqRoutes(app: FastifyInstance, db: Db): Promise<void> {
   app.get<{ Querystring: { serverId?: string } }>("/api/faqs", async (req) => {

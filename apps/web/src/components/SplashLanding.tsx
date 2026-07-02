@@ -387,16 +387,18 @@ export function SplashLanding({ onNavigate }: Props) {
                               </span>
                             </p>
                           ) : null}
-                          {/* Log in demoted (Q2) from a full-width bordered
-                              button to a small text link so it never rivals the
-                              primary CTA. A persistent Log in / Sign up lives in
-                              SplashNav (Q6). */}
+                          {/* Log in: a full-width SECONDARY (outline) button so
+                              returning users get a strong, obvious path, while the
+                              filled "Create my free account" above stays the single
+                              dominant CTA. (A persistent Log in / Sign up also lives
+                              in SplashNav.) */}
                           <a
                             href="/login"
                             onClick={(e) => go(e, "/login")}
-                            className="text-center text-sm text-keep-text/75 underline-offset-4 hover:text-keep-action hover:underline"
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-keep-rule/70 bg-keep-bg/40 px-6 py-3 text-sm font-semibold uppercase tracking-widest text-keep-text transition hover:border-keep-action hover:text-keep-action"
                           >
-                            Already have an account? Log in
+                            <LogIn className="h-5 w-5" aria-hidden />
+                            Log in
                           </a>
                         </>
                       ) : (

@@ -110,54 +110,6 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
 
   const skipDefaults = /^(1|true|yes)$/i.test(process.env.SKIP_DEFAULT_SEED ?? "");
   if (!skipDefaults) {
-    // FAQs are PER-SERVER (migration 0278f: faqs.server_id) and the public read
-    // (routes/faqs.ts) scopes to DEFAULT_SERVER_ID. Any FAQ with a NULL serverId
-    // — the pre-per-server seed, or a global-admin create that didn't set it — is
-    // therefore INVISIBLE on /faqs. So we adopt those onto the default (platform)
-    // server and seed the starter set scoped to it. `faqs.server_id` FKs to
-    // servers(id) with foreign_keys=ON, and the default server row only exists
-    // once migration 0279 / ensureSystemServer has run (needs a real admin), so
-    // gate the whole thing on that row existing — a truly fresh install defers to
-    // a later boot rather than tripping the FK.
-    const defaultServerRow = (await db
-      .select({ id: servers.id })
-      .from(servers)
-      .where(eq(servers.id, DEFAULT_SERVER_ID))
-      .limit(1))[0];
-    if (defaultServerRow) {
-      // Adopt orphaned platform FAQs onto the default server (idempotent: only
-      // touches NULL rows) so already-seeded / admin-created ones become visible.
-      await db.update(faqs).set({ serverId: DEFAULT_SERVER_ID }).where(isNull(faqs.serverId));
-
-      // Seed the starter set ONLY when the default server has none yet (scoped
-      // so a per-server FAQ elsewhere doesn't suppress the platform seed), so a
-      // fresh install ships real /faqs content (and the splash FAQ has a matching
-      // basis) while any admin edit/reorder/delete is never clobbered on later
-      // boots. Markdown → sanitized HTML mirrors the FAQ admin route.
-      const hasDefaultFaq = (await db
-        .select({ id: faqs.id })
-        .from(faqs)
-        .where(eq(faqs.serverId, DEFAULT_SERVER_ID))
-        .limit(1))[0];
-      if (!hasDefaultFaq) {
-        let faqOrder = 0;
-        for (const def of DEFAULT_FAQS) {
-          await db.insert(faqs).values({
-            id: nanoid(),
-            slug: def.slug,
-            question: def.question,
-            answerMarkdown: def.answerMarkdown,
-            answerHtml: sanitizeBio(markdownToHtml(def.answerMarkdown)),
-            category: def.category,
-            sortOrder: faqOrder++,
-            enabled: true,
-            createdByUserId: "system",
-            serverId: DEFAULT_SERVER_ID,
-          }).onConflictDoNothing();
-        }
-      }
-    }
-
     // One-time migration: existing installs were seeded with a room called
     // "MainHall" before The Spire became the canonical landing. If it still
     // exists as a system room, rename it in place so message history,
@@ -247,6 +199,15 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // doc). Runs AFTER ensureSystemForum so a same-boot fresh install already
   // has the system forum to re-home under the new default server if needed.
   await ensureSystemServer(db);
+
+  // Platform FAQ starter set — the default FAQ that ships with the app, inserted
+  // as real, admin-editable rows so it's a first-class part of the FAQ system
+  // (shown on /faqs in-app + public, manageable/removable in the FAQ admin tab).
+  // MUST run AFTER ensureSystemServer: `faqs.server_id` FKs to servers(id) with
+  // foreign_keys=ON, so the default server row has to exist before we can insert
+  // server-scoped rows. Always-on + idempotent (adopts orphans, seeds only when
+  // empty) — ungated by SKIP_DEFAULT_SEED like the other ensure* helpers.
+  await ensureDefaultFaqs(db);
 
   // Force-reseed the `{icon}` placeholder on item-message templates
   // when the deploy script (remote-deploy.sh) staged the flag. Always
@@ -414,6 +375,69 @@ async function ensureSystemServer(db: Db): Promise<void> {
   // rooms ensureSystemSeeds just created + the system forum's boards.
   await db.update(rooms).set({ serverId: "server_spire_system" }).where(sql`${rooms.serverId} IS NULL`);
   await db.update(forums).set({ serverId: "server_spire_system" }).where(sql`${forums.serverId} IS NULL`);
+}
+
+/**
+ * Seed the platform (default server) FAQ — the default FAQ that ships with the
+ * app. Idempotent + always-on:
+ *   (1) Adopt any orphaned platform FAQ (server_id NULL — a pre-per-server seed
+ *       or a global-admin create that didn't set it) onto the default server so
+ *       it becomes visible on /faqs (which scopes to DEFAULT_SERVER_ID).
+ *   (2) Seed the shared DEFAULT_FAQS starter set ONLY when the default server has
+ *       no FAQ yet, so a fresh install ships real, admin-editable /faqs content
+ *       and any admin edit / reorder / delete on later boots is never clobbered.
+ *
+ * The rows are REAL FAQ entries (not a display fallback): they show on /faqs
+ * in-app + public and are fully manageable in the FAQ admin tab. Delete them all
+ * and /faqs is genuinely empty — nothing resurrects them.
+ *
+ * MUST run AFTER ensureSystemServer: faqs.server_id FKs to servers(id) with
+ * foreign_keys=ON, so we no-op safely when the default server isn't there yet
+ * (a truly fresh install with no admin to own it — retried next boot). This
+ * ordering is the whole fix: the old inline block ran BEFORE ensureSystemServer,
+ * so on a boot where the row didn't pre-exist it silently skipped and /faqs
+ * stayed blank. Markdown → sanitized HTML mirrors the FAQ admin route. NOT gated
+ * by SKIP_DEFAULT_SEED (that flag is for the renamed-default-rooms case; keyed
+ * inserts can't duplicate).
+ */
+async function ensureDefaultFaqs(db: Db): Promise<void> {
+  const defaultServerRow = (await db
+    .select({ id: servers.id })
+    .from(servers)
+    .where(eq(servers.id, DEFAULT_SERVER_ID))
+    .limit(1))[0];
+  if (!defaultServerRow) {
+    console.warn("[seed] default FAQ not seeded yet: system server row is missing (will retry next boot)");
+    return; // FK guard: no default server yet.
+  }
+
+  // (1) Adopt orphaned platform FAQs (idempotent: only touches NULL rows).
+  await db.update(faqs).set({ serverId: DEFAULT_SERVER_ID }).where(isNull(faqs.serverId));
+
+  // (2) Seed the starter set only when the default server has none yet.
+  const hasDefaultFaq = (await db
+    .select({ id: faqs.id })
+    .from(faqs)
+    .where(eq(faqs.serverId, DEFAULT_SERVER_ID))
+    .limit(1))[0];
+  if (hasDefaultFaq) return;
+
+  let faqOrder = 0;
+  for (const def of DEFAULT_FAQS) {
+    await db.insert(faqs).values({
+      id: nanoid(),
+      slug: def.slug,
+      question: def.question,
+      answerMarkdown: def.answerMarkdown,
+      answerHtml: sanitizeBio(markdownToHtml(def.answerMarkdown)),
+      category: def.category,
+      sortOrder: faqOrder++,
+      enabled: true,
+      createdByUserId: "system",
+      serverId: DEFAULT_SERVER_ID,
+    }).onConflictDoNothing();
+  }
+  console.log(`[seed] seeded ${DEFAULT_FAQS.length} default FAQ entries for the platform server`);
 }
 
 /**

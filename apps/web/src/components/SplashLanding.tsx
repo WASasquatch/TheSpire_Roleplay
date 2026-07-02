@@ -201,7 +201,7 @@ export function SplashLanding({ onNavigate }: Props) {
           paints it ABOVE the body background; the foreground below is lifted to
           `z-10` so the hero + card still sit on top. */}
       {createPortal(
-        <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: 0 }}>
+        <div aria-hidden className="splash-bg-fixed" style={{ ...themeStyle(splashTheme), zIndex: 0 }}>
           <div className={`absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center ${splashBgClass(splashTheme)}`} />
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70" />
           {splashIsDark ? (

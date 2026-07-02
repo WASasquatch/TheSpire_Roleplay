@@ -48,8 +48,14 @@
       theme) visitor resolves to the Parchment splash unless their OS prefers
       dark (see splashBgUrl in apps/web/src/lib/theme.ts); the dark variant
       loads on demand for dark-mode visitors. Keep this filename in sync with
-      splashBgUrl if that path ever changes. -->
-    <link rel="preload" as="image" href="/the_spire_bg.webp" type="image/webp" fetchpriority="high" />
+      splashBgUrl if that path ever changes.
+
+      Preload AVIF (what the `.splash-bg-*` CSS actually serves modern browsers);
+      the rare no-AVIF browser ignores this and still gets the WebP via CSS. The
+      `?v=1` is a cache-bust token: the images are cached immutably for a year, so
+      when the commissioned art lands, bump this to `?v=2` here AND in styles.css
+      (`.splash-bg-*` + the shell bg) to invalidate every cached copy at once. -->
+    <link rel="preload" as="image" href="/the_spire_bg.avif?v=1" type="image/avif" fetchpriority="high" />
 
     <!--
       SEO + social-card meta. The server (apps/server/src/seo.ts) rewrites

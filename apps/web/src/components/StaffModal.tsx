@@ -72,6 +72,7 @@ export function StaffModal({
 }) {
   const [cards, setCards] = useState<StaffCard[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const siteName = useChat((s) => s.branding.siteName);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,10 +92,10 @@ export function StaffModal({
         onClick={(e) => e.stopPropagation()}
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg lg:rounded`}
       >
-        <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-keep-rule bg-keep-banner px-4 py-2">
           <div>
-            <h2 className="font-action text-lg">Staff</h2>
-            <p className="text-[11px] text-keep-muted">The people who keep the Spire running.</p>
+            <h2 className="font-action text-lg">{siteName} App Staff</h2>
+            <p className="text-[14px] text-keep-muted">This directory lists all of {siteName}'s staff members and their roles. Reach out to them for help with {siteName} itself. If your issue is with a specific community Chat Server or Forum, please contact that community's own staff first, then come to {siteName} staff if it still needs attention.</p>
           </div>
           <CloseButton onClick={onClose} />
         </header>

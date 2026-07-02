@@ -1643,7 +1643,7 @@ html[data-theme-style="glass"] .keep-bg-overlay {
   background-color: rgb(var(--keep-bg));
   background-image:
     var(--orn-bg-overlay, none),
-    var(--keep-shell-bg-url, url("/the_spire_bg.jpg"));
+    var(--keep-shell-bg-url, url("/the_spire_bg.jpg?v=1"));
   background-size:
     cover,
     var(--keep-shell-bg-size, cover);
@@ -3708,13 +3708,39 @@ html.reduce-motion .splash-flash { animation: none; box-shadow: 0 0 0 3px rgb(va
  * the much smaller AVIF. The bg-cover / bg-position utilities stay on the
  * element; only the image source lives here. A browser without image-set
  * still gets the WebP, so no visitor loses the background. */
+/* A solid base color (sampled from each art's dominant tone) sits UNDER the
+ * image so the layer never flashes white before the image decodes/loads. The
+ * `?v=1` query is a cache-bust token paired with the year-long immutable cache
+ * on these files: when the commissioned art lands, bump it to `?v=2` here (all
+ * four lines) and in index.html's preload to invalidate every cached copy. */
 .splash-bg-light {
-  background-image: url("/the_spire_bg.webp");
-  background-image: image-set(url("/the_spire_bg.avif") type("image/avif"), url("/the_spire_bg.webp") type("image/webp"));
+  background-color: #908370;
+  background-image: url("/the_spire_bg.webp?v=1");
+  background-image: image-set(url("/the_spire_bg.avif?v=1") type("image/avif"), url("/the_spire_bg.webp?v=1") type("image/webp"));
 }
 .splash-bg-dark {
-  background-image: url("/the_spire_bg_dark.webp");
-  background-image: image-set(url("/the_spire_bg_dark.avif") type("image/avif"), url("/the_spire_bg_dark.webp") type("image/webp"));
+  background-color: #111213;
+  background-image: url("/the_spire_bg_dark.webp?v=1");
+  background-image: image-set(url("/the_spire_bg_dark.avif?v=1") type("image/avif"), url("/the_spire_bg_dark.webp?v=1") type("image/webp"));
+}
+
+/* Fixed full-window container for the splash hero art (the SplashLanding portal
+ * on <body>). A plain `position:fixed; inset:0` layer is sized to the DYNAMIC
+ * mobile viewport, so when the URL bar shows/hides on scroll the layer resizes
+ * and lags, dragging up and flashing the page background in the strip below it.
+ * Sizing to `100lvh` (the LARGE viewport height, URL-bar-hidden state) makes it
+ * static and always at least as tall as the visible viewport, so no gap ever
+ * appears; the extra height when the bar is shown just clips off-screen. The
+ * base color (splash theme's --keep-bg, set via themeStyle on the element) backs
+ * it so nothing white shows through in any transient. */
+.splash-bg-fixed {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100vh; /* fallback for browsers without lvh */
+  height: 100lvh;
+  background-color: rgb(var(--keep-bg));
 }
 
 /* ============================================================

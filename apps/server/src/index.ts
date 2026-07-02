@@ -2508,10 +2508,16 @@ async function main() {
         index: false,
         // Cache hashed bundle assets aggressively. Vite emits content-hashed
         // filenames in /assets/, so anything in there is safe to cache for a
-        // year. Everything else (favicons, the_spire_bg.jpg) gets short
-        // caching so admin-uploaded changes propagate quickly.
+        // year. Static brand art / icons / fonts in the web root (the hero
+        // backgrounds, favicons, OG image, PWA icons) have FIXED names but change
+        // only at deploy time, so they're also cached a year immutable — the hero
+        // bg is referenced with a `?v=N` token (index.html + styles.css) so a new
+        // commission busts every cached copy by bumping N. Everything else
+        // (manifest, etc.) keeps short caching so tweaks propagate quickly.
         setHeaders(res, path) {
           if (path.includes("/assets/")) {
+            res.setHeader("cache-control", "public, max-age=31536000, immutable");
+          } else if (/\.(?:avif|webp|jpe?g|png|gif|svg|ico|woff2?)$/i.test(path)) {
             res.setHeader("cache-control", "public, max-age=31536000, immutable");
           } else {
             res.setHeader("cache-control", "public, max-age=300");

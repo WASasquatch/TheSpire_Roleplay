@@ -3,6 +3,28 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        // Conservative vendor split (B1, plan.md §3). Pull the React
+        // runtime into its own long-lived chunk so it caches across
+        // deploys and isn't re-fetched with every app-code change. We do
+        // NOT micro-split every dependency, that just trades one big
+        // request for dozens of tiny ones. The heavy authenticated-only
+        // surfaces are code-split separately via React.lazy in App.tsx,
+        // which is what actually keeps them out of the splash/login boot
+        // bundle.
+        // `scheduler` is intentionally NOT listed: it's a transitive dep of
+        // react-dom (not a direct dependency here), so rollup can't resolve
+        // it as a manualChunks entry and the build errors out. Because
+        // react-dom lives in this chunk, scheduler gets pulled in alongside
+        // it anyway — the runtime still lands in one long-lived vendor file.
+        manualChunks: {
+          "react-vendor": ["react", "react-dom"],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

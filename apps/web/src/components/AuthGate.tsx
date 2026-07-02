@@ -1,12 +1,13 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { Eye, EyeOff } from "lucide-react";
 import DOMPurify from "dompurify";
 import { VERSION } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { readReturnForum } from "./ForumPublicLanding.js";
 import { setSessionToken } from "../lib/http.js";
 import { markLoginIntent } from "../lib/socket.js";
-import { resolveSplashTheme, splashBgUrl, themeStyle } from "../lib/theme.js";
+import { resolveSplashTheme, splashBgClass, themeStyle } from "../lib/theme.js";
 import { isDarkPalette } from "@thekeep/shared";
 
 const PROJECT_URL = "https://github.com/WASasquatch/TheSpire_Roleplay";
@@ -114,10 +115,7 @@ export function SplashShell({
           md+ uses the natural cover-center. */}
       {createPortal(
         <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: 0 }}>
-          <div
-            className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
-            style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
-          />
+          <div className={`absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center ${splashBgClass(splashTheme)}`} />
           {/* Right-side veil so the card sits on a calm background; lighter on
               mobile where the glass card wants the artwork showing through. */}
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70" />
@@ -501,12 +499,11 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   /**
-   * Confirm-password field, register-mode only. Pure client-side typo guard:
-   * the server never sees it. Without this a user could mistype their
-   * password during registration and lock themselves out before they ever
-   * logged in.
+   * Show/hide toggle for the single password field. Unmasking lets users
+   * catch typos themselves, which is why we dropped the separate confirm
+   * field (it drove the bulk of signup abandonment).
    */
-  const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   /**
    * Acceptance of the registration disclaimer. Required for /auth/register
    * (server enforces a literal `true`). Reset whenever mode toggles so a
@@ -576,9 +573,6 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
       // linger after a fresh login.
       setKickReason(null);
       if (mode === "register") {
-        if (password !== passwordConfirm) {
-          throw new Error("Passwords don't match. Please retype them.");
-        }
         if (!accepted) {
           throw new Error("Please read and agree to the house rules to register.");
         }
@@ -685,13 +679,14 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
 
   function setModeAndReset(next: "login" | "register") {
     // Reset register-only fields when leaving register mode so a stale tick
-    // or stale confirm-password value doesn't linger after the user backs
-    // out and returns later. (Empty disclaimer text means there's nothing
-    // to agree to; that case is handled separately below.)
+    // doesn't linger after the user backs out and returns later. (Empty
+    // disclaimer text means there's nothing to agree to; that case is
+    // handled separately below.) Re-mask the password on any mode switch so
+    // an unmasked value from register mode isn't left visible on login.
+    setShowPassword(false);
     if (next !== "register") {
       setAccepted(false);
       setAcceptedAgeMature(false);
-      setPasswordConfirm("");
       setCaptcha(null);
       setCaptchaAnswer("");
       setHp("");
@@ -804,7 +799,16 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
 
         {mode === "register" ? (
           <>
-            <Field label="Email" value={email} onChange={setEmail} type="email" autoComplete="email" />
+            <Field
+              label="Email"
+              value={email}
+              onChange={setEmail}
+              type="email"
+              autoComplete="email"
+              // Drop focus straight into the first field so mobile keyboards
+              // open immediately on the register screen.
+              autoFocus
+            />
             <Field label="Master username" value={username} onChange={setUsername} autoComplete="username" />
           </>
         ) : (
@@ -819,8 +823,20 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           label="Password"
           value={password}
           onChange={setPassword}
-          type="password"
+          type={showPassword ? "text" : "password"}
           autoComplete={mode === "register" ? "new-password" : "current-password"}
+          trailing={
+            <button
+              type="button"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              title={showPassword ? "Hide password" : "Show password"}
+              aria-pressed={showPassword}
+              className="absolute inset-y-0 right-0 flex items-center px-2 text-keep-muted hover:text-keep-text"
+            >
+              {showPassword ? <EyeOff className="h-4 w-4" aria-hidden="true" /> : <Eye className="h-4 w-4" aria-hidden="true" />}
+            </button>
+          }
         />
         {mode === "login" ? (
           <div className="text-right">
@@ -834,31 +850,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           </div>
         ) : null}
         {mode === "register" ? (
-          <div>
-            <Field
-              label="Confirm password"
-              value={passwordConfirm}
-              onChange={setPasswordConfirm}
-              type="password"
-              autoComplete="new-password"
-            />
-            {/*
-              Inline mismatch hint - only fires once the user has typed in the
-              confirm field, otherwise the empty initial state would shout at
-              them before they even start. Deliberately doesn't block the
-              submit button (matching is verified on submit) so the keyboard
-              flow stays uninterrupted; the message is just a visual cue.
-            */}
-            {passwordConfirm && password !== passwordConfirm ? (
-              <div className="mt-1 text-[10px] text-keep-accent">
-                Passwords don't match yet.
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {mode === "register" ? (
-          <div className="space-y-2 rounded border border-keep-border/60 bg-keep-bg/40 px-3 py-2">
+          <div className="space-y-2 rounded border border-keep-border/50 bg-keep-bg/25 px-3 py-2 text-keep-muted">
             {/* Admin-set disclaimer, shown above the agreement checkbox when
                 present. When there's none, the checkbox alone carries the
                 (always-required) house-rules agreement. */}
@@ -873,12 +865,12 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
                 />
               </>
             ) : null}
-            <label className="flex cursor-pointer items-start gap-2 text-xs">
+            <label className="flex cursor-pointer items-start gap-2 text-[11px] leading-snug">
               <input
                 type="checkbox"
                 checked={accepted}
                 onChange={(e) => setAccepted(e.target.checked)}
-                className="mt-0.5"
+                className="mt-0.5 scale-90"
               />
               <span>
                 I have read and agree to the{" "}
@@ -904,28 +896,29 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             {/* Age + mature content acknowledgment. Always required (not
                 admin-toggleable) since it's a baseline content-rating
                 gate, not site-specific policy. */}
-            <label className="flex cursor-pointer items-start gap-2 rounded border border-keep-border/60 bg-keep-bg/40 px-3 py-2 text-xs">
+            <label className="flex cursor-pointer items-start gap-2 rounded border border-keep-border/50 bg-keep-bg/25 px-3 py-2 text-[11px] leading-snug text-keep-muted">
               <input
                 type="checkbox"
                 checked={acceptedAgeMature}
                 onChange={(e) => setAcceptedAgeMature(e.target.checked)}
-                className="mt-0.5"
+                className="mt-0.5 scale-90"
               />
               <span>
-                I am <b>18 years or older</b>, and I understand this site may contain mature
-                content (in user profiles, room descriptions, and roleplay).
+                I am <b className="text-keep-text">18 years or older</b>, and I understand this
+                site may contain mature content (in user profiles, room descriptions, and
+                roleplay).
               </span>
             </label>
 
             {/* In-house basic CAPTCHA. The question is server-issued and
                 single-use; if the answer is wrong or stale, we re-fetch
                 automatically on the next render. */}
-            <div className="space-y-1 rounded border border-keep-border/60 bg-keep-bg/40 px-3 py-2 text-xs">
+            <div className="space-y-1 rounded border border-keep-border/50 bg-keep-bg/25 px-3 py-2 text-[11px] text-keep-muted">
               <div className="text-[10px] uppercase tracking-[0.25em] text-keep-muted">
                 Quick check (anti-bot)
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-semibold tabular-nums">
+                <span className="font-semibold tabular-nums text-keep-text">
                   {captcha?.question ?? "loading..."}
                 </span>
                 <input
@@ -997,25 +990,41 @@ export function Field({
   onChange,
   type = "text",
   autoComplete,
+  autoFocus,
+  /**
+   * Optional element rendered inside the input box, absolutely positioned
+   * against the field wrapper (used for the password show/hide eye toggle).
+   * When present the input gets extra right padding so typed text doesn't
+   * slide under it.
+   */
+  trailing,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   type?: string;
   autoComplete?: string;
+  autoFocus?: boolean;
+  trailing?: ReactNode;
 }) {
   return (
     <label className="block text-xs">
       <span className="mb-1 block uppercase tracking-widest text-keep-muted">{label}</span>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        autoComplete={autoComplete}
-        // text-base on mobile prevents iOS auto-zoom (anything <16px triggers
-        // a zoom on focus); md+ keeps the compact density.
-        className="w-full rounded border border-keep-border bg-keep-bg px-2 py-2 text-base outline-none focus:border-keep-action md:py-1 md:text-sm"
-      />
+      <div className="relative">
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          autoComplete={autoComplete}
+          autoFocus={autoFocus}
+          // text-base on mobile prevents iOS auto-zoom (anything <16px triggers
+          // a zoom on focus); md+ keeps the compact density.
+          className={`w-full rounded border border-keep-border bg-keep-bg px-2 py-2 text-base outline-none focus:border-keep-action md:py-1 md:text-sm ${
+            trailing ? "pr-9" : ""
+          }`}
+        />
+        {trailing}
+      </div>
     </label>
   );
 }

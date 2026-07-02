@@ -3,19 +3,23 @@ import { createPortal } from "react-dom";
 import { VERSION } from "@thekeep/shared";
 import { isDarkPalette } from "@thekeep/shared";
 import {
+  Check,
   DoorOpen,
+  Feather,
+  Globe,
   Landmark,
   LogIn,
   MessagesSquare,
   Radio,
   Server,
+  ShieldCheck,
   UserPlus,
   Users,
   VenetianMask,
   type LucideIcon,
 } from "lucide-react";
 import { useChat } from "../state/store.js";
-import { resolveSplashTheme, splashBgUrl, themeStyle } from "../lib/theme.js";
+import { resolveSplashTheme, splashBgClass, themeStyle } from "../lib/theme.js";
 import { SPLASH_GLOW, SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../lib/splashPanel.js";
 import { SplashNav, type SplashTab } from "./SplashNav.js";
 import { BookshelfStrip } from "./BookshelfStrip.js";
@@ -138,6 +142,22 @@ export function SplashLanding({ onNavigate }: Props) {
     });
   }
 
+  // Hero live-count proof (B4): a single honest "N roleplayers online now"
+  // line beside the primary CTA. Same cold-start posture as the stat tiles —
+  // only when activity feeds are on AND the number is truly > 0, never a
+  // dead "0 online" to a first visitor.
+  const liveOnline =
+    branding.activityFeedsEnabled && stats && stats.online > 0 ? stats.online : null;
+
+  // Evergreen credibility strip (B4): ALWAYS-shown, non-numeric trust points
+  // so a cold-start install still reads as credible without any live activity.
+  const credibilityPoints: Array<{ key: string; icon: LucideIcon; label: string }> = [
+    { key: "free", icon: Feather, label: "Free and open source" },
+    { key: "rules", icon: ShieldCheck, label: "Your community, your rules" },
+    { key: "longform", icon: MessagesSquare, label: "Built for long-lived roleplay groups" },
+    { key: "browser", icon: Globe, label: "Play right in your browser" },
+  ];
+
   const splashTheme = resolveSplashTheme(branding);
   const splashIsDark = isDarkPalette(splashTheme);
 
@@ -182,10 +202,7 @@ export function SplashLanding({ onNavigate }: Props) {
           `z-10` so the hero + card still sit on top. */}
       {createPortal(
         <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: 0 }}>
-          <div
-            className="absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center"
-            style={{ backgroundImage: `url(${splashBgUrl(splashTheme)})` }}
-          />
+          <div className={`absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center ${splashBgClass(splashTheme)}`} />
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70" />
           {splashIsDark ? (
             <>
@@ -251,17 +268,29 @@ export function SplashLanding({ onNavigate }: Props) {
           >
             Where stories and communities live.
           </p>
-          <p
-            className="mt-2 text-xs uppercase tracking-[0.3em]"
-            style={{
-              color: "rgba(255, 255, 255, 0.78)",
-              textShadow:
-                "0 1px 4px rgba(0, 0, 0, 0.85), 0 0 3px rgba(0, 0, 0, 0.6)",
-            }}
-          >
-            join the roleplay, or host your own community
-          </p>
         </header>
+
+        {/* EVERGREEN CREDIBILITY BAND (B4): ALWAYS shown, non-numeric trust
+            points, so even a cold-start install with zero live activity still
+            reads as credible right under the hero. Deliberately independent of
+            any /stats number — no cold-start gating here. */}
+        <ul
+          aria-label="What you get here"
+          className={`mx-4 mb-6 flex w-[min(2400px,94vw)] flex-wrap items-stretch justify-center gap-2.5 p-4 lg:mb-8 xl:w-[min(2400px,84vw)] sm:gap-3 sm:p-5 ${SPLASH_PANEL} ${SPLASH_PANEL_HOVER}`}
+        >
+          {credibilityPoints.map((p) => {
+            const PointIcon = p.icon;
+            return (
+              <li
+                key={p.key}
+                className="flex items-center gap-2 rounded-md border border-keep-border/50 bg-keep-panel/30 px-3 py-2 text-xs text-keep-text/85 sm:px-4 sm:text-sm"
+              >
+                <PointIcon className="h-4 w-4 shrink-0 text-keep-accent" aria-hidden />
+                <span>{p.label}</span>
+              </li>
+            );
+          })}
+        </ul>
 
         <div
           className="
@@ -324,30 +353,57 @@ export function SplashLanding({ onNavigate }: Props) {
                     </p>
                     <div className="mt-4 flex flex-col gap-2">
                       {branding.registrationOpen ? (
-                        <a
-                          href="/register"
-                          onClick={(e) => go(e, "/register")}
-                          className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-keep-action bg-keep-action px-6 py-3 text-sm font-semibold uppercase tracking-widest text-keep-bg shadow-[0_4px_14px_-4px_rgba(0,0,0,0.45)] transition hover:brightness-110 active:brightness-95"
-                        >
-                          <UserPlus className="h-5 w-5" aria-hidden />
-                          Create your character
-                        </a>
+                        <>
+                          {/* PRIMARY CTA (Q2): the single filled, highest-contrast
+                              button on the page. First-person + reality-aligned
+                              (Q3a): /register creates an account, so the label
+                              says so instead of promising a character step. */}
+                          <a
+                            href="/register"
+                            onClick={(e) => go(e, "/register")}
+                            className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-keep-action bg-keep-action px-6 py-3 text-sm font-semibold uppercase tracking-widest text-keep-bg shadow-[0_4px_14px_-4px_rgba(0,0,0,0.45)] transition hover:brightness-110 active:brightness-95"
+                          >
+                            <UserPlus className="h-5 w-5" aria-hidden />
+                            Create my free account
+                          </a>
+                          {/* Reassurance microcopy (Q5): honest, no fake
+                              urgency, directly under the primary CTA. */}
+                          <p className="text-center text-xs leading-relaxed text-keep-text/70">
+                            Free forever. No download, no card. Jump into a room
+                            in under a minute.
+                          </p>
+                          {/* Live proof (B4): honest "N online now" beside the
+                              primary CTA. Cold-start posture — only shown when
+                              activity feeds are on AND online > 0, never a dead
+                              "0 online" to a first visitor. */}
+                          {liveOnline !== null ? (
+                            <p className="flex items-center justify-center gap-1.5 text-center text-xs font-medium text-keep-action">
+                              <Radio className="h-3.5 w-3.5" aria-hidden />
+                              <span>
+                                <span className="tabular-nums font-semibold">
+                                  {liveOnline.toLocaleString()}
+                                </span>{" "}
+                                {liveOnline === 1 ? "roleplayer" : "roleplayers"} online now
+                              </span>
+                            </p>
+                          ) : null}
+                          {/* Log in demoted (Q2) from a full-width bordered
+                              button to a small text link so it never rivals the
+                              primary CTA. A persistent Log in / Sign up lives in
+                              SplashNav (Q6). */}
+                          <a
+                            href="/login"
+                            onClick={(e) => go(e, "/login")}
+                            className="text-center text-sm text-keep-text/75 underline-offset-4 hover:text-keep-action hover:underline"
+                          >
+                            Already have an account? Log in
+                          </a>
+                        </>
                       ) : (
                         <div className="rounded border border-keep-rule/50 bg-keep-bg/40 px-4 py-2 text-center text-xs text-keep-muted">
                           Registration is currently closed.
                         </div>
                       )}
-                      {/* Log in — full-width beneath Create, filling the card
-                          (and balancing the Host card's two actions) instead of
-                          a standalone block that left a gap below both cards. */}
-                      <a
-                        href="/login"
-                        onClick={(e) => go(e, "/login")}
-                        className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-keep-rule/70 bg-keep-bg/50 px-6 py-3 text-sm font-semibold uppercase tracking-widest text-keep-text transition hover:border-keep-action hover:text-keep-action"
-                      >
-                        <LogIn className="h-4 w-4" aria-hidden />
-                        Log in
-                      </a>
                     </div>
                   </div>
                   {/* HOST */}
@@ -465,10 +521,10 @@ export function SplashLanding({ onNavigate }: Props) {
                         <h3 className="font-action text-lg text-keep-text">Your own chat community</h3>
                       </div>
                       <ul className="mt-2 space-y-1 text-sm text-keep-text/85">
-                        <li>Live rooms for real-time roleplay</li>
-                        <li>Members, roles, and invites</li>
-                        <li>Its own economy and cosmetics</li>
-                        <li>Moderation tools you control</li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Live rooms for real-time roleplay</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Members, roles, and invites</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Its own economy and cosmetics</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Moderation tools you control</span></li>
                       </ul>
                     </div>
                     <div className="rounded-md border border-keep-border/50 bg-keep-bg/40 p-4">
@@ -477,10 +533,10 @@ export function SplashLanding({ onNavigate }: Props) {
                         <h3 className="font-action text-lg text-keep-text">Your own forums</h3>
                       </div>
                       <ul className="mt-2 space-y-1 text-sm text-keep-text/85">
-                        <li>Boards for play-by-post and discussion</li>
-                        <li>A moderator team and membership rules</li>
-                        <li>A public page you can share anywhere</li>
-                        <li>Threaded topics that last for weeks</li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Boards for play-by-post and discussion</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>A moderator team and membership rules</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>A public page you can share anywhere</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Threaded topics that last for weeks</span></li>
                       </ul>
                     </div>
                   </div>
@@ -537,7 +593,7 @@ export function SplashLanding({ onNavigate }: Props) {
                         className="inline-flex items-center justify-center gap-2 rounded-md border border-keep-action bg-keep-action px-8 py-3 text-sm font-semibold uppercase tracking-widest text-keep-bg shadow-[0_4px_14px_-4px_rgba(0,0,0,0.45)] transition hover:brightness-110 active:brightness-95 sm:text-base"
                       >
                         <UserPlus className="h-5 w-5" aria-hidden />
-                        Create your account
+                        Create my free account
                       </a>
                     ) : (
                       <a

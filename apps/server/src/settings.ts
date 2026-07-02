@@ -143,6 +143,26 @@ export interface SiteSettings {
   metaDescription: string;
   /** Verbatim HTML injected into <head> on the server-rendered splash (analytics scripts). */
   customHeadHtml: string;
+  /** Default social-card image URL. When set, used as the og:image / twitter:image fallback in renderSplashHtml. Empty = the image baked into index.html. */
+  ogImageUrl: string;
+  /** Tagline appended after the site name in the homepage/login/register title. Empty = built-in HOMEPAGE_TAGLINE. */
+  homepageTagline: string;
+  /** Keyword shelf for <meta name="keywords">. Empty = built-in DEFAULT_KEYWORDS. */
+  seoKeywords: string;
+  /** google-site-verification content token. Empty = no meta injected. */
+  googleSiteVerification: string;
+  /** Bing msvalidate.01 content token. Empty = no meta injected. */
+  bingSiteVerification: string;
+  /** Master search-indexing switch. When false, robots.txt disallows all and the splash gets a noindex,nofollow robots meta. Default true. */
+  searchIndexingEnabled: boolean;
+  /** Newline-separated social profile URLs mapped into Organization JSON-LD sameAs. Empty = omitted. */
+  socialProfileUrls: string;
+  /** First-party analytics master switch (migration 0310). When false the ingest routes + server page-view recorder no-op. Default true. */
+  analyticsEnabled: boolean;
+  /** Days of RAW analytics rows to keep before the nightly rollup sweep deletes them. Aggregates in analytics_daily persist. Default 30. */
+  analyticsRawRetentionDays: number;
+  /** Honor the browser DNT / Sec-GPC opt-out signal (migration 0310). Default true. */
+  analyticsRespectDnt: boolean;
   /** Web Push VAPID public key. Safe to ship to clients. Null until first boot generates it. */
   vapidPublicKey: string | null;
   /** Web Push VAPID private key. NEVER expose to clients. */
@@ -308,6 +328,26 @@ export interface SettingsPatch {
   metaDescription?: string;
   /** Raw HTML, NOT sanitized (analytics scripts must remain intact). Admin-only. */
   customHeadHtml?: string;
+  /** Default social-card image URL. Route handler trims; empty clears. */
+  ogImageUrl?: string;
+  /** Homepage title tagline. Route handler trims; empty falls back to the built-in. */
+  homepageTagline?: string;
+  /** Keyword shelf. Route handler trims; empty falls back to DEFAULT_KEYWORDS. */
+  seoKeywords?: string;
+  /** google-site-verification content token. Route handler trims; empty clears. */
+  googleSiteVerification?: string;
+  /** Bing msvalidate.01 content token. Route handler trims; empty clears. */
+  bingSiteVerification?: string;
+  /** Master search-indexing switch. */
+  searchIndexingEnabled?: boolean;
+  /** Newline-separated social profile URLs. Route handler stores verbatim (trimmed). */
+  socialProfileUrls?: string;
+  /** First-party analytics master switch. */
+  analyticsEnabled?: boolean;
+  /** Raw-analytics retention in days. Route handler bounds it (e.g. 1..365). */
+  analyticsRawRetentionDays?: number;
+  /** Honor the browser DNT / Sec-GPC opt-out signal. */
+  analyticsRespectDnt?: boolean;
   /** Master toggle for surfacing live activity counters. */
   activityFeedsEnabled?: boolean;
   /** Splash page featured-worlds carousel toggle. */
@@ -393,6 +433,16 @@ export async function updateSettings(
   if (patch.forumRegistrationRulesHtml !== undefined) update.forumRegistrationRulesHtml = patch.forumRegistrationRulesHtml;
   if (patch.metaDescription !== undefined) update.metaDescription = patch.metaDescription;
   if (patch.customHeadHtml !== undefined) update.customHeadHtml = patch.customHeadHtml;
+  if (patch.ogImageUrl !== undefined) update.ogImageUrl = patch.ogImageUrl;
+  if (patch.homepageTagline !== undefined) update.homepageTagline = patch.homepageTagline;
+  if (patch.seoKeywords !== undefined) update.seoKeywords = patch.seoKeywords;
+  if (patch.googleSiteVerification !== undefined) update.googleSiteVerification = patch.googleSiteVerification;
+  if (patch.bingSiteVerification !== undefined) update.bingSiteVerification = patch.bingSiteVerification;
+  if (patch.searchIndexingEnabled !== undefined) update.searchIndexingEnabled = patch.searchIndexingEnabled;
+  if (patch.socialProfileUrls !== undefined) update.socialProfileUrls = patch.socialProfileUrls;
+  if (patch.analyticsEnabled !== undefined) update.analyticsEnabled = patch.analyticsEnabled;
+  if (patch.analyticsRawRetentionDays !== undefined) update.analyticsRawRetentionDays = patch.analyticsRawRetentionDays;
+  if (patch.analyticsRespectDnt !== undefined) update.analyticsRespectDnt = patch.analyticsRespectDnt;
   if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
   if (patch.featuredWorldsEnabled !== undefined) update.featuredWorldsEnabled = patch.featuredWorldsEnabled;
   if (patch.splashMessages24hEnabled !== undefined) update.splashMessages24hEnabled = patch.splashMessages24hEnabled;
@@ -473,6 +523,16 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     forumRegistrationRulesHtml: row.forumRegistrationRulesHtml,
     metaDescription: row.metaDescription,
     customHeadHtml: row.customHeadHtml,
+    ogImageUrl: row.ogImageUrl,
+    homepageTagline: row.homepageTagline,
+    seoKeywords: row.seoKeywords,
+    googleSiteVerification: row.googleSiteVerification,
+    bingSiteVerification: row.bingSiteVerification,
+    searchIndexingEnabled: row.searchIndexingEnabled,
+    socialProfileUrls: row.socialProfileUrls,
+    analyticsEnabled: row.analyticsEnabled,
+    analyticsRawRetentionDays: row.analyticsRawRetentionDays,
+    analyticsRespectDnt: row.analyticsRespectDnt,
     vapidPublicKey: row.vapidPublicKey,
     vapidPrivateKey: row.vapidPrivateKey,
     activityFeedsEnabled: row.activityFeedsEnabled,

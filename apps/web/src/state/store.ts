@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { recordNav } from "../lib/nav-metrics.js";
 import type {
   ChatMessage,
   DirectConversationSummary,
@@ -1006,7 +1007,7 @@ function emptyBucket(): {
   };
 }
 
-export const useChat = create<ChatState>((set) => ({
+export const useChat = create<ChatState>((set, get) => ({
   me: null,
   setMe: (me) => set({ me }),
   authChecked: false,
@@ -1032,11 +1033,26 @@ export const useChat = create<ChatState>((set) => ({
   setActiveCharacterIdStore: (id) => set({ activeCharacterId: id }),
 
   currentRoomId: null,
-  setCurrentRoom: (id) => set({ currentRoomId: id }),
+  setCurrentRoom: (id) => {
+    // Analytics choke point 1 (plan_ext.md §3): the confirmed-arrival room
+    // switch. Wrapping the setter (vs. the room:state handler) also catches
+    // programmatic sets. Diff so a no-op re-set isn't counted; record the
+    // roomId as the stable key (it's an id, not free text / URL).
+    const prev = get().currentRoomId;
+    if (id && id !== prev) recordNav("room", id);
+    set({ currentRoomId: id });
+  },
 
   currentServerId: null,
   defaultServerId: null,
-  setCurrentServerId: (id) => set({ currentServerId: id }),
+  setCurrentServerId: (id) => {
+    // Analytics choke point 1 (server half): only when the server actually
+    // changes. currentServerId is derived solely from room:state, so this is
+    // the single authoritative server-switch signal.
+    const prev = get().currentServerId;
+    if (id !== prev && id) recordNav("server", id);
+    set({ currentServerId: id });
+  },
   setDefaultServerId: (id) => set({ defaultServerId: id }),
 
   scopedRootDesign: null,
@@ -1528,12 +1544,23 @@ export const useChat = create<ChatState>((set) => ({
   setNotice: (n) => set({ notice: n }),
 
   openProfile: null,
-  setOpenProfile: (p) => set({ openProfile: p }),
+  setOpenProfile: (p) => {
+    // Analytics choke point 3 (plan_ext.md §3): the highest-traffic modal,
+    // opened from every surface. Count only opens (null → non-null), not
+    // closes or profile-to-profile swaps count as one open each.
+    if (p && !get().openProfile) recordNav("modal", "profile");
+    set({ openProfile: p });
+  },
   openStoryReaderId: null,
   setOpenStoryReader: (storyId) => set({ openStoryReaderId: storyId }),
 
   editor: null,
-  openEditor: (target) => set({ editor: target }),
+  openEditor: (target) => {
+    // Analytics choke point 3: the profile/appearance editor. Record the
+    // editor mode (stable enum) as the key detail.
+    recordNav("modal", "editor", { mode: target.mode });
+    set({ editor: target });
+  },
   closeEditor: () => set({ editor: null }),
 
   // fontStep is local-only (no server mirror) and the user cycles it

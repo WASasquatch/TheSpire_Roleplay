@@ -19,6 +19,7 @@
 
 import type React from "react";
 import { resolveUiRoute, type UiRoute, type UiRouteTarget } from "@thekeep/shared";
+import { recordNav } from "./nav-metrics.js";
 
 /** Event name fired on the window when a chip is clicked. */
 export const UI_ROUTE_EVENT = "tk:open-ui-route";
@@ -40,6 +41,11 @@ export function openUiRoute(token: string): boolean {
   const entry = resolveUiRoute(token);
   if (!entry) return false;
   if (typeof window === "undefined") return false;
+  // Analytics choke point 2 (plan_ext.md §3): the single dispatch point for
+  // nearly every modal opened via a chip, marquee, or /command ui:hint.
+  // Record the target kind as the key + the raw token (a stable catalog
+  // token, not free text) as meta.
+  recordNav("modal", entry.target.kind, { token: token.toLowerCase() });
   const detail: UiRouteOpenDetail = { token: token.toLowerCase(), entry };
   window.dispatchEvent(new CustomEvent<UiRouteOpenDetail>(UI_ROUTE_EVENT, { detail }));
   return true;

@@ -29,7 +29,7 @@ import { SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../lib/splashPanel.js";
  * themselves, at that point they're reading, not watching a demo.
  */
 
-const ROTATE_MS = 2500;
+const ROTATE_MS = 6000;
 
 interface Feature {
   key: string;
@@ -292,10 +292,17 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
             <h3 className="font-action mb-4 text-center text-2xl uppercase tracking-[0.12em] text-keep-text sm:text-3xl lg:text-4xl">
               Play and pick-up games on any device
             </h3>
+            {/* Explicit intrinsic size + aspect-ratio reserves the slot before
+                the image loads so it can't shove the layout (CLS). The image is
+                fluid-width (w-full h-auto), so aspect-ratio does the real
+                reserving; the width/height attributes are the fallback. */}
             <img
               src="/spire_screenshots.png"
               alt="A look inside The Spire"
+              width={2605}
+              height={969}
               className="h-auto w-full select-none rounded"
+              style={{ aspectRatio: "2605 / 969" }}
               draggable={false}
             />
           </div>

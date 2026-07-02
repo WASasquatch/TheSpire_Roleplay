@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Plus } from "lucide-react";
 import { isDarkPalette } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
-import { resolveSplashTheme, splashBgUrl, themeStyle } from "../lib/theme.js";
+import { resolveSplashTheme, splashBgClass, themeStyle } from "../lib/theme.js";
 import { CommunityBoard } from "./CommunityBoard.js";
 import { fetchPublicAffiliates, type PublicAffiliateCard } from "../lib/affiliates.js";
 
@@ -90,10 +90,7 @@ export function TopCommunitiesPage() {
           below is lifted to z-10. */}
       {createPortal(
         <div aria-hidden style={{ ...themeStyle(theme), position: "fixed", inset: 0, zIndex: 0 }}>
-          <div
-            className="absolute inset-0 bg-cover bg-center"
-            style={{ backgroundImage: `url(${splashBgUrl(theme)})` }}
-          />
+          <div className={`absolute inset-0 bg-cover bg-center ${splashBgClass(theme)}`} />
           <div className="absolute inset-0 bg-gradient-to-b from-keep-bg/70 via-keep-bg/60 to-keep-bg/85" />
           {dark ? (
             <>

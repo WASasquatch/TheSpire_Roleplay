@@ -11,6 +11,7 @@ import {
   THEMEABLE_TEXT_SLOTS,
 } from "@thekeep/shared";
 import { useActiveTheme } from "../lib/theme.js";
+import { recordNav } from "../lib/nav-metrics.js";
 import { readError } from "../lib/http.js";
 import { listStyles } from "../lib/ornaments/index.js";
 import { AdminBackupsTab } from "./AdminBackupsTab.js";
@@ -22,6 +23,7 @@ import { AdminServersTab } from "./AdminServersTab.js";
 import { AdminPermissionsTab } from "./AdminPermissionsTab.js";
 import { AdminModCasesTab } from "./AdminModCasesTab.js";
 import { AdminEmailTab } from "./AdminEmailTab.js";
+import { AnalyticsTab } from "./admin/AnalyticsTab.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { AccountBanControl } from "./AccountBanControl.js";
 import { ProfileModal } from "./ProfileModal.js";
@@ -54,7 +56,7 @@ interface Props {
   onEnterServer?: (serverId: string, name: string) => void;
 }
 
-type Tab = "overview" | "settings" | "branding" | "rules" | "links" | "affiliates" | "users" | "reports" | "mod-cases" | "verify-logs" | "scriptorium" | "forums" | "servers" | "audit" | "system" | "backups" | "permissions" | "email";
+type Tab = "overview" | "analytics" | "settings" | "branding" | "rules" | "links" | "affiliates" | "users" | "reports" | "mod-cases" | "verify-logs" | "scriptorium" | "forums" | "servers" | "audit" | "system" | "backups" | "permissions" | "email";
 
 /** Tab grouping for the strip's section dividers. Each tab carries
  *  the id of the group it belongs to; the render walks the list
@@ -94,6 +96,7 @@ const TAB_ITEMS: ReadonlyArray<{
 }> = [
   // ----- Monitor: surfaces for the moderation-queue workflow -----
   { id: "overview", label: "Overview", group: "monitor" },
+  { id: "analytics", label: "Analytics", group: "monitor", permission: "view_admin_analytics" },
   { id: "audit", label: "Audit", group: "monitor" },
   { id: "reports", label: "Reports", group: "monitor" },
   { id: "mod-cases", label: "Mod Log", group: "monitor", permission: "view_admin_mod_cases" },
@@ -320,6 +323,14 @@ export function AdminSaveFooter({
 
 export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnterServer }: Props) {
   const [tab, setTab] = useState<Tab>("overview");
+  // Analytics choke point 4 (plan_ext.md §3): sub-tab switches. Route both the
+  // desktop tab strip and the mobile <select> through one helper so the "which
+  // admin section do people actually use" signal is captured in a single place
+  // (the tab id is a stable enum, never free text).
+  const changeTab = (t: Tab) => {
+    if (t !== tab) recordNav("tab", `admin:${t}`);
+    setTab(t);
+  };
   // Calm mode: ease each tab's body in with a soft opacity fade instead of an
   // instant snap. Only when Reduce Motion is on do we add the class + `key`
   // (the `key` remounts the wrapper on tab change so the CSS fade replays);
@@ -403,7 +414,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
             <h2 className="shrink-0 font-action text-base">Admin</h2>
             <select
               value={tab}
-              onChange={(e) => setTab(e.target.value as Tab)}
+              onChange={(e) => changeTab(e.target.value as Tab)}
               aria-label="Admin section"
               className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
             >
@@ -442,7 +453,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
                       title={TAB_GROUP_LABEL[entry.afterGroup]}
                     />
                   ) : (
-                    <TabBtn key={entry.tab.id} active={tab === entry.tab.id} onClick={() => setTab(entry.tab.id)}>
+                    <TabBtn key={entry.tab.id} active={tab === entry.tab.id} onClick={() => changeTab(entry.tab.id)}>
                       {entry.tab.label}
                     </TabBtn>
                   ),
@@ -480,6 +491,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
                 helper so a user with a deep-linked stale tab id
                 can't render a panel they don't have access to. */}
             {tab === "overview" ? <OverviewTab /> : null}
+            {tab === "analytics" && canSeeTab("view_admin_analytics") ? <AnalyticsTab /> : null}
             {tab === "settings" && canSeeTab("view_admin_settings") ? <SettingsTab /> : null}
             {tab === "branding" && canSeeTab("view_admin_branding") ? <BrandingTab /> : null}
             {tab === "rules" && canSeeTab("view_admin_rules") ? <RulesTab /> : null}
@@ -634,6 +646,20 @@ interface SettingsRow {
   forumRegistrationRulesHtml: string;
   metaDescription: string;
   customHeadHtml: string;
+  /** Default social-card image URL (og:image / twitter:image fallback). "" = index.html default. */
+  ogImageUrl: string;
+  /** Tagline appended after the site name in the homepage/login/register title. "" = built-in. */
+  homepageTagline: string;
+  /** Keyword shelf for <meta name="keywords">. "" = built-in default. */
+  seoKeywords: string;
+  /** google-site-verification content token. "" = no meta. */
+  googleSiteVerification: string;
+  /** Bing msvalidate.01 content token. "" = no meta. */
+  bingSiteVerification: string;
+  /** Master search-indexing switch. false = robots Disallow / + noindex meta. */
+  searchIndexingEnabled: boolean;
+  /** Newline-separated social profile URLs for Organization.sameAs. */
+  socialProfileUrls: string;
   activityFeedsEnabled: boolean;
   featuredWorldsEnabled: boolean;
   splashMessages24hEnabled: boolean;
@@ -1566,6 +1592,20 @@ interface BrandingDraft {
   welcomeHtml: string;
   metaDescription: string;
   customHeadHtml: string;
+  /** Default social-card image URL. Empty = the image baked into index.html. */
+  ogImageUrl: string;
+  /** Homepage/login/register title tagline. Empty = built-in. */
+  homepageTagline: string;
+  /** Keyword shelf. Empty = built-in default. */
+  seoKeywords: string;
+  /** google-site-verification content token. */
+  googleSiteVerification: string;
+  /** Bing msvalidate.01 content token. */
+  bingSiteVerification: string;
+  /** Master search-indexing switch. */
+  searchIndexingEnabled: boolean;
+  /** Newline-separated social profile URLs. */
+  socialProfileUrls: string;
 }
 
 function BrandingTab() {
@@ -1608,6 +1648,13 @@ function BrandingTab() {
         welcomeHtml: j.welcomeHtml ?? "",
         metaDescription: j.metaDescription ?? "",
         customHeadHtml: j.customHeadHtml ?? "",
+        ogImageUrl: j.ogImageUrl ?? "",
+        homepageTagline: j.homepageTagline ?? "",
+        seoKeywords: j.seoKeywords ?? "",
+        googleSiteVerification: j.googleSiteVerification ?? "",
+        bingSiteVerification: j.bingSiteVerification ?? "",
+        searchIndexingEnabled: j.searchIndexingEnabled ?? true,
+        socialProfileUrls: j.socialProfileUrls ?? "",
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : "load failed");
@@ -1642,6 +1689,15 @@ function BrandingTab() {
         // customHeadHtml is admin-trusted raw HTML (analytics scripts) - the
         // server stores it verbatim without sanitization.
         customHeadHtml: draft.customHeadHtml,
+        // SEO fields: server trims. Empty string is the explicit clear /
+        // "fall back to the built-in default" for each.
+        ogImageUrl: draft.ogImageUrl.trim(),
+        homepageTagline: draft.homepageTagline,
+        seoKeywords: draft.seoKeywords,
+        googleSiteVerification: draft.googleSiteVerification.trim(),
+        bingSiteVerification: draft.bingSiteVerification.trim(),
+        searchIndexingEnabled: draft.searchIndexingEnabled,
+        socialProfileUrls: draft.socialProfileUrls,
       };
       if (body.logoColor && !/^#[0-9a-fA-F]{6}$/.test(body.logoColor as string)) {
         throw new Error("Logo color must be a 6-digit hex like #2c5d2c (or empty to clear).");
@@ -1717,6 +1773,35 @@ function BrandingTab() {
   if (!data || !draft) {
     return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
   }
+
+  // ---- Live preview (pure client, no server work) ----
+  // Mirror the server's fallback chain (seo.ts) so the mockups show exactly
+  // what a crawler / card scraper would see for the HOMEPAGE.
+  const FALLBACK_TAGLINE = "Roleplay Chat, Communities & Forums";
+  const previewName = draft.siteName.trim() || "The Spire";
+  const previewTagline = draft.homepageTagline.trim() || FALLBACK_TAGLINE;
+  const previewTitle = `${previewName} - ${previewTagline}`;
+  const previewDescription =
+    draft.metaDescription.trim() ||
+    "Host your own roleplay chat community or forum, or dive into live RP chat, character profiles, worlds, and collaborative writing.";
+  // Recommended lengths for the SERP snippet (Google truncates past these).
+  const SERP_TITLE_MAX = 60;
+  const SERP_DESC_MAX = 155;
+  const titleOver = previewTitle.length > SERP_TITLE_MAX;
+  const descOver = previewDescription.length > SERP_DESC_MAX;
+  const clampedDesc =
+    previewDescription.length > SERP_DESC_MAX
+      ? previewDescription.slice(0, SERP_DESC_MAX).replace(/\s+\S*$/, "") + "…"
+      : previewDescription;
+  // Host + URL shown in the SERP row. Derive from the configured Site URL when
+  // it's a valid absolute URL; otherwise show a neutral placeholder.
+  let previewHost = "yoursite.example";
+  const siteUrlTrimmed = draft.siteUrl.trim();
+  if (/^https?:\/\//i.test(siteUrlTrimmed)) {
+    try { previewHost = new URL(siteUrlTrimmed).host; } catch { /* keep placeholder */ }
+  }
+  // Card image: the default OG image when set, else the logo image, else none.
+  const previewCardImage = draft.ogImageUrl.trim() || draft.logoUrl.trim();
 
   return (
     <form id="admin-branding-form" onSubmit={save} className="space-y-4">
@@ -1905,6 +1990,192 @@ function BrandingTab() {
             ({draft.metaDescription.length}/500)
           </span>
         </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Social card image</legend>
+        <input
+          type="url"
+          value={draft.ogImageUrl}
+          onChange={(e) => setDraft({ ...draft, ogImageUrl: e.target.value })}
+          maxLength={2000}
+          placeholder="https://example.com/social-card.png"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+        />
+        <p className="mt-1 text-keep-muted">
+          The image shown when someone shares a link on Discord, X, Slack, or
+          Facebook. Used as the default for every page that doesn't have its own
+          card (a shared forum or community uses its own banner). Recommended
+          1200x630, under 1 MB. Empty falls back to the built-in card.
+        </p>
+        {draft.ogImageUrl.trim() ? (
+          <div className="mt-2">
+            <img
+              src={draft.ogImageUrl.trim()}
+              alt="Social card preview"
+              className="max-h-40 w-full rounded border border-keep-rule object-cover"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+            />
+          </div>
+        ) : null}
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Homepage tagline</legend>
+        <input
+          type="text"
+          value={draft.homepageTagline}
+          onChange={(e) => setDraft({ ...draft, homepageTagline: e.target.value })}
+          maxLength={200}
+          placeholder="Roleplay Chat, Communities & Forums"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+        />
+        <p className="mt-1 text-keep-muted">
+          Added after the site name in the browser tab and search results on the
+          homepage, login, and register pages, so the title reads{" "}
+          <code>{previewName} - {previewTagline}</code>. Keeps the title
+          keyword-rich without baking search terms into the brand name itself.
+          Empty falls back to <code>{FALLBACK_TAGLINE}</code>.
+        </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">SEO keywords</legend>
+        <textarea
+          value={draft.seoKeywords}
+          onChange={(e) => setDraft({ ...draft, seoKeywords: e.target.value })}
+          rows={3}
+          maxLength={1000}
+          placeholder="roleplay chat, RP chat, play-by-post forum, community hosting, worldbuilding"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+        />
+        <p className="mt-1 text-keep-muted">
+          Comma-separated keyword list for <code>&lt;meta name="keywords"&gt;</code>.
+          Google ignores this, but Bing, DuckDuckGo, and some card scrapers still
+          read it. Empty falls back to the built-in default list.
+        </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Search-engine verification</legend>
+        <label className="mb-2 block">
+          <span className="mb-1 block text-keep-muted">Google (Search Console)</span>
+          <input
+            type="text"
+            value={draft.googleSiteVerification}
+            onChange={(e) => setDraft({ ...draft, googleSiteVerification: e.target.value })}
+            maxLength={200}
+            placeholder="paste only the content token"
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-keep-muted">Bing (Webmaster Tools)</span>
+          <input
+            type="text"
+            value={draft.bingSiteVerification}
+            onChange={(e) => setDraft({ ...draft, bingSiteVerification: e.target.value })}
+            maxLength={200}
+            placeholder="paste only the content token"
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+          />
+        </label>
+        <p className="mt-1 text-keep-muted">
+          Paste only the <code>content</code> token from the verification tag,
+          not the whole <code>&lt;meta&gt;</code>. Each gets added to the page{" "}
+          <code>&lt;head&gt;</code> when set. Leave empty once you've switched to
+          the DNS or file verification method.
+        </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Social profiles</legend>
+        <textarea
+          value={draft.socialProfileUrls}
+          onChange={(e) => setDraft({ ...draft, socialProfileUrls: e.target.value })}
+          rows={3}
+          maxLength={2000}
+          placeholder={"https://x.com/yoursite\nhttps://discord.gg/yourinvite\nhttps://bsky.app/profile/yoursite"}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+        />
+        <p className="mt-1 text-keep-muted">
+          One profile URL per line. Added to the structured data so search
+          engines can connect these accounts to your site. Non-link lines are
+          ignored.
+        </p>
+      </fieldset>
+
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Search indexing</legend>
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={draft.searchIndexingEnabled}
+            onChange={(e) => setDraft({ ...draft, searchIndexingEnabled: e.target.checked })}
+            className="mt-0.5"
+          />
+          <span>Allow search engines to index this site</span>
+        </label>
+        {draft.searchIndexingEnabled ? (
+          <p className="mt-1 text-keep-muted">
+            Search engines may crawl and index the site normally. Turn this off
+            for a staging or pre-launch install you don't want appearing in
+            search yet.
+          </p>
+        ) : (
+          <p className="mt-1 text-keep-accent">
+            <b>Off:</b> the site tells all search engines not to index it, and
+            over time it will be removed from Google and other search results.
+            Only use this before launch.
+          </p>
+        )}
+      </fieldset>
+
+      {/* SERP + social-card live preview (pure client, homepage values) */}
+      <fieldset className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">Search &amp; social preview</legend>
+        <p className="mb-2 text-keep-muted">
+          How the homepage looks in a Google result and a Discord / X link card.
+          Live from the values above.
+        </p>
+
+        {/* Google SERP snippet */}
+        <div className="rounded border border-keep-rule bg-white p-3">
+          <div className="truncate text-[13px] text-[#202124]">{previewHost}/</div>
+          <div className="truncate text-[16px] leading-tight text-[#1a0dab]">{previewTitle}</div>
+          <div className="mt-0.5 text-[12px] leading-snug text-[#4d5156]">{clampedDesc}</div>
+        </div>
+        <div className="mt-1 flex flex-wrap gap-3 text-[10px] text-keep-muted">
+          <span className={titleOver ? "text-keep-accent" : ""}>
+            Title {previewTitle.length}/{SERP_TITLE_MAX}
+            {titleOver ? " (may be cut off)" : ""}
+          </span>
+          <span className={descOver ? "text-keep-accent" : ""}>
+            Description {previewDescription.length}/{SERP_DESC_MAX}
+            {descOver ? " (may be cut off)" : ""}
+          </span>
+        </div>
+
+        {/* Discord / X large card */}
+        <div className="mt-3 max-w-md overflow-hidden rounded border border-keep-rule bg-keep-panel">
+          {previewCardImage ? (
+            <img
+              src={previewCardImage}
+              alt=""
+              className="aspect-[1200/630] w-full bg-keep-bg object-cover"
+              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+            />
+          ) : (
+            <div className="flex aspect-[1200/630] w-full items-center justify-center bg-keep-bg text-keep-muted">
+              No card image set
+            </div>
+          )}
+          <div className="p-3">
+            <div className="text-[10px] uppercase tracking-widest text-keep-muted">{previewHost}</div>
+            <div className="mt-0.5 font-semibold text-keep-text">{previewTitle}</div>
+            <div className="mt-0.5 line-clamp-2 text-keep-muted">{previewDescription}</div>
+          </div>
+        </div>
       </fieldset>
 
       <fieldset className="rounded border border-keep-accent/40 bg-keep-accent/5 p-3 text-xs">
@@ -4553,12 +4824,10 @@ function AffiliatePendingItem({
 
   return (
     <li className="rounded border border-keep-action/40 bg-keep-bg p-2 text-xs">
-      <div className="flex flex-col gap-3 sm:flex-row">
-        {/* Card preview — the exact splash treatment. */}
-        <div className="w-full shrink-0 sm:w-56">
-          <AffiliateCard card={toCardPreview(row)} />
-        </div>
-        <div className="min-w-0 flex-1 space-y-2">
+      <div className="flex flex-col gap-3">
+        {/* Wide card preview — the exact Top RP Communities board layout. */}
+        <AffiliateCard card={toCardPreview(row)} size="large" />
+        <div className="min-w-0 space-y-2">
           <div className="text-[11px] text-keep-muted">
             Submitted by <span className="font-semibold text-keep-text">{row.ownerName ?? "unknown"}</span>
           </div>
@@ -4658,11 +4927,9 @@ function AffiliateCardItem({
 
   return (
     <li className="rounded border border-keep-rule/60 bg-keep-bg p-2 text-xs">
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <div className="w-full shrink-0 sm:w-56">
-          <AffiliateCard card={toCardPreview(row)} />
-        </div>
-        <div className="min-w-0 flex-1 space-y-2">
+      <div className="flex flex-col gap-3">
+        <AffiliateCard card={toCardPreview(row)} size="large" />
+        <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate font-semibold">{row.title || row.label || "(untitled)"}</span>
             <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${chip.className}`}>{chip.label}</span>

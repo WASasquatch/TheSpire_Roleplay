@@ -540,7 +540,22 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
    *  member without a `server_members` row — so its explicit count is ~1; we
    *  substitute the total registered-user count for it, so The Spire surfaces as
    *  the flagship community instead of ranking near-empty. Minimal shape; capped
-   *  at 8. Gated on the servers flag like the rest of discovery. */
+   *  at 8. Gated on the servers flag like the rest of discovery.
+   *
+   *  LIVE social proof (B4): each row also carries `onlineCount` — the distinct
+   *  roleplayers currently connected inside that community — and `lastActivityAt`
+   *  — the most recent message across its rooms. Both are cheap:
+   *    - onlineCount is derived from the in-memory socket registry, NOT the DB.
+   *      Every socket caches its current room's server on `socket.data.serverId`
+   *      (set on room-join in broadcast.ts, falling back to the default/home
+   *      server for legacy NULL-serverId rooms), so one `fetchSockets()` pass +
+   *      a group-by-serverId over distinct userIds gives the count with no query.
+   *    - lastActivityAt reuses `loadActivityBy` (max message time per server),
+   *      the same batched read the catalog/discover surfaces already run.
+   *  Both are anonymous-safe (aggregate counts + a timestamp; no names). The
+   *  numbers ride the wire raw — the homepage gates them behind
+   *  `activityFeedsEnabled` and only renders a count when it is > 0, so a
+   *  cold-start install never paints a dead "0 online". */
   app.get("/servers/popular", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
     const rows = await db
@@ -577,6 +592,30 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       totalRegistered = Number(t?.n ?? 0);
     }
 
+    // Live online-per-server from the socket registry (no DB). One pass over the
+    // connected sockets, grouping DISTINCT userIds by the server they're in
+    // (socket.data.serverId, set on every room-join). A user with two tabs in
+    // the same community counts once; a user with tabs in two communities counts
+    // in each. Best-effort: a socket registry hiccup leaves onlineCount at 0.
+    const onlineByServer = new Map<string, Set<string>>();
+    try {
+      const sockets = await io.fetchSockets();
+      for (const s of sockets) {
+        const uid = (s.data as { userId?: string }).userId;
+        const sid = (s.data as { serverId?: string }).serverId;
+        if (!uid || !sid) continue;
+        let set = onlineByServer.get(sid);
+        if (!set) { set = new Set(); onlineByServer.set(sid, set); }
+        set.add(uid);
+      }
+    } catch { /* best-effort: fall through with empty counts */ }
+
+    // Most-recent activity per server (max message time across its rooms) — the
+    // same batched read the catalog/discover surfaces run. Cheap, one grouped
+    // query. Legacy NULL-serverId rooms coalesce into the default server, so the
+    // home server's activity isn't dropped.
+    const activityBy = await loadActivityBy();
+
     const out = rows
       .map((s) => ({
         slug: s.slug,
@@ -586,6 +625,11 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
         iconColor: s.iconColor ?? null,
         isSystem: !!s.isSystem,
         memberCount: s.isSystem ? totalRegistered : (memberCountBy.get(s.id) ?? 0),
+        // Live signals (B4). onlineCount is the distinct connected roleplayers in
+        // this community right now; lastActivityAt is the newest message across
+        // its rooms (ms epoch, or null when the server has never had one).
+        onlineCount: onlineByServer.get(s.id)?.size ?? 0,
+        lastActivityAt: activityBy.get(s.id) ?? null,
       }))
       .sort((a, b) => b.memberCount - a.memberCount || a.name.localeCompare(b.name))
       .slice(0, 8);
@@ -1752,10 +1796,34 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.roomId)).limit(1))[0];
     if (!room || !roomInServer(room, gate.server.id)) { reply.code(404); return { error: "no such room in this server" }; }
-    if (room.isSystem) { reply.code(400); return { error: "this room is the server's system room and can't be deleted" }; }
+    // System rooms are the server's structural landings. Only the SERVER OWNER
+    // (authority.isOwner also covers the site owner / global staff) may remove
+    // one, and never the last one — the server must always keep a home room to
+    // land people in. This lets an owner clear a vestigial system room (e.g. the
+    // old "Forums" landing, now that forums are their own system).
+    let systemSurvivor: typeof room | undefined;
+    if (room.isSystem) {
+      if (!gate.authority.isOwner) {
+        reply.code(403);
+        return { error: "only the server owner can remove a system room" };
+      }
+      systemSurvivor = (await db
+        .select()
+        .from(rooms)
+        .where(and(eq(rooms.serverId, gate.server.id), eq(rooms.isSystem, true), ne(rooms.id, room.id)))
+        .orderBy(asc(rooms.createdAt))
+        .limit(1))[0];
+      if (!systemSurvivor) {
+        reply.code(400);
+        return { error: "can't remove the server's only system room; make another room first" };
+      }
+    }
     // Relocate live occupants to this server's landing (then canonical), mirror
-    // the global admin hatchet; cascade FKs clean up members/messages/bans.
-    const landing = (await findServerLanding(db, gate.server.id)) ?? (await findCanonicalLanding(db));
+    // the global admin hatchet; cascade FKs clean up members/messages/bans. If
+    // the landing IS the system room being deleted, fall back to the surviving
+    // system room so no one is stranded in the deleted room.
+    let landing = (await findServerLanding(db, gate.server.id)) ?? (await findCanonicalLanding(db));
+    if (landing && landing.id === room.id) landing = systemSurvivor ?? (await findCanonicalLanding(db));
     const remoteSockets = await io.in(`room:${room.id}`).fetchSockets();
     for (const s of remoteSockets) {
       s.leave(`room:${room.id}`);

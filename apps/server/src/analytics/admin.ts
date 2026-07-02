@@ -1,0 +1,277 @@
+/**
+ * Admin analytics read endpoints (plan_ext.md §5 admin, §6).
+ *
+ *   GET /admin/analytics/public — hits over time, top referrers, geo, top pages,
+ *                                 bot-vs-human split.
+ *   GET /admin/analytics/inapp  — top modals / sub-tabs / rooms / servers /
+ *                                 features + a per-day event series.
+ *
+ * Both are gated by `view_admin_analytics` via `requireSessionPermission` (same
+ * helper the rest of /admin uses; the /admin preHandler in admin/routes.ts has
+ * already attached `req.sessionUser`). They read the pre-aggregated
+ * `analytics_daily` rollup for speed, then TOP UP "today" live from the raw
+ * tables (today hasn't been rolled up yet). Rows are `WHERE is_bot = 0` by
+ * default; `?includeBots=1` folds the ":bot" rollup rows / raw bot rows back in.
+ * `?range=7|30|90` (days) bounds the window (default 30).
+ *
+ * The rollup encodes the bot flag as a ":bot" metric suffix (see rollup.ts), so
+ * the base metric name is the human series and `<base>:bot` is the bot series;
+ * this reader sums them per `includeBots`.
+ */
+import { and, gte, lt, sql, inArray } from "drizzle-orm";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { PermissionKey } from "@thekeep/shared";
+import {
+  analyticsDaily,
+  analyticsEvent,
+  analyticsPageView,
+} from "../db/schema.js";
+import type { Db } from "../db/index.js";
+import { requireSessionPermission } from "../auth/requireSessionPermission.js";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Clamp the range query to the supported 7/30/90-day windows (default 30). */
+function parseRange(raw: string | undefined): 7 | 30 | 90 {
+  const n = parseInt(raw ?? "", 10);
+  return n === 7 ? 7 : n === 90 ? 90 : 30;
+}
+
+function parseBool(raw: string | undefined): boolean {
+  return raw === "1" || raw === "true";
+}
+
+/** 'YYYY-MM-DD' (UTC) for a ms instant. */
+function dayKey(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/** Start-of-UTC-today in ms. */
+function todayStart(now: number): number {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+/**
+ * Base + bot metric names for a metric family, honoring includeBots. When bots
+ * are excluded we read only the base ("pageview"); when included we read both
+ * ("pageview" + "pageview:bot") and the caller sums.
+ */
+function metricSet(base: string, includeBots: boolean): string[] {
+  return includeBots ? [base, `${base}:bot`] : [base];
+}
+
+export async function registerAnalyticsAdminRoutes(app: FastifyInstance, db: Db): Promise<void> {
+  const requirePermission = (req: FastifyRequest, reply: FastifyReply, key: PermissionKey) =>
+    requireSessionPermission(req, reply, key, db);
+
+  /* ================= PUBLIC site metrics ================= */
+  app.get<{ Querystring: { range?: string; includeBots?: string } }>(
+    "/admin/analytics/public",
+    async (req, reply) => {
+      if (!(await requirePermission(req, reply, "view_admin_analytics"))) return;
+      const range = parseRange(req.query.range);
+      const includeBots = parseBool(req.query.includeBots);
+      const now = Date.now();
+      const tStart = todayStart(now);
+      // Rollup covers days strictly before today; the window's first day is
+      // (range-1) days back so a 7-day range shows 7 buckets incl. today.
+      const fromDay = dayKey(tStart - (range - 1) * DAY_MS);
+
+      /* ----- rolled-up (historical) rows in-window, up to yesterday ----- */
+      const pvMetrics = metricSet("pageview", includeBots);
+      const visMetrics = metricSet("visitor", includeBots);
+      const refMetrics = metricSet("referrer", includeBots);
+      const geoMetrics = metricSet("geo", includeBots);
+
+      const dailyRows = await db
+        .select({
+          day: analyticsDaily.day,
+          metric: analyticsDaily.metric,
+          dim1: analyticsDaily.dim1,
+          dim2: analyticsDaily.dim2,
+          count: analyticsDaily.count,
+        })
+        .from(analyticsDaily)
+        .where(
+          and(
+            gte(analyticsDaily.day, fromDay),
+            inArray(analyticsDaily.metric, [...pvMetrics, ...visMetrics, ...refMetrics, ...geoMetrics]),
+          ),
+        );
+
+      // Per-day pageview + visitor series (seed every day in-window with 0).
+      const series = new Map<string, { pageviews: number; visitors: number }>();
+      for (let i = range - 1; i >= 0; i--) {
+        series.set(dayKey(tStart - i * DAY_MS), { pageviews: 0, visitors: 0 });
+      }
+      const topPages = new Map<string, number>();
+      const referrers = new Map<string, { medium: string; source: string | null; count: number }>();
+      const geo = new Map<string, number>();
+      let botPv = 0;
+      let humanPv = 0;
+
+      for (const r of dailyRows) {
+        const base = r.metric.replace(/:bot$/, "");
+        const isBot = r.metric.endsWith(":bot");
+        if (base === "pageview") {
+          const s = series.get(r.day);
+          if (s) s.pageviews += r.count;
+          if (r.dim1) topPages.set(r.dim1, (topPages.get(r.dim1) ?? 0) + r.count);
+          if (isBot) botPv += r.count; else humanPv += r.count;
+        } else if (base === "visitor") {
+          const s = series.get(r.day);
+          if (s) s.visitors += r.count;
+        } else if (base === "referrer") {
+          const k = `${r.dim1 ?? "direct"}|${r.dim2 ?? ""}`;
+          const cur = referrers.get(k) ?? { medium: r.dim1 ?? "direct", source: r.dim2 ?? null, count: 0 };
+          cur.count += r.count;
+          referrers.set(k, cur);
+        } else if (base === "geo") {
+          if (r.dim1) geo.set(r.dim1, (geo.get(r.dim1) ?? 0) + r.count);
+        }
+      }
+
+      /* ----- live "today" top-up straight from the raw table ----- */
+      const todayFrom = new Date(tStart);
+      const todayTo = new Date(now);
+      const botFilter = includeBots ? undefined : sql`${analyticsPageView.isBot} = 0`;
+      const rawWhere = (extra?: ReturnType<typeof sql> | undefined) =>
+        and(gte(analyticsPageView.createdAt, todayFrom), lt(analyticsPageView.createdAt, todayTo), botFilter, extra);
+      const todayKey = dayKey(now);
+
+      const [todayPv] = await db
+        .select({ n: sql<number>`count(*)` })
+        .from(analyticsPageView)
+        .where(rawWhere());
+      const [todayVis] = await db
+        .select({ n: sql<number>`count(distinct ${analyticsPageView.visitorHash})` })
+        .from(analyticsPageView)
+        .where(rawWhere(sql`${analyticsPageView.visitorHash} is not null`));
+      const todayPageRows = await db
+        .select({ path: analyticsPageView.path, n: sql<number>`count(*)` })
+        .from(analyticsPageView)
+        .where(rawWhere())
+        .groupBy(analyticsPageView.path);
+      const todayRefRows = await db
+        .select({ medium: analyticsPageView.refMedium, source: analyticsPageView.refSource, n: sql<number>`count(*)` })
+        .from(analyticsPageView)
+        .where(rawWhere())
+        .groupBy(analyticsPageView.refMedium, analyticsPageView.refSource);
+      const todayGeoRows = await db
+        .select({ country: analyticsPageView.geoCountry, n: sql<number>`count(*)` })
+        .from(analyticsPageView)
+        .where(rawWhere(sql`${analyticsPageView.geoCountry} is not null`))
+        .groupBy(analyticsPageView.geoCountry);
+      const [todayBots] = await db
+        .select({ n: sql<number>`count(*)` })
+        .from(analyticsPageView)
+        .where(and(gte(analyticsPageView.createdAt, todayFrom), lt(analyticsPageView.createdAt, todayTo), sql`${analyticsPageView.isBot} = 1`));
+      const [todayHumans] = await db
+        .select({ n: sql<number>`count(*)` })
+        .from(analyticsPageView)
+        .where(and(gte(analyticsPageView.createdAt, todayFrom), lt(analyticsPageView.createdAt, todayTo), sql`${analyticsPageView.isBot} = 0`));
+
+      // Fold today's live numbers in.
+      const todaySeries = series.get(todayKey);
+      if (todaySeries) {
+        todaySeries.pageviews += todayPv?.n ?? 0;
+        todaySeries.visitors += todayVis?.n ?? 0;
+      }
+      for (const r of todayPageRows) topPages.set(r.path, (topPages.get(r.path) ?? 0) + r.n);
+      for (const r of todayRefRows) {
+        const k = `${r.medium ?? "direct"}|${r.source ?? ""}`;
+        const cur = referrers.get(k) ?? { medium: r.medium ?? "direct", source: r.source ?? null, count: 0 };
+        cur.count += r.n;
+        referrers.set(k, cur);
+      }
+      for (const r of todayGeoRows) if (r.country) geo.set(r.country, (geo.get(r.country) ?? 0) + r.n);
+      botPv += todayBots?.n ?? 0;
+      humanPv += todayHumans?.n ?? 0;
+
+      const sortDesc = <T extends { count: number }>(a: T, b: T) => b.count - a.count;
+      return {
+        range,
+        includeBots,
+        series: [...series.entries()].map(([day, v]) => ({ day, ...v })),
+        topPages: [...topPages.entries()].map(([path, count]) => ({ path, count })).sort(sortDesc).slice(0, 50),
+        referrers: [...referrers.values()].sort(sortDesc).slice(0, 50),
+        geo: [...geo.entries()].map(([country, count]) => ({ country, count })).sort(sortDesc).slice(0, 100),
+        botSplit: { human: humanPv, bot: botPv },
+      };
+    },
+  );
+
+  /* ================= IN-APP nav metrics ================= */
+  app.get<{ Querystring: { range?: string; includeBots?: string } }>(
+    "/admin/analytics/inapp",
+    async (req, reply) => {
+      if (!(await requirePermission(req, reply, "view_admin_analytics"))) return;
+      const range = parseRange(req.query.range);
+      const includeBots = parseBool(req.query.includeBots);
+      const now = Date.now();
+      const tStart = todayStart(now);
+      const fromDay = dayKey(tStart - (range - 1) * DAY_MS);
+
+      const evMetrics = metricSet("event", includeBots);
+      const dailyRows = await db
+        .select({
+          day: analyticsDaily.day,
+          metric: analyticsDaily.metric,
+          dim1: analyticsDaily.dim1, // event kind
+          dim2: analyticsDaily.dim2, // event key
+          count: analyticsDaily.count,
+        })
+        .from(analyticsDaily)
+        .where(and(gte(analyticsDaily.day, fromDay), inArray(analyticsDaily.metric, evMetrics)));
+
+      // Per-kind key tallies + a per-day total event series.
+      const byKind = new Map<string, Map<string, number>>();
+      const series = new Map<string, number>();
+      for (let i = range - 1; i >= 0; i--) series.set(dayKey(tStart - i * DAY_MS), 0);
+
+      const bump = (kind: string, key: string, n: number) => {
+        let m = byKind.get(kind);
+        if (!m) { m = new Map(); byKind.set(kind, m); }
+        m.set(key, (m.get(key) ?? 0) + n);
+      };
+      for (const r of dailyRows) {
+        bump(r.dim1 ?? "?", r.dim2 ?? "?", r.count);
+        series.set(r.day, (series.get(r.day) ?? 0) + r.count);
+      }
+
+      /* ----- live "today" top-up from raw analytics_event ----- */
+      const todayFrom = new Date(tStart);
+      const todayTo = new Date(now);
+      const botFilter = includeBots ? undefined : sql`${analyticsEvent.isBot} = 0`;
+      const todayRows = await db
+        .select({ kind: analyticsEvent.kind, key: analyticsEvent.key, n: sql<number>`count(*)` })
+        .from(analyticsEvent)
+        .where(and(gte(analyticsEvent.createdAt, todayFrom), lt(analyticsEvent.createdAt, todayTo), botFilter))
+        .groupBy(analyticsEvent.kind, analyticsEvent.key);
+      const todayKey = dayKey(now);
+      for (const r of todayRows) {
+        bump(r.kind, r.key, r.n);
+        series.set(todayKey, (series.get(todayKey) ?? 0) + r.n);
+      }
+
+      const topOf = (kind: string, n = 25) =>
+        [...(byKind.get(kind) ?? new Map()).entries()]
+          .map(([key, count]) => ({ key, count: count as number }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, n);
+
+      return {
+        range,
+        includeBots,
+        series: [...series.entries()].map(([day, count]) => ({ day, count })),
+        modals: topOf("modal"),
+        tabs: topOf("tab"),
+        rooms: topOf("room"),
+        servers: topOf("server"),
+        features: topOf("feature"),
+        pages: topOf("page"),
+      };
+    },
+  );
+}

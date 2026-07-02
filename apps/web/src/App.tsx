@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import type { ChatMessage, PermissionKey, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
 import { arcadeGameByKey, DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
-import { AdminPanel } from "./components/AdminPanel.js";
+// Heavy, authenticated-only surfaces are code-split (B1, plan.md §3) so
+// the anonymous splash / login / boot bundle never downloads them. Each
+// is a NAMED export, so we adapt it to the default-export shape React.lazy
+// expects. Every one of these renders only inside the authenticated <Chat>
+// subtree, which is wrapped in a single <Suspense> boundary — so a lazy
+// descendant can always suspend into an ancestor and never crash. Do NOT
+// lazy-load anything on the anonymous path (SplashLanding, AuthGate, etc.).
+const AdminPanel = lazy(() => import("./components/AdminPanel.js").then((m) => ({ default: m.AdminPanel })));
 import { AuthGate, SplashShell } from "./components/AuthGate.js";
 import { SplashLanding } from "./components/SplashLanding.js";
 import { ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage } from "./components/EmailAuthPages.js";
@@ -10,7 +17,7 @@ import { VerifyEmailGate } from "./components/VerifyEmailGate.js";
 import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/Composer.js";
 import { TypingIndicator } from "./components/TypingIndicator.js";
-import { HelpModal } from "./components/HelpModal.js";
+const HelpModal = lazy(() => import("./components/HelpModal.js").then((m) => ({ default: m.HelpModal })));
 import { InfoModal } from "./components/InfoModal.js";
 import { MessageList } from "./components/MessageList.js";
 import { TheaterPanel } from "./components/TheaterPanel.js";
@@ -18,32 +25,33 @@ import { MutualPrompts } from "./components/MutualPrompts.js";
 import { StoryInvitePrompts } from "./components/StoryInvitePrompts.js";
 import { FriendRequestPrompts } from "./components/FriendRequestPrompts.js";
 import { BookmarksModal } from "./components/BookmarksModal.js";
-import { ProfileEditor } from "./components/ProfileEditor.js";
+const ProfileEditor = lazy(() => import("./components/ProfileEditor.js").then((m) => ({ default: m.ProfileEditor })));
 import { ProfileModal } from "./components/ProfileModal.js";
 import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
 import { ServerRail } from "./components/ServerRail.js";
-import { ServerSettingsView } from "./components/ServerSettingsView.js";
-import { ServerDiscoverModal } from "./components/ServerDiscoverModal.js";
+const ServerSettingsView = lazy(() => import("./components/ServerSettingsView.js").then((m) => ({ default: m.ServerSettingsView })));
+const ServerDiscoverModal = lazy(() => import("./components/ServerDiscoverModal.js").then((m) => ({ default: m.ServerDiscoverModal })));
 import { listServers, resolveServerSlug, visitServer, type ServerSummary } from "./lib/servers.js";
-import { MessagesModal } from "./components/MessagesModal.js";
+const MessagesModal = lazy(() => import("./components/MessagesModal.js").then((m) => ({ default: m.MessagesModal })));
 import { RulesModal } from "./components/RulesModal.js";
 import { RulesPage } from "./components/RulesPage.js";
 import { isRulesUrl, navigateAwayFromRules } from "./lib/rulesUrl.js";
 import { FaqPage } from "./components/FaqPage.js";
 import { TopCommunitiesPage, isTopCommunitiesUrl, consumeAddCommunityIntent } from "./components/TopCommunitiesPage.js";
 import { faqRoute, type FaqRoute } from "./lib/faqUrl.js";
-import { EarningDashboard } from "./components/EarningDashboard.js";
+const EarningDashboard = lazy(() => import("./components/EarningDashboard.js").then((m) => ({ default: m.EarningDashboard })));
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
-import { ArcadeLauncher } from "./components/arcade/ArcadeLauncher.js";
-import { EidolonWindow } from "./components/arcade/EidolonWindow.js";
-import { UrugalWindow } from "./components/arcade/UrugalWindow.js";
-import { GrimholdWindow } from "./components/arcade/GrimholdWindow.js";
+const ArcadeLauncher = lazy(() => import("./components/arcade/ArcadeLauncher.js").then((m) => ({ default: m.ArcadeLauncher })));
+const EidolonWindow = lazy(() => import("./components/arcade/EidolonWindow.js").then((m) => ({ default: m.EidolonWindow })));
+const UrugalWindow = lazy(() => import("./components/arcade/UrugalWindow.js").then((m) => ({ default: m.UrugalWindow })));
+const GrimholdWindow = lazy(() => import("./components/arcade/GrimholdWindow.js").then((m) => ({ default: m.GrimholdWindow })));
 import { EarningRibbon } from "./components/EarningRibbon.js";
 import { BannerMarquee } from "./components/BannerMarquee.js";
 import { RoomInfoBar } from "./components/RoomInfoBar.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
+import { recordNav, recordPageView, classifyPublicPath } from "./lib/nav-metrics.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
 import { playRoomTransition } from "./lib/transitions/orchestrator.js";
 import { reduceMotionEnabled } from "./lib/reducedMotion.js";
@@ -53,28 +61,28 @@ import "./lib/calmCosmetics.js";
 import { fetchSpotlightMember, fetchRoomBrief, fetchStoryBrief } from "./lib/uiRouteDynamicLabel.js";
 import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
-import { ThreadModal } from "./components/ThreadModal.js";
+const ThreadModal = lazy(() => import("./components/ThreadModal.js").then((m) => ({ default: m.ThreadModal })));
 import { UsersModal } from "./components/UsersModal.js";
 import { WorldCatalogModal } from "./components/WorldCatalogModal.js";
-import { WorldEditorModal } from "./components/WorldEditorModal.js";
+const WorldEditorModal = lazy(() => import("./components/WorldEditorModal.js").then((m) => ({ default: m.WorldEditorModal })));
 import { WorldViewerModal } from "./components/WorldViewerModal.js";
-import { WorldsListModal } from "./components/WorldsListModal.js";
+const WorldsListModal = lazy(() => import("./components/WorldsListModal.js").then((m) => ({ default: m.WorldsListModal })));
 import { StaffModal } from "./components/StaffModal.js";
 import { AffiliateSubmitPortal } from "./components/AffiliateSubmitPortal.js";
 import { StoryCatalogModal } from "./components/StoryCatalogModal.js";
-import { ForumsCatalogModal } from "./components/ForumsCatalogModal.js";
+const ForumsCatalogModal = lazy(() => import("./components/ForumsCatalogModal.js").then((m) => ({ default: m.ForumsCatalogModal })));
 import { ForumPublicLanding, readReturnForum, RETURN_FORUM_STORAGE_KEY } from "./components/ForumPublicLanding.js";
 import { ServerPublicLanding, readReturnServer, RETURN_SERVER_STORAGE_KEY } from "./components/ServerPublicLanding.js";
 import { fetchForumNotifications, locateForumTopic } from "./lib/forums.js";
 import { fetchNotifBadge } from "./lib/notificationCenter.js";
-import { NotificationCenter } from "./components/NotificationCenter.js";
-import { StoryEditorModal } from "./components/StoryEditorModal.js";
+const NotificationCenter = lazy(() => import("./components/NotificationCenter.js").then((m) => ({ default: m.NotificationCenter })));
+const StoryEditorModal = lazy(() => import("./components/StoryEditorModal.js").then((m) => ({ default: m.StoryEditorModal })));
 import { StoryReaderModal } from "./components/StoryReaderModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
 import { getSocket, disconnect as disconnectSocket, hasSessionBeenAnnounced, loadTabCharacter, markLoginIntent, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
-import { ActiveThemeContext, applyFontPrefs, applyTheme, resolveSplashTheme, splashBgUrl, themeStyle, useActiveTheme, type UiFontScale } from "./lib/theme.js";
+import { ActiveThemeContext, applyFontPrefs, applyTheme, resolveSplashTheme, splashBgClass, themeStyle, useActiveTheme, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, permission as notifPermission, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
@@ -439,6 +447,25 @@ export function App() {
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
+
+  // Analytics choke point 5 (plan_ext.md §3): public / unauth SPA page views.
+  // ONE mount + popstate listener classifies window.location.pathname to a
+  // route TEMPLATE (never a raw id-bearing path) and records a page view. The
+  // app has no router lib, so every public branch (rules/faq/scriptorium/deep
+  // links) funnels through pushState → popstate; this single listener covers
+  // them all instead of instrumenting each branch. Gated to logged-out
+  // visitors — authed in-app nav is captured by the event choke points, and
+  // this keeps public pageview counts free of member browsing noise.
+  useEffect(() => {
+    if (me) return;
+    const track = () => {
+      const tpl = classifyPublicPath(window.location.pathname);
+      if (tpl) recordPageView(tpl);
+    };
+    track(); // initial mount / auth-state flip to logged-out
+    window.addEventListener("popstate", track);
+    return () => window.removeEventListener("popstate", track);
+  }, [me]);
 
   // Mount-time fetch for the deep-link target. Uses HTTP (works whether the
   // viewer is authed or not) so the AuthGate can decide what banner to show
@@ -1071,8 +1098,7 @@ function PublicViewerShell({
           login splash via splashBgUrl (resolved palette decides). */}
       <div
         aria-hidden
-        className="absolute inset-0 bg-cover bg-[position:-175px_center] opacity-40 md:bg-center"
-        style={{ backgroundImage: `url(${splashBgUrl(resolveSplashTheme(branding))})` }}
+        className={`absolute inset-0 bg-cover bg-[position:-175px_center] opacity-40 md:bg-center ${splashBgClass(resolveSplashTheme(branding))}`}
       />
       <div aria-hidden className="absolute inset-0 bg-keep-bg/70" />
       <a
@@ -1187,6 +1213,19 @@ function Chat() {
     board?: UiRouteRankingBoard;
   };
   const [earningOpen, setEarningOpen] = useState<EarningOpenSpec | null>(null);
+  // Analytics choke point 4 (plan_ext.md §3): the EarningDashboard sub-tab is
+  // recorded at the modal-open hook (no internal EarningDashboard edit). Fire
+  // once per open transition (null → spec) and record the initial tab, so the
+  // many setEarningOpen({...}) call sites don't each need instrumenting.
+  const earningWasOpen = useRef(false);
+  useEffect(() => {
+    if (earningOpen && !earningWasOpen.current) {
+      recordNav("tab", `earning:${earningOpen.tab ?? "overview"}`, {
+        ...(earningOpen.itemSubTab ? { itemSubTab: earningOpen.itemSubTab } : {}),
+      });
+    }
+    earningWasOpen.current = !!earningOpen;
+  }, [earningOpen]);
   // Spire Arcade: the launcher (a modal) and the free-floating Eidolon
   // Tamer window (non-modal, kept up while chatting). Both read the current
   // activeCharacterId at render so the right identity's wallet/inventory is
@@ -4029,6 +4068,20 @@ function Chat() {
     // (set by applyTheme above) still drives all standard styling; this
     // is just for components that must branch on the bg color in JS.
     <ActiveThemeContext.Provider value={activeTheme}>
+    {/* Single high-level Suspense boundary for the whole authenticated
+        shell (B1, plan.md §3). Every React.lazy modal/surface declared at
+        the top of this file (AdminPanel, EarningDashboard, the arcade
+        windows, world/story editors, ProfileEditor, ThreadModal, HelpModal,
+        MessagesModal, NotificationCenter, ServerSettingsView,
+        ServerDiscoverModal, ForumsCatalogModal, WorldsListModal, ...)
+        renders somewhere inside this subtree, so each one suspends into
+        THIS ancestor while its chunk loads and can never render un-bounded.
+        The fallback is null: these are on-demand modals/panels, so there's
+        nothing to show until the user opens one, and the surrounding chat
+        shell is already painted. This boundary is only reached when the
+        user is authenticated (<Chat> is rendered solely from the `me`
+        branch), so the anonymous splash/login/boot path never hits it. */}
+    <Suspense fallback={null}>
     {/* Pin the entire chat shell to the viewport with position: fixed so
         document-level scroll (autoFocus on the composer scrolling things
         into view, mobile chrome address-bar resize, etc.) can't shift it
@@ -4953,6 +5006,7 @@ function Chat() {
         />
       ) : null}
     </div>
+    </Suspense>
     </ActiveThemeContext.Provider>
   );
 }

@@ -11,6 +11,7 @@ import {
 import { useChat } from "../state/store.js";
 import { Modal } from "./Modal.js";
 import { CloseButton } from "./CloseButton.js";
+import { AffiliateCard } from "./AffiliateCard.js";
 import { CommunityBoard } from "./CommunityBoard.js";
 import { TagInput } from "./TagInput.js";
 import {
@@ -356,122 +357,104 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) {
   const bannerPreviewOk = !!form.bannerUrl.trim() && bannerOk;
   const iconPreviewOk = !!form.iconUrl.trim() && iconOk;
 
+  // Live preview built from the form so the "List a community" form shows the
+  // exact wide card the board will paint (invalid URLs fall back rather than
+  // trying to load).
+  const previewCard: PublicAffiliateCard = {
+    id: "preview",
+    title: form.title.trim(),
+    description: form.description.trim(),
+    iconUrl: iconPreviewOk ? form.iconUrl.trim() : null,
+    bannerUrl: bannerPreviewOk ? form.bannerUrl.trim() : null,
+    clicksIn: 0,
+    clicksOut: 0,
+    tags: form.tags,
+  };
+
   return (
     <section className="rounded border border-keep-rule bg-keep-panel/30 p-3">
       <h4 className="mb-2 font-action text-sm text-keep-text">List a community</h4>
 
-      <div className="grid gap-3 md:grid-cols-2">
-        <div className="space-y-3">
-          <div>
-            <label className={labelClass} htmlFor="aff-title">Title</label>
-            <input
-              id="aff-title"
-              className={inputClass}
-              value={form.title}
-              maxLength={AFFILIATE_LIMITS.title}
-              onChange={(e) => set("title", e.target.value)}
-              placeholder="Your community's name"
-            />
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="aff-desc">Description</label>
-            <textarea
-              id="aff-desc"
-              className={`${inputClass} min-h-[4.5rem] resize-y`}
-              value={form.description}
-              maxLength={AFFILIATE_LIMITS.description}
-              onChange={(e) => set("description", e.target.value)}
-              placeholder="A line or two about your community"
-            />
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="aff-target">Target URL</label>
-            <input
-              id="aff-target"
-              className={inputClass}
-              value={form.targetUrl}
-              onChange={(e) => set("targetUrl", e.target.value)}
-              placeholder="https://example.com"
-            />
-            {form.targetUrl.trim() && !targetOk ? (
-              <p className="mt-1 text-[11px] text-keep-accent">Use a full http/https link.</p>
-            ) : null}
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="aff-icon">Icon URL (optional)</label>
-            <input
-              id="aff-icon"
-              className={inputClass}
-              value={form.iconUrl}
-              onChange={(e) => set("iconUrl", e.target.value)}
-              placeholder="https://example.com/icon.png"
-            />
-            {form.iconUrl.trim() && !iconOk ? (
-              <p className="mt-1 text-[11px] text-keep-accent">Use a full http/https link.</p>
-            ) : null}
-          </div>
-          <div>
-            <label className={labelClass} htmlFor="aff-banner">Banner URL (optional)</label>
-            <input
-              id="aff-banner"
-              className={inputClass}
-              value={form.bannerUrl}
-              onChange={(e) => set("bannerUrl", e.target.value)}
-              placeholder="https://example.com/banner.jpg"
-            />
-            {form.bannerUrl.trim() && !bannerOk ? (
-              <p className="mt-1 text-[11px] text-keep-accent">Use a full http/https link.</p>
-            ) : null}
-          </div>
-          <div>
-            <label className={labelClass}>Tags (optional)</label>
-            <div className="mt-1">
-              <TagInput
-                tags={form.tags}
-                onChange={(tags) => { setForm((f) => ({ ...f, tags })); setDone(false); }}
-              />
-            </div>
-            <p className="mt-1 text-[11px] text-keep-muted">Genre or category, so seekers can find you.</p>
-          </div>
+      {/* Wide live preview on top — exactly how the card lands on the board. */}
+      <div className="mb-4">
+        <span className={labelClass}>Preview</span>
+        <div className="mt-1">
+          <AffiliateCard card={previewCard} size="large" />
         </div>
+      </div>
 
-        {/* Live preview column: the widescreen banner + icon exactly as the card
-            will paint them. */}
+      {/* Fields. */}
+      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
         <div>
-          <span className={labelClass}>Preview</span>
-          <div className="mt-1 overflow-hidden rounded border border-keep-rule bg-keep-panel/40">
-            <div className="relative aspect-[16/9] w-full bg-keep-bg/40">
-              {bannerPreviewOk ? (
-                <img
-                  src={form.bannerUrl.trim()}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  className="absolute inset-0 h-full w-full object-cover"
-                />
-              ) : (
-                <span className="absolute inset-0 flex items-center justify-center text-[11px] italic text-keep-muted">
-                  Banner preview
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2 p-2">
-              {iconPreviewOk ? (
-                <img
-                  src={form.iconUrl.trim()}
-                  alt=""
-                  referrerPolicy="no-referrer"
-                  className="h-8 w-8 shrink-0 rounded object-cover"
-                />
-              ) : (
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-panel/60 text-xs font-semibold uppercase text-keep-text">
-                  {(form.title.trim()[0] ?? "?").toUpperCase()}
-                </span>
-              )}
-              <span className="truncate font-action text-xs text-keep-text">
-                {form.title.trim() || "Your community"}
-              </span>
-            </div>
+          <label className={labelClass} htmlFor="aff-title">Title</label>
+          <input
+            id="aff-title"
+            className={inputClass}
+            value={form.title}
+            maxLength={AFFILIATE_LIMITS.title}
+            onChange={(e) => set("title", e.target.value)}
+            placeholder="Your community's name"
+          />
+        </div>
+        <div>
+          <label className={labelClass} htmlFor="aff-target">Target URL</label>
+          <input
+            id="aff-target"
+            className={inputClass}
+            value={form.targetUrl}
+            onChange={(e) => set("targetUrl", e.target.value)}
+            placeholder="https://example.com"
+          />
+          {form.targetUrl.trim() && !targetOk ? (
+            <p className="mt-1 text-[11px] text-keep-accent">Use a full http/https link.</p>
+          ) : null}
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelClass} htmlFor="aff-desc">Description</label>
+          <textarea
+            id="aff-desc"
+            className={`${inputClass} min-h-[4.5rem] resize-y`}
+            value={form.description}
+            maxLength={AFFILIATE_LIMITS.description}
+            onChange={(e) => set("description", e.target.value)}
+            placeholder="A line or two about your community"
+          />
+        </div>
+        <div>
+          <label className={labelClass} htmlFor="aff-icon">Icon URL (optional)</label>
+          <input
+            id="aff-icon"
+            className={inputClass}
+            value={form.iconUrl}
+            onChange={(e) => set("iconUrl", e.target.value)}
+            placeholder="https://example.com/icon.png"
+          />
+          {form.iconUrl.trim() && !iconOk ? (
+            <p className="mt-1 text-[11px] text-keep-accent">Use a full http/https link.</p>
+          ) : null}
+        </div>
+        <div>
+          <label className={labelClass} htmlFor="aff-banner">Banner URL (optional)</label>
+          <input
+            id="aff-banner"
+            className={inputClass}
+            value={form.bannerUrl}
+            onChange={(e) => set("bannerUrl", e.target.value)}
+            placeholder="https://example.com/banner.jpg"
+          />
+          {form.bannerUrl.trim() && !bannerOk ? (
+            <p className="mt-1 text-[11px] text-keep-accent">Use a full http/https link.</p>
+          ) : null}
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelClass}>Tags (optional)</label>
+          <div className="mt-1">
+            <TagInput
+              tags={form.tags}
+              onChange={(tags) => { setForm((f) => ({ ...f, tags })); setDone(false); }}
+            />
           </div>
+          <p className="mt-1 text-[11px] text-keep-muted">Genre or category, so seekers can find you.</p>
         </div>
       </div>
 

@@ -1689,6 +1689,41 @@ export const siteSettings = sqliteTable("site_settings", {
    * surface; non-admin write paths don't exist for this column.
    */
   customHeadHtml: text("custom_head_html").notNull().default(""),
+  /**
+   * Default social-card image URL (migration 0309). When set, renderSplashHtml
+   * uses it as the og:image / twitter:image fallback for every route that
+   * doesn't carry its own card image. Empty = fall back to the image baked
+   * into index.html. Recommended 1200x630, under 1 MB.
+   */
+  ogImageUrl: text("og_image_url").notNull().default(""),
+  /**
+   * Tagline appended after the site name in the homepage / login / register
+   * `<title>` (`{siteName} - {tagline}`). Empty falls back to the built-in
+   * HOMEPAGE_TAGLINE in seo.ts. Migration 0309.
+   */
+  homepageTagline: text("homepage_tagline").notNull().default(""),
+  /**
+   * Keyword shelf rendered into `<meta name="keywords">`. Ignored by Google
+   * but used by Bing / DuckDuckGo / card scrapers. Empty falls back to the
+   * built-in DEFAULT_KEYWORDS in seo.ts. Migration 0309.
+   */
+  seoKeywords: text("seo_keywords").notNull().default(""),
+  /** google-site-verification content token; injected as a `<meta>` when set. Migration 0309. */
+  googleSiteVerification: text("google_site_verification").notNull().default(""),
+  /** Bing msvalidate.01 content token; injected as a `<meta>` when set. Migration 0309. */
+  bingSiteVerification: text("bing_site_verification").notNull().default(""),
+  /**
+   * Master search-indexing switch (migration 0309). When false, robots.txt
+   * emits `Disallow: /` and every splash response gets a `noindex,nofollow`
+   * robots meta. Default true so existing installs stay indexable. Useful for
+   * staging / pre-launch.
+   */
+  searchIndexingEnabled: integer("search_indexing_enabled", { mode: "boolean" }).notNull().default(true),
+  /**
+   * Newline-separated social profile URLs mapped into the Organization JSON-LD
+   * `sameAs` array (migration 0309). Empty = omit `sameAs`.
+   */
+  socialProfileUrls: text("social_profile_urls").notNull().default(""),
   /** Web Push VAPID keys. Generated at first server boot and persisted so deploys don't churn keys (which would invalidate every existing subscription). NEVER expose `vapidPrivateKey` to clients. */
   vapidPublicKey: text("vapid_public_key"),
   vapidPrivateKey: text("vapid_private_key"),
@@ -1782,6 +1817,25 @@ export const siteSettings = sqliteTable("site_settings", {
    * SERVERS_KILL env kill-switch.
    */
   serversEnabled: integer("servers_enabled", { mode: "boolean" }).notNull().default(false),
+  /**
+   * First-party analytics master switch (migration 0310). When false the ingest
+   * routes + server-side page-view recorder become no-ops. Default on; additive
+   * so existing installs start collecting immediately.
+   */
+  analyticsEnabled: integer("analytics_enabled", { mode: "boolean" }).notNull().default(true),
+  /**
+   * How many days of RAW analytics rows (page_view + event) to keep before the
+   * nightly rollup sweep deletes them. Long-term data lives in the tiny
+   * analytics_daily rollup, which is kept indefinitely. Default 30 (migration 0310).
+   */
+  analyticsRawRetentionDays: integer("analytics_raw_retention_days").notNull().default(30),
+  /**
+   * Honor the browser DNT / Sec-GPC signal (migration 0310). When true (default)
+   * a request that opts out of tracking is not recorded. Turning it off records
+   * regardless — the analytics stay first-party, cookieless, and aggregate
+   * either way.
+   */
+  analyticsRespectDnt: integer("analytics_respect_dnt", { mode: "boolean" }).notNull().default(true),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });
@@ -6170,3 +6224,113 @@ export const exportReceipts = sqliteTable(
   }),
 );
 export type DbExportReceipt = typeof exportReceipts.$inferSelect;
+
+/* ---------- analytics_page_view ----------
+ * PUBLIC, anonymous, cookieless site hits (migration 0310, plan_ext.md §4).
+ * Written server-side on the first document GET plus the /a/e client beacon.
+ * Privacy: the raw client IP NEVER lands here — it is resolved to a coarse ISO
+ * country in-memory and discarded. `path` is a route TEMPLATE ("/f/:slug"), not
+ * a resolved slug/id. `visitor_hash` is a daily-rotating salted hash (the
+ * GoatCounter/Plausible pattern) so unique counts stay non-reversible. Raw,
+ * short-retention: swept after `site_settings.analyticsRawRetentionDays`; the
+ * long-term data lives in `analytics_daily`. Index-light on purpose (created_at
+ * + one grouping index) to protect the single SQLite writer.
+ */
+export const analyticsPageView = sqliteTable(
+  "analytics_page_view",
+  {
+    id: id(),
+    createdAt: ts("created_at"),
+    /** Route TEMPLATE, e.g. "/f/:slug" — never the resolved slug/id. */
+    path: text("path").notNull(),
+    /** Referrer hostname only (path + query dropped), may be null/direct. */
+    refHost: text("ref_host"),
+    /** Classified named source, e.g. "google", "reddit", "chatgpt". */
+    refSource: text("ref_source"),
+    /** search | social | email | referral | paid | direct. */
+    refMedium: text("ref_medium"),
+    utmSource: text("utm_source"),
+    utmMedium: text("utm_medium"),
+    utmCampaign: text("utm_campaign"),
+    /** ISO country code only — NO raw IP is ever stored. */
+    geoCountry: text("geo_country"),
+    /** Null until a GeoLite2-City DB is plugged into resolveGeo. */
+    geoRegion: text("geo_region"),
+    /** Fly edge-PoP region tag — a weak fallback, NOT the visitor's country. */
+    flyRegion: text("fly_region"),
+    /** Daily-rotating salted hash for cookieless dedupe; rolls over each day. */
+    visitorHash: text("visitor_hash"),
+    isBot: integer("is_bot", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => ({
+    createdIdx: index("analytics_pv_created_idx").on(t.createdAt),
+    pathIdx: index("analytics_pv_path_idx").on(t.path),
+  }),
+);
+export type DbAnalyticsPageView = typeof analyticsPageView.$inferSelect;
+
+/* ---------- analytics_event ----------
+ * USER in-app navigation (migration 0310, plan_ext.md §4). Fed by the client
+ * nav-metrics beacon: modal opens, sub-tab switches, room/server switches,
+ * feature usage. `meta` is a small JSON blob (like audit.metadataJson) with a
+ * scrubbed typed prop bag — no id-bearing URLs, no query strings, no free text.
+ * `userId`/`serverId` are attached only when a valid session is present (authed
+ * in-app events are already self-identifying). Raw, short-retention + swept;
+ * rolls into `analytics_daily`. Index-light (created_at + kind/key grouping).
+ */
+export const analyticsEvent = sqliteTable(
+  "analytics_event",
+  {
+    id: id(),
+    createdAt: ts("created_at"),
+    /** "modal" | "tab" | "room" | "server" | "page" | "feature". */
+    kind: text("kind").notNull(),
+    /** e.g. "affiliatesOpen", "admin:users", "roomId". */
+    key: text("key").notNull(),
+    /** Small scrubbed JSON prop bag; null when there's nothing to attach. */
+    meta: text("meta"),
+    /** Nullable; set only when the beacon carried a valid bearer. */
+    userId: text("user_id"),
+    /** Nullable; the active server at event time. */
+    serverId: text("server_id"),
+    isBot: integer("is_bot", { mode: "boolean" }).notNull().default(false),
+  },
+  (t) => ({
+    createdIdx: index("analytics_ev_created_idx").on(t.createdAt),
+    kindKeyIdx: index("analytics_ev_kind_key_idx").on(t.kind, t.key),
+  }),
+);
+export type DbAnalyticsEvent = typeof analyticsEvent.$inferSelect;
+
+/* ---------- analytics_daily ----------
+ * Pre-aggregated rollup (migration 0310, plan_ext.md §4) — the long-retention
+ * reporting source the admin dashboard reads. The nightly rollup job aggregates
+ * yesterday's raw rows into (day, metric, dim1, dim2) counts, then deletes the
+ * raw rows past the retention window. Tiny + kept indefinitely, so counts never
+ * silently undercount the way sessions-derived DAU/WAU does past its TTL. The
+ * unique (day, metric, dim1, dim2) index lets the rollup upsert counts.
+ */
+export const analyticsDaily = sqliteTable(
+  "analytics_daily",
+  {
+    id: id(),
+    /** 'YYYY-MM-DD' (UTC). */
+    day: text("day").notNull(),
+    /** "pageview" | "visitor" | "event". */
+    metric: text("metric").notNull(),
+    /** path | refMedium | geoCountry | event kind, depending on `metric`. */
+    dim1: text("dim1"),
+    /** refSource | event key | ..., depending on `metric`. */
+    dim2: text("dim2"),
+    count: integer("count").notNull().default(0),
+  },
+  (t) => ({
+    dayMetricIdx: uniqueIndex("analytics_daily_day_metric_idx").on(
+      t.day,
+      t.metric,
+      t.dim1,
+      t.dim2,
+    ),
+  }),
+);
+export type DbAnalyticsDaily = typeof analyticsDaily.$inferSelect;

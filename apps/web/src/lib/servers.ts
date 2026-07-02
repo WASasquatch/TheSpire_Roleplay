@@ -118,7 +118,19 @@ export interface PopularServer {
   logoUrl: string | null;
   iconColor: string | null;
   isSystem: boolean;
+  /** Evergreen social proof: total members (whole registered base for the home
+   *  server). Always safe to show — it never reads as a dead "0 online". */
   memberCount: number;
+  /** LIVE social proof (B4): distinct roleplayers connected inside this
+   *  community right now, derived from the socket registry. Optional so an older
+   *  server bundle that predates the field degrades cleanly (treated as absent).
+   *  Numeric live proof MUST stay gated behind `branding.activityFeedsEnabled`
+   *  and only rendered when > 0, so a cold-start install never shows "0 online". */
+  onlineCount?: number;
+  /** LIVE social proof (B4): most-recent message time across this community's
+   *  rooms (ms epoch), or null when it has never had activity. Optional for the
+   *  same back-compat reason as {@link onlineCount}. */
+  lastActivityAt?: number | null;
 }
 
 /**

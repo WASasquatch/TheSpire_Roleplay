@@ -3699,6 +3699,25 @@ html.reduce-motion .splash-flash { animation: none; box-shadow: 0 0 0 3px rgb(va
 }
 
 /* ============================================================
+ * Splash background art (optimized AVIF / WebP)
+ * ============================================================
+ * The fixed hero background used by SplashLanding, the login SplashShell,
+ * TopCommunitiesPage, and the authed BootSplash. Each class ships a
+ * universal WebP fallback (first declaration; WebP is supported by every
+ * current browser) then an image-set() that upgrades capable browsers to
+ * the much smaller AVIF. The bg-cover / bg-position utilities stay on the
+ * element; only the image source lives here. A browser without image-set
+ * still gets the WebP, so no visitor loses the background. */
+.splash-bg-light {
+  background-image: url("/the_spire_bg.webp");
+  background-image: image-set(url("/the_spire_bg.avif") type("image/avif"), url("/the_spire_bg.webp") type("image/webp"));
+}
+.splash-bg-dark {
+  background-image: url("/the_spire_bg_dark.webp");
+  background-image: image-set(url("/the_spire_bg_dark.avif") type("image/avif"), url("/the_spire_bg_dark.webp") type("image/webp"));
+}
+
+/* ============================================================
  * Splash bookshelf, antique 3D pull-out volumes (BookshelfStrip)
  * ============================================================
  * The shelf chrome (wood, brass, vignette) reads as a constant

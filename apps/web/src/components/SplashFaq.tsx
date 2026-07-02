@@ -19,6 +19,12 @@ export function SplashFaq({ onNavigate }: { onNavigate: (path: string) => void }
     e.preventDefault();
     onNavigate(path);
   }
+  // Two independent column stacks (not a row-based grid): expanding an item
+  // pushes down only the items below it in its OWN column, never stretching or
+  // gapping the other side. Split SEQUENTIALLY so a single-column phone (where
+  // the two stacks reflow one below the other) keeps the original reading order.
+  const mid = Math.ceil(DEFAULT_FAQS.length / 2);
+  const faqColumns = [DEFAULT_FAQS.slice(0, mid), DEFAULT_FAQS.slice(mid)];
   return (
     <section
       aria-label="Frequently asked questions"
@@ -28,21 +34,25 @@ export function SplashFaq({ onNavigate }: { onNavigate: (path: string) => void }
         <HelpCircle className="h-5 w-5 shrink-0 text-keep-accent" aria-hidden />
         <h2 className="font-action text-xl text-keep-text sm:text-2xl">Frequently asked questions</h2>
       </div>
-      <div className="grid gap-2.5 sm:grid-cols-2">
-        {DEFAULT_FAQS.map((f) => (
-          <details
-            key={f.slug}
-            className="group rounded-md border border-keep-border/40 bg-keep-bg/40 p-3 open:bg-keep-bg/60"
-          >
-            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-semibold text-keep-text [&::-webkit-details-marker]:hidden">
-              <span>{f.question}</span>
-              <ChevronDown
-                className="h-4 w-4 shrink-0 text-keep-muted transition-transform group-open:rotate-180"
-                aria-hidden
-              />
-            </summary>
-            <p className="mt-2 text-sm leading-relaxed text-keep-text/85">{f.answerMarkdown}</p>
-          </details>
+      <div className="grid items-start gap-2.5 sm:grid-cols-2">
+        {faqColumns.map((col, ci) => (
+          <div key={ci} className="flex flex-col gap-2.5">
+            {col.map((f) => (
+              <details
+                key={f.slug}
+                className="group rounded-md border border-keep-border/40 bg-keep-bg/40 p-3 open:bg-keep-bg/60"
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-semibold text-keep-text [&::-webkit-details-marker]:hidden">
+                  <span className="md:text-[1.05rem]">{f.question}</span>
+                  <ChevronDown
+                    className="h-4 w-4 shrink-0 text-keep-muted transition-transform group-open:rotate-180"
+                    aria-hidden
+                  />
+                </summary>
+                <p className="mt-2 text-sm leading-relaxed text-keep-text/85">{f.answerMarkdown}</p>
+              </details>
+            ))}
+          </div>
         ))}
       </div>
       <p className="mt-4 text-sm text-keep-muted lg:text-base">

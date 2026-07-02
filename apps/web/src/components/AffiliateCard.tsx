@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowDownLeft, ArrowUpRight, ExternalLink } from "lucide-react";
 import { isDarkSurface, useActiveTheme } from "../lib/theme.js";
 import { outUrl, type PublicAffiliateCard } from "../lib/affiliates.js";
@@ -46,6 +46,17 @@ export function AffiliateCard({
   const maxTags = large ? 8 : 4;
   const shownTags = card.tags.slice(0, maxTags);
 
+  // "See more" for the description: clamp by default, expand on tap. `clamped`
+  // is measured so the toggle only appears when text is actually hidden.
+  const [expanded, setExpanded] = useState(false);
+  const [clamped, setClamped] = useState(false);
+  const descRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const el = descRef.current;
+    if (!el || expanded) return;
+    setClamped(el.scrollHeight > el.clientHeight + 1);
+  }, [description, expanded, large]);
+
   const icon = hasIcon ? (
     <img
       src={card.iconUrl!}
@@ -59,7 +70,7 @@ export function AffiliateCard({
   ) : (
     <span
       className={`flex shrink-0 items-center justify-center rounded-lg border border-white/25 bg-black/30 font-semibold uppercase shadow-md ${
-        large ? "h-16 w-16 text-3xl" : "h-11 w-11 text-lg"
+        large ? "h-16 w-16 text-3xl" : "h-12 w-12 text-xl"
       }`}
       aria-hidden="true"
     >
@@ -68,7 +79,7 @@ export function AffiliateCard({
   );
 
   const views = (
-    <div className={`flex shrink-0 flex-col items-end gap-0.5 ${large ? "text-sm" : "text-[11px]"} text-white/90`}>
+    <div className={`flex shrink-0 flex-col items-end gap-0.5 ${large ? "text-sm" : "text-xs"} text-white/90`}>
       <span className="inline-flex items-center gap-1" title="Visits sent to us">
         <ArrowDownLeft className={large ? "h-4 w-4" : "h-3.5 w-3.5"} aria-hidden="true" />
         <span className="tabular-nums">{card.clicksIn.toLocaleString()}</span>
@@ -88,13 +99,13 @@ export function AffiliateCard({
         {shownTags.map((t) => (
           <span
             key={t}
-            className={`rounded-full bg-white/15 px-2 py-0.5 ${large ? "text-xs" : "text-[10px]"} lowercase text-white/90 ring-1 ring-white/10 [text-shadow:none] backdrop-blur-sm`}
+            className={`rounded-full bg-white/15 px-2 py-0.5 ${large ? "text-xs" : "text-[11px]"} lowercase text-white/90 ring-1 ring-white/10 [text-shadow:none] backdrop-blur-sm`}
           >
             {t}
           </span>
         ))}
         {card.tags.length > shownTags.length ? (
-          <span className={`rounded-full bg-white/10 px-2 py-0.5 ${large ? "text-xs" : "text-[10px]"} text-white/70 [text-shadow:none]`}>
+          <span className={`rounded-full bg-white/10 px-2 py-0.5 ${large ? "text-xs" : "text-[11px]"} text-white/70 [text-shadow:none]`}>
             +{card.tags.length - shownTags.length}
           </span>
         ) : null}
@@ -107,12 +118,33 @@ export function AffiliateCard({
       target="_blank"
       rel="noopener noreferrer sponsored"
       className={`inline-flex items-center gap-1.5 rounded-md bg-keep-action font-semibold text-keep-bg no-underline shadow-md transition hover:brightness-110 hover:shadow-lg [text-shadow:none] ${
-        large ? "px-5 py-2 text-sm" : "px-4 py-1.5 text-xs"
+        large ? "px-5 py-2 text-sm" : "px-4 py-1.5 text-sm"
       }`}
     >
       Visit
       <ExternalLink className="h-4 w-4" aria-hidden="true" />
     </a>
+  );
+
+  // Description + "See more" toggle, shared by both layouts.
+  const descriptionBlock = (
+    <>
+      <p
+        ref={descRef}
+        className={`mt-1 ${expanded ? "" : large ? "line-clamp-3" : "line-clamp-2"} ${large ? "text-[15px] leading-relaxed" : "text-sm leading-snug"} ${description ? "text-white/90" : "italic text-white/60"}`}
+      >
+        {description || "No Description"}
+      </p>
+      {description && (clamped || expanded) ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-0.5 text-xs font-semibold text-white/85 underline underline-offset-2 [text-shadow:none] hover:text-white"
+        >
+          {expanded ? "See less" : "See more"}
+        </button>
+      ) : null}
+    </>
   );
 
   // Shared background layers (banner + scrim, or the generated gradient) + the
@@ -160,9 +192,7 @@ export function AffiliateCard({
             <div className={`truncate font-action text-2xl tracking-tight ${title ? "" : "italic text-white/70"}`}>
               {title || "No Title"}
             </div>
-            <p className={`mt-1 line-clamp-2 text-[15px] leading-relaxed ${description ? "text-white/90" : "italic text-white/60"}`}>
-              {description || "No Description"}
-            </p>
+            {descriptionBlock}
             {tagRow}
           </div>
           <div className="flex shrink-0 flex-col items-end justify-between gap-4 self-stretch py-0.5">
@@ -184,12 +214,10 @@ export function AffiliateCard({
         <div className="flex items-start gap-2.5">
           {icon}
           <div className="min-w-0 flex-1">
-            <div className={`truncate font-action text-sm ${title ? "" : "italic text-white/70"}`}>
+            <div className={`truncate font-action text-base ${title ? "" : "italic text-white/70"}`}>
               {title || "No Title"}
             </div>
-            <p className={`mt-0.5 line-clamp-2 text-xs leading-snug ${description ? "text-white/90" : "italic text-white/60"}`}>
-              {description || "No Description"}
-            </p>
+            {descriptionBlock}
           </div>
           {views}
         </div>

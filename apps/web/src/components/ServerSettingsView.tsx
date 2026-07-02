@@ -77,6 +77,7 @@ import { StylePicker } from "./AdminPanel.js";
 import { ThemePicker } from "./ThemePicker.js";
 import { useActiveTheme, useScopedRootDesign } from "../lib/theme.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";
+import { recordNav } from "../lib/nav-metrics.js";
 
 /* ============================================================
  * Wire shapes (consumed read-only from the documented endpoints).
@@ -2084,7 +2085,7 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
     <div className="px-4 py-3">
       <div className="mb-3 flex flex-wrap gap-1">
         {tabs.map((t) => (
-          <button key={t} type="button" onClick={() => setTab(t)}
+          <button key={t} type="button" onClick={() => { if (t !== tab) recordNav("tab", `server-settings:${t}`); setTab(t); }}
             className={`rounded border px-2.5 py-1 text-xs uppercase tracking-widest ${tab === t ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}>
             {TAB_LABEL[t]}
           </button>

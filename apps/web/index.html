@@ -33,6 +33,24 @@
     <meta name="msapplication-square310x310logo" content="/mstile-310x310.png" />
     <meta name="theme-color" content="#1a1a1a" />
 
+    <!-- PWA manifest. Names, icons, and standalone display live in
+         public/site.webmanifest (copied to the root by Vite). Paired with
+         the msapplication tiles above so installs look right on every
+         platform. `manifest-src 'self'` in the prod CSP already permits it. -->
+    <link rel="manifest" href="/site.webmanifest" />
+
+    <!--
+      Preload the splash hero background. SplashLanding sets it via an inline
+      `background-image`, which the browser only discovers AFTER the CSS/JS that
+      applies it, so the 868 KB JPG starts late and drags LCP. A high-priority
+      image preload lets the fetch start during the initial HTML parse. We
+      preload the LIGHT variant because a fresh (unauthenticated, no cached
+      theme) visitor resolves to the Parchment splash unless their OS prefers
+      dark (see splashBgUrl in apps/web/src/lib/theme.ts); the dark variant
+      loads on demand for dark-mode visitors. Keep this filename in sync with
+      splashBgUrl if that path ever changes. -->
+    <link rel="preload" as="image" href="/the_spire_bg.webp" type="image/webp" fetchpriority="high" />
+
     <!--
       SEO + social-card meta. The server (apps/server/src/seo.ts) rewrites
       title, description, og:*, twitter:*, and the canonical link with the
@@ -50,14 +68,26 @@
     <meta property="og:title" content="The Spire - Roleplay Chat, Communities &amp; Forums" />
     <meta property="og:description" content="The Spire is a roleplay platform: host your own chat community or forum, or dive into live RP chat, character profiles, worlds, and collaborative writing." />
     <meta property="og:url" content="https://thespire.games/" />
-    <meta property="og:image" content="/the_spire_bg.jpg" />
+    <meta property="og:image" content="/the_spire_og.jpg" />
     <meta property="og:site_name" content="The Spire" />
+    <!--
+      Static OG hints the server (seo.ts renderSplashHtml) does NOT rewrite
+      per route: dimensions, alt text, and locale. Declaring the card size
+      up front lets scrapers reserve the right aspect ratio; og:image:alt is
+      the accessibility text for the card. Per-route images (forum/server
+      banners) may differ in size, but 1200x630 is the standard large-card
+      ratio our default hero targets, and scrapers treat these as advisory.
+    -->
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="The Spire - roleplay chat, communities, and forums" />
+    <meta property="og:locale" content="en_US" />
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="The Spire - Roleplay Chat, Communities &amp; Forums" />
     <meta name="twitter:description" content="The Spire is a roleplay platform: host your own chat community or forum, or dive into live RP chat, character profiles, worlds, and collaborative writing." />
-    <meta name="twitter:image" content="/the_spire_bg.jpg" />
+    <meta name="twitter:image" content="/the_spire_og.jpg" />
 
     <!--
       JSON-LD structured data. The server rewrites name + description with
@@ -86,10 +116,42 @@
          display weights. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!--
+      The multi-family catalog is NON-blocking so it never sits on the
+      critical path (10 families is a heavy sheet for a first paint). The base
+      UI font is the self-hosted / system stack declared in styles.css, so the
+      shell stays fully usable while these preview fonts stream in behind it;
+      the picker still gets every family, just without blocking render.
+
+      We preload the sheet (`as=style`) and swap it to a real stylesheet once
+      it arrives. The swap runs from a nonced inline <script> rather than an
+      inline `onload=` handler on purpose: the prod CSP is
+      `script-src 'self' 'nonce-…' 'strict-dynamic'` with NO `script-src-attr`
+      override, so an inline event-handler attribute would be blocked on the
+      remote build (works in dev, breaks on prod). seo.ts stamps every inline
+      <script> with the response nonce, so this one is permitted; a bare GET
+      (dev, no server rewrite) ships no CSP header, so it runs there too. The
+      <noscript> fallback loads the sheet blocking-style for no-JS agents. -->
     <link
-      rel="stylesheet"
+      id="reading-fonts"
+      rel="preload"
+      as="style"
       href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Inter:wght@400;700&family=Lato:wght@400;700&family=Lora:wght@400;700&family=Merriweather:wght@400;700&family=Open+Sans:wght@400;700&family=Roboto:wght@400;700&family=Roboto+Slab:wght@400;700&family=Source+Sans+3:wght@400;700&display=swap"
     />
+    <script>
+      // Flip the preloaded font sheet to an applied stylesheet. If it already
+      // loaded (cache), the assignment applies immediately.
+      (function () {
+        var l = document.getElementById("reading-fonts");
+        if (l) l.rel = "stylesheet";
+      })();
+    </script>
+    <noscript>
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Inter:wght@400;700&family=Lato:wght@400;700&family=Lora:wght@400;700&family=Merriweather:wght@400;700&family=Open+Sans:wght@400;700&family=Roboto:wght@400;700&family=Roboto+Slab:wght@400;700&family=Source+Sans+3:wght@400;700&display=swap"
+      />
+    </noscript>
 
     <!-- HEAD_EXTRA: server splices admin-configured analytics scripts here. -->
   </head>

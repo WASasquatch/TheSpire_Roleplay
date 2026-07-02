@@ -124,6 +124,10 @@ import { registerArcadeRoutes } from "./routes/arcade.js";
 import { registerUrugalRoutes } from "./routes/arcadeUrugal.js";
 import { registerGrimholdRoutes } from "./routes/arcadeGrimhold.js";
 import { registerStatsRoutes } from "./routes/stats.js";
+import { registerAnalyticsRoutes } from "./analytics/ingest.js";
+import { registerAnalyticsAdminRoutes } from "./analytics/admin.js";
+import { recordServerPageView } from "./analytics/recorder.js";
+import { startAnalyticsRollupScheduler } from "./analytics/rollup.js";
 import { registerThesaurusRoutes } from "./routes/thesaurus.js";
 import { registerUsersRoutes } from "./routes/users.js";
 import { registerAdminRoutes } from "./admin/routes.js";
@@ -174,6 +178,42 @@ const log = pino({
     ? {}
     : { transport: { target: "pino-pretty" } }),
 });
+
+/**
+ * Map a request URL to the SPA / document-route TEMPLATE for analytics
+ * page-view recording (plan_ext.md §2a). Returns null for anything that isn't a
+ * known server-rendered document route (API, assets, sockets, uploads, deep
+ * links we don't render server-side) so the recorder never fires on non-document
+ * traffic. Recording the TEMPLATE ("/f/:slug"), not the resolved slug/id, keeps
+ * the stored path low-cardinality and free of slugs/ids/PII. Query string is
+ * stripped before matching.
+ */
+function documentRouteTemplate(url: string): string | null {
+  const path = (url.split("?")[0] ?? url).replace(/\/+$/, "") || "/";
+  // Exact static document routes (splash / public pages / auth landings).
+  const EXACT = new Set([
+    "/", "/login", "/register", "/scriptorium", "/rules", "/faqs",
+    "/top-communities", "/forgot-password", "/reset-password", "/verify-email",
+  ]);
+  if (EXACT.has(path)) return path === "" ? "/" : path;
+  // Single-segment parametric document routes → collapse the id/slug to the
+  // template so the path column stays low-cardinality.
+  const SEG = /^\/([^/]+)\/[^/]+$/;
+  const m = SEG.exec(path);
+  if (m) {
+    const head = m[1];
+    if (head === "p") return "/p/:name";
+    if (head === "u") return "/u/:name";
+    if (head === "w") return "/w/:slug";
+    if (head === "f") return "/f/:slug";
+    if (head === "s") return "/s/:slug";
+    if (head === "faq") return "/faq/:slug";
+  }
+  // Deeper templated document routes.
+  if (/^\/f\/[^/]+\/t\/[^/]+$/.test(path)) return "/f/:slug/t/:topicId";
+  if (/^\/scriptorium\/@[^/]+\/[^/]+$/.test(path)) return "/scriptorium/@:handle/:slug";
+  return null;
+}
 
 async function main() {
   await ensureSystemSeeds(db);
@@ -338,6 +378,27 @@ async function main() {
   });
   app.addHook("onRequest", async (req) => {
     recordHttpIp(db, readBearerToken(req), req.ip, req.headers["user-agent"] ?? null);
+  });
+
+  // First-party analytics: server-side page-view recorder for server-rendered
+  // document GETs (plan_ext.md §2a). Fires alongside recordHttpIp on the same
+  // onRequest hook, but ONLY for GETs whose path maps to a known SPA/document
+  // route TEMPLATE (never JSON API responses or asset requests). Recording the
+  // TEMPLATE ("/f/:slug"), not the resolved slug/id, keeps the path column
+  // low-cardinality and PII-free. Throttled + gated on `analyticsEnabled`
+  // inside `recordServerPageView`; the raw IP is used only to hash/geo then
+  // discarded. Fire-and-forget: never blocks or fails the request.
+  app.addHook("onRequest", async (req) => {
+    if (req.method !== "GET") return;
+    const template = documentRouteTemplate(req.url);
+    if (!template) return;
+    recordServerPageView(db, {
+      path: template,
+      ip: req.ip,
+      userAgent: req.headers["user-agent"] ?? null,
+      referer: (req.headers["referer"] ?? req.headers["referrer"] ?? null) as string | null,
+      headers: req.headers,
+    });
   });
 
   // Canonical-domain 301: consolidate the free *.fly.dev hostname onto the
@@ -811,6 +872,13 @@ async function main() {
   // Idempotent on subsequent starts; survives deploys via the persisted keys.
   await initPush(db);
   await registerStatsRoutes(baseApp, db, io);
+  // First-party analytics ingest (client beacon) + admin read endpoints
+  // (plan_ext.md §5). Both no-op / stay staff-gated when the master
+  // `analyticsEnabled` switch is off. `/a/e` is anonymous-safe + rate-limited;
+  // `/admin/analytics/*` is gated by `view_admin_analytics`. `/a` and `/admin`
+  // are already in the SPA-fallback apiPrefixes list.
+  await registerAnalyticsRoutes(baseApp, db);
+  await registerAnalyticsAdminRoutes(baseApp, db);
   await registerEarningRoutes(baseApp, db, io);
   await registerArcadeRoutes(baseApp, db, io);
   await registerUrugalRoutes(baseApp, db, io);
@@ -2236,11 +2304,27 @@ async function main() {
    */
   app.get("/robots.txt", publicLimit, async (req, reply) => {
     reply.type("text/plain; charset=utf-8");
-    return renderRobotsTxt(originFromRequest(req));
+    return renderRobotsTxt(db, originFromRequest(req));
   });
+  // Sitemap: up to ~5 sequential 1000-row scans per hit, so we memoize the
+  // rendered XML with a short TTL keyed on origin (the origin can differ
+  // between the *.fly.dev host and a custom domain, and it's baked into every
+  // <loc>). The cache-control header lets crawlers + any CDN edge cache reuse
+  // the response for an hour; the in-process memo covers thundering-herd
+  // bot bursts within the TTL without touching the DB. New content shows up on
+  // the next TTL rollover, which is fine for a sitemap.
+  const SITEMAP_TTL_MS = 15 * 60 * 1000;
+  const sitemapCache = new Map<string, { xml: string; at: number }>();
   app.get("/sitemap.xml", publicLimit, async (req, reply) => {
     reply.type("application/xml; charset=utf-8");
-    return await renderSitemapXml(db, originFromRequest(req));
+    reply.header("cache-control", "public, max-age=3600");
+    const origin = originFromRequest(req);
+    const now = Date.now();
+    const hit = sitemapCache.get(origin);
+    if (hit && now - hit.at < SITEMAP_TTL_MS) return hit.xml;
+    const xml = await renderSitemapXml(db, origin);
+    sitemapCache.set(origin, { xml, at: now });
+    return xml;
   });
 
   if (IS_PROD) {
@@ -2495,6 +2579,11 @@ async function main() {
   // stack timers; the started timer captures `db` + `io` by
   // closure so its lifetime is the process's.
   startAnnouncementScheduler({ db, io });
+  // Nightly analytics rollup + raw-row retention sweep (plan_ext.md §4). Runs at
+  // most once per UTC day (hourly self-check, guarded), aggregating yesterday's
+  // raw page views / events into analytics_daily then deleting raw rows past
+  // `analyticsRawRetentionDays`. Idempotent; captures `db` by closure.
+  startAnalyticsRollupScheduler({ db });
   // Drain the broadcast email outbox within the daily cap.
   startEmailQueue(db);
   // Durable boot-ok marker. Survives the Fly log purge so a future

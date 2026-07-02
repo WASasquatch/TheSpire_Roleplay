@@ -1244,6 +1244,26 @@ export async function registerAdminRoutes(
      * check; the UI warns the field is admin-trusted raw HTML.
      */
     customHeadHtml: z.string().max(20_000).optional(),
+    /** Default social-card image URL (og:image / twitter:image fallback). Empty clears. */
+    ogImageUrl: z.string().max(2_000).optional(),
+    /** Homepage/login/register title tagline. Empty falls back to the built-in. */
+    homepageTagline: z.string().max(200).optional(),
+    /** Keyword shelf for <meta name="keywords">. Empty falls back to DEFAULT_KEYWORDS. */
+    seoKeywords: z.string().max(1_000).optional(),
+    /** google-site-verification content token (paste only the token, not the tag). */
+    googleSiteVerification: z.string().max(200).optional(),
+    /** Bing msvalidate.01 content token (paste only the token, not the tag). */
+    bingSiteVerification: z.string().max(200).optional(),
+    /** Master search-indexing switch. When false: robots Disallow / + noindex meta. */
+    searchIndexingEnabled: z.boolean().optional(),
+    /** Newline-separated social profile URLs mapped into Organization.sameAs. */
+    socialProfileUrls: z.string().max(2_000).optional(),
+    /** First-party analytics master switch (migration 0310). When false the ingest routes + server page-view recorder no-op. */
+    analyticsEnabled: z.boolean().optional(),
+    /** Days of RAW analytics rows to keep before the nightly rollup sweep deletes them. 1..365; aggregates in analytics_daily persist. */
+    analyticsRawRetentionDays: z.number().int().min(1).max(365).optional(),
+    /** Honor the browser DNT / Sec-GPC opt-out signal. */
+    analyticsRespectDnt: z.boolean().optional(),
     /** Surfaces live community activity counters on the splash + future feed rails. Off during cold-start. */
     activityFeedsEnabled: z.boolean().optional(),
     serversEnabled: z.boolean().optional(),
@@ -1310,6 +1330,16 @@ export async function registerAdminRoutes(
       forumRegistrationRulesHtml: s.forumRegistrationRulesHtml,
       metaDescription: s.metaDescription,
       customHeadHtml: s.customHeadHtml,
+      ogImageUrl: s.ogImageUrl,
+      homepageTagline: s.homepageTagline,
+      seoKeywords: s.seoKeywords,
+      googleSiteVerification: s.googleSiteVerification,
+      bingSiteVerification: s.bingSiteVerification,
+      searchIndexingEnabled: s.searchIndexingEnabled,
+      socialProfileUrls: s.socialProfileUrls,
+      analyticsEnabled: s.analyticsEnabled,
+      analyticsRawRetentionDays: s.analyticsRawRetentionDays,
+      analyticsRespectDnt: s.analyticsRespectDnt,
       activityFeedsEnabled: s.activityFeedsEnabled,
       serversEnabled: s.serversEnabled,
       featuredWorldsEnabled: s.featuredWorldsEnabled,
@@ -1353,6 +1383,9 @@ export async function registerAdminRoutes(
       "siteName", "siteUrl", "bannerCoverCss",
       "logoColor", "logoFont", "logoUrl",
       "welcomeHtml", "metaDescription", "customHeadHtml",
+      "ogImageUrl", "homepageTagline", "seoKeywords",
+      "googleSiteVerification", "bingSiteVerification",
+      "searchIndexingEnabled", "socialProfileUrls",
       "themeDesignMap", "defaultStyleKey", "defaultTheme",
     ]);
     const touchedKeys = Object.keys(body).filter(
@@ -1426,6 +1459,19 @@ export async function registerAdminRoutes(
     if (body.customHeadHtml !== undefined) {
       patch.customHeadHtml = body.customHeadHtml;
     }
+    // SEO fields are plain text - trim; empty string is the explicit clear.
+    if (body.ogImageUrl !== undefined) patch.ogImageUrl = body.ogImageUrl.trim();
+    if (body.homepageTagline !== undefined) patch.homepageTagline = body.homepageTagline.replace(/\s+/g, " ").trim();
+    if (body.seoKeywords !== undefined) patch.seoKeywords = body.seoKeywords.replace(/\s+/g, " ").trim();
+    if (body.googleSiteVerification !== undefined) patch.googleSiteVerification = body.googleSiteVerification.trim();
+    if (body.bingSiteVerification !== undefined) patch.bingSiteVerification = body.bingSiteVerification.trim();
+    if (body.searchIndexingEnabled !== undefined) patch.searchIndexingEnabled = body.searchIndexingEnabled;
+    // Social profile URLs: keep newlines (one URL per line for Organization.sameAs);
+    // only trim leading/trailing whitespace on the whole block.
+    if (body.socialProfileUrls !== undefined) patch.socialProfileUrls = body.socialProfileUrls.trim();
+    if (body.analyticsEnabled !== undefined) patch.analyticsEnabled = body.analyticsEnabled;
+    if (body.analyticsRawRetentionDays !== undefined) patch.analyticsRawRetentionDays = body.analyticsRawRetentionDays;
+    if (body.analyticsRespectDnt !== undefined) patch.analyticsRespectDnt = body.analyticsRespectDnt;
     if (body.activityFeedsEnabled !== undefined) {
       patch.activityFeedsEnabled = body.activityFeedsEnabled;
     }

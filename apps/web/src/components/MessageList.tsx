@@ -485,6 +485,11 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   // `.current` gives it the up-to-date buffer.
   const messagesRef = useRef(messages);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
+  // Mirror replyMode too, so the (once-attached) scroll listener can tell flat
+  // chat from the nested forum view without re-binding. Forums read top-down and
+  // keep native anchoring off (as before); only flat chat toggles it.
+  const replyModeRef = useRef(replyMode);
+  useEffect(() => { replyModeRef.current = replyMode; }, [replyMode]);
   // Capture pre-commit geometry every render. Runs after paint, AFTER
   // any layout-effect adjustments fire, so this is the baseline the
   // NEXT render's prepend / append decision compares against.
@@ -530,6 +535,18 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       // and stops the "bounce." The looser NEAR_BOTTOM_PX still governs
       // whether a brand-new message (append, below) scrolls down to follow.
       stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_BOTTOM_PX;
+      // Native scroll-anchoring, toggled by where the reader is:
+      //   - at the bottom (stick) → OFF: the manual re-pin owns the position
+      //     there, and browser anchoring would fight it into a wobble.
+      //   - reading history (not stick) → ON: let the browser hold the visible
+      //     line steady as gates mount/unmount and late media load ABOVE the
+      //     viewport. Without this, every such height change shifts the content
+      //     with nothing to compensate — the jerky scroll-up. The manual
+      //     prepend anchor targets the same position anchoring would, so they
+      //     agree rather than fight. (Safari lacks overflow-anchor and simply
+      //     ignores this, keeping its current behaviour.)
+      el.style.overflowAnchor =
+        replyModeRef.current !== "nested" && !stickRef.current ? "auto" : "none";
       // A programmatic pin (the ResizeObserver below) also emits a scroll
       // event; swallow that echo so it isn't mistaken for user intent.
       // Every OTHER scroll is the reader's, and stamps their last
@@ -562,14 +579,18 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       // Initial mount or empty → end-pin.
       el.scrollTop = el.scrollHeight;
       stickRef.current = true;
+      el.style.overflowAnchor = "none"; // parked at bottom → manual pin owns it
       return;
     }
     const firstChanged = newFirstId !== prev.firstId;
     const lastChanged = newLastId !== prev.lastId;
     if (firstChanged && !lastChanged) {
-      // Prepend: anchor the existing content under the user's eyes.
+      // Prepend: anchor the existing content under the user's eyes. Reading
+      // history → let native anchoring stay on to absorb the prepended (and
+      // still-settling) rows' height churn; it targets the same position.
       const delta = el.scrollHeight - prev.height;
       el.scrollTop = prev.top + delta;
+      el.style.overflowAnchor = stickRef.current ? "none" : "auto";
       return;
     }
     if (lastChanged) {
@@ -586,6 +607,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         // this append's late-loading media (a programmatic scrollTop set
         // doesn't fire a scroll event, so capture() won't re-arm it).
         stickRef.current = true;
+        el.style.overflowAnchor = "none"; // back at bottom → manual pin owns it
       }
     }
     // first AND last unchanged → no buffer changes that affect layout
@@ -1131,17 +1153,15 @@ function FlatMessageView({
       // typing strip toggles, and the last message stays visible even
       // when the strip is active.
       className="flex-1 overflow-y-auto px-4 pb-7 pt-2 leading-relaxed"
-      // `overflow-anchor: none` disables the browser's scroll-anchoring on
-      // this container. This component manages scroll position entirely by
-      // hand (the bottom re-pin, the load-older `scrollTop += delta`
-      // preservation, the buffer-diff auto-scroll). Native scroll anchoring
-      // ALSO nudges scrollTop whenever content above the viewport changes
-      // height (a gate mounting/unmounting, late media) to keep the visible
-      // anchor stable — so the two controllers fight over scrollTop and the
-      // feed wobbles a few px once there's enough history above to anchor
-      // against. Turning anchoring off makes our manual logic the sole
-      // authority and stops the bounce.
-      style={{ fontSize: FONT_EM[fontStep], overflowAnchor: "none" }}
+      // `overflow-anchor` is managed IMPERATIVELY (not set here) so React
+      // re-renders don't clobber the live value: it's toggled OFF while parked
+      // at the bottom (the manual re-pin owns the position, and anchoring would
+      // fight it into a wobble) and ON while reading history (so the browser
+      // keeps the visible line steady as gates mount/unmount and late media
+      // load above the viewport, instead of jerking the reader). See the scroll
+      // capture + layout effect in MessageList. Default is the browser's `auto`
+      // until the first pin flips it to `none`.
+      style={{ fontSize: FONT_EM[fontStep] }}
     >
       {/* Content box the parent's ResizeObserver watches to keep the
           feed pinned to the newest line as late-loading media grows the

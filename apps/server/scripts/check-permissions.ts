@@ -216,7 +216,7 @@ function report(
     totalFailed += row.failed;
     const passed = row.run - row.failed;
     const status = row.failed === 0 ? green("PASS") : red(`FAIL (${row.failed})`);
-    console.log(`  ${status}  ${GROUP_LABEL[row.group].padEnd(28)} ${dim(`${passed}/${row.run} checks`)}`);
+    console.log(`  ${status}  ${(GROUP_LABEL[row.group] ?? row.group).padEnd(28)} ${dim(`${passed}/${row.run} checks`)}`);
   }
 
   if (failures.length > 0) {

@@ -182,11 +182,18 @@ export function resolveSplashTheme(_branding: SiteBranding): Theme {
   return preset ? preset.theme : DEFAULT_THEME;
 }
 
-/** Path for the splash background image, dark / light variant chosen
- *  by the resolved splash palette. The dark variant is bundled at
- *  /the_spire_bg_dark.jpg (added 2026-05). */
+/** Path for the splash background image (optimized WebP), dark / light variant
+ *  chosen by the resolved splash palette. Used for the preload hint; the actual
+ *  layer is painted via {@link splashBgClass} which also serves AVIF. */
 export function splashBgUrl(theme: Theme): string {
-  return isDarkPalette(theme) ? "/the_spire_bg_dark.jpg" : "/the_spire_bg.jpg";
+  return isDarkPalette(theme) ? "/the_spire_bg_dark.webp" : "/the_spire_bg.webp";
+}
+
+/** CSS class for the fixed splash background layer. Ships a universal WebP
+ *  fallback plus an image-set() AVIF upgrade (see `.splash-bg-*` in styles.css),
+ *  so the layer is a small AVIF on modern browsers and a WebP everywhere else. */
+export function splashBgClass(theme: Theme): string {
+  return isDarkPalette(theme) ? "splash-bg-dark" : "splash-bg-light";
 }
 
 /**

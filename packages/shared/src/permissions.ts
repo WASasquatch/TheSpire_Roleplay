@@ -137,6 +137,7 @@ export const PERMISSION_KEYS = [
   "view_admin_faqs",
   "view_admin_email",
   "view_system_metrics",
+  "view_admin_analytics",
   "verify_export_logs",
 
   // ---- system (live metrics + destructive maintenance tools) ----
@@ -295,6 +296,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   view_admin_faqs: "See the admin FAQ tab. Editing requires manage_faqs.",
   view_admin_email: "See the admin Email tab (verification settings + the emailer). Sending requires send_admin_email.",
   view_system_metrics: "See the admin System tab: live server metrics (CPU, memory, connections, database size, uptime, host info).",
+  view_admin_analytics: "See the admin Analytics tab: first-party site metrics (hits, referrers, coarse geo, top pages) and in-app usage.",
   verify_export_logs: "Use the admin Verify Log tool: check whether a submitted /export chat log is authentic and unaltered, and read its signed contents.",
 
   // system (destructive maintenance — masteradmin-only by default)
@@ -442,6 +444,7 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   view_admin_faqs: "admin_panel_tabs",
   view_admin_email: "admin_panel_tabs",
   view_system_metrics: "admin_panel_tabs",
+  view_admin_analytics: "admin_panel_tabs",
   verify_export_logs: "admin_panel_tabs",
 
   // system (destructive maintenance tools)

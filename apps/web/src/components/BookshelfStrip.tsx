@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { BookText, PenLine } from "lucide-react";
 import type { StoryCard } from "@thekeep/shared";
 import { ratingRequiresAuth, STORY_RATING_INFO } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
@@ -230,7 +231,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
     return (
       <section aria-label="Featured stories" className="bookshelf bookshelf-loading">
         <BookshelfHeader onBrowse={() => onNavigate("/scriptorium")} />
-        <div className="bookshelf-stage" aria-hidden>
+        <div className="bookshelf-stage hidden md:block" aria-hidden>
           <div className="bookshelf-shelf">
             <div className="bookshelf-board" />
           </div>
@@ -243,7 +244,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
     <section aria-label="Featured stories" className="bookshelf">
       <BookshelfHeader onBrowse={() => onNavigate("/scriptorium")} />
 
-      <div className="bookshelf-stage">
+      <div className="bookshelf-stage hidden md:block">
         <div className="bookshelf-shelf">
           <div className="bookshelf-books">
             <Bookend side="left" />
@@ -276,6 +277,40 @@ export function BookshelfStrip({ onNavigate }: Props) {
           <div className="bookshelf-board" aria-hidden />
         </div>
       </div>
+
+      {/* Mobile: the 3D shelf is too cramped on a phone, so present the
+          volumes as a tapable list with a book icon instead. Real stories
+          only (no placeholder padding), then a single "write your own" CTA. */}
+      <ul className="mt-3 space-y-1.5 md:hidden">
+        {stories.map((card) => {
+          const author = card.author.characterName ?? card.author.masterUsername;
+          return (
+            <li key={card.id}>
+              <button
+                type="button"
+                onClick={() => openStory(card)}
+                className="flex w-full items-center gap-2.5 rounded-md border border-keep-rule/50 bg-keep-panel/30 px-3 py-2 text-left transition hover:border-keep-action"
+              >
+                <BookText className="h-4 w-4 shrink-0 text-keep-accent" aria-hidden />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-keep-text">{card.title}</span>
+                  <span className="block truncate text-xs text-keep-muted">{author} · {card.rating}</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+        <li>
+          <button
+            type="button"
+            onClick={() => onNavigate("/register")}
+            className="flex w-full items-center gap-2.5 rounded-md border border-dashed border-keep-rule/50 bg-keep-bg/30 px-3 py-2 text-left text-keep-muted transition hover:border-keep-action hover:text-keep-text"
+          >
+            <PenLine className="h-4 w-4 shrink-0 text-keep-accent" aria-hidden />
+            <span className="text-sm">Write your story</span>
+          </button>
+        </li>
+      </ul>
     </section>
   );
 }

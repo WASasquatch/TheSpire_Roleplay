@@ -8,13 +8,29 @@
  * title lookup, id parsing) against this fixed contract.
  *
  * Config (via env / Fly secrets):
- *   YOUTUBE_API_KEY - required to call the Data API; unset = feature off
+ *   YOUTUBE_API_KEY      - required to call the Data API; unset = feature off
+ *   YOUTUBE_API_REFERRER - optional; sent as the `Referer` header so an API key
+ *                          restricted to HTTP referrers accepts server-side
+ *                          calls (e.g. https://thespire.games). Unset = send
+ *                          none, which is correct when the key uses NO
+ *                          restriction or an IP-address restriction instead.
  */
 
 const API_KEY = process.env.YOUTUBE_API_KEY ?? "";
 
 /** True once a YouTube Data API key is present, so callers can branch UX. */
 export const youtubeConfigured = API_KEY.length > 0;
+
+/**
+ * Optional `Referer` for Data API calls. A key locked to "HTTP referrers
+ * (websites)" rejects a bare backend call ("Requests from referer <empty> are
+ * blocked.") because a server-to-server fetch carries no page referrer. Set
+ * this to a value that matches the key's allowed referrer list and we attach
+ * it so a referrer-restricted key accepts the call. The recommended posture
+ * for a server-side key is instead NO restriction or an IP restriction, in
+ * which case leave this unset.
+ */
+const API_REFERER = process.env.YOUTUBE_API_REFERRER ?? "";
 
 /** Exported for the feature team to build authorized Data API requests. */
 export { API_KEY };
@@ -24,37 +40,76 @@ const API_BASE = "https://www.googleapis.com/youtube/v3";
 const FETCH_TIMEOUT_MS = 5_000;
 
 /**
- * GET a Data API endpoint and parse JSON, modeled on unfurl.ts fetchHtml:
- * AbortController timeout, never throws, returns null on any error / non-200.
- * The key is appended here so callers pass only the query params.
+ * A YouTube Data API error distilled from the JSON response BODY (not just the
+ * HTTP status), so callers can tell the operator the ACTUAL cause. YouTube
+ * returns `{ error: { code, message, status, errors: [{ reason, domain }] } }`;
+ * we keep the fields that identify the fix — the HTTP status, the API `status`
+ * (e.g. PERMISSION_DENIED), the first error `reason` (forbidden / quotaExceeded
+ * / keyInvalid / …), and the human `message` ("Requests from referer <empty>
+ * are blocked."). Never carries the API key (the key rides only the URL).
  */
-async function apiGet<T = any>(path: string, params: Record<string, string>): Promise<T | null> {
+export interface YoutubeApiError {
+  httpStatus: number;
+  apiStatus?: string;
+  reason?: string;
+  message?: string;
+}
+
+interface ApiResult<T> {
+  data: T | null;
+  error: YoutubeApiError | null;
+}
+
+/**
+ * GET a Data API endpoint, modeled on unfurl.ts fetchHtml: AbortController
+ * timeout, never throws. On any non-200 it parses YouTube's error body into a
+ * {@link YoutubeApiError} (and logs the raw body server-side); callers surface
+ * the distilled reason. The key is appended here so callers pass only params.
+ */
+async function apiGet<T = any>(path: string, params: Record<string, string>): Promise<ApiResult<T>> {
   const qs = new URLSearchParams({ ...params, key: API_KEY }).toString();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
     const res = await fetch(`${API_BASE}/${path}?${qs}`, {
       signal: ctrl.signal,
-      headers: { accept: "application/json" },
+      // Attach the configured Referer so a key restricted to HTTP referrers
+      // accepts the call (a bare backend fetch otherwise sends none → 403
+      // "Requests from referer <empty> are blocked"). Node's fetch transmits a
+      // manually-set Referer as-is. Omitted when YOUTUBE_API_REFERRER is unset.
+      headers: {
+        accept: "application/json",
+        ...(API_REFERER ? { Referer: API_REFERER } : {}),
+      },
     });
     if (!res.ok) {
-      // Surface WHY in the server log (never the key). With a key present the
-      // usual culprits are a 403 from an HTTP-referrer-restricted key (a
-      // server-side call sends no referrer, so Google blocks it) or the
-      // YouTube Data API v3 not being enabled on the project — both need a
-      // Google Cloud console fix, not a code change. The response body carries
-      // Google's machine-readable reason (e.g. "API_KEY_HTTP_REFERRER_BLOCKED").
-      let reason = "";
-      try { reason = (await res.text()).slice(0, 400); } catch { /* ignore body */ }
+      // Read + parse YouTube's error body for the specific machine-readable
+      // reason (e.g. "forbidden" + "Requests from referer <empty> are blocked"
+      // = an HTTP-referrer-restricted key; "quotaExceeded" = the daily cap;
+      // the API v3 not enabled = a different reason). The key is only ever in
+      // the request URL, never the body, so this is safe to surface + log.
+      let body = "";
+      try { body = await res.text(); } catch { /* ignore unreadable body */ }
+      let e: { message?: unknown; status?: unknown; errors?: Array<{ reason?: unknown }> } | null = null;
+      try { e = JSON.parse(body)?.error ?? null; } catch { /* non-JSON body */ }
+      const error: YoutubeApiError = {
+        httpStatus: res.status,
+        ...(typeof e?.status === "string" ? { apiStatus: e.status } : {}),
+        ...(typeof e?.errors?.[0]?.reason === "string" ? { reason: e.errors[0]!.reason as string } : {}),
+        ...(typeof e?.message === "string"
+          ? { message: e.message as string }
+          : body ? { message: body.slice(0, 300) } : {}),
+      };
       // eslint-disable-next-line no-console
-      console.error(`[youtube] ${path} -> ${res.status} ${res.statusText}${reason ? ` :: ${reason}` : ""}`);
-      return null;
+      console.error(`[youtube] ${path} -> ${res.status} ${res.statusText} :: ${body.slice(0, 500)}`);
+      return { data: null, error };
     }
-    return (await res.json()) as T;
+    return { data: (await res.json()) as T, error: null };
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     // eslint-disable-next-line no-console
-    console.error(`[youtube] ${path} request failed:`, err instanceof Error ? err.message : err);
-    return null;
+    console.error(`[youtube] ${path} request failed:`, message);
+    return { data: null, error: { httpStatus: 0, message } };
   } finally {
     clearTimeout(timer);
   }
@@ -138,9 +193,10 @@ type PlaylistItemsResponse = {
  */
 export async function expandPlaylist(
   playlistId: string,
-): Promise<{ url: string; title: string }[]> {
+): Promise<{ items: { url: string; title: string }[]; error: YoutubeApiError | null }> {
   const out: { url: string; title: string }[] = [];
   let pageToken: string | undefined;
+  let error: YoutubeApiError | null = null;
 
   for (let page = 0; page < 2; page++) {
     const params: Record<string, string> = {
@@ -150,7 +206,8 @@ export async function expandPlaylist(
     };
     if (pageToken) params.pageToken = pageToken;
 
-    const data = await apiGet<PlaylistItemsResponse>("playlistItems", params);
+    const { data, error: err } = await apiGet<PlaylistItemsResponse>("playlistItems", params);
+    if (err) { error = err; break; }
     if (!data?.items) break;
 
     for (const item of data.items) {
@@ -168,7 +225,7 @@ export async function expandPlaylist(
     pageToken = data.nextPageToken;
   }
 
-  return out;
+  return { items: out, error };
 }
 
 type VideosResponse = {
@@ -180,6 +237,6 @@ type VideosResponse = {
  * Never throws — returns null on any API error, non-200, or missing item.
  */
 export async function fetchVideoTitle(videoId: string): Promise<string | null> {
-  const data = await apiGet<VideosResponse>("videos", { part: "snippet", id: videoId });
+  const { data } = await apiGet<VideosResponse>("videos", { part: "snippet", id: videoId });
   return data?.items?.[0]?.snippet?.title ?? null;
 }

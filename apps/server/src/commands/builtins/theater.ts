@@ -152,7 +152,7 @@ export const theaterCommand: CommandHandler = {
         // A real playlist id → expand it into queued sources. A watch URL
         // carrying both `v` and `list` still expands the playlist.
         if (playlistId) {
-          const items = await expandPlaylist(playlistId);
+          const { items, error } = await expandPlaylist(playlistId);
           if (items.length > 0) {
             const remaining = 50 - playlist.length; // >0 (guarded above)
             const queued = items.slice(0, remaining);
@@ -187,11 +187,19 @@ export const theaterCommand: CommandHandler = {
           // log shows which). Don't no-op silently: tell the operator, and if
           // the link also carried a single video, queue that (appendSingle
           // strips the &list= so it actually plays) instead of a dead link.
+          // Surface the SPECIFIC reason from the API payload (also logged
+          // server-side + echoed to the browser console) rather than a vague
+          // guess: a 403 "(forbidden): Requests from referer <empty> are
+          // blocked" = an HTTP-referrer-restricted key; "quotaExceeded" = the
+          // daily cap; no error at all = a private/empty playlist.
+          const detail = error
+            ? `YouTube API ${error.httpStatus}${error.apiStatus ? ` ${error.apiStatus}` : ""}${error.reason ? ` (${error.reason})` : ""}${error.message ? `: ${error.message}` : ""}`
+            : "the playlist looks private or empty";
           if (videoId) {
-            notice(ctx, "THEATER", "Couldn't expand that YouTube playlist (it may be private, or the API key isn't authorized for the YouTube Data API). Queued the single video instead.");
+            notice(ctx, "THEATER", `Couldn't expand that YouTube playlist — ${detail}. Queued the single video instead.`);
             return appendSingle(url, title, kindOverride);
           }
-          return notice(ctx, "THEATER", "Couldn't expand that YouTube playlist (it may be private, or the API key isn't authorized for the YouTube Data API).");
+          return notice(ctx, "THEATER", `Couldn't expand that YouTube playlist — ${detail}.`);
         } else if (videoId && sniffKind(url) === "youtube" && !title) {
           // Plain YouTube video with no operator-supplied title → try to
           // fetch the real title so the playlist reads nicely. null → append

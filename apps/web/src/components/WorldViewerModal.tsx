@@ -292,10 +292,13 @@ function MembershipControls({
       </button>
     );
   }
-  // Non-member branches. Visibility !== "open" means there's no
-  // public path in here at all (private worlds resolve only for the
-  // owner; public ones aren't catalog-joinable). Show nothing.
-  if (detail.world.visibility !== "open") return null;
+  // Non-member branches, driven by joinMode INDEPENDENT of visibility. Visibility
+  // gates who can SEE the world (resolveWorld — if the viewer reached this modal
+  // they can see it); joinMode gates how they get IN. This matches the editor's
+  // own contract ("independent of visibility — a public / link-shared world still
+  // takes applications"). The old `visibility !== "open"` guard hid Apply/Join on
+  // every non-"open" world, so a PUBLIC application-mode world showed no way in
+  // for anyone — including site staff who can moderate it but don't own it.
   const joinMode = detail.world.joinMode ?? "open";
   if (joinMode === "invite-only") {
     // Static informational chip. Looks like a button but isn't one,

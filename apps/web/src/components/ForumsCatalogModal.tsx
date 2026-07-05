@@ -1334,7 +1334,7 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Header band: banner image (when set) behind logo + name + meta. */}
       <header
-        className="relative shrink-0 border-b border-keep-rule bg-keep-banner/30 px-5 py-6 md:px-8 md:py-12"
+        className="relative shrink-0 border-b border-keep-rule bg-keep-banner/30 px-4 py-3 md:px-8 md:py-12"
         style={detail.bannerImageUrl ? {
           backgroundImage: `url(${detail.bannerImageUrl})`,
           backgroundSize: "cover",
@@ -1459,7 +1459,11 @@ function ForumFooter({ detail }: { detail: ForumDetail }) {
   const onlineTotal = s.online.publicNames.length + s.online.hiddenCount;
   return (
     <footer className="shrink-0 border-t border-keep-rule bg-keep-banner/30 px-4 py-2 text-[11px] text-keep-muted">
-      <div className="truncate border-b border-keep-rule/50 pb-1.5">
+      {/* On phones the footer collapses to just the stats line — the "who's
+          online" and vitals bands are hidden to reclaim vertical space (the
+          user's "footer takes too much room on mobile" report); the stats row
+          already carries the online count. Everything returns at `md`. */}
+      <div className="hidden truncate border-b border-keep-rule/50 pb-1.5 md:block">
         <span className="font-semibold uppercase tracking-widest">Who's online</span>{" "}
         {onlineTotal === 0 ? (
           <span className="italic">The halls are quiet right now.</span>
@@ -1477,7 +1481,7 @@ function ForumFooter({ detail }: { detail: ForumDetail }) {
           </>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-b border-keep-rule/50 py-1.5">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-keep-rule/50 py-1.5 md:border-b">
         <span className="font-semibold uppercase tracking-widest">Board statistics</span>
         <span><b className="tabular-nums text-keep-text">{s.topics.toLocaleString()}</b> topics</span>
         <span><b className="tabular-nums text-keep-text">{s.replies.toLocaleString()}</b> replies</span>
@@ -1488,7 +1492,7 @@ function ForumFooter({ detail }: { detail: ForumDetail }) {
         </span>
         <span><b className="tabular-nums text-keep-text">{onlineTotal.toLocaleString()}</b> online now</span>
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 pt-1.5">
+      <div className="hidden flex-wrap items-center gap-x-4 gap-y-0.5 pt-1.5 md:flex">
         <span>Posting: <span className="text-keep-text">{detail.postingMode === "application" ? "by application" : "open to all"}</span></span>
         <span>Keeper: <span className="text-keep-text">{detail.ownerUsername}</span></span>
         {detail.linkedWorld ? (

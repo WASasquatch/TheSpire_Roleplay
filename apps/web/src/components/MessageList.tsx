@@ -401,9 +401,11 @@ function fmtFullTimestamp(ms: number): string {
 
 /**
  * Distance from the bottom (px) within which a NEW message (an append)
- * is allowed to scroll the reader down to follow it. Generous on
- * purpose: a brand-new line — especially the reader's OWN send — should
- * follow even when they're a few lines off the bottom.
+ * is allowed to scroll the reader down to follow it. Now scoped to the
+ * reader's OWN send: your own new line jumps you to it even a few lines
+ * up, while SOMEONE ELSE's arrival follows only when you're parked at the
+ * bottom (STICK_BOTTOM_PX) — casually scrolling up to re-read no longer
+ * snaps you back to the newest message.
  */
 const NEAR_BOTTOM_PX = 120;
 
@@ -464,6 +466,10 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
    * past the near-bottom threshold and read as "scrolled away."
    */
   const stickRef = useRef(true);
+  // Current user id, so the append-follow can tell the reader's OWN send
+  // (always jump to it) apart from someone else's live message (which must
+  // NOT yank a reader who has scrolled up to read).
+  const myUserId = useChat((s) => s.me?.id ?? null);
   /**
    * Scroll-bookkeeping for flat-mode auto-scroll-vs-preserve. We
    * capture the scroll geometry from BEFORE the upcoming commit and
@@ -544,8 +550,8 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       // Uses the TIGHT threshold: the re-pin (reactions, decoding images,
       // late media) should only follow when the reader is genuinely at the
       // bottom, so manually scrolling up even a little releases the stick
-      // and stops the "bounce." The looser NEAR_BOTTOM_PX still governs
-      // whether a brand-new message (append, below) scrolls down to follow.
+      // and stops the "bounce." The looser NEAR_BOTTOM_PX now governs only
+      // whether the reader's OWN new message (append, below) scrolls to follow.
       stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_BOTTOM_PX;
       // Native scroll-anchoring, toggled by where the reader is:
       //   - at the bottom (stick) → OFF: the manual re-pin owns the position
@@ -606,14 +612,18 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       return;
     }
     if (lastChanged) {
-      // Append (or full replacement). End-pin only when the user was
-      // already near the bottom, otherwise they're reading older
-      // history and we shouldn't yank them away.
-      const wasNearBottom = prev.height - prev.top - el.clientHeight < NEAR_BOTTOM_PX;
-      // Detect full-replacement: BOTH endpoints changed (room switch,
-      // jump-window swap). End-pin so the user lands at the newest.
+      // Follow the newest line only when the reader is genuinely parked at
+      // the bottom (tight stickRef band) OR the newest line is the reader's
+      // OWN send (jump them to it even a few lines up). A live message from
+      // SOMEONE ELSE no longer yanks a reader who has scrolled up: the old
+      // loose 120px "near bottom" follow fired for anyone's arrival, which
+      // was the "scroll up and it jumps right back to the end" report.
+      const dist = prev.height - prev.top - el.clientHeight;
+      const newestIsMine = myUserId != null && messages[messages.length - 1]?.userId === myUserId;
+      // Full-replacement: BOTH endpoints changed (room switch, jump-window
+      // swap). End-pin so the user lands at the newest.
       const replaced = firstChanged && lastChanged;
-      if (replaced || wasNearBottom) {
+      if (replaced || dist <= STICK_BOTTOM_PX || (newestIsMine && dist < NEAR_BOTTOM_PX)) {
         el.scrollTop = el.scrollHeight;
         // Re-arm the stick so the async-growth re-pin keeps following
         // this append's late-loading media (a programmatic scrollTop set
@@ -624,7 +634,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     }
     // first AND last unchanged → no buffer changes that affect layout
     // (an in-place message edit, for example). Leave scroll alone.
-  }, [messages, highlightMessageId, replyMode]);
+  }, [messages, highlightMessageId, replyMode, myUserId]);
 
   // Keep the flat feed pinned to the newest line after LATE height
   // growth the buffer-diff effect above can't see: avatars / inline
@@ -1067,8 +1077,13 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   );
 }
 
-/** Trigger an older-history fetch when scrolled within this many px of the top. */
+/** Overflow slack for the auto-fill check (does the buffer scroll at all). */
 const FLAT_LOAD_OLDER_THRESHOLD_PX = 200;
+/** Prefetch the next older page while still this far from the top, so history
+ *  streams in continuously as the reader scrolls up instead of stalling at the
+ *  very top and then jumping. ~1 screen; pairs with the gate's 1500px mount
+ *  padding so the rows are mounted before they scroll into view. */
+const FLAT_PREFETCH_AHEAD_PX = 1000;
 
 /**
  * Flat-mode renderer extracted so it can own the scroll-to-load-older
@@ -1115,7 +1130,7 @@ function FlatMessageView({
     setLoadingOlder(true);
     setOlderError(null);
     try {
-      const r = await fetch(`/rooms/${roomId}/messages?before=${oldest.createdAt}&limit=50`, {
+      const r = await fetch(`/rooms/${roomId}/messages?before=${oldest.createdAt}&limit=100`, {
         credentials: "include",
       });
       if (!r.ok) throw new Error(await readError(r));
@@ -1132,7 +1147,9 @@ function FlatMessageView({
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     if (!hasMore || inflightRef.current) return;
-    if (e.currentTarget.scrollTop <= FLAT_LOAD_OLDER_THRESHOLD_PX) {
+    // Prefetch ~1 screen BEFORE the top so the next batch is already resident
+    // as the reader scrolls into it — no stall-at-top-then-jump.
+    if (e.currentTarget.scrollTop <= FLAT_PREFETCH_AHEAD_PX) {
       void loadOlder();
     }
   }

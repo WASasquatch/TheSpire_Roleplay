@@ -41,6 +41,11 @@ apps/web/dist/
 *.pfx
 secrets/
 
+# Ad-hoc local API probes at the repo root. These routinely hardcode a real
+# API key/secret for a quick test (e.g. test_youtube_playlist_scrape.py), so
+# they must NEVER be committed. If a key ever lands here, rotate it.
+/test_*.py
+
 # =====================================================================
 # Server-side runtime data
 # =====================================================================

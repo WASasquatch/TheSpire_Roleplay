@@ -578,7 +578,11 @@ export async function registerRoomsRoutes(
       reply.code(400);
       return { error: "before (ms) required" };
     }
-    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit ?? "50", 10) || 50));
+    // Cap at 100: the scroll-up loader pulls 100-row batches so history
+    // streams in a screenful at a time instead of dribbling; the default
+    // stays 50 for any caller that omits the param. Overfetch (limit+1) makes
+    // this a ~101-row read, still cheap.
+    const limit = Math.min(100, Math.max(1, parseInt(req.query.limit ?? "50", 10) || 50));
 
     // Apply the same hide filter the live backlog uses so a user they've
     // muted (one-way /ignore) or are blocked with (mutual) doesn't re-appear

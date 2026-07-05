@@ -377,7 +377,9 @@ function JoinCard({ detail, membership }: { detail: WorldDetail; membership: KbM
       <button type="button" disabled={membership.busy} onClick={membership.onLeave} className="keep-button rounded border border-keep-accent/50 px-3 py-1 text-sm text-keep-accent disabled:opacity-50">Leave world</button>
     ));
   }
-  if (w.visibility !== "open") return null; // no public path
+  // joinMode drives the card, independent of visibility: resolveWorld already
+  // gated who can SEE this world, so a public / link-shared world still joins or
+  // applies here (a private one the viewer can't resolve never renders this).
   if (!membership.isAuthenticated) return wrap("Sign in to join this world.", null);
   const joinMode = w.joinMode ?? "open";
   if (joinMode === "invite-only") {

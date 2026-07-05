@@ -2044,10 +2044,12 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
     const isOwner = w.ownerUserId === me.id;
     const isAdmin = !isOwner && (await hasPermission(me, "edit_others_world", db));
     if (!isOwner && !isAdmin) {
-      if (w.visibility !== "open") {
-        reply.code(403);
-        return { error: "this world isn't open for community membership", code: "NOT_OPEN" };
-      }
+      // joinMode alone gates entry, independent of visibility (resolveWorld above
+      // already enforced who can SEE the world). A public / link-shared world with
+      // a one-click "open" joinMode is joinable by anyone who can reach it; the
+      // invite-only / application branches below still apply. This mirrors the
+      // application route (which never checked visibility) and the editor's
+      // "joinMode is independent of visibility" contract.
       const joinMode = (w.joinMode ?? "open") as WorldJoinMode;
       if (joinMode === "invite-only") {
         reply.code(403);

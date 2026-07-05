@@ -2830,7 +2830,16 @@ function Chat() {
       }
       st.bumpFriendsVersion();
     });
-    socket.on("error:notice", (n) => setNotice(n));
+    socket.on("error:notice", (n) => {
+      // Echo server notices to the browser console (not just the toast) so
+      // diagnostics — e.g. the YouTube Data API's specific error ("403
+      // PERMISSION_DENIED (forbidden): Requests from referer <empty> are
+      // blocked.") carried in a THEATER notice — are inspectable in-browser
+      // without needing server-log access.
+      // eslint-disable-next-line no-console
+      console.warn(`[notice] ${n.code}: ${n.message}`);
+      setNotice(n);
+    });
     // Per-channel unread pulse (Batch 2 per-channel-reads). REPLACES the
     // cached unread + mention for one room wholesale (no accumulation);
     // `unread: 0` clears the dot. Mute state is NOT carried here — it comes

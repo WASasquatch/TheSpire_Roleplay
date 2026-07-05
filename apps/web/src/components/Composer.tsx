@@ -517,6 +517,9 @@ export function Composer({
   // in a nested room.
   const effectiveMaxLength = isForumRoom ? maxForumPostLength : maxChatLength;
   const setNotice = useChat((s) => s.setNotice);
+  // Email-verification state, so the composer can stop a send in block mode
+  // with instant, actionable feedback (the server also rejects it server-side).
+  const me = useChat((s) => s.me);
 
   useEffect(() => {
     if (!roomId) {
@@ -1015,6 +1018,22 @@ export function Composer({
     // client → server hop. Only the trailing whitespace is collapsed
     // (accidental trailing newline / spaces on copy-paste).
     if (!value.trim()) return;
+    // Email-verification gate. In block mode an unverified, non-staff user
+    // can't send: the server rejects it too, but catching it here gives instant
+    // feedback and points them at the banner's resend instead of silently
+    // swallowing their message. Staff are exempt (mirrors the server chat:input
+    // exemption + the VerifyEmailGate banner).
+    if (
+      me && me.emailVerificationEnabled && me.emailVerifiedAt == null &&
+      me.emailVerificationMode === "block" &&
+      me.role !== "admin" && me.role !== "masteradmin"
+    ) {
+      setNotice({
+        code: "VERIFY_EMAIL",
+        message: "Verify your email to chat — check your inbox for the link (resend it from the banner up top).",
+      });
+      return;
+    }
     const t = value.trimEnd();
     // Length gate. chat:input is fire-and-forget, by the time the
     // server's TOO_LONG `error:notice` echoes back, the call site

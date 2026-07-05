@@ -310,8 +310,13 @@ export function BannerMarquee({ appName, serverName }: Props) {
       />
       {/* Left: fixed source label + a full-bar-height vertical rule partitioning
           it from the scrolling content. The label names the stream currently on
-          screen; the rule is a real full-height divider (self-stretch + w-px). */}
-      <div className="relative z-10 flex items-stretch gap-3">
+          screen; the rule is a real full-height divider (self-stretch + w-px).
+          Hidden below `sm`: on a phone this nowrap label (e.g. "THE SPIRE
+          ANNOUNCEMENTS") reserved ~45% of the row and forced the body to wrap
+          to several lines; dropping it there gives the announcement the width
+          to stay on one or two lines. The source-coded background wash + the
+          right-hand source toggle still convey which stream is showing. */}
+      <div className="relative z-10 hidden items-stretch gap-3 sm:flex">
         <span
           className="flex items-center whitespace-nowrap text-[11px] font-semibold uppercase tracking-widest"
           style={{ color: accentHex }}

@@ -22,6 +22,8 @@ export interface ServerEvent {
   /** Host identity, when the creator voiced a character; null = OOC/none. */
   hostCharacterId: string | null;
   title: string;
+  /** Curated Lucide icon slug shown before the title; null = no icon. */
+  icon: string | null;
   /** Sanitized HTML description, or null. */
   descriptionHtml: string | null;
   /** Start time, ms epoch. */

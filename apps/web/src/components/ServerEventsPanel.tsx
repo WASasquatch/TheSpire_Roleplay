@@ -31,6 +31,7 @@ import type {
   ServerEventRsvpStatus,
 } from "@thekeep/shared";
 import { readError } from "../lib/http.js";
+import { EventIcon } from "../lib/eventIcons.js";
 import { useChat } from "../state/store.js";
 import { Modal } from "./Modal.js";
 
@@ -148,7 +149,6 @@ export function ServerEventsPanel() {
   const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
   const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
-  const listRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     if (!serverId) return;
@@ -231,11 +231,9 @@ export function ServerEventsPanel() {
   // YYYY-MM-DD sorts chronologically as a plain string.
   const sortedDays = useMemo(() => [...eventsByDay.keys()].sort(), [eventsByDay]);
 
-  // Clicking a calendar day that has events scrolls the grouped list to it.
-  const onSelectDay = useCallback((key: string) => {
-    setSelectedDay(key);
-    listRef.current?.querySelector<HTMLElement>(`[data-daykey="${key}"]`)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
+  // Clicking a calendar day shows that day's detail below (its events, or a
+  // "nothing on this day" note); the detail's back button clears the selection.
+  const onSelectDay = useCallback((key: string) => setSelectedDay(key), []);
 
   async function rsvp(row: EventRow, status: ServerEventRsvpStatus) {
     if (!serverId) return;
@@ -287,13 +285,14 @@ export function ServerEventsPanel() {
       >
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="truncate text-sm font-semibold text-keep-text">
-              {ev.title}
+            <h3 className="flex items-center gap-1.5 text-sm font-semibold text-keep-text">
+              <EventIcon name={ev.icon} className="h-4 w-4 shrink-0 text-keep-muted" />
+              <span className="truncate">{ev.title}</span>
               {ev.status === "live" ? (
-                <span className="ml-2 rounded bg-keep-accent px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-bg">Live</span>
+                <span className="shrink-0 rounded bg-keep-accent px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-bg">Live</span>
               ) : null}
               {cancelled ? (
-                <span className="ml-2 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-accent">Cancelled</span>
+                <span className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-accent">Cancelled</span>
               ) : null}
             </h3>
             <p className="mt-0.5 text-xs text-keep-muted">
@@ -401,16 +400,37 @@ export function ServerEventsPanel() {
                   onSelectDay={onSelectDay}
                 />
               </div>
-              {/* Events, grouped by date (soonest first). */}
-              <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto p-4">
+              {/* Below the calendar: a single day's detail when one is picked,
+                  otherwise every upcoming event grouped by date (soonest first). */}
+              <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 {rows === null ? (
                   <p className="text-sm italic text-keep-muted">Loading…</p>
+                ) : selectedDay ? (
+                  <div>
+                    <div className="mb-3 flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDay(null)}
+                        className="shrink-0 rounded border border-keep-rule px-2 py-1 text-[11px] text-keep-muted hover:text-keep-text"
+                      >
+                        ‹ All upcoming
+                      </button>
+                      <h4 className="min-w-0 truncate text-sm font-semibold text-keep-text">{formatDayHeader(selectedDay)}</h4>
+                    </div>
+                    {(eventsByDay.get(selectedDay) ?? []).length === 0 ? (
+                      <p className="text-sm italic text-keep-muted">No events on this day.</p>
+                    ) : (
+                      <ul className="space-y-3">
+                        {(eventsByDay.get(selectedDay) ?? []).map((row) => renderEventCard(row))}
+                      </ul>
+                    )}
+                  </div>
                 ) : rows.length === 0 ? (
                   <p className="text-sm italic text-keep-muted">No upcoming events yet. Pick a day above, or check back soon.</p>
                 ) : (
                   <div className="space-y-4">
                     {sortedDays.map((key) => (
-                      <div key={key} data-daykey={key} className="scroll-mt-2">
+                      <div key={key}>
                         <h4 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">{formatDayHeader(key)}</h4>
                         <ul className="space-y-3">
                           {(eventsByDay.get(key) ?? []).map((row) => renderEventCard(row))}
@@ -482,18 +502,15 @@ function MonthCalendar({
             <button
               key={key}
               type="button"
-              disabled={!has}
               onClick={() => onSelectDay(key)}
-              title={has ? `${count} event${count === 1 ? "" : "s"}` : undefined}
+              title={has ? `${count} event${count === 1 ? "" : "s"}` : "No events"}
               aria-label={`${monthLabel} ${d}${has ? `, ${count} event${count === 1 ? "" : "s"}` : ""}`}
-              className={`relative flex aspect-square flex-col items-center justify-center rounded text-xs transition-colors ${
+              className={`relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded text-xs transition-colors ${
                 isSelected
                   ? "bg-keep-action/20 font-semibold text-keep-action ring-1 ring-keep-action"
                   : has
-                    ? "cursor-pointer font-semibold text-keep-text hover:bg-keep-panel"
-                    : isToday
-                      ? "text-keep-text"
-                      : "cursor-default text-keep-muted"
+                    ? "font-semibold text-keep-text hover:bg-keep-panel"
+                    : "text-keep-muted hover:bg-keep-panel hover:text-keep-text"
               } ${isToday && !isSelected ? "ring-1 ring-keep-rule" : ""}`}
             >
               <span>{d}</span>

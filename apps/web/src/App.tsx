@@ -91,7 +91,7 @@ import { fire as fireNotification, permission as notifPermission, shouldNotify, 
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
 import { identityArgFor, nameForCommand } from "./lib/commandText.js";
 import { playAlert, playPing, playTap, playWhisper } from "./lib/sound.js";
-import { saveCachedActiveTheme, useChat, type SiteBranding } from "./state/store.js";
+import { loadCachedActiveStyleKey, loadCachedActiveTheme, saveCachedActiveStyleKey, saveCachedActiveTheme, useChat, type SiteBranding } from "./state/store.js";
 import { fetchEmoticonCatalog, useEmoticons } from "./state/emoticons.js";
 import { parseScriptoriumFromUrl, storyPermalink } from "./lib/scriptoriumUrl.js";
 import { useEarning } from "./state/earning.js";
@@ -1705,7 +1705,16 @@ function Chat() {
   // separately avoids the previous bug where activeTheme was set in a
   // one-shot effect that only re-ran on `themeVersion` bumps, leaving
   // the chat stuck on the OLD site default after an admin palette change.
-  const [userTheme, setUserTheme] = useState<Theme | null>(null);
+  // Seed from the cached last-active theme so a signed-in user's palette paints
+  // from the very first chat frame instead of flashing the site default while
+  // the async /me/profile fetch below resolves and calls setUserTheme. The
+  // splash already paints this cached theme; without the seed, the moment chat
+  // mounts activeTheme falls to branding.defaultTheme until the fetch lands —
+  // the "my theme reverts to default on login until I open my profile" report.
+  // activeCharacterId is null until that same fetch seeds it, so this OOC-path
+  // seed covers every identity during the gap; the fetch then overwrites it
+  // with the authoritative value (their saved theme, or null → site default).
+  const [userTheme, setUserTheme] = useState<Theme | null>(() => loadCachedActiveTheme());
   // Per-user UI font + size preferences. User-level accessibility settings,
   // not theme-layered (a character doesn't override font; that'd be
   // hostile to a user with low vision). Loaded with the master profile,
@@ -1760,8 +1769,12 @@ function Chat() {
   };
   const [notifyPref, setNotifyPref] = useState<NotifyPref>("mentions");
   // Per-user style override. `null` means "follow the site default";
-  // applyStyle below resolves user > site > hardcoded fallback.
-  const [userStyleKey, setUserStyleKey] = useState<string | null>(null);
+  // applyStyle below resolves user > site > hardcoded fallback. Seeded from
+  // cache for the same no-first-frame-flash reason as userTheme above: the
+  // null = "inherit" semantics are only briefly treated as an explicit pick
+  // during the load gap, then the /me/profile fetch overwrites it with the
+  // authoritative value (their override, or null → resolve through the chain).
+  const [userStyleKey, setUserStyleKey] = useState<string | null>(() => loadCachedActiveStyleKey());
   // Per-character style override. Same shape as userStyleKey; loaded
   // from the active character row in the character-theme effect
   // below. Null = inherit the chain (master → theme-pinned → site).
@@ -2191,6 +2204,12 @@ function Chat() {
       applyStyle(scopedRootDesign.theme, scopedRootDesign.styleKey);
     } else {
       applyStyle(activeTheme, resolvedStyle);
+      // Cache the resolved design next to the palette (saveCachedActiveTheme
+      // above) so the next chat mount seeds userStyleKey and paints the right
+      // ornaments from the first frame. Gated on `me` like the theme cache; a
+      // mounted forum surface (scopedRootDesign) owns the root design
+      // transiently and must never be cached as the user's own.
+      if (me) saveCachedActiveStyleKey(resolvedStyle);
     }
 
     // Glass shell-bg URL, character > master > Spire artwork

@@ -17,13 +17,14 @@
  * helpers — lib/servers.ts stays untouched). Description accepts the same HTML
  * as profile bios; the server re-sanitizes on save.
  */
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   ServerEvent,
   ServerEventRsvp,
   ServerViewerState,
 } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { EVENT_ICONS, EventIcon } from "../../lib/eventIcons.js";
 
 interface EventsTabProps {
   serverId: string;
@@ -218,7 +219,8 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
               return (
                 <tr key={ev.id} className="border-b border-keep-rule/40 align-top">
                   <td className="max-w-[220px] px-2 py-2">
-                    <div className="font-semibold text-keep-text">
+                    <div className="flex items-center gap-1 font-semibold text-keep-text">
+                      <EventIcon name={ev.icon} className="h-3.5 w-3.5 shrink-0 text-keep-muted" />
                       {ev.title}
                       {ev.status === "cancelled" ? (
                         <span className="ml-1 text-[10px] uppercase tracking-widest text-keep-accent">(cancelled)</span>
@@ -302,6 +304,8 @@ function EventForm({
   onSaved: () => Promise<void>;
 }) {
   const [title, setTitle] = useState(initial?.title ?? "");
+  const [icon, setIcon] = useState<string | null>(initial?.icon ?? null);
+  const iconMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [description, setDescription] = useState(initial?.descriptionHtml ?? "");
   const [startsAt, setStartsAt] = useState(initial ? msToLocalInput(initial.startsAt) : "");
   const [endsAt, setEndsAt] = useState(initial?.endsAt ? msToLocalInput(initial.endsAt) : "");
@@ -324,6 +328,7 @@ function EventForm({
 
       const payload = {
         title: title.trim(),
+        icon,
         descriptionHtml: description.trim() ? description : null,
         startsAt: startMs,
         endsAt: endMs,
@@ -351,6 +356,49 @@ function EventForm({
 
   return (
     <form onSubmit={submit} className="space-y-2 rounded border border-keep-rule bg-keep-panel/30 p-3 text-xs">
+      <details ref={iconMenuRef} className="block">
+        <summary className="flex cursor-pointer list-none items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+          <span className="uppercase tracking-widest text-keep-muted">Icon</span>
+          {icon ? (
+            <span className="flex items-center gap-1 text-keep-text">
+              <EventIcon name={icon} className="h-4 w-4" />
+              {icon}
+            </span>
+          ) : (
+            <span className="text-keep-muted">None</span>
+          )}
+          <span className="ml-auto text-keep-muted">▾</span>
+        </summary>
+        <div className="mt-1 flex flex-wrap gap-1 rounded border border-keep-rule bg-keep-bg p-2">
+          <button
+            type="button"
+            onClick={() => { setIcon(null); if (iconMenuRef.current) iconMenuRef.current.open = false; }}
+            title="No icon"
+            aria-label="No icon"
+            aria-pressed={icon == null}
+            className={`flex h-8 w-8 items-center justify-center rounded border text-[9px] uppercase ${icon == null ? "border-keep-action bg-keep-action/15 text-keep-action" : "border-keep-rule text-keep-muted hover:bg-keep-banner"}`}
+          >
+            None
+          </button>
+          {Object.entries(EVENT_ICONS).map(([name, Ico]) => {
+            const on = icon === name;
+            return (
+              <button
+                key={name}
+                type="button"
+                onClick={() => { setIcon(name); if (iconMenuRef.current) iconMenuRef.current.open = false; }}
+                title={name}
+                aria-label={name}
+                aria-pressed={on}
+                className={`flex h-8 w-8 items-center justify-center rounded border ${on ? "border-keep-action bg-keep-action/15 text-keep-action" : "border-keep-rule text-keep-text hover:bg-keep-banner"}`}
+              >
+                <Ico className="h-4 w-4" aria-hidden="true" />
+              </button>
+            );
+          })}
+        </div>
+      </details>
+
       <label className="block">
         <span className="mb-1 block uppercase tracking-widest text-keep-muted">Title</span>
         <input

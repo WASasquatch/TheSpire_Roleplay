@@ -37,9 +37,23 @@ async function apiGet<T = any>(path: string, params: Record<string, string>): Pr
       signal: ctrl.signal,
       headers: { accept: "application/json" },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Surface WHY in the server log (never the key). With a key present the
+      // usual culprits are a 403 from an HTTP-referrer-restricted key (a
+      // server-side call sends no referrer, so Google blocks it) or the
+      // YouTube Data API v3 not being enabled on the project — both need a
+      // Google Cloud console fix, not a code change. The response body carries
+      // Google's machine-readable reason (e.g. "API_KEY_HTTP_REFERRER_BLOCKED").
+      let reason = "";
+      try { reason = (await res.text()).slice(0, 400); } catch { /* ignore body */ }
+      // eslint-disable-next-line no-console
+      console.error(`[youtube] ${path} -> ${res.status} ${res.statusText}${reason ? ` :: ${reason}` : ""}`);
+      return null;
+    }
     return (await res.json()) as T;
-  } catch {
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error(`[youtube] ${path} request failed:`, err instanceof Error ? err.message : err);
     return null;
   } finally {
     clearTimeout(timer);

@@ -70,6 +70,7 @@ const REMINDER_LEADS_MS = new Set<number>([
 
 const createSchema = z.object({
   title: z.string().trim().min(1).max(TITLE_MAX),
+  icon: z.string().trim().max(40).regex(/^[a-z0-9-]+$/).nullable().optional(),
   descriptionHtml: z.string().max(DESCRIPTION_MAX).nullable().optional(),
   startsAt: z.number().int().positive(),
   endsAt: z.number().int().positive().nullable().optional(),
@@ -81,6 +82,7 @@ const createSchema = z.object({
 
 const updateSchema = z.object({
   title: z.string().trim().min(1).max(TITLE_MAX).optional(),
+  icon: z.string().trim().max(40).regex(/^[a-z0-9-]+$/).nullable().optional(),
   descriptionHtml: z.string().max(DESCRIPTION_MAX).nullable().optional(),
   startsAt: z.number().int().positive().optional(),
   endsAt: z.number().int().positive().nullable().optional(),
@@ -132,6 +134,7 @@ function wireEvent(r: typeof serverEvents.$inferSelect): ServerEvent {
     createdByUserId: r.createdByUserId ?? null,
     hostCharacterId: r.hostCharacterId ?? null,
     title: r.title,
+    icon: r.icon ?? null,
     descriptionHtml: r.descriptionHtml ?? null,
     startsAt: +r.startsAt,
     endsAt: r.endsAt != null ? +r.endsAt : null,
@@ -346,6 +349,7 @@ export async function registerServerEventRoutes(
         createdByUserId: g.meId,
         hostCharacterId: body.hostCharacterId ?? null,
         title: body.title,
+        icon: body.icon ?? null,
         descriptionHtml: body.descriptionHtml ? sanitizeBio(body.descriptionHtml) : null,
         startsAt: body.startsAt,
         endsAt: body.endsAt ?? null,
@@ -410,6 +414,7 @@ export async function registerServerEventRoutes(
 
       const patch: Record<string, unknown> = { updatedAt: new Date() };
       if (body.title !== undefined) patch.title = body.title;
+      if (body.icon !== undefined) patch.icon = body.icon;
       if (body.descriptionHtml !== undefined) {
         patch.descriptionHtml = body.descriptionHtml ? sanitizeBio(body.descriptionHtml) : null;
       }

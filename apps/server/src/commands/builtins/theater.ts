@@ -21,6 +21,36 @@ function sniffKind(url: string): TheaterSourceKind {
   return "embed";
 }
 
+/**
+ * Drop the playlist-related query params (`list`, `index`, …) from a YouTube
+ * WATCH/video URL, keeping the actual video. The client's player (ReactPlayer)
+ * rejects a `watch?v=<id>&list=<playlist>` URL as an "Invalid video id", so any
+ * single video we queue must carry only its own id. Non-YouTube URLs and pure
+ * playlist URLs (no video to keep) pass through untouched.
+ */
+function stripYoutubeListParams(url: string): string {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, "");
+    const isYt = host === "youtube.com" || host === "m.youtube.com" || host === "youtube-nocookie.com" || host === "youtu.be";
+    if (!isYt) return url;
+    // Only strip when a concrete video remains (a watch `v`, youtu.be/<id>, or
+    // a /live//shorts//embed/ path). A bare playlist URL has nothing to fall
+    // back to, so leave it as-is.
+    const hasVideo = u.searchParams.has("v")
+      || host === "youtu.be"
+      || /^\/(?:live|shorts|embed)\/[\w-]+/.test(u.pathname);
+    if (!hasVideo) return url;
+    let changed = false;
+    for (const p of ["list", "index", "start_radio", "pp"]) {
+      if (u.searchParams.has(p)) { u.searchParams.delete(p); changed = true; }
+    }
+    return changed ? u.toString() : url;
+  } catch {
+    return url;
+  }
+}
+
 const KIND_LABEL: Record<TheaterSourceKind, string> = {
   video: "video file",
   youtube: "YouTube",
@@ -151,8 +181,17 @@ export const theaterCommand: CommandHandler = {
             }
             return;
           }
-          // Expansion failed/empty (API error, private playlist, etc.) →
-          // fall through and append the raw URL as today.
+          // Expansion came back empty: a private/unavailable playlist, or the
+          // Data API rejected the call (commonly an HTTP-referrer-restricted
+          // key, or the YouTube Data API v3 not enabled — the [youtube] server
+          // log shows which). Don't no-op silently: tell the operator, and if
+          // the link also carried a single video, queue that (appendSingle
+          // strips the &list= so it actually plays) instead of a dead link.
+          if (videoId) {
+            notice(ctx, "THEATER", "Couldn't expand that YouTube playlist (it may be private, or the API key isn't authorized for the YouTube Data API). Queued the single video instead.");
+            return appendSingle(url, title, kindOverride);
+          }
+          return notice(ctx, "THEATER", "Couldn't expand that YouTube playlist (it may be private, or the API key isn't authorized for the YouTube Data API).");
         } else if (videoId && sniffKind(url) === "youtube" && !title) {
           // Plain YouTube video with no operator-supplied title → try to
           // fetch the real title so the playlist reads nicely. null → append
@@ -167,7 +206,12 @@ export const theaterCommand: CommandHandler = {
 
     // Append exactly one source (the classic path): sniff kind, resolve the
     // live flag, persist, confirm, broadcast, and auto-start an empty room.
-    const appendSingle = async (url: string, title: string, kindOverride?: TheaterSourceKind) => {
+    const appendSingle = async (rawUrl: string, title: string, kindOverride?: TheaterSourceKind) => {
+      // Queue a clean video URL. A YouTube watch link can arrive with a
+      // `&list=` (e.g. the playlist-expansion fallback above, or a mix/radio
+      // link), which makes the client player reject it as an "Invalid video
+      // id". Non-YouTube URLs pass through unchanged.
+      const url = stripYoutubeListParams(rawUrl);
       // `/theater live` declares a live broadcast. A YouTube/Vimeo live still
       // plays through its iframe API (NOT hls.js), so keep the sniffed kind and
       // mark it live via the `live` flag; only a raw stream gets kind:"live"

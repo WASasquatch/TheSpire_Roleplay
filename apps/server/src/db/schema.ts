@@ -4595,6 +4595,8 @@ export const serverEvents = sqliteTable(
     createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     hostCharacterId: text("host_character_id").references(() => characters.id, { onDelete: "set null" }),
     title: text("title").notNull(),
+    /** Curated Lucide icon slug shown before the title; null = no icon. */
+    icon: text("icon"),
     descriptionHtml: text("description_html"),
     /** Start time, ms epoch. */
     startsAt: integer("starts_at").notNull(),

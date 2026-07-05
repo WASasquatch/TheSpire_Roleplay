@@ -399,6 +399,35 @@ export function clearCachedActiveTheme(): void {
 }
 
 /**
+ * Cache the user's most recently *resolved* active DESIGN — the style key
+ * (medieval / glass / scifi / …) after all character / master / theme-pinned /
+ * site fallbacks. Companion to {@link saveCachedActiveTheme}: seeding BOTH on a
+ * fresh chat mount paints the signed-in user's palette AND their design from
+ * the first frame, instead of flashing the site-default ornaments while the
+ * async /me/profile fetch resolves and sets the authoritative style. Same
+ * localStorage lifetime as the theme cache (the design preference is
+ * account-global, not tab-local). Stored as a bare style-key string.
+ */
+const LAST_ACTIVE_STYLE_KEY = "tk:lastActiveStyleKey:v1";
+
+export function saveCachedActiveStyleKey(styleKey: string): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(LAST_ACTIVE_STYLE_KEY, styleKey);
+  } catch { /* private-mode: the design just resolves a frame later */ }
+}
+
+export function loadCachedActiveStyleKey(): string | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(LAST_ACTIVE_STYLE_KEY);
+    return raw && raw.trim() !== "" ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Local-only UI prefs that aren't worth a round-trip to the server.
  * Persisted to localStorage so a tab reload (or a post-deploy bundle
  * pickup) doesn't wipe the user's customizations. Each key is small

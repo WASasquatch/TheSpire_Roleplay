@@ -76,12 +76,20 @@ export function AdminAnnouncementsTab() {
 
   return (
     <div className="space-y-6">
+      <div className="rounded border border-keep-rule bg-keep-panel/20 px-3 py-2 text-xs text-keep-muted">
+        These are the <strong className="text-keep-text">System Announcements</strong> for the
+        default Spire server. Community servers manage their own announcements
+        separately, so anything you add here shows to everyone on the home
+        server (and site-wide chrome), not inside other communities.
+      </div>
+
       <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
-          Banner marquee
+          System banner marquee
         </h2>
         <p className="mb-3 text-xs text-keep-muted">
-          Rows shown here render in a rotating banner above the chat. The marquee fades
+          Rows shown here render in a rotating banner above the chat on the
+          default Spire server. The marquee fades
           between entries every ~8 seconds when there are two or more enabled.
           Viewers can dismiss the bar for themselves; the dismissal persists in
           their browser until they clear site data.
@@ -91,13 +99,14 @@ export function AdminAnnouncementsTab() {
 
       <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
-          Scheduled <code>/announce</code> cronjobs
+          Scheduled system <code>/announce</code> cronjobs
         </h2>
         <p className="mb-3 text-xs text-keep-muted">
-          Rows here fire as a sitewide or per-room <code>/announce</code> at the
-          configured time. One-shot rows auto-disable after firing; recurring
-          rows re-arm to <em>now + interval</em> on each fire (a server restart
-          mid-cycle won't double-fire to catch up).
+          Rows here fire as an every-room or single-room <code>/announce</code> on
+          the default Spire server at the configured time. One-shot rows
+          auto-disable after firing; recurring rows re-arm to <em>now +
+          interval</em> on each fire (a server restart mid-cycle won't
+          double-fire to catch up).
         </p>
         <ScheduledSection canManage={canManageScheduled} />
       </section>
@@ -526,7 +535,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
                 <td className="px-2 py-2">
                   {r.targetRoomId
                     ? (roomNameById.get(r.targetRoomId) ?? <code className="text-keep-muted">{r.targetRoomId}</code>)
-                    : <em className="text-keep-muted">sitewide</em>}
+                    : <em className="text-keep-muted">all rooms</em>}
                 </td>
                 <td className="px-2 py-2 text-center">
                   {canManage ? (
@@ -702,7 +711,7 @@ function ScheduledForm({
           onChange={(e) => setTargetRoomId(e.target.value || null)}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
         >
-          <option value="">Sitewide (every room)</option>
+          <option value="">Every room (default server)</option>
           {rooms.map((r) => (
             <option key={r.id} value={r.id}>{r.name}</option>
           ))}

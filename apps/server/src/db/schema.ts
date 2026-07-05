@@ -353,6 +353,14 @@ export const users = sqliteTable(
      * system events. Customisable via `/incognito <alias>`.
      */
     incognitoAlias: text("incognito_alias"),
+    incognitoCharacterId: text("incognito_character_id"),
+    /**
+     * Per-user server-rail ordering — a JSON array of server ids in the order
+     * the viewer dragged them (Discord-style). Private to the user. Servers not
+     * present fall to the end in their default order; NULL = default order.
+     * Migration 0326.
+     */
+    railOrderJson: text("rail_order_json"),
     /**
      * Custom leave-message broadcast at the moment the user goes
      * incognito. Null → use a default phrasing built from their
@@ -394,6 +402,18 @@ export const users = sqliteTable(
      * welcome (any non-empty message will show on next load).
      */
     welcomeSeenHash: text("welcome_seen_hash"),
+    /**
+     * Highest site coach-tour version this user has acknowledged (migration
+     * 0312). Compared against the shared `SITE_TOUR_VERSION` on /me/profile:
+     * when it is lower, the response reports `showSiteTour:true` and the client
+     * auto-opens the first-run screen tour once, then POST /me/tour/dismiss
+     * writes `SITE_TOUR_VERSION` back here. 0 (the default) = never seen any
+     * tour, so a fresh user gets version 1 on first load. Bumping the constant
+     * re-shows the revised tour to everyone below it. Mirrors the welcome's
+     * seen-once mechanism, but as a monotonic version rather than a copy hash
+     * because the tour text is client-hard-coded, not admin-authored.
+     */
+    tourSeenVersion: integer("tour_seen_version").notNull().default(0),
     /**
      * Last room the user occupied when their previous session disconnected
      * or idled out. Set on disconnect / room switch; consumed on the next
@@ -445,6 +465,13 @@ export const users = sqliteTable(
     bannedUntil: integer("banned_until", { mode: "timestamp_ms" }),
     banReason: text("ban_reason"),
     bannedById: text("banned_by_id"),
+    /**
+     * Whether this account has a usable local password (migration 0323).
+     * Normal registrations default to true; an account provisioned purely
+     * through Google sign-in sets this false so the login UI / password-change
+     * flow can adapt (offer "set a password" instead of "change password").
+     */
+    hasPassword: integer("has_password", { mode: "boolean" }).notNull().default(true),
   },
   (t) => ({
     // Email is no longer unique at the DB layer; the per-account cap is
@@ -452,6 +479,35 @@ export const users = sqliteTable(
     // in /auth/register. Username remains uniquely indexed.
     emailIdx: index("users_email_idx").on(sql`lower(${t.email})`),
     usernameUq: uniqueIndex("users_username_uq").on(sql`lower(${t.username})`),
+  }),
+);
+
+/* ---------- oauth accounts (migration 0323) ----------
+ * Links a local `users` row to an external identity provider (currently just
+ * Google). unique(provider, providerUserId) keeps one external identity mapped
+ * to a single local; unique(userId, provider) keeps one local mapped to a
+ * single identity per provider. `providerEmail` is informational (the email the
+ * provider reported at link time); the local account's own email stays
+ * authoritative. Cascades on user delete. Additive + env-gated — nothing reads
+ * this until Google sign-in is configured and turned on. */
+export const oauthAccounts = sqliteTable(
+  "oauth_accounts",
+  {
+    id: id(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Provider key, e.g. "google". */
+    provider: text("provider").notNull(),
+    /** The provider's stable subject id for the user (Google `sub`). */
+    providerUserId: text("provider_user_id").notNull(),
+    /** Email the provider reported at link time; informational only. */
+    providerEmail: text("provider_email"),
+    linkedAt: integer("linked_at").notNull().default(sql`(unixepoch() * 1000)`),
+  },
+  (t) => ({
+    providerUidUq: uniqueIndex("oauth_accounts_provider_uid_uq").on(t.provider, t.providerUserId),
+    userProviderUq: uniqueIndex("oauth_accounts_user_provider_uq").on(t.userId, t.provider),
   }),
 );
 
@@ -1268,6 +1324,38 @@ export const mutes = sqliteTable(
   }),
 );
 
+/* ---------- account_mutes (server-wide / site-wide timed silence) ----------
+ * Wider-than-room mutes whose REACH follows the ISSUER's authority: site staff
+ * (global mod/admin) mute site-wide, server staff mute their whole server. A
+ * room owner/mod's /mute stays in the per-room `mutes` table above. Every mute
+ * is account-level (silences all of the target's tabs/identities). Enforced in
+ * dispatch.ts alongside the room mute; cleared by /unmute or expiry. The
+ * partial UNIQUE indexes (one site mute per user; one server mute per
+ * user+server) live in migration 0325, not here — drizzle only needs the shape
+ * for queries.
+ */
+export const accountMutes = sqliteTable(
+  "account_mutes",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // "server" | "site". Server mutes carry a serverId; site mutes leave it null.
+    scope: text("scope").notNull(),
+    serverId: text("server_id").references(() => servers.id, { onDelete: "cascade" }),
+    until: integer("until", { mode: "timestamp_ms" }).notNull(),
+    reason: text("reason"),
+    issuedById: text("issued_by_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    byUser: index("account_mutes_user_idx").on(t.userId),
+  }),
+);
+
 /* ---------- ignores (per-user mute list) ---------- */
 export const ignores = sqliteTable(
   "ignores",
@@ -1818,6 +1906,20 @@ export const siteSettings = sqliteTable("site_settings", {
    */
   serversEnabled: integer("servers_enabled", { mode: "boolean" }).notNull().default(false),
   /**
+   * Escalating chat anti-spam (migration 0313). When true, rapid-fire message
+   * floods from ordinary users hit a warn->mute ladder (see realtime/antiSpam.ts).
+   * Off by default so admins opt in; the `bypass_anti_spam` permission exempts
+   * trusted users, mods, and admins.
+   */
+  antiSpamEnabled: integer("anti_spam_enabled", { mode: "boolean" }).notNull().default(false),
+  /**
+   * Auto-moderation master switch (migration 0319). When true, the chat + forum
+   * pipelines run the enabled `automod_rules` (keyword/regex/link/invite/mention
+   * filters) before a message lands. Off by default so admins opt in; the
+   * `bypass_automod` permission exempts trusted users, mods, and admins.
+   */
+  automodEnabled: integer("automod_enabled", { mode: "boolean" }).notNull().default(false),
+  /**
    * First-party analytics master switch (migration 0310). When false the ingest
    * routes + server-side page-view recorder become no-ops. Default on; additive
    * so existing installs start collecting immediately.
@@ -2080,8 +2182,8 @@ export const affiliates = sqliteTable(
     clicksOut: integer("clicks_out").notNull().default(0),
     /** Traffic padding (global-admin only): optional SYNTHETIC in/out traffic so a
      *  quiet listing still shows some life. Kept separate from clicks_in/out; a
-     *  per-day random target (0..max) is spread across the day and banked as it
-     *  completes. See affiliates/padding.ts + migration 0311. */
+     *  rolling-24h random ceiling (1..max) is spread across the period and banked
+     *  as each period completes. See affiliates/padding.ts + migrations 0311/0322. */
     padInEnabled: integer("pad_in_enabled", { mode: "boolean" }).notNull().default(false),
     padInMax: integer("pad_in_max").notNull().default(0),
     padInBanked: integer("pad_in_banked").notNull().default(0),
@@ -2090,8 +2192,12 @@ export const affiliates = sqliteTable(
     padOutMax: integer("pad_out_max").notNull().default(0),
     padOutBanked: integer("pad_out_banked").notNull().default(0),
     padOutTarget: integer("pad_out_target").notNull().default(0),
-    /** Shared YYYY-MM-DD the current pad targets belong to; NULL until first set. */
+    /** LEGACY (0311): calendar YYYY-MM-DD the pad targets belonged to. Superseded
+     *  by padPeriodStart (0322); retained so old rows still read. */
     padDay: text("pad_day"),
+    /** Shared rolling-period anchor (epoch ms); NULL until first initialized. The
+     *  current pad ceilings + ramp curve are seeded from this. */
+    padPeriodStart: integer("pad_period_start"),
     /** Discovery tags (JSON string[]); NULL when empty. Mirrors server/forum tags;
      *  round-trip through serializeTags/parseTagsJson. */
     tagsJson: text("tags_json"),
@@ -4136,6 +4242,14 @@ export const serverUsergroups = sqliteTable(
     isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
     sortOrder: integer("sort_order").notNull().default(0),
     autoRulesJson: text("auto_rules_json").notNull().default("[]"),
+    /**
+     * Self-role toggle (migration 0320). When true a member may add/remove
+     * themselves from this group without a manager (Discord-style self-roles).
+     * Default false = manager-managed as before.
+     */
+    memberSelectable: integer("member_selectable", { mode: "boolean" }).notNull().default(false),
+    /** Member-facing blurb shown next to the self-role toggle / onboarding option (migration 0320). Null = none. */
+    description: text("description"),
     createdAt: ts("created_at"),
   },
   (t) => ({
@@ -4297,6 +4411,12 @@ export const serverSettings = sqliteTable("server_settings", {
   bordersEnabled: integer("borders_enabled", { mode: "boolean" }),
   roomTransitionsEnabled: integer("room_transitions_enabled", { mode: "boolean" }),
   cosmeticsEnabled: integer("cosmetics_enabled", { mode: "boolean" }),
+  // Per-server onboarding (migration 0320). NULL = no onboarding flow.
+  // `onboardingConfigJson` is a stored OnboardingConfig (the prompt set a new
+  // member answers on join, each answer mapping to a self-role usergroup);
+  // `onboardingEnabled` is the per-server master switch (NULL/false = off).
+  onboardingConfigJson: text("onboarding_config_json"),
+  onboardingEnabled: integer("onboarding_enabled", { mode: "boolean" }),
   createdAt: ts("created_at"),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
@@ -4359,20 +4479,284 @@ export const bookmarks = sqliteTable(
     userId: text("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    messageId: text("message_id")
-      .notNull()
-      .references(() => messages.id, { onDelete: "cascade" }),
+    /**
+     * FK is SET NULL (not CASCADE) as of migration 0314: a bookmark must
+     * OUTLIVE the message it points at (that's what the snapshot_* columns
+     * below are for). When the underlying message is hard-deleted, the id
+     * goes null and the client renders the frozen snapshot instead of the
+     * live join.
+     */
+    messageId: text("message_id").references(() => messages.id, { onDelete: "set null" }),
     /** Free-form user-defined category; empty string is treated as "Uncategorized". */
     category: text("category").notNull().default(""),
     /** Optional user-authored note for context, "why I bookmarked this". */
     note: text("note"),
     createdAt: ts("created_at"),
+    /* ---- display snapshots (migration 0314) ----
+     * Mirror the message reply-snapshot convention
+     * (messages.replyToDisplayName / replyToBodySnippet): frozen at save
+     * time so a soft-/hard-deleted or renamed message still reads in the
+     * bookmarks viewer. All nullable; legacy rows fall back to the live join. */
+    /** Author display name at save time. */
+    snapshotDisplayName: text("snapshot_display_name"),
+    /** Message body at save time. */
+    snapshotBody: text("snapshot_body"),
+    /** Trusted-HTML body snapshot (announce/scene rows), else null. */
+    snapshotBodyHtml: text("snapshot_body_html"),
+    /** Author chat color at save time (hex / theme:slot). */
+    snapshotColor: text("snapshot_color"),
+    /** CSS snapshot for `kind: "cmd"` rows. */
+    snapshotCmdCss: text("snapshot_cmd_css"),
+    /** Scene banner image URL for `kind: "scene"` rows. */
+    snapshotSceneImageUrl: text("snapshot_scene_image_url"),
+    /** Author inline-avatar URL at save time. */
+    snapshotAvatarUrl: text("snapshot_avatar_url"),
+    /** Message kind at save time. */
+    snapshotKind: text("snapshot_kind"),
+    /** Room name at save time. */
+    snapshotRoomName: text("snapshot_room_name"),
+    /** Parent message id when the bookmarked message was itself a reply. */
+    snapshotReplyToId: text("snapshot_reply_to_id"),
+    /** Author character id at save time (null when OOC). */
+    snapshotCharacterId: text("snapshot_character_id"),
+    /** Original message createdAt (ms) at save time. */
+    snapshotMsgCreatedAt: integer("snapshot_msg_created_at"),
+    /** Author user id at save time (moderation trace after a delete). */
+    snapshotAuthorUserId: text("snapshot_author_user_id"),
+    /** When the user archived this bookmark (soft-hide from the main list). Null = active. */
+    archivedAt: integer("archived_at"),
   },
   (t) => ({
     userMsgUq: uniqueIndex("bookmarks_user_msg_uq").on(t.userId, t.messageId),
     userIdx: index("bookmarks_user_idx").on(t.userId),
   }),
 );
+
+/* ---------- pinned messages (migration 0316) ----------
+ * One row per pin. The room FK cascades (a deleted room drops its pins); the
+ * message FK is SET NULL so a pin OUTLIVES the message it points at — the
+ * snapshot_* columns freeze the author/body/styling at pin time so a
+ * soft-/hard-deleted message still reads as a pinned card (same convention as
+ * bookmarks + reply snapshots). `sortOrder` drives the strip's manual order;
+ * `serverId` is null on the default server, carried for per-server scoping.
+ * unique(roomId, messageId) blocks double-pinning. Gated by the `pin_message`
+ * global permission (seeded to mod + admin). */
+export const pinnedMessages = sqliteTable(
+  "pinned_messages",
+  {
+    id: id(),
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    /** SET NULL so the pin survives the message; the snapshot columns render it. */
+    messageId: text("message_id").references(() => messages.id, { onDelete: "set null" }),
+    /** Owning server; null on the default server. Carried for per-server queries. */
+    serverId: text("server_id").references(() => servers.id, { onDelete: "set null" }),
+    pinnedByUserId: text("pinned_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    /** Snapshot of who pinned it (survives that account's deletion). */
+    pinnedByDisplayName: text("pinned_by_display_name"),
+    pinnedAt: integer("pinned_at", { mode: "timestamp_ms" }).notNull().default(sql`(unixepoch() * 1000)`),
+    /** Manual ordering within a room's pinned strip. */
+    sortOrder: integer("sort_order").notNull().default(0),
+    /* ---- snapshot of the pinned message at pin time ---- */
+    authorUserId: text("author_user_id"),
+    authorCharacterId: text("author_character_id"),
+    displayName: text("display_name"),
+    kind: text("kind"),
+    body: text("body"),
+    color: text("color"),
+    cmdCss: text("cmd_css"),
+    sceneImageUrl: text("scene_image_url"),
+    bodyHtml: text("body_html"),
+    /** Original message createdAt (ms) at pin time. */
+    origCreatedAt: integer("orig_created_at"),
+  },
+  (t) => ({
+    roomMsgUq: uniqueIndex("pinned_messages_room_msg_uq").on(t.roomId, t.messageId),
+    roomSortIdx: index("pinned_messages_room_sort_idx").on(t.roomId, t.sortOrder),
+  }),
+);
+
+/* ---------- server events (migration 0317) ----------
+ * Scheduled community events (calendar) per server, plus RSVPs. An event is
+ * scoped to a server (FK cascade), created by a member optionally voicing a
+ * character; starts/ends are ms epoch (ends nullable = open-ended). Optional
+ * deep links to a room/forum. `status` moves scheduled -> live -> ended /
+ * cancelled. `reminderLeadMs`/`reminderFiredAt` drive an opt-in "starting
+ * soon" ping fired at most once. `recurrenceJson` is RESERVED for future
+ * repeating events. Gated by the `manage_events` SERVER permission. */
+export const serverEvents = sqliteTable(
+  "server_events",
+  {
+    id: id(),
+    serverId: text("server_id")
+      .notNull()
+      .references(() => servers.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    hostCharacterId: text("host_character_id").references(() => characters.id, { onDelete: "set null" }),
+    title: text("title").notNull(),
+    descriptionHtml: text("description_html"),
+    /** Start time, ms epoch. */
+    startsAt: integer("starts_at").notNull(),
+    /** End time, ms epoch; null = open-ended. */
+    endsAt: integer("ends_at"),
+    linkedRoomId: text("linked_room_id").references(() => rooms.id, { onDelete: "set null" }),
+    linkedForumId: text("linked_forum_id").references(() => forums.id, { onDelete: "set null" }),
+    /** scheduled | live | ended | cancelled. */
+    status: text("status").notNull().default("scheduled"),
+    /** Opt-in reminder lead time in ms before startsAt; null = no reminder. */
+    reminderLeadMs: integer("reminder_lead_ms"),
+    /** Stamped when the reminder fired so it only fires once; null = not yet. */
+    reminderFiredAt: integer("reminder_fired_at"),
+    /** RESERVED for future repeating-event rules (unused today). */
+    recurrenceJson: text("recurrence_json"),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    serverTimeIdx: index("server_events_server_time_idx").on(t.serverId, t.startsAt),
+  }),
+);
+
+export const serverEventRsvps = sqliteTable(
+  "server_event_rsvps",
+  {
+    id: id(),
+    eventId: text("event_id")
+      .notNull()
+      .references(() => serverEvents.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Identity the member RSVP'd as; null = OOC. */
+    characterId: text("character_id").references(() => characters.id, { onDelete: "set null" }),
+    /** going | maybe | declined (feature team owns the vocabulary). */
+    status: text("status").notNull(),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    eventUserCharUq: uniqueIndex("server_event_rsvps_event_user_char_uq").on(t.eventId, t.userId, t.characterId),
+    eventStatusIdx: index("server_event_rsvps_event_status_idx").on(t.eventId, t.status),
+  }),
+);
+
+/* ---------- per-channel reads + notify prefs (migration 0318) ----------
+ * Per-(user, room) unread tracking + per-room mute. Both mirror the
+ * (user, room) composite-PK / cascade-FK shape of `mutes` + `room_members`.
+ *
+ * `room_reads` is the high-water mark: `lastReadAt` (ms) is how far the user
+ * has read, `lastReadMessageId` snapshots the exact anchor so a retention
+ * sweep can't lose the position. Absent row = never read.
+ *
+ * `per_room_notify_prefs` is the per-room mute: `muted` suppresses the unread
+ * badge + per-room ping; `mutedUntil` (ms, nullable) is a timed mute that
+ * lazily expires (null = indefinite while `muted`). The `room:unread` socket
+ * event carries the live delta. */
+export const roomReads = sqliteTable(
+  "room_reads",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    /** ms high-water mark: the user has read this room up to here. */
+    lastReadAt: integer("last_read_at").notNull().default(0),
+    /** Exact message the mark points at (survives a retention re-anchor); null = by timestamp only. */
+    lastReadMessageId: text("last_read_message_id"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.roomId] }),
+    roomIdx: index("room_reads_room_idx").on(t.roomId),
+  }),
+);
+export type DbRoomRead = typeof roomReads.$inferSelect;
+
+export const perRoomNotifyPrefs = sqliteTable(
+  "per_room_notify_prefs",
+  {
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    /** When true, no unread badge + no per-room ping for this room. */
+    muted: integer("muted", { mode: "boolean" }).notNull().default(false),
+    /** Timed mute expiry (ms); null = indefinite while `muted`. Lazily expired. */
+    mutedUntil: integer("muted_until", { mode: "timestamp_ms" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.roomId] }),
+    roomIdx: index("per_room_notify_prefs_room_idx").on(t.roomId),
+  }),
+);
+export type DbPerRoomNotifyPref = typeof perRoomNotifyPrefs.$inferSelect;
+
+/* ---------- contextual tour tracking (migration 0321) ----------
+ * Per-surface first-time tours, tracked independently of the single site tour
+ * (`users.tour_seen_version`, migration 0312). One row per (user, tour) with a
+ * monotonic `seenVersion`; /me/profile reports each tour whose shared catalog
+ * version (TOURS[id].version) is ahead of the stored value as `toursToShow`,
+ * and POST /me/tours/:tourId/dismiss upserts the current version + dismissedAt.
+ * Absent row = seenVersion 0 (never seen). Composite PK, same shape as
+ * roomReads / perRoomNotifyPrefs. */
+export const tourSeen = sqliteTable(
+  "tour_seen",
+  {
+    userId: text("user_id").notNull(),
+    tourId: text("tour_id").notNull(),
+    /** Highest tour catalog version this user has acknowledged (0 = never). */
+    seenVersion: integer("seen_version").notNull().default(0),
+    /** ms epoch of the most recent dismissal; null until first dismissed. */
+    dismissedAt: integer("dismissed_at"),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.userId, t.tourId] }),
+  }),
+);
+export type DbTourSeen = typeof tourSeen.$inferSelect;
+
+/* ---------- automod rules (migration 0319) ----------
+ * Configurable auto-moderation rules the chat + forum pipelines consult before
+ * a message lands. A rule matches on a `kind` (keyword / regex / link / invite
+ * / mention_cap) and applies an `action` (warn / delete / mute). `serverId`
+ * null = site-wide, else scoped to one server (cascade). `scope` picks which
+ * surfaces it polices (chat / forum / both). Gated behind the
+ * site_settings.automod_enabled master switch; the `bypass_automod` permission
+ * (seeded trusted + mod + admin) exempts staff. */
+export const automodRules = sqliteTable(
+  "automod_rules",
+  {
+    id: id(),
+    /** null = site-wide; set = scoped to this community server. */
+    serverId: text("server_id").references(() => servers.id, { onDelete: "cascade" }),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    /** keyword | regex | link | invite | mention_cap. */
+    kind: text("kind", { enum: ["keyword", "regex", "link", "invite", "mention_cap"] }).notNull(),
+    /** Matcher input: word/phrase, regex source, or the numeric cap for mention_cap. */
+    pattern: text("pattern").notNull().default(""),
+    /** warn | delete | mute. */
+    action: text("action", { enum: ["warn", "delete", "mute"] }).notNull().default("warn"),
+    /** Mute duration (ms) when action = 'mute'; null = engine default. */
+    muteMs: integer("mute_ms"),
+    /** chat | forum | both. */
+    scope: text("scope", { enum: ["chat", "forum", "both"] }).notNull().default("both"),
+    caseInsensitive: integer("case_insensitive", { mode: "boolean" }).notNull().default(true),
+    wholeWord: integer("whole_word", { mode: "boolean" }).notNull().default(false),
+    /** Admin note explaining the rule. */
+    note: text("note"),
+    createdByUserId: text("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    scopeIdx: index("automod_rules_scope_idx").on(t.serverId, t.enabled),
+  }),
+);
+export type DbAutomodRule = typeof automodRules.$inferSelect;
 
 /* ============================================================
  * Earning, earned-currency (XP + Currency) + Rank ladder +
@@ -5489,6 +5873,7 @@ export type DbEmoticonSheet = typeof emoticonSheets.$inferSelect;
 export type DbMessageReaction = typeof messageReactions.$inferSelect;
 
 export type DbUser = typeof users.$inferSelect;
+export type DbOauthAccount = typeof oauthAccounts.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;
 export type DbRoom = typeof rooms.$inferSelect;
 export type DbRoomMember = typeof roomMembers.$inferSelect;
@@ -5513,6 +5898,9 @@ export type DbFriend = typeof friends.$inferSelect;
 export type DbWatch = DbFriend;
 export type DbPushSubscription = typeof pushSubscriptions.$inferSelect;
 export type DbBookmark = typeof bookmarks.$inferSelect;
+export type DbPinnedMessage = typeof pinnedMessages.$inferSelect;
+export type DbServerEvent = typeof serverEvents.$inferSelect;
+export type DbServerEventRsvp = typeof serverEventRsvps.$inferSelect;
 export type DbRoomThreadCategory = typeof roomThreadCategories.$inferSelect;
 export type DbRank = typeof ranks.$inferSelect;
 export type DbRankTier = typeof rankTiers.$inferSelect;

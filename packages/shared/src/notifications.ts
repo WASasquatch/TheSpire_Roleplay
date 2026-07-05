@@ -63,7 +63,8 @@ export type NotificationTargetKind =
   | "dm"
   | "server"
   | "profile"
-  | "earning";
+  | "earning"
+  | "event";
 
 /** One inbox row as sent to the client (snapshots + freshly-joined display
  *  bits like the actor's current avatar and the server's current name). */

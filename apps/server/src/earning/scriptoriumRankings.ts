@@ -230,7 +230,29 @@ export interface ScriptoriumRankingsResponse {
   generatedAt: number;
 }
 
+/**
+ * Short-TTL single-flight cache for the scriptorium-rankings build (mirrors
+ * rankings.ts). The public route is per-IP rate-capped, but the four board
+ * queries (COUNT/SUM/AVG over the `stories` rollups) + batched display-info
+ * fetch are process-global; memoizing the in-flight Promise per db collapses a
+ * fleet of pollers into ~1-2 passes per TTL and shares one query pass under
+ * concurrent cold load. `generatedAt` reflects the cached-build time — the
+ * correct/honest "as of" stamp for a cached leaderboard. Keyed by db so a
+ * fresh test db never serves another's rows.
+ */
+const SCRIPTORIUM_RANKINGS_TTL_MS = 45_000;
+const scriptoriumRankingsCache = new Map<Db, { at: number; promise: Promise<ScriptoriumRankingsResponse> }>();
+
 export async function buildScriptoriumRankings(db: Db): Promise<ScriptoriumRankingsResponse> {
+  const cached = scriptoriumRankingsCache.get(db);
+  if (cached && Date.now() - cached.at < SCRIPTORIUM_RANKINGS_TTL_MS) return cached.promise;
+  const promise = computeScriptoriumRankings(db);
+  scriptoriumRankingsCache.set(db, { at: Date.now(), promise });
+  promise.catch(() => scriptoriumRankingsCache.delete(db)); // don't memoize a failed pass
+  return promise;
+}
+
+async function computeScriptoriumRankings(db: Db): Promise<ScriptoriumRankingsResponse> {
   const [publishersRaw, wordsRaw, topBooks, highestRated] = await Promise.all([
     queryPublishersBoard(db),
     queryWordsBoard(db),

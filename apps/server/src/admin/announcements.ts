@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { and, asc, eq, isNull, lte } from "drizzle-orm";
+import { and, asc, eq, isNull, lte, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
@@ -23,6 +23,7 @@ import { sanitizeBio } from "../auth/html.js";
 import { recordAudit } from "../audit.js";
 import { addMessageDirect } from "../realtime/broadcast.js";
 import { areServersEnabled, getSettings } from "../settings.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -88,9 +89,13 @@ export async function registerAdminAnnouncementRoutes(
 
   app.get("/admin/announcements/banners", async (req, reply) => {
     if (!(await requirePermission(req, reply, "view_admin_announcements"))) return;
+    // Scope to the default/system Spire server only. This Global Admin tab
+    // manages ONLY the default server's announcements; community-server
+    // banners are managed from their own server admin surface.
     const rows = await db
       .select()
       .from(announcementBanners)
+      .where(eq(announcementBanners.serverId, DEFAULT_SERVER_ID))
       .orderBy(asc(announcementBanners.sortOrder), asc(announcementBanners.createdAt));
     return {
       banners: rows.map((r) => ({
@@ -126,6 +131,9 @@ export async function registerAdminAnnouncementRoutes(
       enabled: body.enabled ?? true,
       sortOrder: body.sortOrder ?? 0,
       createdByUserId: sessionUser.id,
+      // Stamp the default/system server so this tab's rows are always scoped
+      // (they previously omitted it -> NULL). Reads above filter on this id.
+      serverId: DEFAULT_SERVER_ID,
     });
     io.emit("announcements:banners-changed");
     await recordAudit(db, {
@@ -144,7 +152,10 @@ export async function registerAdminAnnouncementRoutes(
       const existing = (await db
         .select()
         .from(announcementBanners)
-        .where(eq(announcementBanners.id, req.params.id))
+        .where(and(
+          eq(announcementBanners.id, req.params.id),
+          eq(announcementBanners.serverId, DEFAULT_SERVER_ID),
+        ))
         .limit(1))[0];
       if (!existing) {
         reply.code(404);
@@ -166,7 +177,10 @@ export async function registerAdminAnnouncementRoutes(
           ...(body.sortOrder !== undefined ? { sortOrder: body.sortOrder } : {}),
           updatedAt: new Date(),
         })
-        .where(eq(announcementBanners.id, req.params.id));
+        .where(and(
+          eq(announcementBanners.id, req.params.id),
+          eq(announcementBanners.serverId, DEFAULT_SERVER_ID),
+        ));
       io.emit("announcements:banners-changed");
       const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
       await recordAudit(db, {
@@ -182,7 +196,10 @@ export async function registerAdminAnnouncementRoutes(
     "/admin/announcements/banners/:id",
     async (req, reply) => {
       if (!(await requirePermission(req, reply, "manage_banner_announcements"))) return;
-      await db.delete(announcementBanners).where(eq(announcementBanners.id, req.params.id));
+      await db.delete(announcementBanners).where(and(
+        eq(announcementBanners.id, req.params.id),
+        eq(announcementBanners.serverId, DEFAULT_SERVER_ID),
+      ));
       io.emit("announcements:banners-changed");
       const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
       await recordAudit(db, {
@@ -203,18 +220,24 @@ export async function registerAdminAnnouncementRoutes(
   // anyone who can SEE the tab can read the picker options.
   app.get("/admin/announcements/rooms", async (req, reply) => {
     if (!(await requirePermission(req, reply, "view_admin_announcements"))) return;
+    // Scope the target-room picker to the default/system server's rooms only,
+    // matching the scope this tab manages. Default rooms store `server_id IS
+    // NULL` (adopted-by-default) OR the explicit default id — accept both.
     const all = await db
       .select({ id: rooms.id, name: rooms.name })
       .from(rooms)
+      .where(or(isNull(rooms.serverId), eq(rooms.serverId, DEFAULT_SERVER_ID)))
       .orderBy(asc(rooms.name));
     return { rooms: all };
   });
 
   app.get("/admin/announcements/scheduled", async (req, reply) => {
     if (!(await requirePermission(req, reply, "view_admin_announcements"))) return;
+    // Scope to the default/system Spire server only (same posture as banners).
     const rows = await db
       .select()
       .from(scheduledAnnouncements)
+      .where(eq(scheduledAnnouncements.serverId, DEFAULT_SERVER_ID))
       .orderBy(asc(scheduledAnnouncements.createdAt));
     return {
       scheduled: rows.map(wireScheduled),
@@ -278,6 +301,11 @@ export async function registerAdminAnnouncementRoutes(
       targetRoomId: body.targetRoomId ?? null,
       enabled: body.enabled ?? true,
       createdByUserId: sessionUser.id,
+      // Stamp the default/system server (previously omitted -> NULL). This
+      // also keeps the scheduler's NULL-targetRoomId "fan out" clamp aimed at
+      // the default server's rooms rather than platform-NULL, matching the
+      // scope this tab now manages.
+      serverId: DEFAULT_SERVER_ID,
     });
     await recordAudit(db, {
       actorUserId: sessionUser.id,
@@ -295,7 +323,10 @@ export async function registerAdminAnnouncementRoutes(
       const existing = (await db
         .select()
         .from(scheduledAnnouncements)
-        .where(eq(scheduledAnnouncements.id, req.params.id))
+        .where(and(
+          eq(scheduledAnnouncements.id, req.params.id),
+          eq(scheduledAnnouncements.serverId, DEFAULT_SERVER_ID),
+        ))
         .limit(1))[0];
       if (!existing) {
         reply.code(404);
@@ -351,7 +382,10 @@ export async function registerAdminAnnouncementRoutes(
       await db
         .update(scheduledAnnouncements)
         .set(patch)
-        .where(eq(scheduledAnnouncements.id, req.params.id));
+        .where(and(
+          eq(scheduledAnnouncements.id, req.params.id),
+          eq(scheduledAnnouncements.serverId, DEFAULT_SERVER_ID),
+        ));
       const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
       await recordAudit(db, {
         actorUserId: sessionUser.id,
@@ -366,7 +400,10 @@ export async function registerAdminAnnouncementRoutes(
     "/admin/announcements/scheduled/:id",
     async (req, reply) => {
       if (!(await requirePermission(req, reply, "manage_scheduled_announcements"))) return;
-      await db.delete(scheduledAnnouncements).where(eq(scheduledAnnouncements.id, req.params.id));
+      await db.delete(scheduledAnnouncements).where(and(
+        eq(scheduledAnnouncements.id, req.params.id),
+        eq(scheduledAnnouncements.serverId, DEFAULT_SERVER_ID),
+      ));
       const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
       await recordAudit(db, {
         actorUserId: sessionUser.id,
@@ -391,7 +428,10 @@ export async function registerAdminAnnouncementRoutes(
       const row = (await db
         .select()
         .from(scheduledAnnouncements)
-        .where(eq(scheduledAnnouncements.id, req.params.id))
+        .where(and(
+          eq(scheduledAnnouncements.id, req.params.id),
+          eq(scheduledAnnouncements.serverId, DEFAULT_SERVER_ID),
+        ))
         .limit(1))[0];
       if (!row) {
         reply.code(404);
@@ -583,10 +623,22 @@ async function fireScheduled(
   if (row.targetRoomId) {
     targetRoomIds = [row.targetRoomId];
   } else if (areServersEnabled(await getSettings(db))) {
+    // Default/system scope reaches the default server's rooms, which store
+    // `rooms.server_id IS NULL` (adopted-by-default) OR the explicit default
+    // id — match both so a default-scoped schedule fans across the same rooms
+    // it always did, whether or not the room backfill has run. A NULL-server
+    // (legacy pre-stamp) row keeps its historical "system rooms" behavior; a
+    // sub-server schedule reaches only that server's rooms.
+    // Inline the scope test so TS narrows `row.serverId` to non-null in the
+    // sub-server branch (a separate `isDefaultScope` const wouldn't narrow it).
     const scopedRooms = await db
       .select({ id: rooms.id })
       .from(rooms)
-      .where(row.serverId === null ? isNull(rooms.serverId) : eq(rooms.serverId, row.serverId));
+      .where(
+        row.serverId && row.serverId !== DEFAULT_SERVER_ID
+          ? eq(rooms.serverId, row.serverId)
+          : or(isNull(rooms.serverId), eq(rooms.serverId, DEFAULT_SERVER_ID)),
+      );
     targetRoomIds = scopedRooms.map((r) => r.id);
   } else {
     const allRooms = await db.select({ id: rooms.id }).from(rooms);

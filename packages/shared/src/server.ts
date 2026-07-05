@@ -66,6 +66,7 @@ export const SERVER_MOD_PERMISSIONS = [
   "manage_faqs",             // this server's FAQ entries
   "manage_commands",         // this server's custom !cmd commands + social-game config
   "manage_titles",           // this server's mutual-title kinds catalog
+  "manage_events",           // create / edit / cancel this server's scheduled events
   "manage_reports",          // view + resolve this server's message report queue
   "manage_mod_cases",        // create / edit / resolve this server's moderation cases
   "view_mod_log",            // read this server's Mod Log (the server-scoped audit feed)
@@ -98,6 +99,7 @@ export const SERVER_MOD_PERMISSION_META: Record<
   manage_faqs: { label: "Manage FAQs", description: "Create, edit, and delete this server's FAQ entries." },
   manage_commands: { label: "Manage commands", description: "Create, edit, and delete this server's custom commands and social-game config." },
   manage_titles: { label: "Manage titles", description: "Manage this server's mutual-title kinds catalog." },
+  manage_events: { label: "Manage events", description: "Create, edit, and cancel this server's scheduled events." },
   manage_reports: { label: "Handle reports", description: "See and resolve this server's reported messages." },
   manage_mod_cases: { label: "Manage mod cases", description: "Create, edit, and resolve entries in this server's moderation case log." },
   view_mod_log: { label: "View Mod Log", description: "Read this server's Mod Log (the server-scoped audit feed)." },
@@ -375,6 +377,13 @@ export interface ServerUsergroupWire {
   /** Explicit members (manual + auto). The default group reports 0 — its
    *  membership is everyone, so it isn't enumerated. */
   memberCount: number;
+  /**
+   * Self-role toggle (migration 0320). When true a member may add/remove
+   * themselves from this group without a manager. Default false.
+   */
+  memberSelectable: boolean;
+  /** Member-facing blurb shown next to the self-role toggle / onboarding option (migration 0320). Null = none. */
+  description: string | null;
 }
 
 /** One explicit member row in a group's roster (GET .../usergroups/:gid/members). */

@@ -892,6 +892,12 @@ function replyRowToWire(
  * ========================================================= */
 
 export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
+  // Per-IP cap for the PUBLIC, DB-heavy browse/read routes (splash shelf,
+  // catalog, story landing). Click-driven, not polled; 60/min leaves
+  // generous headroom for a page firing a few in parallel while capping a
+  // refetch/reconnect loop at 1/s. Bump to 120 if a busy shared IP trips it.
+  const browseLimit = { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } } as const;
+
   /**
    * Shared detail builder used by both id-or-slug and @handle/slug lookups.
    */
@@ -973,7 +979,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
    * exists; the access gate is at body-open time, not on the
    * cover thumbnail.
    */
-  app.get<{ Querystring: { limit?: string } }>("/stories/splash", async (req) => {
+  app.get<{ Querystring: { limit?: string } }>("/stories/splash", browseLimit, async (req) => {
     const limit = Math.min(24, Math.max(1, parseInt(req.query.limit ?? "12", 10) || 12));
     const rows = await db
       .select()
@@ -1018,7 +1024,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
   });
 
   /* ---------- Full catalog (auth-aware filtering) ---------- */
-  app.get<{ Querystring: Record<string, string | string[]> }>("/stories/catalog", async (req, reply) => {
+  app.get<{ Querystring: Record<string, string | string[]> }>("/stories/catalog", browseLimit, async (req, reply) => {
     const me = await getSessionUser(req, db);
     const parsed = catalogQuery.safeParse(req.query);
     if (!parsed.success) {
@@ -1213,7 +1219,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
   });
 
   /* ---------- Read story (landing) ---------- */
-  app.get<{ Params: { idOrSlug: string } }>("/stories/:idOrSlug", async (req, reply) => {
+  app.get<{ Params: { idOrSlug: string } }>("/stories/:idOrSlug", browseLimit, async (req, reply) => {
     const me = await getSessionUser(req, db);
     const s = await resolveStory(db, req.params.idOrSlug, me?.id ?? null);
     if (!s) { reply.code(404); return { error: "not found" }; }
@@ -1229,6 +1235,7 @@ export async function registerStoryRoutes(app: FastifyInstance, db: Db, io: Io):
   /* ---------- Canonical @handle/slug ---------- */
   app.get<{ Params: { handle: string; slug: string } }>(
     "/stories/@:handle/:slug",
+    browseLimit,
     async (req, reply) => {
       const me = await getSessionUser(req, db);
       const s = await resolveStoryByHandle(db, req.params.handle, req.params.slug);

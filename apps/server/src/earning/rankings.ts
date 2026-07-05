@@ -147,11 +147,38 @@ interface RawEntry {
 }
 
 /**
+ * Short-TTL single-flight cache for the full rankings build.
+ *
+ * The public route is already per-IP rate-capped, but the cap is per-IP
+ * while this build is process-global and expensive (nine full-table
+ * COUNT/SUM aggregates over messages/inventory + a batched display-info
+ * fetch). Memoizing the in-flight Promise for a few tens of seconds collapses
+ * a fleet of pollers/loopers into at most ~1-2 query passes per TTL TOTAL,
+ * and single-flight (caching the Promise, not just the resolved value) means
+ * a cold cache under concurrent load still runs exactly ONE pass. Keyed by
+ * the db instance (a Map) so a fresh db in tests never serves another's rows.
+ * `generatedAt` becomes the cached-build time — the honest "as of" stamp.
+ */
+const RANKINGS_TTL_MS = 45_000;
+const rankingsCache = new Map<Db, { at: number; promise: Promise<RankingsResponse> }>();
+
+/**
  * Build the full rankings response, runs all nine board queries,
  * collects the union of referenced pools, resolves display info in
  * one batched fetch, and stitches the boards + champions list.
  */
 export async function buildRankings(db: Db): Promise<RankingsResponse> {
+  const cached = rankingsCache.get(db);
+  if (cached && Date.now() - cached.at < RANKINGS_TTL_MS) return cached.promise;
+  const promise = computeRankings(db);
+  rankingsCache.set(db, { at: Date.now(), promise });
+  // On a transient failure (e.g. SQLite lock) drop the entry so the next
+  // caller recomputes instead of serving a rejected promise for the whole TTL.
+  promise.catch(() => rankingsCache.delete(db));
+  return promise;
+}
+
+async function computeRankings(db: Db): Promise<RankingsResponse> {
   const [
     currencyRaw,
     xpRaw,

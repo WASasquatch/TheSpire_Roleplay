@@ -1,6 +1,7 @@
 import { and, eq, lt } from "drizzle-orm";
 import { messages, rooms } from "../../db/schema.js";
 import { callerCanEditRoom } from "../../auth/roomPermissions.js";
+import { archiveDoomedBookmarks } from "../../retention/archiveBookmarks.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -68,7 +69,10 @@ export const expiryCommand: CommandHandler = {
     // Fire the sweep immediately for THIS room so visible old messages don't
     // hang around until the next janitor tick. Bounded by the new cutoff.
     const cutoff = new Date(Date.now() - n * 60 * 1000);
-    await ctx.db.delete(messages).where(and(eq(messages.roomId, ctx.roomId), lt(messages.createdAt, cutoff)));
+    const doomed = and(eq(messages.roomId, ctx.roomId), lt(messages.createdAt, cutoff));
+    // Snapshot-archive bookmarks BEFORE the hard delete drops the rows.
+    await archiveDoomedBookmarks(ctx.db, doomed);
+    await ctx.db.delete(messages).where(doomed);
 
     const { addMessage, broadcastRoomState } = await import("../../realtime/broadcast.js");
     await addMessage(ctx, { kind: "system", body: `Per-room message expiry set to ${n} minutes. Older messages just purged.` });

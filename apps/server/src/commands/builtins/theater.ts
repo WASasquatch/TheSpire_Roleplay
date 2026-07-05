@@ -5,6 +5,7 @@ import { rooms } from "../../db/schema.js";
 import { callerCanEditRoom } from "../../auth/roomPermissions.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { applyControl, clearTheater, getTheater, parsePlaylist, serializePlaylist, setTheater } from "../../realtime/theaterState.js";
+import { expandPlaylist, fetchVideoTitle, parseYoutubeIds, youtubeConfigured } from "../../lib/youtube.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -108,6 +109,65 @@ export const theaterCommand: CommandHandler = {
       if (playlist.length >= 50) {
         return notice(ctx, "PLAYLIST_FULL", "Playlist is full (50 sources). Remove some with /theater remove <n>.");
       }
+
+      // ---- YouTube enrichment (only when a Data API key is configured) -----
+      // A `/theater add` of a YouTube link can carry a playlist id (?list=…)
+      // or benefit from an auto-fetched title. `/theater live` is a single
+      // broadcast, so skip enrichment for it. When the key is unset, or the
+      // API returns nothing, we fall through to the plain single-URL append
+      // below — identical to the pre-YouTube behavior.
+      if (youtubeConfigured && kindOverride !== "live") {
+        const { playlistId, videoId } = parseYoutubeIds(url);
+
+        // A real playlist id → expand it into queued sources. A watch URL
+        // carrying both `v` and `list` still expands the playlist.
+        if (playlistId) {
+          const items = await expandPlaylist(playlistId);
+          if (items.length > 0) {
+            const remaining = 50 - playlist.length; // >0 (guarded above)
+            const queued = items.slice(0, remaining);
+            const skipped = items.length - queued.length;
+            const additions: TheaterSource[] = queued.map((it) => ({
+              id: nanoid(),
+              url: it.url,
+              kind: "youtube",
+              ...(it.title ? { title: it.title } : {}),
+            }));
+            const wasEmpty = playlist.length === 0;
+            const next = [...playlist, ...additions];
+            await ctx.db.update(rooms).set({ theaterPlaylist: serializePlaylist(next) }).where(eq(rooms.id, ctx.roomId));
+            notice(
+              ctx,
+              "THEATER",
+              skipped > 0
+                ? `Queued ${queued.length} video${queued.length === 1 ? "" : "s"} from that YouTube playlist (${skipped} skipped - playlist cap is 50).`
+                : `Queued ${queued.length} video${queued.length === 1 ? "" : "s"} from that YouTube playlist.`,
+            );
+            await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
+            if (wasEmpty) {
+              applyControl(ctx.roomId, "play", { len: next.length, loop: room.theaterLoop, now: Date.now() });
+              await broadcastTheaterSync(ctx.io, ctx.roomId);
+              await persistTheaterCheckpoint(ctx.db, ctx.roomId);
+            }
+            return;
+          }
+          // Expansion failed/empty (API error, private playlist, etc.) →
+          // fall through and append the raw URL as today.
+        } else if (videoId && sniffKind(url) === "youtube" && !title) {
+          // Plain YouTube video with no operator-supplied title → try to
+          // fetch the real title so the playlist reads nicely. null → append
+          // titleless, exactly as before.
+          const fetched = await fetchVideoTitle(videoId);
+          return appendSingle(url, fetched ?? "", kindOverride);
+        }
+      }
+
+      return appendSingle(url, title, kindOverride);
+    };
+
+    // Append exactly one source (the classic path): sniff kind, resolve the
+    // live flag, persist, confirm, broadcast, and auto-start an empty room.
+    const appendSingle = async (url: string, title: string, kindOverride?: TheaterSourceKind) => {
       // `/theater live` declares a live broadcast. A YouTube/Vimeo live still
       // plays through its iframe API (NOT hls.js), so keep the sniffed kind and
       // mark it live via the `live` flag; only a raw stream gets kind:"live"

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import type { ChatMessage, PermissionKey, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
+import type { ChatMessage, PermissionKey, PinnedMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, TourId, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
 import { arcadeGameByKey, DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
 // Heavy, authenticated-only surfaces are code-split (B1, plan.md §3) so
 // the anonymous splash / login / boot bundle never downloads them. Each
@@ -79,6 +79,9 @@ const NotificationCenter = lazy(() => import("./components/NotificationCenter.js
 const StoryEditorModal = lazy(() => import("./components/StoryEditorModal.js").then((m) => ({ default: m.StoryEditorModal })));
 import { StoryReaderModal } from "./components/StoryReaderModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
+import { ServerOnboardingModal } from "./components/ServerOnboardingModal.js";
+import { ServerEventsPanel, OPEN_SERVER_EVENT, type OpenServerEventDetail } from "./components/ServerEventsPanel.js";
+import { SiteTour } from "./components/SiteTour.js";
 import { getSocket, disconnect as disconnectSocket, hasSessionBeenAnnounced, loadTabCharacter, markLoginIntent, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
@@ -157,6 +160,7 @@ export function App() {
               permissions: PermissionKey[];
               incognitoMode?: boolean;
               incognitoAlias?: string | null;
+              incognitoCharacterId?: string | null;
               emailVerifiedAt?: number | null;
               emailVerificationEnabled?: boolean;
               emailVerificationMode?: "nudge" | "block";
@@ -194,6 +198,7 @@ export function App() {
             permissions: j.permissions ?? [],
             incognitoMode: j.incognitoMode ?? false,
             incognitoAlias: j.incognitoAlias ?? null,
+            incognitoCharacterId: j.incognitoCharacterId ?? null,
             emailVerifiedAt: typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null,
             emailVerificationEnabled: j.emailVerificationEnabled ?? false,
             emailVerificationMode: j.emailVerificationMode ?? "nudge",
@@ -307,6 +312,7 @@ export function App() {
           permissions?: PermissionKey[];
           incognitoMode?: boolean;
           incognitoAlias?: string | null;
+          incognitoCharacterId?: string | null;
           emailVerifiedAt?: number | null;
           emailVerificationEnabled?: boolean;
           emailVerificationMode?: "nudge" | "block";
@@ -327,6 +333,7 @@ export function App() {
           const cur = useChat.getState().me;
           const nextIncognitoMode = j.incognitoMode ?? false;
           const nextIncognitoAlias = j.incognitoAlias ?? null;
+          const nextIncognitoCharacterId = j.incognitoCharacterId ?? null;
           const nextVerifiedAt = typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null;
           const nextVerifyEnabled = j.emailVerificationEnabled ?? false;
           const nextVerifyMode = j.emailVerificationMode ?? "nudge";
@@ -337,6 +344,7 @@ export function App() {
             || cur.role !== j.role
             || cur.incognitoMode !== nextIncognitoMode
             || cur.incognitoAlias !== nextIncognitoAlias
+            || cur.incognitoCharacterId !== nextIncognitoCharacterId
             || cur.emailVerifiedAt !== nextVerifiedAt
             || cur.emailVerificationEnabled !== nextVerifyEnabled
             || cur.emailVerificationMode !== nextVerifyMode
@@ -349,6 +357,7 @@ export function App() {
               permissions: j.permissions,
               incognitoMode: nextIncognitoMode,
               incognitoAlias: nextIncognitoAlias,
+              incognitoCharacterId: nextIncognitoCharacterId,
               emailVerifiedAt: nextVerifiedAt,
               emailVerificationEnabled: nextVerifyEnabled,
               emailVerificationMode: nextVerifyMode,
@@ -1178,6 +1187,9 @@ function Chat() {
   const currentServerId = useChat((s) => s.currentServerId);
   const setCurrentServerId = useChat((s) => s.setCurrentServerId);
   const setDefaultServerId = useChat((s) => s.setDefaultServerId);
+  // The home/system server id (learned from the catalog). Used to skip the
+  // onboarding flow on the home server (Batch 2 self-roles trigger).
+  const defaultServerId = useChat((s) => s.defaultServerId);
   const myActiveTransitionKey = useChat((s) => s.myActiveTransitionKey);
   const setMyActiveTransitionKey = useChat((s) => s.setMyActiveTransitionKey);
   // Stable wrapper around the chat content; the room-transition orchestrator
@@ -1388,6 +1400,25 @@ function Chat() {
     fetchNotifBadge()
       .then((b) => { if (alive) useChat.getState().setNotifBadge(b.unread, b.unreadByServer); })
       .catch(() => { /* badge stays 0 until the first pulse */ });
+    return () => { alive = false; };
+  }, []);
+  // Seed per-channel unread/mention/mute state once per boot (Batch 2
+  // per-channel-reads). One grouped GET /me/room-reads → the three store
+  // maps RoomsTree reads for its per-room dot / mention pill / muted glyph.
+  // The `room:unread` socket pulse keeps unread + mention live from then on;
+  // mute changes ride the mute PUT + its re-emitted pulse. Absent roomIds are
+  // treated as {unread:0, hasMention:false, muted:false} by the renderers.
+  useEffect(() => {
+    let alive = true;
+    fetch("/me/room-reads", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!alive || !j || typeof j !== "object") return;
+        useChat.getState().seedRoomReads(
+          j as Record<string, { unread: number; hasMention: boolean; muted: boolean }>,
+        );
+      })
+      .catch(() => { /* dots stay clear until the first room:unread pulse */ });
     return () => { alive = false; };
   }, []);
   // Story editor state. Discriminated by presence: null → closed;
@@ -1753,6 +1784,33 @@ function Chat() {
    * edits the welcome text (which rotates the hash and re-shows to all).
    */
   const [welcome, setWelcome] = useState<{ html: string; hash: string } | null>(null);
+  /**
+   * Server onboarding / self-roles flow (Batch 2 self-roles). Holds the id of
+   * the server whose onboarding modal is open, or null. Triggered on server
+   * ENTRY (a currentServerId change while the servers flag is on) — the modal
+   * self-fetches GET /servers/:id/onboarding and self-resolves (calls onDone)
+   * when the flow is off/empty/already completed, so the pre-check here is an
+   * optimization, not a correctness requirement. `onboardedServersRef` dedupes
+   * so re-entering the same server in one session doesn't re-open it after the
+   * member dismissed it.
+   */
+  const [onboardingServerId, setOnboardingServerId] = useState<string | null>(null);
+  const onboardedServersRef = useRef<Set<string>>(new Set());
+  /**
+   * One-time guided site tour. /me/profile returns `showSiteTour: true`
+   * only while the user's stored tour_seen_version is behind the current
+   * SITE_TOUR_VERSION; the tour dismiss endpoint bumps it so re-fetches
+   * stop asking. Mirrors the one-shot `welcome` gating above, and the
+   * tour is deliberately held back until the welcome modal is gone (see
+   * the render below) so the two never stack.
+   */
+  const [showSiteTour, setShowSiteTour] = useState(false);
+  // On-demand tour replay. The "Take the tour" menu row (and the Help
+  // modal button) flips this store flag so a user who dismissed the
+  // first-run tour can re-open it any time, independent of the one-shot
+  // showSiteTour above.
+  const siteTourForced = useChat((s) => s.siteTourForced);
+  const setSiteTourForced = useChat((s) => s.setSiteTourForced);
   const [themeVersion, setThemeVersion] = useState(0);
 
   const socket = useMemo(() => getSocket(), []);
@@ -1852,6 +1910,7 @@ function Chat() {
           publicProfileBgUrl?: string | null;
           publicProfileBgMode?: "cover" | "contain" | "tile" | "stretch";
           welcome?: { html: string; hash: string } | null;
+          showSiteTour?: boolean;
           limits?: {
             maxBioLength?: number;
             maxMessageLength?: number;
@@ -1983,6 +2042,13 @@ function Chat() {
           // welcome to surface. Dismissal flips the user's stored hash
           // server-side, so re-fetches stop returning this field.
           if (u.welcome) setWelcome(u.welcome);
+          // First-run tour flag. Server sets it true only while the
+          // user's tour_seen_version is behind SITE_TOUR_VERSION; the
+          // dismiss endpoint bumps it, so re-fetches stop asking. The
+          // render below holds the tour back until the welcome modal
+          // (if any) is dismissed so they don't stack.
+          setShowSiteTour(u.showSiteTour === true);
+          useChat.getState().setToursToShow((u as { toursToShow?: TourId[] }).toursToShow ?? []);
         }
       } catch { /* ignore */ }
     }
@@ -2404,6 +2470,20 @@ function Chat() {
     return () => { cancelled = true; };
   }, [serversEnabled, roomsTreeVersion, setDefaultServerId]);
 
+  // Server onboarding / self-roles trigger (Batch 2 self-roles). On ENTERING a
+  // community server (currentServerId resolves to a non-home server id we
+  // haven't already onboarded this session), open the onboarding modal. The
+  // modal itself fetches the flow and self-resolves when onboarding is
+  // off/empty/already-completed, so this only decides WHEN to mount it. Skipped
+  // on the home/default server and flag-off. Mirrors the one-shot welcome host.
+  useEffect(() => {
+    if (!serversEnabled || !currentServerId) return;
+    if (currentServerId === defaultServerId) return;
+    if (onboardedServersRef.current.has(currentServerId)) return;
+    onboardedServersRef.current.add(currentServerId);
+    setOnboardingServerId(currentServerId);
+  }, [serversEnabled, currentServerId, defaultServerId]);
+
   useEffect(() => {
     // Coalesced rooms-tree refetch. A presence storm (many joins/leaves/
     // char-switches in a burst) used to fire one immediate `/rooms` refetch
@@ -2421,6 +2501,47 @@ function Chat() {
         treeRefetchId = null;
       }, 400);
     };
+    // Coalesced inbox-counts refetch. `dm:new` fires per inbound DM, so a
+    // DM storm used to fire one `/me/inbox-counts` PER message. The DM
+    // bodies themselves still land instantly via `appendDmMessage`; only
+    // the ✉ badge-count refetch is funnelled through this 400ms trailing
+    // debounce, so a burst collapses to a single counts fetch after it
+    // settles. Read the store action fresh inside the timeout so we never
+    // fire a stale closure.
+    let inboxCountsRefetchId: number | null = null;
+    const scheduleInboxCountsRefetch = () => {
+      if (inboxCountsRefetchId != null) window.clearTimeout(inboxCountsRefetchId);
+      inboxCountsRefetchId = window.setTimeout(() => {
+        inboxCountsRefetchId = null;
+        void useChat.getState().refreshInboxCounts();
+      }, 400);
+    };
+    // Coalesced friend-state refetch. `friend:request` fires on four
+    // distinct causes and can arrive in a burst; each event otherwise
+    // triggered a `/me/friend-requests` re-poll + a friends-version bump
+    // + a counts fetch. Keep the three atomic inside one scheduled
+    // callback (same as today) so the modal never re-fires on a version
+    // bump before the store write lands, and collapse a burst to a single
+    // re-poll. Capture the identity id at schedule time so the LAST event
+    // in the burst wins the scope, matching the current fire-time read of
+    // `activeCharacterId`. The user-visible notice toast stays immediate
+    // and outside this debounce (below) so distinct sender names are
+    // never merged or dropped.
+    let friendStateRefetchId: number | null = null;
+    const scheduleFriendStateRefetch = (charId: string | null) => {
+      if (friendStateRefetchId != null) window.clearTimeout(friendStateRefetchId);
+      friendStateRefetchId = window.setTimeout(() => {
+        friendStateRefetchId = null;
+        fetch(withIdentityQuery("/me/friend-requests", charId), { credentials: "include" })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => {
+            if (j && Array.isArray(j.requests)) useChat.getState().setPendingFriendRequests(j.requests);
+          })
+          .catch(() => {});
+        useChat.getState().bumpFriendsVersion();
+        void useChat.getState().refreshInboxCounts();
+      }, 400);
+    };
     socket.on("room:state", ({ room, occupants }) => {
       setRoom(room);
       setOccupants(room.id, occupants);
@@ -2433,6 +2554,13 @@ function Chat() {
       setCurrentServerId((room as { serverId?: string | null }).serverId ?? null);
       // Joining/creating a room means the rooms tree is stale.
       setRoomsTreeVersion((v) => v + 1);
+    });
+    // Pinned-messages set for a room (migration 0316). The server sends this
+    // whenever a pin is added / removed; we replace that room's cached set
+    // wholesale (empty array clears the strip). Seeding on room open is done
+    // via the GET fetch effect below — this keeps it live thereafter.
+    socket.on("room:pins", ({ roomId, pins }) => {
+      setPinsByRoom((prev) => ({ ...prev, [roomId]: pins }));
     });
     // Theater (watch-party) live playback state + floating reactions.
     // Both just feed the store; the TheaterPanel reads from it and owns
@@ -2470,15 +2598,21 @@ function Chat() {
         return next;
       });
       // Presence changes in our current room mean other rooms might have
-      // changed too (e.g. another user just left a room to join ours), and
-      // /char switch broadcasts presence - refetch the active theme too.
-      // The /rooms refetch is now a DEBOUNCED backstop, not the primary
-      // update path: the direct occupant write above keeps the rail live,
-      // and the debounce stops a presence storm from firing one full-tree
-      // refetch per event. It still corrects for anything the direct write
-      // couldn't see (a brand-new room the rail doesn't know about yet).
+      // changed too (e.g. another user just left a room to join ours), so
+      // refresh the rooms tree - but as a DEBOUNCED backstop, not the primary
+      // update path: the direct occupant write above keeps the rail live, and
+      // the debounce stops a presence storm from firing one full-tree refetch
+      // per event. It still corrects for anything the direct write couldn't
+      // see (a brand-new room the rail doesn't know about yet).
       scheduleTreeRefetch();
-      setThemeVersion((v) => v + 1);
+      // NOTE: we deliberately do NOT bump themeVersion here. A presence event
+      // is triggered by ANY occupant (someone else joining/leaving/going
+      // incognito/switching character) and has no bearing on the *local*
+      // viewer's theme. Bumping it re-fetched /me/profile + /characters/:id on
+      // every presence event, per client - a presence storm turned that into a
+      // request flood. Our own theme re-resolves where it actually changes: our
+      // own /char switch (me:character-update, below) and profile saves both
+      // bump themeVersion already.
       // The friends modal pulls fresh data on every open, so we no
       // longer need to bump a live refresh key here. Online dots in
       // an open FriendsModal will lag slightly until the user re-
@@ -2678,6 +2812,28 @@ function Chat() {
       st.bumpFriendsVersion();
     });
     socket.on("error:notice", (n) => setNotice(n));
+    // Per-channel unread pulse (Batch 2 per-channel-reads). REPLACES the
+    // cached unread + mention for one room wholesale (no accumulation);
+    // `unread: 0` clears the dot. Mute state is NOT carried here — it comes
+    // from the boot /me/room-reads map + the mute PUT response — so a live
+    // delta can never clobber the muted glyph. Never triggers a /rooms
+    // refetch; RoomsTree reads these store maps directly.
+    socket.on("room:unread", ({ roomId, unread, hasMention }) => {
+      useChat.getState().setRoomUnread(roomId, unread, hasMention);
+    });
+    // Per-channel mute toggled on ANOTHER tab of this account (migration 0318).
+    // Replaces the cached `muted` flag for one room so every live socket repaints
+    // its mute glyph without a poll. Separate from `room:unread` (mute lives
+    // outside the unread map), so it can never clobber the count.
+    socket.on("room:muted", ({ roomId, muted }) => {
+      useChat.getState().setRoomMuted(roomId, muted);
+    });
+    // A server just became available to this account (creation application
+    // approved, or a membership accepted). Refetch the rail so it appears live
+    // without a page refresh; ServerRail fades in whatever is genuinely new.
+    socket.on("servers:changed", () => {
+      void listServers().then(setServers).catch(() => {});
+    });
     // Forum inbox pulse: keeps the rail + bell badges live without
     // refetching (replies to your topics, quotes, watched topics).
     socket.on("forum:notifications", ({ unread }) => {
@@ -2917,14 +3073,15 @@ function Chat() {
      * resync on the next /auth/me poll (60s), which read as the
      * command silently failing and led mods to re-issue it.
      */
-    socket.on("me:incognito-update", ({ incognitoMode: nextMode, incognitoAlias: nextAlias }: {
+    socket.on("me:incognito-update", ({ incognitoMode: nextMode, incognitoAlias: nextAlias, incognitoCharacterId: nextCharId }: {
       incognitoMode: boolean;
       incognitoAlias: string | null;
+      incognitoCharacterId: string | null;
     }) => {
       const cur = useChat.getState().me;
       if (!cur) return;
-      if (cur.incognitoMode === nextMode && cur.incognitoAlias === nextAlias) return;
-      setMe({ ...cur, incognitoMode: nextMode, incognitoAlias: nextAlias });
+      if (cur.incognitoMode === nextMode && cur.incognitoAlias === nextAlias && cur.incognitoCharacterId === nextCharId) return;
+      setMe({ ...cur, incognitoMode: nextMode, incognitoAlias: nextAlias, incognitoCharacterId: nextCharId });
     });
 
     /**
@@ -3013,8 +3170,10 @@ function Chat() {
       // current characterId, a DM pinned to Char B while the viewer
       // is on Char A would otherwise never bump any visible counter
       // and the recipient would have no signal that a message
-      // arrived for one of their other identities.
-      void useChat.getState().refreshInboxCounts();
+      // arrived for one of their other identities. Debounced (400ms
+      // trailing) so a DM storm collapses to a single counts fetch; the
+      // message body already landed immediately via appendDmMessage above.
+      scheduleInboxCountsRefetch();
       // Ping on inbound DMs from someone else; silent on our own echo
       // (the server fans every send to the sender's sockets too so
       // multi-tab works). Same posture as the room-message tap sound.
@@ -3179,25 +3338,17 @@ function Chat() {
       // of guessing from the payload. The in-chat prompt card and the
       // DM pinned banner both read from the store, so this single
       // fetch updates both surfaces atomically.
-      fetch(withIdentityQuery("/me/friend-requests", useChat.getState().activeCharacterId), { credentials: "include" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((j) => {
-          if (j && Array.isArray(j.requests)) useChat.getState().setPendingFriendRequests(j.requests);
-        })
-        .catch(() => {});
-      // Bump the friends-version counter so MessagesModal's
-      // refreshLists effect re-fires (it keys on this). Covers
-      // every echo cause, accept by the other party, decline
-      // echo, unfriend echo, new request, so the modal's local
-      // friends + conversations + pending-inbox state stays in
-      // lockstep with whatever just changed server-side, even
-      // when the user wasn't the one who initiated the action.
-      useChat.getState().bumpFriendsVersion();
-      // Per-identity counts refresh, the pending friend-request
-      // half of the chat-shell badge needs to track new requests on
-      // ANY of the user's identities (a friend request to Char B
-      // while the viewer is on Char A should still bump the badge).
-      void useChat.getState().refreshInboxCounts();
+      //
+      // The re-poll + friends-version bump + counts refresh are
+      // burst-prone (a friend-event storm fires this handler once per
+      // event), so they're funnelled through a single 400ms trailing
+      // debounce. All three stay ATOMIC inside the one scheduled
+      // callback so the modal's refreshLists (keyed on friendsVersion)
+      // never fires before the /me/friend-requests store write lands.
+      // `activeCharacterId` is read at schedule time so the LAST event
+      // in the burst wins the identity scope, matching the prior
+      // fire-time read.
+      scheduleFriendStateRefetch(useChat.getState().activeCharacterId);
       // Soft notice in the banner so the user gets a glance signal
       // even when the chat prompt is offscreen (e.g. they're deep in
       // the forum view). Phrasing keeps it neutral, the actual
@@ -3251,18 +3402,29 @@ function Chat() {
 
     return () => {
       socket.off("room:state");
+      socket.off("room:pins");
       socket.off("presence:update");
       socket.off("theater:sync");
       socket.off("theater:reaction");
       socket.off("chat:typing:update");
       socket.off("rooms:tree-changed");
       if (treeRefetchId != null) window.clearTimeout(treeRefetchId);
+      // Cancel (don't flush) pending debounced refetches so a trailing
+      // fetch can't fire against a torn-down listener set on unmount /
+      // socket swap. Correctness is backstopped by onConnect, which
+      // re-pulls /me/dms + /me/friend-requests + refreshInboxCounts on
+      // the next (re)connect, so counts self-heal.
+      if (inboxCountsRefetchId != null) window.clearTimeout(inboxCountsRefetchId);
+      if (friendStateRefetchId != null) window.clearTimeout(friendStateRefetchId);
       socket.off("message:new");
       socket.off("message:bulk");
       socket.off("message:update");
       socket.off("message:bulk-delete");
       socket.off("watch:online");
       socket.off("error:notice");
+      socket.off("room:unread");
+      socket.off("room:muted");
+      socket.off("servers:changed");
       socket.off("auth:expired");
       socket.off("ui:hint");
       socket.off("mutual:settled");
@@ -3666,6 +3828,21 @@ function Chat() {
 
   function onRoomClick(roomId: string) {
     if (roomId === currentRoomId) return;
+    // Per-channel read marker (Batch 2 per-channel-reads): opening a room
+    // clears its unread. Do it OPTIMISTICALLY here — zero the store maps
+    // immediately for instant feedback, then POST the watermark. The server
+    // ALSO marks the room read on join (joinRoomBody → markRoomRead) and
+    // re-emits `room:unread {unread:0}` to every tab, so this POST is a
+    // fast-path confirm, not the source of truth. Fire-and-forget; a failure
+    // just leaves the server-side join-mark to settle it. Never triggers a
+    // /rooms refetch.
+    useChat.getState().setRoomUnread(roomId, 0, false);
+    void fetch(`/me/rooms/${encodeURIComponent(roomId)}/read`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    }).catch(() => { /* server-side join-mark backstops this */ });
     // Mobile: close the rooms/userlist drawer BEFORE the transition snapshots
     // the chat. The drawer is a fixed child of the wrapper we clone, so if it's
     // still open at snapshot time the clone freezes the open drawer over the
@@ -3754,6 +3931,20 @@ function Chat() {
       const sid = id ?? serverId ?? null;
       const srv = servers?.find((s) => s.id === sid);
       if (srv) void onServerSelect(srv);
+    } else if (kind === "event" && id) {
+      // Community-event reminder (bell row, web-push tap, or boot `?n=event:<id>`
+      // marker). Switch to the event's owning server first (the events panel only
+      // holds the CURRENT server's events), then ask ServerEventsPanel to open on
+      // it. The panel reloads on open, so dispatching AFTER the switch settles
+      // lands the focus once the new server's list is in flight. When the server
+      // is already active (or the marker carries no serverId), dispatch straight
+      // away. The `?n=event:<id>:<serverId>` marker now carries the owning server,
+      // so a push-opened fresh tab switches to it before focusing the event.
+      const detail: OpenServerEventDetail = { eventId: id, serverId: serverId ?? null };
+      const emit = () => window.dispatchEvent(new CustomEvent<OpenServerEventDetail>(OPEN_SERVER_EVENT, { detail }));
+      const srv = serverId ? servers?.find((s) => s.id === serverId) : undefined;
+      if (srv && serverId !== currentServerId) void onServerSelect(srv).then(emit);
+      else emit();
     } else if (kind === "dm") {
       setMessagesOpen(true);
     } else if (kind === "earning") {
@@ -3761,15 +3952,24 @@ function Chat() {
     } else if (kind === "forum" || kind === "topic" || kind === "message") {
       setForumsOpen({});
     }
-  }, [servers, onServerSelect]);
+  }, [servers, onServerSelect, currentServerId]);
 
-  // Parse the server-encoded "/?n=<kind>:<id>" deep-link marker.
-  const parseNotifMarker = (rawUrl: string): { kind: string; id: string } | null => {
+  // Parse the server-encoded "/?n=<kind>:<id>" deep-link marker. The event kind
+  // appends the owning server ("event:<id>:<serverId>") so a push-opened tab can
+  // switch to it; that third segment is split off into `serverId`.
+  const parseNotifMarker = (rawUrl: string): { kind: string; id: string; serverId?: string } | null => {
     try {
       const n = new URL(rawUrl, window.location.origin).searchParams.get("n");
       if (!n) return null;
       const idx = n.indexOf(":");
-      return idx < 0 ? { kind: n, id: "" } : { kind: n.slice(0, idx), id: n.slice(idx + 1) };
+      if (idx < 0) return { kind: n, id: "" };
+      const kind = n.slice(0, idx);
+      const rest = n.slice(idx + 1);
+      if (kind === "event") {
+        const sep = rest.indexOf(":");
+        if (sep >= 0) return { kind, id: rest.slice(0, sep), serverId: rest.slice(sep + 1) };
+      }
+      return { kind, id: rest };
     } catch { return null; }
   };
 
@@ -3781,7 +3981,7 @@ function Chat() {
       const d = e.data as { type?: string; url?: string } | undefined;
       if (d?.type !== "tk-notification-click" || typeof d.url !== "string") return;
       const t = parseNotifMarker(d.url);
-      if (t) openNotifTarget(t.kind, t.id || null);
+      if (t) openNotifTarget(t.kind, t.id || null, t.serverId ?? null);
     };
     navigator.serviceWorker.addEventListener("message", onMsg);
     return () => navigator.serviceWorker.removeEventListener("message", onMsg);
@@ -3793,11 +3993,44 @@ function Chat() {
     if (!me) return;
     const t = parseNotifMarker(window.location.href);
     if (!t) return;
-    openNotifTarget(t.kind, t.id || null);
+    openNotifTarget(t.kind, t.id || null, t.serverId ?? null);
     const url = new URL(window.location.href);
     url.searchParams.delete("n");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }, [me, openNotifTarget]);
+
+  // "?googleLinked=1": the Google account-link flow (started from Edit
+  // Profile → Privacy → Connected accounts) redirects back to the app root
+  // with this marker once the link succeeds. Surface a brief confirmation
+  // via the shared Toast, then strip the param so a refresh doesn't replay it.
+  useEffect(() => {
+    if (!me) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("googleLinked") !== "1") return;
+    setNotice({ code: "GOOGLE_LINKED", message: "Google account linked." });
+    url.searchParams.delete("googleLinked");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, [me, setNotice]);
+
+  // "?googleError=<code>": the Google callback bounces failures (bad/expired
+  // state, token-exchange failure, already-linked collision, disabled account)
+  // back to the app root with a reason. Surface a friendly message and strip the
+  // param so a refresh doesn't replay it. Fires regardless of auth state (a
+  // login-flow failure happens while logged out), mirroring googleLinked above.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const gErr = url.searchParams.get("googleError");
+    if (!gErr) return;
+    const message =
+      gErr === "already_linked"
+        ? "That Google account is already connected to a different account."
+        : gErr === "disabled"
+          ? "That account is disabled. Please contact an admin."
+          : "Google sign-in didn't complete. Please try again.";
+    setNotice({ code: "GOOGLE_ERROR", message });
+    url.searchParams.delete("googleError");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, [setNotice]);
   // The current server's identity drives the top bar (banner + wordmark + name)
   // for EVERY server, including the home server — so an owner's uploaded banner
   // shows wherever they are. Banner falls back to the global site branding for
@@ -3843,6 +4076,11 @@ function Chat() {
   //    set so the modal scrolls to and flashes the specific hit.
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
   const [viewingHistory, setViewingHistory] = useState<boolean>(false);
+  // Pinned messages per room (migration 0316). Seeded from GET /rooms/:id/pins
+  // on room open and kept live by the `room:pins` socket broadcast (which
+  // replaces a room's set wholesale). Local App state — pins are room-scoped
+  // UI, not global store data.
+  const [pinsByRoom, setPinsByRoom] = useState<Record<string, PinnedMessage[]>>({});
   async function jumpToMessage(roomId: string, messageId: string) {
     setRailOpen(false);
     // Forum boards live ENTIRELY in the Forums Catalog (Phase 1C): a
@@ -3992,6 +4230,41 @@ function Chat() {
   );
   // Pin/Unpin visibility. Stricter than canModerate.
   const canPin = !!me && me.permissions.includes("pin_forum_topic");
+  // Pin CHAT messages (migration 0316): the sitewide `pin_message` grant OR
+  // the room owner/mod (per-room role from the viewer's own occupant row).
+  // Server re-checks the same tiered gate on POST/DELETE /messages/:id/pin.
+  const canPinMessage = !!me && (
+    me.permissions.includes("pin_message")
+    || me.permissions.includes("edit_any_room_metadata")
+    || occ.some((o) => o.userId === me.id && (o.role === "owner" || o.role === "mod"))
+  );
+  // Seed the pinned-messages strip on room open (migration 0316). The live
+  // `room:pins` socket broadcast keeps it current after this; the GET just
+  // primes the initial set (the join broadcast may fire before Chat's socket
+  // listeners attach, and standalone deep-link shells skip it entirely). Flat
+  // rooms only — forum boards render their own chrome, not the RoomInfoBar.
+  useEffect(() => {
+    if (!currentRoomId || isForumRoom) return;
+    let cancelled = false;
+    fetch(`/rooms/${encodeURIComponent(currentRoomId)}/pins`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j || !Array.isArray(j.pins)) return;
+        setPinsByRoom((prev) => ({ ...prev, [currentRoomId]: j.pins as PinnedMessage[] }));
+      })
+      .catch(() => { /* strip stays empty; a socket delta will fill it */ });
+    return () => { cancelled = true; };
+  }, [currentRoomId, isForumRoom]);
+  // Set of source message ids currently pinned in this room, so MessageList's
+  // row action renders Pin vs Unpin. Rebuilt only when this room's pin set
+  // changes. Null messageIds (source hard-deleted) are dropped — there's no
+  // live row to toggle.
+  const pinnedMessageIdsForRoom = useMemo(() => {
+    const set = new Set<string>();
+    const rp = currentRoomId ? pinsByRoom[currentRoomId] : undefined;
+    if (rp) for (const p of rp) if (p.messageId) set.add(p.messageId);
+    return set;
+  }, [currentRoomId, pinsByRoom]);
   // Theater playback-control gate. Mirrors the server's `callerCanEditRoom`
   // (room owner / mod, or the site-wide grant): only these drive shared
   // play/pause/seek. Everyone else's player follows. Derived from the
@@ -4117,6 +4390,12 @@ function Chat() {
         onOpenAffiliates={() => setAffiliatesOpen("list")}
         serverBrand={serverBrand}
         notificationBell={
+          // Community events (calendar) + the notification bell sit side by
+          // side in the Banner header as first-class siblings. The events
+          // entry is self-gated (renders nothing unless servers are on and the
+          // viewer is inside one), so flag-off the header is unchanged.
+          <>
+          <ServerEventsPanel />
           <NotificationCenter
             onOpen={(n) => {
               const md = n.metadata ?? {};
@@ -4141,6 +4420,7 @@ function Chat() {
             }}
             onOpenForums={() => setForumsOpen({})}
           />
+          </>
         }
         {...(canManageCurrentServer && currentServer ? { onOpenServerAdmin: () => setServerSettingsId(currentServer.id) } : {})}
         {...(hasAnyAdminAccess ? { onOpenAdmin: () => setAdminOpen(true) } : {})}
@@ -4182,7 +4462,18 @@ function Chat() {
               rail down off the header. Their content is site/account level —
               identical across rooms — so sitting inside the transition target
               is harmless. */}
-          <BannerMarquee />
+          <BannerMarquee
+            appName={branding.siteName}
+            // Only offer the server source when the viewer is inside a REAL
+            // community server (not the home/default/system server), so the
+            // marquee toggle has a genuine second stream to switch to. Null
+            // everywhere else keeps the bar app-only.
+            serverName={
+              currentServer && !currentServer.isDefault && !currentServer.isSystem
+                ? currentServer.name
+                : null
+            }
+          />
           <EarningRibbon onOpenEarning={() => setEarningOpen({})} />
           {room?.linkedWorld && !worldBannerDismissed ? (
             <div className="keep-notice keep-notice-accent relative flex w-full items-center justify-center pr-10">
@@ -4215,6 +4506,15 @@ function Chat() {
               room={room}
               canEdit={canControlTheater}
               onOpenWorld={(id) => setWorldViewerId(id)}
+              pins={currentRoomId ? pinsByRoom[currentRoomId] ?? [] : []}
+              canPinMessage={canPinMessage}
+              onJumpToMessage={(id) => { if (currentRoomId) void jumpToMessage(currentRoomId, id); }}
+              onUnpin={(messageId) => {
+                void fetch(`/messages/${encodeURIComponent(messageId)}/pin`, {
+                  method: "DELETE",
+                  credentials: "include",
+                }).catch(() => { /* room:pins will resync; nothing to surface */ });
+              }}
             />
           ) : null}
           {room?.messageExpiryMinutes && room.messageExpiryMinutes > 0 ? (
@@ -4310,6 +4610,8 @@ function Chat() {
               : {})}
             canModerate={canModerate}
             canPin={canPin}
+            canPinMessage={canPinMessage}
+            pinnedMessageIds={pinnedMessageIdsForRoom}
             canAdminEdit={canAdminEdit}
             onQuotePost={(quoteText) => {
               // Inline forum-view quote: pre-fill the MAIN composer.
@@ -5005,6 +5307,34 @@ function Chat() {
           onDismissed={() => setWelcome(null)}
         />
       ) : null}
+      {/* Server onboarding / self-roles flow (Batch 2 self-roles). Opened on
+          entry to a community server (see the trigger effect). The modal
+          fetches the flow itself and calls onDone immediately when there's
+          nothing to show, so mounting it eagerly on entry is safe. Its
+          welcome header + name come from the server catalog when available. */}
+      {onboardingServerId ? (
+        <ServerOnboardingModal
+          serverId={onboardingServerId}
+          serverName={servers?.find((s) => s.id === onboardingServerId)?.name}
+          onDone={() => setOnboardingServerId(null)}
+        />
+      ) : null}
+      {/* Guided site tour. Two entry points share one render:
+            - First-run: `showSiteTour` (from /me/profile) opens it, but
+              only once the one-shot welcome modal is gone, so the two
+              never stack. The SiteTour component POSTs the dismiss so
+              re-fetches stop asking.
+            - On demand: the "Take the tour" menu row flips the store's
+              `siteTourForced`, which opens it regardless of the one-time
+              flag. onClose clears both so it doesn't immediately reopen. */}
+      {(showSiteTour && !welcome) || siteTourForced ? (
+        <SiteTour
+          onClose={() => {
+            setShowSiteTour(false);
+            setSiteTourForced(false);
+          }}
+        />
+      ) : null}
     </div>
     </Suspense>
     </ActiveThemeContext.Provider>
@@ -5117,9 +5447,11 @@ function Toast({ notice, onDismiss }: { notice: { code: string; message: string 
  */
 function IncognitoBanner() {
   const incognitoMode = useChat((s) => s.me?.incognitoMode);
+  const incognitoCharacterId = useChat((s) => s.me?.incognitoCharacterId ?? null);
+  const tabCharacterId = useChat((s) => s.activeCharacterId);
   const incognitoAlias = useChat((s) => s.me?.incognitoAlias);
   const currentRoomId = useChat((s) => s.currentRoomId);
-  if (!incognitoMode) return null;
+  if (!incognitoMode || (tabCharacterId ?? null) !== (incognitoCharacterId ?? null)) return null;
   const alias = incognitoAlias ?? "System";
   return (
     <div className="keep-notice keep-notice-accent flex flex-wrap items-center justify-center gap-2 px-3 py-1 text-xs">

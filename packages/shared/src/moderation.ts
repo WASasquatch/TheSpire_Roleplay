@@ -13,6 +13,12 @@ export type AuditAction =
   | "ban"
   | "unban"
   | "announce"
+  // Pinned messages (a room message pinned/unpinned — migration 0316)
+  | "message_pin"
+  | "message_unpin"
+  // Auto-moderation (create/edit/delete an automod_rules row, or an
+  // automatic warn/delete/mute the filters applied) — migration 0319
+  | "automod"
   // Role changes
   | "promote_mod"
   | "demote_mod"
@@ -143,7 +149,8 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
     label: "Moderation",
     actions: [
       "kick", "mute", "unmute", "ban", "unban", "announce", "incognito_enter", "incognito_exit",
-      "mod_case_create", "mod_case_update", "mod_case_delete",
+      "mod_case_create", "mod_case_update", "mod_case_delete", "automod",
+      "message_pin", "message_unpin",
     ],
   },
   forums: {
@@ -269,6 +276,9 @@ export interface ReportEntry {
   /** Snapshot of the reported message body at time of fetch (or "[removed]" if since deleted). */
   messageBody: string;
   messageDisplayName: string;
+  /** The reported message's author userId, so a moderator can open their
+   *  profile to verify a report. Null when the message/author is gone. */
+  messageUserId?: string | null;
   messageCreatedAt: number;
   roomId: string;
   roomName: string;

@@ -93,6 +93,7 @@ export async function loadSessionUser(db: Db, userId: string): Promise<SessionUs
     currentMood: u.currentMood,
     incognitoMode: u.incognitoMode,
     incognitoAlias: u.incognitoAlias,
+    incognitoCharacterId: u.incognitoCharacterId,
     incognitoExitMessage: u.incognitoExitMessage,
     incognitoReturnMessage: u.incognitoReturnMessage,
   };

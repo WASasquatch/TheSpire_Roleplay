@@ -50,8 +50,10 @@ import {
   persistTheaterCheckpoint,
   emitTreeChanged,
   expireIfEmpty,
+  exitIncognitoOnCharSwitch,
   findCanonicalLanding,
   findServerLanding,
+  isHiddenIncognitoIdentity,
   joinRoom,
   registerIdleGhost,
   sendRoomBacklogTo,
@@ -86,8 +88,9 @@ import {
 import { readFile } from "node:fs/promises";
 import { extendSession, loadSessionUser, resolveDisplayName } from "./auth/session.js";
 import { recordHttpIp, recordSocketIp, extractSocketIp } from "./auth/ipLog.js";
-import { isIpBanned, isIpBannedCachedSync, loadBannedIpCache } from "./auth/ipBan.js";
+import { isIpBanned, isIpBannedCachedSync, loadBannedIpCache, isBlockableIp } from "./auth/ipBan.js";
 import { registerAuthRoutes, getSessionUser, userIdFromSessionId, slugToUsername, readBearerToken } from "./routes/auth.js";
+import { registerGoogleAuthRoutes } from "./routes/googleAuth.js";
 import { registerCharacterRoutes } from "./routes/characters.js";
 import { registerAffiliateRoutes } from "./routes/affiliates.js";
 import { registerBookmarkRoutes } from "./routes/bookmarks.js";
@@ -108,6 +111,8 @@ import { registerMessageRoutes } from "./routes/messages.js";
 import { registerReportRoutes } from "./routes/reports.js";
 import { registerPushRoutes } from "./routes/push.js";
 import { registerNotificationRoutes } from "./routes/notifications.js";
+import { registerRoomReadsRoutes } from "./routes/roomReads.js";
+import { registerSearchRoutes } from "./routes/search.js";
 import { initPush } from "./push.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
 import { registerAnnouncementsRoutes } from "./routes/announcements.js";
@@ -116,6 +121,7 @@ import { registerRegistrationRulesRoutes } from "./routes/registrationRules.js";
 import { registerUnsubscribeRoute } from "./routes/unsubscribe.js";
 import { registerProfileFlairRoutes } from "./routes/profileFlair.js";
 import { startAnnouncementScheduler } from "./admin/announcements.js";
+import { startEventReminderSweep } from "./servers/events.js";
 import { startEmailQueue } from "./email/queue.js";
 import { registerNavLinkRoutes } from "./routes/nav-links.js";
 import { registerRoomsRoutes } from "./routes/rooms.js";
@@ -133,6 +139,7 @@ import { registerUsersRoutes } from "./routes/users.js";
 import { registerAdminRoutes } from "./admin/routes.js";
 import { ensureSystemSeeds, startJanitor } from "./seed.js";
 import { getServerSettings, getSettings, areServersEnabled } from "./settings.js";
+import { googleConfigured } from "./auth/googleOauth.js";
 
 // In dev: server runs on 3001, Vite dev-server on 5173 with a proxy to 3001.
 // In prod: a single Node process serves both the API and the built web bundle
@@ -178,6 +185,68 @@ const log = pino({
     ? {}
     : { transport: { target: "pino-pretty" } }),
 });
+
+/**
+ * Per-IP socket handshake throttle. Socket.io handshakes attach to the raw HTTP
+ * server and BYPASS Fastify's rate limiter, and each admitted handshake runs
+ * ~4-6 DB queries (isIpBanned + userIdFromSessionId + loadSessionUser +
+ * resolveDisplayName + character-ownership). A reconnect storm (a runaway /
+ * looping client with no backoff) would hammer that path with zero
+ * backpressure, so this caps it in-process BEFORE any DB work in io.use.
+ *
+ * Bucket: client IP (extractSocketIp's first-XFF-hop = the true client behind
+ * Fly's edge, so buckets are per-real-client, not collapsed onto the proxy).
+ * Window: 10s. Max: 40 connects/window → sustained ceiling ~4 handshakes/sec/IP.
+ * Rationale: a real human reconnects a handful of times per minute at worst
+ * (network blip, mobile suspend/resume, wake); a deploy reconnects everyone
+ * ONCE; even a chunky NAT/CGNAT egress with dozens of tabs reconnecting after a
+ * deploy fits inside a single window. Real abuse is qualitatively different —
+ * dozens-per-second SUSTAINED — which blows past 40 immediately and stays
+ * blocked while it keeps hammering, then auto-clears one window after it idles.
+ * A blocked handshake still records its timestamp so a sustained flood keeps the
+ * counter saturated; a legit burst that briefly overshoots recovers within ~10s.
+ * MAX is the single safe knob to raise if a huge shared IP ever proves tight.
+ *
+ * Dev-exempt: isBlockableIp is false for null / loopback / RFC1918 / link-local
+ * / ULA, so local dev (127.0.0.1 / ::1), the Fly internal 172.16.x hop, and any
+ * reverse-proxy-internal address are never throttled — only real routable
+ * public IPs are counted.
+ *
+ * Memory: self-healing per-key (each admit prunes that key to the window and
+ * drops it entirely when its pruned array is empty), plus a size-gated global
+ * sweep so a flood of one-shot churned IPs (e.g. rotating XFF) can't grow the
+ * Map past HANDSHAKE_GC_AT keys.
+ */
+const HANDSHAKE_WINDOW_MS = 10_000;
+const HANDSHAKE_MAX = 40;
+const HANDSHAKE_GC_AT = 20_000;
+const handshakeHits = new Map<string, number[]>();
+
+function admitHandshake(ip: string, now: number): boolean {
+  const cutoff = now - HANDSHAKE_WINDOW_MS;
+  const list = (handshakeHits.get(ip) ?? []).filter((t) => t >= cutoff);
+  list.push(now);
+  if (list.length > HANDSHAKE_MAX) {
+    // Over the ceiling: keep the appended list stored so sustained hammering
+    // stays saturated and the IP remains throttled until it goes quiet for a
+    // full window. No GC on the reject path — the flood keeps this key hot.
+    handshakeHits.set(ip, list);
+    return false;
+  }
+  if (list.length === 0) handshakeHits.delete(ip);
+  else handshakeHits.set(ip, list);
+  // Size-gated global sweep: reclaim idle/churned keys so a rotating-IP flood
+  // can't grow the Map unbounded. Fires only past a ceiling far above any real
+  // concurrent-distinct-public-IP count.
+  if (handshakeHits.size >= HANDSHAKE_GC_AT) {
+    for (const [k, arr] of handshakeHits) {
+      const kept = arr.filter((t) => t >= cutoff);
+      if (kept.length === 0) handshakeHits.delete(k);
+      else handshakeHits.set(k, kept);
+    }
+  }
+  return true;
+}
 
 /**
  * Map a request URL to the SPA / document-route TEMPLATE for analytics
@@ -243,6 +312,24 @@ async function main() {
     loggerInstance: log,
     bodyLimit: 12 * 1024 * 1024,
     trustProxy: true,
+    // Fastify's built-in per-request logging emits an "incoming request" AND a
+    // "request completed" line - each with the full req/res object - for EVERY
+    // request. Under any burst (a chatty client, a reconnect storm, a poll loop,
+    // a crawler) that floods the console thousands of lines deep and buries real
+    // signal. We turn it off and log a single concise line ONLY for server
+    // errors or slow requests via the onResponse hook below; ordinary 2xx/4xx
+    // traffic stays quiet. Set LOG_LEVEL=debug to see every request again.
+    disableRequestLogging: true,
+  });
+  // Concise access log: quiet for normal traffic, loud only where it matters.
+  // Replaces the disabled built-in request logging above.
+  app.addHook("onResponse", async (req, reply) => {
+    const status = reply.statusCode;
+    const ms = Math.round(reply.elapsedTime);
+    const line = { method: req.method, url: req.url, status, ms };
+    if (status >= 500) req.log.error(line, "request failed");
+    else if (ms > 1000) req.log.warn(line, "slow request");
+    else req.log.debug(line, "request"); // hidden at the default info level
   });
   await app.register(cookie, { secret: SESSION_SECRET });
   // CORS is only useful when the web bundle is served from a different origin
@@ -259,6 +346,18 @@ async function main() {
     global: false,
     timeWindow: "1 minute",
     max: 60,
+    // The plugin's DEFAULT errorResponseBuilder returns an `Error`, and
+    // `reply.send(error)` makes Fastify log a full stack trace for every
+    // rejected request. A hammered public endpoint (e.g. the splash polling
+    // /stats, or a dev page reloading under HMR) then floods the console with
+    // identical stacks. Returning a PLAIN object keeps the standard 429 body
+    // and the Retry-After header (set separately by the plugin) but drops the
+    // stack spam - a 429 is expected traffic shaping, not a fault.
+    errorResponseBuilder: (_req, context) => ({
+      statusCode: 429,
+      error: "Too Many Requests",
+      message: `Rate limit exceeded, retry in ${Math.ceil((context.ttl ?? 0) / 1000)} seconds`,
+    }),
   });
 
   // HTTP Strict Transport Security. Production only - Fly already forces
@@ -446,6 +545,10 @@ async function main() {
   // base instance shape just for the registrar calls.
   const baseApp = app as unknown as FastifyInstance;
   await registerAuthRoutes(baseApp, db);
+  // Google sign-in (OAuth) routes. Self-gates to a no-op when GOOGLE_CLIENT_ID/
+  // SECRET are unset, so every /auth/google/* path stays 404 on an unconfigured
+  // deploy (mirrors the youtubeConfigured / googleConfigured env posture).
+  await registerGoogleAuthRoutes(baseApp, db);
   await registerCommandsRoutes(baseApp, db, registry);
   // Public marquee banners, unauthenticated; the splash + chat
   // shell paint these for every viewer. Admin CRUD lives behind
@@ -684,6 +787,13 @@ async function main() {
       // single-server experience. Without this field the client always
       // defaults to false, so the feature can never light up — wire it here.
       serversEnabled: areServersEnabled(s),
+      // Env-gated: whether the operator configured Google OAuth credentials, so
+      // the client hides the sign-in-with-Google button when it can't work. Pure
+      // env boolean (no admin toggle). (YouTube for /theater needs no client
+      // flag: videos still play without an API key — the key only enables
+      // server-side playlist expansion + title lookup, gated by youtubeConfigured
+      // in the /theater handler, and both degrade gracefully.)
+      googleAuthEnabled: googleConfigured,
     };
   });
 
@@ -868,6 +978,12 @@ async function main() {
   await registerReportRoutes(baseApp, db);
   await registerPushRoutes(baseApp, db);
   await registerNotificationRoutes(baseApp, db, io);
+  // Per-channel unread/mute reads (Batch 2). Needs `io` because the read/mute
+  // routes emit "room:unread" sockets to the caller's tabs. Same 3-arg shape as
+  // registerNotificationRoutes.
+  await registerRoomReadsRoutes(baseApp, db, io);
+  // Server-wide message search (Batch 2). GET /search/messages, (app, db) only.
+  await registerSearchRoutes(baseApp, db);
   // Generate VAPID keys at first boot if missing, then configure web-push.
   // Idempotent on subsequent starts; survives deploys via the persisted keys.
   await initPush(db);
@@ -931,10 +1047,24 @@ async function main() {
    */
   io.use(async (socket, next) => {
     try {
+      // Resolve the client IP once, up front — reused by both the handshake
+      // throttle and the ban check so we don't re-parse the XFF/Fly headers.
+      const ip = extractSocketIp(socket.handshake);
+      // PER-IP handshake throttle — runs FIRST, before any DB work. The
+      // handshake bypasses Fastify's rate limiter, and admitting one costs
+      // ~4-6 DB queries below, so a reconnect storm from one runaway/looping IP
+      // is the uncapped DoS path. Cap it here: over ~40 connects/10s per public
+      // IP, reject with connect_error (socket.io then backs off) BEFORE the ban
+      // /auth/tabChar lookups ever fire. Non-public IPs (dev/NAT hops) are
+      // exempt via isBlockableIp; null IPs skip too (never reject on our own
+      // inability to identify a client). See admitHandshake for tuning.
+      if (isBlockableIp(ip) && !admitHandshake(ip, Date.now())) {
+        return next(new Error("rate"));
+      }
       // HARDENED IP ban — reject the handshake outright from a blocked IP, so a
       // pre-ban session token can't keep a banned network connected. Exact
       // (async DB) check; the handshake bypasses Fastify's onRequest gate.
-      if (await isIpBanned(db, extractSocketIp(socket.handshake))) {
+      if (await isIpBanned(db, ip)) {
         return next(new Error("restricted"));
       }
       const a = socket.handshake.auth as {
@@ -1817,6 +1947,12 @@ async function main() {
         const tabCharId = (socket.data as { tabCharId?: string | null }).tabCharId;
         if (tabCharId !== undefined) typingCharId = tabCharId;
       }
+      // A hidden mod's identity must not leak through the "…is typing"
+      // indicator. Every other presence surface (userlist, join/leave, whisper
+      // attribution) hides this exact identity, so the typing pulse must too —
+      // gate on the resolved identity with the byte-identical rule those
+      // surfaces use. Placed before the name lookup so we skip that too.
+      if (isHiddenIncognitoIdentity(user, typingCharId)) return;
       const typingDisplayName = typingCharId === user.activeCharacterId
         ? user.displayName
         : await resolveDisplayName(db, user.id, typingCharId);
@@ -2062,10 +2198,22 @@ async function main() {
             return;
           }
         }
+        // The identity this tab was voicing BEFORE the switch. Captured now,
+        // before tabCharId is overwritten, so exitIncognitoOnCharSwitch can tell
+        // whether this was the hidden tab.
+        const tabCharRaw = (socket.data as { tabCharId?: string | null }).tabCharId;
+        const priorCharId = tabCharRaw !== undefined ? tabCharRaw : (user.activeCharacterId ?? null);
         await db.update(users).set({ activeCharacterId: requested }).where(eq(users.id, user.id));
         (socket.data as { tabCharId?: string | null }).tabCharId = requested;
         user.activeCharacterId = requested;
         user.displayName = await resolveDisplayName(db, user.id, requested);
+        // If this tab was the one hidden by /incognito, switching identity would
+        // silently un-hide the mod (the new identity no longer matches the
+        // incognito target, so every hide gate stops firing). Exit incognito
+        // cleanly and tell them, rather than a stealth reveal. Self-guards to a
+        // no-op on any tab that wasn't the hidden identity, and refreshes
+        // presence in every room on an actual exit.
+        await exitIncognitoOnCharSwitch(io, db, socket, user, priorCharId);
         const roomId = (socket.data as { roomId?: string }).roomId;
         if (roomId) {
           const { broadcastPresence } = await import("./realtime/broadcast.js");
@@ -2499,6 +2647,14 @@ async function main() {
       app.get("/forgot-password", publicLimit, serveSplash);
       app.get("/reset-password", publicLimit, serveSplash);
       app.get("/verify-email", publicLimit, serveSplash);
+      // Google OAuth client-landing routes. The callback 302s the browser here
+      // carrying a single-use code the SPA reads + POSTs back. They start with
+      // /auth, so without explicit handlers the not-found apiPrefixes block would
+      // JSON-404 them; register the splash so the SPA boots and its landing
+      // handler can run. (The matching POST /auth/google/finish is a separate
+      // method, so this GET splash route doesn't shadow it.)
+      app.get("/auth/google/done", publicLimit, serveSplash);
+      app.get("/auth/google/finish", publicLimit, serveSplash);
 
       await app.register(fastifyStatic, {
         root: webDistPath,
@@ -2585,6 +2741,11 @@ async function main() {
   // stack timers; the started timer captures `db` + `io` by
   // closure so its lifetime is the process's.
   startAnnouncementScheduler({ db, io });
+  // Per-server event reminders (Multi-Server Lift). Its own ~60s .unref() timer
+  // that pings the going/maybe RSVPs a lead-time before a scheduled event
+  // starts. Idempotent like the announcement scheduler; captures db+io by
+  // closure. Inert flag-off (no events exist without the servers feature).
+  startEventReminderSweep({ db, io });
   // Nightly analytics rollup + raw-row retention sweep (plan_ext.md §4). Runs at
   // most once per UTC day (hourly self-check, guarded), aggregating yesterday's
   // raw page views / events into analytics_daily then deleting raw rows past

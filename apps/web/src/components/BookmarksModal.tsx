@@ -32,6 +32,7 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [query, setQuery] = useState("");
 
   async function load() {
     setError(null);
@@ -52,8 +53,25 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
   // surface first.
   const grouped = useMemo(() => {
     if (!bookmarks) return [] as Array<{ category: string; rows: Bookmark[] }>;
+    // Client-side search over the already-loaded list: matches the body,
+    // note, category, author name, and room name (case-insensitive). Empty
+    // query shows everything. No server round-trip, the full list is
+    // already in memory.
+    const q = query.trim().toLowerCase();
+    const matches = (b: Bookmark) => {
+      if (!q) return true;
+      const m = b.message;
+      return (
+        m.body.toLowerCase().includes(q) ||
+        (b.note ?? "").toLowerCase().includes(q) ||
+        b.category.toLowerCase().includes(q) ||
+        m.displayName.toLowerCase().includes(q) ||
+        m.roomName.toLowerCase().includes(q)
+      );
+    };
     const map = new Map<string, Bookmark[]>();
     for (const b of bookmarks) {
+      if (!matches(b)) continue;
       const key = b.category.trim() || UNCATEGORIZED;
       const arr = map.get(key) ?? [];
       arr.push(b);
@@ -65,7 +83,7 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
       return a.localeCompare(b);
     });
     return entries.map(([category, rows]) => ({ category, rows }));
-  }, [bookmarks]);
+  }, [bookmarks, query]);
 
   async function removeBookmark(id: string) {
     if (!window.confirm("Remove this bookmark?")) return;
@@ -125,6 +143,19 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
           <CloseButton onClick={onClose} />
         </header>
 
+        {bookmarks && bookmarks.length > 0 ? (
+          <div className="shrink-0 border-b border-keep-rule/50 px-3 py-2">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search bookmarks…"
+              aria-label="Search bookmarks"
+              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm placeholder:text-keep-muted"
+            />
+          </div>
+        ) : null}
+
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
           {error ? (
             <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
@@ -139,6 +170,9 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
               No bookmarks yet. Tap the bookmark icon on a message to save it
               here, with an optional category and note.
             </p>
+          ) : null}
+          {bookmarks && bookmarks.length > 0 && grouped.length === 0 ? (
+            <p className="italic text-keep-muted">No bookmarks match your search.</p>
           ) : null}
 
           {grouped.map(({ category, rows }) => {
@@ -204,6 +238,16 @@ function Row({
   const m = bookmark.message;
   const when = new Date(m.createdAt).toLocaleString();
   const removed = m.body === "[message removed]";
+  // Archived = the original message expired out of the retention window and
+  // we're rendering the saved snapshot. There's no live row to jump to, so
+  // the body is a plain (non-clickable) block with an explanatory tooltip.
+  const archived = !!m.archived;
+  // Only offer a clickable "Jump" when there's a REAL live target to jump to.
+  // The server sends id="" / roomId="" for both the archived snapshot AND the
+  // soft-deleted/[removed] placeholder; jumping with those empty ids misfired
+  // (and regressed soft-deleted rows into a broken jump). A row is jumpable
+  // only when it's neither archived nor removed AND carries real ids.
+  const jumpable = !archived && !removed && !!m.id && !!m.roomId;
   // Match the chat renderer's styling pass so a bookmarked kind="cmd"
   // row reads in the same palette + CSS the user remembers seeing
   // when they bookmarked it. `useActiveTheme().bg` lets the legibility
@@ -224,22 +268,45 @@ function Row({
           <span className="mx-1">·</span>
           {m.roomName}
           {m.replyToId ? <span className="ml-1 italic text-keep-action/80">in thread</span> : null}
+          {archived ? (
+            <span className="ml-1 rounded bg-keep-muted/20 px-1 py-0.5 text-[9px] not-italic text-keep-muted">
+              Archived
+            </span>
+          ) : null}
         </span>
         <span className="shrink-0 tabular-nums">{when}</span>
       </div>
-      <button
-        type="button"
-        onClick={onOpen}
-        className="mt-1 block w-full text-left text-sm leading-snug hover:underline"
-        title="Jump to this message"
-      >
-        <span
-          className={removed ? "italic text-keep-muted" : "break-words"}
-          style={removed ? undefined : bodyStyle}
+      {jumpable ? (
+        <button
+          type="button"
+          onClick={onOpen}
+          className="mt-1 block w-full text-left text-sm leading-snug hover:underline"
+          title="Jump to this message"
         >
-          {removed ? m.body : parseInline(m.body)}
-        </span>
-      </button>
+          <span className="break-words" style={bodyStyle}>
+            {parseInline(m.body)}
+          </span>
+        </button>
+      ) : (
+        // No live message to jump to (archived snapshot, or soft-deleted /
+        // [removed]); render the body inline, non-clickable, so a click can't
+        // misfire a jump with empty ids.
+        <div
+          className="mt-1 block w-full text-left text-sm leading-snug"
+          title={
+            removed
+              ? "This message is no longer available."
+              : "The original message expired; showing your saved copy."
+          }
+        >
+          <span
+            className={removed ? "italic text-keep-muted" : "break-words"}
+            style={removed ? undefined : bodyStyle}
+          >
+            {removed ? m.body : parseInline(m.body)}
+          </span>
+        </div>
+      )}
       {bookmark.note ? (
         <div className="mt-1 break-words rounded border-l-2 border-keep-action/40 bg-keep-action/5 px-2 py-0.5 text-xs italic text-keep-text/85">
           {bookmark.note}

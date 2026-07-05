@@ -32,6 +32,7 @@ import { backfillRoomSlugs } from "./lib/roomSlug.js";
 import { schedulePresenceSweep } from "./earning/sweeps.js";
 import { scheduleEidolonNudgeSweep } from "./earning/eidolonNudge.js";
 import { pruneSnapshots } from "./backup/snapshots.js";
+import { archiveDoomedBookmarks } from "./retention/archiveBookmarks.js";
 
 /**
  * Default system rooms shipped on every fresh install. Each one is a
@@ -844,12 +845,13 @@ export function startJanitor(
         const { messageRetentionMs } = await getServerSettings(db, serverId);
         if (messageRetentionMs <= 0 || roomIds.length === 0) continue;
         const cutoff = new Date(Date.now() - messageRetentionMs);
-        const r = await db.delete(messages).where(
-          and(
-            lt(messages.createdAt, cutoff),
-            inArray(messages.roomId, roomIds),
-          ),
+        const doomed = and(
+          lt(messages.createdAt, cutoff),
+          inArray(messages.roomId, roomIds),
         );
+        // Snapshot-archive bookmarks BEFORE the hard delete drops the rows.
+        await archiveDoomedBookmarks(db, doomed);
+        const r = await db.delete(messages).where(doomed);
         if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages older than retention window (server ${serverId})`);
       }
 
@@ -868,9 +870,10 @@ export function startJanitor(
         const mins = room.mins;
         if (!mins || mins <= 0) continue;
         const cutoff = new Date(Date.now() - mins * 60 * 1000);
-        const r = await db
-          .delete(messages)
-          .where(and(eq(messages.roomId, room.id), lt(messages.createdAt, cutoff)));
+        const doomed = and(eq(messages.roomId, room.id), lt(messages.createdAt, cutoff));
+        // Snapshot-archive bookmarks BEFORE the hard delete drops the rows.
+        await archiveDoomedBookmarks(db, doomed);
+        const r = await db.delete(messages).where(doomed);
         if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages from "${room.name}" older than ${mins}m`);
       }
     } catch (err) {
@@ -917,6 +920,11 @@ export function startJanitor(
             SELECT 1 FROM mutes mu
             WHERE mu.user_id = u.id
               AND mu.until > ${Date.now()}
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM account_mutes am
+            WHERE am.user_id = u.id
+              AND am.until > ${Date.now()}
           )
           AND NOT EXISTS (
             SELECT 1 FROM bans b

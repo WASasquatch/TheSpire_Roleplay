@@ -33,6 +33,10 @@ export interface SessionUser {
   /** Alias used on system-line message attribution when incognito.
    *  Null → use the literal "System". */
   incognitoAlias: string | null;
+  /** The single identity (character id, null = OOC/master) the account
+   *  went incognito AS. Only that identity is hidden; other tabs voicing
+   *  other characters stay visible. */
+  incognitoCharacterId: string | null;
   /** Custom leave / return message templates. Null → server-default phrasing. */
   incognitoExitMessage: string | null;
   incognitoReturnMessage: string | null;

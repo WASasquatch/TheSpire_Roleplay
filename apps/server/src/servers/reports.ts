@@ -136,6 +136,8 @@ export async function registerServerReportRoutes(
             ? (msg.deletedAt ? "[message removed]" : msg.body)
             : "[message gone]",
           messageDisplayName: msg?.displayName ?? "(unknown)",
+          // The reported author, so a mod can open their profile to verify.
+          messageUserId: r.senderUserId ?? null,
           messageCreatedAt: msg ? +msg.createdAt : 0,
           roomId: r.roomId ?? "",
           roomName: room?.name ?? "(deleted room)",

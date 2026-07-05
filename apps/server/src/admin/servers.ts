@@ -77,7 +77,7 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "../routes/auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { ensureDefaultUsergroup } from "../servers/usergroups.js";
-import { notifyUser } from "../servers/notifications.js";
+import { notifyUser, emitServersChanged } from "../servers/notifications.js";
 import { recordAudit } from "../audit.js";
 import { getSettings, areServersEnabled } from "../settings.js";
 
@@ -245,7 +245,7 @@ export async function registerAdminServerRoutes(app: FastifyInstance, db: Db, io
               "• Appoint moderators and admins, and set who may join.",
               "• Set the server's banner, sigil, colors, rules, and welcome.",
               "",
-              "Find it on the server rail and share the word. The hall is yours.",
+              "To access the \"Admin Panel\", click the **Server Admin** button from the top navigation, or the gear icon on your server icon in the server rail.",
             ].join("\n"),
             isSticky: true,
             lastActivityAt: new Date(),
@@ -288,6 +288,11 @@ export async function registerAdminServerRoutes(app: FastifyInstance, db: Db, io
           ...(nextStatus === "approved" ? { target: { kind: "server", id: serverId } } : {}),
         },
       });
+      // Live-add the freshly-approved server to the applicant's rail (fade-in),
+      // so the "find it on the server rail!" notice is true without a refresh.
+      if (nextStatus === "approved") {
+        await emitServersChanged(io, appRow.applicantUserId, serverId);
+      }
 
       const rows = await db.select().from(serverCreationApplications)
         .where(eq(serverCreationApplications.id, appRow.id)).limit(1);

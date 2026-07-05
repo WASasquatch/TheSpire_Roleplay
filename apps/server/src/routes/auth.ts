@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { type Role, VERSION } from "@thekeep/shared";
@@ -365,6 +365,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       // off the register response without a second probe.
       incognitoMode: false,
       incognitoAlias: null,
+      incognitoCharacterId: null,
       // Unverified only when verification is on for a normal signup
       // (mirrors the insert above). Lets the client raise the verify
       // banner/gate straight off the register response.
@@ -446,6 +447,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       // next login without having to re-toggle.
       incognitoMode: u.incognitoMode,
       incognitoAlias: u.incognitoAlias,
+      incognitoCharacterId: u.incognitoCharacterId,
       emailVerifiedAt: u.emailVerifiedAt ? +u.emailVerifiedAt : null,
       // Mirror the verify policy on the login response so the nudge banner /
       // block gate can show the INSTANT the user signs in, instead of only
@@ -533,6 +535,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       .select({
         incognitoMode: users.incognitoMode,
         incognitoAlias: users.incognitoAlias,
+        incognitoCharacterId: users.incognitoCharacterId,
         emailVerifiedAt: users.emailVerifiedAt,
       })
       .from(users)
@@ -550,6 +553,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       permissions,
       incognitoMode: incognitoRow?.incognitoMode ?? false,
       incognitoAlias: incognitoRow?.incognitoAlias ?? null,
+      incognitoCharacterId: incognitoRow?.incognitoCharacterId ?? null,
       emailVerifiedAt: incognitoRow?.emailVerifiedAt ? +incognitoRow.emailVerifiedAt : null,
       emailVerificationEnabled: settings.emailVerificationEnabled,
       emailVerificationMode: settings.emailVerificationMode,
@@ -592,9 +596,72 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       reply.code(400);
       return { error: "This reset link is invalid or has expired. Request a new one." };
     }
-    await db.update(users).set({ passwordHash: await hashPassword(body.password) }).where(eq(users.id, userId));
+    await db.update(users).set({ passwordHash: await hashPassword(body.password), hasPassword: true }).where(eq(users.id, userId));
     await db.delete(sessions).where(eq(sessions.userId, userId));
     return { ok: true };
+  });
+
+  // In-app password management for the signed-in account. Two modes, decided by
+  // whether the account already has a usable password:
+  //   - has a password → CHANGE it; the current password must be re-entered and
+  //     verified (so a walked-away session can't silently reset it).
+  //   - OAuth-only (has_password=0) → SET a first password with no current one
+  //     to prove (there is none). This closes the "lose your Google login and
+  //     you're locked out of the account" gap.
+  // On success every OTHER session is revoked (a leaked session shouldn't
+  // outlive a password change) while the caller's own session is kept so they
+  // stay signed in on this device.
+  const passwordLimit = { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } } as const;
+  app.post<{ Body: unknown }>("/me/password", passwordLimit, async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "not authenticated" }; }
+    const body = z.object({
+      currentPassword: z.string().max(200).optional(),
+      newPassword: z.string().min(8).max(200),
+    }).parse(req.body);
+    const u = (await db
+      .select({ passwordHash: users.passwordHash, hasPassword: users.hasPassword })
+      .from(users)
+      .where(eq(users.id, me.id))
+      .limit(1))[0];
+    if (!u) { reply.code(404); return { error: "no user" }; }
+    if (u.hasPassword) {
+      if (!body.currentPassword) {
+        reply.code(400);
+        return { error: "Enter your current password." };
+      }
+      if (!(await verifyPassword(u.passwordHash, body.currentPassword))) {
+        reply.code(400);
+        return { error: "Your current password is incorrect." };
+      }
+    }
+    await db
+      .update(users)
+      .set({ passwordHash: await hashPassword(body.newPassword), hasPassword: true })
+      .where(eq(users.id, me.id));
+    // Keep this session, drop the rest.
+    const currentSid = readBearerToken(req);
+    if (currentSid) {
+      await db.delete(sessions).where(and(eq(sessions.userId, me.id), ne(sessions.id, currentSid)));
+    } else {
+      await db.delete(sessions).where(eq(sessions.userId, me.id));
+    }
+    return { ok: true };
+  });
+
+  // Does the signed-in account have a usable local password? Drives the profile
+  // Security section (Change vs Set a password). Deliberately NOT gated on
+  // Google being enabled, so a password user can always reach Change Password.
+  app.get("/me/password-status", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "not authenticated" }; }
+    const u = (await db
+      .select({ hasPassword: users.hasPassword })
+      .from(users)
+      .where(eq(users.id, me.id))
+      .limit(1))[0];
+    if (!u) { reply.code(404); return { error: "no user" }; }
+    return { hasPassword: !!u.hasPassword };
   });
 
   // ---- Email verification ------------------------------------------------
@@ -629,7 +696,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
   });
 }
 
-async function issueSession(
+export async function issueSession(
   db: Db,
   userId: string,
   req: FastifyRequest,

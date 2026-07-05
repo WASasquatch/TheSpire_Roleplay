@@ -2,16 +2,20 @@ import type { FastifyInstance } from "fastify";
 import { hasPermission } from "../auth/permissions.js";
 import type { Role, ForumPermission, AuditAction } from "@thekeep/shared";
 import { recordAudit } from "../audit.js";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
+import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type {
   ChatMessage,
   ClientToServerEvents,
   ServerToClientEvents,
+  PinnedMessage,
+  MessageKind,
 } from "@thekeep/shared";
 import { mentionsField, parseNpcStats } from "@thekeep/shared";
-import { messages, rooms, roomThreadCategories, users } from "../db/schema.js";
+import { messages, rooms, roomThreadCategories, roomMembers, pinnedMessages, users } from "../db/schema.js";
+import { callerCanEditRoom } from "../auth/roomPermissions.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "./auth.js";
@@ -167,6 +171,124 @@ async function auditForumTopic(
 }
 
 const editBody = z.object({ body: z.string().min(1).max(20_000) }).strict();
+
+/**
+ * Hard cap on pinned messages per room. Pins are room furniture, not a
+ * second inbox — keeping the strip short keeps it scannable and bounds the
+ * `room:pins` delta payload. Adding beyond the cap is rejected (409) rather
+ * than silently rotating the oldest out, so a mod is never surprised by a pin
+ * vanishing to make room.
+ */
+const MAX_PINS_PER_ROOM = 10;
+
+/** One `pinned_messages` row → the shared `PinnedMessage` wire shape. */
+function pinRowToWire(p: typeof pinnedMessages.$inferSelect): PinnedMessage {
+  return {
+    id: p.id,
+    roomId: p.roomId,
+    messageId: p.messageId,
+    serverId: p.serverId,
+    pinnedByUserId: p.pinnedByUserId,
+    pinnedByDisplayName: p.pinnedByDisplayName,
+    pinnedAt: +p.pinnedAt,
+    sortOrder: p.sortOrder,
+    authorUserId: p.authorUserId,
+    authorCharacterId: p.authorCharacterId,
+    displayName: p.displayName,
+    kind: (p.kind as MessageKind | null) ?? null,
+    body: p.body,
+    color: p.color,
+    cmdCss: p.cmdCss,
+    sceneImageUrl: p.sceneImageUrl,
+    bodyHtml: p.bodyHtml,
+    origCreatedAt: p.origCreatedAt,
+  };
+}
+
+/**
+ * Read a room's full pin set (ascending by sortOrder, then pinnedAt) and map
+ * it to the wire shape. Used by the GET route and by the emit helper so the
+ * ordering the client renders is identical wherever the set is served.
+ */
+async function loadRoomPins(db: Db, roomId: string): Promise<PinnedMessage[]> {
+  const rows = await db
+    .select()
+    .from(pinnedMessages)
+    .where(eq(pinnedMessages.roomId, roomId))
+    .orderBy(asc(pinnedMessages.sortOrder), asc(pinnedMessages.pinnedAt));
+  return rows.map(pinRowToWire);
+}
+
+/**
+ * Broadcast the room's authoritative pin set to everyone in it. A single
+ * delta-free replace: the client swaps its cached pins for `roomId` wholesale
+ * (empty `pins: []` clears the strip). Kept as one payload per the contract —
+ * not a per-pin stream.
+ */
+async function emitRoomPins(io: Io, db: Db, roomId: string): Promise<void> {
+  const pins = await loadRoomPins(db, roomId);
+  io.to(`room:${roomId}`).emit("room:pins", { roomId, pins });
+}
+
+/**
+ * Tiered pin gate, mirrors the sticky/delete routes. Accepts either:
+ *   - `hasPermission(user, "pin_message")` — the sitewide grant (mods + admins
+ *     by default, plus any matrix / per-user override), OR
+ *   - `callerCanEditRoom` — the room owner or a room mod (or the site-wide
+ *     `edit_any_room_metadata` grant).
+ *
+ * A server owner/mod's authority over a sub-server room lands in
+ * `room_members.role`, so `callerCanEditRoom` already folds the per-server
+ * tier in — no separate serverModTier branch is needed for pins.
+ */
+async function canCallerPin(
+  db: Db,
+  user: { id: string; role: Role },
+  roomId: string,
+): Promise<boolean> {
+  if (await hasPermission(user, "pin_message", db)) return true;
+  return callerCanEditRoom(db, user, roomId);
+}
+
+/**
+ * Visibility gate for pinning / reading pins: the caller must be able to SEE
+ * the room's messages. Mirrors {@link registerBookmarkRoutes}'
+ * `canCallerSeeMessage`: whispers are never pinnable (private threads), and
+ * private-room messages require room membership. Returns the message row on
+ * success, null on any failure (merged 404/403 so private-room existence never
+ * leaks).
+ */
+async function canCallerPinMessage(db: Db, userId: string, messageId: string) {
+  const m = (await db.select().from(messages).where(eq(messages.id, messageId)).limit(1))[0];
+  if (!m) return null;
+  // Whispers are private conversations, not room furniture — never pinnable.
+  if (m.kind === "whisper") return null;
+  const room = (await db.select().from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
+  if (!room) return null;
+  if (room.type === "private") {
+    const member = (await db
+      .select()
+      .from(roomMembers)
+      .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, userId)))
+      .limit(1))[0];
+    if (!member) return null;
+  }
+  return m;
+}
+
+/** Can the caller merely SEE a room's pins (read gate for GET /rooms/:id/pins)?
+ *  Public rooms: any authenticated user. Private rooms: members only. */
+async function canCallerSeeRoomPins(db: Db, userId: string, roomId: string): Promise<boolean> {
+  const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+  if (!room) return false;
+  if (room.type !== "private") return true;
+  const member = (await db
+    .select()
+    .from(roomMembers)
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+    .limit(1))[0];
+  return !!member;
+}
 
 export function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): ChatMessage {
   // Mirrors the row→ChatMessage shape used in broadcast.ts; if either side
@@ -434,6 +556,18 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
+    // Auto-unpin: a removed message must not linger as a pinned card. The
+    // strip's frozen snapshot would otherwise keep showing the (now hidden)
+    // original body, defeating the moderation AND permanently eating a pin-cap
+    // slot. Drop any pin(s) for this message and re-broadcast the room's set.
+    // Runs BEFORE the socket-count early-return below so it happens even when
+    // no one is currently in the room. (`/trash` hard-delete + the retention
+    // janitor live in other modules and rely on the FK SET NULL instead — an
+    // orphaned pin there stays removable via the pin-id unpin path.)
+    const removedPins = await db
+      .delete(pinnedMessages)
+      .where(eq(pinnedMessages.messageId, m.id));
+    if (removedPins.changes > 0) await emitRoomPins(io, db, m.roomId);
     // Mod Log: a moderator removing someone ELSE's forum post (self-deletes
     // aren't moderation). No-op off forum boards.
     if (!isAuthor) {
@@ -853,5 +987,168 @@ export async function registerMessageRoutes(
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (updated) io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
     return { ok: true };
+  });
+
+  /**
+   * POST /messages/:id/pin — pin a chat message to the top of its room
+   * (migration 0316). Gate mirrors the tiered moderation gates above:
+   * the sitewide `pin_message` permission OR the room owner/mod (which also
+   * covers a server owner/mod, whose room authority lands in room_members).
+   *
+   * The pin carries a display SNAPSHOT frozen at pin time (author, body,
+   * styling, original createdAt) so the strip stays readable after the
+   * underlying message is edited or hard-deleted — the same convention
+   * bookmarks and reply previews use. Because pins live in their own table
+   * with `messageId` FK SET NULL, chat retention needs no changes.
+   *
+   * Guards: whispers are never pinnable; private-room messages require the
+   * caller be a room member (the visibility check); the per-room count is
+   * capped at {@link MAX_PINS_PER_ROOM}; re-pinning an already-pinned message
+   * is idempotent (the unique (roomId, messageId) index). On success the
+   * room's full pin set is re-broadcast via `room:pins`.
+   */
+  app.post<{ Params: { id: string } }>("/messages/:id/pin", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    // Visibility first (also loads the row + resolves the room). Whispers and
+    // messages the caller can't see are indistinguishable 404s so private-room
+    // existence never leaks.
+    const m = await canCallerPinMessage(db, me.id, req.params.id);
+    if (!m) { reply.code(404); return { error: "message not found or not visible" }; }
+    if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
+
+    // Authorization: sitewide pin_message, or room owner/mod (server
+    // owner/mod authority folds in here via room_members).
+    if (!(await canCallerPin(db, me, m.roomId))) { reply.code(403); return { error: "not allowed" }; }
+
+    // Idempotent: re-pinning an already-pinned message is a no-op (unique
+    // (roomId, messageId)). Re-broadcast so the caller's client still syncs.
+    const existing = (await db
+      .select()
+      .from(pinnedMessages)
+      .where(and(eq(pinnedMessages.roomId, m.roomId), eq(pinnedMessages.messageId, m.id)))
+      .limit(1))[0];
+    if (existing) {
+      await emitRoomPins(io, db, m.roomId);
+      return { ok: true, id: existing.id };
+    }
+
+    // Enforce the per-room cap (count only real rows for THIS room).
+    const countRow = (await db
+      .select({ n: sql<number>`count(*)` })
+      .from(pinnedMessages)
+      .where(eq(pinnedMessages.roomId, m.roomId)))[0];
+    if ((countRow?.n ?? 0) >= MAX_PINS_PER_ROOM) {
+      reply.code(409);
+      return { error: `This room already has the maximum of ${MAX_PINS_PER_ROOM} pinned messages.` };
+    }
+
+    // Next sortOrder = current max + 1 (append to the end of the strip).
+    const maxRow = (await db
+      .select({ mx: sql<number>`max(${pinnedMessages.sortOrder})` })
+      .from(pinnedMessages)
+      .where(eq(pinnedMessages.roomId, m.roomId)))[0];
+    const nextSort = (maxRow?.mx == null ? -1 : Number(maxRow.mx)) + 1;
+
+    // Snapshot the message content at pin time so the strip survives edits /
+    // hard-delete. `serverId` mirrors the room's owning server (null on the
+    // default server), matching the column's contract.
+    const room = (await db.select({ serverId: rooms.serverId }).from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
+    const id = nanoid();
+    await db.insert(pinnedMessages).values({
+      id,
+      roomId: m.roomId,
+      messageId: m.id,
+      serverId: room?.serverId ?? null,
+      pinnedByUserId: me.id,
+      pinnedByDisplayName: me.username,
+      sortOrder: nextSort,
+      authorUserId: m.userId,
+      authorCharacterId: m.characterId ?? null,
+      displayName: m.displayName,
+      kind: m.kind,
+      body: m.body,
+      color: m.color,
+      cmdCss: m.cmdCss ?? null,
+      sceneImageUrl: m.sceneImageUrl ?? null,
+      bodyHtml: m.bodyHtml ?? null,
+      origCreatedAt: +m.createdAt,
+    });
+
+    await emitRoomPins(io, db, m.roomId);
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "message_pin",
+      targetRoomId: m.roomId,
+      targetMessageId: m.id,
+      ...(m.userId ? { targetUserId: m.userId } : {}),
+      metadata: { pinId: id },
+    });
+    return { ok: true, id };
+  });
+
+  /**
+   * DELETE /messages/:id/pin — unpin a message from its room. Same tiered
+   * gate as pinning. Unpinning resolves the PIN ROW itself, never the
+   * underlying message, so a pin ALWAYS removable even after its source was
+   * hard-deleted (the FK sets `pinnedMessages.messageId` to NULL, which no
+   * `messageId = :id` lookup can ever match — that was the "un-unpinnable pin
+   * permanently eating a cap slot" bug).
+   *
+   * `:id` accepts EITHER identifier so both callers work:
+   *   - a live pin's SOURCE message id (the in-chat Pin/Unpin toggle + the
+   *     pins-strip button for pins whose message still exists), or
+   *   - the PIN row's own id (the pins-strip button for a pin whose source was
+   *     hard-deleted — its `messageId` is NULL, so only the pin id can find it).
+   * We try the messageId match first (the common live case), then fall back to
+   * the pin-id match. The room comes from the pin row, so a missing message is
+   * irrelevant. Re-broadcasts the room's pin set on success.
+   */
+  app.delete<{ Params: { id: string } }>("/messages/:id/pin", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+
+    const pin = (await db
+      .select()
+      .from(pinnedMessages)
+      .where(or(eq(pinnedMessages.messageId, req.params.id), eq(pinnedMessages.id, req.params.id)))
+      .limit(1))[0];
+    if (!pin) { reply.code(404); return { error: "not pinned" }; }
+    // Room is always taken from the pin row — the source message may be gone.
+    const roomId = pin.roomId;
+
+    if (!(await canCallerPin(db, me, roomId))) { reply.code(403); return { error: "not allowed" }; }
+
+    await db.delete(pinnedMessages).where(eq(pinnedMessages.id, pin.id));
+    await emitRoomPins(io, db, roomId);
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "message_unpin",
+      targetRoomId: roomId,
+      // Stamp the real source message id when it still exists; a hard-deleted
+      // source leaves `pin.messageId` NULL, so omit it rather than record the
+      // pin id in the message-id slot.
+      ...(pin.messageId ? { targetMessageId: pin.messageId } : {}),
+      metadata: { pinId: pin.id },
+    });
+    return { ok: true };
+  });
+
+  /**
+   * GET /rooms/:id/pins — the room's pinned-message set. Visibility-gated:
+   * public rooms are readable by any authenticated user, private rooms by
+   * members only. Used by the client to seed the pins strip on room open (the
+   * live `room:pins` broadcasts keep it current thereafter).
+   */
+  app.get<{ Params: { id: string } }>("/rooms/:id/pins", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    if (!(await canCallerSeeRoomPins(db, me.id, req.params.id))) {
+      reply.code(404);
+      return { error: "room not found or not visible" };
+    }
+    const pins = await loadRoomPins(db, req.params.id);
+    return { pins };
   });
 }

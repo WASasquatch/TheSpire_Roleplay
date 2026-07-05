@@ -1075,7 +1075,7 @@ export async function registerUsersRoutes(
 
     const { hashPassword } = await import("../auth/passwords.js");
     const hash = await hashPassword(body.newPassword);
-    await db.update(users).set({ passwordHash: hash }).where(eq(users.id, id));
+    await db.update(users).set({ passwordHash: hash, hasPassword: true }).where(eq(users.id, id));
 
     // Force-kick any live sessions so they have to re-auth.
     const sockets = await io.fetchSockets();

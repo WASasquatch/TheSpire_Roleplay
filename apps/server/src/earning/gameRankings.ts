@@ -76,7 +76,27 @@ export interface GameRankingsResponse {
   overall: OverallRankingRow[];
 }
 
+/**
+ * Short-TTL single-flight cache for the game-rankings build (mirrors
+ * rankings.ts). The public route is per-IP rate-capped, but this full
+ * `game_stats` scan + batched display-info fetch is process-global and
+ * expensive; memoizing the in-flight Promise per db collapses a fleet of
+ * pollers into ~1-2 passes per TTL and shares one query pass under
+ * concurrent cold load. Keyed by db so a fresh test db never serves stale rows.
+ */
+const GAME_RANKINGS_TTL_MS = 45_000;
+const gameRankingsCache = new Map<Db, { at: number; promise: Promise<GameRankingsResponse> }>();
+
 export async function buildGameRankings(db: Db): Promise<GameRankingsResponse> {
+  const cached = gameRankingsCache.get(db);
+  if (cached && Date.now() - cached.at < GAME_RANKINGS_TTL_MS) return cached.promise;
+  const promise = computeGameRankings(db);
+  gameRankingsCache.set(db, { at: Date.now(), promise });
+  promise.catch(() => gameRankingsCache.delete(db)); // don't memoize a failed pass
+  return promise;
+}
+
+async function computeGameRankings(db: Db): Promise<GameRankingsResponse> {
   // Pull all rows in one query; the table is small enough (one row
   // per identity per game kind) that even a multi-thousand-player
   // site comes out in the low-megabyte range. Filtering / ranking

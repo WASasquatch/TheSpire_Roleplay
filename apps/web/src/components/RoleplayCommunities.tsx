@@ -32,13 +32,21 @@ export function RoleplayCommunities({ onNavigate: _onNavigate }: { onNavigate?: 
 
   const loading = cards === null;
   const isEmpty = !loading && cards.length === 0;
+  // Actually "Top": rank by combined traffic (visits in + out), the same
+  // "Most active" order the full /top-communities board defaults to, then take
+  // the leading few. `fetchPublicAffiliates` returns them in no guaranteed
+  // order, so we sort here rather than trust the response.
+  const topCards = (cards ?? [])
+    .slice()
+    .sort((a, b) => b.clicksIn + b.clicksOut - (a.clicksIn + a.clicksOut))
+    .slice(0, 6);
 
   return (
-    <section aria-label="Top RP Communities" className={`w-full p-4 sm:p-5 ${SPLASH_PANEL} ${SPLASH_PANEL_HOVER}`}>
+    <section aria-label="Top Communities" className={`w-full p-4 sm:p-5 ${SPLASH_PANEL} ${SPLASH_PANEL_HOVER}`}>
       <header className="mb-3 text-center">
-        <h3 className="font-action text-lg text-keep-text">Top RP Communities</h3>
+        <h3 className="font-action text-lg text-keep-text">Top Communities</h3>
         <p className="mt-0.5 text-xs text-keep-muted">
-          Sister sites and partner communities. Give us a look, and list your own.
+          The most active communities in our network. Take a look, and list your own.
         </p>
       </header>
 
@@ -47,12 +55,12 @@ export function RoleplayCommunities({ onNavigate: _onNavigate }: { onNavigate?: 
       ) : isEmpty ? (
         <div className="rounded border border-dashed border-keep-rule bg-keep-panel/30 px-4 py-6 text-center">
           <p className="text-xs text-keep-muted">
-            No partner communities yet. Be the first to list yours.
+            No communities listed yet. Be the first to list yours.
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-3">
-          {cards.slice(0, 6).map((card) => (
+          {topCards.map((card) => (
             <AffiliateCard key={card.id} card={card} />
           ))}
         </div>

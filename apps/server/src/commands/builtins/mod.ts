@@ -1,6 +1,7 @@
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { nanoid } from "nanoid";
 import { isAdminRole, roleRank, type PermissionKey, type ServerModPermission, type ServerPermission } from "@thekeep/shared";
-import { bans, mutes, roomMembers, roomMods, rooms, users } from "../../db/schema.js";
+import { accountMutes, bans, mutes, roomMembers, roomMods, rooms, users } from "../../db/schema.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { areServersEnabled, getSettings } from "../../settings.js";
 import {
@@ -117,14 +118,14 @@ async function isKeymaster(ctx: CommandContext, userId: string): Promise<boolean
  */
 async function serverModTier(
   ctx: CommandContext,
-): Promise<{ isOwner: boolean; permissions: ServerPermission[]; serverOwnerUserId: string } | null> {
+): Promise<{ isOwner: boolean; permissions: ServerPermission[]; serverOwnerUserId: string; serverId: string } | null> {
   if (!areServersEnabled(await getSettings(ctx.db))) return null;
   const room = (await ctx.db.select({ serverId: rooms.serverId }).from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
   if (!room?.serverId) return null;
   const { serverAuthority } = await import("../../servers/authority.js");
   const a = await serverAuthority(ctx.db, ctx.user, room.serverId);
   if (!a.server || a.server.isSystem) return null;
-  return { isOwner: a.isOwner, permissions: a.permissions, serverOwnerUserId: a.server.ownerUserId };
+  return { isOwner: a.isOwner, permissions: a.permissions, serverOwnerUserId: a.server.ownerUserId, serverId: room.serverId };
 }
 
 /** Owner-implies-all check for a server moderation tier (mirrors serverCan). */
@@ -289,6 +290,25 @@ export const kickCommand: CommandHandler = {
 
 /* ---------------------- /mute /unmute ---------------------- */
 
+/**
+ * The REACH of a /mute or /unmute, following the ISSUER's authority — the
+ * widest tier they hold wins. Site staff act site-wide, server staff act across
+ * their whole server, everyone else (room owner/mod) acts on just this room.
+ * `serverId` is set only for "server" reach. Precedence mirrors
+ * callerCanModerateRoom; the caller passes the same site/server permission keys
+ * that gated the command so mute and unmute resolve the tier identically.
+ */
+async function muteReach(
+  ctx: CommandContext,
+  siteKey: PermissionKey,
+  serverKey: ServerModPermission,
+): Promise<{ scope: "site" | "server" | "room"; serverId: string | null }> {
+  if (await hasPermission(ctx.user, siteKey, ctx.db)) return { scope: "site", serverId: null };
+  const tier = await serverModTier(ctx);
+  if (tier && serverTierCan(tier, serverKey)) return { scope: "server", serverId: tier.serverId };
+  return { scope: "room", serverId: null };
+}
+
 export const muteCommand: CommandHandler = {
   name: "mute",
   aliases: ["silence"],
@@ -330,25 +350,56 @@ export const muteCommand: CommandHandler = {
     }
 
     const until = new Date(Date.now() + ms);
-    await ctx.db
-      .insert(mutes)
-      .values({
-        roomId: ctx.roomId,
+    // Reach follows the issuer's authority (site > server > room). A site/server
+    // admin muting silences the target account across that whole scope; a room
+    // owner/mod's mute stays room-local. Every scope hits all the target's tabs.
+    const reach = await muteReach(ctx, "mute_user", "mute_member");
+    if (reach.scope === "room") {
+      await ctx.db
+        .insert(mutes)
+        .values({
+          roomId: ctx.roomId,
+          userId: target.id,
+          until,
+          reason: reason || null,
+          issuedById: ctx.user.id,
+        })
+        .onConflictDoUpdate({
+          target: [mutes.roomId, mutes.userId],
+          set: { until, reason: reason || null, issuedById: ctx.user.id },
+        });
+    } else {
+      // Wider mute. Replace any existing same-scope row for this target so a
+      // re-mute just resets the timer (the partial UNIQUE indexes also allow
+      // only one row per scope). Site scope keeps serverId NULL; server scope
+      // pins it to this room's server.
+      await ctx.db.delete(accountMutes).where(
+        and(
+          eq(accountMutes.userId, target.id),
+          eq(accountMutes.scope, reach.scope),
+          reach.scope === "server" && reach.serverId
+            ? eq(accountMutes.serverId, reach.serverId)
+            : isNull(accountMutes.serverId),
+        ),
+      );
+      await ctx.db.insert(accountMutes).values({
+        id: nanoid(),
         userId: target.id,
+        scope: reach.scope,
+        serverId: reach.scope === "server" ? reach.serverId : null,
         until,
         reason: reason || null,
         issuedById: ctx.user.id,
-      })
-      .onConflictDoUpdate({
-        target: [mutes.roomId, mutes.userId],
-        set: { until, reason: reason || null, issuedById: ctx.user.id },
       });
+    }
 
+    const scopeLabel =
+      reach.scope === "site" ? " across the site" : reach.scope === "server" ? " across this server" : "";
     await addMessage(ctx, {
       kind: "system",
       body: reason
-        ? `${ctx.user.displayName} muted ${target.username} for ${formatDuration(ms)}: ${reason}`
-        : `${ctx.user.displayName} muted ${target.username} for ${formatDuration(ms)}.`,
+        ? `${ctx.user.displayName} muted ${target.username} for ${formatDuration(ms)}${scopeLabel}: ${reason}`
+        : `${ctx.user.displayName} muted ${target.username} for ${formatDuration(ms)}${scopeLabel}.`,
     });
     await recordAudit(ctx.db, {
       actorUserId: ctx.user.id,
@@ -356,7 +407,7 @@ export const muteCommand: CommandHandler = {
       targetUserId: target.id,
       targetRoomId: ctx.roomId,
       reason: reason || null,
-      metadata: { durationMs: ms },
+      metadata: { durationMs: ms, scope: reach.scope, ...(reach.serverId ? { serverId: reach.serverId } : {}) },
     });
   },
 };
@@ -373,11 +424,38 @@ export const unmuteCommand: CommandHandler = {
     if (!name) return notice(ctx, "EMPTY", "Usage: /unmute <username>");
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
-    const r = await ctx.db
+    // Lift every mute affecting this room that the issuer's authority permits:
+    // the room mute always (they passed the room gate); the server-wide mute if
+    // they're server/site staff; the site-wide mute if they're site staff. A
+    // room mod can't clear a wider mute they lack the authority to have set.
+    const reach = await muteReach(ctx, "unmute_user", "unmute_member");
+    let lifted = 0;
+    lifted += (await ctx.db
       .delete(mutes)
-      .where(and(eq(mutes.roomId, ctx.roomId), eq(mutes.userId, target.id)));
-    if (r.changes === 0) {
-      return notice(ctx, "NOT_MUTED", `${target.username} isn't muted in this room.`);
+      .where(and(eq(mutes.roomId, ctx.roomId), eq(mutes.userId, target.id)))).changes;
+    if (reach.scope === "server" || reach.scope === "site") {
+      const serverId = reach.serverId ?? (await ctx.db
+        .select({ serverId: rooms.serverId })
+        .from(rooms)
+        .where(eq(rooms.id, ctx.roomId))
+        .limit(1))[0]?.serverId ?? null;
+      if (serverId) {
+        lifted += (await ctx.db.delete(accountMutes).where(
+          and(
+            eq(accountMutes.userId, target.id),
+            eq(accountMutes.scope, "server"),
+            eq(accountMutes.serverId, serverId),
+          ),
+        )).changes;
+      }
+    }
+    if (reach.scope === "site") {
+      lifted += (await ctx.db.delete(accountMutes).where(
+        and(eq(accountMutes.userId, target.id), eq(accountMutes.scope, "site")),
+      )).changes;
+    }
+    if (lifted === 0) {
+      return notice(ctx, "NOT_MUTED", `${target.username} isn't muted here.`);
     }
     await addMessage(ctx, {
       kind: "system",

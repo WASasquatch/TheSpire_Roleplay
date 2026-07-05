@@ -354,7 +354,10 @@ export async function registerEmoticonRoutes(
    * exist only as moderation history with their image files
    * already deleted.
    */
-  app.get("/emoticons", async (req) => {
+  app.get("/emoticons", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (req) => {
+    // Per-IP cap: the picker fetches the sheet list occasionally (open
+    // picker / server switch), never on a poll, so 60/min is very generous
+    // for a human and still caps a refetch loop at 1/s.
     // LEFT JOIN users so community sheets ship with the creator's
     // master username for "by @<name>" display in the picker. System
     // sheets (createdByUserId IS NULL) join-miss and stay anonymous.
@@ -531,7 +534,11 @@ export async function registerEmoticonRoutes(
   });
 
   /* ---------- Reactions: toggle ---------- */
-  app.post<{ Body: unknown }>("/reactions/toggle", async (req, reply) => {
+  // Per-IP cap: an enthusiastic user clicking reactions during a lively
+  // chat could plausibly toggle ~1/s in bursts, so 60/min covers that while
+  // blocking a script spamming the reactions table. Auth-gated below (401
+  // without a session), so anonymous abuse is bounced before this even bites.
+  app.post<{ Body: unknown }>("/reactions/toggle", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
 

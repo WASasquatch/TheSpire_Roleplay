@@ -45,4 +45,9 @@ export interface BookmarkedMessage {
    *  on the rendered body in the bookmarks viewer so the preview matches
    *  what the message looked like in chat. */
   cmdCss?: string | null;
+  /** True when the user has archived this bookmark (soft-hidden from the
+   *  main list). Archived bookmarks stay saved and can be surfaced via a
+   *  dedicated filter; absent/false = active. Mirrors bookmarks.archivedAt
+   *  (migration 0314). */
+  archived?: boolean;
 }

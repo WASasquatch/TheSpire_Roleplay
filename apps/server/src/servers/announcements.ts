@@ -35,7 +35,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
+import type { ClientToServerEvents, Role, ServerToClientEvents } from "@thekeep/shared";
 import {
   ANNOUNCEMENT_BANNER_BODY_MAX,
   COLOR_TOKEN_OR_HEX_RE,
@@ -110,7 +110,7 @@ async function gate(
   reply: FastifyReply,
   db: Db,
   serverId: string,
-): Promise<{ meId: string; serverId: string } | null> {
+): Promise<{ meId: string; meRole: Role; serverId: string } | null> {
   if (!areServersEnabled(await getSettings(db))) {
     reply.code(404);
     return null;
@@ -130,7 +130,12 @@ async function gate(
     reply.code(403);
     return null;
   }
-  return { meId: me.id, serverId: a.server.id };
+  // Surface the caller's SITE-WIDE role so the write paths can run the same
+  // author UI-route token gate as admin/announcements.ts. `manage_announcements`
+  // is a per-server grant a community owner/mod can hold with only a normal
+  // site role, so an author-gated chip (e.g. `{admin}`) must still be rejected
+  // by the caller's real site role — not silently persisted with a forged label.
+  return { meId: me.id, meRole: me.role, serverId: a.server.id };
 }
 
 /**
@@ -174,6 +179,15 @@ export async function registerServerAnnouncementRoutes(
       const g = await gate(req, reply, db, req.params.id);
       if (!g) return { error: "forbidden" };
       const body = bannerCreateSchema.parse(req.body);
+      // UI route token guard, reject author-gated shortcuts the caller
+      // can't use (e.g. a community manager trying to embed
+      // `{modal:admin}` in a banner). Unknown tokens pass through as
+      // literal text; only KNOWN tokens with insufficient role fail.
+      const tokenCheck = validateAuthorUiRouteTokens(body.bodyHtml, g.meRole);
+      if (!tokenCheck.ok) {
+        reply.code(400);
+        return { error: tokenCheck.reason };
+      }
       const id = nanoid();
       await db.insert(announcementBanners).values({
         id,
@@ -213,6 +227,13 @@ export async function registerServerAnnouncementRoutes(
       if (!existing) {
         reply.code(404);
         return { error: "not found" };
+      }
+      if (body.bodyHtml !== undefined) {
+        const tokenCheck = validateAuthorUiRouteTokens(body.bodyHtml, g.meRole);
+        if (!tokenCheck.ok) {
+          reply.code(400);
+          return { error: tokenCheck.reason };
+        }
       }
       await db
         .update(announcementBanners)
@@ -314,6 +335,20 @@ export async function registerServerAnnouncementRoutes(
           return { error: "target room not found in this server" };
         }
       }
+      // Validate UI route tokens in BOTH the html + markdown bodies,
+      // the markdown is what the editor round-trips, the html is what
+      // actually broadcasts. A token gated on `admin` rejects when a
+      // mod-level delegate tries to schedule it (banner manager grant
+      // does NOT imply the right to drop an `{modal:admin}` chip into
+      // every room).
+      const bodyTokenCheck = validateAuthorUiRouteTokens(
+        `${body.bodyMarkdown}\n${body.bodyHtml}`,
+        g.meRole,
+      );
+      if (!bodyTokenCheck.ok) {
+        reply.code(400);
+        return { error: bodyTokenCheck.reason };
+      }
       const id = nanoid();
       // Recurring rows arm one interval AFTER creation (an "every 3h" reads as
       // "first ping 3h from now") so a test save doesn't fire immediately.
@@ -396,6 +431,14 @@ export async function registerServerAnnouncementRoutes(
         if (!room) {
           reply.code(400);
           return { error: "target room not found in this server" };
+        }
+      }
+      if (body.bodyHtml !== undefined || body.bodyMarkdown !== undefined) {
+        const combined = `${body.bodyMarkdown ?? ""}\n${body.bodyHtml ?? ""}`;
+        const tokenCheck = validateAuthorUiRouteTokens(combined, g.meRole);
+        if (!tokenCheck.ok) {
+          reply.code(400);
+          return { error: tokenCheck.reason };
         }
       }
       if (body.bodyHtml !== undefined) patch.bodyHtml = sanitizeBio(body.bodyHtml);

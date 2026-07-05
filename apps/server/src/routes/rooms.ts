@@ -55,7 +55,20 @@ export async function registerRoomsRoutes(
   db: Db,
   io: Io,
 ): Promise<void> {
-  app.get<{ Querystring: { serverId?: string } }>("/rooms", async (req) => {
+  app.get<{ Querystring: { serverId?: string } }>(
+    "/rooms",
+    // Per-IP DoS backstop. This endpoint rebuilds the whole room tree (a
+    // per-room occupant fan-out) and was previously unrate-limited, so a
+    // client stuck in a refetch/reconnect loop could hammer it at ~100 req/s
+    // and take the synchronous-SQLite event loop down for everyone. Legit use
+    // is a 20s poll plus presence-debounced bumps. Headroom note: the client's
+    // presence-storm refetch is 400ms-debounced (~150/min worst case from ONE
+    // tab), and the counter is shared per-IP across tabs + NAT/CGNAT peers, so
+    // 240/min leaves room for a busy shared IP during a mass-reconnect storm; a
+    // runaway is still capped at 4/s and its fetch just returns the last-good
+    // tree client-side.
+    { config: { rateLimit: { max: 240, timeWindow: "1 minute" } } },
+    async (req) => {
     const me = await getSessionUser(req, db);
 
     // Optional per-server scoping (multi-server lift). The web rail and the
@@ -327,6 +340,11 @@ export async function registerRoomsRoutes(
    */
   app.get<{ Params: { id: string }; Querystring: { q?: string; limit?: string } }>(
     "/rooms/:id/messages/search",
+    // Per-IP cap. Search is user-typed (the SearchBar), even fast debounced
+    // type-search won't sustain more than one query per few hundred ms; 30/min
+    // = one search every 2s sustained, ample for interactive search while it
+    // blocks a LIKE-scan hammer. Matches the earning-rankings cap (comparably heavy).
+    { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
     async (req, reply) => {
       const me = await getSessionUser(req, db);
       if (!me) { reply.code(401); return { error: "auth" }; }
@@ -669,7 +687,14 @@ export async function registerRoomsRoutes(
   app.get<{
     Params: { id: string };
     Querystring: { ms?: string; tz?: string; theme?: string };
-  }>("/rooms/:id/export", async (req, reply) => {
+  }>(
+    "/rooms/:id/export",
+    // Per-IP cap. Export builds a full HTML log over an indexed range (capped
+    // at EXPORT_MAX_MESSAGES) — a deliberate, occasional user action (the
+    // /export command), never polled. 10/min mirrors /stories/:id/reports and
+    // is plenty for re-exporting a couple of windows while throttling a download loop.
+    { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];

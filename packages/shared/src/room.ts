@@ -90,6 +90,18 @@ export interface RoomSummary {
    * Room Info bar/pullout so a late joiner sees the active beat.
    */
   currentSceneTitle: string | null;
+  /**
+   * Per-channel notification/read hints (migration 0318). Optional so older
+   * server bundles that don't compute them omit them (the client treats absent
+   * as "muted false / 0 unread / no mention"). `muted` is the caller's per-room
+   * mute (`per_room_notify_prefs`); `unread` is the caller's unread count for
+   * this room past their `room_reads` high-water mark; `hasMention` is true when
+   * any unread row @mentions the caller. Live deltas ride the `room:unread`
+   * socket event.
+   */
+  muted?: boolean;
+  unread?: number;
+  hasMention?: boolean;
 }
 
 /**

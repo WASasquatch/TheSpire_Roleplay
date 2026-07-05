@@ -18,7 +18,7 @@
  * Icon-only buttons each carry a `title` + `aria-label` (the rail is all
  * glyphs, no text labels).
  */
-import { useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Compass, Plus, Settings as SettingsIcon } from "lucide-react";
 import type { ServerSummary } from "../lib/servers.js";
 import { cropStyleFor } from "../lib/avatarCrop.js";
@@ -64,9 +64,92 @@ export function ServerRail({
   // there; once joined they appear on the rail.
   const mine = useMemo(() => (servers ?? []).filter(isMine), [servers]);
 
+  // Fade in servers that NEWLY appear on the rail — e.g. a creation/membership
+  // approval arriving live via `servers:changed` — instead of popping in. Diff
+  // the current id set against the previous render's; brand-new ids get a
+  // one-shot fade. A pure-opacity fade is calm-safe, so it applies regardless of
+  // Reduce Motion (this is a requested appearance cue, not an idle transition).
+  const prevIdsRef = useRef<Set<string> | null>(null);
+  const [justAdded, setJustAdded] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    const ids = new Set(mine.map((s) => s.id));
+    const prev = prevIdsRef.current;
+    prevIdsRef.current = ids;
+    if (!prev) return; // first paint: don't animate the initial list
+    const added = [...ids].filter((id) => !prev.has(id));
+    if (added.length === 0) return;
+    setJustAdded((cur) => new Set([...cur, ...added]));
+    const t = window.setTimeout(() => {
+      setJustAdded((cur) => {
+        const next = new Set(cur);
+        for (const id of added) next.delete(id);
+        return next;
+      });
+    }, 900);
+    return () => window.clearTimeout(t);
+  }, [mine]);
+
+  // Per-user rail order (Discord-style drag-to-reorder): fetched once, persisted
+  // on each drop. Servers absent from the saved order keep the rail's default
+  // (listServers) order after the arranged ones. Private to this user.
+  const [order, setOrder] = useState<string[]>([]);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    fetch("/me/server-order", { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { order: [] }))
+      .then((j: { order?: string[] }) => { if (alive && Array.isArray(j.order)) setOrder(j.order); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const orderedMine = useMemo(() => {
+    if (order.length === 0) return mine;
+    const pos = new Map(order.map((id, i) => [id, i] as const));
+    // Ordered ids first (in saved sequence); the rest keep their default order.
+    return mine
+      .map((s, i) => ({ s, i }))
+      .sort((a, b) => {
+        const pa = pos.get(a.s.id);
+        const pb = pos.get(b.s.id);
+        if (pa != null && pb != null) return pa - pb;
+        if (pa != null) return -1;
+        if (pb != null) return 1;
+        return a.i - b.i;
+      })
+      .map((x) => x.s);
+  }, [mine, order]);
+
+  function persistOrder(next: string[]) {
+    setOrder(next);
+    void fetch("/me/server-order", {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order: next }),
+    }).catch(() => {});
+  }
+
+  function dropOn(targetId: string) {
+    const src = dragId;
+    setDragId(null);
+    setOverId(null);
+    if (!src || src === targetId) return;
+    const ids = orderedMine.map((s) => s.id);
+    const from = ids.indexOf(src);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    const moved = ids.splice(from, 1)[0];
+    if (moved === undefined) return;
+    ids.splice(to, 0, moved);
+    persistOrder(ids);
+  }
+
   return (
     <nav
       aria-label="Servers"
+      data-tour="server-rail"
       className="flex w-[4.5rem] shrink-0 flex-col items-center gap-2.5 border-l border-keep-rule bg-keep-panel/40 py-2.5"
     >
       <div className="flex min-h-0 flex-1 flex-col items-center gap-2.5 overflow-y-auto overflow-x-hidden">
@@ -77,14 +160,30 @@ export function ServerRail({
             <div className="h-12 w-12 animate-pulse rounded-full bg-keep-rule/20" aria-hidden="true" />
           </>
         ) : (
-          mine.map((s) => (
-            <ServerIcon
+          orderedMine.map((s) => (
+            <div
               key={s.id}
-              server={s}
-              active={currentServerId === s.id}
-              onClick={() => onSelect(s)}
-              onOpenSettings={onOpenSettings && canManage(s) ? () => onOpenSettings(s) : undefined}
-            />
+              draggable
+              onDragStart={(e) => { setDragId(s.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", s.id); }}
+              onDragEnter={() => setOverId(s.id)}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+              onDragLeave={() => setOverId((cur) => (cur === s.id ? null : cur))}
+              onDrop={(e) => { e.preventDefault(); dropOn(s.id); }}
+              onDragEnd={() => { setDragId(null); setOverId(null); }}
+              className={[
+                "w-full transition-opacity",
+                justAdded.has(s.id) ? "tk-fade-in" : "",
+                dragId === s.id ? "opacity-40" : "",
+                overId === s.id && dragId && dragId !== s.id ? "rounded-lg bg-keep-action/15" : "",
+              ].filter(Boolean).join(" ")}
+            >
+              <ServerIcon
+                server={s}
+                active={currentServerId === s.id}
+                onClick={() => onSelect(s)}
+                onOpenSettings={onOpenSettings && canManage(s) ? () => onOpenSettings(s) : undefined}
+              />
+            </div>
           ))
         )}
       </div>
@@ -98,6 +197,7 @@ export function ServerRail({
         <button
           type="button"
           onClick={onDiscover}
+          data-tour="server-rail-discover-btn"
           title={canApply ? "Discover servers, or apply to create your own" : "Discover servers"}
           aria-label={canApply ? "Discover servers, or apply to create your own" : "Discover servers"}
           className="flex h-12 w-12 items-center justify-center rounded-full border border-keep-action/50 bg-keep-action/10 text-keep-action transition-all hover:bg-keep-action/20"

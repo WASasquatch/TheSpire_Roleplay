@@ -189,6 +189,12 @@ export function NotificationCenter({
       void markNotificationsRead([n.id]).then((b) => setNotifBadge(b.unread, b.unreadByServer)).catch(() => {});
     }
     setOpen(false);
+    // Deep-link via App's `onOpen` (→ openNotifTarget). Community-event reminders
+    // are handled there too: openNotifTarget's "event" case switches to the
+    // owning server first, THEN dispatches OPEN_SERVER_EVENT so ServerEventsPanel
+    // opens on the event once the correct server's list is loading. Dispatching
+    // here as well would fire before the server switch (wrong server) and double
+    // up, so we route everything through the single App path.
     onOpen(n);
   }
 

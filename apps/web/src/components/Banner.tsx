@@ -670,11 +670,13 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
         <ConnectionOrb />
       </nav>
 
-      {/* Mobile hamburger trigger. The same actions live in a dropdown
-          panel underneath the header so we don't overflow the narrow
-          banner with a strip of inline links. `relative z-10` floats it over
-          the banner scrim; it stays top-right in the (shorter) mobile bar. */}
+      {/* Mobile controls: events + notifications first, THEN the hamburger
+          menu trigger (its dropdown panel lives underneath the header so we
+          don't overflow the narrow banner), then the connection orb. The
+          hamburger sits to the RIGHT of events/notifications, not the left.
+          `relative z-10` floats the row over the banner scrim. */}
       <div className={`flex items-center gap-2 lg:hidden ${hasServerBanner ? "relative z-10" : ""}`}>
+        {notificationBell}
         <button
           type="button"
           onClick={() => setMenuOpen((o) => !o)}
@@ -685,7 +687,6 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
         >
           {menuOpen ? "✕" : "☰"}
         </button>
-        {notificationBell}
         <ConnectionOrb />
       </div>
 

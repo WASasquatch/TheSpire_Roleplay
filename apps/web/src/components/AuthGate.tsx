@@ -1,14 +1,14 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Eye, EyeOff } from "lucide-react";
 import DOMPurify from "dompurify";
-import { VERSION } from "@thekeep/shared";
-import { useChat } from "../state/store.js";
+import { VERSION, isDarkPalette, type Role } from "@thekeep/shared";
+import { useChat, type AuthMe } from "../state/store.js";
 import { readReturnForum } from "./ForumPublicLanding.js";
 import { setSessionToken } from "../lib/http.js";
 import { markLoginIntent } from "../lib/socket.js";
+import { GoogleFinishSignup } from "./GoogleFinishSignup.js";
 import { resolveSplashTheme, splashBgClass, themeStyle } from "../lib/theme.js";
-import { isDarkPalette } from "@thekeep/shared";
 
 const PROJECT_URL = "https://github.com/WASasquatch/TheSpire_Roleplay";
 
@@ -487,6 +487,127 @@ interface AuthGateProps {
   onNavigate?: (path: string) => void;
 }
 
+/**
+ * The auth bundle returned by /auth/login, /auth/register, and the two
+ * Google endpoints (/auth/google/exchange + /auth/google/finish). All four
+ * hand back the same shape, so one applier keeps the token-store + setMe
+ * mapping in a single place instead of re-typing the ~9-field map at every
+ * call site. Fields mirror what the login branch reads below.
+ */
+type SetMe = (me: AuthMe | null) => void;
+
+/**
+ * Persist the session token, mark the login as intentional (so the socket
+ * fires the "X has connected." broadcast on its next handshake), and flip
+ * `me` from the returned bundle. Shared by the password forms AND the Google
+ * exchange/finish landings so every entry path lands in chat identically.
+ */
+function applyAuthBundle(bundle: unknown, setMe: SetMe): void {
+  const j = (bundle ?? {}) as {
+    sessionToken?: unknown;
+    id?: string;
+    username?: string;
+    role?: string;
+    permissions?: unknown;
+    incognitoMode?: unknown;
+    incognitoAlias?: unknown;
+    incognitoCharacterId?: unknown;
+    emailVerifiedAt?: unknown;
+    emailVerificationEnabled?: unknown;
+    emailVerificationMode?: unknown;
+  };
+  // Persist the per-tab bearer token before flipping `me`: the moment
+  // AuthGate unmounts, the chat shell fires its mount-time /me/* fetches
+  // and they need the Authorization header already in place.
+  if (typeof j.sessionToken === "string") setSessionToken(j.sessionToken);
+  markLoginIntent();
+  setMe({
+    id: j.id as string,
+    username: j.username as string,
+    // The server returns role:"masteradmin" for the first registrant
+    // (bootstrap). Trust it so the Admin button appears without a reload.
+    role: (j.role ?? "user") as Role,
+    permissions: Array.isArray(j.permissions) ? (j.permissions as AuthMe["permissions"]) : [],
+    incognitoMode: j.incognitoMode === true,
+    incognitoAlias: typeof j.incognitoAlias === "string" ? j.incognitoAlias : null,
+    incognitoCharacterId: typeof j.incognitoCharacterId === "string" ? j.incognitoCharacterId : null,
+    emailVerifiedAt: typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null,
+    emailVerificationEnabled: j.emailVerificationEnabled === true,
+    emailVerificationMode: j.emailVerificationMode === "block" ? "block" : "nudge",
+  });
+}
+
+/**
+ * Google's four-color "G" glyph, inline SVG so it renders under the prod CSP
+ * (no external image request) and stays crisp at any size. Marked aria-hidden;
+ * the button carries the accessible label.
+ */
+function GoogleGlyph() {
+  return (
+    <svg viewBox="0 0 48 48" className="h-4 w-4 shrink-0" aria-hidden="true">
+      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z" />
+      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z" />
+      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z" />
+      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z" />
+    </svg>
+  );
+}
+
+/**
+ * "Continue with Google" button + an "or" rule. Rendered on both the login
+ * and register views when the admin has Google sign-in enabled. This is a
+ * full-page redirect (NOT a fetch): OAuth is a browser navigation round-trip
+ * to Google's consent screen and back, not an XHR. `mode` distinguishes a
+ * fresh login/signup from a link-existing-account flow so the server can
+ * branch its callback.
+ */
+export function GoogleAuthButton({ mode }: { mode: "login" | "link" }) {
+  return (
+    <>
+      <div className="my-3 flex items-center gap-3 text-[10px] uppercase tracking-[0.25em] text-keep-muted">
+        <span className="h-px flex-1 bg-keep-rule/60" />
+        or
+        <span className="h-px flex-1 bg-keep-rule/60" />
+      </div>
+      <button
+        type="button"
+        onClick={() => { window.location.href = `/auth/google/start?mode=${mode}`; }}
+        aria-label="Continue with Google"
+        className="flex w-full items-center justify-center gap-2 rounded border border-keep-border bg-keep-bg py-2 text-sm font-semibold tracking-wide text-keep-text hover:bg-keep-panel"
+      >
+        <GoogleGlyph />
+        Continue with Google
+      </button>
+    </>
+  );
+}
+
+/**
+ * Classify the current URL against the three Google OAuth client landings.
+ * Returns null for every other URL (the common case) so callers cheaply skip.
+ *   - /auth/google/done?code=…   → exchange the code, sign straight in
+ *   - /auth/google/finish?code=… → show the finish-signup screen (new user)
+ */
+export function readGoogleLanding(): { kind: "done" | "finish"; code: string } | null {
+  if (typeof window === "undefined") return null;
+  const { pathname, search } = window.location;
+  const kind =
+    pathname === "/auth/google/done" ? "done" :
+    pathname === "/auth/google/finish" ? "finish" :
+    null;
+  if (!kind) return null;
+  const code = new URLSearchParams(search).get("code");
+  if (!code) return null;
+  return { kind, code };
+}
+
+/** Strip the Google landing path (+ its `code`) from the address bar so a
+ *  refresh can't replay a now-consumed single-use code. Resets to "/". */
+function clearGoogleLandingUrl(): void {
+  if (typeof window === "undefined") return;
+  window.history.replaceState(null, "", "/");
+}
+
 export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "login", onNavigate }: AuthGateProps = {}) {
   const [mode, setMode] = useState<"login" | "register">(initialMode);
   // Keep local mode in sync with `initialMode` so a popstate-driven URL
@@ -542,6 +663,61 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
   // When the admin closes registration, snap any stale "register" mode back
   // to "login" so the form can't show fields that the server will reject.
   if (!branding.registrationOpen && mode === "register") setMode("login");
+
+  // Google OAuth client landing, classified once from the URL. Two shapes
+  // arrive after Google returns and the server hands back a single-use code:
+  //   - "done"   → an existing/linked account: exchange the code straight
+  //                for a session (no user input needed) and enter chat.
+  //   - "finish" → a brand-new Google user: render the finish-signup screen
+  //                (username + disclaimers) which redeems the code itself.
+  // Read via lazy init so it's captured before any replaceState we do below.
+  const [googleLanding] = useState(() => readGoogleLanding());
+  // Guards the one-shot exchange so React 18 StrictMode's double-invoke (or a
+  // re-render) can't POST a single-use code twice. A ref, not state, so it
+  // flips synchronously before the async fetch is even in flight.
+  const exchangeStartedRef = useRef(false);
+
+  // "done" landing: POST the code to /auth/google/exchange and, on success,
+  // run the same token-store + setMe handoff the login form uses. On failure
+  // strip the URL and drop the user on the login form with an explanation
+  // (the code is single-use, so there's nothing to retry in place).
+  useEffect(() => {
+    if (googleLanding?.kind !== "done") return;
+    if (exchangeStartedRef.current) return;
+    exchangeStartedRef.current = true;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/auth/google/exchange", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: googleLanding.code }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(
+            () => ({} as { error?: string; issues?: Array<{ path?: string; message: string }> }),
+          );
+          const firstIssue = body.issues?.[0];
+          throw new Error(
+            (firstIssue ? firstIssue.message : null) ?? body.error ?? "Google sign-in failed. Please try again.",
+          );
+        }
+        const bundle = await res.json();
+        if (cancelled) return;
+        // Strip the single-use code from the URL BEFORE applyAuthBundle flips
+        // `me` (which unmounts this gate), so a refresh can't replay it.
+        clearGoogleLandingUrl();
+        setKickReason(null);
+        applyAuthBundle(bundle, setMe);
+      } catch (err) {
+        if (cancelled) return;
+        clearGoogleLandingUrl();
+        setError(err instanceof Error ? err.message : "Google sign-in failed. Please try again.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [googleLanding, setMe, setKickReason]);
 
   // Fetch a fresh captcha when entering register mode (or after a failed
   // submit consumed the previous one). Tokens are single-use server-side,
@@ -613,32 +789,10 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             : null;
           throw new Error(detail ?? body.error ?? "register failed");
         }
-        const j = await res.json();
-        // Persist the per-tab bearer token before flipping `me`, the
-        // moment AuthGate unmounts, the chat shell fires its mount-time
-        // /me/profile + /me/dms fetches and they need the header
-        // already in place.
-        if (typeof j.sessionToken === "string") setSessionToken(j.sessionToken);
-        // Mark this as an intentional login. The socket's auth callback
-        // reads (and clears) the marker on its next handshake, passing
-        // `intent: "login"` so the server fires the "X has connected."
-        // chat broadcast. Subsequent reconnects after mobile suspend /
-        // network blip don't have the marker and stay silent.
-        markLoginIntent();
-        // The server returns role:"masteradmin" for the very first registrant
-        // (bootstrap path). Trust the server response so the Admin button
-        // appears immediately without requiring a page reload.
-        setMe({
-          id: j.id,
-          username: j.username,
-          role: j.role ?? "user",
-          permissions: Array.isArray(j.permissions) ? j.permissions : [],
-          incognitoMode: j.incognitoMode === true,
-          incognitoAlias: typeof j.incognitoAlias === "string" ? j.incognitoAlias : null,
-          emailVerifiedAt: typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null,
-          emailVerificationEnabled: j.emailVerificationEnabled ?? false,
-          emailVerificationMode: j.emailVerificationMode === "block" ? "block" : "nudge",
-        });
+        // Persist the token, mark the login intentional (so the socket
+        // fires "X has connected." on its next handshake), and flip `me`.
+        // Shared with login + the Google landings via applyAuthBundle.
+        applyAuthBundle(await res.json(), setMe);
       } else {
         const res = await fetch("/auth/login", {
           method: "POST",
@@ -654,21 +808,8 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             : null;
           throw new Error(detail ?? body.error ?? "login failed");
         }
-        const j = await res.json();
-        if (typeof j.sessionToken === "string") setSessionToken(j.sessionToken);
-        // See the register branch above for the same rationale.
-        markLoginIntent();
-        setMe({
-          id: j.id,
-          username: j.username,
-          role: j.role,
-          permissions: Array.isArray(j.permissions) ? j.permissions : [],
-          incognitoMode: j.incognitoMode === true,
-          incognitoAlias: typeof j.incognitoAlias === "string" ? j.incognitoAlias : null,
-          emailVerifiedAt: typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null,
-          emailVerificationEnabled: j.emailVerificationEnabled ?? false,
-          emailVerificationMode: j.emailVerificationMode === "block" ? "block" : "nudge",
-        });
+        // Same token-store + setMe handoff as the register branch above.
+        applyAuthBundle(await res.json(), setMe);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "error");
@@ -711,6 +852,41 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
       ? true
       : accepted && acceptedAgeMature && !!captcha && captchaAnswer.trim() !== ""
   );
+
+  // "finish" landing: hand off to the dedicated finish-signup screen (it
+  // renders its own SplashShell). Collects the username + disclaimers and
+  // redeems the pending code, then runs the same bundle handoff on success.
+  // Placed here (after every hook) so the early return doesn't sit between
+  // hook calls, keeping hook order stable across renders. `googleLanding` is
+  // captured once at mount and never mutated, so this branch is consistent.
+  if (googleLanding?.kind === "finish") {
+    return (
+      <GoogleFinishSignup
+        code={googleLanding.code}
+        onAuthenticated={(bundle) => {
+          clearGoogleLandingUrl();
+          setKickReason(null);
+          applyAuthBundle(bundle, setMe);
+        }}
+      />
+    );
+  }
+
+  // "done" landing in flight: the exchange effect above is redeeming the
+  // code. Show a calm "signing you in" indicator instead of the login form
+  // (which would flash confusingly). On success `me` flips and this gate
+  // unmounts; on failure `error` is set and we fall through to the form so
+  // the message renders in its usual slot with a retry path.
+  if (googleLanding?.kind === "done" && !error) {
+    return (
+      <SplashShell>
+        <div className="flex items-center justify-center gap-2 py-6 text-sm text-keep-muted">
+          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-keep-muted/40" />
+          <span>Signing you in with Google…</span>
+        </div>
+      </SplashShell>
+    );
+  }
 
   return (
     <SplashShell
@@ -978,6 +1154,14 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             ? mode === "login" ? "Logging in..." : "Registering..."
             : mode === "login" ? "Log in" : "Register"}
         </button>
+
+        {/* Google sign-in, on BOTH the login and register views when the
+            admin has it enabled. Always mode=login for the browser round-trip:
+            the server's callback routes an unknown Google account to the
+            finish-signup screen and a known one straight into a session, so a
+            single entry covers "already have an account" and "new here" alike.
+            A full-page redirect (see GoogleAuthButton), not a fetch. */}
+        {branding.googleAuthEnabled ? <GoogleAuthButton mode="login" /> : null}
 
       </form>
     </SplashShell>

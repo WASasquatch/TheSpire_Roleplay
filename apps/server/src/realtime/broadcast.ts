@@ -50,6 +50,7 @@ import { inArray } from "drizzle-orm";
 import type { LinkedWorldRef } from "@thekeep/shared";
 import { pushToUser } from "../push.js";
 import { notify as notifyCenter } from "../notifications/engine.js";
+import { markRoomRead } from "../routes/roomReads.js";
 import type { Db } from "../db/index.js";
 import {
   persistRoomDescriptionOnce,
@@ -328,7 +329,7 @@ export async function addMessage(
   // Reply metadata is stripped because system lines don't render
   // reply tags and the reply target itself could leak "the mod
   // replied to message X", informative even without their name.
-  if (ctx.user.incognitoMode && payload.kind !== "system") {
+  if (ctx.user.incognitoMode && (ctx.user.activeCharacterId ?? null) === (ctx.user.incognitoCharacterId ?? null) && payload.kind !== "system") {
     // Strip reply metadata via destructure rather than `= undefined`
     // assignment, exactOptionalPropertyTypes treats the latter as a
     // type error because the field shape is `string`, not
@@ -601,6 +602,16 @@ export async function addMessage(
   // duplicate-on-the-wire is invisible in the typical happy path
   // (socket is in the room → first delivery wins, second is dropped).
   ctx.socket.emit("message:new", out);
+
+  // Per-channel unread pulse (migration 0318). Fire-and-forget: bump the
+  // `room:unread` badge for room members who are NOT currently parked in this
+  // room's socket band (they'd see the message live otherwise) and whose
+  // per-room mute isn't active — a @mention still pierces the mute. This is a
+  // cheap, bounded, incremental fan-out (one grouped query + one emit per
+  // eligible member's live sockets); it deliberately does NOT recompute the
+  // room tree and NEVER prompts a /rooms refetch on the client. Whisper /
+  // targeted-system rows are excluded inside the helper.
+  void fanRoomUnreadBump(ctx.io, ctx.db, ctx.roomId, out, ctx.user.id, payload.kind);
 
   // Fire-and-forget push triggers for offline recipients. Privacy contract:
   // payloads carry only the *kind* of event ("whisper" / "mention") and the
@@ -883,6 +894,117 @@ async function emitFiltered(
     const uid = (s.data as { userId?: string }).userId;
     if (uid && hide.has(uid)) continue;
     s.emit("message:new", msg);
+  }
+}
+
+/**
+ * Per-channel unread fan-out (migration 0318). After a message broadcasts, bump
+ * the `room:unread` badge for the room's members who did NOT see it live:
+ *
+ *   - the sender never bumps themselves;
+ *   - anyone currently parked in this room's socket band saw it live → skip
+ *     (they'll clear their own marker on the next read anyway);
+ *   - a member whose per-room mute is active is skipped UNLESS this message
+ *     @mentions them (mentions always pierce a mute, matching the notify path);
+ *
+ * Cost is bounded and incremental by design (contract): ONE grouped query for
+ * every absent member's unread/mention/mute state for THIS room, then one
+ * `room:unread` emit per still-eligible member's live sockets. It deliberately
+ * does NOT recompute the room tree and carries no signal that would make the
+ * client refetch `/rooms`. Whisper + targeted-system rows never fan out (they're
+ * not room-wide unread), and best-effort: a failure is logged, never thrown.
+ */
+async function fanRoomUnreadBump(
+  io: Io,
+  db: Db,
+  roomId: string,
+  msg: ChatMessage,
+  senderUserId: string,
+  kind: MessageKind,
+): Promise<void> {
+  try {
+    // Whispers + any targeted-to-one-user row aren't room-wide unread. System
+    // lines DO count (presence/announce are room activity), so only whisper is
+    // excluded by kind; targeted rows carry a toUserId and are filtered in SQL.
+    if (kind === "whisper" || msg.toUserId) return;
+
+    const serverId = (await db
+      .select({ serverId: rooms.serverId })
+      .from(rooms)
+      .where(eq(rooms.id, roomId))
+      .limit(1))[0]?.serverId ?? null;
+
+    // Fetch every live socket ONCE and index by userId. From this single
+    // enumeration we derive BOTH "who saw it live" (a socket parked in this
+    // room's band) and each absent member's delivery targets — instead of
+    // calling pulseRoomUnread per member, which each ran a full-server
+    // fetchSockets() (O(members × sockets) per message).
+    const band = `room:${roomId}`;
+    const allSockets = await io.fetchSockets();
+    const liveUserIds = new Set<string>();
+    const socketsByUser = new Map<string, typeof allSockets>();
+    for (const s of allSockets) {
+      const uid = (s.data as { userId?: string }).userId;
+      if (!uid) continue;
+      if (s.rooms.has(band)) liveUserIds.add(uid);
+      const list = socketsByUser.get(uid);
+      if (list) list.push(s);
+      else socketsByUser.set(uid, [s]);
+    }
+
+    const now = Date.now();
+    // ONE grouped query: for every room member (minus the sender), their unread
+    // count past their read watermark, whether any unread row mentions them (by
+    // username LIKE or a mentions-JSON hit on their user id), and their active
+    // mute state. Indexed by room_members(room) + messages(room_id, created_at).
+    const rows = await db.all<{
+      user_id: string;
+      username: string;
+      unread: number;
+      mentions: number;
+      muted: number;
+      muted_until: number | null;
+    }>(sql`
+      SELECT rm.user_id AS user_id,
+             u.username AS username,
+             COUNT(m.id) AS unread,
+             SUM(
+               CASE WHEN m.id IS NOT NULL
+                          AND (lower(m.body) LIKE '%@' || lower(u.username) || '%'
+                               OR m.mentions_json LIKE '%"userId":"' || rm.user_id || '"%')
+                    THEN 1 ELSE 0 END
+             ) AS mentions,
+             COALESCE(p.muted, 0) AS muted,
+             p.muted_until AS muted_until
+      FROM room_members rm
+      JOIN users u ON u.id = rm.user_id
+      LEFT JOIN room_reads rr ON rr.room_id = ${roomId} AND rr.user_id = rm.user_id
+      LEFT JOIN per_room_notify_prefs p ON p.room_id = ${roomId} AND p.user_id = rm.user_id
+      LEFT JOIN messages m ON m.room_id = ${roomId}
+        AND m.kind != 'whisper'
+        AND m.deleted_at IS NULL
+        AND m.target_user_id IS NULL
+        AND m.user_id != rm.user_id
+        AND m.created_at > COALESCE(rr.last_read_at, 0)
+      WHERE rm.room_id = ${roomId}
+        AND rm.user_id != ${senderUserId}
+      GROUP BY rm.user_id, u.username, p.muted, p.muted_until
+    `);
+
+    for (const r of rows) {
+      if (liveUserIds.has(r.user_id)) continue; // saw it live
+      const hasMention = (r.mentions ?? 0) > 0;
+      const muteActive = !!r.muted && (!r.muted_until || r.muted_until > now);
+      // A muted room stays silent unless the new activity mentions the member.
+      if (muteActive && !hasMention) continue;
+      const targets = socketsByUser.get(r.user_id);
+      if (!targets || targets.length === 0) continue; // no live tabs; boot fetch backstops
+      const payload = { roomId, serverId, unread: r.unread ?? 0, hasMention };
+      for (const s of targets) s.emit("room:unread", payload);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[room-reads] unread fan-out failed", { roomId, err });
   }
 }
 
@@ -1796,8 +1918,12 @@ async function joinRoomBody(
     // Incognito gate: room transitions stay silent for an incognito
     // moderator, the whole point is they can drift across rooms
     // without trace. Their "X has left the chat" line already
-    // broadcast at the moment they went incognito.
-    if (user.incognitoMode) continue;
+    // broadcast at the moment they went incognito. Scoped to the
+    // identity they went incognito AS, so a leave broadcast for a
+    // DIFFERENT character on another tab still fires.
+    const _leaveTabRaw = (socket.data as { tabCharId?: string | null }).tabCharId;
+    const _leaveCharId = _leaveTabRaw !== undefined ? _leaveTabRaw : (user.activeCharacterId ?? null);
+    if (user.incognitoMode && (_leaveCharId ?? null) === (user.incognitoCharacterId ?? null)) continue;
     const prevRoom = (await db.select().from(rooms).where(eq(rooms.id, prevId)).limit(1))[0];
     if (!prevRoom || prevRoom.replyMode === "nested") continue;
     await addSystemMessage(io, db, prevId, renderPresenceTemplate(
@@ -1856,8 +1982,18 @@ async function joinRoomBody(
   // cheap (one row, indexed PK). Mirrors the per-tab cache update the
   // client already does via `rememberTabRoom` on `room:state`.
   await db.update(users).set({ lastRoomId: roomId }).where(eq(users.id, user.id));
-  await broadcastRoomState(io, db, roomId);
-  await broadcastPresence(io, db, roomId);
+  // Per-channel read marker (migration 0318). Entering a room clears its
+  // unread: advance the user's `room_reads` high-water mark to now and pulse
+  // `room:unread {unread:0}` so every tab drops the dot for this room. Fire-and-
+  // forget + best-effort — a stuck read marker must never block the join.
+  void markRoomRead(io, db, user.id, roomId, null).catch((err) => {
+    // eslint-disable-next-line no-console
+    console.error("[room-reads] join read-marker failed", { roomId, userId: user.id, err });
+  });
+  // One occupant rebuild + one block graph for BOTH room:state and
+  // presence:update (was two sequential broadcasts, each rebuilding the
+  // userlist). Emits both wire events, same as before.
+  await broadcastRoomStateAndPresence(io, db, roomId);
 
   // Send recent backlog to just this socket. Whisper privacy + ignore
   // filtering + soft-delete blanking all live in sendRoomBacklogTo so the
@@ -1974,7 +2110,7 @@ async function joinRoomBody(
   // is suppressed while the user is in incognito mode. Pair with the
   // suppress on the leave path above so the moderator can hop rooms
   // entirely silently.
-  const baseGate = !otherIdentitySocketHere && !isInBootGrace() && !isForumRoom && !user.incognitoMode;
+  const baseGate = !otherIdentitySocketHere && !isInBootGrace() && !isForumRoom && !(user.incognitoMode && (socketCharacterId ?? null) === (user.incognitoCharacterId ?? null));
   if (loginIntent && !isRoomSwitch && baseGate && !isReconnect) {
     await addSystemMessage(io, db, roomId, renderPresenceTemplate(
       sessionConnectTemplate,
@@ -2251,18 +2387,30 @@ function occupantsForViewer(
   return hide ? occupants.filter((o) => !hide.has(o.userId)) : occupants;
 }
 
-export async function broadcastRoomState(
+/**
+ * Emit `room:state` for a room from an ALREADY-COMPUTED occupant list. The
+ * per-viewer block filtering + fast-path/fan-out emit + tree pulse that used to
+ * live inline in `broadcastRoomState`. Extracted so the combined join path can
+ * reuse one occupant rebuild + one block graph across both room:state and
+ * presence:update.
+ */
+type BlockGraphResult = Awaited<ReturnType<typeof roomBlockGraph>>;
+
+async function emitRoomStateWith(
   io: Io,
   db: Db,
   roomId: string,
+  summary: Awaited<ReturnType<typeof buildRoomSummary>>,
+  occupants: RoomOccupant[],
+  serverId: string | null | undefined,
+  // When the caller already built the block graph (combined join path), reuse
+  // it to avoid a redundant fetchSockets + blocksAmong. Standalone callers omit
+  // it and we build it here, byte-identical to the old inline behavior.
+  precomputedGraph?: BlockGraphResult,
 ): Promise<void> {
-  const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
-  if (!room) return;
-  const summary = await buildRoomSummary(db, room);
-  const occupants = await currentOccupants(io, db, roomId);
   // Per-viewer block filtering (see roomBlockGraph). Fast path: no blocks
   // among the room → one room-wide emit. Otherwise fan out filtered lists.
-  const { sockets, blockGraph } = await roomBlockGraph(io, db, roomId, occupants);
+  const { sockets, blockGraph } = precomputedGraph ?? (await roomBlockGraph(io, db, roomId, occupants));
   if (blockGraph.size === 0) {
     io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
   } else {
@@ -2279,15 +2427,26 @@ export async function broadcastRoomState(
   // `/rooms` (debounced) and re-renders. The room row is already in hand,
   // so its serverId is free here; emitTreeChanged ignores it when the flag
   // is off and emits the same bare global pulse as before.
-  emitTreeChanged(io, room.serverId);
+  emitTreeChanged(io, serverId ?? null);
 }
 
-export async function broadcastPresence(io: Io, db: Db, roomId: string): Promise<void> {
-  const occupants = await currentOccupants(io, db, roomId);
+/**
+ * Emit `presence:update` for a room from an ALREADY-COMPUTED occupant list.
+ * The block-filtering + emit + tree pulse that used to live inline in
+ * `broadcastPresence`. See `emitRoomStateWith`.
+ */
+async function emitPresenceWith(
+  io: Io,
+  db: Db,
+  roomId: string,
+  occupants: RoomOccupant[],
+  // See emitRoomStateWith: reuse a precomputed block graph on the combined path.
+  precomputedGraph?: BlockGraphResult,
+): Promise<void> {
   // Per-viewer block filtering: blocked accounts must not see each other in
   // the userlist. Fast path (no blocks among the room) keeps the single
   // room-wide emit; otherwise fan out filtered lists per socket.
-  const { sockets, blockGraph } = await roomBlockGraph(io, db, roomId, occupants);
+  const { sockets, blockGraph } = precomputedGraph ?? (await roomBlockGraph(io, db, roomId, occupants));
   if (blockGraph.size === 0) {
     io.to(`room:${roomId}`).emit("presence:update", { roomId, occupants });
   } else {
@@ -2315,6 +2474,165 @@ export async function broadcastPresence(io: Io, db: Db, roomId: string): Promise
       .limit(1))[0]?.serverId ?? null;
   }
   emitTreeChanged(io, presenceServerId);
+}
+
+export async function broadcastRoomState(
+  io: Io,
+  db: Db,
+  roomId: string,
+): Promise<void> {
+  const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+  if (!room) return;
+  const summary = await buildRoomSummary(db, room);
+  const occupants = await currentOccupants(io, db, roomId);
+  await emitRoomStateWith(io, db, roomId, summary, occupants, room.serverId);
+}
+
+export async function broadcastPresence(io: Io, db: Db, roomId: string): Promise<void> {
+  const occupants = await currentOccupants(io, db, roomId);
+  await emitPresenceWith(io, db, roomId, occupants);
+}
+
+/**
+ * Canonical per-IDENTITY incognito visibility check.
+ *
+ * An identity is hidden iff the account is in incognito mode AND the identity
+ * in question is the exact one the account went incognito AS
+ * (`incognitoCharacterId`; null = OOC/master). A DIFFERENT character the same
+ * account voices on another tab stays visible. This is the single predicate the
+ * userlist filter (`currentOccupants`), the watcher ping (`pingWatchers`), the
+ * enter/leave presence gates, and the message-author rewrite all encode inline;
+ * exported here so the typing-indicator path (`realtime/typing.ts`) can gate its
+ * broadcast with the byte-identical rule instead of re-deriving it (a hidden
+ * mod's name must not leak through "…is typing" while every other surface hides
+ * them).
+ *
+ * Accepts the loose incognito shape shared by `SessionUser` and a raw `users`
+ * row so either caller can pass what it already holds.
+ */
+export function isHiddenIncognitoIdentity(
+  who: { incognitoMode: boolean; incognitoCharacterId: string | null },
+  characterId: string | null,
+): boolean {
+  return who.incognitoMode && (characterId ?? null) === (who.incognitoCharacterId ?? null);
+}
+
+/**
+ * Fail-closed guard against a hidden moderator SILENTLY reappearing when the
+ * tab they went incognito on switches character.
+ *
+ * Going incognito stamps `incognitoCharacterId` with the switching tab's
+ * current identity, and only THAT identity is filtered out of userlists /
+ * presence / typing. If the same socket then `/char`-switches (or uses the
+ * profile "switch to this character" button), its identity no longer matches
+ * `incognitoCharacterId`, so every hide gate stops firing and the mod pops back
+ * into the room — presence, attribution, the lot — while they likely still
+ * believe they're invisible. There is no legitimate "half-incognito" state, so
+ * rather than try to keep hiding the new identity we EXIT incognito entirely
+ * (identical end state to `/incognito off`) and tell the mod plainly.
+ *
+ * `priorCharacterId` is the identity the socket was voicing BEFORE the switch —
+ * the caller captures `socket.data.tabCharId` (resolved to the account default
+ * when unset) just before applying the switch. We act only when that prior
+ * identity was the incognito one; a switch on a tab that was NEVER the hidden
+ * identity (e.g. a sibling tab voicing a different character) is a no-op, so a
+ * mod hidden as Character A on tab 1 keeps their cover when tab 2 changes
+ * characters.
+ *
+ * Side effects on an actual exit (mirrors `incognito.ts` leaveIncognito):
+ *   - clears `incognito_mode` / `incognito_character_id` on the `users` row;
+ *   - syncs the in-memory `SessionUser` + the per-socket cached user so the rest
+ *     of this tick and the next dispatched event see the cleared state;
+ *   - fans `me:incognito-update` to EVERY live socket the account owns (menu
+ *     label + banner flip immediately, same as the command does);
+ *   - emits a private `error:notice` to the switching socket explaining why;
+ *   - refreshes presence in every room the account has a socket in, so the mod
+ *     reappears consistently everywhere (not just the room they switched in).
+ *
+ * Best-effort and defensive: any failure is swallowed so a presence hiccup can
+ * never wedge a character switch. Returns true iff it actually exited incognito.
+ */
+export async function exitIncognitoOnCharSwitch(
+  io: Io,
+  db: Db,
+  socket: Sock,
+  user: SessionUser,
+  priorCharacterId: string | null,
+): Promise<boolean> {
+  // Only the tab that IS the hidden identity may trigger the exit. A switch on
+  // any other tab (already-visible sibling) must leave the cover intact.
+  if (!isHiddenIncognitoIdentity(user, priorCharacterId)) return false;
+  try {
+    await db
+      .update(users)
+      .set({ incognitoMode: false, incognitoCharacterId: null })
+      .where(eq(users.id, user.id));
+    // Keep the live session user (and the per-socket cached user, if the socket
+    // carries one) in sync so later code in this tick / next event sees the
+    // cleared flags without a round-trip through loadSessionUser.
+    user.incognitoMode = false;
+    user.incognitoCharacterId = null;
+    const cached = (socket.data as { user?: SessionUser }).user;
+    if (cached && cached.id === user.id) {
+      cached.incognitoMode = false;
+      cached.incognitoCharacterId = null;
+    }
+    // Flip the menu label / banner on every tab the moment the exit lands.
+    const allSockets = await io.fetchSockets();
+    const userRooms = new Set<string>();
+    for (const s of allSockets) {
+      if ((s.data as { userId?: string }).userId !== user.id) continue;
+      s.emit("me:incognito-update", {
+        incognitoMode: false,
+        incognitoAlias: user.incognitoAlias,
+        incognitoCharacterId: null,
+      });
+      for (const r of s.rooms) {
+        if (r.startsWith("room:")) userRooms.add(r.slice(5));
+      }
+    }
+    // Tell the mod plainly why they're visible again.
+    socket.emit("error:notice", {
+      code: "INCOGNITO_OFF",
+      message: "You switched characters, so you're no longer incognito.",
+    });
+    // Reappear consistently in every room the account is in (mirrors the
+    // command's all-rooms refresh, not just the room the switch happened in).
+    for (const rid of userRooms) {
+      await broadcastPresence(io, db, rid);
+    }
+    return true;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[incognito] exit-on-char-switch failed", { userId: user.id, err });
+    return false;
+  }
+}
+
+/**
+ * Combined join broadcast: compute the occupant list ONCE and emit BOTH
+ * `room:state` and `presence:update` from that single result.
+ *
+ * `joinRoomBody` previously called `broadcastRoomState` then `broadcastPresence`
+ * back-to-back for the same room. Each independently rebuilt `currentOccupants`
+ * (~12 DB queries) and ran its own `roomBlockGraph` (an extra `fetchSockets`),
+ * so every join rebuilt the userlist twice and fetched sockets ~4×. This helper
+ * rebuilds occupants once and reuses that one list for both emits. Both wire
+ * events are still sent (clients may listen to each) and
+ * the tree pulse still fires (once per emit, as before).
+ */
+async function broadcastRoomStateAndPresence(io: Io, db: Db, roomId: string): Promise<void> {
+  const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+  if (!room) return;
+  const summary = await buildRoomSummary(db, room);
+  const occupants = await currentOccupants(io, db, roomId);
+  // Build the block graph ONCE (one fetchSockets + one blocksAmong) and reuse it
+  // for both emits. Both wire events (room:state, presence:update) are still
+  // sent; the tree pulse fires once per emit, exactly as the two old
+  // back-to-back broadcasts did.
+  const graph = await roomBlockGraph(io, db, roomId, occupants);
+  await emitRoomStateWith(io, db, roomId, summary, occupants, room.serverId, graph);
+  await emitPresenceWith(io, db, roomId, occupants, graph);
 }
 
 /**
@@ -2366,8 +2684,10 @@ async function pingWatchers(
   // /char-switch, etc.) is supposed to leave no trace, friends receiving
   // a "☆ X is online" system line in their current room would directly
   // out the moderator's presence. Same rationale as the userlist
-  // suppression in currentOccupants.
-  if (user.incognitoMode) return;
+  // suppression in currentOccupants. Scoped to the identity that went
+  // incognito, so friends of a DIFFERENT character the account voices
+  // on another tab still get the online ping.
+  if (user.incognitoMode && (onlineAsCharacterId ?? null) === (user.incognitoCharacterId ?? null)) return;
   const rows = await db
     .select({
       frienderUserId: friends.frienderUserId,
@@ -2606,11 +2926,13 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // /incognito command broadcasts the visible leave-message
     // before flipping the bit, so other participants saw them
     // "leave" already.
-    if (u.incognitoMode) continue;
     // `tabCharId === undefined` → no per-tab override yet, fall back
     // to the DB-default active character. `null` → explicit OOC.
     // A string → /char-switched on this socket.
     const characterId = r.tabCharId !== undefined ? r.tabCharId : (u.activeCharacterId ?? null);
+    // Hide only the identity the account went incognito AS, so another
+    // tab voicing a different character stays in the userlist.
+    if (u.incognitoMode && (characterId ?? null) === (u.incognitoCharacterId ?? null)) continue;
     const key = `${r.userId}::${characterId ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -2627,7 +2949,8 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // Same incognito filter for the idle-ghost re-introduction
     // path, a moderator who went incognito just before their last
     // live socket dropped shouldn't reappear as an "(idle)" row.
-    if (user.incognitoMode) continue;
+    // Scoped to the identity that went incognito.
+    if (user.incognitoMode && (g.characterId ?? null) === (user.incognitoCharacterId ?? null)) continue;
     const key = `${g.userId}::${g.characterId ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);

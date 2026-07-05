@@ -25,7 +25,10 @@ const prefsBody = z.object({
  */
 export async function registerNotificationRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
   /** Cheap boot/poll fetch: just the unread totals (+ per-server for rail dots). */
-  app.get("/me/notifications/unread", async (req, reply) => {
+  // Bell boot + live poll fetch. Cheap per call, but it's a poll endpoint, so a
+  // reconnect/poll loop hits the same failure mode as /rooms did. Cap per-IP;
+  // legit use (boot + occasional live refresh across a few tabs) is well under.
+  app.get("/me/notifications/unread", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     return badgeFor(db, me.id);

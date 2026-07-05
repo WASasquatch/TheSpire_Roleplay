@@ -186,16 +186,21 @@ export function AffiliateCard({
         style={hasBanner ? undefined : { backgroundImage: placeholderBg(card.id) }}
       >
         {background}
-        <div className="relative flex flex-1 items-center gap-4 p-5">
-          {icon}
-          <div className="min-w-0 flex-1">
-            <div className={`truncate font-action text-2xl tracking-tight ${title ? "" : "italic text-white/70"}`}>
-              {title || "No Title"}
+        {/* Mobile: stack icon+text, then a views/Visit row underneath so the
+            button never runs off the edge. Desktop (sm+): a horizontal row with
+            the views/Visit column pinned to the right. */}
+        <div className="relative flex flex-1 flex-col gap-3 p-4 sm:flex-row sm:items-center sm:gap-4 sm:p-5">
+          <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center sm:gap-4">
+            {icon}
+            <div className="min-w-0 flex-1">
+              <div className={`truncate font-action text-xl tracking-tight sm:text-2xl ${title ? "" : "italic text-white/70"}`}>
+                {title || "No Title"}
+              </div>
+              {descriptionBlock}
+              {tagRow}
             </div>
-            {descriptionBlock}
-            {tagRow}
           </div>
-          <div className="flex shrink-0 flex-col items-end justify-between gap-4 self-stretch py-0.5">
+          <div className="flex shrink-0 items-center justify-between gap-4 sm:flex-col sm:items-end sm:justify-between sm:self-stretch sm:py-0.5">
             {views}
             {visitBtn}
           </div>

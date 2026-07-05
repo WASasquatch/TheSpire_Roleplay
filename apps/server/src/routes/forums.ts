@@ -333,6 +333,12 @@ export async function resolveTopicAuthorFlair(
 export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, uploadsRoot: string): Promise<void> {
   const forumsDir = join(uploadsRoot, "forums");
 
+  // Per-IP cap for the PUBLIC, DB-heavy browse/read routes (forum list,
+  // discover, discover search, tags, forum detail). Click-driven, not
+  // polled; 60/min is generous vs a human browsing while capping a
+  // refetch/reconnect loop at 1/s. Bump to 120 if a busy shared IP trips it.
+  const browseLimit = { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } } as const;
+
   /** Write a content-hashed forum image; returns its public URL. */
   async function writeForumImage(
     prefix: string,
@@ -357,7 +363,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     if (filename) unlink(join(forumsDir, filename)).catch(() => { /* best-effort */ });
   }
 
-  app.get("/forums", async (req) => {
+  app.get("/forums", browseLimit, async (req) => {
     // Session is optional (see file header). Signed-in viewers also get
     // the per-forum `unseen` flag from their visit markers.
     const me = await getSessionUser(req, db).catch(() => null);
@@ -546,7 +552,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     }));
   }
 
-  app.get("/forums/discover", async () => {
+  app.get("/forums/discover", browseLimit, async () => {
     const all = await browsableForumSummaries();
     // popular: most members first, then most-recent activity (nulls last).
     const popular = [...all]
@@ -563,6 +569,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
 
   app.get<{ Querystring: { q?: string; tag?: string } }>(
     "/forums/discover/search",
+    browseLimit,
     async (req) => {
       const q = (req.query.q ?? "").trim().toLowerCase();
       const tag = (req.query.tag ?? "").trim();
@@ -579,7 +586,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     },
   );
 
-  app.get("/forums/tags", async () => {
+  app.get("/forums/tags", browseLimit, async () => {
     const all = await browsableForumSummaries();
     const counts = new Map<string, number>();
     for (const f of all) {
@@ -591,7 +598,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     return { tags };
   });
 
-  app.get<{ Params: { idOrSlug: string } }>("/forums/:idOrSlug", async (req, reply) => {
+  app.get<{ Params: { idOrSlug: string } }>("/forums/:idOrSlug", browseLimit, async (req, reply) => {
     const me = await getSessionUser(req, db).catch(() => null);
     const key = req.params.idOrSlug;
     // Resolve id first (ids are nanoids, never collide with the lowercase

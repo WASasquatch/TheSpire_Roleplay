@@ -29,7 +29,19 @@ export interface AnnouncementBanner {
   createdByUserId: string | null;
   createdAt: number;
   updatedAt: number;
+  /**
+   * Which stream the row belongs to, tagged by the PUBLIC marquee route so the
+   * shell can keep the two sources SEPARATE (one shown at a time) instead of
+   * merging them into a single rotation:
+   *   - `"app"`    — platform/default (site-wide) announcements.
+   *   - `"server"` — the viewer's current community server's announcements.
+   * Only the public read shape sets it; the admin CRUD shapes omit it (each
+   * admin tab already scopes to a single server), so it stays optional. */
+  source?: AnnouncementBannerSource;
 }
+
+/** Which announcement stream a marquee row came from. */
+export type AnnouncementBannerSource = "app" | "server";
 
 /**
  * Wire row for a single scheduled `/announce`. The scheduler reads

@@ -41,6 +41,16 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
   // (or about to open). Without the key, a freshly-added command
   // wouldn't show up in the help list until a full tab reload.
   const commandsVersion = useChat((s) => s.commandsVersion);
+
+  // Lets a returning player replay the first-run interface walkthrough on
+  // demand. Closes this modal, then flips the shared flag the site tour
+  // watches so the spotlight overlay opens over the live chat.
+  const setSiteTourForced = useChat((s) => s.setSiteTourForced);
+  function replayTour() {
+    onClose();
+    setSiteTourForced(true);
+  }
+
   useEffect(() => {
     let cancelled = false;
     fetch("/commands", { credentials: "include" })
@@ -138,7 +148,18 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
               className="flex-1 rounded border border-keep-border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
             />
           ) : (
-            <div className="flex-1" />
+            <div className="flex flex-1 justify-end">
+              {tab === "guides" ? (
+                <button
+                  type="button"
+                  onClick={replayTour}
+                  title="Replay the guided walkthrough of the interface"
+                  className="rounded border border-keep-action/50 bg-keep-action/10 px-2 py-1 text-xs font-action uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
+                >
+                  Take the tour
+                </button>
+              ) : null}
+            </div>
           )}
           <CloseButton onClick={onClose} />
         </div>
@@ -225,6 +246,59 @@ const FORMATTING_ROWS: Array<{ syntax: string; example: string; note?: string }>
   { syntax: "@world:slug", example: "anyone for a game in @world:ironreach?", note: "click to open the world viewer; slug is the world's URL slug (lowercase + hyphens)" },
   { syntax: `<font color="#hex">text</font>`, example: `<font color="#a83232">red text</font>`, note: "puts a one-off color on a chunk of text. Color must be a 3- or 6-digit hex literal; anything else falls through as plain text. The viewer's theme nudges the value toward legibility if it would disappear against their chat background." },
   { syntax: "\\* escape", example: "\\*boinks Kaal on the head\\*", note: "put a backslash before any of * _ ~ | ` [ ] ( ) ! < > @ \\ to keep it literal. Use `\\@name` to type an @username without pinging, or `\\!cmd` to write the command name without firing it." },
+];
+
+/**
+ * Conditional / check posts. Unlike FORMATTING_ROWS, these are block-level
+ * or custom-command constructs, so there's no faithful `parseInline`
+ * preview to show; we describe what each one does and give a copy-able
+ * example instead. The Dice, checks, and pass/fail prompts guide on the
+ * Guides tab walks through them in full.
+ */
+const CHECK_ROWS: Array<{ syntax: string; meaning: string; example: string }> = [
+  {
+    syntax: "<check> <pass>…</pass> <fail>…</fail> </check>",
+    meaning:
+      "A 50/50 pass or fail prompt. Write both outcomes; the room sees a card with the winning one and the other tucked away. Needs at least a pass or fail line.",
+    example: "<check><pass>The lock clicks open.</pass><fail>The pick snaps off.</fail></check>",
+  },
+  {
+    syntax: "<roll:NdM:DC> <pass>…</pass> <fail>…</fail> </roll>",
+    meaning:
+      "Like a check, but a dice roll decides it. The roll must meet or beat the target (DC) to pass. Add one bonus with +X, -X, or an x multiplier.",
+    example:
+      "<roll:1d20+3:12><pass>The ropes slice clean.</pass><fail>The rope barely takes a mark.</fail></roll>",
+  },
+  {
+    syntax: "!name  (or !name:extra)",
+    meaning:
+      "Drop a custom command into the middle of a sentence. Its text lands right there, marked with a ✓. Put a backslash in front (\\!name) to show it as plain text.",
+    example: "she waves at the newcomer !greet and smiles",
+  },
+  {
+    syntax: "{if:condition|then|else}",
+    meaning:
+      'Inside a custom command: show the "then" text when the condition has something in it, or the "else" text when it\'s empty. The else part is optional.',
+    example: "{if:{target}|hugs {target}|waves at nobody in particular}",
+  },
+  {
+    syntax: "{choose:a|b|c}",
+    meaning:
+      "Inside a custom command: pick one of the options at random. The short form {a|b|c} does the same thing.",
+    example: "{choose:warmly|tightly|gently}",
+  },
+  {
+    syntax: "{roll:NdM}",
+    meaning:
+      "Inside a custom command: drop in a random dice total (just the number). Plain dice only, no plus or minus bonus.",
+    example: "You rolled a {roll:1d20}!",
+  },
+  {
+    syntax: "{=math}",
+    meaning:
+      "Inside a custom command: quick math with + - * / and parentheses. You can nest other pieces inside it.",
+    example: "{=10+{roll:1d20}}",
+  },
 ];
 
 /**
@@ -413,6 +487,49 @@ function FormattingHelp() {
             or a fenced block also keeps them literal.
           </li>
         </ul>
+      </div>
+
+      <div className="mt-5 border-t border-keep-rule/40 pt-3">
+        <h3 className="mb-1 font-action text-sm uppercase tracking-widest text-keep-text">
+          Conditional &amp; check posts
+        </h3>
+        <p className="text-keep-muted">
+          Let the dice (or a coin flip) decide an outcome, or add a dash of chance to your own custom
+          commands. Write these as their own block or inside a custom command's text. The{" "}
+          <b>Dice, checks, and pass/fail prompts</b> guide on the Guides tab walks through every one
+          with examples.
+        </p>
+
+        <div className="mt-2 overflow-hidden rounded border border-keep-border">
+          <table className="w-full text-[12px]">
+            <thead className="bg-keep-panel/50 text-[10px] uppercase tracking-widest text-keep-muted">
+              <tr>
+                <th className="w-1/3 px-2 py-1 text-left">You write</th>
+                <th className="px-2 py-1 text-left">What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              {CHECK_ROWS.map((r) => (
+                <tr key={r.syntax} className="border-t border-keep-border align-top">
+                  <td className="px-2 py-1.5 align-top">
+                    <code className="block whitespace-pre-wrap break-words font-mono text-[11px] text-keep-action">
+                      {r.syntax}
+                    </code>
+                  </td>
+                  <td className="px-2 py-1.5 align-top">
+                    <div className="text-keep-muted">{r.meaning}</div>
+                    <div className="mt-1 text-[10px] text-keep-muted">
+                      Example:{" "}
+                      <code className="whitespace-pre-wrap break-words font-mono text-keep-text">
+                        {r.example}
+                      </code>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <div className="mt-5 border-t border-keep-rule/40 pt-3">

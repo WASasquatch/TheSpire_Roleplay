@@ -245,21 +245,30 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
 
   // Scoped CSS-var overrides applied to the modal card.
   //
-  // The card ALWAYS renders on the owner's OPAQUE surfaces, even when the
-  // profile has a BG image. The image is shown only as the modal BACKDROP
-  // (around the card), never bled through the card itself. The previous
-  // translucent-glass-over-image treatment was the legibility killer:
-  // `legibleThemePalette` lifts the owner's text to contrast against the
-  // owner's `theme.bg`, but a translucent card let a light image wash the
-  // surface to near-white while the (dark-theme) text stayed light —
-  // white-on-white. Forcing every `.keep-frame` / `.keep-panel` glass
-  // tint to full opacity (plus the inline `backgroundColor` below) means
-  // the rendered surface equals the color the contrast math assumes, so
-  // the body stays legible on every theme + image combination.
-  const legibilityVars: Record<string, string> = {
-    "--keep-glass-panel-tint": "rgb(var(--keep-panel))",
-    "--keep-glass-bg-tint": "rgb(var(--keep-bg))",
-  };
+  // DEFAULT: the card renders on the owner's OPAQUE surfaces. A translucent
+  // card let a light BG image wash the surface to near-white while the
+  // (dark-theme) text stayed light — white-on-white — because
+  // `legibleThemePalette` lifts text to contrast against the owner's opaque
+  // `theme.bg`. Forcing the glass tints to full opacity (plus the inline
+  // `backgroundColor` below) keeps the rendered surface equal to the color the
+  // contrast math assumes, legible on every theme + image combination.
+  //
+  // EXCEPTION (frostCard): under the Glass design AND with no owner BG image,
+  // let the card frost translucently so the page/backdrop shows through — the
+  // whole point of Glass. Skipped when an owner image is set (the
+  // white-on-white case above) and for every non-glass design.
+  const frostCard = ownerOrnaments.styleKey === "glass" && !profileBgUrl;
+  const legibilityVars: Record<string, string> = frostCard
+    ? {
+        // Translucent frost: the page shows through, but the tint over the
+        // owner's bg/panel + the glass backdrop-blur keep text readable.
+        "--keep-glass-panel-tint": "rgb(var(--keep-panel) / 0.55)",
+        "--keep-glass-bg-tint": "rgb(var(--keep-bg) / 0.45)",
+      }
+    : {
+        "--keep-glass-panel-tint": "rgb(var(--keep-panel))",
+        "--keep-glass-bg-tint": "rgb(var(--keep-bg))",
+      };
 
   return (
     <Modal
@@ -325,7 +334,11 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
           ...themeStyle(ownerTheme),
           ...ownerOrnaments.vars,
           ...legibilityVars,
-          backgroundColor: "rgb(var(--keep-bg))",
+          // Opaque fill for every non-frost case (also defeats the scifi
+          // .keep-frame 50%-alpha bleed). Omitted when frosting so the glass
+          // CSS tint (the translucent --keep-glass-bg-tint above) + the
+          // backdrop-blur let the page/backdrop show through.
+          ...(frostCard ? {} : { backgroundColor: "rgb(var(--keep-bg))" }),
         }}
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
         onClick={(e) => e.stopPropagation()}

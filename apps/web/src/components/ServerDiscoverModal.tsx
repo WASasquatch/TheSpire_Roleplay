@@ -26,6 +26,7 @@ import {
   Crown,
   Flame,
   Globe,
+  HelpCircle,
   Landmark,
   Mail,
   Plus,
@@ -67,6 +68,7 @@ import {
 import { Modal } from "./Modal.js";
 import { useChat } from "../state/store.js";
 import { CloseButton } from "./CloseButton.js";
+import { ContextualTour } from "./ContextualTour.js";
 import { cropStyleFor } from "../lib/avatarCrop.js";
 import { isDarkSurface, useActiveTheme } from "../lib/theme.js";
 import { getSocket } from "../lib/socket.js";
@@ -191,6 +193,11 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
           onClose={() => { setCreateOpen(false); refreshAppStatus(); }}
         />
       ) : null}
+
+      {/* First-run walkthrough of the create-a-server form. Mounted always;
+          fires only while the form is actually up (and unseen), and is
+          replayable from the form's "?" button. */}
+      <ContextualTour tourId="server-create" active={createOpen} />
     </Modal>
   );
 }
@@ -884,6 +891,8 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
   // ARE set, the applicant must tick the agreement box before Submit enables.
   const [rulesHtml, setRulesHtml] = useState<string | undefined>(undefined);
   const [agreed, setAgreed] = useState(false);
+  // Replays the create-a-server walkthrough while this form is open.
+  const setForcedTourId = useChat((s) => s.setForcedTourId);
 
   useEffect(() => {
     let alive = true;
@@ -965,7 +974,18 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
       >
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-action text-lg text-keep-text">Create your server</h3>
-          <CloseButton onClick={onClose} />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setForcedTourId("server-create")}
+              title="Show me around"
+              aria-label="Show me around this form"
+              className="flex h-7 w-7 items-center justify-center rounded-full border border-keep-rule text-keep-muted transition-colors hover:border-keep-action hover:text-keep-action"
+            >
+              <HelpCircle className="h-4 w-4" aria-hidden="true" />
+            </button>
+            <CloseButton onClick={onClose} />
+          </div>
         </div>
 
         {mine === null ? (
@@ -998,6 +1018,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setName(e.target.value)}
                 maxLength={SERVER_NAME_MAX}
                 placeholder="The Obsidian Court"
+                data-tour="server-create-name"
                 className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
               />
             </label>
@@ -1011,6 +1032,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
                 onChange={(e) => { setSlugTouched(true); setSlug(e.target.value.toLowerCase()); }}
                 maxLength={40}
                 placeholder="obsidian-court"
+                data-tour="server-create-slug"
                 className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 font-mono text-sm outline-none focus:border-keep-action"
               />
             </label>
@@ -1027,6 +1049,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
                 maxLength={SERVER_PURPOSE_MAX}
                 rows={4}
                 placeholder="Tell the reviewers what community this server gathers and what its rooms will hold."
+                data-tour="server-create-purpose"
                 className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
               />
             </label>
@@ -1059,6 +1082,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
                 type="button"
                 onClick={() => void submit()}
                 disabled={!canSubmit}
+                data-tour="server-create-submit"
                 className="shrink-0 rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
               >
                 {busy ? "…" : "Apply"}

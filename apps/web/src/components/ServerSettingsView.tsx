@@ -33,7 +33,7 @@
  * widening that module.
  */
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { Settings as SettingsIcon, X } from "lucide-react";
+import { HelpCircle, Settings as SettingsIcon, X } from "lucide-react";
 import {
   DEFAULT_THEME,
   SERVER_MOD_PERMISSIONS,
@@ -60,9 +60,15 @@ import {
   type ServerRole,
   type ServerJoinMode,
   type ServerViewerState,
+  type OnboardingConfig,
+  type OnboardingPrompt,
+  type OnboardingOption,
+  type ProfileView,
 } from "@thekeep/shared";
 import { Modal } from "./Modal.js";
+import { ContextualTour } from "./ContextualTour.js";
 import { BanModal } from "./BanModal.js";
+import { ProfileModal } from "./ProfileModal.js";
 import { ImageCropField } from "./ImageCropField.js";
 // Per-server admin tabs (Admin Partition — plan_ext.md). Self-contained tabs
 // taking { serverId, viewer, busy, run, onSaved }.
@@ -70,6 +76,7 @@ import ReportsTab from "./server-admin/ReportsTab.js";
 import ModCasesTab from "./server-admin/ModCasesTab.js";
 import EmoticonsTab from "./server-admin/EmoticonsTab.js";
 import AnnouncementsTab from "./server-admin/AnnouncementsTab.js";
+import EventsTab from "./server-admin/EventsTab.js";
 import FaqsTab from "./server-admin/FaqsTab.js";
 import CommandsTitlesTab from "./server-admin/CommandsTitlesTab.js";
 import EarningTab from "./server-admin/EarningTab.js";
@@ -78,6 +85,7 @@ import { ThemePicker } from "./ThemePicker.js";
 import { useActiveTheme, useScopedRootDesign } from "../lib/theme.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";
 import { recordNav } from "../lib/nav-metrics.js";
+import { useChat } from "../state/store.js";
 
 /* ============================================================
  * Wire shapes (consumed read-only from the documented endpoints).
@@ -146,6 +154,10 @@ interface ServerUsergroupWire {
   sortOrder: number;
   autoRules: ServerAutoRule[];
   memberCount: number;
+  /** Self-role toggle (migration 0320): members may add/remove themselves. */
+  memberSelectable: boolean;
+  /** Member-facing blurb shown next to the self-role toggle / onboarding option. */
+  description: string | null;
 }
 
 interface ServerUsergroupMemberWire {
@@ -177,6 +189,15 @@ interface ServerBanWire {
   expired: boolean;
 }
 
+/** GET /servers/:id/mutes → active server-wide mutes (account_mutes, scope="server"). */
+interface ServerMuteWire {
+  userId: string;
+  username: string;
+  until: number;
+  reason: string | null;
+  createdAt: number;
+}
+
 interface ServerModLogWire {
   id: string;
   action: string;
@@ -197,6 +218,9 @@ interface ServerSettingsWire {
   welcomeHtml: string | null;
   newUserWelcomeHtml: string | null;
   maxForumPostLength: number | null;
+  /** Onboarding flow (migration 0320): stored OnboardingConfig JSON + master switch. */
+  onboardingConfigJson: string | null;
+  onboardingEnabled: boolean;
 }
 
 /** A room row off GET /rooms (the only rooms list available to the web). */
@@ -319,6 +343,18 @@ async function apiBan(id: string, body: Record<string, unknown>): Promise<void> 
 }
 async function apiLiftBan(id: string, userId: string): Promise<void> {
   await jsonOrThrow(await fetch(`/servers/${sid(id)}/bans/${sid(userId)}`, { method: "DELETE", credentials: "include" }));
+}
+async function apiGetMutes(id: string): Promise<ServerMuteWire[]> {
+  const j = await jsonOrThrow<{ mutes: ServerMuteWire[] }>(await fetch(`/servers/${sid(id)}/mutes`, { credentials: "include" }));
+  return j.mutes;
+}
+async function apiMute(id: string, body: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(id)}/mutes`, {
+    method: "PUT", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
+  }));
+}
+async function apiUnmute(id: string, userId: string): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(id)}/mutes/${sid(userId)}`, { method: "DELETE", credentials: "include" }));
 }
 async function apiGetModLog(id: string): Promise<ServerModLogWire[]> {
   const j = await jsonOrThrow<{ entries: ServerModLogWire[] }>(await fetch(`/servers/${sid(id)}/mod-log`, { credentials: "include" }));
@@ -990,7 +1026,7 @@ function RoomsTab({ detail, busy, run }: TabProps) {
           Create, rename, retopic, set message expiry, or remove this server's rooms. (Day-to-day room
           commands like <span className="text-keep-text">/topic</span> still work in chat too.)
         </p>
-        <button type="button" onClick={() => { setCreating((c) => !c); setEditingId(null); }}
+        <button type="button" data-tour="server-settings-rooms-create" onClick={() => { setCreating((c) => !c); setEditingId(null); }}
           className="shrink-0 rounded border border-keep-action bg-keep-action px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg">
           {creating ? "Cancel" : "+ New room"}
         </button>
@@ -1184,6 +1220,210 @@ function MembersTab({ detail, busy, run }: TabProps) {
 }
 
 /* ============================================================
+ * Tab: Users — moderation user finder
+ *
+ * The moderation twin of the Members tab: search any member and act on them —
+ * mute (server-wide), ban, remove, or open their profile — without having to
+ * catch them present in a room. Each action is gated on the matching granular
+ * grant (the routes re-check every one; the client gate is only an affordance).
+ * Mute rows land in account_mutes (scope="server") which the chat dispatcher
+ * already enforces; ban/remove reuse the existing routes.
+ * ============================================================ */
+
+/** Format a bare hours count as a friendly "2d" / "6h" label for the row copy. */
+function muteRemainingLabel(untilMs: number): string {
+  const ms = Math.max(0, untilMs - Date.now());
+  if (ms >= 86_400_000) return `${Math.round(ms / 86_400_000)}d`;
+  if (ms >= 3_600_000) return `${Math.round(ms / 3_600_000)}h`;
+  return `${Math.max(1, Math.round(ms / 60_000))}m`;
+}
+
+function UsersTab({ detail, viewer, busy, run }: TabProps) {
+  // The signed-in account (for the never-act-on-yourself guard). Read-only
+  // selector; `me.id` is the canonical viewer identity the routes also key on.
+  const me = useChat((s) => s.me);
+  const [data, setData] = useState<{ members: ServerMemberWire[] } | null>(null);
+  const [mutes, setMutes] = useState<ServerMuteWire[]>([]);
+  const [bans, setBans] = useState<ServerBanWire[]>([]);
+  const [q, setQ] = useState("");
+  const [hours, setHours] = useState<Record<string, string>>({});
+  const [banTarget, setBanTarget] = useState<ServerMemberWire | null>(null);
+  const [viewing, setViewing] = useState<ProfileView | null>(null);
+  const [viewError, setViewError] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+
+  const perms = new Set(viewer.permissions);
+  const canMute = viewer.isOwner || perms.has("mute_member");
+  const canUnmute = viewer.isOwner || perms.has("unmute_member");
+  const canBan = viewer.isOwner || perms.has("ban_member");
+  const canRemove = viewer.isOwner || perms.has("manage_members");
+
+  useEffect(() => {
+    let alive = true;
+    // Members are the roster we act on; mutes/bans decorate each row with its
+    // current state. mute/ban reads are gated server-side — a viewer without
+    // that grant just gets an empty list (the .catch), which is fine.
+    apiGetMembers(detail.id).then((d) => { if (alive) setData({ members: d.members }); }).catch(() => { if (alive) setData({ members: [] }); });
+    if (canMute) apiGetMutes(detail.id).then((m) => { if (alive) setMutes(m); }).catch(() => { if (alive) setMutes([]); });
+    if (canBan) apiGetBans(detail.id).then((b) => { if (alive) setBans(b); }).catch(() => { if (alive) setBans([]); });
+    return () => { alive = false; };
+  }, [detail.id, tick, canMute, canBan]);
+
+  async function openProfile(userId: string) {
+    setViewError(null);
+    try {
+      const r = await fetch(`/profiles/${encodeURIComponent(`@id:${userId}`)}`, { credentials: "include" });
+      if (!r.ok) { setViewError(r.status === 404 ? "That account no longer exists." : `Couldn't load profile (HTTP ${r.status}).`); return; }
+      const j = await r.json();
+      if (j && "private" in j) { setViewError("That profile is restricted."); return; }
+      setViewing(j as ProfileView);
+    } catch {
+      setViewError("Couldn't load profile.");
+    }
+  }
+
+  if (!data) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+
+  const mutedUntil = new Map(mutes.map((m) => [m.userId, m.until]));
+  const bannedActive = new Map(bans.filter((b) => !b.expired).map((b) => [b.userId, b] as const));
+
+  const needle = q.trim().toLowerCase();
+  const shown = needle ? data.members.filter((m) => m.username.toLowerCase().includes(needle)) : data.members;
+
+  const roleLabel = (m: ServerMemberWire) =>
+    m.role === "owner" ? "Owner"
+      : m.role === "admin" ? "Admin"
+      : m.role === "mod" ? "Moderator"
+      : "Member";
+
+  return (
+    <div className="max-w-2xl space-y-3">
+      <p className="text-[11px] text-keep-muted">
+        Find any member and moderate them here, no need to catch them in a room. Muting silences them across this
+        server; banning blocks its rooms and strips their role; removing drops their membership. Every action is
+        logged in the Mod Log.
+      </p>
+
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search members by username…"
+        aria-label="Search members"
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
+      />
+
+      {viewError ? <p className="text-xs text-keep-accent">{viewError}</p> : null}
+
+      {shown.length === 0 ? (
+        <p className="text-xs italic text-keep-muted">{needle ? "No members match that search." : "No members yet."}</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {shown.map((m) => {
+            const isSelf = !!me && m.userId === me.id;
+            const isOwner = m.role === "owner";
+            const protectedRow = isSelf || isOwner; // never mute/ban/remove yourself or the owner
+            const muteUntil = mutedUntil.get(m.userId);
+            const isMuted = muteUntil !== undefined && muteUntil > Date.now();
+            const ban = bannedActive.get(m.userId);
+            const hoursStr = hours[m.userId] ?? "24";
+            const hoursNum = Math.max(1, Math.min(8760, Math.round(Number(hoursStr) || 0)));
+            return (
+              <li key={m.userId} className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5">
+                <Avatar url={m.avatarUrl} name={m.username} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-keep-text">{m.username}</span>
+                  <span className="block text-[10px] text-keep-muted">
+                    {roleLabel(m)}
+                    {isMuted ? <span className="text-keep-system"> · muted {muteRemainingLabel(muteUntil!)}</span> : null}
+                    {ban ? <span className="text-keep-system"> · banned{ban.until ? ` until ${new Date(ban.until).toLocaleDateString()}` : ""}</span> : null}
+                  </span>
+                </span>
+
+                {/* View profile — always available so a mod can verify who they're acting on. */}
+                <button type="button" disabled={busy}
+                  onClick={() => void openProfile(m.userId)}
+                  title={`View ${m.username}'s profile`} aria-label={`View ${m.username}'s profile`}
+                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50">Profile</button>
+
+                {protectedRow ? null : (
+                  <>
+                    {/* Mute / Unmute (server-wide). */}
+                    {isMuted && canUnmute ? (
+                      <button type="button" disabled={busy}
+                        onClick={() => void run(async () => { await apiUnmute(detail.id, m.userId); setTick((t) => t + 1); })}
+                        className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50">Unmute</button>
+                    ) : !isMuted && canMute ? (
+                      <span className="flex shrink-0 items-center gap-1">
+                        <input type="number" inputMode="numeric" min={1} max={8760} value={hoursStr} disabled={busy}
+                          onChange={(e) => setHours((h) => ({ ...h, [m.userId]: e.target.value }))}
+                          aria-label={`Mute ${m.username} for this many hours`} title="Mute duration in hours"
+                          className="w-14 rounded border border-keep-rule bg-keep-bg px-1 py-0.5 text-[11px] outline-none focus:border-keep-action" />
+                        <span className="text-[10px] text-keep-muted">h</span>
+                        <button type="button" disabled={busy}
+                          onClick={() => void run(async () => { await apiMute(detail.id, { target: `@id:${m.userId}`, hours: hoursNum }); setTick((t) => t + 1); })}
+                          title={`Mute ${m.username} across this server for ${hoursNum}h`}
+                          className="rounded border border-keep-system/70 bg-keep-system/15 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-system hover:bg-keep-system/25 disabled:opacity-50">Mute</button>
+                      </span>
+                    ) : null}
+
+                    {/* Ban — reuses the shared BanModal + existing ban route. */}
+                    {canBan ? (
+                      ban ? (
+                        <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted" title="Lift this ban from the Bans tab">Banned (Bans tab)</span>
+                      ) : (
+                        <button type="button" disabled={busy}
+                          onClick={() => setBanTarget(m)}
+                          className="shrink-0 rounded border border-keep-system/70 bg-keep-system/15 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-system hover:bg-keep-system/25 disabled:opacity-50">Ban…</button>
+                      )
+                    ) : null}
+
+                    {/* Remove from server (the admin-panel "kick"). */}
+                    {canRemove ? (
+                      <button type="button" disabled={busy}
+                        onClick={() => { if (window.confirm(`Remove ${m.username} from ${detail.name}?`)) void run(async () => { await apiRemoveMember(detail.id, m.userId); setTick((t) => t + 1); }); }}
+                        className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50">Remove</button>
+                    ) : null}
+                  </>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {banTarget ? (
+        <BanModal
+          targetName={banTarget.username}
+          description={`Blocks ${detail.name}'s rooms only. The rest of the Spire is untouched. A timed ban lifts itself when it expires.`}
+          reasonRequired={false}
+          reasonPlaceholder="Reason (shown to them)"
+          reasonMaxLength={300}
+          purgeScopeLabel="posts here"
+          confirmLabel="Ban from server"
+          onClose={() => setBanTarget(null)}
+          onConfirm={async (durationMs, reason, purge) => {
+            const banHours = durationMs == null ? null : Math.max(1, Math.round(durationMs / 3_600_000));
+            await run(async () => {
+              await apiBan(detail.id, {
+                target: `@id:${banTarget.userId}`,
+                hours: banHours,
+                ...(reason.trim() ? { reason: reason.trim() } : {}),
+                ...(purge != null ? { purgePosts: purge } : {}),
+              });
+              setBanTarget(null); setTick((t) => t + 1);
+            });
+          }}
+        />
+      ) : null}
+
+      {viewing ? (
+        <ProfileModal profile={viewing} onClose={() => setViewing(null)} bypassNsfwGate={true} zIndex={60} />
+      ) : null}
+    </div>
+  );
+}
+
+/* ============================================================
  * Tab: Roles (owner line, appoint admin/mod, edit grants)
  * ============================================================ */
 
@@ -1264,7 +1504,7 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
           </div>
 
           {/* Appoint flow — pick a person, then a tier (preset), not a blank grid. */}
-          <div className="rounded border border-keep-rule p-3">
+          <div data-tour="server-settings-roles-appoint" className="rounded border border-keep-rule p-3">
             <p className="mb-2 text-xs uppercase tracking-widest text-keep-muted">Appoint staff</p>
             {!pendingHit ? (
               <ServerUserPicker
@@ -1434,6 +1674,10 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
   const [color, setColor] = useState(group?.color ?? "");
   const [perms, setPerms] = useState<ServerFeaturePermission[]>(group?.permissions ?? [...SERVER_FEATURE_PERMISSIONS]);
   const [autoRules, setAutoRules] = useState<ServerAutoRule[]>(group?.autoRules ?? []);
+  // Self-role fields (migration 0320): let members pick this group + a blurb.
+  // The default group applies to everyone, so it can't be self-selectable.
+  const [memberSelectable, setMemberSelectable] = useState(group?.memberSelectable ?? false);
+  const [description, setDescription] = useState(group?.description ?? "");
   const [rooms, setRooms] = useState<RoomListRow[]>([]);
 
   // Rooms power the `posted_in_room` auto-rule selector (non-default only).
@@ -1447,7 +1691,13 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
   function save() {
     void run(async () => {
       const payload: Record<string, unknown> = { name: name.trim(), color: color.trim() || null, permissions: perms };
-      if (!isDefault) payload.autoRules = autoRules;
+      if (!isDefault) {
+        payload.autoRules = autoRules;
+        // Self-role fields only apply to named groups (the default group applies
+        // to everyone, so it can't be member-selectable).
+        payload.memberSelectable = memberSelectable;
+        payload.description = description.trim() ? description.trim() : null;
+      }
       if (group) await apiPatchUsergroup(detail.id, group.id, payload);
       else await apiCreateUsergroup(detail.id, payload);
       onSaved();
@@ -1472,6 +1722,25 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
         <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Member features</p>
         <ServerFeatureCheckboxes value={perms} grantable={grantable} disabled={busy} onChange={setPerms} />
       </div>
+      {!isDefault ? (
+        <div>
+          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Self-service</p>
+          <label className="flex items-start gap-2 rounded border border-keep-rule/60 px-2 py-1.5 text-sm">
+            <input type="checkbox" className="mt-0.5" checked={memberSelectable} disabled={busy}
+              onChange={(e) => setMemberSelectable(e.target.checked)} />
+            <span className="min-w-0">
+              <span className="block text-keep-text">Members can pick this</span>
+              <span className="block text-[11px] text-keep-muted">Lets any member add or remove themselves from this group (a self-role). Auto-joined members keep it even if they leave.</span>
+            </span>
+          </label>
+          <label className="mt-2 block text-sm">
+            <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Description</span>
+            <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={500} disabled={busy}
+              placeholder="A short line shown next to the self-role toggle and in onboarding."
+              className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+          </label>
+        </div>
+      ) : null}
       {!isDefault ? (
         <div>
           <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Auto-join rules</p>
@@ -1732,6 +2001,8 @@ function modLogLabel(action: string, meta: Record<string, unknown> | null): { te
     case "server_usergroup_change": return { text: `Usergroup ${m.op ? String(m.op) : "change"}`, tone: "text-keep-muted" };
     case "server_ban": return { text: "Banned user", tone: "text-keep-system" };
     case "server_unban": return { text: "Lifted ban", tone: "text-keep-muted" };
+    case "server_mute": return { text: `Muted user${typeof m.hours === "number" ? ` for ${m.hours}h` : ""}`, tone: "text-keep-system" };
+    case "server_unmute": return { text: "Lifted mute", tone: "text-keep-muted" };
     case "server_transfer": return { text: "Transferred ownership", tone: "text-keep-system" };
     default: return { text: action.replace(/^server_/, "").replace(/_/g, " "), tone: "text-keep-muted" };
   }
@@ -2016,11 +2287,209 @@ function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
   );
 }
 
+/* ------------------------------------------------------------
+ * Tab: Onboarding — the ordered new-member prompt flow (migration 0320). Each
+ * prompt maps its options to a member-selectable usergroup, so answering the
+ * flow grants self-roles. Reads/writes onboarding_config_json +
+ * onboarding_enabled through the shared GET/PATCH /servers/:id/settings; the
+ * member-facing flow consumes them via the self-roles onboarding endpoints.
+ * Folded under manage_appearance (same chair as Rules/Settings).
+ * ------------------------------------------------------------ */
+
+/** Short client-side id for a new prompt/option (stable across a single edit
+ *  session; the server hashes the whole config, not these ids). */
+function onbId(): string {
+  return `ob_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function OnboardingTab({ detail, busy, run, onSaved }: TabProps) {
+  const [loaded, setLoaded] = useState<ServerSettingsWire | null>(null);
+  const [enabled, setEnabled] = useState(false);
+  const [prompts, setPrompts] = useState<OnboardingPrompt[]>([]);
+  // The member-selectable usergroups an option may map to (the ONLY valid
+  // targets; the server re-validates on completion).
+  const [groups, setGroups] = useState<ServerUsergroupWire[] | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    apiGetSettings(detail.id).then((s) => {
+      if (!alive) return;
+      setLoaded(s);
+      setEnabled(s.onboardingEnabled);
+      let cfg: OnboardingConfig = { prompts: [] };
+      if (s.onboardingConfigJson) {
+        try { cfg = JSON.parse(s.onboardingConfigJson) as OnboardingConfig; } catch { cfg = { prompts: [] }; }
+      }
+      setPrompts(Array.isArray(cfg.prompts) ? cfg.prompts : []);
+    }).catch(() => { if (alive) setLoaded(null); });
+    return () => { alive = false; };
+  }, [detail.id]);
+
+  useEffect(() => {
+    let alive = true;
+    apiGetUsergroups(detail.id)
+      .then((d) => { if (alive) setGroups(d.groups.filter((g) => g.memberSelectable && !g.isDefault)); })
+      .catch(() => { if (alive) setGroups([]); });
+    return () => { alive = false; };
+  }, [detail.id]);
+
+  if (!loaded) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+
+  const selectable = groups ?? [];
+
+  function setPrompt(i: number, next: OnboardingPrompt) {
+    setPrompts((ps) => ps.map((p, j) => (j === i ? next : p)));
+  }
+  function movePrompt(i: number, dir: -1 | 1) {
+    setPrompts((ps) => {
+      const j = i + dir;
+      if (j < 0 || j >= ps.length) return ps;
+      const next = ps.slice();
+      const tmp = next[i]!; next[i] = next[j]!; next[j] = tmp;
+      return next;
+    });
+  }
+  function addPrompt() {
+    setPrompts((ps) => [...ps, { id: onbId(), label: "", kind: "single", options: [] }]);
+  }
+  function setOption(pi: number, oi: number, next: OnboardingOption) {
+    setPrompts((ps) => ps.map((p, j) => (j === pi ? { ...p, options: p.options.map((o, k) => (k === oi ? next : o)) } : p)));
+  }
+  function addOption(pi: number) {
+    const firstGid = selectable[0]?.id ?? "";
+    setPrompts((ps) => ps.map((p, j) => (j === pi ? { ...p, options: [...p.options, { label: "", usergroupId: firstGid }] } : p)));
+  }
+  function removeOption(pi: number, oi: number) {
+    setPrompts((ps) => ps.map((p, j) => (j === pi ? { ...p, options: p.options.filter((_, k) => k !== oi) } : p)));
+  }
+
+  function save() {
+    void run(async () => {
+      // Drop empty prompts/options so a half-filled row never persists; keep
+      // only options that point at a still-selectable group.
+      const validGids = new Set(selectable.map((g) => g.id));
+      const clean: OnboardingPrompt[] = prompts
+        .map((p) => {
+          const help = p.help?.trim();
+          return {
+            id: p.id,
+            kind: p.kind,
+            label: p.label.trim(),
+            ...(help ? { help } : {}),
+            options: p.options
+              .filter((o) => o.label.trim() && validGids.has(o.usergroupId))
+              .map((o) => ({ label: o.label.trim(), usergroupId: o.usergroupId })),
+          };
+        })
+        .filter((p) => p.label && p.options.length > 0);
+      const config: OnboardingConfig = { prompts: clean };
+      await apiPatchSettings(detail.id, {
+        onboardingEnabled: enabled,
+        onboardingConfigJson: clean.length ? JSON.stringify(config) : null,
+      });
+      onSaved();
+    });
+  }
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <p className="text-[11px] text-keep-muted">
+        Ask new members a few questions when they join. Each answer can add them to a self-role usergroup, so people land in the right groups from the start.
+      </p>
+
+      <label className="flex items-start gap-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5 text-sm">
+        <input type="checkbox" className="mt-0.5" checked={enabled} disabled={busy}
+          onChange={(e) => setEnabled(e.target.checked)} />
+        <span>
+          <span className="font-semibold text-keep-text">Show onboarding on join</span>
+          <span className="block text-xs text-keep-muted">When on, new members see these prompts the first time they enter. Editing the flow re-shows it to everyone.</span>
+        </span>
+      </label>
+
+      {selectable.length === 0 ? (
+        <p className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2.5 py-2 text-[11px] text-keep-accent">
+          No self-role usergroups yet. In the Usergroups tab, edit a group and turn on "Members can pick this" — those groups become the answer options here.
+        </p>
+      ) : null}
+
+      <div className="space-y-3">
+        {prompts.map((p, pi) => (
+          <div key={p.id} className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">Prompt {pi + 1}</span>
+              <span className="ml-auto flex items-center gap-1">
+                <button type="button" disabled={busy || pi === 0} onClick={() => movePrompt(pi, -1)}
+                  aria-label="Move prompt up" title="Move up"
+                  className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] text-keep-muted hover:text-keep-text disabled:opacity-40">↑</button>
+                <button type="button" disabled={busy || pi === prompts.length - 1} onClick={() => movePrompt(pi, 1)}
+                  aria-label="Move prompt down" title="Move down"
+                  className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] text-keep-muted hover:text-keep-text disabled:opacity-40">↓</button>
+                <button type="button" disabled={busy} onClick={() => setPrompts((ps) => ps.filter((_, j) => j !== pi))}
+                  className="rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Remove</button>
+              </span>
+            </div>
+            <input value={p.label} maxLength={200} disabled={busy}
+              onChange={(e) => setPrompt(pi, { ...p, label: e.target.value })}
+              placeholder="Question (e.g. What do you like to play?)"
+              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+            <input value={p.help ?? ""} maxLength={300} disabled={busy}
+              onChange={(e) => setPrompt(pi, { ...p, help: e.target.value })}
+              placeholder="Helper text (optional)"
+              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action" />
+            <label className="flex items-center gap-2 text-xs text-keep-muted">
+              <span className="uppercase tracking-widest">Answer type</span>
+              <select value={p.kind} disabled={busy}
+                onChange={(e) => setPrompt(pi, { ...p, kind: e.target.value === "multi" ? "multi" : "single" })}
+                className="rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action">
+                <option value="single">Pick one</option>
+                <option value="multi">Pick any</option>
+              </select>
+            </label>
+            <div className="space-y-1.5 border-t border-keep-rule/60 pt-2">
+              <p className="text-[10px] uppercase tracking-widest text-keep-muted">Options → usergroup</p>
+              {p.options.length === 0 ? (
+                <p className="text-[11px] italic text-keep-muted">No options yet. Add one below.</p>
+              ) : null}
+              {p.options.map((o, oi) => (
+                <div key={oi} className="flex flex-wrap items-center gap-1.5">
+                  <input value={o.label} maxLength={120} disabled={busy}
+                    onChange={(e) => setOption(pi, oi, { ...o, label: e.target.value })}
+                    placeholder="Option label"
+                    className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action" />
+                  <select value={o.usergroupId} disabled={busy || selectable.length === 0}
+                    onChange={(e) => setOption(pi, oi, { ...o, usergroupId: e.target.value })}
+                    className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action">
+                    {selectable.length === 0 ? <option value="">(no self-role groups)</option> : null}
+                    {selectable.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                  </select>
+                  <button type="button" disabled={busy} onClick={() => removeOption(pi, oi)}
+                    aria-label="Remove option" title="Remove option"
+                    className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">×</button>
+                </div>
+              ))}
+              <button type="button" disabled={busy || selectable.length === 0} onClick={() => addOption(pi)}
+                className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action disabled:opacity-40">+ Add option</button>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <button type="button" disabled={busy} onClick={addPrompt}
+        className="rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">+ Add prompt</button>
+
+      <div>
+        <button type="button" disabled={busy} onClick={save}
+          className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save onboarding</button>
+      </div>
+    </div>
+  );
+}
+
 /* ============================================================
  * The console shell + tab router
  * ============================================================ */
 
-type ServerSettingsTab = "overview" | "appearance" | "rooms" | "members" | "roles" | "usergroups" | "applications" | "reports" | "modcases" | "bans" | "modlog" | "emoticons" | "announcements" | "faqs" | "commands-titles" | "earning" | "rules" | "settings";
+type ServerSettingsTab = "overview" | "appearance" | "rooms" | "members" | "users" | "roles" | "usergroups" | "applications" | "reports" | "modcases" | "bans" | "modlog" | "emoticons" | "announcements" | "events" | "faqs" | "commands-titles" | "earning" | "rules" | "onboarding" | "settings";
 
 interface TabProps {
   detail: ServerConsoleDetail;
@@ -2032,10 +2501,12 @@ interface TabProps {
 
 const TAB_LABEL: Record<ServerSettingsTab, string> = {
   overview: "overview", appearance: "appearance", rooms: "rooms", members: "members",
+  users: "users",
   roles: "roles", usergroups: "usergroups", applications: "applications", reports: "reports",
   modcases: "mod cases",
   bans: "bans", modlog: "mod log", emoticons: "emoticons", announcements: "announcements",
-  faqs: "faqs", "commands-titles": "commands & titles", earning: "earning", rules: "rules", settings: "settings",
+  events: "events",
+  faqs: "faqs", "commands-titles": "commands & titles", earning: "earning", rules: "rules", onboarding: "onboarding", settings: "settings",
 };
 
 /**
@@ -2051,6 +2522,10 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
     ...(can("manage_appearance") ? (["overview", "appearance"] as const) : []),
     ...(can("manage_rooms") ? (["rooms"] as const) : []),
     ...(can("manage_members") ? (["members", "roles"] as const) : []),
+    // A moderation-focused user finder: search any member and mute/ban/remove
+    // them (or open their profile) without having to catch them in a room.
+    // Shown to anyone holding any one of the moderation grants it exposes.
+    ...(can("kick_member") || can("mute_member") || can("ban_member") || can("manage_members") ? (["users"] as const) : []),
     ...(can("manage_usergroups") ? (["usergroups"] as const) : []),
     ...(can("manage_applications") ? (["applications"] as const) : []),
     ...(can("manage_reports") ? (["reports"] as const) : []),
@@ -2059,10 +2534,15 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
     ...(can("view_mod_log") ? (["modlog"] as const) : []),
     ...(can("manage_emoticons") ? (["emoticons"] as const) : []),
     ...(can("manage_announcements") ? (["announcements"] as const) : []),
+    ...(can("manage_events") ? (["events"] as const) : []),
     ...(can("manage_faqs") ? (["faqs"] as const) : []),
     ...(can("manage_commands") || can("manage_titles") ? (["commands-titles"] as const) : []),
     ...(can("manage_earning") ? (["earning"] as const) : []),
-    ...(can("manage_appearance") ? (["rules", "settings"] as const) : []),
+    // Onboarding writes onboarding_config_json on server_settings, which the
+    // route gates on manage_appearance (same chair as rules/settings), so gate
+    // the tab identically. The option→usergroup targets come from the Usergroups
+    // tab's "Members can pick this" toggle (manage_usergroups).
+    ...(can("manage_appearance") ? (["onboarding", "rules", "settings"] as const) : []),
   ];
   const [tab, setTab] = useState<ServerSettingsTab>(tabs[0] ?? "modlog");
   const [err, setErr] = useState<string | null>(null);
@@ -2083,13 +2563,27 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
 
   return (
     <div className="px-4 py-3">
-      <div className="mb-3 flex flex-wrap gap-1">
-        {tabs.map((t) => (
-          <button key={t} type="button" onClick={() => { if (t !== tab) recordNav("tab", `server-settings:${t}`); setTab(t); }}
-            className={`rounded border px-2.5 py-1 text-xs uppercase tracking-widest ${tab === t ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}>
-            {TAB_LABEL[t]}
-          </button>
-        ))}
+      {/* Tab nav: a horizontally-scrollable strip on desktop (one tidy row
+          instead of tabs wrapping into several scrunched rows), collapsed to a
+          dropdown on mobile. Both feed the same setTab; the desktop strip
+          carries the tour anchors. */}
+      <div className="mb-3">
+        <select
+          value={tab}
+          onChange={(e) => { const t = e.target.value as ServerSettingsTab; if (t !== tab) recordNav("tab", `server-settings:${t}`); setTab(t); }}
+          aria-label="Settings section"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm md:hidden"
+        >
+          {tabs.map((t) => <option key={t} value={t}>{TAB_LABEL[t]}</option>)}
+        </select>
+        <div data-tour="server-settings-tab-strip" className="keep-scroll-strip hidden min-w-0 items-center gap-1 overflow-x-auto md:flex">
+          {tabs.map((t) => (
+            <button key={t} type="button" data-tour={`server-settings-tab-${t}`} onClick={() => { if (t !== tab) recordNav("tab", `server-settings:${t}`); setTab(t); }}
+              className={`shrink-0 rounded border px-2.5 py-1 text-xs uppercase tracking-widest ${tab === t ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}>
+              {TAB_LABEL[t]}
+            </button>
+          ))}
+        </div>
       </div>
       {err ? <p className="mb-2 text-xs text-keep-accent">{err}</p> : null}
       {(() => {
@@ -2097,6 +2591,7 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
           : tab === "appearance" ? <AppearanceTab {...props} />
           : tab === "rooms" ? <RoomsTab {...props} />
           : tab === "members" ? <MembersTab {...props} />
+          : tab === "users" ? <UsersTab {...props} />
           : tab === "roles" ? <RolesTab {...props} />
           : tab === "usergroups" ? <UsergroupsTab {...props} />
           : tab === "applications" ? <ApplicationsTab {...props} />
@@ -2106,10 +2601,12 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
           : tab === "modlog" ? <ModLogTab detail={detail} />
           : tab === "emoticons" ? <EmoticonsTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
           : tab === "announcements" ? <AnnouncementsTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
+          : tab === "events" ? <EventsTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
           : tab === "faqs" ? <FaqsTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
           : tab === "commands-titles" ? <CommandsTitlesTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
           : tab === "earning" ? <EarningTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
           : tab === "rules" ? <RulesTab {...props} />
+          : tab === "onboarding" ? <OnboardingTab {...props} />
           : <SettingsTab {...props} />;
         // Calm mode only: wrap the body in a remount-on-tab-change (key) div
         // carrying `tk-fade-in` so the new tab eases in. When Reduce Motion is
@@ -2131,6 +2628,8 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
   const [state, setState] = useState<{ detail: ServerConsoleDetail; viewer: ServerViewerState } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // Replay the server-admin walkthrough on demand (the "?" in the header).
+  const setForcedTourId = useChat((s) => s.setForcedTourId);
 
   // Clear to the loading state ONLY when the target server changes — never on a
   // post-save refetch. Nulling `state` on every `tick` unmounted the tabbed
@@ -2170,7 +2669,7 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
           Modal backdrop, whose onClick fires onClose with no target guard. */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className="flex h-full w-full flex-col overflow-hidden bg-keep-bg text-keep-text lg:h-[90vh] lg:max-h-[90vh] lg:w-[75vw] lg:max-w-5xl lg:rounded-lg lg:border lg:border-keep-rule lg:shadow-2xl"
+        className="flex h-full w-full flex-col overflow-hidden bg-keep-bg text-keep-text lg:h-[90vh] lg:max-h-[90vh] lg:w-[75vw] lg:max-w-[2400px] lg:rounded-lg lg:border lg:border-keep-rule lg:shadow-2xl"
       >
         <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule px-4 py-3">
           <SettingsIcon className="h-5 w-5 text-keep-action" aria-hidden="true" />
@@ -2178,6 +2677,12 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
             {state ? state.detail.name : "Server settings"}
             <span className="ml-2 text-xs font-normal text-keep-muted">Server settings</span>
           </h2>
+          {state && state.viewer.isOwner ? (
+            <button type="button" onClick={() => setForcedTourId("server-admin")} title="Show me around" aria-label="Show me around"
+              className="shrink-0 rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text">
+              <HelpCircle className="h-4 w-4" aria-hidden="true" />
+            </button>
+          ) : null}
           <button type="button" onClick={onClose} title="Close" aria-label="Close"
             className="shrink-0 rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text">
             <X className="h-4 w-4" aria-hidden="true" />
@@ -2194,6 +2699,13 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
             <ServerSettingsBody detail={state.detail} viewer={state.viewer} onSaved={() => { setTick((t) => t + 1); onChanged?.(); }} />
           )}
         </div>
+        {/* First-run walkthrough of the console — OWNER-only. Its steps tour the
+            Overview/Appearance/Members/Roles tabs, which are owner-gated
+            (manage_appearance is owner-only), so firing it for a mod/admin with a
+            narrower tab set would narrate tabs they can't see. Mounted
+            unconditionally, driven by `active` once the body (with its anchors)
+            is on screen; self-fires when unseen and replays from the header "?". */}
+        <ContextualTour tourId="server-admin" active={!!state && !!state.viewer.isOwner} />
       </div>
     </Modal>
   );

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { VERSION } from "@thekeep/shared";
 import { isDarkPalette } from "@thekeep/shared";
@@ -158,6 +158,26 @@ export function SplashLanding({ onNavigate }: Props) {
     { key: "browser", icon: Globe, label: "Play right in your browser" },
   ];
 
+  // "Features at a glance" band: the evergreen trust points plus any live-stat
+  // tiles, rendered as ONE even grid (not a ragged centered wrap). On phones it
+  // collapses to a single row with a toggle to reveal the rest; sm+ always shows
+  // the full grid.
+  const [featuresExpanded, setFeaturesExpanded] = useState(false);
+  const FEATURES_MOBILE_ROW = 2; // one row of the 2-col mobile grid
+  const featureChips: Array<{ key: string; icon: LucideIcon; accent: boolean; node: ReactNode }> = [
+    ...credibilityPoints.map((p) => ({ key: p.key, icon: p.icon, accent: false, node: p.label as ReactNode })),
+    ...tiles.map((t) => ({
+      key: t.key,
+      icon: t.icon,
+      accent: true,
+      node: (
+        <>
+          <span className="font-semibold tabular-nums text-keep-action">{t.value}</span> {t.label}
+        </>
+      ) as ReactNode,
+    })),
+  ];
+
   const splashTheme = resolveSplashTheme(branding);
   const splashIsDark = isDarkPalette(splashTheme);
 
@@ -269,28 +289,6 @@ export function SplashLanding({ onNavigate }: Props) {
             Where stories and communities live.
           </p>
         </header>
-
-        {/* EVERGREEN CREDIBILITY BAND (B4): ALWAYS shown, non-numeric trust
-            points, so even a cold-start install with zero live activity still
-            reads as credible right under the hero. Deliberately independent of
-            any /stats number — no cold-start gating here. */}
-        <ul
-          aria-label="What you get here"
-          className={`mx-4 mb-6 flex w-[min(2400px,94vw)] flex-wrap items-stretch justify-center gap-2.5 p-4 lg:mb-8 xl:w-[min(2400px,84vw)] sm:gap-3 sm:p-5 ${SPLASH_PANEL} ${SPLASH_PANEL_HOVER}`}
-        >
-          {credibilityPoints.map((p) => {
-            const PointIcon = p.icon;
-            return (
-              <li
-                key={p.key}
-                className="flex items-center gap-2 rounded-md border border-keep-border/50 bg-keep-panel/30 px-3 py-2 text-xs text-keep-text/85 sm:px-4 sm:text-sm"
-              >
-                <PointIcon className="h-4 w-4 shrink-0 text-keep-accent" aria-hidden />
-                <span>{p.label}</span>
-              </li>
-            );
-          })}
-        </ul>
 
         <div
           className="
@@ -451,51 +449,24 @@ export function SplashLanding({ onNavigate }: Props) {
                     </div>
                   </div>
                 </div>
-                {/* LIVE SIGNALS, admin-gated stat tiles. Only the tiles
-                    whose toggles are on render; the band disappears
-                    entirely on a cold-start install. */}
-                {tiles.length > 0 ? (
-                  // Live-signal tiles, wrapped in a panel so the band reads as a
-                  // contained section like the rest of the page (hover-lit too).
-                  // Mobile: a uniform two-column, half-scale grid; sm+ spreads the
-                  // tiles in a centered row.
-                  <div className={`grid grid-cols-2 gap-2.5 p-4 sm:flex sm:flex-wrap sm:justify-center sm:gap-3 sm:p-5 ${SPLASH_PANEL} ${SPLASH_PANEL_HOVER}`}>
-                    {tiles.map((t) => {
-                      const TileIcon = t.icon;
-                      return (
-                        <div
-                          key={t.key}
-                          className="rounded-md border border-keep-border/50 bg-keep-panel/30 px-3 py-3 text-center sm:min-w-[170px] sm:px-6 sm:py-4"
-                        >
-                          <TileIcon className="mx-auto h-4 w-4 text-keep-accent sm:h-5 sm:w-5" aria-hidden />
-                          <div className="mt-1 text-xl font-bold tabular-nums leading-none text-keep-action sm:mt-1.5 sm:text-3xl">
-                            {t.value}
-                          </div>
-                          <div className="mt-1 text-[10px] uppercase tracking-[0.12em] text-keep-muted sm:mt-1.5 sm:text-[11px] sm:tracking-[0.15em]">
-                            {t.label}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : null}
-
-                {/* POPULAR COMMUNITIES, social proof + a browse hook: the most
-                    popular public communities (The Spire included). Self-hides
-                    when none are public yet; only mounted when servers are on. */}
-                {branding.serversEnabled ? (
-                  <div id="popular" className="scroll-mt-24 rounded-md">
-                    <PopularCommunities onNavigate={onNavigate} />
-                  </div>
-                ) : null}
-
-                {/* FEATURE TOUR + pitches, the rest of the main column. */}
+                {/* FEATURE TOUR + pitches ("Everything Your Story Needs" — the
+                    CTA marquee), the rest of the main column. */}
                 <div id="features" className="scroll-mt-24 rounded-md">
                   <FeatureShowcase
                     onNavigate={onNavigate}
                     registrationOpen={branding.registrationOpen}
                   />
                 </div>
+
+                {/* POPULAR CHAT SERVERS, social proof + a browse hook: the site's
+                    own most-popular public chat servers. Sits BELOW the feature
+                    marquee. Self-hides when none are public yet; only mounted when
+                    servers are on. */}
+                {branding.serversEnabled ? (
+                  <div id="popular" className="scroll-mt-24 rounded-md">
+                    <PopularCommunities onNavigate={onNavigate} />
+                  </div>
+                ) : null}
 
                 {/* HOST DETAIL, what you actually get when you host here: a
                     live chat community and threaded forums, side by side, plus
@@ -633,10 +604,14 @@ export function SplashLanding({ onNavigate }: Props) {
                 // column wider than the viewport on a phone — that horizontal
                 // overflow scrolled the whole page sideways and made the
                 // centered CTA / login read as left-aligned. `space-y-8` stacks
-                // the worlds+bookshelf block, then Roleplay Communities, down
-                // the rail.
+                // Top Communities, then the worlds+bookshelf block, down the rail.
                 className="min-w-0 space-y-8"
               >
+                {/* TOP COMMUNITIES — the ranked topsite board preview, pinned to
+                    the TOP of the meta rail so the leading communities head the
+                    column. Sorted by traffic; full board at /top-communities. */}
+                <RoleplayCommunities onNavigate={onNavigate} />
+
                 {/* Worlds + Scriptorium keep their own grid: side-by-side on the
                     768–1400px reflow (rail runs full-width under the main
                     column), single column in the ≥1400px 540px rail. Kept in a
@@ -655,11 +630,6 @@ export function SplashLanding({ onNavigate }: Props) {
                     <BookshelfStrip onNavigate={onNavigate} />
                   </div>
                 </div>
-
-                {/* ROLEPLAY COMMUNITIES — Affiliates v2 mini top-sites / webring.
-                    A full-width sibling beneath the worlds+bookshelf block, so
-                    the widescreen partner banners get the whole rail width. */}
-                <RoleplayCommunities onNavigate={onNavigate} />
               </aside>
             </div>
           </div>
@@ -681,6 +651,54 @@ export function SplashLanding({ onNavigate }: Props) {
               The Spire Roleplay Chat v{VERSION}
             </a>
           </div>
+        </div>
+
+        {/* FEATURES AT A GLANCE (B4): the always-shown, non-numeric trust points
+            plus any admin-gated LIVE stat tiles (messages/24h, online, rooms,
+            writers) appended INLINE as compact chips, each self-gated so the band
+            still stands on its own when they're off. Its OWN container, moved
+            BELOW the main card (was above the hero). */}
+        <div
+          className={`mx-4 mt-6 w-[min(2400px,94vw)] p-4 lg:mt-8 xl:w-[min(2400px,84vw)] sm:p-5 ${SPLASH_PANEL} ${SPLASH_PANEL_HOVER}`}
+        >
+          {/* Even grid, not a ragged centered wrap: 2 cols on phones, 3 on
+              tablet, 4 on desktop, so chips line up in tidy columns/rows and
+              stretch to equal widths. On phones only the first row shows until
+              the toggle below is opened. */}
+          <ul
+            aria-label="What you get here"
+            className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4"
+          >
+            {featureChips.map((c, i) => {
+              const ChipIcon = c.icon;
+              // Phone-only collapse: hide everything past the first row until
+              // expanded; sm+ always shows all (sm:flex overrides the hide).
+              const collapsedOnMobile = !featuresExpanded && i >= FEATURES_MOBILE_ROW;
+              return (
+                <li
+                  key={c.key}
+                  className={`${collapsedOnMobile ? "hidden sm:flex" : "flex"} items-center gap-2 rounded-md border ${
+                    c.accent ? "border-keep-accent/40" : "border-keep-border/50"
+                  } bg-keep-panel/30 px-3 py-2 text-xs text-keep-text/85 sm:px-4 sm:text-sm`}
+                >
+                  <ChipIcon className="h-4 w-4 shrink-0 text-keep-accent" aria-hidden />
+                  <span>{c.node}</span>
+                </li>
+              );
+            })}
+          </ul>
+          {/* Phone-only expand/collapse toggle. Hidden from sm+ (full grid shows
+              there). Only rendered when there's more than the first row to show. */}
+          {featureChips.length > FEATURES_MOBILE_ROW ? (
+            <button
+              type="button"
+              onClick={() => setFeaturesExpanded((v) => !v)}
+              aria-expanded={featuresExpanded}
+              className="mt-2.5 w-full rounded-md border border-keep-rule/60 bg-keep-panel/40 px-3 py-1.5 text-xs font-medium text-keep-muted transition hover:text-keep-text sm:hidden"
+            >
+              {featuresExpanded ? "Show less" : `Show ${featureChips.length - FEATURES_MOBILE_ROW} more`}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>

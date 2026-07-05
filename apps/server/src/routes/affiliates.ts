@@ -18,7 +18,7 @@ import {
 } from "@thekeep/shared";
 import { affiliateClickLog, affiliates, users } from "../db/schema.js";
 import type { DbAffiliate } from "../db/schema.js";
-import { computePad, padDayKey, type PadResult } from "../affiliates/padding.js";
+import { computePad, type PadResult } from "../affiliates/padding.js";
 import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import { hasPermission } from "../auth/permissions.js";
@@ -299,7 +299,10 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
    * `html` rows are NOT surfaced here; they're archival, managed only from the
    * admin panel.
    */
-  app.get("/affiliates", async () => {
+  // Public Top Communities board: anonymous, polled, and it does a per-row
+  // padding compute (with a conditional write) over every approved card. Cap
+  // per-IP so a loop/poll can't amplify those reads+writes on the SQLite loop.
+  app.get("/affiliates", { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } }, async () => {
     const cards = await db
       .select()
       .from(affiliates)
@@ -653,10 +656,11 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
     if (body.enabled !== undefined) patch.enabled = body.enabled;
     if (body.sortOrder !== undefined) patch.sortOrder = body.sortOrder;
 
-    // Traffic padding config. Any change re-stamps the pad day to NULL so the next
-    // read re-seeds today's target (a config change takes effect the same day) —
-    // banking an un-banked prior day first so accumulated synthetic traffic isn't
-    // lost. `resetPad` wipes the accumulated totals entirely.
+    // Traffic padding config. On ANY pad change, fold the currently-shown
+    // synthetic total (banked + the in-period partial under the OLD config) into
+    // banked and clear the period anchor, so the next read opens a fresh rolling
+    // 24h period that ramps from 0 — a reconfigure never drops the visible count.
+    // `resetPad` wipes the accumulated totals entirely.
     if (body.padInEnabled !== undefined) patch.padInEnabled = body.padInEnabled;
     if (body.padInMax !== undefined) patch.padInMax = body.padInMax;
     if (body.padOutEnabled !== undefined) patch.padOutEnabled = body.padOutEnabled;
@@ -665,19 +669,19 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
       body.padInEnabled !== undefined || body.padInMax !== undefined ||
       body.padOutEnabled !== undefined || body.padOutMax !== undefined;
     if (padTouched) {
-      const today = padDayKey(new Date());
-      if (existing.padDay && existing.padDay !== today) {
-        patch.padInBanked = existing.padInBanked + existing.padInTarget;
-        patch.padOutBanked = existing.padOutBanked + existing.padOutTarget;
-      }
-      patch.padDay = null;
+      const realized = computePad(existing, new Date());
+      patch.padInBanked = realized.padIn;
+      patch.padOutBanked = realized.padOut;
+      patch.padInTarget = 0;
+      patch.padOutTarget = 0;
+      patch.padPeriodStart = null;
     }
     if (body.resetPad) {
       patch.padInBanked = 0;
       patch.padOutBanked = 0;
       patch.padInTarget = 0;
       patch.padOutTarget = 0;
-      patch.padDay = null;
+      patch.padPeriodStart = null;
     }
 
     if (body.status !== undefined) {

@@ -208,6 +208,19 @@ export interface SiteSettings {
    * kill-switch.
    */
   serversEnabled: boolean;
+  /**
+   * Escalating chat anti-spam master switch (migration 0313). When true, a
+   * rapid-fire message flood from an ordinary user climbs a warn->auto-mute
+   * ladder in `realtime/antiSpam.ts`. Off by default; `bypass_anti_spam` exempts
+   * trusted/mods/admins.
+   */
+  antiSpamEnabled: boolean;
+  /**
+   * Auto-moderation master switch (migration 0319). When true, the chat + forum
+   * pipelines run the enabled `automod_rules` before a message lands. Off by
+   * default; `bypass_automod` exempts trusted/mods/admins.
+   */
+  automodEnabled: boolean;
   updatedAt: number;
 }
 
@@ -381,6 +394,9 @@ export interface SettingsPatch {
    * route handler gates this to masteradmin.
    */
   serversEnabled?: boolean;
+  antiSpamEnabled?: boolean;
+  /** Auto-moderation master switch (migration 0319). */
+  automodEnabled?: boolean;
 }
 
 export async function updateSettings(
@@ -461,6 +477,8 @@ export async function updateSettings(
         : JSON.stringify(normalizeEarningConfig(patch.earningConfig));
   }
   if (patch.serversEnabled !== undefined) update.serversEnabled = patch.serversEnabled;
+  if (patch.antiSpamEnabled !== undefined) update.antiSpamEnabled = patch.antiSpamEnabled;
+  if (patch.automodEnabled !== undefined) update.automodEnabled = patch.automodEnabled;
   if (patch.newUserWelcomeHtml !== undefined) {
     // Only bump the welcome's edit timestamp when the text actually changed.
     // The audience filter (`user.createdAt > newUserWelcomeUpdatedAt`)
@@ -547,6 +565,8 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     worldsSeedVersion: row.worldsSeedVersion,
     earningConfig: parseEarningConfig(row.earningConfigJson),
     serversEnabled: !!row.serversEnabled,
+    antiSpamEnabled: !!row.antiSpamEnabled,
+    automodEnabled: !!row.automodEnabled,
     updatedAt: +row.updatedAt,
   };
 }
@@ -660,6 +680,14 @@ export interface ServerSettings {
   earningConfig: EarningConfig;
   /** Flash-sale toggle is server-only (no platform analog); null → false. */
   flashSaleEnabled: boolean;
+  /**
+   * Per-server onboarding (migration 0320). Server-only (no platform analog).
+   * `onboardingConfigJson` is the raw stored OnboardingConfig JSON (null = none,
+   * for serializing to the owner console); `onboardingEnabled` is the per-server
+   * master switch (null → false).
+   */
+  onboardingConfigJson: string | null;
+  onboardingEnabled: boolean;
 }
 
 /**
@@ -731,5 +759,7 @@ function mergeServerSettings(
     newUserWelcomeHash: hashWelcome(newUserWelcomeHtml),
     earningConfig: row?.earningConfigJson ? parseEarningConfig(row.earningConfigJson) : base.earningConfig,
     flashSaleEnabled: !!row?.flashSaleEnabled,
+    onboardingConfigJson: row?.onboardingConfigJson ?? null,
+    onboardingEnabled: !!row?.onboardingEnabled,
   };
 }

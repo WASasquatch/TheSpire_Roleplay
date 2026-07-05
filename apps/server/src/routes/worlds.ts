@@ -818,6 +818,14 @@ async function rebroadcastUserOccupancy(io: Io, db: Db, userId: string): Promise
  * ========================================================= */
 
 export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
+  // Per-IP cap for the PUBLIC, DB-heavy browse/read routes (featured
+  // carousel, catalog, world detail). These fire while a visitor clicks
+  // through the splash + catalog and open a few worlds; 60/min is 2-4x a
+  // human's click rate with headroom for a page firing a couple in
+  // parallel, while a refetch/reconnect loop is capped at 1/s. Tune up to
+  // 120 if a busy shared IP (NAT/CGNAT) trips it.
+  const browseLimit = { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } } as const;
+
   /* ---------- World list (caller's own) ---------- */
   app.get("/me/worlds", async (req, reply) => {
     const me = await getSessionUser(req, db);
@@ -842,7 +850,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
    * landing simultaneously generally see different rotations - no static
    * cache to bust on world edits, and no popularity bias either.
    */
-  app.get<{ Querystring: { limit?: string } }>("/worlds/featured", async (req) => {
+  app.get<{ Querystring: { limit?: string } }>("/worlds/featured", browseLimit, async (req) => {
     const limit = Math.min(10, Math.max(1, parseInt(req.query.limit ?? "10", 10) || 10));
     // Featured rotation: prefer admin-curated `status="featured"`, fall
     // back to the random sample of open worlds when there aren't enough
@@ -868,7 +876,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
   });
 
   /* ---------- World catalog (open visibility, filterable) ---------- */
-  app.get<{ Querystring: Record<string, string | string[]> }>("/worlds/catalog", async (req) => {
+  app.get<{ Querystring: Record<string, string | string[]> }>("/worlds/catalog", browseLimit, async (req) => {
     const parsed = catalogQuery.safeParse(req.query);
     const q = parsed.success ? parsed.data : ({} as z.infer<typeof catalogQuery>);
     const pageSize = q.pageSize ?? 24;
@@ -1035,7 +1043,7 @@ export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io):
   });
 
   /* ---------- Read world (summary + full pages list + members) ---------- */
-  app.get<{ Params: { idOrSlug: string } }>("/worlds/:idOrSlug", async (req, reply) => {
+  app.get<{ Params: { idOrSlug: string } }>("/worlds/:idOrSlug", browseLimit, async (req, reply) => {
     const me = await getSessionUser(req, db);
     const w = await resolveWorld(db, req.params.idOrSlug, me?.id ?? null, me?.role ?? null);
     if (!w) {

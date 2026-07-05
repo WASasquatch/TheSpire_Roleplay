@@ -386,6 +386,120 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode; requiresPermis
   },
 
   {
+    id: "getting-started",
+    title: "Getting started: the interface",
+    body: (
+      <>
+        <P>
+          Welcome to The Spire. This is a quick tour of the screen so you know where everything
+          lives. You can come back to this any time from Help, so there is nothing to memorize.
+        </P>
+        <Tip>
+          New here? The first time you sign in, this same walkthrough pops up as a guided tour with a
+          spotlight on each part of the screen. You can skip it and read this page instead, or replay
+          the tour later.
+        </Tip>
+
+        <Heading>Your name and characters</Heading>
+        <P>
+          Down at the bottom of the right-hand rail you will see a button with your name on it. That
+          button is your identity switcher. Click it to step into one of your characters, create a
+          new character, or drop back to being yourself (out of character).
+        </P>
+        <P>
+          While a character is active, everything you post shows under that character's name and
+          styling. When no character is active, you are posting as yourself.
+        </P>
+        <Tip>
+          Your name at the bottom of the rail is for switching who you are posting as. To open your
+          actual profile page, use the Menu, see below.
+        </Tip>
+
+        <Heading>Open and edit your profile</Heading>
+        <P>
+          You and every character you make get a profile page. To open yours for editing, open the
+          Menu (the button at the very bottom of the rail), then under Account pick Edit Profile. You
+          can also just type <K>/profile</K> in chat.
+        </P>
+        <Steps>
+          <li>Open the Menu at the bottom of the rail.</li>
+          <li>Open the Account section and click Edit Profile.</li>
+          <li>Add a picture, a bio, and any details you like, then hit Save.</li>
+        </Steps>
+        <Tip>
+          To peek at someone else's profile, click their name or their picture in chat, or click
+          their name in the rail. Clicking your own name in chat shows your profile the way visitors
+          see it.
+        </Tip>
+
+        <Heading>The Menu holds everything</Heading>
+        <P>
+          The Menu button at the bottom of the rail is your hub. Open it and you will find your
+          profile, your worlds, the forums, your messages and friends, and more, all in one place.
+        </P>
+        <Bullets>
+          <li>Account, edit your profile, wallet and rewards, bookmarks.</li>
+          <li>People, your messages, friends, and friend requests.</li>
+          <li>Worldbuilding, your worlds and the world catalog.</li>
+          <li>Forums, the forum catalog and your own boards.</li>
+          <li>Help / Commands, guides like this one plus every command.</li>
+        </Bullets>
+        <Tip>
+          Whenever you are not sure where something is, open the Menu first. Almost every part of the
+          site has a door here.
+        </Tip>
+
+        <Heading>Typing in chat</Heading>
+        <P>
+          The box at the bottom of the screen is where you write. Type a message and press Enter to
+          send it. Hold Shift and press Enter to start a new line for longer posts.
+        </P>
+        <Bullets>
+          <li>
+            Start a line with <K>/</K> to run a command. A list pops up as you type, so you do not
+            have to memorize anything.
+          </li>
+          <li>Type <K>@</K> to mention someone. Pick them from the list and they get a ping.</li>
+          <li>
+            Start a line with <K>:</K> to write an action. Typing <K>:draws her sword</K> posts as an
+            action in third person.
+          </li>
+        </Bullets>
+        <Tip>
+          You rarely need commands at all. Most things are a click away in the rail and the Menu.
+        </Tip>
+
+        <Heading>Switching rooms</Heading>
+        <P>
+          The rail on the right lists every room you can join, with how many people are in each.
+          Click a room's name to hop into it. Private rooms ask for a invite, or a password.
+        </P>
+        <P>On a phone, tap the Menu button near the chat box to slide the room list open.</P>
+        <Tip>
+          Want your own space? Use the New button at the top of the room list, or type <K>/go</K>{" "}
+          followed by a room name to make one on the spot.
+        </Tip>
+
+        <Heading>Forums and communities</Heading>
+        <P>
+          Live chat scrolls away. Forums are for writing you want to keep, character sheets, lore,
+          slow threads. Open the Forums Catalog from the button pinned just above the room list, or
+          from the Forums section of the Menu, or type <K>/forums</K>.
+        </P>
+        <P>
+          If communities are turned on, a thin strip of round icons runs along the far edge. Each
+          icon is a community you have joined. The button at the bottom of that strip lets you
+          discover more communities, or apply to start your own.
+        </P>
+        <Tip>
+          You can replay this whole tour any time. Open Help from the Menu and look for the option to
+          show the interface tour again.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
     id: "dice-checks",
     title: "Dice, checks, and pass/fail prompts",
     body: (
@@ -393,40 +507,60 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode; requiresPermis
         <P>
           When a scene needs a little chance, you can let the dice decide. Every result here is
           rolled on the server and can't be re-rolled or faked, so the whole room can trust the
-          outcome.
+          outcome. It all works the same in a live room and in a forum reply, so a play-by-post
+          scene can lean on the dice just like a fast chat.
         </P>
 
         <Heading>Rolling dice</Heading>
+        <P>Roll on its own line with <K>/roll</K>, and the room sees a clean result.</P>
         <Bullets>
           <li><K>/roll 1d20</K> rolls one twenty-sided die.</li>
-          <li><K>/roll 3d6</K> rolls three six-sided dice and shows each die plus the total.</li>
-          <li><K>/roll 1d20+3</K> adds a flat bonus. <K>/roll 2d6-1</K> subtracts one.</li>
-          <li><K>!roll</K> mid-sentence splices a roll into the line you're writing.</li>
+          <li>
+            <K>/roll 3d6</K> rolls three six-sided dice and shows each die plus the total, like{" "}
+            <K>[4, 2, 6] = 12</K>.
+          </li>
+          <li><K>/roll d20</K> is shorthand for <K>1d20</K> (the count starts at 1).</li>
+          <li><K>/roll 1d20+3</K> adds a flat bonus. <K>/roll 2d6-1</K> takes one away.</li>
+          <li>
+            <K>!roll</K> mid-sentence splices a roll into the line you're writing. Bare{" "}
+            <K>!roll</K> is a d20; <K>!roll:3d6</K> or <K>!roll:1d20+3</K> sets your own dice.
+          </li>
         </Bullets>
+        <Tip>
+          You can roll up to 100 dice with up to 1000 sides, and a bonus anywhere from -999 to
+          +999. Spaces inside the dice aren't allowed, so write <K>1d20+3</K>, not <K>1d20 + 3</K>.
+        </Tip>
 
         <Heading>A quick check</Heading>
         <P>
-          <K>/check</K> is the simplest call: a clean 50/50 Pass or Fail, posted for the room. Drop
-          <K>!check</K> into a sentence for the same thing inline ("she tries the lock ( check: ✓
-          Pass )").
+          <K>/check</K> is the simplest call: a clean 50/50 Pass or Fail, posted for the room to
+          see. Drop <K>!check</K> into a sentence for the same thing inline, so "she tries the lock
+          !check" reads back as "she tries the lock ( check: ✓ Pass )".
         </P>
 
         <Heading>Pass/fail prompts</Heading>
         <P>
           Write both outcomes ahead of time and let the result reveal which one happened. The room
-          sees a card with the verdict on top, the winning outcome already open, and the other
-          tucked away to peek at if they're curious.
+          sees a card with the verdict on top, the winning outcome already open, and the other one
+          tucked away to peek at if they're curious. This is a plain 50/50 flip.
         </P>
+        <P>Wrap your two outcomes in a check block like this:</P>
         <pre className="overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`/me works the pick into the old lock.
 <check>
   <pass>The lock gives with a soft click.</pass>
   <fail>The pick snaps off inside the mechanism.</fail>
 </check>`}</pre>
+        <Tip>
+          You need at least one <K>{"<pass>"}</K> or <K>{"<fail>"}</K> line inside the block. If
+          both are missing, the room just sees the raw text, which is a handy way to show someone
+          how a check is written without firing one.
+        </Tip>
 
         <Heading>Letting the dice decide a prompt</Heading>
         <P>
           Swap <K>{"<check>"}</K> for a roll with a target number. The roll has to meet or beat the
-          target to pass. The opener is <K>{"<roll:dice:target>"}</K>.
+          target to pass. The opener is <K>{"<roll:dice:target>"}</K>, and you close it with{" "}
+          <K>{"</roll>"}</K> (or <K>{"</check>"}</K>, either one works).
         </P>
         <pre className="overflow-x-auto rounded border border-keep-rule/60 bg-keep-panel/30 p-2 font-mono text-[10px] leading-relaxed">{`/me swings for the bridge's rope supports.
 <roll:1d20:12>
@@ -435,12 +569,16 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode; requiresPermis
 </roll>`}</pre>
         <Bullets>
           <li><K>{"<roll:1d20:12>"}</K> rolls a d20, and 12 or higher passes.</li>
-          <li><K>{"<roll:1d20+3:12>"}</K> adds a flat bonus before comparing.</li>
-          <li><K>{"<roll:1d20x1.5:12>"}</K> multiplies the roll (handy for advantage or a buff).</li>
+          <li><K>{"<roll:1d20+3:12>"}</K> adds a flat bonus before comparing to the target.</li>
+          <li>
+            <K>{"<roll:1d20x1.5:12>"}</K> multiplies the roll (handy for advantage or a buff). Use a
+            lowercase x, like <K>1d20x1.5</K>.
+          </li>
         </Bullets>
         <Tip>
-          The card shows the math it used, so everyone can see the roll, the bonus, and the target
-          that decided it.
+          The card shows the math it used, like "1d20: 16  +3 = 19  vs 12", so everyone can see the
+          roll, the bonus, and the target that decided it. A block roll takes one bonus at a time:
+          either a flat +X/-X or an x multiplier, not both.
         </Tip>
 
         <Heading>A house difficulty for the room</Heading>
@@ -448,7 +586,8 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode; requiresPermis
           Room owners and mods can set a single difficulty for the whole room with <K>/roll dc 15</K>.
           Once it's set, every plain <K>/roll</K> in that room is marked Pass or Fail against it, so
           a game can keep a steady bar without writing the target on each roll. <K>/roll dc</K> shows
-          the current difficulty, and <K>/roll dc clear</K> removes it.
+          the current difficulty, and <K>/roll dc clear</K> removes it. A roll has to meet or beat
+          the number to pass.
         </P>
 
         <Heading>Initiative</Heading>
@@ -457,9 +596,52 @@ const GUIDES: Array<{ id: string; title: string; body: ReactNode; requiresPermis
           <K>/init +3</K>. If the room has a difficulty set, the initiative roll is marked Pass or
           Fail against it too.
         </P>
+
+        <Heading>Random bits inside your own commands</Heading>
+        <P>
+          If you build custom commands for your community (through the command menu), you can add a
+          dash of chance right in the command's text. These little helpers only work inside a custom
+          command's template, not in a normal chat line, and they run every time someone uses the
+          command:
+        </P>
+        <Bullets>
+          <li>
+            <K>{"{roll:1d20}"}</K> drops in a random dice total. It shows just the number, and it
+            doesn't take a plus or minus bonus, so keep it to plain dice like <K>{"{roll:2d6}"}</K>.
+          </li>
+          <li>
+            <K>{"{choose:warmly|tightly|gently}"}</K> picks one option at random. The short form{" "}
+            <K>{"{a|b|c}"}</K> does the same thing.
+          </li>
+          <li>
+            <K>{"{if:condition|then|else}"}</K> shows the "then" text when the condition has
+            something in it, or the "else" text when it's empty (or 0, or false). The "else" part is
+            optional.
+          </li>
+          <li>
+            <K>{"{=10+5}"}</K> does quick math with + - * / and parentheses. You can even nest, like{" "}
+            <K>{"{=10+{roll:1d20}}"}</K> to add a die to a base number.
+          </li>
+        </Bullets>
         <Tip>
-          All of this works the same in forum threads as it does in chat, so a play-by-post scene
-          can lean on the dice just like a live room.
+          Anything the command doesn't understand is left on screen exactly as you typed it, so a
+          stray <K>{"{something}"}</K> is easy to spot and fix.
+        </Tip>
+
+        <Heading>Dropping a command into a sentence</Heading>
+        <P>
+          Any custom command that's set to work inline can be used mid-sentence by typing <K>!</K>{" "}
+          in front of its name, like <K>!wave</K> or <K>!greet</K>. The command's text lands right
+          where you put it, marked with a ✓ so the room knows it's the real thing.
+        </P>
+        <P>
+          Want to show what a command looks like without setting it off? Put a backslash in front,
+          like <K>{"\\!wave"}</K>, and it stays as plain text. Commands typed inside code formatting
+          are left alone too.
+        </P>
+        <Tip>
+          All of this works the same in forum replies as it does in chat, so a slower play-by-post
+          scene can lean on the dice and your custom commands just like a live room.
         </Tip>
       </>
     ),
@@ -1354,88 +1536,334 @@ foot of the mountains. Speaks little. Watches everything.</p>
   },
 
   {
+    id: "communities-join",
+    title: "Communities: joining & discovering",
+    body: (
+      <>
+        <P>
+          A community (also called a server) is a whole space of its own inside the Spire, with its
+          own rooms, its own look, and its own members. The Spire itself is the home community that
+          everyone belongs to; on top of that, people can raise their own communities for a guild, a
+          game world, a fandom, or any group that wants a home of its own.
+        </P>
+        <P>
+          You can belong to as many communities as you like and hop between them whenever you want.
+          Each one keeps its own rooms and members separate, so what happens in one stays in one.
+        </P>
+
+        <Heading>Find your communities</Heading>
+        <P>
+          Look for the thin strip of round icons down one side of the screen. That is your community
+          rail. Each round icon is a community you belong to, and the home community sits there too.
+          The little bar that lights up on the edge of an icon shows which one you are currently in,
+          and a small dot on an icon means there is new activity you have not seen yet.
+        </P>
+        <Tip>
+          Hop between the communities you have joined by clicking their icons on the rail. Clicking
+          one drops you straight into that community's main room.
+        </Tip>
+
+        <Heading>Browse and discover</Heading>
+        <P>
+          At the bottom of the rail is a button that opens Discover, a browsable list of communities
+          you can join.
+        </P>
+        <P>
+          The top of Discover shows Your communities for quick jumping. Below that is the browse area
+          with two lists, Popular and New, so you can see what is busy and what has just opened.
+          There is also a search box to look up a community by name, and clickable tags (like high
+          fantasy, sci-fi, or 18+) to narrow things down by theme.
+        </P>
+        <Tip>
+          Private communities do not show up in Discover on purpose. You reach those with a direct
+          link someone shares (a <K>/s/</K> address) or with an invite code.
+        </Tip>
+
+        <Heading>The three ways to join</Heading>
+        <P>
+          Every community sets how newcomers get in. A small badge on each Discover card tells you
+          which one it uses:
+        </P>
+        <Bullets>
+          <li>
+            <b>Open</b> - anyone signed in can join instantly. Just click Join on the card and you
+            are in.
+          </li>
+          <li>
+            <b>By application</b> - you send a short note and the owner (or their mods) approves you.
+            Click Apply, write a line or two on why you would like to join if you want, and send it.
+            You will get a notice once it is decided, and the card shows Applied while you wait.
+          </li>
+          <li>
+            <b>Invite only</b> - the community is hidden and joined with a code. Click Enter code on
+            the card, paste the code you were given, and you are in.
+          </li>
+        </Bullets>
+        <Tip>
+          For a community that is closed to newcomers, each card has a by &lt;owner&gt; link. Click
+          it to open the owner's profile and message them to ask about joining.
+        </Tip>
+
+        <Heading>Pick a home community</Heading>
+        <P>
+          On any community you belong to, the star button on its card marks it as your default. Your
+          default is the community whose look you carry on your profile, your rank there, your name
+          style, your border, and your collection. Tap the star again to clear it and fall back to
+          the home community.
+        </P>
+      </>
+    ),
+  },
+
+  {
+    id: "communities-create",
+    title: "Running your own community",
+    requiresPermission: "apply_create_server",
+    body: (
+      <>
+        <P>
+          Want a whole space of your own, a guild hall, a game world's home base, a group's private
+          corner? You can apply to raise a community and become its owner. As owner you shape its
+          rooms, decide how people join, choose its look, and tend it day to day.
+        </P>
+
+        <Heading>Apply to raise one</Heading>
+        <Steps>
+          <li>
+            Open Discover from the bottom of the community rail and click Create your server.
+          </li>
+          <li>
+            Pick a name and a short web address (the bit after <K>/s/</K>). The form checks the
+            address is free as you type, and the address is permanent so shared links never break.
+          </li>
+          <li>
+            Write a short note on what your community is for. The site's moderators read this when
+            they review.
+          </li>
+          <li>If there are rules to agree to before applying, tick the box, then submit.</li>
+        </Steps>
+        <Tip>
+          You can have only one application in the queue at a time, and there is a short wait before
+          re-applying if one is declined, so put your best foot forward. If it is declined you will
+          see the reviewer's note and can revise and try again.
+        </Tip>
+
+        <Heading>Once you are approved</Heading>
+        <P>
+          Your community appears in the catalog with you as its owner. Open it from the rail, then
+          use the gear on its icon to open your owner settings. Everything below lives there, laid
+          out as tabs. You only ever see the tabs for the things you are allowed to manage.
+        </P>
+
+        <Heading>Set it up your way</Heading>
+        <P>From your settings you can:</P>
+        <Bullets>
+          <li>
+            <b>Overview</b> - set the name, a tagline, a longer description, and theme tags people
+            search by. This is also where you choose how people join (open, by application, or invite
+            only) and whether signed-out visitors may read the place.
+          </li>
+          <li>
+            <b>Appearance</b> - add a round icon, a banner across the top, a wide logo, your own
+            colors, and a theme. Your look applies only to your community, it never changes anyone's
+            chat.
+          </li>
+          <li>
+            <b>Rooms</b> - create rooms, rename them, set their topic, tune how long messages are
+            kept, and remove ones you no longer need.
+          </li>
+          <li>
+            <b>Rules and Settings</b> - write your welcome and house rules, and set limits like how
+            long messages stay and how long people have to edit a message.
+          </li>
+        </Bullets>
+
+        <Heading>Members, roles, and groups</Heading>
+        <P>
+          You are the owner, so you hold every power. To share the work, you can appoint helpers and
+          organize your members:
+        </P>
+        <Bullets>
+          <li>
+            <b>Members</b> - see everyone who has joined, promote someone to a helper, or remove
+            them.
+          </li>
+          <li>
+            <b>Roles</b> - appoint a Moderator or an Admin. A Moderator is your everyday helper who
+            tends chat; an Admin runs almost everything for you.
+          </li>
+          <li>
+            <b>Member groups</b> - bundle member perks (like posting, images, or inviting others) and
+            a color, and hand them to people. Everyone starts in a default group; you can add named
+            groups by hand or set rules so people earn a group automatically (for example after so
+            many messages).
+          </li>
+          <li>
+            <b>Applications</b> - when your community is set to join by application, approve or
+            decline the people waiting at the gate, with an optional note.
+          </li>
+        </Bullets>
+
+        <Heading>Moderation, your way</Heading>
+        <P>
+          You decide exactly how much each helper can do. When you appoint a Moderator you choose
+          their powers one by one, so a helper only ever gets the reach you hand them. A Moderator
+          starts with a sensible chat-tidying set (handling reports, kicking and muting, cleaning up
+          others' messages), and you can add or remove individual powers any time.
+        </P>
+        <P>
+          An Admin is a fuller helper who can run day-to-day management for you, members, rooms,
+          groups, and more. The one thing an Admin can never do is change your community's look, and
+          only you can hand out the Admin role or transfer the community.
+        </P>
+        <P>
+          No helper, however you set them up, can ever touch your own messages or change your
+          community's appearance. Those stay yours.
+        </P>
+        <Bullets>
+          <li>
+            <b>Ban someone</b> - a ban covers your community's rooms only, never the rest of the
+            Spire. Make it timed so it lifts itself when it runs out, or permanent. You can add a
+            reason and lift a ban later.
+          </li>
+          <li>
+            <b>Mute or kick</b> - quieter tools for a single room when someone just needs to cool
+            off.
+          </li>
+          <li>
+            <b>Mod Log</b> - a running list of every moderation action taken in your community,
+            newest first, so you and your helpers can see who did what.
+          </li>
+        </Bullets>
+        <Tip>
+          Every power you grant is re-checked behind the scenes, and a helper can never be handed a
+          power you have not given yourself. When in doubt, start a helper as a Moderator with the
+          default set and add more only as you trust them.
+        </Tip>
+
+        <Heading>Handing it on</Heading>
+        <P>
+          If you ever want someone else to run the community, you can transfer ownership to a member.
+          You step down to Admin and keep your moderation reach, but the community becomes theirs.
+          Only you can do this, and it cannot be undone by you afterward, so choose carefully.
+        </P>
+        <Tip>
+          Share your community with its <K>/s/</K> address. Anyone you send it to lands right on your
+          front page, ready to read or join.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
     id: "forums",
     title: "Forums: reading and posting",
     body: (
       <>
         <P>
-          Live chat scrolls away. <b>Forums</b> are for the writing you want to keep and come back
-          to over days, announcements, character sheets, world lore, long slow-burn threads. Each
-          forum is its own little community space with its own boards, its own keeper, and its own
-          look.
+          Live chat scrolls away. Forums are for the writing you want to keep and come back to over
+          days: announcements, character sheets, world lore, long slow-burn threads. Each forum is
+          its own little space with its own boards, its own keeper, and its own look.
+        </P>
+        <P>
+          A quick map of the words. A forum holds <b>boards</b> (like "General Discussion" or
+          "Looking for RP"). A board holds <b>topics</b> (individual threads). A topic holds the
+          opening post and everyone's replies. Boards are grouped into <b>categories</b> to keep
+          things tidy.
         </P>
 
         <Heading>Open the Forums Catalog</Heading>
+        <P>
+          The number on the Forums Catalog button is your unread count: replies and quotes waiting
+          for you. The Tools drawer also lists the forums you own or have visited as quick
+          shortcuts, so your regular haunts are one tap away.
+        </P>
         <Bullets>
           <li>Click the <b>Forums Catalog</b> row pinned just above the room list on the right.</li>
           <li>Or open the <b>Tools</b> drawer and pick <b>Forums Catalog</b>.</li>
-          <li>Or type <K>/forums</K>. Add a name to jump straight in: <K>/forums spire</K>.</li>
+          <li>Or type <K>/forums</K>. Add a name to jump straight in, like <K>/forums spire</K>.</li>
         </Bullets>
-        <P>
-          A little number on the Forums Catalog button is your unread count, replies and mentions
-          waiting for you. The Tools drawer also lists the forums you own or have visited as quick
-          shortcuts under the two Forums buttons, so your regular haunts are one tap away.
-        </P>
 
         <Heading>Find your way around</Heading>
         <P>
-          A forum holds <b>boards</b> (think "General Discussion", "Looking for RP"). A board holds
-          <b> topics</b> (individual threads). A topic holds the first post and everyone's replies.
+          Pick a forum from the list on the right. The Spire's own forum is pinned first, then any
+          you belong to, then everything else under Explore. Use the Discover button (the compass)
+          to search every forum by name or by tag.
+        </P>
+        <P>
+          A small dot on a forum or a board means something new has happened since you last looked.
+          Tap the star at the top to make a forum your default, the one the catalog opens to next
+          time.
         </P>
         <Steps>
-          <li>Pick a forum from the list. The Spire's own forum is pinned first.</li>
+          <li>Open a forum. Its boards are grouped into categories.</li>
           <li>
-            Boards are grouped into categories. Pinned topics sit on top, then the rest by most
-            recent reply. A topic shows its reply count so you can see what is busy.
+            Inside a board, pinned topics sit on top, then the rest by most recent reply. Each topic
+            shows its reply count so you can see what's busy.
           </li>
-          <li>Click a topic to read the whole thread right there, without leaving the catalog.</li>
+          <li>
+            Click a topic to read the whole thread right there, without leaving the catalog. A
+            colored tag (a "prefix") on a topic tells you what it is at a glance, like News or Open
+            RP.
+          </li>
         </Steps>
+
+        <Heading>Starting a topic</Heading>
         <P>
-          A small dot on a forum (or a board) means something new has happened since you last
-          looked. If you have a room transition equipped, it plays as you move between forums,
-          boards, and topics, the same flourish you get switching rooms.
+          When you're allowed to post, a board shows a <b>New Topic</b> button. Give your thread a
+          title and write the opening post with the full writing toolbar, the same formatting,
+          emoticons, and thesaurus you have in chat. If the board allows it you can attach a poll
+          instead of a plain post.
+        </P>
+        <P>
+          You post as whoever is active: your character if you're in one, your OOC self if you're
+          not.
         </P>
 
-        <Heading>Posting and replying</Heading>
+        <Heading>Replying, and the three post styles</Heading>
         <P>
-          When you can post, a board gives you the full writing toolbar, the same formatting,
-          emoticons, and thesaurus you have in chat. Start a <b>New Topic</b> for a fresh thread,
-          or <b>Reply</b> under any post to continue one. You post as whoever is active, your
-          character if you are in one, your OOC self if you are not.
+          Open a topic and use the reply box at the bottom. Above it you'll see up to three little
+          style buttons that change how your reply reads:
         </P>
-        <P>
-          Some forums let anyone post the moment they want to. Others ask you to <b>join</b> first
-          (see the next guide). Either way you can <i>read</i> freely, and the forum's page tells
-          you which kind it is. A few boards or categories are members-only, those show a small lock
-          until you have joined.
-        </P>
+        <Bullets>
+          <li><b>Say</b>, an ordinary post in your voice. The default.</li>
+          <li>
+            <b>Action</b>, an emote, framed as something your character does rather than says.
+          </li>
+          <li>
+            <b>NPC</b>, speak as a saved side-character. You pick which NPC from the list. This one
+            only appears if the forum's keeper has let you voice NPCs there.
+          </li>
+        </Bullets>
+        <Tip>
+          Some forums only let approved members post. You can always read first, then apply if it's
+          for you. See the "Forums: joining one that asks you to apply" guide.
+        </Tip>
 
         <Heading>Notifications and watching</Heading>
         <P>
-          The bell at the top of the catalog is your forum inbox. It collects three things: when
-          someone <b>replies</b> to a topic you started, when someone <b>quotes</b> one of your
-          posts, and new replies on topics you are <b>watching</b>. Click a notification to jump
-          straight to that post.
+          The bell at the top of the catalog is your forum inbox. It gathers three things: when
+          someone replies to a topic you started, when someone quotes one of your posts, and new
+          replies on topics you're watching. Click any notice to jump straight to that post.
         </P>
         <Bullets>
           <li>You automatically watch any topic you start or reply to.</li>
           <li>
-            To follow a thread you have not posted in, open it and tap its <b>watch</b> bell. Tap
-            again to stop.
+            To follow a thread you haven't posted in, open it and tap its watch bell. Tap again to
+            stop.
           </li>
           <li>
-            The unread number shows on the bell, on the Forums Catalog button above the userlist,
-            and on the Forums row in the Tools drawer, so you never miss a reply just because the
-            catalog is closed.
+            The unread number shows on the bell, on the Forums Catalog button, and on the Forums row
+            in the Tools drawer, so you never miss a reply just because the catalog is closed.
           </li>
         </Bullets>
 
-        <Heading>Sharing a forum</Heading>
+        <Heading>Reading and sharing on the web</Heading>
         <P>
-          Every forum has its own web address like <K>/f/spire</K>. Hand it out anywhere. Visitors
-          land right on that forum's page, and if they need to sign in, they come straight back to
-          it afterward. If the keeper has turned on public reading, even signed-out visitors can
-          browse the boards (posting always needs an account).
+          Every forum has its own web address like <K>/f/spire</K>, and a topic has one too. Hand
+          either out anywhere. Visitors land right on that page, and if they need to sign in, they
+          come straight back to it afterward. If the keeper has turned on public reading, even
+          signed-out visitors can browse the boards. Posting always needs an account.
         </P>
         <Tip>
           Forums and chat rooms are different tools for different speeds. Use a room for live
@@ -1451,51 +1879,57 @@ foot of the mountains. Speaks little. Watches everything.</p>
     body: (
       <>
         <P>
-          Open forums need nothing from you, just start posting. Some forums are
-          <b> application</b> forums: the keeper wants to meet you (or read a quick pitch) before
-          you can post. This is normal for tight-knit or themed communities. You can always read
-          first and decide if it is for you.
+          Forums come in two flavors. Open forums need nothing from you, just start posting.
+          Application forums want the keeper to meet you (or read a quick pitch) before you can post.
+          That's normal for tight-knit or themed communities. Either way you can read everything
+          first and decide if it's for you.
         </P>
 
-        <Heading>How to apply</Heading>
+        <Heading>Joining an open forum</Heading>
+        <P>
+          On an open forum you can post right away, no join needed. The only time you'll see a{" "}
+          <b>Join</b> button is when the forum has a members-only board or category tucked inside it.
+          One click on Join unlocks those sections. There's no waiting and no review.
+        </P>
+
+        <Heading>Applying to an application forum</Heading>
         <Steps>
-          <li>Open the forum from the catalog.</li>
+          <li>Open the forum from the catalog and read around.</li>
           <li>
-            When posting is gated, the button reads <b>Apply to join</b> instead of letting you
-            post. Click it.
+            Where you'd normally post, you'll see <b>Apply to join</b> instead. Click it.
           </li>
           <li>
-            A short form opens. The keeper may have written a prompt ("tell us about your
-            character", "how did you hear about us"). Answer what is there and submit. If there is
-            no prompt, just confirm.
+            A short box opens. The keeper may have written a prompt ("tell us about your character",
+            "how did you hear about us"). Answer it and submit. An answer is optional, but a good one
+            helps.
           </li>
         </Steps>
 
         <Heading>After you apply</Heading>
         <P>
-          Your application sits in the keeper's queue and the forum shows <b>Application pending</b>.
-          There is no clock, the keeper reviews when they can. If you change your mind, you can
-          <b> withdraw</b> a pending application and step away.
+          Your application sits in the keeper's queue and the forum shows "Your application is
+          pending." There's no clock, the keeper reviews when they can. Changed your mind? You can{" "}
+          <b>Withdraw</b> a pending application at any time.
         </P>
         <Bullets>
           <li>
-            <b>Approved</b>, you are now a member and can post. Any members-only boards unlock too.
+            <b>Approved</b>: you're a member and can post. Any members-only boards unlock too.
           </li>
           <li>
-            <b>Declined</b>, you will see the keeper left, if any. You can apply again later, after
-            a short cooldown, so treat a note as friendly feedback rather than a closed door.
+            <b>Declined</b>: you'll see the keeper's note, if they left one. You can apply again
+            after a short wait, so treat a note as friendly feedback, not a closed door.
           </li>
         </Bullets>
 
         <Heading>Leaving</Heading>
         <P>
-          Changed your mind, or the story moved on? You can leave a forum at any time from its page.
-          Leaving just removes your membership; you can re-apply later if the forum allows it. Your
-          past posts stay where they are.
+          Changed your mind, or the story moved on? You can leave a forum from its page at any time.
+          Leaving just removes your membership; your past posts stay where they are, and you can
+          re-apply later if the forum allows it.
         </P>
         <Tip>
-          Joining a forum is about that one forum only. It does not change your rooms, your worlds,
-          or anything else on the Spire.
+          Joining a forum is about that one forum only. It doesn't change your rooms, your worlds, or
+          anything else on the Spire.
         </Tip>
       </>
     ),
@@ -1503,44 +1937,69 @@ foot of the mountains. Speaks little. Watches everything.</p>
 
   {
     id: "forums-create",
-    title: "Forums: starting and running your own",
+    title: "Forums: applying to start your own",
+    requiresPermission: "apply_create_forum",
     body: (
       <>
         <P>
           Want your own corner of the Spire, a guild hall, a game's home base, a fandom space? You
-          can apply to open a forum and become its <b>keeper</b>. Keepers shape the boards, set the
-          rules, pick the look, and tend the place day to day.
+          can apply to open a forum and become its keeper. This guide covers the application; once
+          you're approved, see "Forums: running your own" for the day-to-day tools.
         </P>
 
         <Heading>Apply to open one</Heading>
+        <P>
+          A couple of house rules: you can keep only a small number of forums at once, and you can
+          have just one application in the queue at a time. If an application is declined, there's a
+          short wait before you can re-apply, so put your best foot forward the first time.
+        </P>
         <Steps>
           <li>
             In the Forums Catalog, click <b>Create your Forum</b> (or type <K>/forums create</K>).
           </li>
           <li>
-            Pick a <b>name</b> and a short web-address <b>slug</b> (the bit in <K>/f/your-slug</K>).
-            The form checks the slug is free as you type.
+            Pick a name and a short web-address slug, the bit in <K>/f/your-slug</K>. The form checks
+            the slug is free as you type.
           </li>
           <li>
-            Write a sentence or two on <b>what the forum is for</b>. The staff team reads this when
-            they review.
+            Write a sentence or two on what the forum is for. The staff team reads this when they
+            review.
           </li>
-          <li>Submit. You will hear back once a moderator has looked it over.</li>
+          <li>If the site shows a rules box, read it and tick to agree. Then submit.</li>
         </Steps>
-        <P>
-          A couple of house rules: you can keep only a small number of forums at once, and you can
-          have one application in the queue at a time. If an application is declined, there is a
-          short wait before you can re-apply, so put your best foot forward the first time.
-        </P>
 
-        <Heading>Once you are approved</Heading>
+        <Heading>After you apply</Heading>
         <P>
-          Your forum is created with a starter board and a welcome post, and you are its keeper. The
-          <b> gear</b> icon at the top of your forum opens your keeper settings. Everything below
-          lives there.
+          Your request goes to the site's staff team. You'll get a notice here and in chat when it's
+          decided. If it's approved, your forum is created with a starter board and a welcome post,
+          and you become its keeper. If it's declined, you'll see the reviewer's note, which doubles
+          as guidance for a stronger try next time.
+        </P>
+        <Tip>
+          Share your forum with its <K>/f/your-slug</K> address once it's live. Anyone you send it to
+          lands right on your front page, sign-in and all, ready to read or apply.
+        </Tip>
+      </>
+    ),
+  },
+
+  {
+    id: "forums-admin",
+    title: "Forums: running your own",
+    body: (
+      <>
+        <P>
+          Once your forum is approved you're its keeper (its owner). Keepers shape the boards, set
+          who may post, pick the look, and tend the place day to day. Everything below lives behind
+          the gear icon at the top of your forum.
+        </P>
+        <P>
+          You don't have to do it all yourself. You can appoint moderators and hand each one only
+          the powers you choose.
         </P>
 
         <Heading>Boards and categories</Heading>
+        <P>Open the gear, then the <b>Boards</b> tab.</P>
         <Bullets>
           <li>
             <b>Boards</b> are the main sections. Raise new ones, rename them, give each a short
@@ -1549,106 +2008,240 @@ foot of the mountains. Speaks little. Watches everything.</p>
           </li>
           <li>
             <b>Categories</b> sort topics inside a board ("Announcements", "Open RP"). Give each a
-            name, a one-line note on what belongs there, and an optional icon. You can nest a
-            category one level under another for a tidy two-tier layout.
+            name, a one-line note, and an optional icon. You can nest one category under another for
+            a tidy two-tier layout.
           </li>
           <li>
-            Mark a board or a category <b>members-only</b> to keep its contents for members while
-            it still shows (locked) to everyone else.
+            Mark a board or a category members-only to keep its contents for members while it still
+            shows (locked) to everyone else.
           </li>
         </Bullets>
 
         <Heading>Who may post</Heading>
         <Bullets>
           <li>
-            <b>Open</b>, anyone signed in can post right away. Best for public, welcoming spaces.
+            <b>Open</b>: anyone signed in can post right away. Best for public, welcoming spaces.
           </li>
           <li>
-            <b>By application</b>, people apply and you approve them. You can write the question
-            applicants answer. Review the queue from your settings, approve or decline with an
-            optional note.
+            <b>By application</b>: people apply and you approve them. You can write the question
+            applicants answer, then review the queue in the Applications tab and approve or decline
+            with an optional note.
           </li>
           <li>
-            <b>Public reading</b>, an on/off switch that lets signed-out visitors browse your
-            boards. Posting always needs an account. Handy when you want to show the place off.
+            <b>Public reading</b>: an on/off switch that lets signed-out visitors browse your boards.
+            Posting always needs an account. Handy when you want to show the place off.
           </li>
         </Bullets>
 
-        <Heading>Your moderators</Heading>
+        <Heading>Prefixes (topic tags)</Heading>
         <P>
-          Appoint <b>forum moderators</b> to help you tend the boards. They can pin, lock, and tidy
-          topics and review join applications. They cannot edit your settings or touch your own
-          posts, the forum stays yours. Add or remove them any time from settings.
+          Prefixes are the little colored tags on topics, like News, Open, or Closed. Open the{" "}
+          <b>Prefixes</b> tab to build your set: give each a label, a color, and an optional hover
+          note.
+        </P>
+        <Bullets>
+          <li>Limit a prefix to certain categories so it's only offered where it fits.</li>
+          <li>
+            Mark a prefix staff-only when only you and your mods should be able to attach it, good
+            for authoritative tags like Announcement.
+          </li>
+          <li>You can also let members mint a new tag on the fly while posting, if you turn that on.</li>
+        </Bullets>
+
+        <Heading>Member groups</Heading>
+        <P>
+          Usergroups let you hand a whole bundle of abilities to a set of members at once, instead of
+          one by one. Open the <b>Usergroups</b> tab to create a group, choose what it can do (start
+          topics, post replies, use action posts, embed images, add polls, and any moderation powers
+          you want to include), and add people to it.
+        </P>
+        <P>
+          Groups can also fill themselves. Add a rule like "has posted at least 20 times" or "has
+          been a member 30 days" and people join the group automatically once they qualify, no
+          chasing required.
         </P>
 
-        <Heading>Keeping order</Heading>
+        <Heading>Moderators and their powers</Heading>
+        <P>
+          Appoint moderators from the <b>Roles</b> tab to help you tend the boards. What makes forum
+          mods flexible is that you choose each one's powers with a set of checkboxes, so a helper
+          can pin and lock topics without ever being able to ban anyone.
+        </P>
         <Bullets>
-          <li><b>Pin</b> a topic to hold it at the top of its board.</li>
-          <li><b>Lock</b> a topic to stop new replies while leaving it readable.</li>
           <li>
-            <b>Ban</b> someone from your forum if you have to. A forum ban covers <i>your forum
-            only</i>, never the rest of the Spire, and you can lift it later.
+            <b>Tidy-up powers</b>: lock or reopen topics, pin them to the top, move or merge them,
+            and edit or remove other members' posts.
+          </li>
+          <li>
+            <b>Trust powers</b>: review join applications, manage members, run member groups, handle
+            the report queue, and ban or unban people.
+          </li>
+          <li><b>Voice powers</b>: let a mod post as an NPC.</li>
+          <li>
+            One thing no mod can ever do, even with editing powers, is touch your own posts as
+            keeper. The forum stays yours.
           </li>
         </Bullets>
+        <Tip>
+          New mods start with the everyday tidy-up powers turned on and the sensitive ones (banning,
+          managing members) left off, so you grant those deliberately.
+        </Tip>
+
+        <Heading>Removing and banning people</Heading>
+        <P>
+          From the <b>Members</b> tab you can remove a plain member. From the <b>Bans</b> tab you can
+          ban someone for a day, a week, a month, or for good, with a reason they'll see. A forum ban
+          covers your forum only, never the rest of the Spire, and you can lift it any time.
+        </P>
+        <P>
+          You can also ban straight from a troublemaker's profile: open their profile and use{" "}
+          <b>Ban from forum</b>. If you run more than one forum, you'll pick which one first. This
+          uses the same forum-only ban, so it never affects their account anywhere else.
+        </P>
+
+        <Heading>Reports and the mod log</Heading>
+        <P>
+          When a member flags a post, it lands in your <b>Reports</b> tab, where you (or a mod with
+          that power) can jump to the post and resolve or dismiss it. The <b>Mod Log</b> tab is a
+          running history of moderation in your forum, who locked, moved, or banned what, so you and
+          your mods can always see how a situation was handled.
+        </P>
+
+        <Heading>Voicing NPCs</Heading>
+        <P>
+          NPCs are saved side-characters, a name plus a few optional stat lines like HP or Mood, that
+          you can speak as inside a topic. Build them once from the NPC list and reuse them anywhere.
+          They belong to your account, so they follow you between forums.
+        </P>
+        <P>
+          In your own forum, decide who may voice NPCs by handing out the NPC power to a group or a
+          mod. When someone has it, an NPC button appears next to Say and Action on the reply box.
+        </P>
 
         <Heading>Make it yours</Heading>
         <P>
-          In the appearance settings you can add a <b>banner</b> and a <b>logo</b>, choose your own
-          <b> colors</b>, and link a <b>world</b> you have built so visitors can read its lore right
-          from the forum. The look applies only to your forum, it never changes anyone's chat.
+          In the <b>Appearance</b> tab you can add a banner and a logo, choose your own colors, link
+          a world you've built so visitors can read its lore right from the forum, and (if you run a
+          community server) tie the forum to it. The look applies only to your forum; it never
+          changes anyone's chat.
         </P>
         <Tip>
-          Share your forum with its <K>/f/your-slug</K> address. Anyone you send it to lands right
-          on your front page, sign-in and all, ready to read or apply.
+          Share your forum with its <K>/f/your-slug</K> address. Anyone you send it to lands right on
+          your front page, ready to read or apply.
         </Tip>
       </>
     ),
   },
 
   {
-    id: "forums-admin",
-    title: "Forums: reviewing requests (staff)",
-    requiresPermission: "review_forum_applications",
+    id: "top-communities",
+    title: "Top Communities",
     body: (
       <>
         <P>
-          People apply to open their own forums, and those requests come to the staff team. This
-          guide is the review side. It shows only for staff who can review forum requests.
+          Top Communities is a public board of roleplay communities worth checking out. Think of it
+          as a friendly directory: sister sites, partner communities, and other places people gather
+          to write together, all in one browsable list. Anyone can look, whether you are signed in or
+          not.
         </P>
-
-        <Heading>Where the queue lives</Heading>
         <P>
-          Open the <b>Admin</b> panel and go to the <b>Forums</b> tab. Pending requests sit at the
-          top; recently reviewed ones sit below so you can see who decided what.
+          You will see a card for each community with its name, a short blurb, some tags, and a Visit
+          button that opens it in a new tab. It is a quick way to find your next home, hop between
+          communities you already love, and discover groups you have not met yet.
         </P>
 
-        <Heading>Reviewing a request</Heading>
+        <Heading>How to open it</Heading>
+        <P>There are a couple of easy ways in.</P>
         <Steps>
+          <li>From the homepage, tap the "Top Communities" tab in the top menu bar.</li>
           <li>
-            Read the requested name, the web-address slug, and the applicant's note on what the
-            forum is for.
+            Or scroll the homepage to the "Top RP Communities" panel and click "Browse all
+            communities" to open the full board.
           </li>
-          <li>
-            <b>Approve</b> to create the forum. It is set up automatically with a starter board and
-            a welcome post, and the applicant becomes its keeper.
-          </li>
-          <li>
-            <b>Decline</b> if it is not a fit. Leave a short note when you can, the applicant sees
-            it, and it doubles as guidance for a stronger re-application later.
-          </li>
+          <li>You can also go straight there by visiting the <K>/top-communities</K> address.</li>
         </Steps>
 
-        <Heading>Oversight after approval</Heading>
+        <Heading>What each card shows</Heading>
+        <P>Every listing is a card. Here is what you are looking at.</P>
+        <Bullets>
+          <li>
+            <b>Icon and name</b>: the community's logo (or a lettered tile) and its title.
+          </li>
+          <li>
+            <b>Blurb</b>: a short description of what the community is about. If it is long, tap "See
+            more" to read the rest.
+          </li>
+          <li>
+            <b>Tags</b>: little labels for the genre or vibe, like the kind of roleplay you would find
+            there.
+          </li>
+          <li>
+            <b>Two little counters</b>: an arrow pointing down-and-left shows visits sent to us from
+            that community, and an arrow pointing up-and-right shows visits we sent to them. Together
+            they give a rough sense of how much traffic flows between that community and here.
+          </li>
+          <li>
+            <b>Visit button</b>: opens the community in a new tab so you keep your place on the board.
+          </li>
+        </Bullets>
+        <Tip>
+          Cards open in a new tab, so you can peek at a few communities and come back to the board
+          without losing your spot.
+        </Tip>
+
+        <Heading>How communities are ordered</Heading>
         <P>
-          Keepers run their own forums day to day. Staff with the forum-management permission can
-          still step in on any forum, edit or archive it, lift a forum ban, or step in on
-          moderation, the same way site mods can act in any room. Use it the way you would any
-          override: when the community needs it, not as routine.
+          By default the board shows the busiest communities first. "Busiest" just means the ones
+          with the most visits moving to and from them, so the places people are actually clicking
+          through rise toward the top.
+        </P>
+        <P>You are not stuck with that order. Use the Sort menu at the top of the board to change it.</P>
+        <Bullets>
+          <li><b>Most active</b>: the default, busiest communities first.</li>
+          <li><b>Most sent to us</b>: the ones sending the most visitors our way.</li>
+          <li><b>Most sent out</b>: the ones we send the most visitors to.</li>
+          <li>
+            <b>A to Z</b>: plain alphabetical, handy when you know the name you are looking for.
+          </li>
+        </Bullets>
+
+        <Heading>Finding a community</Heading>
+        <P>
+          If the list is long, you have a few ways to narrow it down. Everything updates instantly as
+          you go.
+        </P>
+        <Steps>
+          <li>Type a name or tag into the search box to filter the list as you type.</li>
+          <li>
+            Or click one of the tag chips to show only communities with that tag. Click it again (or
+            "Clear tag") to remove the filter.
+          </li>
+          <li>
+            Use the page arrows at the bottom to flip through the results if there are more than one
+            page.
+          </li>
+        </Steps>
+        <Tip>
+          Search and tags work together with sorting, so you can, say, filter to a tag and still keep
+          the busiest ones on top.
+        </Tip>
+
+        <Heading>Listing your own community</Heading>
+        <P>Run a community of your own? You can add it to the board.</P>
+        <P>
+          Click "Add Your Site" (also called "List your community") near the top of the board. If you
+          are logged in, a short form opens where you fill in your community's name, a description,
+          the link people should visit, and, if you like, an icon, a banner image, and some tags. If
+          you are not logged in yet, you will be pointed to sign up first.
+        </P>
+        <P>
+          New listings are reviewed before they go live, so your card will not appear on the board
+          right away. Once it is approved, it shows up alongside the others and starts collecting
+          visits.
         </P>
         <Tip>
-          Approving a forum hands real ownership to the applicant. The name and slug become their
-          public address, so a quick sanity check on the slug (no impersonation, nothing that
-          breaks the rules page) before approving saves a rename later.
+          A clear name, a friendly one-line blurb, and a couple of accurate tags help people find and
+          choose your community at a glance.
         </Tip>
       </>
     ),

@@ -426,7 +426,15 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   const inboxCountsVersion = useChat((s) => s.inboxCountsVersion);
   useEffect(() => {
     void refreshInboxCounts();
-  }, [refreshInboxCounts, dmConversations, pendingFriendRequests, refreshKey, inboxCountsVersion]);
+    // Intentionally NOT keyed on dmConversations / pendingFriendRequests.
+    // The App-level dm:new / friend:request socket handlers already
+    // refresh the counts when those lists change, so re-firing here on
+    // every list replacement was a redundant second /me/inbox-counts
+    // fetch. Key only on the meaningful triggers: refreshKey (local
+    // open/accept bumps) and inboxCountsVersion (read-marker advances
+    // from ThreadPane after /read and from the App dm:read handler).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshInboxCounts, refreshKey, inboxCountsVersion]);
 
   // NOTE: an earlier "auto-jump to the identity with unread items"
   // effect lived here. Removed deliberately, characters are their

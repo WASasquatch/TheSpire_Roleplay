@@ -13,6 +13,7 @@ import type {
   RoomSummary,
   TheaterSync,
   Theme,
+  TourId,
   TypingEntry,
 } from "@thekeep/shared";
 import { DEFAULT_THEME } from "@thekeep/shared";
@@ -42,6 +43,10 @@ export interface AuthMe {
   /** Display name shown on outgoing system lines while incognito.
    *  Null → server falls back to the literal "System". */
   incognitoAlias: string | null;
+  /** The single identity (character id, null = OOC/master) the account
+   *  went incognito AS. The banner only shows on the tab voicing this
+   *  identity; other tabs stay visible. */
+  incognitoCharacterId: string | null;
   /**
    * When this account's email was confirmed (ms epoch), or null if not
    * verified. Only meaningful when `emailVerificationEnabled` is on.
@@ -161,6 +166,14 @@ export interface SiteBranding {
    */
   serversEnabled?: boolean;
   /**
+   * Whether Google sign-in is available (env-gated on the server:
+   * GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET set). When false the AuthGate
+   * hides the "Continue with Google" button and ProfileEditor hides the
+   * link/unlink control. Optional so pre-feature builds + cached branding
+   * hydrate cleanly to off.
+   */
+  googleAuthEnabled?: boolean;
+  /**
    * Admin-configured per-preset design map. Keys are THEME_PRESETS names
    * (Parchment, Twilight, …); values are design keys (medieval/modern/
    * scifi). When the user's active palette matches a preset, this map
@@ -215,6 +228,10 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // Off by default — the chat shell stays exactly as it is today until an
   // admin turns the Multi-Server Lift on.
   serversEnabled: false,
+  // Off by default — env-gated on the server; the /site payload flips these
+  // on once GOOGLE_CLIENT_ID/SECRET (google) and YOUTUBE_API_KEY (youtube)
+  // are configured.
+  googleAuthEnabled: false,
   // Empty by default, every theme falls straight through to
   // defaultStyleKey. Admins seed pinned designs via the migration and
   // can edit them in the admin settings UI.
@@ -295,6 +312,9 @@ export function loadCachedBranding(): SiteBranding {
       serversEnabled: typeof parsed.serversEnabled === "boolean"
         ? parsed.serversEnabled
         : DEFAULT_BRANDING.serversEnabled ?? false,
+      googleAuthEnabled: typeof parsed.googleAuthEnabled === "boolean"
+        ? parsed.googleAuthEnabled
+        : DEFAULT_BRANDING.googleAuthEnabled ?? false,
       themeDesignMap: sanitizeThemeDesignMap(parsed.themeDesignMap),
     };
   } catch {
@@ -422,6 +442,36 @@ interface ChatState {
   /** False until the initial /auth/me probe resolves. Prevents AuthGate flicker on reload. */
   authChecked: boolean;
   setAuthChecked: (b: boolean) => void;
+  /**
+   * Replay request for the first-run site coach tour. The normal auto-open
+   * path is server-driven (`/me/profile`'s `showSiteTour`), but a user can
+   * re-run the tour on demand from Help; that surface flips this true, the
+   * shell mounts <SiteTour>, and closing the tour flips it back to false (in
+   * addition to POSTing /me/tour/dismiss). Purely client-side, no persistence.
+   */
+  siteTourForced: boolean;
+  setSiteTourForced: (v: boolean) => void;
+  /**
+   * Contextual per-surface tours the server says this viewer hasn't yet seen
+   * (from `/me/profile`'s `toursToShow`). A <ContextualTour> mounted on a
+   * surface auto-opens when its id is in this list; dismissing removes it.
+   */
+  toursToShow: TourId[];
+  setToursToShow: (v: TourId[]) => void;
+  /**
+   * Replay request for a single contextual tour, the multi-tour analog of
+   * `siteTourForced`. A Help/replay surface sets this to the tour id; the
+   * matching <ContextualTour> opens even if the user already dismissed it.
+   * Cleared to null when that tour is dismissed. Client-only, no persistence.
+   */
+  forcedTourId: TourId | null;
+  setForcedTourId: (v: TourId | null) => void;
+  /**
+   * Dismiss a contextual tour: optimistically drop it from `toursToShow`,
+   * clear `forcedTourId` if it was the one being replayed, and fire-and-forget
+   * the server dismiss so it doesn't re-show on the next load.
+   */
+  dismissTour: (tourId: TourId) => void;
   /**
    * Reason the user was bounced back to the splash, if any. Set by the
    * `auth:expired` socket handler / 401 backstop poll, cleared when the
@@ -620,6 +670,44 @@ interface ChatState {
    *  `forum:notifications` socket pulse. Drives the rail + bell badges. */
   forumNotifUnread: number;
   setForumNotifUnread: (n: number) => void;
+
+  /**
+   * Per-channel (per-room) unread state (Batch 2 per-channel-reads). Three
+   * parallel maps keyed by roomId, all seeded by one boot fetch of
+   * `GET /me/room-reads` and kept live by the `room:unread` socket pulse:
+   *
+   *   - `roomUnread[roomId]`      → count of messages the viewer hasn't read.
+   *   - `roomHasMention[roomId]`  → true when at least one of those unread
+   *                                 messages @mentions the viewer.
+   *   - `roomMuted[roomId]`       → the viewer muted this room (via the PUT
+   *                                 `/me/rooms/:id/mute`); the rail suppresses
+   *                                 the unread dot but STILL shows the mention
+   *                                 pill so a direct mention isn't silenced.
+   *
+   * The `room:unread` event REPLACES the cached unread/hasMention for its
+   * roomId wholesale (no accumulation); `unread: 0` clears the dot. Mute
+   * state does NOT ride that event — it comes only from the boot map + the
+   * mute PUT response — so a live delta never clobbers the muted glyph.
+   *
+   * Deliberately kept OUT of `rooms` (the RoomSummary map): the room tree is
+   * driven by App's `roomsTree` local state (fed by `/rooms`), and these
+   * badges must repaint on a socket delta WITHOUT triggering any `/rooms`
+   * refetch. RoomsTree reads these maps directly (same pattern as
+   * ForumNotifBadge) so a badge update never rebuilds the tree.
+   */
+  roomUnread: Record<string, number>;
+  roomHasMention: Record<string, boolean>;
+  roomMuted: Record<string, boolean>;
+  /** Overwrite one room's unread + mention state (from a `room:unread`
+   *  socket delta). Never touches `roomMuted`. Clears the entry when
+   *  unread is 0 and there's no mention, keeping the maps small. */
+  setRoomUnread: (roomId: string, unread: number, hasMention: boolean) => void;
+  /** Set (or clear) one room's muted flag (from the mute PUT / boot map). */
+  setRoomMuted: (roomId: string, muted: boolean) => void;
+  /** Seed all three maps at once from the boot `GET /me/room-reads` payload. */
+  seedRoomReads: (
+    map: Record<string, { unread: number; hasMention: boolean; muted: boolean }>,
+  ) => void;
   /**
    * Notification Center (unified inbox). `notifUnread`/`notifUnreadByServer`
    * are seeded by a boot fetch (/me/notifications/unread) and kept live by the
@@ -1012,6 +1100,22 @@ export const useChat = create<ChatState>((set, get) => ({
   setMe: (me) => set({ me }),
   authChecked: false,
   setAuthChecked: (b) => set({ authChecked: b }),
+  siteTourForced: false,
+  setSiteTourForced: (v) => set({ siteTourForced: v }),
+  toursToShow: [],
+  setToursToShow: (v) => set({ toursToShow: v }),
+  forcedTourId: null,
+  setForcedTourId: (v) => set({ forcedTourId: v }),
+  dismissTour: (tourId) => {
+    set((s) => ({
+      toursToShow: s.toursToShow.filter((t) => t !== tourId),
+      forcedTourId: s.forcedTourId === tourId ? null : s.forcedTourId,
+    }));
+    void fetch(`/me/tours/${tourId}/dismiss`, {
+      method: "POST",
+      credentials: "include",
+    }).catch(() => {});
+  },
   kickReason: null,
   setKickReason: (r) => set({ kickReason: r }),
   staleVersion: null,
@@ -1236,6 +1340,52 @@ export const useChat = create<ChatState>((set, get) => ({
   bumpForumActionTick: () => set((s) => ({ forumActionTick: s.forumActionTick + 1 })),
   forumNotifUnread: 0,
   setForumNotifUnread: (n) => set({ forumNotifUnread: n }),
+
+  roomUnread: {},
+  roomHasMention: {},
+  roomMuted: {},
+  setRoomUnread: (roomId, unread, hasMention) =>
+    set((s) => {
+      // Overwrite (never accumulate). When the delta clears the room
+      // (unread 0 AND no mention), drop the keys so the maps stay small
+      // and the badge renderers' truthiness checks read false. Guard
+      // against no-op writes so a redundant pulse doesn't re-render the
+      // whole rail.
+      const nextUnread = { ...s.roomUnread };
+      const nextMention = { ...s.roomHasMention };
+      if (unread <= 0 && !hasMention) {
+        if (!(roomId in s.roomUnread) && !(roomId in s.roomHasMention)) return {};
+        delete nextUnread[roomId];
+        delete nextMention[roomId];
+      } else {
+        if (s.roomUnread[roomId] === unread && !!s.roomHasMention[roomId] === hasMention) return {};
+        nextUnread[roomId] = unread;
+        if (hasMention) nextMention[roomId] = true;
+        else delete nextMention[roomId];
+      }
+      return { roomUnread: nextUnread, roomHasMention: nextMention };
+    }),
+  setRoomMuted: (roomId, muted) =>
+    set((s) => {
+      if (!!s.roomMuted[roomId] === muted) return {};
+      const next = { ...s.roomMuted };
+      if (muted) next[roomId] = true;
+      else delete next[roomId];
+      return { roomMuted: next };
+    }),
+  seedRoomReads: (map) =>
+    set(() => {
+      const unread: Record<string, number> = {};
+      const hasMention: Record<string, boolean> = {};
+      const muted: Record<string, boolean> = {};
+      for (const [roomId, entry] of Object.entries(map)) {
+        if (entry.unread > 0) unread[roomId] = entry.unread;
+        if (entry.hasMention) hasMention[roomId] = true;
+        if (entry.muted) muted[roomId] = true;
+      }
+      return { roomUnread: unread, roomHasMention: hasMention, roomMuted: muted };
+    }),
+
   notifUnread: 0,
   notifUnreadByServer: {},
   notifItems: [],

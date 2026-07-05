@@ -11,6 +11,7 @@ import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import {
   auditLog,
+  automodRules,
   builtinCommandConfig,
   characters,
   customCommandAliases,
@@ -40,6 +41,13 @@ import {
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
 import { getSettings, updateSettings } from "../settings.js";
+import {
+  applyFilters,
+  getCompiledRuleset,
+  invalidateAutomodCache,
+  validateAutomodPattern,
+} from "../realtime/automod.js";
+import type { AutomodRule } from "@thekeep/shared";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { globalAuditScopeWhere, recordAudit } from "../audit.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
@@ -1267,6 +1275,10 @@ export async function registerAdminRoutes(
     /** Surfaces live community activity counters on the splash + future feed rails. Off during cold-start. */
     activityFeedsEnabled: z.boolean().optional(),
     serversEnabled: z.boolean().optional(),
+    /** Escalating chat anti-spam master switch. */
+    antiSpamEnabled: z.boolean().optional(),
+    /** Content auto-moderation master switch. */
+    automodEnabled: z.boolean().optional(),
     /** Splash page featured-worlds carousel toggle. */
     featuredWorldsEnabled: z.boolean().optional(),
     /** Splash stat: rolling 24h chat message count. Independent toggle. */
@@ -1342,6 +1354,8 @@ export async function registerAdminRoutes(
       analyticsRespectDnt: s.analyticsRespectDnt,
       activityFeedsEnabled: s.activityFeedsEnabled,
       serversEnabled: s.serversEnabled,
+      antiSpamEnabled: s.antiSpamEnabled,
+      automodEnabled: s.automodEnabled,
       featuredWorldsEnabled: s.featuredWorldsEnabled,
       splashMessages24hEnabled: s.splashMessages24hEnabled,
       profileDesignerEnabled: s.profileDesignerEnabled,
@@ -1489,6 +1503,14 @@ export async function registerAdminRoutes(
     if (body.serversEnabled !== undefined) {
       patch.serversEnabled = body.serversEnabled;
     }
+    // Escalating chat anti-spam. Sitewide behavior change → edit_site_settings.
+    if (body.antiSpamEnabled !== undefined) {
+      patch.antiSpamEnabled = body.antiSpamEnabled;
+    }
+    // Content auto-moderation. Sitewide behavior change → edit_site_settings.
+    if (body.automodEnabled !== undefined) {
+      patch.automodEnabled = body.automodEnabled;
+    }
     if (body.newUserWelcomeHtml !== undefined) {
       // Sanitize via the bio allow-list (same trust posture as welcomeHtml /
       // rulesHtml). Empty string passes through and represents "no welcome
@@ -1507,6 +1529,211 @@ export async function registerAdminRoutes(
       metadata: { keys: Object.keys(patch) },
     });
     return result;
+  });
+
+  /* ---------- auto-moderation rules (CRUD) ----------
+   *
+   * Content auto-moderation config surface. Site-wide (serverId = null) rules
+   * for v1; the same table + shape carries a future per-server dispatch path.
+   * Gated on `edit_site_settings` (same key that toggles the master switch).
+   *
+   * Every mutating route invalidates the compiled-ruleset cache in
+   * realtime/automod.ts so the dispatch hot path picks up the change on the
+   * next message without re-reading the table per send. Regex/keyword patterns
+   * are validated (ReDoS screen + length cap) at save time so a bad pattern is
+   * rejected here rather than silently never matching or wedging the loop
+   * later. */
+  const AUTOMOD_KINDS = ["keyword", "regex", "link", "invite", "mention_cap"] as const;
+  const AUTOMOD_ACTIONS = ["warn", "delete", "mute"] as const;
+  const AUTOMOD_SCOPES = ["chat", "forum", "both"] as const;
+
+  function automodRowToWire(row: typeof automodRules.$inferSelect): AutomodRule {
+    return {
+      id: row.id,
+      serverId: row.serverId,
+      enabled: !!row.enabled,
+      kind: row.kind,
+      pattern: row.pattern,
+      action: row.action,
+      muteMs: row.muteMs,
+      scope: row.scope,
+      caseInsensitive: !!row.caseInsensitive,
+      wholeWord: !!row.wholeWord,
+      note: row.note,
+      createdByUserId: row.createdByUserId,
+      createdAt: +row.createdAt,
+      updatedAt: +row.updatedAt,
+    };
+  }
+
+  app.get("/admin/automod/rules", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "edit_site_settings"))) return;
+    // Site-wide rules only for v1 (serverId IS NULL). Newest first.
+    const rows = await db
+      .select()
+      .from(automodRules)
+      .where(sql`${automodRules.serverId} IS NULL`)
+      .orderBy(desc(automodRules.createdAt));
+    return { rules: rows.map(automodRowToWire) };
+  });
+
+  const automodCreateBody = z.object({
+    enabled: z.boolean().optional(),
+    kind: z.enum(AUTOMOD_KINDS),
+    pattern: z.string().max(1_000).default(""),
+    action: z.enum(AUTOMOD_ACTIONS).default("warn"),
+    /** Mute duration (ms) when action = 'mute'; null/omit = engine default. */
+    muteMs: z.number().int().min(1_000).max(30 * 24 * 60 * 60 * 1000).nullable().optional(),
+    scope: z.enum(AUTOMOD_SCOPES).default("both"),
+    caseInsensitive: z.boolean().default(true),
+    wholeWord: z.boolean().default(false),
+    note: z.string().max(500).nullable().optional(),
+  });
+
+  app.post<{ Body: unknown }>("/admin/automod/rules", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "edit_site_settings"))) return;
+    const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    let body: z.infer<typeof automodCreateBody>;
+    try { body = automodCreateBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    // Save-time pattern validation (ReDoS screen + length cap). Rejects a bad
+    // regex/keyword before it can ever reach the dispatch matcher.
+    const v = validateAutomodPattern(body.kind, body.pattern);
+    if (!v.ok) { reply.code(400); return { error: v.reason ?? "invalid pattern" }; }
+    const now = new Date();
+    const rule = {
+      id: nanoid(),
+      serverId: null,
+      enabled: body.enabled ?? true,
+      kind: body.kind,
+      pattern: body.pattern,
+      action: body.action,
+      muteMs: body.muteMs ?? null,
+      scope: body.scope,
+      caseInsensitive: body.caseInsensitive,
+      wholeWord: body.wholeWord,
+      note: body.note ?? null,
+      createdByUserId: sessionUser.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.insert(automodRules).values(rule);
+    invalidateAutomodCache();
+    await recordAudit(db, {
+      actorUserId: sessionUser.id,
+      action: "automod",
+      reason: `created automod rule (${body.kind}/${body.action})`,
+      metadata: { ruleId: rule.id, op: "create", kind: body.kind, action: body.action, scope: body.scope },
+    });
+    const created = (await db.select().from(automodRules).where(eq(automodRules.id, rule.id)).limit(1))[0]!;
+    return { rule: automodRowToWire(created) };
+  });
+
+  const automodPatchBody = z.object({
+    enabled: z.boolean().optional(),
+    kind: z.enum(AUTOMOD_KINDS).optional(),
+    pattern: z.string().max(1_000).optional(),
+    action: z.enum(AUTOMOD_ACTIONS).optional(),
+    muteMs: z.number().int().min(1_000).max(30 * 24 * 60 * 60 * 1000).nullable().optional(),
+    scope: z.enum(AUTOMOD_SCOPES).optional(),
+    caseInsensitive: z.boolean().optional(),
+    wholeWord: z.boolean().optional(),
+    note: z.string().max(500).nullable().optional(),
+  });
+
+  app.patch<{ Params: { id: string }; Body: unknown }>("/admin/automod/rules/:id", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "edit_site_settings"))) return;
+    const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    const id = req.params.id;
+    let body: z.infer<typeof automodPatchBody>;
+    try { body = automodPatchBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    // Never trust the client id: load the existing row (site-wide only) first.
+    const existing = (await db
+      .select()
+      .from(automodRules)
+      .where(and(eq(automodRules.id, id), sql`${automodRules.serverId} IS NULL`))
+      .limit(1))[0];
+    if (!existing) { reply.code(404); return { error: "rule not found" }; }
+    // Re-validate whenever kind OR pattern is touched (the effective pair is
+    // what the matcher compiles), using the merged values.
+    const effectiveKind = body.kind ?? existing.kind;
+    const effectivePattern = body.pattern ?? existing.pattern;
+    if (body.kind !== undefined || body.pattern !== undefined) {
+      const v = validateAutomodPattern(effectiveKind, effectivePattern);
+      if (!v.ok) { reply.code(400); return { error: v.reason ?? "invalid pattern" }; }
+    }
+    const update: Partial<typeof automodRules.$inferInsert> = { updatedAt: new Date() };
+    if (body.enabled !== undefined) update.enabled = body.enabled;
+    if (body.kind !== undefined) update.kind = body.kind;
+    if (body.pattern !== undefined) update.pattern = body.pattern;
+    if (body.action !== undefined) update.action = body.action;
+    if (body.muteMs !== undefined) update.muteMs = body.muteMs;
+    if (body.scope !== undefined) update.scope = body.scope;
+    if (body.caseInsensitive !== undefined) update.caseInsensitive = body.caseInsensitive;
+    if (body.wholeWord !== undefined) update.wholeWord = body.wholeWord;
+    if (body.note !== undefined) update.note = body.note;
+    await db.update(automodRules).set(update).where(eq(automodRules.id, id));
+    invalidateAutomodCache();
+    await recordAudit(db, {
+      actorUserId: sessionUser.id,
+      action: "automod",
+      reason: "updated automod rule",
+      metadata: { ruleId: id, op: "update", keys: Object.keys(body) },
+    });
+    const updated = (await db.select().from(automodRules).where(eq(automodRules.id, id)).limit(1))[0]!;
+    return { rule: automodRowToWire(updated) };
+  });
+
+  app.delete<{ Params: { id: string } }>("/admin/automod/rules/:id", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "edit_site_settings"))) return;
+    const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    const id = req.params.id;
+    const existing = (await db
+      .select()
+      .from(automodRules)
+      .where(and(eq(automodRules.id, id), sql`${automodRules.serverId} IS NULL`))
+      .limit(1))[0];
+    if (!existing) { reply.code(404); return { error: "rule not found" }; }
+    await db.delete(automodRules).where(eq(automodRules.id, id));
+    invalidateAutomodCache();
+    await recordAudit(db, {
+      actorUserId: sessionUser.id,
+      action: "automod",
+      reason: "deleted automod rule",
+      metadata: { ruleId: id, op: "delete" },
+    });
+    return { ok: true };
+  });
+
+  /* ---------- auto-moderation test box ----------
+   * Paste sample text; get back which currently-enabled site-wide rules would
+   * fire (and the resolved action) on each surface. Read-only, no persistence.
+   * Lets an admin blunt false positives before turning the feature on. */
+  const automodTestBody = z.object({
+    text: z.string().max(50_000),
+    surface: z.enum(["chat", "forum"]).default("chat"),
+  });
+
+  app.post<{ Body: unknown }>("/admin/automod/test", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "edit_site_settings"))) return;
+    let body: z.infer<typeof automodTestBody>;
+    try { body = automodTestBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    // Reuse the EXACT dispatch matcher + compiled cache so the test mirrors
+    // production behavior 1:1 (same ruleset epoch, same precedence).
+    const ruleset = await getCompiledRuleset(db);
+    const verdict = applyFilters(body.text, ruleset, body.surface);
+    return {
+      action: verdict.action,
+      muteMs: verdict.muteMs,
+      hits: verdict.hits.map((h) => ({
+        ruleId: h.ruleId,
+        kind: h.kind,
+        action: h.action,
+        label: h.label,
+      })),
+    };
   });
 
   /* ---------- logo upload ----------

@@ -1,31 +1,50 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { MessageSquare, Search, Server } from "lucide-react";
 import type { MessageSearchHit } from "@thekeep/shared";
 import { readError } from "../lib/http.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";
 
+type Scope = "room" | "server";
+
 interface Props {
-  /** Current room. Search is scoped to this room only; null disables. */
+  /** Current room. Drives the "This room" scope; null disables that scope. */
   roomId: string | null;
-  /** Called with the messageId of the clicked hit. Caller handles scroll + buffer-swap. */
-  onJump: (messageId: string) => void;
+  /**
+   * The active server's id, powering the "This server" scope. Null / omitted ⇒
+   * the default (system) server, which the server-side route resolves to
+   * "everything the viewer can see" — so the toggle still works site-wide.
+   */
+  currentServerId?: string | null;
+  /** Called with the clicked hit's messageId AND its roomId, so a cross-room
+   *  (server-scope) hit lands in the right room. Caller handles scroll + buffer-swap. */
+  onJump: (messageId: string, roomId: string) => void;
   /** Optional close hook so the parent drawer can dismiss after a jump. */
   onClose?: () => void;
+  /** Initial scope. Defaults to "room" (the classic in-room search). */
+  defaultScope?: Scope;
 }
 
 const DEBOUNCE_MS = 250;
 const MAX_HITS = 8;
 
 /**
- * Live message-search input. Renders inline at the bottom of its host (the
- * tools drawer); the results popup floats above the input with most-
- * relevant hit nearest the bar, that's the spatial-proximity-to-action
- * convention requested in the spec, so the user's finger/cursor doesn't
- * have to travel for the most likely target.
+ * Live message-search input with a scope toggle: "This room" (the classic
+ * per-room search) or "This server" (a cross-room hunt across every room the
+ * viewer may see in the active server). Self-contained + prop-driven so its
+ * host can mount it anywhere — it reads its own state, fetches its own results,
+ * and calls `onJump(messageId)` on pick; the host owns scroll + buffer swap.
  *
- * The popup only renders when there's a non-empty query AND at least one
- * hit; an empty query collapses everything. Esc clears the input.
+ * The results popup floats ABOVE the input (bottom-full) with the most-relevant
+ * hit nearest the bar — the spatial-proximity-to-action convention: the most
+ * likely target is one tap away. The popup only renders on a non-empty query.
+ * Esc clears the input.
+ *
+ * Server-scope hits carry room + server context (`roomName` / `serverName`),
+ * rendered as a breadcrumb above the snippet so a cross-room result is legible
+ * ("in <room> · on <server>"); room-scope hits omit that line.
  */
-export function SearchBar({ roomId, onJump, onClose }: Props) {
+export function SearchBar({ roomId, currentServerId, onJump, onClose, defaultScope }: Props) {
+  const [scope, setScope] = useState<Scope>(defaultScope ?? "room");
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<MessageSearchHit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -35,15 +54,14 @@ export function SearchBar({ roomId, onJump, onClose }: Props) {
   // Pure CSS positioning, so the slide transform is safe.
   const reduceMotion = useReducedMotion();
 
-  // Debounced fetch. Each keystroke restarts the timer; in-flight requests
-  // from prior keystrokes are dropped via the `cancelled` flag so we don't
-  // race responses back into stale state.
+  // If the current room disappears (leave/navigate) while on room-scope, fall
+  // back to server-scope so the bar stays useful instead of going inert.
+  const effectiveScope: Scope = scope === "room" && !roomId ? "server" : scope;
+
+  // Debounced fetch. Each keystroke restarts the timer; in-flight requests from
+  // prior keystrokes are dropped via the `cancelled` flag so we don't race stale
+  // responses back into state. Re-runs when the scope, room, or server changes.
   useEffect(() => {
-    if (!roomId) {
-      setHits([]);
-      setError(null);
-      return;
-    }
     const trimmed = query.trim();
     if (!trimmed) {
       setHits([]);
@@ -51,14 +69,24 @@ export function SearchBar({ roomId, onJump, onClose }: Props) {
       setLoading(false);
       return;
     }
+    // Room-scope with no room ⇒ nothing to search (the effectiveScope guard
+    // above already redirects to server, so this only trips mid-transition).
+    if (effectiveScope === "room" && !roomId) {
+      setHits([]);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     const t = window.setTimeout(async () => {
       try {
-        const r = await fetch(
-          `/rooms/${encodeURIComponent(roomId)}/messages/search?q=${encodeURIComponent(trimmed)}&limit=${MAX_HITS}`,
-          { credentials: "include" },
-        );
+        const url =
+          effectiveScope === "room"
+            ? `/rooms/${encodeURIComponent(roomId as string)}/messages/search?q=${encodeURIComponent(trimmed)}&limit=${MAX_HITS}`
+            : `/search/messages?q=${encodeURIComponent(trimmed)}${
+                currentServerId ? `&serverId=${encodeURIComponent(currentServerId)}` : ""
+              }&limit=${MAX_HITS}`;
+        const r = await fetch(url, { credentials: "include" });
         if (!r.ok) {
           if (!cancelled) {
             setError(await readError(r));
@@ -84,7 +112,7 @@ export function SearchBar({ roomId, onJump, onClose }: Props) {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [query, roomId]);
+  }, [query, effectiveScope, roomId, currentServerId]);
 
   function clear() {
     setQuery("");
@@ -94,19 +122,25 @@ export function SearchBar({ roomId, onJump, onClose }: Props) {
   }
 
   function pick(hit: MessageSearchHit) {
-    onJump(hit.id);
+    onJump(hit.id, hit.roomId);
     clear();
     onClose?.();
   }
 
-  // Reverse-relevance ordering: server returns most-relevant first, but
-  // the popup renders ascending so the top entry is least relevant and
-  // the bottom (closest to the input) is most relevant. See plan.md
-  // Phase 1 design, the spatial proximity to the input matches the
-  // user's intent: "the most likely thing I want is one tap away".
+  // Reverse-relevance ordering: server returns most-relevant first, but the
+  // popup renders ascending so the top entry is least relevant and the bottom
+  // (closest to the input) is most relevant — spatial proximity to the input
+  // matches "the most likely thing I want is one tap away".
   const ordered = hits.slice().reverse();
 
   const showPopup = query.trim().length > 0 && (loading || error !== null || ordered.length > 0);
+
+  const placeholder =
+    effectiveScope === "server"
+      ? "Search messages across this server…"
+      : roomId
+        ? "Search messages in this room…"
+        : "Join a room to search";
 
   return (
     <div className="relative">
@@ -137,6 +171,7 @@ export function SearchBar({ roomId, onJump, onClose }: Props) {
                         {new Date(h.createdAt).toLocaleDateString()}
                       </span>
                     </div>
+                    {effectiveScope === "server" ? <HitContext hit={h} /> : null}
                     <Snippet body={h.snippet} query={query.trim()} />
                   </button>
                 </li>
@@ -145,23 +180,101 @@ export function SearchBar({ roomId, onJump, onClose }: Props) {
           ) : null}
         </div>
       ) : null}
-      <input
-        ref={inputRef}
-        type="search"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onKeyDown={(e) => { if (e.key === "Escape") clear(); }}
-        placeholder={roomId ? "Search messages in this room…" : "Join a room to search"}
-        disabled={!roomId}
-        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action disabled:opacity-50 md:py-1"
-      />
+      {/* Input + inline scope toggle in one row. The scope is two compact icon
+          buttons (room vs server) instead of a second row of text buttons, to
+          conserve vertical space; tooltips carry the labels. "This room"
+          disables when there's no current room so the choice can't strand the
+          search. */}
+      <div className="flex items-center gap-1 rounded border border-keep-rule bg-keep-bg pl-2 pr-1 focus-within:border-keep-action">
+        <Search className="h-3.5 w-3.5 shrink-0 text-keep-muted" aria-hidden />
+        <input
+          ref={inputRef}
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Escape") clear(); }}
+          placeholder={placeholder}
+          className="min-w-0 flex-1 bg-transparent py-1.5 text-xs outline-none md:py-1"
+        />
+        <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Search scope">
+          <ScopeIcon
+            icon={<MessageSquare className="h-3.5 w-3.5" aria-hidden />}
+            label="Search this room"
+            active={effectiveScope === "room"}
+            disabled={!roomId}
+            onClick={() => setScope("room")}
+          />
+          <ScopeIcon
+            icon={<Server className="h-3.5 w-3.5" aria-hidden />}
+            label="Search this server"
+            active={effectiveScope === "server"}
+            onClick={() => setScope("server")}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ScopeIcon({
+  icon,
+  label,
+  active,
+  disabled,
+  onClick,
+}: {
+  icon: ReactNode;
+  label: string;
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      title={label}
+      aria-label={label}
+      className={`rounded p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+        active
+          ? "bg-keep-action/20 text-keep-action"
+          : "text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+      }`}
+    >
+      {icon}
+    </button>
+  );
+}
+
+/**
+ * The "in <room> · on <server>" breadcrumb for a server-scope hit. Uses the
+ * extended MessageSearchHit context fields; renders nothing when a hit carries
+ * no room name (defensive — the server route always sets it for this route).
+ */
+function HitContext({ hit }: { hit: MessageSearchHit }) {
+  if (!hit.roomName && !hit.title) return null;
+  return (
+    <div className="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 text-[10px] text-keep-muted/90">
+      {hit.title ? <span className="truncate font-medium text-keep-text/80">{hit.title}</span> : null}
+      {hit.roomName ? (
+        <span className="truncate">
+          in <span className="text-keep-text/70">{hit.roomName}</span>
+        </span>
+      ) : null}
+      {hit.serverName ? (
+        <span className="truncate">
+          · on <span className="text-keep-text/70">{hit.serverName}</span>
+        </span>
+      ) : null}
     </div>
   );
 }
 
 /**
  * Trim the message body to a window around the first match (case-insensitive)
- * and bold the matched substring. Pure render, server already filtered the
+ * and bold the matched substring. Pure render — the server already filtered the
  * row to one we can see, so we just style what's there.
  */
 function Snippet({ body, query }: { body: string; query: string }) {

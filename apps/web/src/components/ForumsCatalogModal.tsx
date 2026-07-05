@@ -17,7 +17,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import DOMPurify from "dompurify";
-import { ArrowDown, ArrowLeft, ArrowUp, BarChart3, Bell, Compass, FolderOpen, Globe, Landmark, Lock, MessagesSquare, Plus, Search, Settings as SettingsIcon, Star, Users, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BarChart3, Bell, Compass, FolderOpen, Globe, HelpCircle, Landmark, Lock, MessagesSquare, Plus, Search, Settings as SettingsIcon, Star, Users, X } from "lucide-react";
 import {
   DEFAULT_THEME,
   FORUM_NAME_MAX,
@@ -148,6 +148,7 @@ import { Modal } from "./Modal.js";
 import { UserLookupPicker } from "./UserLookupPicker.js";
 import { StylePicker } from "./AdminPanel.js";
 import { CloseButton } from "./CloseButton.js";
+import { ContextualTour } from "./ContextualTour.js";
 import { FormattingToolbar } from "./FormattingToolbar.js";
 import { MessageList } from "./MessageList.js";
 import { ThemePicker } from "./ThemePicker.js";
@@ -190,6 +191,9 @@ interface Props {
 
 export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, onClose, onOpenWorld, onIconClick, onNameClick, onMentionClick, onWorldMentionClick, selfNames, fontStep }: Props) {
   const me = useChat((s) => s.me);
+  const setForcedTourId = useChat((s) => s.setForcedTourId);
+  const toursToShow = useChat((s) => s.toursToShow);
+  const forcedTourId = useChat((s) => s.forcedTourId);
   const myActiveTransitionKey = useChat((s) => s.myActiveTransitionKey);
   // Per-send identity claim for forum posts — the same source of truth
   // the chat composer ships with every send.
@@ -315,6 +319,11 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
   // ── In-modal navigation (forum front page → board → topic) ──────────
   // Deep-linked topics (bookmark / search jumps) open inside the forum
   // view: ForumContent selects the board and activates the topic inline.
+  // Always open on the forum view so the Forums Catalog loads the default forum
+  // (or the deep-linked one). The first-run browse tour used to FORCE Discover
+  // here to give itself a surface, but that hid the forum behind an awkward,
+  // mostly-empty Discover list; the browse tour now runs on the forum view and
+  // spotlights the Discover compass instead (see the ContextualTours below).
   const [view, setView] = useState<CatalogView>({ kind: "forum" });
 
   /** All in-modal hops (forum switch, board open, topic open, back) run
@@ -455,9 +464,13 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     <MessagesSquare className="h-4 w-4" aria-hidden="true" />
                   </button>
                   {/* Discover: search the catalog by name or tag, browse the
-                      Popular / New rails. Toggles back to the open forum. */}
+                      Popular / New rails. Toggles back to the open forum.
+                      Anchored for the browse tour — this chrome button is the
+                      one Discover affordance visible on BOTH mobile and desktop
+                      (the rail is hidden under lg, the drawer starts closed). */}
                   <button
                     type="button"
+                    data-tour="forums-chrome-discover-btn"
                     onClick={() => navigateView(view.kind === "discover" ? { kind: "forum" } : { kind: "discover" })}
                     title="Discover forums - search by name or tag"
                     aria-label="Discover forums"
@@ -488,6 +501,17 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                       className="rounded border border-keep-rule bg-keep-bg/70 p-1.5 text-keep-muted hover:border-keep-action hover:text-keep-action"
                     >
                       <SettingsIcon className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  ) : null}
+                  {view.kind === "forum" && detail ? (
+                    <button
+                      type="button"
+                      onClick={() => setForcedTourId("forum-posting")}
+                      title="Replay the posting tour - how to start topics and reply"
+                      aria-label="Replay the posting tour"
+                      className="rounded border border-keep-rule bg-keep-bg/70 p-1.5 text-keep-muted hover:border-keep-action hover:text-keep-action"
+                    >
+                      <HelpCircle className="h-4 w-4" aria-hidden="true" />
                     </button>
                   ) : null}
                   <button
@@ -560,6 +584,15 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
               <span className="text-xs uppercase tracking-widest text-keep-muted">
                 Forums <span className="text-keep-rule">({list?.length ?? "…"})</span>
               </span>
+              <button
+                type="button"
+                onClick={() => { navigateView({ kind: "forum" }); setForcedTourId("forums-browse"); }}
+                title="Replay the browse-forums tour"
+                aria-label="Replay the browse-forums tour"
+                className="rounded p-1 text-keep-muted hover:bg-keep-panel hover:text-keep-action"
+              >
+                <HelpCircle className="h-4 w-4" aria-hidden="true" />
+              </button>
             </div>
             <ForumRailList
               list={list}
@@ -614,6 +647,20 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
           </div>
         ) : null}
       </div>
+      {/* Contextual first-run tours. Each mounts unconditionally and self-fires
+          only when its own surface is on screen (and the tour is unseen or
+          being replayed). Empty step lists render nothing. */}
+      <ContextualTour tourId="forums-browse" active={view.kind === "forum" && !!detail && !createOpen} />
+      <ContextualTour
+        tourId="forum-posting"
+        active={
+          view.kind === "forum" && !!detail && !createOpen &&
+          // Let the browse (overview) tour finish first; both share the forum
+          // surface, so gating here keeps them from stacking two overlays.
+          !(toursToShow.includes("forums-browse") || forcedTourId === "forums-browse")
+        }
+      />
+      <ContextualTour tourId="forum-admin" active={view.kind === "settings" && !!detail && !createOpen} />
       {createOpen ? <CreateForumModal onClose={() => setCreateOpen(false)} /> : null}
     </Modal>
   );
@@ -628,6 +675,7 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
  * replaced by its status; a recent rejection shows the review note.
  */
 function CreateForumModal({ onClose }: { onClose: () => void }) {
+  const setForcedTourId = useChat((s) => s.setForcedTourId);
   const [mine, setMine] = useState<ForumCreationApplicationWire[] | null>(null);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -728,8 +776,23 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
       >
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-action text-lg text-keep-text">Create your Forum</h3>
-          <CloseButton onClick={onClose} />
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => setForcedTourId("forum-create")}
+              title="Replay the create-a-forum tour"
+              aria-label="Replay the create-a-forum tour"
+              className="rounded p-1 text-keep-muted hover:bg-keep-panel hover:text-keep-action"
+            >
+              <HelpCircle className="h-4 w-4" aria-hidden="true" />
+            </button>
+            <CloseButton onClick={onClose} />
+          </div>
         </div>
+        {/* The create-forum form only exists while this modal is mounted, so
+            the tour is always eligible here (it self-gates on unseen/replay). */}
+        <ContextualTour tourId="forum-create" active />
+
 
         {mine === null ? (
           <p className="text-sm italic text-keep-muted">Checking your applications…</p>
@@ -757,6 +820,7 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
             <label className="block text-sm">
               <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Forum name</span>
               <input
+                data-tour="forum-create-name-input"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={FORUM_NAME_MAX}
@@ -770,6 +834,7 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
                 {slugNote ? <span className={`ml-2 normal-case ${slugNote.tone}`}>{slugNote.text}</span> : null}
               </span>
               <input
+                data-tour="forum-create-slug-input"
                 value={slug}
                 onChange={(e) => { setSlugTouched(true); setSlug(e.target.value.toLowerCase()); }}
                 maxLength={40}
@@ -785,6 +850,7 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
                 </span>
               </span>
               <textarea
+                data-tour="forum-create-purpose-input"
                 value={purpose}
                 onChange={(e) => setPurpose(e.target.value)}
                 maxLength={FORUM_PURPOSE_MAX}
@@ -818,6 +884,7 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
               <p className="text-[11px] text-keep-muted">Reviewed by the site's moderators. Approved forums appear in the catalog with you as Keeper.</p>
               <button
                 type="button"
+                data-tour="forum-create-submit"
                 onClick={() => void submit()}
                 disabled={!canSubmit}
                 className="shrink-0 rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
@@ -861,6 +928,7 @@ function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, disc
       <div className="shrink-0 px-2 pt-2">
         <button
           type="button"
+          data-tour="forums-discover-button"
           onClick={onDiscover}
           title="Search and browse all forums by name or tag"
           aria-pressed={discoverActive}
@@ -878,6 +946,7 @@ function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, disc
         <div className="shrink-0 px-2 pt-2">
           <button
             type="button"
+            data-tour="forums-create-button"
             onClick={onCreate}
             title="Apply to create your own forum - reviewed by the site's moderators"
             className="flex w-full items-center justify-center gap-1.5 rounded border border-keep-action/60 bg-keep-action/10 px-2 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action transition-colors hover:bg-keep-action/20"
@@ -944,6 +1013,7 @@ function ForumRailRow({ forum, active, isDefault = false, onClick }: {
     <li className="shrink-0">
       <button
         type="button"
+        data-tour="forums-rail-row"
         onClick={onClick}
         className={`flex w-full items-center gap-2 rounded border px-2 py-1.5 text-left transition-colors ${
           active
@@ -1060,6 +1130,7 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
       <div className="relative">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-keep-muted" aria-hidden="true" />
         <input
+          data-tour="forums-search-input"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Search by name or tag…"
@@ -1120,7 +1191,11 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
         </div>
       ) : null}
 
-      <div className="mt-4">
+      {/* Anchored for the browse tour's "pick a forum" step: this list of
+          forum cards (Popular / New, or search results) lives ONLY in the
+          Discover content, so it's visible on mobile and desktop alike — unlike
+          the rail rows, which are display:none under lg. */}
+      <div className="mt-4" data-tour="forums-discover-list">
         {searching ? (
           /* ── Search results ── */
           <section>
@@ -1629,7 +1704,7 @@ function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumC
 
   return (
     <Modal onClose={onClose} zIndex={60}>
-      <div onClick={(e) => e.stopPropagation()} className="keep-frame w-full rounded bg-keep-bg p-5 text-keep-text md:w-[min(440px,84vw)]">
+      <div onClick={(e) => e.stopPropagation()} data-tour="forum-topic-prefix-selector" className="keep-frame w-full rounded bg-keep-bg p-5 text-keep-text md:w-[min(440px,84vw)]">
         <h2 className="font-action text-lg">Topic tag</h2>
         {applicable.length === 0 ? (
           <p className="mt-2 text-xs italic text-keep-muted">
@@ -2119,6 +2194,7 @@ function GhostReplyComposer({ topicId, quoteSeed, canUseNpc, onSubmit }: {
         {FMT.map((f) => (
           <button
             key={f.k} type="button" onClick={() => setFormat(f.k)}
+            {...(f.k === "action" ? { "data-tour": "forum-compose-action-toggle" } : f.k === "npc" ? { "data-tour": "forum-compose-npc-toggle" } : {})}
             className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${format === f.k ? "border-keep-action bg-keep-action/10 text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}
           >{f.label}</button>
         ))}
@@ -2148,6 +2224,7 @@ function GhostReplyComposer({ topicId, quoteSeed, canUseNpc, onSubmit }: {
       <div className="mt-1.5 flex justify-end">
         <button
           type="button"
+          data-tour="forum-compose-send"
           disabled={busy || !draft.trim()}
           onClick={() => void go()}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
@@ -2331,6 +2408,7 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
       </div>
       <input
         ref={titleRef}
+        data-tour="forum-topic-title-input"
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         maxLength={isPoll ? POLL_QUESTION_MAX : 120}
@@ -2704,6 +2782,7 @@ function ForumSettingsView({ detail, onSaved, onBoardArchived }: {
   // appearance); the moderation tabs surface to a Forum Mod holding the
   // matching granular grant — roles←manage_members, applications←
   // review_applications, bans←ban_users. The server re-checks each action.
+  const setForcedTourId = useChat((s) => s.setForcedTourId);
   const canManage = !!detail.viewer?.canManage;
   const isMod = canManage || detail.viewer?.role === "mod";
   const perms = new Set(detail.viewer?.permissions ?? []);
@@ -2735,11 +2814,12 @@ function ForumSettingsView({ detail, onSaved, onBoardArchived }: {
 
   return (
     <div className="px-4 py-3">
-      <div className="mb-3 flex flex-wrap gap-1">
+      <div className="mb-3 flex flex-wrap items-center gap-1" data-tour="forum-settings-tab-strip">
         {tabs.map((t) => (
           <button
             key={t}
             type="button"
+            data-tour={`forum-settings-tab-${t}`}
             onClick={() => setTab(t)}
             className={`rounded border px-2.5 py-1 text-xs uppercase tracking-widest ${
               tab === t ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"
@@ -2748,6 +2828,15 @@ function ForumSettingsView({ detail, onSaved, onBoardArchived }: {
             {t}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => setForcedTourId("forum-admin")}
+          title="Replay the forum settings tour"
+          aria-label="Replay the forum settings tour"
+          className="ml-auto rounded p-1 text-keep-muted hover:bg-keep-panel hover:text-keep-action"
+        >
+          <HelpCircle className="h-4 w-4" aria-hidden="true" />
+        </button>
       </div>
       {err ? <p className="mb-2 text-xs text-keep-accent">{err}</p> : null}
       {(() => {

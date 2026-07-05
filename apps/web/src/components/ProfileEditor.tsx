@@ -2017,6 +2017,16 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     + account-level). The only place to UNDO a block, since
                     a blocked user's profile is no longer reachable. */}
                 {!isCharacter ? <BlockedUsersRow /> : null}
+                {/* Password (change, or first-time set for Google-only
+                    accounts). Master-only — a password is account-level, not
+                    per-character. Always shown so a password user can change it
+                    even when Google sign-in is off. */}
+                {!isCharacter ? <PasswordRow /> : null}
+                {/* Connected accounts (Google sign-in). Master-only, an
+                    OAuth link is account-level, not per-character. Renders
+                    nothing when the admin hasn't enabled Google sign-in so
+                    it doesn't tease a switch that can't be used. */}
+                {!isCharacter ? <ConnectedAccountsRow /> : null}
               </div>
             ) : null}
 
@@ -4006,6 +4016,257 @@ function BlockedUsersRow() {
             </li>
           ))}
         </ul>
+      )}
+    </fieldset>
+  );
+}
+
+/**
+ * Password management for the master account (profile → Privacy). Two modes,
+ * decided by GET /me/password-status:
+ *   - has a password → "Change password": current + new + confirm.
+ *   - OAuth-only (no password yet) → "Set a password": new + confirm, shown with
+ *     an IMPORTANT highlight, because for a Google-only account a lost Google
+ *     login means no way back in. Setting one is the safety net.
+ * Submits POST /me/password; on success it flips to change-mode, clears the
+ * fields, and flashes. Not gated on Google being enabled — a password user can
+ * always change it. The server keeps THIS session and revokes the others.
+ */
+function PasswordRow() {
+  // undefined = loading; true = has a password (change mode); false = OAuth-only
+  // (set-a-password mode with the highlight).
+  const [hasPassword, setHasPassword] = useState<boolean | undefined>(undefined);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/me/password-status", { credentials: "include" });
+        if (!r.ok) throw new Error(await readError(r));
+        const j = (await r.json()) as { hasPassword: boolean };
+        if (!cancelled) setHasPassword(j.hasPassword);
+      } catch {
+        // On error default to change-mode: the safer branch (requires a current
+        // password), never accidentally offering a no-current-password set.
+        if (!cancelled) setHasPassword(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const settingNew = hasPassword === false; // OAuth-only: setting a first password
+
+  async function submit() {
+    setErr(null);
+    if (next.length < 8) { setErr("Your new password must be at least 8 characters."); return; }
+    if (next !== confirm) { setErr("The new passwords don't match."); return; }
+    if (!settingNew && !current) { setErr("Enter your current password."); return; }
+    setBusy(true);
+    try {
+      const r = await fetch("/me/password", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(settingNew ? {} : { currentPassword: current }),
+          newPassword: next,
+        }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      setHasPassword(true);
+      setCurrent(""); setNext(""); setConfirm("");
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 2500);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't save your password");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <fieldset className={`rounded border p-3 text-xs ${settingNew ? "border-keep-accent/60 bg-keep-accent/5" : "border-keep-rule"}`}>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">
+        {settingNew ? "Set a password" : "Password"}
+      </legend>
+      {hasPassword === undefined ? (
+        <p className="italic text-keep-muted">Loading…</p>
+      ) : (
+        <>
+          {settingNew ? (
+            <p className="mb-2 rounded border border-keep-accent/50 bg-keep-accent/10 p-2 text-keep-accent">
+              You sign in with Google and don't have a password yet. Set one now so you can still
+              get in if you ever lose access to your Google account — right now it's your only way in.
+            </p>
+          ) : (
+            <p className="mb-2 text-[10px] text-keep-muted">
+              Change the password you sign in with. You'll stay signed in here; anywhere else will
+              need the new password.
+            </p>
+          )}
+          {err ? <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{err}</div> : null}
+          {saved ? <div className="mb-2 text-keep-system">Password saved.</div> : null}
+          <div className="flex flex-col gap-1.5">
+            {!settingNew ? (
+              <input
+                type="password"
+                autoComplete="current-password"
+                placeholder="Current password"
+                value={current}
+                onChange={(e) => setCurrent(e.target.value)}
+                className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+              />
+            ) : null}
+            <input
+              type="password"
+              autoComplete="new-password"
+              placeholder="New password (at least 8 characters)"
+              value={next}
+              onChange={(e) => setNext(e.target.value)}
+              className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+            />
+            <input
+              type="password"
+              autoComplete="new-password"
+              placeholder="Confirm new password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+            />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void submit()}
+              className="self-start rounded border border-keep-rule px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
+            >
+              {busy ? "Saving…" : settingNew ? "Set password" : "Change password"}
+            </button>
+          </div>
+        </>
+      )}
+    </fieldset>
+  );
+}
+
+/**
+ * Connected-accounts management (Google sign-in) for the master account.
+ *
+ * Renders nothing when the admin hasn't enabled Google sign-in
+ * (`branding.googleAuthEnabled`) so we don't advertise a switch that can't
+ * be flipped. Otherwise fetches GET /me/oauth and shows either:
+ *   - linked   → the Google email + an Unlink button. The server refuses
+ *                (409) if unlinking would leave the account with no way to
+ *                sign in (no password + no other provider); we surface that
+ *                message inline so the user knows to set a password first.
+ *   - unlinked → a "Link Google account" button that full-page-redirects to
+ *                /auth/google/start?mode=link (OAuth is a browser round-trip,
+ *                not a fetch). On return the app root shows a "linked" toast.
+ */
+function ConnectedAccountsRow() {
+  const googleAuthEnabled = useChat((s) => s.branding.googleAuthEnabled);
+  // Undefined = still loading; null = loaded + not linked; string(-able) =
+  // linked, carrying the informational provider email (may itself be null
+  // when Google didn't return one, in which case we show a generic label).
+  const [google, setGoogle] = useState<{ email: string | null } | null | undefined>(undefined);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!googleAuthEnabled) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/me/oauth", { credentials: "include" });
+        if (!r.ok) throw new Error(await readError(r));
+        const j = (await r.json()) as {
+          providers: Array<{ provider: string; providerEmail: string | null }>;
+        };
+        const row = j.providers.find((p) => p.provider === "google");
+        if (!cancelled) setGoogle(row ? { email: row.providerEmail } : null);
+      } catch (e) {
+        if (!cancelled) {
+          setGoogle(null);
+          setErr(e instanceof Error ? e.message : "Failed to load");
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [googleAuthEnabled]);
+
+  // Admin hasn't turned Google sign-in on: nothing to connect, render nothing.
+  if (!googleAuthEnabled) return null;
+
+  async function unlink() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch("/me/oauth/google/unlink", {
+        method: "POST",
+        credentials: "include",
+      });
+      // 409 is the lockout guard ("set a password first"); readError surfaces
+      // the server's exact wording so the user knows the concrete next step.
+      if (!r.ok) throw new Error(await readError(r));
+      setGoogle(null);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to unlink");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Connected accounts</legend>
+      <p className="mb-2 text-[10px] text-keep-muted">
+        Link Google to sign in with one tap. Linking doesn't change your account's
+        email or password, it's just another way in.
+      </p>
+      {err ? <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{err}</div> : null}
+      {google === undefined ? (
+        <p className="italic text-keep-muted">Loading…</p>
+      ) : (
+        <div className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1.5">
+          <span className="min-w-0 flex-1 truncate text-keep-text">
+            Google
+            {google ? (
+              <span className="text-keep-muted">
+                {" — "}
+                {google.email ?? "linked"}
+              </span>
+            ) : (
+              <span className="text-keep-muted"> — not linked</span>
+            )}
+          </span>
+          {google ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void unlink()}
+              className="shrink-0 rounded border border-keep-rule px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
+            >
+              Unlink
+            </button>
+          ) : (
+            <button
+              type="button"
+              // OAuth link is a browser round-trip, not a fetch: navigate the
+              // whole page to Google's consent screen. mode=link tells the
+              // server to attach the Google identity to THIS signed-in account
+              // rather than mint / sign into a separate one.
+              onClick={() => { window.location.href = "/auth/google/start?mode=link"; }}
+              className="shrink-0 rounded border border-keep-rule px-2 py-0.5 hover:bg-keep-banner"
+            >
+              Link Google account
+            </button>
+          )}
+        </div>
       )}
     </fieldset>
   );

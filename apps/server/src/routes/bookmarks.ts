@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { Bookmark, BookmarkedMessage } from "@thekeep/shared";
 import { bookmarks, messages, roomMembers, rooms } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
+import { blockedUserIdsFor } from "../auth/blocks.js";
 import type { Db } from "../db/index.js";
 
 const createBody = z.object({
@@ -42,8 +43,42 @@ async function canCallerSeeMessage(db: Db, userId: string, messageId: string) {
       .limit(1))[0];
     if (!member) return null;
   }
-  return m;
+  // Return the room name alongside the row so the snapshot writer can freeze
+  // it without a second lookup. Forum topics are just messages in nested-mode
+  // rooms, so this covers forum-post bookmarks too (same messages table).
+  return { m, roomName: room.name };
 }
+
+type MessageRow = typeof messages.$inferSelect;
+
+/**
+ * The frozen snapshot_* payload written at bookmark time (and refreshed on
+ * every re-bookmark). Mirrors the message reply-snapshot convention so a
+ * later hard-delete / rename still reads in the bookmarks viewer. Kept as a
+ * partial-insert so the same shape feeds both INSERT and UPDATE.
+ */
+function buildSnapshot(m: MessageRow, roomName: string): Partial<typeof bookmarks.$inferInsert> {
+  return {
+    snapshotDisplayName: m.displayName,
+    snapshotBody: m.body,
+    snapshotBodyHtml: m.bodyHtml ?? null,
+    snapshotColor: m.color ?? null,
+    snapshotCmdCss: m.cmdCss ?? null,
+    snapshotSceneImageUrl: m.sceneImageUrl ?? null,
+    snapshotAvatarUrl: m.avatarUrl ?? null,
+    snapshotKind: m.kind,
+    snapshotRoomName: roomName,
+    snapshotReplyToId: m.replyToId ?? null,
+    snapshotCharacterId: m.characterId ?? null,
+    snapshotMsgCreatedAt: +m.createdAt,
+    snapshotAuthorUserId: m.userId,
+    // Re-bookmarking a still-live message clears any stale archive flag: the
+    // original is back in view, so the row renders live again.
+    archivedAt: null,
+  };
+}
+
+const REMOVED = "[message removed]";
 
 /**
  * Per-user bookmarks. CRUD only, the unique index on (user_id, message_id)
@@ -68,8 +103,10 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
     if (rows.length === 0) return { bookmarks: [] as Bookmark[] };
 
     // Batch the message + room joins so a user with hundreds of
-    // bookmarks doesn't make hundreds of round-trips.
-    const msgIds = rows.map((r) => r.messageId);
+    // bookmarks doesn't make hundreds of round-trips. messageId is now
+    // nullable (FK SET NULL on hard-delete), so filter the nulls out
+    // before the IN().
+    const msgIds = rows.map((r) => r.messageId).filter((v): v is string => !!v);
     const msgRows = msgIds.length
       ? await db.select().from(messages).where(inArray(messages.id, msgIds))
       : [];
@@ -80,38 +117,100 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
       : [];
     const roomById = new Map(roomRows.map((r) => [r.id, r]));
 
+    // One block-graph read for the whole list. A bookmarked line whose
+    // author is now blocked by (or blocking) the viewer must NOT surface,
+    // neither live nor from the frozen snapshot; it reads as removed.
+    const blocked = await blockedUserIdsFor(db, me.id);
+
+    // A removed row that we can't safely expose. Keeps the row in the list
+    // (so the user can delete it) but leaks nothing about its content.
+    function removedMessage(roomName: string): BookmarkedMessage {
+      return {
+        id: "",
+        roomId: "",
+        roomName,
+        displayName: "",
+        kind: "system",
+        body: REMOVED,
+        createdAt: 0,
+        replyToId: null,
+      };
+    }
+
+    // Paint the frozen snapshot (retention-expired original). archived:true
+    // drives the "Archived" chip + disabled Jump on the client.
+    function archivedMessage(r: typeof rows[number]): BookmarkedMessage {
+      return {
+        id: "",
+        roomId: "",
+        roomName: r.snapshotRoomName ?? "(expired room)",
+        displayName: r.snapshotDisplayName ?? "",
+        kind: (r.snapshotKind as BookmarkedMessage["kind"]) ?? "say",
+        body: r.snapshotBody ?? REMOVED,
+        createdAt: r.snapshotMsgCreatedAt ?? +r.createdAt,
+        replyToId: r.snapshotReplyToId ?? null,
+        archived: true,
+        ...(r.snapshotColor ? { color: r.snapshotColor } : {}),
+        ...(r.snapshotCmdCss ? { cmdCss: r.snapshotCmdCss } : {}),
+        ...(r.snapshotSceneImageUrl ? { sceneImageUrl: r.snapshotSceneImageUrl } : {}),
+        ...(r.snapshotBodyHtml ? { bodyHtml: r.snapshotBodyHtml } : {}),
+      };
+    }
+
     const out: Bookmark[] = [];
     for (const r of rows) {
-      const m = msgById.get(r.messageId);
-      // FK cascade should have removed orphaned bookmarks already, but a
-      // race between hard-delete and the next list call could surface
-      // one. Skip rather than 500.
-      if (!m) continue;
-      const room = roomById.get(m.roomId);
-      // Whisper privacy: even your own bookmark of a whisper you were
-      // a party to renders. If the row exists at all, by induction the
-      // caller was a party at bookmark time, and that's still true now
-      // (whispers can't change parties post-send).
-      const message: BookmarkedMessage = {
-        id: m.id,
-        roomId: m.roomId,
-        roomName: room?.name ?? "(deleted room)",
-        displayName: m.displayName,
-        kind: m.kind,
-        body: m.deletedAt ? "[message removed]" : m.body,
-        createdAt: +m.createdAt,
-        replyToId: m.replyToId ?? null,
-        // Snapshot color + cmd-css so the bookmark preview paints the
-        // same way the row reads in chat. `kind: "cmd"` rows especially
-        // depend on this, without the css the bookmarked snippet drops
-        // back to plain text and an admin-styled command (italic + a
-        // theme color) renders inconsistently between the live chat and
-        // the bookmarks viewer.
-        ...(m.color ? { color: m.color } : {}),
-        ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
-        ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
-        ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
-      };
+      const m = r.messageId ? msgById.get(r.messageId) : undefined;
+      let message: BookmarkedMessage;
+      if (m) {
+        // The message row still exists. Render LIVE unless it was
+        // moderator-/self-deleted (deletedAt set) or its author is now
+        // block-hidden from the viewer. Either case yields [removed] and
+        // never falls through to the snapshot, a mod-deleted line must
+        // stay gone even though we still hold a copy.
+        const room = roomById.get(m.roomId);
+        if (m.deletedAt || blocked.has(m.userId)) {
+          message = removedMessage(room?.name ?? r.snapshotRoomName ?? "(deleted room)");
+        } else {
+          // Whisper privacy: even your own bookmark of a whisper you were
+          // a party to renders. If the row exists at all, by induction the
+          // caller was a party at bookmark time, and that's still true now
+          // (whispers can't change parties post-send).
+          message = {
+            id: m.id,
+            roomId: m.roomId,
+            roomName: room?.name ?? "(deleted room)",
+            displayName: m.displayName,
+            kind: m.kind,
+            body: m.body,
+            createdAt: +m.createdAt,
+            replyToId: m.replyToId ?? null,
+            // Snapshot color + cmd-css so the bookmark preview paints the
+            // same way the row reads in chat. `kind: "cmd"` rows especially
+            // depend on this, without the css the bookmarked snippet drops
+            // back to plain text and an admin-styled command (italic + a
+            // theme color) renders inconsistently between the live chat and
+            // the bookmarks viewer.
+            ...(m.color ? { color: m.color } : {}),
+            ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
+            ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+            ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
+          };
+        }
+      } else if (r.archivedAt && r.snapshotBody != null) {
+        // The message row is GONE and the retention janitor stamped
+        // archivedAt (its ONLY writer). This is a clean expiry, so serve
+        // the frozen snapshot, unless the snapshot author is now
+        // block-hidden from the viewer.
+        message = (r.snapshotAuthorUserId && blocked.has(r.snapshotAuthorUserId))
+          ? removedMessage(r.snapshotRoomName ?? "(expired room)")
+          : archivedMessage(r);
+      } else {
+        // GONE with no archive stamp: a /trash hard-delete, ban-purge, or
+        // account-delete cascade (none of those touch archivedAt). We may
+        // hold a snapshot, but must NOT expose it, this content was pulled
+        // deliberately. Render [removed]; keep the row so the user can tidy.
+        message = removedMessage(r.snapshotRoomName ?? "(deleted room)");
+      }
       out.push({
         id: r.id,
         category: r.category,
@@ -130,21 +229,25 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
     try { body = createBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
 
-    const m = await canCallerSeeMessage(db, me.id, body.messageId);
-    if (!m) { reply.code(404); return { error: "message not found or not visible" }; }
+    const seen = await canCallerSeeMessage(db, me.id, body.messageId);
+    if (!seen) { reply.code(404); return { error: "message not found or not visible" }; }
 
     const category = (body.category ?? "").trim();
     const note = body.note?.trim() || null;
+    // Freeze the display snapshot so the bookmark outlives a later
+    // retention purge / hard-delete of the underlying message.
+    const snapshot = buildSnapshot(seen.m, seen.roomName);
 
     // Idempotent upsert on the unique (user, message) index, re-bookmarking
-    // updates the category/note instead of duplicating.
+    // updates the category/note (and refreshes the snapshot) instead of
+    // duplicating.
     const existing = (await db
       .select()
       .from(bookmarks)
       .where(and(eq(bookmarks.userId, me.id), eq(bookmarks.messageId, body.messageId)))
       .limit(1))[0];
     if (existing) {
-      await db.update(bookmarks).set({ category, note }).where(eq(bookmarks.id, existing.id));
+      await db.update(bookmarks).set({ category, note, ...snapshot }).where(eq(bookmarks.id, existing.id));
       return { id: existing.id };
     }
     const id = nanoid();
@@ -154,6 +257,7 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
       messageId: body.messageId,
       category,
       note,
+      ...snapshot,
     });
     return { id };
   });

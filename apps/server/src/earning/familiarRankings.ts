@@ -56,7 +56,31 @@ interface Base extends FamiliarCosmetics {
   health: number;
 }
 
+/**
+ * Short-TTL single-flight cache for the familiar-rankings build (mirrors
+ * rankings.ts). The public route is per-IP rate-capped, but this full
+ * `eidolon_state` scan + per-row `catchUp` decay + batched display-info fetch
+ * is process-global; memoizing the in-flight Promise per db collapses a fleet
+ * of pollers into ~1-2 passes per TTL. NOTE: this also freezes the live
+ * `catchUp(now)` decay snapshot for up to the TTL, so level/health/ageHours on
+ * the board can lag reality by ~45s. That's acceptable for a browse leaderboard
+ * (the player's own live familiar view reads eidolon state on its own path);
+ * don't "fix" the apparent staleness by dropping the cache. Keyed by db so a
+ * fresh test db never serves another's rows.
+ */
+const FAMILIAR_RANKINGS_TTL_MS = 45_000;
+const familiarRankingsCache = new Map<Db, { at: number; promise: Promise<FamiliarRankingsResponse> }>();
+
 export async function buildFamiliarRankings(db: Db): Promise<FamiliarRankingsResponse> {
+  const cached = familiarRankingsCache.get(db);
+  if (cached && Date.now() - cached.at < FAMILIAR_RANKINGS_TTL_MS) return cached.promise;
+  const promise = computeFamiliarRankings(db);
+  familiarRankingsCache.set(db, { at: Date.now(), promise });
+  promise.catch(() => familiarRankingsCache.delete(db)); // don't memoize a failed pass
+  return promise;
+}
+
+async function computeFamiliarRankings(db: Db): Promise<FamiliarRankingsResponse> {
   // Per-server economy: default (system) server only this pass, matching the
   // other leaderboards. With the servers flag off this is the only server.
   const rows = await db.select().from(eidolonState).where(eq(eidolonState.serverId, DEFAULT_SERVER_ID));

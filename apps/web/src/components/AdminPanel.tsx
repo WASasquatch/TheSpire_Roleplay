@@ -1,8 +1,8 @@
 import { createContext, Fragment, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, HelpCircle } from "lucide-react";
 import DOMPurify from "dompurify";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../lib/userHtml.js";
-import type { AuditEntry, PermissionKey, ProfileView, ReportEntry, Role, Theme, ThemeableTextSlot } from "@thekeep/shared";
+import type { AutomodRule, AuditEntry, PermissionKey, ProfileView, ReportEntry, Role, Theme, ThemeableTextSlot } from "@thekeep/shared";
 import { AUDIT_ACTION_GROUPS, THEME_PRESETS } from "@thekeep/shared";
 import {
   DEFAULT_THEME,
@@ -24,6 +24,7 @@ import { AdminPermissionsTab } from "./AdminPermissionsTab.js";
 import { AdminModCasesTab } from "./AdminModCasesTab.js";
 import { AdminEmailTab } from "./AdminEmailTab.js";
 import { AnalyticsTab } from "./admin/AnalyticsTab.js";
+import { ContextualTour } from "./ContextualTour.js";
 import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
 import { AccountBanControl } from "./AccountBanControl.js";
 import { ProfileModal } from "./ProfileModal.js";
@@ -141,6 +142,20 @@ const TAB_ITEMS: ReadonlyArray<{
   { id: "system", label: "System", group: "system", permission: "view_system_metrics" },
   { id: "backups", label: "Backups", group: "system", permission: "view_admin_backups" },
 ];
+
+/** Site-admin contextual-tour anchors. Maps a tab id to the
+ *  `data-tour` value the tour's step targets. Only the tabs the tour
+ *  actually spotlights are listed; every other tab renders without an
+ *  anchor. The strip walk stamps `data-tour={TAB_TOUR_ANCHOR[id]}` onto
+ *  the matching tab button so the tour lands on a persistent element
+ *  (the whole strip stays mounted regardless of which tab is active). */
+const TAB_TOUR_ANCHOR: Partial<Record<Tab, string>> = {
+  overview: "admin-tab-overview",
+  users: "admin-tab-users",
+  servers: "admin-tab-servers",
+  forums: "admin-tab-forums",
+  settings: "admin-tab-settings",
+};
 
 /** Tab-visibility predicate. Masteradmin sees every tab unconditionally
  *  (matches the server-side bypass). Otherwise:
@@ -350,6 +365,10 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
   // from the store via the AuthMe payload, refreshes on the /auth/me
   // poll, same as the rest of `me`.
   const mePermissions = useChat((s) => s.me?.permissions ?? []);
+  // Replay hook for the site-admin contextual tour. The "?" button in the
+  // desktop tab strip calls this to re-run the walkthrough while the panel
+  // is open; <ContextualTour> below drives the actual overlay.
+  const setForcedTourId = useChat((s) => s.setForcedTourId);
   // Multi-Server Lift flag. When ON, several "Content & community" tabs
   // here operate on the HOME server only (their per-server twins live in
   // each server's own console): the Earning admin pins every read/write to
@@ -442,7 +461,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
             {/* `keep-scroll-strip` hides the scrollbar on touch and
                 swaps in a thin themed scrollbar on md+ so it never
                 underlines the tab labels. */}
-            <nav className="keep-scroll-strip flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-xs uppercase tracking-widest">
+            <nav data-tour="admin-tab-strip" className="keep-scroll-strip flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-xs uppercase tracking-widest">
               {withGroupSeparators(TAB_ITEMS.filter((t) => tabVisible(t, isMaster, mePermissions))).map(
                 (entry) =>
                   entry.kind === "separator" ? (
@@ -453,12 +472,28 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
                       title={TAB_GROUP_LABEL[entry.afterGroup]}
                     />
                   ) : (
-                    <TabBtn key={entry.tab.id} active={tab === entry.tab.id} onClick={() => changeTab(entry.tab.id)}>
+                    <TabBtn
+                      key={entry.tab.id}
+                      active={tab === entry.tab.id}
+                      onClick={() => changeTab(entry.tab.id)}
+                      {...(TAB_TOUR_ANCHOR[entry.tab.id] ? { tourAnchor: TAB_TOUR_ANCHOR[entry.tab.id] } : {})}
+                    >
                       {entry.tab.label}
                     </TabBtn>
                   ),
               )}
             </nav>
+            {/* Replay the first-run walkthrough. Sits between the strip and
+                the close button so a keeper can re-run the tour any time. */}
+            <button
+              type="button"
+              onClick={() => setForcedTourId("site-admin")}
+              title="Replay the admin tour"
+              aria-label="Replay the admin tour"
+              className="keep-button shrink-0 rounded border border-keep-rule bg-keep-banner/40 p-1 text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+            >
+              <HelpCircle className="h-4 w-4" aria-hidden />
+            </button>
             <CloseButton onClick={onClose} />
           </div>
         </div>
@@ -512,6 +547,13 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
           </div>
         </AdminShellContext.Provider>
 
+        {/* First-run contextual tour for the whole panel. Mounted
+            unconditionally with `active` true because AdminPanel only
+            renders while the panel is open, so "on screen" and "mounted"
+            coincide. Self-fires when unseen, no-ops otherwise, and re-runs
+            when the strip's "?" button sets the forced tour id. */}
+        <ContextualTour tourId="site-admin" active />
+
         {/* Persistent footer. Form tabs (Settings/Branding/Rules)
             register save+status controls here via `setFooter`; other
             tabs fall back to a lone Close button on the right so the
@@ -535,11 +577,12 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
   );
 }
 
-function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function TabBtn({ active, onClick, children, tourAnchor }: { active: boolean; onClick: () => void; children: React.ReactNode; tourAnchor?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      {...(tourAnchor ? { "data-tour": tourAnchor } : {})}
       // `shrink-0 whitespace-nowrap` keeps each tab at its intrinsic
       // size inside the scrolling nav, without these, tabs would
       // squish to single letters before the strip would start scrolling.
@@ -665,6 +708,9 @@ interface SettingsRow {
   splashMessages24hEnabled: boolean;
   profileDesignerEnabled: boolean;
   serversEnabled: boolean;
+  antiSpamEnabled: boolean;
+  /** Content auto-moderation master switch. */
+  automodEnabled: boolean;
   /** Sanitized HTML for the post-login welcome modal. "" = no welcome shown. */
   newUserWelcomeHtml: string;
   /** Site-wide default theme style key. Users without an override inherit this. */
@@ -1079,6 +1125,8 @@ function SettingsTab() {
   const [splashMessages24hEnabled, setSplashMessages24hEnabled] = useState(false);
   const [profileDesignerEnabled, setProfileDesignerEnabled] = useState(false);
   const [serversEnabled, setServersEnabled] = useState(false);
+  const [antiSpamEnabled, setAntiSpamEnabled] = useState(false);
+  const [automodEnabled, setAutomodEnabled] = useState(false);
   const [defaultStyleKey, setDefaultStyleKey] = useState<string>("medieval");
   // Per-preset design pinning. Keyed by THEME_PRESETS name. Empty
   // entry on a preset means "fall through to defaultStyleKey for
@@ -1115,6 +1163,8 @@ function SettingsTab() {
       setSplashMessages24hEnabled(j.splashMessages24hEnabled);
       setProfileDesignerEnabled(j.profileDesignerEnabled);
       setServersEnabled(j.serversEnabled);
+      setAntiSpamEnabled(j.antiSpamEnabled);
+      setAutomodEnabled(j.automodEnabled);
       setDefaultStyleKey(j.defaultStyleKey || "medieval");
       setThemeDesignMap(j.themeDesignMap ?? {});
     } catch (err) {
@@ -1167,6 +1217,8 @@ function SettingsTab() {
         splashMessages24hEnabled,
         profileDesignerEnabled,
         serversEnabled,
+        antiSpamEnabled,
+        automodEnabled,
         defaultStyleKey,
         themeDesignMap,
       };
@@ -1250,6 +1302,7 @@ function SettingsTab() {
   }
 
   return (
+    <div className="space-y-4">
     <form id="admin-settings-form" onSubmit={save} className="space-y-4">
       <p className="text-xs text-keep-muted">
         Sitewide configuration. Changes apply immediately for new sessions and the next hourly retention sweep.
@@ -1477,6 +1530,34 @@ function SettingsTab() {
               Master switch for the multi-server feature: the round server-icon rail beside the userlist, the discover/create-a-server flow, and all per-server scoping. Off keeps the chat exactly as a single server. The SERVERS_KILL env var overrides this to off.
             </span>
           </label>
+          <label className="text-xs">
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Anti-spam</span>
+            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+              <input
+                type="checkbox"
+                checked={antiSpamEnabled}
+                onChange={(e) => setAntiSpamEnabled(e.target.checked)}
+              />
+              <span>{antiSpamEnabled ? "On - rapid-fire floods get warned, then auto-muted" : "Off - no automatic spam throttling"}</span>
+            </div>
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              Catches rapid-fire message floods: after more than five messages in a few seconds a user gets a warning and a short, growing cooldown, then an automatic mute (5 minutes, growing on repeat offenders) after three warnings. Keeps a room from being blown out when no mod is around. Trusted users, mods, and admins are exempt via the bypass_anti_spam permission.
+            </span>
+          </label>
+          <label className="text-xs">
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Auto-moderation</span>
+            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+              <input
+                type="checkbox"
+                checked={automodEnabled}
+                onChange={(e) => setAutomodEnabled(e.target.checked)}
+              />
+              <span>{automodEnabled ? "On - messages are checked against your rules below" : "Off - no content filtering (mature-RP safe)"}</span>
+            </div>
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              Master switch for content auto-moderation. When on, each message is checked against the rules below before it posts; a matching rule can warn (block the message), delete (silently drop it), or mute the sender. Off by default so mature roleplay isn't caught by surprise. Trusted users, mods, and admins are exempt via the bypass_automod permission. Manage rules and try sample text in the Auto-moderation section below.
+            </span>
+          </label>
         </div>
       </fieldset>
 
@@ -1564,6 +1645,430 @@ function SettingsTab() {
           this component. No inline save row, keeps the form
           scrolling area focused on field editing. */}
     </form>
+
+    {/* Auto-moderation rule management + test box. Self-contained
+        (own fetch/state), lives OUTSIDE the settings <form> so its
+        buttons never submit the settings save. The master toggle
+        above (Auto-moderation) enables/disables enforcement; these
+        rules define WHAT gets caught. */}
+    <AutomodRulesCard canEdit={canEditSiteSettings} />
+    </div>
+  );
+}
+
+/* =============================================================
+ * AUTO-MODERATION RULES CARD (inside the Settings tab)
+ * =============================================================
+ *
+ * CRUD over site-wide content-moderation rules plus a live test box.
+ * Reads/writes /admin/automod/*; fully self-contained so it can be
+ * dropped beside the Anti-spam toggle without touching the settings
+ * save flow. Gated read-only when the admin lacks edit_site_settings.
+ */
+
+const AUTOMOD_KIND_LABELS: Record<AutomodRule["kind"], string> = {
+  keyword: "Keyword",
+  regex: "Regex",
+  link: "Any link",
+  invite: "Invite link",
+  mention_cap: "Mention cap",
+};
+const AUTOMOD_ACTION_LABELS: Record<AutomodRule["action"], string> = {
+  warn: "Warn (block message)",
+  delete: "Delete (silent)",
+  mute: "Mute sender",
+};
+const AUTOMOD_SCOPE_LABELS: Record<AutomodRule["scope"], string> = {
+  chat: "Chat only",
+  forum: "Forum only",
+  both: "Chat + forum",
+};
+
+type AutomodDraft = {
+  kind: AutomodRule["kind"];
+  pattern: string;
+  action: AutomodRule["action"];
+  scope: AutomodRule["scope"];
+  caseInsensitive: boolean;
+  wholeWord: boolean;
+  muteMinutes: string;
+  note: string;
+};
+
+function freshAutomodDraft(): AutomodDraft {
+  return {
+    kind: "keyword",
+    pattern: "",
+    action: "warn",
+    scope: "both",
+    caseInsensitive: true,
+    wholeWord: true,
+    muteMinutes: "",
+    note: "",
+  };
+}
+
+function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
+  const [rules, setRules] = useState<AutomodRule[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState<AutomodDraft>(freshAutomodDraft);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  // Test box.
+  const [testText, setTestText] = useState("");
+  const [testSurface, setTestSurface] = useState<"chat" | "forum">("chat");
+  const [testResult, setTestResult] = useState<
+    { action: AutomodRule["action"] | null; hits: Array<{ ruleId: string; kind: AutomodRule["kind"]; action: AutomodRule["action"]; label: string }> } | null
+  >(null);
+
+  async function loadRules() {
+    setErr(null);
+    try {
+      const r = await fetch("/admin/automod/rules", { credentials: "include" });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as { rules: AutomodRule[] };
+      setRules(j.rules);
+      setLoaded(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "load failed");
+    }
+  }
+  useEffect(() => { loadRules(); }, []);
+
+  // link/invite carry no pattern; mention_cap uses a number; keyword/regex a string.
+  const patternless = draft.kind === "link" || draft.kind === "invite";
+
+  function startEdit(rule: AutomodRule) {
+    setEditingId(rule.id);
+    setDraft({
+      kind: rule.kind,
+      pattern: rule.pattern,
+      action: rule.action,
+      scope: rule.scope,
+      caseInsensitive: rule.caseInsensitive,
+      wholeWord: rule.wholeWord,
+      muteMinutes: rule.muteMs != null ? String(Math.round(rule.muteMs / 60_000)) : "",
+      note: rule.note ?? "",
+    });
+  }
+  function cancelEdit() {
+    setEditingId(null);
+    setDraft(freshAutomodDraft());
+  }
+
+  async function submitDraft() {
+    setErr(null);
+    setBusy(true);
+    try {
+      const muteMs =
+        draft.action === "mute" && draft.muteMinutes.trim()
+          ? Math.round(Number(draft.muteMinutes) * 60_000)
+          : null;
+      if (draft.action === "mute" && draft.muteMinutes.trim() && (!Number.isFinite(muteMs) || (muteMs ?? 0) < 60_000)) {
+        throw new Error("Mute length must be at least 1 minute (or blank for the default).");
+      }
+      const payload = {
+        kind: draft.kind,
+        pattern: patternless ? "" : draft.pattern,
+        action: draft.action,
+        scope: draft.scope,
+        caseInsensitive: draft.caseInsensitive,
+        wholeWord: draft.wholeWord,
+        muteMs,
+        note: draft.note.trim() || null,
+      };
+      const url = editingId ? `/admin/automod/rules/${editingId}` : "/admin/automod/rules";
+      const method = editingId ? "PATCH" : "POST";
+      const r = await fetch(url, {
+        method,
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      await loadRules();
+      cancelEdit();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleRule(rule: AutomodRule) {
+    setErr(null);
+    try {
+      const r = await fetch(`/admin/automod/rules/${rule.id}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !rule.enabled }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      await loadRules();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "update failed");
+    }
+  }
+
+  async function deleteRule(rule: AutomodRule) {
+    // eslint-disable-next-line no-alert
+    if (!window.confirm("Delete this auto-moderation rule?")) return;
+    setErr(null);
+    try {
+      const r = await fetch(`/admin/automod/rules/${rule.id}`, { method: "DELETE", credentials: "include" });
+      if (!r.ok) throw new Error(await readError(r));
+      await loadRules();
+      if (editingId === rule.id) cancelEdit();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "delete failed");
+    }
+  }
+
+  async function runTest() {
+    setErr(null);
+    try {
+      const r = await fetch("/admin/automod/test", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: testText, surface: testSurface }),
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as typeof testResult;
+      setTestResult(j);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "test failed");
+    }
+  }
+
+  const inputCls = "rounded border border-keep-rule bg-keep-bg px-2 py-1";
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">Auto-moderation rules</legend>
+      <p className="mb-2 text-keep-muted">
+        Rules checked against each message when Auto-moderation is on (toggle above). A rule can warn (block the message with a notice), delete it silently, or mute the sender. Trusted users, mods, and admins are always exempt. Off by default so mature roleplay isn't caught by surprise, use the test box below to blunt false positives before enabling.
+      </p>
+
+      {err ? <div className="mb-2 rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-red-300">{err}</div> : null}
+
+      {/* Rule list */}
+      <div className="mb-3 space-y-1">
+        {!loaded ? (
+          <div className="text-keep-muted">loading rules...</div>
+        ) : rules.length === 0 ? (
+          <div className="italic text-keep-muted">No rules yet. Add one below.</div>
+        ) : (
+          rules.map((rule) => (
+            <div
+              key={rule.id}
+              className={`flex flex-wrap items-center gap-2 rounded border border-keep-rule px-2 py-1 ${rule.enabled ? "" : "opacity-50"}`}
+            >
+              <span className="rounded bg-keep-panel px-1.5 py-0.5 font-semibold">{AUTOMOD_KIND_LABELS[rule.kind]}</span>
+              {rule.kind !== "link" && rule.kind !== "invite" ? (
+                <code className="max-w-[16rem] truncate rounded bg-keep-bg px-1">{rule.pattern || "(empty)"}</code>
+              ) : null}
+              <span className="text-keep-muted">→</span>
+              <span>{AUTOMOD_ACTION_LABELS[rule.action]}</span>
+              <span className="text-keep-muted">·</span>
+              <span className="text-keep-muted">{AUTOMOD_SCOPE_LABELS[rule.scope]}</span>
+              {rule.note ? <span className="text-keep-muted">· {rule.note}</span> : null}
+              <span className="ml-auto flex items-center gap-2">
+                {canEdit ? (
+                  <>
+                    <button type="button" className="underline" onClick={() => toggleRule(rule)}>
+                      {rule.enabled ? "Disable" : "Enable"}
+                    </button>
+                    <button type="button" className="underline" onClick={() => startEdit(rule)}>Edit</button>
+                    <button type="button" className="text-red-400 underline" onClick={() => deleteRule(rule)}>Delete</button>
+                  </>
+                ) : null}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Add / edit form */}
+      {canEdit ? (
+        <div className="mb-3 rounded border border-keep-rule bg-keep-bg/40 p-2">
+          <div className="mb-2 font-semibold uppercase tracking-widest text-keep-muted">
+            {editingId ? "Edit rule" : "Add rule"}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="flex flex-col gap-1">
+              <span className="text-keep-muted">Match on</span>
+              <select
+                className={inputCls}
+                value={draft.kind}
+                onChange={(e) => setDraft((d) => ({ ...d, kind: e.target.value as AutomodRule["kind"] }))}
+              >
+                {(Object.keys(AUTOMOD_KIND_LABELS) as AutomodRule["kind"][]).map((k) => (
+                  <option key={k} value={k}>{AUTOMOD_KIND_LABELS[k]}</option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-keep-muted">Action</span>
+              <select
+                className={inputCls}
+                value={draft.action}
+                onChange={(e) => setDraft((d) => ({ ...d, action: e.target.value as AutomodRule["action"] }))}
+              >
+                {(Object.keys(AUTOMOD_ACTION_LABELS) as AutomodRule["action"][]).map((a) => (
+                  <option key={a} value={a}>{AUTOMOD_ACTION_LABELS[a]}</option>
+                ))}
+              </select>
+            </label>
+            {!patternless ? (
+              <label className="flex flex-col gap-1 sm:col-span-2">
+                <span className="text-keep-muted">
+                  {draft.kind === "mention_cap" ? "Max @mentions allowed" : draft.kind === "regex" ? "Regular expression" : "Word or phrase"}
+                </span>
+                <input
+                  className={`${inputCls} font-mono`}
+                  value={draft.pattern}
+                  placeholder={draft.kind === "mention_cap" ? "e.g. 5" : draft.kind === "regex" ? "e.g. \\bbad(word)?\\b" : "e.g. spoiler"}
+                  onChange={(e) => setDraft((d) => ({ ...d, pattern: e.target.value }))}
+                />
+              </label>
+            ) : (
+              <div className="sm:col-span-2 text-keep-muted italic">
+                {draft.kind === "link" ? "Matches any http/https link in the message." : "Matches common chat/forum/other-service invite links."}
+              </div>
+            )}
+            <label className="flex flex-col gap-1">
+              <span className="text-keep-muted">Applies to</span>
+              <select
+                className={inputCls}
+                value={draft.scope}
+                onChange={(e) => setDraft((d) => ({ ...d, scope: e.target.value as AutomodRule["scope"] }))}
+              >
+                {(Object.keys(AUTOMOD_SCOPE_LABELS) as AutomodRule["scope"][]).map((s) => (
+                  <option key={s} value={s}>{AUTOMOD_SCOPE_LABELS[s]}</option>
+                ))}
+              </select>
+            </label>
+            {draft.action === "mute" ? (
+              <label className="flex flex-col gap-1">
+                <span className="text-keep-muted">Mute length (minutes)</span>
+                <input
+                  className={inputCls}
+                  value={draft.muteMinutes}
+                  placeholder="blank = default (10)"
+                  onChange={(e) => setDraft((d) => ({ ...d, muteMinutes: e.target.value }))}
+                />
+              </label>
+            ) : null}
+            {draft.kind === "keyword" ? (
+              <>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={draft.caseInsensitive}
+                    onChange={(e) => setDraft((d) => ({ ...d, caseInsensitive: e.target.checked }))}
+                  />
+                  <span>Ignore case</span>
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={draft.wholeWord}
+                    onChange={(e) => setDraft((d) => ({ ...d, wholeWord: e.target.checked }))}
+                  />
+                  <span>Whole word only</span>
+                </label>
+              </>
+            ) : draft.kind === "regex" ? (
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={draft.caseInsensitive}
+                  onChange={(e) => setDraft((d) => ({ ...d, caseInsensitive: e.target.checked }))}
+                />
+                <span>Ignore case</span>
+              </label>
+            ) : null}
+            <label className="flex flex-col gap-1 sm:col-span-2">
+              <span className="text-keep-muted">Note (optional)</span>
+              <input
+                className={inputCls}
+                value={draft.note}
+                placeholder="Why this rule exists"
+                onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
+              />
+            </label>
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={submitDraft}
+              className="rounded border border-keep-rule bg-keep-panel px-3 py-1 font-semibold disabled:opacity-50"
+            >
+              {editingId ? "Save rule" : "Add rule"}
+            </button>
+            {editingId ? (
+              <button type="button" onClick={cancelEdit} className="underline text-keep-muted">Cancel</button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {/* Test box */}
+      <div className="rounded border border-keep-rule bg-keep-bg/40 p-2">
+        <div className="mb-2 font-semibold uppercase tracking-widest text-keep-muted">Test a message</div>
+        <p className="mb-2 text-keep-muted">
+          Paste sample text to see which enabled rules would fire (and the resulting action). Nothing is saved or posted.
+        </p>
+        <textarea
+          className={`${inputCls} w-full font-mono`}
+          rows={3}
+          value={testText}
+          placeholder="Type or paste a message to test..."
+          onChange={(e) => setTestText(e.target.value)}
+        />
+        <div className="mt-2 flex items-center gap-2">
+          <select
+            className={inputCls}
+            value={testSurface}
+            onChange={(e) => setTestSurface(e.target.value as "chat" | "forum")}
+          >
+            <option value="chat">As chat</option>
+            <option value="forum">As forum post</option>
+          </select>
+          <button
+            type="button"
+            onClick={runTest}
+            className="rounded border border-keep-rule bg-keep-panel px-3 py-1 font-semibold"
+          >
+            Run test
+          </button>
+        </div>
+        {testResult ? (
+          <div className="mt-2">
+            {testResult.hits.length === 0 ? (
+              <div className="text-green-400">No rules fired, this message would post.</div>
+            ) : (
+              <>
+                <div className="mb-1">
+                  Resulting action: <span className="font-semibold">{testResult.action ? AUTOMOD_ACTION_LABELS[testResult.action] : "none"}</span>
+                </div>
+                <ul className="list-disc pl-5 text-keep-muted">
+                  {testResult.hits.map((h, i) => (
+                    <li key={`${h.ruleId}-${i}`}>
+                      {AUTOMOD_KIND_LABELS[h.kind]} ({AUTOMOD_ACTION_LABELS[h.action]}): <code>{h.label}</code>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
+    </fieldset>
   );
 }
 
@@ -3016,7 +3521,11 @@ function UsersTab() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (q.trim()) params.set("q", q.trim());
+      // While pivoting on an IP (alt-account check), suppress the username
+      // search so alts — which have DIFFERENT usernames — aren't filtered out
+      // by the name that was searched. The search text stays in the box (just
+      // disabled); clearing the IP pivot restores the name search.
+      if (q.trim() && !ipPivot.trim()) params.set("q", q.trim());
       if (ipPivot.trim()) params.set("ip", ipPivot.trim());
       // "disabled" is a DB-backed state, so push it server-side — otherwise
       // a disabled account past the first page (username-ordered, limit 100)
@@ -3142,22 +3651,14 @@ function UsersTab() {
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-        <p className="text-xs text-keep-muted sm:max-w-[60%]">
-          Every registered account, including disabled ones. Search matches
-          username, email, and character name (so a persona name finds its
-          owning OOC account). Editing role to "admin" grants global
-          moderation - same as <code>/promoteadmin</code>. "masteradmin"
-          (master-only to set) additionally unlocks settings, branding,
-          rules, account-disable, and email changes.
-        </p>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search username/email/character"
-          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs sm:w-auto sm:shrink-0"
-        />
-      </div>
+      <p className="text-xs text-keep-muted">
+        Every registered account, including disabled ones. Search matches
+        username, email, and character name (so a persona name finds its
+        owning OOC account). Editing role to "admin" grants global
+        moderation - same as <code>/promoteadmin</code>. "masteradmin"
+        (master-only to set) additionally unlocks settings, branding,
+        rules, account-disable, and email changes.
+      </p>
 
       {/* IP pivot chip, surfaces while a click on an IP chip in the
           table has scoped the list to "every account on this IP." A
@@ -3182,6 +3683,17 @@ function UsersTab() {
       ) : null}
 
       <div className="flex flex-wrap items-end gap-2 rounded border border-keep-rule/60 bg-keep-bg/30 p-2 text-xs">
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Search</span>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            disabled={!!ipPivot}
+            placeholder="username / email / character"
+            title={ipPivot ? "Clear the IP pivot to search by name again" : "Search username, email, or character name"}
+            className="min-w-[12rem] rounded border border-keep-rule bg-keep-bg px-2 py-1 disabled:opacity-50"
+          />
+        </label>
         <label className="flex flex-col gap-0.5">
           <span className="text-[10px] uppercase tracking-widest text-keep-muted">Role</span>
           <select

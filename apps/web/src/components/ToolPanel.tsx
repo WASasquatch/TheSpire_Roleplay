@@ -8,7 +8,6 @@ import {
   Users,
   Paintbrush2,
   Settings,
-  Search,
   HelpCircle,
   Gamepad2,
   Archive,
@@ -31,7 +30,6 @@ import {
 import { fetchForums } from "../lib/forums.js";
 import { fetchArchivedRooms, hideArchivedRoom } from "../lib/rooms.js";
 import type { ArchivedRoomBrief, ForumSummary } from "@thekeep/shared";
-import { SearchBar } from "./SearchBar.js";
 import { CloseButton } from "./CloseButton.js";
 import { CreateCharacterModal } from "./CreateCharacterModal.js";
 
@@ -74,7 +72,11 @@ interface Props {
  * is a fixed-position slide-out), so the drawer here just expands upward
  * within that container - works the same as desktop.
  */
-export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, currentRoomId, onJumpToMessage, onOpenMessages, onOpenEarning, onOpenArcade }: Props) {
+export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, onOpenMessages, onOpenEarning, onOpenArcade }: Props) {
+  // NOTE: `currentRoomId` + `onJumpToMessage` remain in Props (RoomsTree still
+  // passes them) but are no longer consumed here — the message SearchBar they
+  // fed moved to the top of the rail (RoomsTree). Left in the interface so the
+  // existing mount stays type-compatible without an App-level change.
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
   const [refreshOpen, setRefreshOpen] = useState(false);
@@ -95,6 +97,11 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   const [createCharOpen, setCreateCharOpen] = useState(false);
   const openEditor = useChat((s) => s.openEditor);
   const me = useChat((s) => s.me);
+  // Replay the site tour on demand from the "Take the tour" menu row.
+  // The tour itself is rendered at the App level; flipping this store
+  // flag opens it regardless of whether the one-time showSiteTour has
+  // already been dismissed.
+  const setSiteTourForced = useChat((s) => s.setSiteTourForced);
   // Reduce Motion (accessibility) — effective state (OS setting OR per-device
   // toggle). osForced = the OS demands it, so the toggle shows on + locked.
   const reduceMotion = useReducedMotion();
@@ -206,11 +213,6 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
   function toggleSection(title: string) {
     setOpenSection((cur) => (cur === title ? null : title));
   }
-  // "Search this room" is the one section that defaults OPEN and lives
-  // OUTSIDE the single-open accordion above, so it stays put while the user
-  // expands category sections. It persists across drawer opens (we never
-  // reset it), so a manual collapse sticks for the session.
-  const [searchOpen, setSearchOpen] = useState(true);
   // Scroll container + per-section anchors. The drawer grows UPWARD out of
   // the trigger bar, so its "bottom" edge is the one nearest the thumb;
   // we default the scroll there on open and nudge a freshly-opened section
@@ -667,6 +669,23 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
               </button>
             ) : null}
 
+            {/* Take the tour, replays the guided site walkthrough. Sits
+                beside Help so a newcomer who dismissed the first-run tour
+                (or wants a refresher) can find it in the same spot they'd
+                look for the guides. Flips the store flag the App-level
+                tour watches, then closes the drawer so the spotlight has a
+                clean view of the rails behind it. */}
+            <button
+              type="button"
+              onClick={() => { setSiteTourForced(true); setDrawerOpen(false); }}
+              title="Replay the guided walkthrough of the chat and its rails"
+              className="flex w-full items-center gap-2 border-y border-keep-rule/60 bg-keep-banner/40 px-3 py-1.5 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted hover:bg-keep-banner/60 hover:text-keep-text lg:py-1"
+            >
+              <span aria-hidden className="shrink-0"><HelpCircle size={14} aria-hidden /></span>
+              <span className="flex-1 text-left">Take the tour</span>
+              <span aria-hidden className="shrink-0 text-sm leading-none text-keep-muted">›</span>
+            </button>
+
             {/* Help, always exposed (not tucked inside the Account accordion)
                 so a newcomer can always find the guides + command reference
                 without hunting. Styled like a section header but acts as a
@@ -682,28 +701,11 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
               <span aria-hidden className="shrink-0 text-sm leading-none text-keep-muted">›</span>
             </button>
 
-            {/* Search lives at the bottom of the drawer so the input is
-                close to the user's resting touch position on mobile.
-                Results render upward (most-relevant nearest the bar), see
-                SearchBar for the spatial-proximity-to-action rationale.
-                It defaults OPEN and toggles independently of the accordion. */}
-            <Section
-              title="Search this room"
-              icon={<Search size={14} aria-hidden />}
-              open={searchOpen}
-              onToggle={() => setSearchOpen((v) => !v)}
-              innerRef={(el) => { sectionRefs.current["Search this room"] = el; }}
-            >
-              <div className="px-3 py-2">
-                <SearchBar
-                  roomId={currentRoomId}
-                  onJump={(messageId) => {
-                    if (currentRoomId) onJumpToMessage(currentRoomId, messageId);
-                  }}
-                  onClose={() => setDrawerOpen(false)}
-                />
-              </div>
-            </Section>
+            {/* Message search moved OUT of this drawer to a dedicated
+                container pinned at the TOP of the rail (RoomsTree), above the
+                Forums Catalog button, so it's always reachable without
+                opening the Tools menu and now carries a room/server scope
+                toggle (Batch 2 search-core). */}
           </div>
         </>
       ) : null}
@@ -793,6 +795,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, c
           the identity/envelope row. */}
       <button
         type="button"
+        data-tour="menu-button"
         onClick={() => setDrawerOpen((v) => !v)}
         title="Open the menu"
         className={`mt-1 flex h-9 w-full items-center justify-center gap-2 rounded border border-keep-rule text-xs font-semibold uppercase tracking-widest lg:h-7 ${
@@ -993,6 +996,7 @@ function IdentityButton({
 
       <button
         type="button"
+        data-tour="identity-button"
         onClick={onToggle}
         title={
           inCharacter

@@ -17,6 +17,7 @@ import { useChat } from "../state/store.js";
  */
 export function PopularCommunities({ onNavigate }: { onNavigate: (path: string) => void }) {
   const activityFeedsEnabled = useChat((s) => s.branding.activityFeedsEnabled);
+  const siteName = useChat((s) => s.branding.siteName?.trim() || "The Spire");
   const [servers, setServers] = useState<PopularServer[] | null>(null);
 
   useEffect(() => {
@@ -39,12 +40,12 @@ export function PopularCommunities({ onNavigate }: { onNavigate: (path: string) 
 
   return (
     <section
-      aria-label="Popular communities"
+      aria-label={`Popular ${siteName} chat servers`}
       className={`rounded-md border border-keep-border/50 bg-keep-panel/30 p-5 sm:p-6 ${SPLASH_PANEL_HOVER}`}
     >
       <div className="mb-1 flex items-center gap-2">
         <Compass className="h-5 w-5 shrink-0 text-keep-accent" aria-hidden />
-        <h2 className="font-action text-xl text-keep-text sm:text-2xl">Popular communities</h2>
+        <h2 className="font-action text-xl text-keep-text sm:text-2xl">Popular {siteName} Chat Servers</h2>
       </div>
       <p className="mb-4 text-sm text-keep-text/85 lg:text-base">
         Places people are already gathering. Take a look inside.

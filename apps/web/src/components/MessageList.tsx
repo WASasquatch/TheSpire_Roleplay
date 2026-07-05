@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { BarChart3, Bookmark, BookmarkCheck, Flag, FolderInput, Lock, Pencil, Reply, SmilePlus, Trash2 } from "lucide-react";
+import { BarChart3, Bookmark, BookmarkCheck, Flag, FolderInput, Lock, Pencil, Pin, PinOff, Reply, SmilePlus, Trash2 } from "lucide-react";
 import { setTopicCategory, moveTopicToBoard, mergeTopicInto, fetchBoardTopics, fetchRoomCategories } from "../lib/forums.js";
 import { ForumReportContext } from "../lib/forumReportContext.js";
 import { ForumTopicAdminContext, type ForumTopicAdminBoard } from "../lib/forumTopicAdminContext.js";
@@ -246,6 +246,18 @@ interface Props {
   watchedTopicIds?: ReadonlySet<string>;
   /** Forums Catalog: toggle a topic subscription from the card's bell. */
   onToggleTopicWatch?: (topicId: string, watch: boolean) => void;
+  /**
+   * Viewer can pin/unpin CHAT messages to the top of the room (migration
+   * 0316). True when they hold the sitewide `pin_message` permission OR are
+   * the room owner/mod. Surfaces a Pin/Unpin action beside the bookmark
+   * button on flat-chat rows. The server re-checks the same gate. Defaults
+   * to false. Distinct from `canPin` above (which gates forum TOPIC
+   * stickies). */
+  canPinMessage?: boolean;
+  /** Ids of messages currently pinned in this room, so the row action can
+   *  render Unpin (filled) vs Pin (outline). Fed from App's `room:pins`
+   *  state. */
+  pinnedMessageIds?: ReadonlySet<string>;
   /** Anonymous forum reader (/f/ landing): hide every action toolbar —
    *  read-only browsing, copy-link only. */
   readOnly?: boolean;
@@ -434,7 +446,7 @@ const STICK_BOTTOM_PX = 24;
 const FLAT_BUFFER_SOFT_CAP = 200;
 const FLAT_BUFFER_HARD_CAP = 300;
 
-export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, postPermalink }: Props) {
+export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canPinMessage = false, pinnedMessageIds, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, postPermalink }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   /**
    * The flat feed's content box (wraps the loader + every message row).
@@ -744,6 +756,14 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   // background class. Cleared via onHighlightDone after the flash window.
   useEffect(() => {
     if (!highlightMessageId) return;
+    // A jump anchors the view on a specific message, so the viewer is NOT
+    // following the live bottom. Clear the end-pin: a cross-room jump (e.g. a
+    // mention notification) end-pins during the room switch, so without this
+    // the late-growth re-pin effect would yank the view back to the newest line
+    // the moment avatars/images in the jumped-to window finish loading (and
+    // once the flash clears `highlightMessageId` stops suppressing it) — making
+    // the jump look like it "didn't scroll to the message".
+    stickRef.current = false;
     const container = ref.current;
     if (!container) return;
     const node = container.querySelector<HTMLElement>(
@@ -945,6 +965,8 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         canReport={roomType === "public"}
         canModerate={canModerate}
         canAdminEdit={canAdminEdit}
+        canPinMessage={canPinMessage}
+        isPinned={!!pinnedMessageIds?.has(m.id)}
         onIconClick={onIconClick}
         onNameClick={onNameClick}
         onMentionClick={onMentionClick}
@@ -3953,6 +3975,8 @@ function Line({
   canReport,
   canModerate,
   canAdminEdit,
+  canPinMessage,
+  isPinned,
   onIconClick,
   onNameClick,
   onMentionClick,
@@ -3983,6 +4007,10 @@ function Line({
   canModerate: boolean;
   /** Viewer is admin/masteradmin, surfaces a cross-author Edit button on others' lines. Stricter than canModerate. */
   canAdminEdit: boolean;
+  /** Viewer can pin/unpin this chat message (sitewide `pin_message` or room owner/mod). Surfaces a Pin/Unpin action beside the bookmark button. */
+  canPinMessage: boolean;
+  /** This message is currently pinned in the room, so the action renders Unpin. */
+  isPinned: boolean;
   /** Unbound - Line binds with the relevant userId/displayName for sender vs recipient. */
   onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
   onNameClick: (userId: string, displayName: string, characterId?: string | null) => void;
@@ -4611,6 +4639,12 @@ function Line({
   // be bookmarked in principle but the body is empty, hide there too.
   const BOOKMARKABLE_KINDS = new Set(["say", "me", "ooc", "whisper", "npc", "roll"]);
   const showBookmark = BOOKMARKABLE_KINDS.has(msg.kind) && !msg.deletedAt;
+  // Pin/Unpin (migration 0316): shown to privileged viewers on content-
+  // bearing room lines. Whispers are private threads and never pinnable
+  // (mirrors the server gate); soft-deleted rows can't be pinned. An
+  // already-pinned message keeps the control visible so it can be UNpinned.
+  const PINNABLE_KINDS = new Set(["say", "me", "ooc", "npc", "roll", "scene", "announce", "cmd"]);
+  const showPinMessage = canPinMessage && PINNABLE_KINDS.has(msg.kind) && !msg.deletedAt;
 
   // Hover row-highlight. `bg-keep-muted/25` uses the theme's "secondary
   // text" tone (warm gray on light palettes, soft gray on dark ones) so
@@ -4667,7 +4701,7 @@ function Line({
   // purposes of mounting the wrapper + the tap-to-focus affordance,
   // so other people's messages still surface the React button on
   // hover/tap even when no other control would apply.
-  const hasControls = showBookmark || showOwnControls || showModControls || effectiveShowReport || reactAvailable;
+  const hasControls = showBookmark || showPinMessage || showOwnControls || showModControls || effectiveShowReport || reactAvailable;
   // On mobile we normally keep the controls hidden until the row gains
   // focus-within (a tap) so the timeline stays uncluttered. The author's
   // own edit/delete row is the exception: hiding it behind a tap was
@@ -4717,6 +4751,9 @@ function Line({
           pair, then Bookmark (save) follows. */}
       {chatReactButton}
       {showBookmark ? <BookmarkButton msg={msg} /> : null}
+      {/* Pin/Unpin sits beside Bookmark (both are "keep this around" saves,
+          but Pin is the shared, mod-gated one). */}
+      {showPinMessage ? <PinToggleButton msg={msg} isPinned={isPinned} /> : null}
       {/* When the inline edit form is open, the buttons collapse so
           the user isn't staring at duplicate Edit/Cancel affordances
           (the form has its own Save / Cancel). The form itself
@@ -5173,6 +5210,60 @@ function formatGraceWindow(ms: number): string {
   if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
   if (ms % 60_000 === 0) return `${ms / 60_000}m`;
   return `${Math.round(ms / 1000)}s`;
+}
+
+/**
+ * Pin / Unpin control (migration 0316). Mod/admin (or room owner/mod) toggle
+ * whether this message is pinned to the top of the room. POST/DELETE
+ * `/messages/:id/pin`; the server re-checks the same gate and broadcasts
+ * `room:pins`, which flips the `isPinned` prop and re-labels this button — so
+ * no optimistic state is needed beyond a brief in-flight lock. Styled to match
+ * the bookmark / edit / delete buttons so the row reads as one set.
+ */
+function PinToggleButton({ msg, isPinned }: { msg: ChatMessage; isPinned: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function toggle(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/messages/${encodeURIComponent(msg.id)}/pin`, {
+        method: isPinned ? "DELETE" : "POST",
+        credentials: "include",
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({} as { error?: string }));
+        throw new Error(j.error ?? `HTTP ${r.status}`);
+      }
+      // Success: the room:pins broadcast updates isPinned; nothing else to do.
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "pin failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={busy}
+      title={error ?? (isPinned ? "Unpin this message" : "Pin this message to the top of the room")}
+      aria-label={isPinned ? "Unpin this message" : "Pin this message"}
+      aria-pressed={isPinned}
+      className={
+        "flex h-5 items-center gap-1 rounded border px-1.5 text-[10px] leading-none disabled:opacity-50 " +
+        (isPinned
+          ? "border-keep-action/60 bg-keep-action/15 text-keep-action hover:bg-keep-action/25"
+          : "border-keep-rule bg-keep-bg/80 text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action md:invisible md:group-hover:visible md:group-focus-within:visible")
+      }
+    >
+      {isPinned ? <PinOff className="h-3 w-3" aria-hidden /> : <Pin className="h-3 w-3" aria-hidden />}
+    </button>
+  );
 }
 
 /**

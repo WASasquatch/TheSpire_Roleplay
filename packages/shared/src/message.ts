@@ -340,4 +340,16 @@ export interface MessageSearchHit {
   relevance: number;
   /** Top-level thread anchor when the matched message is itself a reply. Used to render "in thread: <parent>" context. */
   replyToId?: string | null;
+  /**
+   * Cross-room / cross-server search context (extended search v1). Optional so
+   * a single-room search that omits them stays byte-identical. `roomName` is the
+   * hit's room name; `serverId`/`serverName` scope the room to a community
+   * server (null/absent on the default server); `title` is the forum topic
+   * title when the hit lives on a forum board. The UI uses these to render
+   * "in <room>" / "on <server>" breadcrumbs on a global result list.
+   */
+  roomName?: string;
+  serverId?: string | null;
+  serverName?: string;
+  title?: string;
 }

@@ -10,11 +10,16 @@ import {
   Info,
   Megaphone,
   MessagesSquare,
+  Pin,
+  PinOff,
   ScrollText,
   Users,
 } from "lucide-react";
-import type { RoomInfo, RoomSummary } from "@thekeep/shared";
+import type { PinnedMessage, RoomInfo, RoomSummary } from "@thekeep/shared";
+import { customCmdCssToStyle, resolveMessageColor } from "@thekeep/shared";
 import { fetchRoomInfo } from "../lib/rooms.js";
+import { parseInline } from "../lib/markdown.js";
+import { useActiveTheme } from "../lib/theme.js";
 import { useMarqueeHidden, resurrectMarquee } from "../lib/marqueeVisibility.js";
 
 interface Props {
@@ -25,6 +30,19 @@ interface Props {
   canEdit?: boolean;
   /** Open the linked-world viewer from the metadata grid. */
   onOpenWorld?: (worldId: string) => void;
+  /** Pinned messages for this room (migration 0316). Renders a collapsible
+   *  strip above the room bar. Empty/absent → no strip. */
+  pins?: PinnedMessage[];
+  /** Viewer can unpin (sitewide `pin_message` or room owner/mod). Surfaces
+   *  the Unpin button on each pin row. Read-only viewers still see + jump. */
+  canPinMessage?: boolean;
+  /** Jump the chat to a pinned message (flash it). Null messageId (source
+   *  hard-deleted) rows render non-clickable. */
+  onJumpToMessage?: (messageId: string) => void;
+  /** Unpin a pin. Receives the live source message id when it still exists,
+   *  or the pin row's own id when the source was hard-deleted (the DELETE
+   *  route resolves either). Wired to `DELETE /messages/:id/pin`. */
+  onUnpin?: (idForUnpin: string) => void;
 }
 
 /** True when the icon string should render as an <img> rather than a glyph. */
@@ -59,8 +77,12 @@ function Bevel() {
  * fetched from GET /rooms/:id/info on first expand. The icon is set via the
  * `/icon` command (no inline editor here, by design).
  */
-export function RoomInfoBar({ room, canEdit = false, onOpenWorld }: Props) {
+export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMessage = false, onJumpToMessage, onUnpin }: Props) {
   const [expanded, setExpanded] = useState(false);
+  // Pins strip: collapsed to a "N pinned" summary by default, expands to a
+  // scrollable list. Independent of the room-details pullout below.
+  const [pinsExpanded, setPinsExpanded] = useState(false);
+  const roomPins = pins ?? [];
   // Calm-mode ease: the dossier pullout opens BELOW the room bar and mounts
   // fresh on expand, so it slides down gently under Reduce Motion. Block-flow
   // positioned (no transform placement), so the slide transform is safe.
@@ -91,6 +113,7 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld }: Props) {
   useEffect(() => {
     setExpanded(false);
     setInfo(null);
+    setPinsExpanded(false);
   }, [room.id]);
 
   const bannerText = room.topic
@@ -101,6 +124,42 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld }: Props) {
 
   return (
     <div className="border-b border-keep-rule bg-keep-banner/40">
+      {/* Pinned-messages strip. Collapsed to a "N pinned" summary; expands to
+          a scrollable list rendered like bookmark rows (color / cmd CSS
+          preserved), each with jump + (privileged) unpin. Sits above the room
+          bar so it reads as the room's pinned notices. */}
+      {roomPins.length > 0 ? (
+        <div className="border-b border-keep-rule/60 bg-keep-bg/30">
+          <button
+            type="button"
+            onClick={() => setPinsExpanded((v) => !v)}
+            aria-expanded={pinsExpanded}
+            className="flex w-full items-center gap-2 px-3 py-1 text-xs text-keep-muted hover:bg-keep-banner/40"
+            title={pinsExpanded ? "Hide pinned messages" : "Show pinned messages"}
+          >
+            <Pin size={12} aria-hidden />
+            <span className="font-action tracking-wide text-keep-text">
+              {roomPins.length} pinned
+            </span>
+            <span className="ml-auto">
+              {pinsExpanded ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
+            </span>
+          </button>
+          {pinsExpanded ? (
+            <ul className={`max-h-60 divide-y divide-keep-rule/40 overflow-y-auto${reduceMotion ? " tk-slide-down-in" : ""}`}>
+              {roomPins.map((p) => (
+                <PinRow
+                  key={p.id}
+                  pin={p}
+                  canUnpin={canPinMessage}
+                  {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
+                  {...(onUnpin ? { onUnpin } : {})}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
       {/* Clickable bar — the whole strip toggles the pullout. */}
       <div
         role="button"
@@ -345,5 +404,90 @@ function LinkRow({ slug }: { slug: string }) {
         </button>
       </dd>
     </>
+  );
+}
+
+/**
+ * One row in the pinned-messages strip. Renders the frozen snapshot (author +
+ * body) with the same color / cmd-CSS pass the chat line + bookmark rows use,
+ * so a pinned styled command reads as the user remembers. Clicking the body
+ * jumps to the live message (unless its source was hard-deleted — `messageId`
+ * null — in which case the saved snapshot renders inert). Privileged viewers
+ * get an Unpin button.
+ */
+function PinRow({
+  pin,
+  canUnpin,
+  onJump,
+  onUnpin,
+}: {
+  pin: PinnedMessage;
+  canUnpin: boolean;
+  onJump?: (messageId: string) => void;
+  /** Arg is the live source message id, or the pin row id when the source was
+   *  hard-deleted (see the Props doc). */
+  onUnpin?: (idForUnpin: string) => void;
+}) {
+  const themeBg = useActiveTheme().bg;
+  const color = resolveMessageColor(pin.color, themeBg);
+  const cmdStyle = pin.kind === "cmd" ? customCmdCssToStyle(pin.cmdCss ?? null, themeBg) : null;
+  const bodyStyle = {
+    ...(color ? { color } : {}),
+    ...(cmdStyle ?? {}),
+  };
+  // messageId goes null once the source message was hard-deleted; the snapshot
+  // still renders but there's nothing live to jump to.
+  const jumpable = !!pin.messageId && !!onJump;
+  const body = pin.body ?? "";
+
+  return (
+    <li className="group flex items-start gap-2 px-3 py-1.5 text-sm hover:bg-keep-banner/30">
+      <Pin size={12} aria-hidden className="mt-1 shrink-0 text-keep-action/70" />
+      <div className="min-w-0 flex-1">
+        <div className="text-[10px] uppercase tracking-widest text-keep-muted">
+          <b className="text-keep-text">{pin.displayName ?? "Someone"}</b>
+          {pin.pinnedByDisplayName ? (
+            <>
+              <span className="mx-1">·</span>
+              <span className="italic">pinned by {pin.pinnedByDisplayName}</span>
+            </>
+          ) : null}
+        </div>
+        {jumpable ? (
+          <button
+            type="button"
+            onClick={() => onJump!(pin.messageId!)}
+            className="mt-0.5 block w-full text-left text-sm leading-snug hover:underline"
+            title="Jump to this message"
+          >
+            <span className="break-words" style={bodyStyle}>{parseInline(body)}</span>
+          </button>
+        ) : (
+          <div
+            className="mt-0.5 block w-full text-left text-sm leading-snug"
+            title="The original message is gone; showing the pinned copy."
+          >
+            <span className="break-words" style={bodyStyle}>{parseInline(body)}</span>
+          </div>
+        )}
+      </div>
+      {canUnpin && onUnpin ? (
+        // Always offered to privileged viewers — even when the source message
+        // was hard-deleted (`messageId` null). We unpin by the live source id
+        // when it survives (the existing message-id contract), otherwise by the
+        // stable pin row id, which the server resolves too. Gating this on
+        // `messageId` was the bug that left a hard-deleted pin un-unpinnable and
+        // permanently consuming a pin-cap slot.
+        <button
+          type="button"
+          onClick={() => onUnpin(pin.messageId ?? pin.id)}
+          title="Unpin this message"
+          aria-label="Unpin this message"
+          className="mt-0.5 shrink-0 rounded border border-keep-rule/60 bg-keep-bg/60 p-1 text-keep-muted opacity-0 hover:border-keep-accent hover:text-keep-accent group-hover:opacity-100"
+        >
+          <PinOff size={12} aria-hidden />
+        </button>
+      ) : null}
+    </li>
   );
 }

@@ -77,3 +77,27 @@ export async function notifyUser(
     });
   }
 }
+
+/**
+ * Nudge a user's LIVE server rail to refresh — a server just became available to
+ * them (creation application approved, membership accepted), so the rail should
+ * pick it up and fade it in without a page refresh. Best-effort, mirroring
+ * {@link notifyUser}: a socket lookup / emit failure never fails the route
+ * action (the membership row already committed, and the durable notification is
+ * the source of truth).
+ */
+export async function emitServersChanged(
+  io: Io,
+  userId: string,
+  addedServerId?: string | null,
+): Promise<void> {
+  try {
+    const sockets = await io.fetchSockets();
+    for (const s of sockets) {
+      if ((s.data as { userId?: string }).userId !== userId) continue;
+      s.emit("servers:changed", { addedServerId: addedServerId ?? null });
+    }
+  } catch {
+    /* best-effort */
+  }
+}

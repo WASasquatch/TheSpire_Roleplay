@@ -1513,6 +1513,7 @@ export function Composer({
   return (
     <form
       onSubmit={submit}
+      data-tour="composer"
       // `min-h-[5.25rem]` + `justify-end` keep the composer wrapper the
       // same height as the right-rail's bottom strip (identity-button +
       // Tools-trigger stacked), so the two bottom rails align visually

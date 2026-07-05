@@ -238,19 +238,58 @@ async function pulse(io: Io, db: Db, userId: string, newRowId?: string): Promise
   return mine.length > 0;
 }
 
+/**
+ * Per-channel unread pulse (migration 0318). The per-channel analog of
+ * {@link pulse}: fan a `room:unread` delta to every live socket belonging to
+ * `recipientUserId`, so every tab replaces its cached unread for that room
+ * wholesale (0 clears the badge). Clones pulse()'s per-user socket fan-out
+ * exactly — one `io.fetchSockets()`, filter by `socket.data.userId`, emit — so
+ * the read/mute routes and the broadcast bump share one delivery path.
+ *
+ * Best-effort by the same contract as the notification pulses: a failure never
+ * throws back into the route/broadcast action that triggered it.
+ */
+export async function pulseRoomUnread(
+  io: Io,
+  _db: Db,
+  recipientUserId: string,
+  payload: { roomId: string; serverId: string | null; unread: number; hasMention: boolean },
+): Promise<void> {
+  try {
+    const socks = await io.fetchSockets();
+    for (const s of socks) {
+      if ((s.data as { userId?: string }).userId === recipientUserId) s.emit("room:unread", payload);
+    }
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[notifications] pulseRoomUnread failed", err);
+  }
+}
+
 function pushPayload(input: NotifyInput): { title: string; body: string; tag: string; url?: string } {
   const copy = input.push ? input.push : { title: input.title, body: input.snippet ?? "" };
   const base = { title: copy.title, body: copy.body, tag: `notif-${input.category}` };
-  const url = deepLinkUrl(input.target);
+  const url = deepLinkUrl(input.target, input.serverId ?? null);
   return url ? { ...base, url } : base;
 }
 
 /** Deep-link path the web-push notificationclick handler opens (and the client
  *  resolves into an in-app navigation). An explicit `target.url` wins; otherwise
- *  we encode the target as a `?n=<kind>:<id>` marker the SPA reads on focus/boot. */
-function deepLinkUrl(target?: NotifyTarget): string | undefined {
+ *  we encode the target as a `?n=<kind>:<id>` marker the SPA reads on focus/boot.
+ *  `serverId` (the notification's originating server) is folded into the event
+ *  marker so a push-opened fresh tab can switch to the owning server. */
+function deepLinkUrl(target?: NotifyTarget, serverId?: string | null): string | undefined {
   if (!target) return undefined;
   if (target.url) return target.url;
+  // A community-event reminder deep-links to the event by id. The SPA reads the
+  // `?n=event:<id>:<serverId>` marker on focus/boot, switches to the owning
+  // server, and opens the events panel to that event (see App.tsx). ids and
+  // serverIds are colon-free nanoids, so the extra colon is an unambiguous
+  // delimiter. serverId is omitted only if unknown (falls back to event:<id>).
+  if (target.kind === "event" && target.id) {
+    const marker = serverId ? `event:${target.id}:${serverId}` : `event:${target.id}`;
+    return `/?n=${encodeURIComponent(marker)}`;
+  }
   if (target.kind !== "none" && target.id) {
     return `/?n=${encodeURIComponent(`${target.kind}:${target.id}`)}`;
   }

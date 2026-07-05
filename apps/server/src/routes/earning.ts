@@ -1307,7 +1307,13 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * `hideXpCount`, `users.isPublic = false`, soft-delete) live
    * inside the engine so each board enforces its own gates.
    */
-  app.get("/earning/rankings", async () => {
+  // Public leaderboards are recomputed live per request (full-table COUNT/SUM
+  // aggregates over messages/inventory/stories), so an uncapped poll or a
+  // looping client turns them into a DB-load amplifier on the synchronous
+  // SQLite loop. Per-IP cap is generous vs the dashboard's occasional fetch;
+  // the proper follow-up is a short-TTL server cache on the ranking builders.
+  const rankingsLimit = { config: { rateLimit: { max: 30, timeWindow: "1 minute" } } } as const;
+  app.get("/earning/rankings", rankingsLimit, async () => {
     return await buildRankings(db);
   });
 
@@ -1325,11 +1331,11 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * sort for accumulating-score games (scramble) vs binary-win
    * games (rps, trivia, duel, raffle).
    */
-  app.get("/earning/game-rankings", async () => {
+  app.get("/earning/game-rankings", rankingsLimit, async () => {
     return await buildGameRankings(db);
   });
 
-  app.get("/earning/familiar-rankings", async () => {
+  app.get("/earning/familiar-rankings", rankingsLimit, async () => {
     return await buildFamiliarRankings(db);
   });
 
@@ -1339,7 +1345,7 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
    * Rated by reviews) rank the books themselves. Computed live from the story
    * rollups — no registration, surfaces the moment data exists.
    */
-  app.get("/earning/scriptorium-rankings", async () => {
+  app.get("/earning/scriptorium-rankings", rankingsLimit, async () => {
     return await buildScriptoriumRankings(db);
   });
 

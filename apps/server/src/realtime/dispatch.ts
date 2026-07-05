@@ -10,12 +10,15 @@ import { parseInput } from "../commands/parser.js";
 import type { CommandRegistry } from "../commands/registry.js";
 import type { CommandContext, SessionUser } from "../commands/types.js";
 import type { Db } from "../db/index.js";
-import { messages, mutes, rooms } from "../db/schema.js";
+import { accountMutes, messages, mutes, rooms } from "../db/schema.js";
 import { formatDuration } from "../commands/duration.js";
 import { areServersEnabled, getServerSettings, getSettings } from "../settings.js";
 import { resolveRoomServerId } from "../earning/pool.js";
-import { addMessage } from "./broadcast.js";
+import { addMessage, addMessageDirect, exitIncognitoOnCharSwitch } from "./broadcast.js";
+import { evaluateAntiSpam } from "./antiSpam.js";
+import { applyFilters, AUTOMOD_DEFAULT_MUTE_MS, getCompiledRuleset } from "./automod.js";
 import { hasPermission } from "../auth/permissions.js";
+import { recordAudit } from "../audit.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -105,7 +108,7 @@ export async function dispatchChatInput(args: {
   const serverId = await resolveRoomServerId(db, roomId);
   const serverSettings = await getServerSettings(db, serverId);
   const { maxMessageLength, maxForumPostLength } = serverSettings;
-  const { maxForumTopicTitleLength } = await getSettings(db);
+  const { maxForumTopicTitleLength, antiSpamEnabled, automodEnabled } = await getSettings(db);
   // Use the larger of the two so a forum-bound long body isn't
   // rejected before we know it's destined for a forum room. The
   // forum-specific check inside the nested-mode branch enforces the
@@ -173,6 +176,34 @@ export async function dispatchChatInput(args: {
       await db.delete(mutes).where(and(eq(mutes.roomId, roomId), eq(mutes.userId, user.id)));
     }
   }
+  // Wider account-level mutes (server-wide / site-wide). Reach follows the
+  // ISSUER's authority: a site mute silences the user everywhere, a server mute
+  // silences every room in that server. We take the LONGEST remaining across
+  // room + wide so the notice shows the true wait. Normally zero rows (a cheap
+  // indexed lookup by user), so the extra query is negligible on the hot path.
+  const wideMutes = await db
+    .select()
+    .from(accountMutes)
+    .where(eq(accountMutes.userId, user.id));
+  if (wideMutes.length) {
+    const roomServerId = (await db
+      .select({ serverId: rooms.serverId })
+      .from(rooms)
+      .where(eq(rooms.id, roomId))
+      .limit(1))[0]?.serverId ?? null;
+    for (const w of wideMutes) {
+      const remaining = +w.until - Date.now();
+      if (remaining <= 0) {
+        // Auto-clean any expired wide mute we touch, same as the room row above.
+        await db.delete(accountMutes).where(eq(accountMutes.id, w.id));
+        continue;
+      }
+      const applies =
+        w.scope === "site" ||
+        (w.scope === "server" && w.serverId != null && w.serverId === roomServerId);
+      if (applies) mutedFor = Math.max(mutedFor ?? 0, remaining);
+    }
+  }
   const isSpeechCommand = (cmd: string | null): boolean => {
     if (cmd === null) return true; // plain say
     return [
@@ -184,12 +215,181 @@ export async function dispatchChatInput(args: {
       "scene", "npc",
     ].includes(cmd);
   };
+  // Whisper / DM commands (kind:"whisper", targeted at one `toUserId`). These
+  // are private, one-to-one sends that never reach the room broadcast, so
+  // content auto-moderation MUST skip them: matching a whisper would (a) police
+  // a private message the room can't see, and (b) — worse — a mute action posts
+  // a PUBLIC room system line naming the sender, leaking the very fact that a
+  // whisper happened. Kept in lockstep with the whisper builtin's name+aliases
+  // (commands/builtins/whisper.ts). The rate limit + mute gates above still
+  // apply (a whisper flood is still a flood); only the content matcher is
+  // excluded, matching the "exclude whisper-kind from automod entirely" rule.
+  const isWhisperCommand = (cmd: string | null): boolean => {
+    if (cmd === null) return false; // a plain say is never a whisper
+    return ["whisper", "wh", "w", "to", "msg", "message", "pm"].includes(cmd);
+  };
   if (mutedFor !== null && isSpeechCommand(parsed.command)) {
     socket.emit("error:notice", {
       code: "MUTED",
       message: `You're muted in this room for another ${formatDuration(mutedFor)}.`,
     });
     return;
+  }
+
+  // Escalating anti-spam ladder (admin-toggled). Runs AFTER the mute gate so a
+  // user we just auto-muted isn't re-counted, and only for speech-producing
+  // input (a burst of /help isn't a chat flood). Site staff and anyone holding
+  // `bypass_anti_spam` (trusted/mods/admins by default) are exempt, so it only
+  // ever polices ordinary accounts. The base rate limit above stays as a coarse
+  // always-on backstop; this is the sharper, opt-in layer that escalates a
+  // genuine rapid-fire flood into a growing auto-mute when no mod is watching.
+  if (
+    antiSpamEnabled &&
+    isSpeechCommand(parsed.command) &&
+    // Exclude whispers/DMs exactly as the automod block below does: a
+    // whisper-triggered auto-mute posts a PUBLIC room system line naming the
+    // sender, which would leak the fact that a whisper happened. The always-on
+    // base rate limit above still covers a whisper flood.
+    !isWhisperCommand(parsed.command) &&
+    !isAdminRole(user.role) &&
+    user.role !== "mod" &&
+    !(await hasPermission(user, "bypass_anti_spam", db))
+  ) {
+    const verdict = evaluateAntiSpam(user.id, Date.now());
+    if (verdict.action === "blocked") {
+      socket.emit("error:notice", {
+        code: "RATE_LIMIT",
+        message: `You're going too fast. Wait ${Math.ceil(verdict.retryMs / 1000)}s.`,
+      });
+      return;
+    }
+    if (verdict.action === "warn") {
+      socket.emit("error:notice", {
+        code: "SPAM_WARNING",
+        message: `Slow down - that's rapid-fire spam. Warning ${verdict.warning} of ${verdict.limit}; keep it up and you'll be muted.`,
+      });
+      return;
+    }
+    if (verdict.action === "mute") {
+      const until = new Date(Date.now() + verdict.muteMs);
+      await db
+        .insert(mutes)
+        .values({ roomId, userId: user.id, until, reason: "Automatic anti-spam mute", issuedById: null })
+        .onConflictDoUpdate({
+          target: [mutes.roomId, mutes.userId],
+          set: { until, reason: "Automatic anti-spam mute", issuedById: null },
+        });
+      socket.emit("error:notice", {
+        code: "MUTED",
+        message: `You've been muted for ${formatDuration(verdict.muteMs)} for spamming. Continued spam makes this longer.`,
+      });
+      // Public system line so returning mods can see the auto-action in backlog.
+      await addMessageDirect({
+        db,
+        io,
+        roomId,
+        userId: user.id,
+        displayName: user.displayName,
+        kind: "system",
+        body: `${user.displayName} was automatically muted for ${formatDuration(verdict.muteMs)} for spam.`,
+      });
+      return;
+    }
+    // action === "allow" falls through to normal message handling.
+  }
+
+  // Content auto-moderation (admin-toggled). Runs AFTER the anti-spam ladder
+  // and uses the EXACT same exemption predicate: site staff and anyone holding
+  // `bypass_automod` (trusted/mods/admins by default) are never filtered, and
+  // only speech-producing input is inspected. Where anti-spam polices rate,
+  // this polices content, an admin-authored rule matching the message body.
+  //
+  // The matcher is a pure function over a compiled ruleset (compiled once and
+  // cached in automod.ts; the admin CRUD routes invalidate the cache on any
+  // write), so this hot path never re-reads or re-compiles rules per message.
+  //
+  // Actions:
+  //   - warn   -> SPAM_WARNING-style notice; the send is dropped (never persisted).
+  //   - delete -> silently drop the message before it reaches addMessage.
+  //   - mute   -> reuse the anti-spam mutes upsert + a MUTED notice + a public
+  //               system line, then drop the message.
+  // Every hit is recorded via recordAudit(action: "automod").
+  if (
+    automodEnabled &&
+    isSpeechCommand(parsed.command) &&
+    // Whispers / DMs are excluded from content auto-moderation entirely: they're
+    // private one-to-one sends, and a mute triggered by one would leak the
+    // whisper via a public room system line (see isWhisperCommand above).
+    !isWhisperCommand(parsed.command) &&
+    !isAdminRole(user.role) &&
+    user.role !== "mod" &&
+    !(await hasPermission(user, "bypass_automod", db))
+  ) {
+    // Surface: forum (nested-mode room) vs flat chat. Determines which
+    // scoped rules apply (a chat-only rule never fires on a forum post).
+    const amRoom = (await db.select({ replyMode: rooms.replyMode }).from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+    const surface: "chat" | "forum" = amRoom?.replyMode === "nested" ? "forum" : "chat";
+    // Match against the actual message body (the argsText for a slash-speech
+    // command like /me, or the full input for a plain say).
+    const filterBody = parsed.command === null ? trimmed : parsed.argsText.trim();
+    const ruleset = await getCompiledRuleset(db);
+    const verdict = applyFilters(filterBody, ruleset, surface);
+    if (verdict.action) {
+      // Log EVERY hit (not just the winning action) so an admin tuning rules
+      // can see exactly which fired. Best-effort; never blocks the action.
+      for (const hit of verdict.hits) {
+        void recordAudit(db, {
+          actorUserId: user.id,
+          action: "automod",
+          targetUserId: user.id,
+          targetRoomId: roomId,
+          reason: `automod ${hit.action}: ${hit.label}`,
+          metadata: { ruleId: hit.ruleId, kind: hit.kind, action: hit.action, surface },
+        });
+      }
+      if (verdict.action === "warn") {
+        socket.emit("error:notice", {
+          code: "SPAM_WARNING",
+          message: "That message was blocked by an auto-moderation rule. Please reword it.",
+        });
+        return;
+      }
+      if (verdict.action === "delete") {
+        // Silent drop, no message persisted, no visible notice beyond a
+        // generic acknowledgement so the sender isn't left wondering.
+        socket.emit("error:notice", {
+          code: "BLOCKED",
+          message: "That message couldn't be posted.",
+        });
+        return;
+      }
+      if (verdict.action === "mute") {
+        const muteMs = verdict.muteMs ?? AUTOMOD_DEFAULT_MUTE_MS;
+        const until = new Date(Date.now() + muteMs);
+        await db
+          .insert(mutes)
+          .values({ roomId, userId: user.id, until, reason: "Automatic content-moderation mute", issuedById: null })
+          .onConflictDoUpdate({
+            target: [mutes.roomId, mutes.userId],
+            set: { until, reason: "Automatic content-moderation mute", issuedById: null },
+          });
+        socket.emit("error:notice", {
+          code: "MUTED",
+          message: `You've been muted for ${formatDuration(muteMs)} by an auto-moderation rule.`,
+        });
+        // Public system line so returning mods see the auto-action in backlog.
+        await addMessageDirect({
+          db,
+          io,
+          roomId,
+          userId: user.id,
+          displayName: user.displayName,
+          kind: "system",
+          body: `${user.displayName} was automatically muted for ${formatDuration(muteMs)} by an auto-moderation rule.`,
+        });
+        return;
+      }
+    }
   }
 
   // Plain chat. Behavior splits based on the room's replyMode:
@@ -402,6 +602,15 @@ export async function dispatchChatInput(args: {
     ...(replyContext ? { replyContext } : {}),
   };
 
+  // Snapshot the socket's identity BEFORE the command runs so we can tell
+  // whether it was a character switch (`/char switch|use|clear|off|…`, which
+  // rewrites `socket.data.tabCharId`). Resolved the same way every presence
+  // path resolves it: a per-tab override wins; `undefined` means "no override
+  // yet" → the account default. Captured for the incognito-un-hide guard below.
+  const priorTabCharRaw = (socket.data as { tabCharId?: string | null }).tabCharId;
+  const priorCharacterId: string | null =
+    priorTabCharRaw !== undefined ? priorTabCharRaw : (user.activeCharacterId ?? null);
+
   try {
     await handler.run(ctx);
   } catch (err) {
@@ -409,6 +618,22 @@ export async function dispatchChatInput(args: {
       code: "CMD_ERROR",
       message: err instanceof Error ? err.message : "Command failed.",
     });
+  }
+
+  // Incognito un-hide guard. If this command switched the socket's identity
+  // (tabCharId changed) AND the tab was the one that went incognito, exit
+  // incognito instead of letting the mod silently reappear under the new
+  // identity. Keyed on the actual tabCharId delta (not the command name) so it
+  // fires for every char-switching subcommand without enumerating them, and is
+  // a cheap no-op for the overwhelming majority of commands that don't touch
+  // identity or aren't run by an incognito user. `exitIncognitoOnCharSwitch`
+  // itself re-checks that `priorCharacterId` was the hidden identity, so a
+  // switch on an already-visible sibling tab leaves the cover intact.
+  const nextTabCharRaw = (socket.data as { tabCharId?: string | null }).tabCharId;
+  const nextCharacterId: string | null =
+    nextTabCharRaw !== undefined ? nextTabCharRaw : (user.activeCharacterId ?? null);
+  if (user.incognitoMode && nextCharacterId !== priorCharacterId) {
+    await exitIncognitoOnCharSwitch(io, db, socket, user, priorCharacterId);
   }
 }
 

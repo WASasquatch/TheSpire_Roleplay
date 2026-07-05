@@ -14,7 +14,8 @@
  * carry our own here rather than widen it).
  */
 import { useEffect, useState } from "react";
-import type { ServerViewerState } from "@thekeep/shared";
+import type { ProfileView, ServerViewerState } from "@thekeep/shared";
+import { ProfileModal } from "../ProfileModal.js";
 
 /* ============================================================
  * Wire shapes (consumed read-only from /servers/:id/reports).
@@ -30,6 +31,7 @@ interface ServerReportWire {
   messageId: string;
   messageBody: string;
   messageDisplayName: string;
+  messageUserId?: string | null;
   messageCreatedAt: number;
   roomId: string;
   roomName: string;
@@ -87,20 +89,34 @@ function ReportCard({
   busy,
   run,
   onChanged,
+  onViewAuthor,
 }: {
   report: ServerReportWire;
   serverId: string;
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
   onChanged: () => void;
+  onViewAuthor?: (userId: string) => void;
 }) {
   const [note, setNote] = useState("");
   const open = report.status === "open";
+  const authorId = report.messageUserId ?? null;
 
   return (
     <li className="space-y-2 rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-2">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="text-sm font-semibold text-keep-text">{report.messageDisplayName}</span>
+        {authorId && onViewAuthor ? (
+          <button
+            type="button"
+            onClick={() => onViewAuthor(authorId)}
+            title="View this member's profile to verify the report"
+            className="text-sm font-semibold text-keep-text underline decoration-dotted underline-offset-2 hover:text-keep-action"
+          >
+            {report.messageDisplayName}
+          </button>
+        ) : (
+          <span className="text-sm font-semibold text-keep-text">{report.messageDisplayName}</span>
+        )}
         <span className="text-[11px] text-keep-muted">in {report.roomName}</span>
         <span className="ml-auto text-[10px] text-keep-muted">{new Date(report.createdAt).toLocaleString()}</span>
       </div>
@@ -173,6 +189,8 @@ export default function ReportsTab({
 }): React.ReactElement {
   const [reports, setReports] = useState<ServerReportWire[] | null>(null);
   const [tick, setTick] = useState(0);
+  const [viewing, setViewing] = useState<ProfileView | null>(null);
+  const [viewError, setViewError] = useState<string | null>(null);
   // Gate the action UI on the mirrored permission, exactly like the routes
   // re-check; owner implies the key.
   const canManage = viewer.isOwner || viewer.permissions.includes("manage_reports");
@@ -189,6 +207,20 @@ export default function ReportsTab({
   // refresh shared state (mirrors the other tabs' onSaved contract).
   const refresh = () => { setTick((t) => t + 1); onSaved(); };
 
+  // Open the reported member's profile so a mod can verify a report before
+  // acting. Resolves by the stable @id: token (never the display name, which
+  // can contain spaces and break the identity parser).
+  async function openProfile(userId: string) {
+    setViewError(null);
+    try {
+      const r = await fetch(`/profiles/${encodeURIComponent(`@id:${userId}`)}`, { credentials: "include" });
+      if (!r.ok) { setViewError(r.status === 404 ? "That member no longer exists." : `Couldn't load their profile (HTTP ${r.status}).`); return; }
+      const j = await r.json();
+      if (j && "private" in j) { setViewError("That profile is restricted."); return; }
+      setViewing(j as ProfileView);
+    } catch { setViewError("Couldn't load their profile."); }
+  }
+
   if (!reports) return <p className="text-sm italic text-keep-muted">Loading…</p>;
 
   const open = reports.filter((r) => r.status === "open");
@@ -200,6 +232,7 @@ export default function ReportsTab({
         Reports your members filed against this server's messages. Direct-message and profile reports go to the
         platform team, not here.
       </p>
+      {viewError ? <p className="text-xs text-keep-accent">{viewError}</p> : null}
 
       <section className="space-y-1.5">
         <p className="text-xs uppercase tracking-widest text-keep-muted">Open ({open.length})</p>
@@ -208,7 +241,7 @@ export default function ReportsTab({
         ) : (
           <ul className="space-y-2">
             {open.map((r) => (
-              <ReportCard key={r.id} report={r} serverId={serverId} busy={busy || !canManage} run={run} onChanged={refresh} />
+              <ReportCard key={r.id} report={r} serverId={serverId} busy={busy || !canManage} run={run} onChanged={refresh} onViewAuthor={openProfile} />
             ))}
           </ul>
         )}
@@ -219,10 +252,14 @@ export default function ReportsTab({
           <p className="text-xs uppercase tracking-widest text-keep-muted">Recently resolved</p>
           <ul className="space-y-2">
             {resolved.map((r) => (
-              <ReportCard key={r.id} report={r} serverId={serverId} busy={busy || !canManage} run={run} onChanged={refresh} />
+              <ReportCard key={r.id} report={r} serverId={serverId} busy={busy || !canManage} run={run} onChanged={refresh} onViewAuthor={openProfile} />
             ))}
           </ul>
         </section>
+      ) : null}
+
+      {viewing ? (
+        <ProfileModal profile={viewing} onClose={() => setViewing(null)} bypassNsfwGate={true} zIndex={60} />
       ) : null}
     </div>
   );

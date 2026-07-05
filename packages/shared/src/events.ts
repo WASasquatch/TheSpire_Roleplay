@@ -5,6 +5,7 @@ import type { IdentityRef, ProfileView } from "./profile.js";
 import type { WatchOnlineEvent } from "./moderation.js";
 import type { DirectMessage } from "./directMessage.js";
 import type { NotificationWire, NotificationBadge } from "./notifications.js";
+import type { PinnedMessage } from "./pinnedMessage.js";
 
 /** Events emitted by the client → server. */
 export interface ClientToServerEvents {
@@ -320,6 +321,45 @@ export interface ServerToClientEvents {
   "room:state": (payload: { room: RoomSummary; occupants: RoomOccupant[] }) => void;
   "presence:update": (payload: { roomId: string; occupants: RoomOccupant[] }) => void;
   /**
+   * Authoritative pinned-message set for a room (migration 0316). Sent on join
+   * and re-broadcast to the room whenever a pin is added, removed, or reordered
+   * by someone with the `pin_message` permission. The client replaces its
+   * cached pins for `roomId` wholesale; an empty `pins: []` clears the strip.
+   */
+  "room:pins": (payload: { roomId: string; pins: PinnedMessage[] }) => void;
+  /**
+   * Per-channel unread delta (migration 0318). Pushed to a user's sockets when
+   * the unread state of a room they can see changes — new activity arrives, or
+   * they read/mute the room elsewhere. `unread` is the authoritative count for
+   * that room (0 clears the badge); `hasMention` is true when any unread row
+   * @mentions the user. `serverId` pins which server's rail dot to bump (null on
+   * the default server). The client replaces its cached unread for `roomId`
+   * wholesale — no accumulation.
+   */
+  "room:unread": (payload: {
+    roomId: string;
+    serverId: string | null;
+    unread: number;
+    hasMention: boolean;
+  }) => void;
+  /**
+   * Per-channel mute toggled (migration 0318). Pushed to EVERY live socket of
+   * the caller after they mute/unmute a room via `PUT /me/rooms/:id/mute`, so a
+   * sibling tab repaints its mute glyph without waiting on a poll. Separate from
+   * `room:unread` (which carries the count) because the mute flag lives outside
+   * the unread map and a mute toggle doesn't change the count. The client
+   * replaces its cached `muted` for `roomId` with this value.
+   */
+  "room:muted": (payload: { roomId: string; muted: boolean }) => void;
+  /**
+   * "Your joined-servers list changed" pulse — a server-creation application was
+   * approved for you, or a membership was accepted — so the rail should refetch
+   * and fade in whatever is new instead of the user having to refresh.
+   * `addedServerId` names the newly-available server (a hint for the fade); it
+   * may be null for other changes.
+   */
+  "servers:changed": (payload: { addedServerId?: string | null }) => void;
+  /**
    * Global "your cached rooms tree is stale" pulse. Fired by the server
    * whenever a room is created, deleted, archived, has its metadata
    * changed, or sees a presence change (someone joined/left). Sockets
@@ -458,6 +498,7 @@ export interface ServerToClientEvents {
   "me:incognito-update": (payload: {
     incognitoMode: boolean;
     incognitoAlias: string | null;
+    incognitoCharacterId: string | null;
   }) => void;
   /**
    * Marquee banner catalog changed (admin added / edited / toggled /

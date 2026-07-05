@@ -116,12 +116,14 @@ async function patchUser(
   // loadSessionUser.
   ctx.user.incognitoMode = fresh.incognitoMode;
   ctx.user.incognitoAlias = fresh.incognitoAlias;
+  ctx.user.incognitoCharacterId = fresh.incognitoCharacterId;
   ctx.user.incognitoExitMessage = fresh.incognitoExitMessage;
   ctx.user.incognitoReturnMessage = fresh.incognitoReturnMessage;
   const cached = (ctx.socket.data as { user?: typeof ctx.user }).user;
   if (cached && cached.id === ctx.user.id) {
     cached.incognitoMode = fresh.incognitoMode;
     cached.incognitoAlias = fresh.incognitoAlias;
+    cached.incognitoCharacterId = fresh.incognitoCharacterId;
     cached.incognitoExitMessage = fresh.incognitoExitMessage;
     cached.incognitoReturnMessage = fresh.incognitoReturnMessage;
   }
@@ -136,6 +138,7 @@ async function patchUser(
     s.emit("me:incognito-update", {
       incognitoMode: fresh.incognitoMode,
       incognitoAlias: fresh.incognitoAlias,
+      incognitoCharacterId: fresh.incognitoCharacterId,
     });
   }
   return fresh;
@@ -147,7 +150,12 @@ async function enterIncognito(ctx: CommandContext, opts: { aliasOverride?: strin
   // chat would say "System has left the chat" which is nonsensical).
   const realDisplayName = ctx.user.displayName;
 
-  const patch: Partial<typeof users.$inferInsert> = { incognitoMode: true };
+  // Stamp WHICH identity this tab is going incognito as, so only that
+  // one character (or OOC, when null) gets hidden. Prefer the socket's
+  // per-tab character; fall back to the account's default active one.
+  const tabRaw = (ctx.socket.data as { tabCharId?: string | null }).tabCharId;
+  const identityCharId = tabRaw !== undefined ? tabRaw : (ctx.user.activeCharacterId ?? null);
+  const patch: Partial<typeof users.$inferInsert> = { incognitoMode: true, incognitoCharacterId: identityCharId };
   if (opts.aliasOverride !== undefined) patch.incognitoAlias = opts.aliasOverride;
   const fresh = await patchUser(ctx, patch);
 
@@ -206,7 +214,7 @@ async function leaveIncognito(ctx: CommandContext): Promise<void> {
     ? meRow.username
     : ctx.user.displayName;  // already character-resolved by the dispatcher
 
-  const fresh = await patchUser(ctx, { incognitoMode: false });
+  const fresh = await patchUser(ctx, { incognitoMode: false, incognitoCharacterId: null });
 
   const returnLine = fresh.incognitoReturnMessage ?? defaultReturnMessage(realDisplayName);
   // Same addSystemMessage rationale as enterIncognito, keep the

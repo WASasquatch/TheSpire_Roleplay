@@ -42,6 +42,9 @@ export const PERMISSION_KEYS = [
   "announce_sitewide",
   "use_ghost_mode",
   "manage_mod_cases",
+  "bypass_anti_spam",
+  "pin_message",
+  "bypass_automod",
 
   // ---- room_admin ----
   "bypass_room_cap",
@@ -201,6 +204,9 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
   announce_sitewide: "Send `/announce all` to every room. Use sparingly.",
   use_ghost_mode: "Use /incognito (or /ghost) to disappear from the userlist and observe rooms unnoticed.",
   manage_mod_cases: "Create, edit, and resolve entries in the moderation case log.",
+  bypass_anti_spam: "Skip the escalating anti-spam ladder (rapid-fire warnings and auto-mute). Granted to trusted, mods, and admins by default.",
+  pin_message: "Pin a chat message to the top of a room (and unpin / reorder pins). Granted to mods and admins by default.",
+  bypass_automod: "Skip the auto-moderation filters (keyword/regex/link/invite/mention rules). Granted to trusted, mods, and admins by default.",
 
   // room_admin
   bypass_room_cap: "Skip the per-user max-rooms-owned ceiling on /go and /private.",
@@ -349,6 +355,9 @@ export const PERMISSION_GROUPS: Record<PermissionKey, PermissionGroup> = {
   announce_sitewide: "chat_moderation",
   use_ghost_mode: "chat_moderation",
   manage_mod_cases: "chat_moderation",
+  bypass_anti_spam: "chat_moderation",
+  pin_message: "chat_moderation",
+  bypass_automod: "chat_moderation",
 
   // room_admin
   bypass_room_cap: "room_admin",

@@ -5,16 +5,20 @@ import {
   CHARACTER_ATTRIBUTE_VALUE_MAX,
   CHARACTER_ATTRIBUTE_VALUE_MIN,
   STAT_FIELD_MAX,
+  SITE_TOUR_VERSION,
+  TOURS,
+  TOUR_IDS,
   parseTagList,
   serializeTagList,
 } from "@thekeep/shared";
+import type { TourId } from "@thekeep/shared";
 import { hasPermission } from "../auth/permissions.js";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { characterPortraits, characters, userPortraits, users } from "../db/schema.js";
+import { characterPortraits, characters, tourSeen, userPortraits, users } from "../db/schema.js";
 import { bioHtmlForEdit, sanitizeBio } from "../auth/html.js";
 import { recordAudit } from "../audit.js";
 import { getSessionUser } from "./auth.js";
@@ -682,6 +686,19 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       settings.newUserWelcomeUpdatedAt !== null &&
       userCreatedMs > settings.newUserWelcomeUpdatedAt &&
       u.welcomeSeenHash !== serverSettings.newUserWelcomeHash;
+
+    // Contextual per-surface tours (migration 0321). One grouped read of this
+    // user's tour_seen rows; a tour is due whenever its shared catalog version
+    // (TOURS[id].version) is ahead of the stored seen_version (absent row => 0).
+    const seenRows = await db
+      .select({ tourId: tourSeen.tourId, seenVersion: tourSeen.seenVersion })
+      .from(tourSeen)
+      .where(eq(tourSeen.userId, me.id));
+    const seenByTour = new Map(seenRows.map((r) => [r.tourId, r.seenVersion]));
+    const toursToShow: TourId[] = TOUR_IDS.filter(
+      (id) => TOURS[id].version > (seenByTour.get(id) ?? 0),
+    );
+
     return {
       userId: u.id,
       username: u.username,
@@ -754,6 +771,18 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       welcome: wantsWelcome
         ? { html: serverSettings.newUserWelcomeHtml, hash: serverSettings.newUserWelcomeHash }
         : null,
+      // First-run screen coach tour: show once until the user acknowledges the
+      // current tour version. Unlike the welcome (admin copy + audience gating
+      // by registration date), the tour text is client-hard-coded and universal
+      // — every user who hasn't yet seen this version gets it, gated only by the
+      // monotonic `tour_seen_version` vs the shared `SITE_TOUR_VERSION`. POST
+      // /me/tour/dismiss writes the version back so it doesn't re-show.
+      showSiteTour: (u.tourSeenVersion ?? 0) < SITE_TOUR_VERSION,
+      // Contextual per-surface tours the viewer hasn't yet acknowledged at the
+      // current catalog version (migration 0321). Surface components mount a
+      // <ContextualTour> gated on membership in this list; dismissing one POSTs
+      // /me/tours/:tourId/dismiss, which drops it from future loads.
+      toursToShow,
       // Admin-tunable input caps surfaced to the editor so the bio counter
       // matches whatever the server will accept on save. Without these the
       // UI hardcoded "50,000" and silently lied after admin tuning.
@@ -790,6 +819,46 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       ? body.hash
       : serverSettings.newUserWelcomeHash;
     await db.update(users).set({ welcomeSeenHash: hash }).where(eq(users.id, me.id));
+    return { ok: true };
+  });
+
+  /**
+   * Mark the current site coach tour as seen for this user. Records the shared
+   * `SITE_TOUR_VERSION` so future /me/profile loads report `showSiteTour:false`
+   * until the constant is bumped (a meaningful tour revision), which re-shows it
+   * to everyone below the new version. Mirrors POST /me/welcome/dismiss, but
+   * takes no body — the tour copy is client-hard-coded, so there's nothing
+   * version-specific for the client to echo back; the server always records its
+   * own current version. Idempotent.
+   */
+  app.post("/me/tour/dismiss", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    await db.update(users).set({ tourSeenVersion: SITE_TOUR_VERSION }).where(eq(users.id, me.id));
+    return { ok: true };
+  });
+
+  /**
+   * Mark a single contextual surface tour as seen for this user (migration
+   * 0321). Mirrors the site-tour dismiss but is keyed by `tourId`: it upserts
+   * the (user, tour) row, recording the tour's current shared catalog version
+   * (TOURS[tourId].version) plus a dismissal timestamp, so /me/profile stops
+   * listing it in `toursToShow` until that version is bumped. Rejects an
+   * unknown tourId. Idempotent.
+   */
+  app.post<{ Params: { tourId: string } }>("/me/tours/:tourId/dismiss", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const tourId = req.params.tourId as TourId;
+    if (!TOUR_IDS.includes(tourId)) { reply.code(400); return { error: "unknown tour" }; }
+    const version = TOURS[tourId].version;
+    await db
+      .insert(tourSeen)
+      .values({ userId: me.id, tourId, seenVersion: version, dismissedAt: Date.now() })
+      .onConflictDoUpdate({
+        target: [tourSeen.userId, tourSeen.tourId],
+        set: { seenVersion: version, dismissedAt: Date.now() },
+      });
     return { ok: true };
   });
 

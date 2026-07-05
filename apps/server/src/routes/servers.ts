@@ -72,6 +72,7 @@ import type {
   ServerViewerState,
 } from "@thekeep/shared";
 import {
+  accountMutes,
   auditLog,
   characters,
   messages,
@@ -96,7 +97,7 @@ import { serverAuthority, serverCan } from "../servers/authority.js";
 import { isServerModerationActive, serverModerationNotice } from "../servers/moderation.js";
 import { ensureDefaultUsergroup, serverRoomIds } from "../servers/usergroups.js";
 import { resolveIdentityArg } from "../commands/identityArg.js";
-import { notifyUser } from "../servers/notifications.js";
+import { notifyUser, emitServersChanged } from "../servers/notifications.js";
 import { getSettings, areServersEnabled, invalidateServerSettings } from "../settings.js";
 import {
   broadcastPresence,
@@ -119,6 +120,10 @@ import { registerServerAnnouncementRoutes } from "../servers/announcements.js";
 import { registerServerFaqRoutes } from "../servers/faqs.js";
 import { registerServerCommandTitleRoutes } from "../servers/commandsTitles.js";
 import { registerServerEarningRoutes } from "../servers/earning.js";
+import { registerServerEventRoutes } from "../servers/events.js";
+// Member-facing self-roles + onboarding (Batch 2). Self-gated on serversEnabled
+// + canParticipate; mounted alongside the manager usergroup routes below.
+import { registerSelfRolesRoutes } from "../servers/selfRoles.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -336,6 +341,10 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
   await registerServerFaqRoutes(app, db, io);
   await registerServerCommandTitleRoutes(app, db, io, registry);
   await registerServerEarningRoutes(app, db, io, uploadsRoot);
+  await registerServerEventRoutes(app, db, io);
+  // Member-facing self-roles + onboarding (Batch 2). Takes (app, db) only —
+  // no io. Gated on canParticipate + the servers flag inside the module.
+  await registerSelfRolesRoutes(app, db);
 
   const serversImgDir = join(uploadsRoot, "servers");
 
@@ -634,6 +643,36 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       .sort((a, b) => b.memberCount - a.memberCount || a.name.localeCompare(b.name))
       .slice(0, 8);
     return { servers: out };
+  });
+
+  /**
+   * Per-user server-rail ordering (Discord-style drag-to-reorder). GET returns
+   * the caller's saved order (a JSON array of server ids); PUT persists a new
+   * one. The arrangement is PRIVATE to the caller — servers not listed fall to
+   * the rail's default order, so this never affects other members. Migration
+   * 0326 (users.rail_order_json).
+   */
+  app.get("/me/server-order", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "not authenticated" }; }
+    const row = (await db.select({ order: users.railOrderJson }).from(users).where(eq(users.id, me.id)).limit(1))[0];
+    let order: string[] = [];
+    if (row?.order) {
+      try {
+        const parsed: unknown = JSON.parse(row.order);
+        if (Array.isArray(parsed)) order = parsed.filter((x): x is string => typeof x === "string");
+      } catch { /* corrupt JSON → fall back to default order */ }
+    }
+    return { order };
+  });
+  app.put<{ Body: unknown }>("/me/server-order", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "not authenticated" }; }
+    const body = z.object({ order: z.array(z.string().min(1)).max(500) }).parse(req.body);
+    // De-dupe defensively; the client sends the full rail order on each drop.
+    const order = [...new Set(body.order)];
+    await db.update(users).set({ railOrderJson: JSON.stringify(order) }).where(eq(users.id, me.id));
+    return { ok: true };
   });
 
   /** GET /servers/discover/search?q=&tag= — { items }. Public non-archived
@@ -1367,6 +1406,11 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
           ...(nextStatus === "approved" ? { target: { kind: "server", id: gate.server.id } } : {}),
         },
       });
+      // Live-add the joined server to the new member's rail (fade-in) so they
+      // don't have to refresh to see it.
+      if (nextStatus === "approved") {
+        await emitServersChanged(io, appRow.applicantUserId, gate.server.id);
+      }
       return { ok: true };
     },
   );
@@ -1870,6 +1914,11 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
         welcomeHtml: row?.welcomeHtml ?? null,
         newUserWelcomeHtml: row?.newUserWelcomeHtml ?? null,
         maxForumPostLength: row?.maxForumPostLength ?? null,
+        // Onboarding flow (migration 0320): the stored OnboardingConfig JSON +
+        // the per-server master switch. The console's Onboarding editor reads
+        // these; the member-facing flow reads them via getServerSettings.
+        onboardingConfigJson: row?.onboardingConfigJson ?? null,
+        onboardingEnabled: !!row?.onboardingEnabled,
       },
     };
   });
@@ -1889,6 +1938,11 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     securityNoticeHtml: z.string().max(200_000).nullable().optional(),
     welcomeHtml: z.string().max(200_000).nullable().optional(),
     newUserWelcomeHtml: z.string().max(200_000).nullable().optional(),
+    // Onboarding flow (migration 0320): the raw OnboardingConfig JSON + master
+    // switch. JSON is stored verbatim (parsed/validated by the self-roles route);
+    // null clears the override.
+    onboardingConfigJson: z.string().max(200_000).nullable().optional(),
+    onboardingEnabled: z.boolean().nullable().optional(),
   }).strict();
 
   app.patch<{ Params: { id: string }; Body: unknown }>("/servers/:id/settings", async (req, reply) => {
@@ -1908,6 +1962,12 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     if (body.maxMessageLength !== undefined) update.maxMessageLength = body.maxMessageLength;
     if (body.editGraceMs !== undefined) update.editGraceMs = body.editGraceMs;
     if (body.maxForumPostLength !== undefined) update.maxForumPostLength = body.maxForumPostLength;
+    // Onboarding flow (migration 0320). JSON stored verbatim (blank ⇒ cleared);
+    // the enabled switch coerces null ⇒ false so a cleared toggle turns it off.
+    if (body.onboardingConfigJson !== undefined) {
+      update.onboardingConfigJson = body.onboardingConfigJson?.trim() ? body.onboardingConfigJson : null;
+    }
+    if (body.onboardingEnabled !== undefined) update.onboardingEnabled = body.onboardingEnabled ?? false;
     if (body.rulesHtml !== undefined || body.securityNoticeHtml !== undefined
       || body.welcomeHtml !== undefined || body.newUserWelcomeHtml !== undefined) {
       const { sanitizeBio } = await import("../auth/html.js");
@@ -1936,10 +1996,20 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
 
   app.get<{ Params: { id: string } }>("/servers/:id/members", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
-    const gate = await requireServerPermission(req, req.params.id, "manage_members");
-    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    // The member roster is basic staff info: ANY server staff may READ it — the
+    // Users moderation tab needs it for a mod holding kick/mute/ban, not only
+    // manage_members. (Role/permission WRITES stay gated on manage_members in
+    // the mutation routes below.) So gate the read on "holds any server grant".
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const a = await serverAuthority(db, me, req.params.id);
+    if (!a.server) { reply.code(404); return { error: "no server" }; }
+    if (!(a.isOwner || a.permissions.length > 0)) { reply.code(403); return { error: "you don't manage this server" }; }
+    // Capture after the null-guard so the non-null narrowing survives the awaits
+    // below (TS re-widens a mutable property across await/calls otherwise).
+    const server = a.server;
     const owner = (await db.select({ username: users.username, avatarUrl: users.avatarUrl })
-      .from(users).where(eq(users.id, gate.server.ownerUserId)).limit(1))[0];
+      .from(users).where(eq(users.id, server.ownerUserId)).limit(1))[0];
     const rows = await db
       .select({
         userId: serverMembers.userId, username: users.username, avatarUrl: users.avatarUrl,
@@ -1947,9 +2017,9 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       })
       .from(serverMembers)
       .leftJoin(users, eq(users.id, serverMembers.userId))
-      .where(eq(serverMembers.serverId, gate.server.id));
+      .where(eq(serverMembers.serverId, server.id));
     const members = rows
-      .filter((r) => r.userId !== gate.server.ownerUserId)
+      .filter((r) => r.userId !== server.ownerUserId)
       .map((r) => ({
         userId: r.userId,
         username: r.username ?? "unknown",
@@ -1959,9 +2029,9 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
         joinedAt: +r.joinedAt,
       }));
     return {
-      managerPermissions: gate.authority.permissions,
+      managerPermissions: a.permissions,
       members: [
-        { userId: gate.server.ownerUserId, username: owner?.username ?? "unknown", avatarUrl: owner?.avatarUrl ?? null, role: "owner" as const, permissions: [], joinedAt: +gate.server.createdAt },
+        { userId: server.ownerUserId, username: owner?.username ?? "unknown", avatarUrl: owner?.avatarUrl ?? null, role: "owner" as const, permissions: [], joinedAt: +server.createdAt },
         ...members,
       ],
     };
@@ -2177,6 +2247,9 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     permissions: z.array(z.string()).max(SERVER_PERMISSIONS.length + 5).optional(),
     autoRules: z.array(z.unknown()).max(SERVER_MAX_AUTO_RULES + 4).optional(),
     sortOrder: z.number().int().min(0).max(999).optional(),
+    // Self-role fields (migration 0320): let members pick this group + a blurb.
+    memberSelectable: z.boolean().optional(),
+    description: z.string().trim().max(500).nullable().optional(),
   }).strict();
   const patchGroupBody = z.object({
     name: z.string().trim().min(1).max(SERVER_USERGROUP_NAME_MAX).optional(),
@@ -2184,6 +2257,9 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     permissions: z.array(z.string()).max(SERVER_PERMISSIONS.length + 5).optional(),
     autoRules: z.array(z.unknown()).max(SERVER_MAX_AUTO_RULES + 4).optional(),
     sortOrder: z.number().int().min(0).max(999).optional(),
+    // Self-role fields (migration 0320): let members pick this group + a blurb.
+    memberSelectable: z.boolean().optional(),
+    description: z.string().trim().max(500).nullable().optional(),
   }).strict();
 
   app.get<{ Params: { id: string } }>("/servers/:id/usergroups", async (req, reply) => {
@@ -2212,6 +2288,11 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
         sortOrder: g.sortOrder,
         autoRules: parseServerAutoRules(g.autoRulesJson),
         memberCount: g.isDefault ? 0 : (countMap.get(g.id) ?? 0),
+        // Self-role fields (migration 0320): whether members may pick this group
+        // themselves + its member-facing blurb. The console's usergroup editor
+        // reads these; the self-roles/onboarding member surfaces consume them.
+        memberSelectable: !!g.memberSelectable,
+        description: g.description ?? null,
       })),
     };
   });
@@ -2233,6 +2314,10 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       id, serverId: gate.server.id, name: body.name, color: body.color ?? null,
       permissionsJson: serializeServerFeaturePermissions(perms),
       isDefault: false, sortOrder: body.sortOrder ?? count, autoRulesJson: serializeServerAutoRules(autoRules),
+      // Self-role fields (migration 0320). A brand-new group is never the default,
+      // so member_selectable is honored as sent.
+      memberSelectable: body.memberSelectable ?? false,
+      description: body.description?.trim() ? body.description.trim() : null,
     });
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_usergroup_change",
@@ -2270,6 +2355,11 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       update.autoRulesJson = serializeServerAutoRules(await validServerAutoRules(gate.server.id, body.autoRules));
     }
     if (body.sortOrder !== undefined) update.sortOrder = body.sortOrder;
+    // Self-role fields (migration 0320). The default group applies to everyone,
+    // so it can never be self-selectable — force it off there regardless of the
+    // client. Named groups honor the flag as sent.
+    if (body.memberSelectable !== undefined) update.memberSelectable = group.isDefault ? false : body.memberSelectable;
+    if (body.description !== undefined) update.description = body.description?.trim() ? body.description.trim() : null;
     if (Object.keys(update).length) {
       await db.update(serverUsergroups).set(update).where(eq(serverUsergroups.id, group.id));
       await auditServer(db, {
@@ -2492,6 +2582,127 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
       .where(and(eq(serverBans.serverId, gate.server.id), eq(serverBans.userId, req.params.userId)));
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_unban",
+      targetUserId: req.params.userId, metadata: { slug: gate.server.slug },
+    });
+    return { ok: true };
+  });
+
+  /* =========================================================
+   *  Server-wide mutes
+   *
+   *  These routes only CREATE / LIST / DELETE the account_mutes rows that the
+   *  chat dispatcher already enforces (realtime/dispatch.ts silences a user when
+   *  an active row with scope='site' OR scope='server' matching the room's
+   *  server is present). They are the console twin of the /mute chat command's
+   *  "server" reach (commands/builtins/mod.ts muteReach): a mod holding
+   *  mute_member can silence a member across this whole server without having to
+   *  catch them in a room first. Enforcement is untouched.
+   * ========================================================= */
+
+  app.get<{ Params: { id: string } }>("/servers/:id/mutes", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "mute_member");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const rows = await db
+      .select({
+        userId: accountMutes.userId, username: users.username,
+        until: accountMutes.until, reason: accountMutes.reason, createdAt: accountMutes.createdAt,
+      })
+      .from(accountMutes)
+      .leftJoin(users, eq(users.id, accountMutes.userId))
+      .where(and(
+        eq(accountMutes.scope, "server"),
+        eq(accountMutes.serverId, gate.server.id),
+        sql`${accountMutes.until} > ${Date.now()}`,
+      ));
+    return {
+      mutes: rows.map((m) => ({
+        userId: m.userId,
+        username: m.username ?? "unknown",
+        until: +m.until,
+        reason: m.reason ?? null,
+        createdAt: +m.createdAt,
+      })),
+    };
+  });
+
+  const muteBody = z.object({
+    target: z.string().trim().min(1).max(120),
+    hours: z.number().int().min(1).max(24 * 365),
+    reason: z.string().trim().max(300).optional(),
+  }).strict();
+
+  app.put<{ Params: { id: string }; Body: unknown }>("/servers/:id/mutes", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "mute_member");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    let body: z.infer<typeof muteBody>;
+    try { body = muteBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const target = await resolveServerTarget(body.target);
+    if (!target.ok) { reply.code(404); return { error: target.error }; }
+    if (target.userId === gate.me.id) { reply.code(409); return { error: "You can't mute yourself." }; }
+    if (target.userId === gate.server.ownerUserId) { reply.code(409); return { error: "The server owner can't be muted in their own server." }; }
+    const targetUser = (await db.select({ role: users.role }).from(users)
+      .where(eq(users.id, target.userId)).limit(1))[0];
+    if (targetUser && isModeratorRole(targetUser.role)) {
+      reply.code(409); return { error: `${target.username} is site staff and can't be server-muted.` };
+    }
+
+    const until = new Date(Date.now() + body.hours * 3_600_000);
+    const reason = body.reason?.trim() ? body.reason.trim() : null;
+    // Replace any existing server-scope row for this target (the partial UNIQUE
+    // index allows one per (userId, serverId)); a re-mute just resets the timer.
+    // Mirrors the /mute command's delete-then-insert.
+    await db.delete(accountMutes).where(and(
+      eq(accountMutes.userId, target.userId),
+      eq(accountMutes.scope, "server"),
+      eq(accountMutes.serverId, gate.server.id),
+    ));
+    await db.insert(accountMutes).values({
+      id: nanoid(),
+      userId: target.userId,
+      scope: "server",
+      serverId: gate.server.id,
+      until,
+      reason,
+      issuedById: gate.me.id,
+    });
+
+    // Best-effort heads-up to the target's live sockets. The mute already
+    // committed; a notice failure is harmless.
+    try {
+      const hoursLabel = `${body.hours}h`;
+      const socks = await io.fetchSockets();
+      for (const s of socks) {
+        if ((s.data as { userId?: string }).userId !== target.userId) continue;
+        s.emit("error:notice", {
+          code: "SERVER_MUTED",
+          message: `You've been muted in "${gate.server.name}" for ${hoursLabel}${reason ? `: ${reason}` : "."}`,
+        });
+      }
+    } catch { /* best-effort */ }
+
+    await auditServer(db, {
+      serverId: gate.server.id, actorUserId: gate.me.id, action: "server_mute",
+      targetUserId: target.userId, reason,
+      metadata: { slug: gate.server.slug, until: +until, hours: body.hours },
+    });
+    return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string; userId: string } }>("/servers/:id/mutes/:userId", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "unmute_member");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const r = await db.delete(accountMutes).where(and(
+      eq(accountMutes.userId, req.params.userId),
+      eq(accountMutes.scope, "server"),
+      eq(accountMutes.serverId, gate.server.id),
+    ));
+    if (r.changes === 0) { reply.code(404); return { error: "no such mute" }; }
+    await auditServer(db, {
+      serverId: gate.server.id, actorUserId: gate.me.id, action: "server_unmute",
       targetUserId: req.params.userId, metadata: { slug: gate.server.slug },
     });
     return { ok: true };

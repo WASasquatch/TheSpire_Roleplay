@@ -1,0 +1,1 @@
+ALTER TABLE users ADD incognito_character_id text;

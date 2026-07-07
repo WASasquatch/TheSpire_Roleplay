@@ -28,7 +28,9 @@
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.36.0",
     "fastify": "^5.0.0",
+    "geoip-lite": "^2.0.3",
     "jszip": "^3.10.1",
+    "maxmind": "^5.0.6",
     "moby": "^1.1.2",
     "nanoid": "^5.0.7",
     "pino": "^9.4.0",
@@ -41,6 +43,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
+    "@types/geoip-lite": "^1.4.4",
     "@types/node": "^22.7.4",
     "@types/sanitize-html": "^2.13.0",
     "drizzle-kit": "^0.27.0",

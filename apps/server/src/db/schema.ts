@@ -1938,6 +1938,10 @@ export const siteSettings = sqliteTable("site_settings", {
    * either way.
    */
   analyticsRespectDnt: integer("analytics_respect_dnt", { mode: "boolean" }).notNull().default(true),
+  /** Optional MaxMind account ID for the GeoLite2-City accuracy upgrade (migration 0328). NULL = use the bundled geoip-lite snapshot. */
+  maxmindAccountId: text("maxmind_account_id"),
+  /** Optional MaxMind license key paired with `maxmindAccountId`. SECRET — like `vapidPrivateKey`, NEVER expose to clients (only a `maxmindConfigured` boolean leaves the server). */
+  maxmindLicenseKey: text("maxmind_license_key"),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
 });

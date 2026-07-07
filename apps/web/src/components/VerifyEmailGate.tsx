@@ -13,10 +13,13 @@ import { clearSessionToken } from "../lib/http.js";
  */
 export function VerifyEmailGate() {
   const me = useChat((s) => s.me);
+  const setMe = useChat((s) => s.setMe);
   const [dismissed, setDismissed] = useState(false);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [notYet, setNotYet] = useState(false);
 
   if (!me || !me.emailVerificationEnabled || me.emailVerifiedAt != null) return null;
   // Staff are never hard-blocked (mirrors the server chat:input exemption)
@@ -36,6 +39,35 @@ export function VerifyEmailGate() {
       setError(e instanceof Error ? e.message : "Try again in a minute.");
     } finally {
       setSending(false);
+    }
+  }
+
+  // "I've verified" — re-read /auth/me on demand so the user isn't stuck
+  // behind a stale gate. The verify link is redeemed in another tab (or on a
+  // phone), so this tab doesn't know it's verified until it re-reads. On
+  // success emailVerifiedAt flips non-null and this whole banner unmounts (the
+  // guard at the top); if it's still null we tell them the link isn't clicked
+  // yet. This is the manual companion to the automatic tab-focus refresh in
+  // App.tsx, for webviews where focus events are unreliable.
+  async function recheck() {
+    setChecking(true);
+    setNotYet(false);
+    try {
+      const r = await fetch("/auth/me");
+      if (!r.ok) throw new Error();
+      const j = (await r.json()) as { emailVerifiedAt?: number | null };
+      const cur = useChat.getState().me;
+      if (cur) {
+        const verifiedAt = typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null;
+        // Only emailVerifiedAt matters for the gate; the spread keeps every
+        // other me field (enabled/mode/permissions) as-is.
+        setMe({ ...cur, emailVerifiedAt: verifiedAt });
+        if (verifiedAt == null) setNotYet(true);
+      }
+    } catch {
+      setNotYet(true);
+    } finally {
+      setChecking(false);
     }
   }
 
@@ -76,8 +108,16 @@ export function VerifyEmailGate() {
       <span className="min-w-0">
         {isBlock ? (
           <>
-            <b>Verify your email to chat.</b> We sent you a link — click it and you're in. Don't see
-            it? Check your <b>spam</b> folder, then {resendControl}
+            <b>Verify your email to chat.</b> Click the link we sent, then{" "}
+            <button
+              type="button"
+              onClick={recheck}
+              disabled={checking}
+              className="font-semibold underline underline-offset-2 hover:text-keep-action disabled:opacity-50"
+            >
+              {checking ? "Checking…" : "I've verified — refresh"}
+            </button>
+            . Don't see it? Check your <b>spam</b> folder, then {resendControl}
             {" · "}
             <button
               type="button"
@@ -86,6 +126,11 @@ export function VerifyEmailGate() {
             >
               wrong email?
             </button>
+            {notYet ? (
+              <span className="ml-2 text-keep-accent">
+                Not verified yet — open the link in your email, then try again.
+              </span>
+            ) : null}
           </>
         ) : (
           <>Please verify your email to secure your account. {resendControl}</>

@@ -163,6 +163,10 @@ export interface SiteSettings {
   analyticsRawRetentionDays: number;
   /** Honor the browser DNT / Sec-GPC opt-out signal (migration 0310). Default true. */
   analyticsRespectDnt: boolean;
+  /** Optional MaxMind account ID for the GeoLite2-City geo accuracy upgrade (migration 0328). Null = analytics use the bundled geoip-lite snapshot. */
+  maxmindAccountId: string | null;
+  /** Optional MaxMind license key paired with `maxmindAccountId`. SECRET — NEVER expose to clients (only a `maxmindConfigured` boolean, like the VAPID private key). */
+  maxmindLicenseKey: string | null;
   /** Web Push VAPID public key. Safe to ship to clients. Null until first boot generates it. */
   vapidPublicKey: string | null;
   /** Web Push VAPID private key. NEVER expose to clients. */
@@ -397,6 +401,10 @@ export interface SettingsPatch {
   antiSpamEnabled?: boolean;
   /** Auto-moderation master switch (migration 0319). */
   automodEnabled?: boolean;
+  /** MaxMind account ID for the geo accuracy upgrade. Empty string or null clears it (disables the upgrade). */
+  maxmindAccountId?: string | null;
+  /** MaxMind license key. Empty string or null clears it. SECRET — never echoed back to clients. */
+  maxmindLicenseKey?: string | null;
 }
 
 export async function updateSettings(
@@ -479,6 +487,15 @@ export async function updateSettings(
   if (patch.serversEnabled !== undefined) update.serversEnabled = patch.serversEnabled;
   if (patch.antiSpamEnabled !== undefined) update.antiSpamEnabled = patch.antiSpamEnabled;
   if (patch.automodEnabled !== undefined) update.automodEnabled = patch.automodEnabled;
+  // Empty/whitespace clears the credential (disables the upgrade); otherwise store trimmed.
+  if (patch.maxmindAccountId !== undefined) {
+    const v = (patch.maxmindAccountId ?? "").trim();
+    update.maxmindAccountId = v === "" ? null : v;
+  }
+  if (patch.maxmindLicenseKey !== undefined) {
+    const v = (patch.maxmindLicenseKey ?? "").trim();
+    update.maxmindLicenseKey = v === "" ? null : v;
+  }
   if (patch.newUserWelcomeHtml !== undefined) {
     // Only bump the welcome's edit timestamp when the text actually changed.
     // The audience filter (`user.createdAt > newUserWelcomeUpdatedAt`)
@@ -551,6 +568,8 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     analyticsEnabled: row.analyticsEnabled,
     analyticsRawRetentionDays: row.analyticsRawRetentionDays,
     analyticsRespectDnt: row.analyticsRespectDnt,
+    maxmindAccountId: row.maxmindAccountId,
+    maxmindLicenseKey: row.maxmindLicenseKey,
     vapidPublicKey: row.vapidPublicKey,
     vapidPrivateKey: row.vapidPrivateKey,
     activityFeedsEnabled: row.activityFeedsEnabled,

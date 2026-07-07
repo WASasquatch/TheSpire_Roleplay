@@ -207,8 +207,8 @@ function RoomMuteToggle({ roomId }: { roomId: string }) {
     <button
       type="button"
       onClick={toggle}
-      className={`flex h-6 w-6 shrink-0 items-center justify-center rounded text-keep-muted opacity-0 transition-opacity hover:bg-keep-banner/60 hover:text-keep-text focus:opacity-100 group-hover:opacity-100 ${
-        muted ? "opacity-100 text-keep-accent" : ""
+      className={`pointer-events-none flex h-6 w-6 shrink-0 items-center justify-center rounded text-keep-muted opacity-0 transition-opacity hover:bg-keep-banner/60 hover:text-keep-text focus:pointer-events-auto focus:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 ${
+        muted ? "pointer-events-auto opacity-100 text-keep-accent" : ""
       }`}
       title={muted ? "Muted — tap to unmute (mentions still notify)" : "Mute this room"}
       aria-label={muted ? "Unmute room" : "Mute room"}
@@ -712,16 +712,21 @@ function RoomGroup({
       className={`keep-row border-b border-keep-rule/40 ${isCurrent ? "bg-keep-banner/40" : ""}`}
       data-active={isCurrent ? "true" : undefined}
     >
-      {/* Header is a flex of two SIBLING controls (not nested — invalid HTML):
-          the room-switch button takes the slack, and the per-room mute toggle
-          sits flush at the right. `group` so the mute glyph fades in on row
-          hover (and stays visible when a room is actively muted). */}
-      <div className="group flex w-full items-stretch">
+      {/* The room-switch button spans the FULL row width so its hover/active
+          "title bar" reaches the container edge. The per-room mute toggle is a
+          SIBLING (not nested — button-in-button is invalid HTML) but is OVERLAID
+          absolutely on the right rather than taking layout width. `pr-9` on the
+          button reserves the strip the bell floats over. The overlay wrapper is
+          click-through (pointer-events-none) so tapping anywhere but the bell
+          still switches rooms; the toggle itself re-enables pointer events when
+          visible. `group` fades the glyph in on row hover (and it stays visible
+          when a room is actively muted). */}
+      <div className="group relative flex w-full items-stretch">
         <button
           type="button"
           onClick={() => onRoomClick(room.id)}
           title={room.topic ?? ""}
-          className={`flex min-w-0 flex-1 items-baseline justify-between px-3 py-2.5 text-left text-[1.1rem] font-bold hover:bg-keep-banner/30 hover:text-keep-accent lg:py-1 ${
+          className={`flex min-w-0 flex-1 items-baseline justify-between py-2.5 pl-3 pr-9 text-left text-[1.1rem] font-bold hover:bg-keep-banner/30 hover:text-keep-accent lg:py-1 ${
             isCurrent ? "text-keep-action" : "text-keep-accent"
           }`}
         >
@@ -769,9 +774,10 @@ function RoomGroup({
           </span>
           <span className="ml-2 shrink-0 font-normal text-keep-muted">({displayedOccupants.length})</span>
         </button>
-        {/* Per-room mute toggle — sibling of the switch button so tapping it
-            never also joins the room. */}
-        <div className="flex shrink-0 items-center pr-1.5">
+        {/* Per-room mute toggle — overlaid at the right edge (not in flow) so
+            the room button stays full-width. Click-through wrapper; the toggle
+            re-enables pointer events on itself when visible. */}
+        <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1.5">
           <RoomMuteToggle roomId={room.id} />
         </div>
       </div>

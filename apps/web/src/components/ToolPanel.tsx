@@ -114,6 +114,34 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
   const fontStep = useChat((s) => s.fontStep);
   const setFontStep = useChat((s) => s.setFontStep);
   const refreshIntervalSec = useChat((s) => s.refreshIntervalSec);
+  // "Export my data" (Account section). The export is an AUTHENTICATED GET, so
+  // we fetch it (the bearer token rides the patched window.fetch) and download
+  // the returned blob — a plain <a href> navigation wouldn't carry the token.
+  const [exportingData, setExportingData] = useState(false);
+  async function exportMyData() {
+    if (exportingData) return;
+    setExportingData(true);
+    try {
+      const r = await fetch("/me/export", { credentials: "include" });
+      if (!r.ok) throw new Error(String(r.status));
+      const blob = await r.blob();
+      const cd = r.headers.get("content-disposition") ?? "";
+      const name = /filename="([^"]+)"/.exec(cd)?.[1] ?? "thespire-export.json";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      useChat.getState().setNotice({ code: "EXPORT_OK", message: "Your data export downloaded — keep it somewhere safe." });
+    } catch {
+      useChat.getState().setNotice({ code: "EXPORT_FAILED", message: "Couldn't build your export just now. Try again in a minute." });
+    } finally {
+      setExportingData(false);
+    }
+  }
   // Per-kind totals across EVERY identity the user owns (master / OOC
   // + each character). Kept as two numbers, not one combined cue,
   // because reports of "the badge said I have messages but they were
@@ -613,8 +641,8 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
                 onClick={() => setReduceCosmeticsToggle(!getReduceCosmeticsToggle())}
               />
               <MenuItem
-                label={refreshIntervalSec > 0 ? `Refresh: every ${refreshIntervalSec}s` : "Refresh"}
-                hint={refreshIntervalSec > 0 ? "Auto-refresh on a schedule" : "Refresh once or schedule"}
+                label={refreshIntervalSec > 0 ? `Slow mode: every ${refreshIntervalSec}s` : "Refresh"}
+                hint={refreshIntervalSec > 0 ? "Real-time userlist + typing paused; resyncs on a schedule" : "Refresh once, or slow real-time updates to ease load on this device"}
                 active={refreshOpen || refreshIntervalSec > 0}
                 onClick={() => setRefreshOpen((v) => !v)}
               />
@@ -648,6 +676,11 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
                 />
               ) : null}
               <MenuItem label="Bookmarks" hint="Your saved chat messages" onClick={() => fire("/bookmarks")} />
+              <MenuItem
+                label={exportingData ? "Preparing export…" : "Export my data"}
+                hint="Download your profile, characters, worlds, and stories"
+                onClick={() => { if (!exportingData) void exportMyData(); }}
+              />
               <MenuItem label="Toggle Away" hint="Mark yourself away" onClick={() => fire("/away")} />
             </Section>
 
@@ -1398,6 +1431,9 @@ function RefreshPicker({ current, onPick }: { current: number; onPick: (n: numbe
       {current > 0 ? (
         <div className="mb-1 text-keep-muted">currently every {current}s</div>
       ) : null}
+      <div className="mb-1.5 text-[10px] leading-snug text-keep-muted">
+        Pauses the real-time userlist + typing churn and resyncs on this schedule — eases load on a slower device. Chat messages stay live.
+      </div>
       <ul className="mb-1 space-y-0.5">
         {REFRESH_PRESETS.map((p) => (
           <li key={p.label}>

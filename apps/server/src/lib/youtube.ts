@@ -229,7 +229,7 @@ export async function expandPlaylist(
 }
 
 type VideosResponse = {
-  items?: { snippet?: { title?: string } }[];
+  items?: { id?: string; snippet?: { title?: string } }[];
 };
 
 /**
@@ -239,4 +239,26 @@ type VideosResponse = {
 export async function fetchVideoTitle(videoId: string): Promise<string | null> {
   const { data } = await apiGet<VideosResponse>("videos", { part: "snippet", id: videoId });
   return data?.items?.[0]?.snippet?.title ?? null;
+}
+
+/**
+ * Batch-resolve video titles by id, returned as `id -> title`. The Data API's
+ * `videos.list` accepts up to 50 ids for ONE unit of quota, so a retroactive
+ * backfill of many legacy items is cheap. Ids that are unavailable (private /
+ * deleted) simply don't appear in the map. Never throws — a failed batch is
+ * skipped, leaving its ids unresolved for a later attempt.
+ */
+export async function fetchVideoTitles(videoIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (let i = 0; i < videoIds.length; i += 50) {
+    const batch = videoIds.slice(i, i + 50);
+    if (batch.length === 0) continue;
+    const { data } = await apiGet<VideosResponse>("videos", { part: "snippet", id: batch.join(",") });
+    for (const item of data?.items ?? []) {
+      const id = item.id;
+      const title = item.snippet?.title;
+      if (id && title) out.set(id, title);
+    }
+  }
+  return out;
 }

@@ -1,82 +1,46 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 /**
- * Padding above and below the viewport inside which messages stay
- * mounted. Roughly 1.5 screen heights, large enough that normal
- * scrolling never reveals a placeholder gap (the content renders
- * before the user gets to it) and small enough that a long chat
- * doesn't keep thousands of image / video / emoticon DOM nodes
- * around when the user is parked at the bottom.
- *
- * Discord uses a similar buffer; if perf telemetry ever shows
- * placeholder flashes during fast scroll we can bump this, until
- * then 1500 hits the sweet spot.
+ * Padding above and below the viewport within which a row stays fully rendered.
+ * ~1 screen each way; large enough that normal scrolling reaches a row well
+ * after it's already painted (no blank flash), small enough that a long history
+ * doesn't keep painting thousands of media-heavy rows.
  */
-const VIEWPORT_PADDING_PX = 1500;
-
-interface Props {
-  children: ReactNode;
-}
+const VIEWPORT_PADDING_PX = 1200;
 
 /**
- * Mount a message's render tree only while it's near the viewport;
- * collapse it to a height-preserving placeholder when scrolled far
- * away. Targeted at the flat chat-message stream, the biggest
- * memory and paint-cost wins are media-heavy histories (lots of
- * Show-image embeds, inline emoticon sprites, video iframes) which
- * stay anchored in the DOM otherwise.
+ * Skip layout + paint for a chat row while it's far off-screen — WITHOUT
+ * unmounting it — by toggling `content-visibility: hidden` (plus an EXACT
+ * reserved height via `contain-intrinsic-size`) as it leaves a padded viewport
+ * zone. The row's DOM stays put, which is the whole point:
  *
- * Behavior:
+ *   - Flipping visibility is a cheap style change, NOT a React remount: the row
+ *     keeps its rendering state (no image re-decode, instant re-show, no
+ *     placeholder flash).
+ *   - Because the reserved height equals the last measured height, the feed's
+ *     total height DOESN'T change when a row flips. That's what stops the
+ *     scroll "seizure": the OLD gate UNMOUNTED rows, which changed the feed
+ *     height → fired the bottom-pin's ResizeObserver → nudged scrollTop →
+ *     re-crossed the trigger → shook. No height change ⇒ no feedback ⇒ smooth,
+ *     Discord-style scrolling.
+ *   - On-screen the row has NO containment, so hover toolbars, the reaction
+ *     picker, and profile popovers that overflow the row are never clipped — a
+ *     blanket `content-visibility: auto` (paint containment even on-screen)
+ *     would have cut them off.
  *
- *   - Initial state is OPTIMISTIC: render the child on first paint.
- *     The IntersectionObserver flips it to "hidden" on the next tick
- *     if the message is actually off-screen. New messages arriving
- *     at the bottom (where the viewer is parked) are visible from
- *     frame one, no placeholder flash.
- *
- *   - A ResizeObserver records the rendered height of the child
- *     while visible. When the gate transitions to hidden, the
- *     placeholder div claims that exact height, preserving scroll
- *     position. Re-entering the viewport rehydrates the real
- *     children; if the content's height drifts on rehydrate
- *     (reaction count changed, edit landed), the next scroll
- *     adjusts naturally.
- *
- *   - The gate is a single host `<div>` per message. No portals, no
- *     virtualization library, no estimated-height heuristics for the
- *     scrollbar. The browser's native scroll machinery handles
- *     everything because the document height is always correct.
- *
- * Trade-off acknowledged: if a user is mid-edit on a message and
- * scrolls far enough away that the message unmounts, the in-progress
- * edit draft is lost. This is rare (edits are quick), the gate's
- * mount/unmount transition is fast, and saving every keystroke
- * across an unmount would defeat the memory-recovery goal of
- * unmounting in the first place.
+ * SHOW is immediate; HIDE is deferred so a row parked at the boundary while the
+ * reader jiggles the scroll doesn't flap on and off. Progressive enhancement:
+ * where `content-visibility` is unsupported the style is simply ignored and
+ * every row renders (correct, just less thrifty).
  */
-export function MessageVisibilityGate({ children }: Props) {
+export function MessageVisibilityGate({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(true);
-  const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
-  // Pending "hide" timer (see the asymmetric show/hide handling below).
+  const [hidden, setHidden] = useState(false);
+  const [measured, setMeasured] = useState<number | null>(null);
   const hideTimerRef = useRef<number | null>(null);
 
-  // Visibility tracker. rootMargin extends the trigger zone above
-  // AND below the viewport so messages render slightly before they
-  // scroll into view, masking the placeholder→child transition.
-  //
-  // SHOW is immediate; HIDE is deferred ~200ms. Why asymmetric: a message
-  // hovering at the rootMargin edge can be nudged across it every frame by the
-  // feed's bottom re-pin (MessageList sets scrollTop = scrollHeight while parked
-  // at the bottom). Hiding on each crossing swaps the real body for a
-  // height-preserving placeholder — but the placeholder height can't perfectly
-  // track live content (late media, reaction edits, sub-pixel rounding), so
-  // each flip changes the feed height by more than the pin's 2px settle epsilon,
-  // which re-fires the pin → the chat "bounces" and never settles, worst with a
-  // mix of differently-sized message kinds near the boundary. Deferring the hide
-  // lets a boundary message ride out the jitter mounted (stable height) so the
-  // pin settles; a genuine scroll-away still releases it ~200ms later. Showing
-  // must stay instant or the placeholder→child swap flashes.
+  // Visibility tracker. SHOW immediately (clear any pending hide); HIDE after a
+  // short delay so a boundary row doesn't flap during small scroll jitters.
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
@@ -88,18 +52,16 @@ export function MessageVisibilityGate({ children }: Props) {
               clearTimeout(hideTimerRef.current);
               hideTimerRef.current = null;
             }
-            setVisible(true);
+            setHidden(false);
           } else if (hideTimerRef.current == null) {
             hideTimerRef.current = window.setTimeout(() => {
               hideTimerRef.current = null;
-              setVisible(false);
-            }, 200);
+              setHidden(true);
+            }, 300);
           }
         }
       },
-      {
-        rootMargin: `${VIEWPORT_PADDING_PX}px 0px ${VIEWPORT_PADDING_PX}px 0px`,
-      },
+      { rootMargin: `${VIEWPORT_PADDING_PX}px 0px ${VIEWPORT_PADDING_PX}px 0px` },
     );
     obs.observe(el);
     return () => {
@@ -111,37 +73,33 @@ export function MessageVisibilityGate({ children }: Props) {
     };
   }, []);
 
-  // Height tracker. Only runs while the child is mounted; the most
-  // recently measured value is what the placeholder uses when the
-  // gate transitions to hidden. ResizeObserver fires whenever the
-  // child grows (image loaded, reaction added) so the stored
-  // height stays current.
+  // Keep the reserved (skipped) height matched to the real rendered height so a
+  // flip never changes the row's box size (the anti-seizure guarantee). Only
+  // measures while shown; the last value is frozen in for the hidden state.
   useEffect(() => {
-    if (!visible) return;
+    if (hidden) return;
     const el = ref.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => {
       const h = el.offsetHeight;
-      // Avoid storing zero (transient layout state during mount).
-      // A zero placeholder would collapse the scroll position when
-      // the message later transitions to hidden.
-      if (h > 0) setMeasuredHeight(h);
+      if (h > 0) setMeasured(h);
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, [visible]);
+  }, [hidden]);
 
-  // When hidden, hold the last-measured height so the scroll
-  // position doesn't jump. When visible, no inline style, the
-  // child's natural layout drives the box.
-  const placeholderStyle =
-    !visible && measuredHeight !== null
-      ? { height: `${measuredHeight}px` }
-      : undefined;
+  const style: CSSProperties | undefined = hidden
+    ? {
+        contentVisibility: "hidden",
+        // `auto` remembers the real size too; the explicit px is our exact
+        // measured height so the box doesn't resize when it flips.
+        containIntrinsicSize: measured != null ? `auto ${measured}px` : "auto 3rem",
+      }
+    : undefined;
 
   return (
-    <div ref={ref} style={placeholderStyle} aria-hidden={!visible ? true : undefined}>
-      {visible ? children : null}
+    <div ref={ref} style={style} aria-hidden={hidden ? true : undefined}>
+      {children}
     </div>
   );
 }

@@ -5233,15 +5233,17 @@ html.reduce-motion .splash-flash { animation: none; box-shadow: 0 0 0 3px rgb(va
  * unrelated app classes that happen to contain "ns-" (e.g.
  * .ns-card-controls). These are exactly the name styles that ship an
  * `infinite` animation per the catalog inventory. */
-html.calm-cosmetics .ns-pulse,
-html.calm-cosmetics .ns-pan,
-html.calm-cosmetics .ns-hearth-fire,
-html.calm-cosmetics .ns-embers,
-html.calm-cosmetics .ns-neon-sign,
-html.calm-cosmetics .ns-marquee,
-html.calm-cosmetics .ns-aurora-borealis,
-html.calm-cosmetics .ns-embers::before,
-html.calm-cosmetics .ns-embers::after {
+/* Freeze EVERY equipped name style's animation, not a hand-maintained list.
+ * `[class^="ns-"]` matches any name-style element — StyledName emits
+ * `class="ns-<key> nst-…"` with the ns-key FIRST — plus its particle
+ * pseudo-elements, so newer or admin-added styles (Magma, etc.) freeze too
+ * instead of slipping through an out-of-date list (the "reduce cosmetic effects
+ * stopped pausing my name style" report). The per-instance `nst-…` class never
+ * matches (its 3rd char is `t`, not `-`), and no non-cosmetic class in the app
+ * starts with `ns-`. Mirrors the generic `.av *` avatar-border freeze below. */
+html.calm-cosmetics [class^="ns-"],
+html.calm-cosmetics [class^="ns-"]::before,
+html.calm-cosmetics [class^="ns-"]::after {
   animation: none !important;
 }
 

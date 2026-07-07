@@ -100,6 +100,7 @@ import { registerEmoticonRoutes } from "./routes/emoticons.js";
 import { registerFriendsRoutes } from "./routes/friends.js";
 import { registerBlockRoutes } from "./routes/blocks.js";
 import { registerJournalRoutes } from "./routes/journal.js";
+import { registerDataExportRoutes } from "./routes/dataExport.js";
 import { registerLinkRoutes } from "./routes/links.js";
 import { registerWorldRoutes } from "./routes/worlds.js";
 import { registerStoryRoutes } from "./routes/stories.js";
@@ -113,6 +114,8 @@ import { registerPushRoutes } from "./routes/push.js";
 import { registerNotificationRoutes } from "./routes/notifications.js";
 import { registerRoomReadsRoutes } from "./routes/roomReads.js";
 import { registerSearchRoutes } from "./routes/search.js";
+import { initGeoDb } from "./analytics/geoDb.js";
+import { backfillTheaterTitles } from "./realtime/theaterTitleBackfill.js";
 import { initPush } from "./push.js";
 import { registerCommandsRoutes } from "./routes/commands.js";
 import { registerAnnouncementsRoutes } from "./routes/announcements.js";
@@ -961,6 +964,7 @@ async function main() {
   await registerCharacterRoutes(baseApp, db, io);
   await registerLinkRoutes(baseApp, db);
   await registerJournalRoutes(baseApp, db);
+  await registerDataExportRoutes(baseApp, db);
   await registerAffiliateRoutes(baseApp, db);
   await registerBookmarkRoutes(baseApp, db);
   await registerWorldRoutes(baseApp, db, io);
@@ -995,6 +999,24 @@ async function main() {
   // are already in the SPA-fallback apiPrefixes list.
   await registerAnalyticsRoutes(baseApp, db);
   await registerAnalyticsAdminRoutes(baseApp, db);
+  // Optional MaxMind GeoLite2-City accuracy upgrade for analytics geo. The DB
+  // lives on the persistent /data volume (sibling of the SQLite file) so it
+  // survives restarts; nothing downloads unless an admin has stored a key.
+  // resolveGeo falls back to the bundled geoip-lite snapshot when this is off
+  // or a download fails. Fire-and-forget: the reader loads in the background.
+  {
+    const s = await getSettings(db);
+    void initGeoDb(
+      dirname(dbPath),
+      s.maxmindAccountId && s.maxmindLicenseKey
+        ? { accountId: s.maxmindAccountId, licenseKey: s.maxmindLicenseKey }
+        : null,
+    );
+  }
+  // Retroactively title legacy /theater playlist items that were queued as bare
+  // YouTube URLs (before auto-titling, or while the Data API was down). One-shot,
+  // background, idempotent, no-op unless a YouTube key is configured.
+  void backfillTheaterTitles(io, db);
   await registerEarningRoutes(baseApp, db, io);
   await registerArcadeRoutes(baseApp, db, io);
   await registerUrugalRoutes(baseApp, db, io);

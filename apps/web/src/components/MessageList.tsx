@@ -496,6 +496,14 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   const pinHandleRef = useRef<number | null>(null);
   const programmaticScrollRef = useRef(false);
   const lastUserScrollTsRef = useRef(0);
+  // Scroll DIRECTION bookkeeping. A forced re-pin (container resize) uses these
+  // to tell a mobile address-bar reveal DURING a scroll-up (don't yank the
+  // reader back to the newest line) from composer auto-grow (which never moves
+  // the feed up, so it should still re-pin instantly). Without it, every mobile
+  // scroll-up got grabbed back to the bottom in its first pixels — the "scroll
+  // up is resistive" report.
+  const lastScrollTopRef = useRef(0);
+  const lastUpScrollAtRef = useRef(0);
   // Mirror `messages` into a ref so the live scroll listener below can
   // read the current array without re-binding on every change (cheap,
   // but binds dozens of times per second in active rooms). The
@@ -571,6 +579,12 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       // interaction so the re-pin can hold off and never yank a live drag.
       if (programmaticScrollRef.current) programmaticScrollRef.current = false;
       else lastUserScrollTsRef.current = performance.now();
+      // Track scroll DIRECTION (down-clamped for a couple px of noise) so the
+      // forced re-pin can stand down during an active scroll-up (a mobile
+      // address-bar reveal) instead of grabbing the reader back to the bottom.
+      const prevTop = lastScrollTopRef.current;
+      lastScrollTopRef.current = el.scrollTop;
+      if (el.scrollTop < prevTop - 2) lastUpScrollAtRef.current = performance.now();
     };
     el.addEventListener("scroll", capture, { passive: true });
     return () => el.removeEventListener("scroll", capture);
@@ -667,6 +681,11 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     const content = contentRef.current;
     if (!el || !content || typeof ResizeObserver === "undefined") return;
     const REPIN_AFTER_USER_MS = 250;
+    // A forced re-pin stands down if the reader scrolled UP within this window —
+    // enough to cover a mobile address-bar reveal that fires a beat after the
+    // scroll gesture. (Composer auto-grow never scrolls the feed up, so typing
+    // still re-pins instantly.)
+    const RECENT_UP_SCROLL_MS = 400;
     // Set true when a CONTAINER resize (composer auto-grow as you type, or a
     // window resize) schedules the pin. A layout resize is NOT a user drag,
     // so the pin must re-stick immediately and BYPASS the "reader just
@@ -680,6 +699,14 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       if (!stickRef.current || highlightMessageId) { forceNextPin = false; return; } // jump owns scroll
       const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
       if (dist <= 2) { forceNextPin = false; return; } // (b) already pinned — don't re-trigger the gates
+      // A FORCED pin (container resize) stands down if the reader just scrolled
+      // UP: that's a mobile address-bar reveal during a scroll-up, not composer
+      // auto-grow (which never moves the feed up). Stops the re-pin from grabbing
+      // the reader back to the bottom as they try to leave it.
+      if (forceNextPin && performance.now() - lastUpScrollAtRef.current < RECENT_UP_SCROLL_MS) {
+        forceNextPin = false;
+        return;
+      }
       const sinceUser = performance.now() - lastUserScrollTsRef.current;
       if (!forceNextPin && sinceUser < REPIN_AFTER_USER_MS) {
         // (c) reader just scrolled (a real drag): let them settle, then pin once.
@@ -715,8 +742,14 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
           if (Math.abs(h - lastContainerH) >= CONTAINER_REPIN_MIN_DELTA) { shouldPin = true; forceNextPin = true; }
           lastContainerH = h;
         } else {
-          // Content box: late media / gate mounts — always consider.
-          shouldPin = true;
+          // Content box: late media / gate mounts. Only schedule a pin while
+          // parked at the BOTTOM (stickRef) — while reading history the pin
+          // would no-op anyway, so scheduling it on every gate mount/unmount
+          // during a scroll-up just thrashes rAF + layout reads and stutters
+          // the scroll (the "resistive scroll-up", desktop especially, where
+          // there's no address bar in play). Container resizes above still
+          // force a re-check regardless of stick.
+          if (stickRef.current) shouldPin = true;
         }
       }
       if (!shouldPin) return;

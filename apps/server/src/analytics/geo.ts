@@ -1,24 +1,30 @@
 /**
- * Coarse geo resolution for analytics (plan_ext.md §2c, §7).
+ * Coarse geo resolution for analytics.
  *
  * PRIVACY CONTRACT: the raw client IP is used ONLY to derive a coarse country
  * (in-memory) and is then discarded — it NEVER lands in the analytics tables.
- * Today `resolveGeo` returns `{ country: null, region: null }` for every input;
- * the `flyRegion` edge-PoP tag from the request header is the only geo signal we
- * currently persist, and it is a WEAK fallback (the Fly datacenter the request
- * landed on), not the visitor's actual country.
+ * `resolveGeo` returns an ISO country code (region when the data set carries
+ * one) and the caller persists only that. The `flyRegion` edge-PoP tag from the
+ * request header is a separate WEAK fallback (the Fly datacenter the request
+ * landed on), NOT the visitor's actual country.
  *
- * TODO (GeoLite2 hook): to turn on real country/region resolution, bake a
- * MaxMind `GeoLite2-Country.mmdb` (or City for region) into the Docker image at
- * build time (needs a MaxMind license: MAXMIND_ACCOUNT_ID + MAXMIND_LICENSE_KEY
- * build secrets — the DB is NOT downloaded at runtime, Fly's FS is ephemeral),
- * add the `maxmind` npm reader, `maxmind.open(<path>)` once at boot into a
- * module-level reader, and have `resolveGeo` look the IP up + map to the ISO
- * country code (region once the City DB is in use). Everything downstream
- * already stores only the coarse code and discards the IP, so no other change
- * is needed. A scheduled CI job must re-bake the DB every ≤30 days per the
- * GeoLite2 EULA. Until that is wired, this stub keeps `geo_country` nullable.
+ * DATA SOURCE: `geoip-lite` bundles a MaxMind GeoLite2 snapshot inside the npm
+ * package, so lookups work with no license key and no network — the data is
+ * baked into the Docker image at `pnpm install` time (the Dockerfile copies the
+ * whole workspace, node_modules included), which survives Fly's ephemeral FS.
+ * The snapshot is country-accurate; it drifts slowly, refreshed by bumping the
+ * package (its `updatedb` script needs a free MaxMind key, but *using* the
+ * bundled data does not). Region/city are usually blank in the bundled set, so
+ * `region` stays null until a City data set is in use.
+ *
+ * OPTIONAL UPGRADE: when an admin supplies MaxMind credentials, `geoDb` loads a
+ * downloaded `GeoLite2-City.mmdb` from the persistent `/data` volume and this
+ * function prefers it (country + region) — falling back to the bundled snapshot
+ * automatically. See geoDb.ts. No caller changes are needed either way.
  */
+import geoip from "geoip-lite";
+
+import { lookupCity } from "./geoDb.js";
 
 export interface GeoResult {
   /** ISO 3166-1 alpha-2 country code, or null when unresolved. */
@@ -30,17 +36,41 @@ export interface GeoResult {
 /**
  * Resolve a coarse country/region from the raw client IP. The IP is consumed
  * here and MUST be discarded by the caller afterwards. `flyRegion` is accepted
- * so a future implementation could fall back to it, but it is NOT the visitor's
- * country and is stored separately.
+ * so a caller could fall back to it, but it is NOT the visitor's country and is
+ * stored separately.
  *
- * Returns `{ country: null, region: null }` for now (see the TODO above).
+ * Returns `{ country: null, region: null }` when the IP is absent, private, or
+ * not in the data set (e.g. loopback / LAN addresses in local dev).
  */
 export function resolveGeo(
-  _ip: string | null | undefined,
+  ip: string | null | undefined,
   _flyRegion: string | null | undefined,
 ): GeoResult {
-  // GeoLite2 lookup goes here once the .mmdb reader is plugged in.
-  return { country: null, region: null };
+  if (!ip) return { country: null, region: null };
+  try {
+    // Prefer the optional MaxMind City reader when an admin has configured it;
+    // fall back to the bundled geoip-lite snapshot when it's absent or has no
+    // country for this IP.
+    const city = lookupCity(ip);
+    if (city && city.country) return city;
+
+    const hit = geoip.lookup(ip);
+    if (!hit) return { country: null, region: null };
+    // MaxMind country codes are ISO 3166-1 alpha-2. Guard defensively so a
+    // malformed value can't smuggle a non-code string into a stored row.
+    const country =
+      typeof hit.country === "string" && hit.country.length === 2
+        ? hit.country.toUpperCase()
+        : null;
+    const region =
+      typeof hit.region === "string" && hit.region.trim()
+        ? hit.region.trim()
+        : null;
+    return { country, region };
+  } catch {
+    // A bad address or an unexpected reader error must never break ingestion.
+    return { country: null, region: null };
+  }
 }
 
 /**

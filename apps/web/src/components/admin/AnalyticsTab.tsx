@@ -172,6 +172,140 @@ function CountTable({
   );
 }
 
+interface GeoStatus {
+  configured: boolean;
+  loaded: boolean;
+  dbMtimeMs: number | null;
+  lastDownloadMs: number | null;
+  lastError: string | null;
+}
+
+/**
+ * Optional MaxMind GeoIP2 accuracy upgrade. Country geo always works from a
+ * bundled database; supplying a free MaxMind Account ID + License key lets the
+ * server download a fresher GeoLite2-City database for city-level accuracy. The
+ * key is write-only — the server only reports whether it's configured, never
+ * the value. Saving triggers an immediate download so the result is shown here.
+ */
+function GeoAccuracy() {
+  const [status, setStatus] = useState<GeoStatus | null>(null);
+  const [accountId, setAccountId] = useState("");
+  const [licenseKey, setLicenseKey] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const r = await fetch("/admin/geo/status", { credentials: "include" });
+      if (r.ok) setStatus((await r.json()) as GeoStatus);
+    } catch {
+      /* leave status null — the section just shows the bundled-data baseline */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadStatus();
+  }, [loadStatus]);
+
+  const save = useCallback(
+    async (clear: boolean) => {
+      setBusy(true);
+      setMsg(null);
+      try {
+        const r = await fetch("/admin/geo/maxmind", {
+          method: "PUT",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(clear ? { accountId: "", licenseKey: "" } : { accountId, licenseKey }),
+        });
+        if (!r.ok) {
+          setMsg(
+            r.status === 403
+              ? "Save failed (needs the Edit site settings permission)."
+              : `Save failed (${r.status}).`,
+          );
+          return;
+        }
+        const s = (await r.json()) as GeoStatus;
+        setStatus(s);
+        setAccountId("");
+        setLicenseKey("");
+        if (clear) setMsg("Reverted to the bundled country database.");
+        else if (s.loaded) setMsg("Saved. GeoLite2-City database downloaded and active.");
+        else setMsg(s.lastError ? `Saved, but the download failed: ${s.lastError}` : "Saved.");
+      } catch (err) {
+        setMsg(err instanceof Error ? err.message : "Save failed.");
+      } finally {
+        setBusy(false);
+      }
+    },
+    [accountId, licenseKey],
+  );
+
+  const input = "rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-text";
+  const btn =
+    "keep-button rounded border border-keep-rule bg-keep-bg px-2 py-1 hover:bg-keep-banner/60 disabled:opacity-50";
+
+  return (
+    <Section
+      title="Geo accuracy (optional)"
+      hint="Country geo works out of the box from a bundled database. For fresher, city-level accuracy, paste a free MaxMind Account ID + License key (from your MaxMind account). The key is stored securely and never shown again."
+    >
+      <div className="mb-2 text-keep-muted">
+        {status?.loaded ? (
+          <span className="text-keep-text">
+            Upgraded: GeoLite2-City active
+            {status.dbMtimeMs ? ` (database from ${new Date(status.dbMtimeMs).toLocaleDateString()})` : ""}.
+          </span>
+        ) : status?.configured ? (
+          <span>
+            Key saved, but the database isn&apos;t loaded yet
+            {status.lastError ? `: ${status.lastError}` : "."}
+          </span>
+        ) : (
+          <span>Using the bundled country database.</span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase tracking-wider text-keep-muted">Account ID</span>
+          <input
+            className={input + " w-28"}
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+            autoComplete="off"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-[10px] uppercase tracking-wider text-keep-muted">License key</span>
+          <input
+            className={input + " w-56"}
+            type="password"
+            value={licenseKey}
+            onChange={(e) => setLicenseKey(e.target.value)}
+            autoComplete="off"
+            placeholder={status?.configured ? "set — enter both to replace" : ""}
+          />
+        </label>
+        <button
+          type="button"
+          className={btn}
+          disabled={busy || !accountId.trim() || !licenseKey.trim()}
+          onClick={() => void save(false)}
+        >
+          {busy ? "Saving…" : "Save & download"}
+        </button>
+        {status?.configured ? (
+          <button type="button" className={btn} disabled={busy} onClick={() => void save(true)}>
+            Remove key
+          </button>
+        ) : null}
+      </div>
+      {msg ? <p className="mt-2 text-[10px] text-keep-muted">{msg}</p> : null}
+    </Section>
+  );
+}
+
 export function AnalyticsTab() {
   const [range, setRange] = useState<Range>(30);
   const [includeBots, setIncludeBots] = useState(false);
@@ -215,11 +349,12 @@ export function AnalyticsTab() {
     return { pageviews, visitors };
   }, [pub]);
 
-  // The flyRegion breakdown is a weak edge-PoP fallback until a GeoLite2 .mmdb
-  // is baked in; there's no dedicated flyRegion series in the endpoint yet, so
-  // we surface it as a note rather than a fabricated table.
+  // Coarse country comes from the bundled GeoLite2 snapshot (geoip-lite); it
+  // only fills in for hits recorded after that shipped, so recent ranges read
+  // truer than long ones. Edge Fly-Region is stored separately as a weak PoP
+  // fallback tag and isn't surfaced as its own series.
   const geoHint =
-    "Coarse country from GeoLite2 (not yet baked in — expect this to be sparse). Edge Fly-Region is stored as a weak fallback tag on each hit.";
+    "Coarse country from IP (bundled GeoLite2). Older hits recorded before this was enabled show no country. Edge Fly-Region is stored as a weak fallback tag on each hit.";
 
   return (
     <div className="space-y-3 text-xs">
@@ -293,11 +428,13 @@ export function AnalyticsTab() {
           <CountTable
             rows={pub?.geo ?? []}
             labelHead="Country"
-            empty="No geo data yet (needs GeoLite2)."
+            empty="No geo data yet."
             renderLabel={(r) => <span className="font-mono">{r.country}</span>}
           />
         </Section>
       </div>
+
+      <GeoAccuracy />
 
       <Section title="Top pages">
         <CountTable

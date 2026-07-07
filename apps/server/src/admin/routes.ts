@@ -40,6 +40,7 @@ import {
   findCanonicalLanding,
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
+import { applyGeoCredentials, geoDbStatus } from "../analytics/geoDb.js";
 import { getSettings, updateSettings } from "../settings.js";
 import {
   applyFilters,
@@ -1352,6 +1353,8 @@ export async function registerAdminRoutes(
       analyticsEnabled: s.analyticsEnabled,
       analyticsRawRetentionDays: s.analyticsRawRetentionDays,
       analyticsRespectDnt: s.analyticsRespectDnt,
+      // Only whether the MaxMind geo upgrade is configured — never the raw key.
+      maxmindConfigured: !!(s.maxmindAccountId && s.maxmindLicenseKey),
       activityFeedsEnabled: s.activityFeedsEnabled,
       serversEnabled: s.serversEnabled,
       antiSpamEnabled: s.antiSpamEnabled,
@@ -1529,6 +1532,45 @@ export async function registerAdminRoutes(
       metadata: { keys: Object.keys(patch) },
     });
     return result;
+  });
+
+  // ---- Optional MaxMind GeoIP2 accuracy upgrade -------------------------
+  // Runtime status of the GeoLite2-City reader (configured? loaded? last
+  // download / error). Surfaced in the Analytics tab, so gated with the
+  // analytics-view key. Never returns the raw credentials.
+  app.get("/admin/geo/status", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_admin_analytics"))) return;
+    return geoDbStatus();
+  });
+
+  // Store (or clear) the MaxMind credentials and attempt an immediate download
+  // so the admin gets synchronous success/failure feedback. Empty strings clear
+  // the credentials and revert analytics geo to the bundled geoip-lite snapshot.
+  app.put<{ Body: unknown }>("/admin/geo/maxmind", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "edit_site_settings"))) return;
+    const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    const body = z
+      .object({
+        accountId: z.string().max(64).optional(),
+        licenseKey: z.string().max(128).optional(),
+      })
+      .parse(req.body);
+    const accountId = (body.accountId ?? "").trim();
+    const licenseKey = (body.licenseKey ?? "").trim();
+    await updateSettings(
+      db,
+      { maxmindAccountId: accountId, maxmindLicenseKey: licenseKey },
+      sessionUser.id,
+    );
+    // Apply + await the initial refresh so the returned status reflects the real
+    // download result (a bad key surfaces as lastError, loaded=false).
+    await applyGeoCredentials(accountId && licenseKey ? { accountId, licenseKey } : null);
+    await recordAudit(db, {
+      actorUserId: sessionUser.id,
+      action: "settings_update",
+      metadata: { keys: ["maxmindGeo"], configured: !!(accountId && licenseKey) },
+    });
+    return geoDbStatus();
   });
 
   /* ---------- auto-moderation rules (CRUD) ----------

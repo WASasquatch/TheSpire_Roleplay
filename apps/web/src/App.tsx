@@ -262,122 +262,115 @@ export function App() {
   // (see auth/session.ts) - otherwise this poll would keep idle tabs logged
   // in forever, defeating the idle-timeout feature.
   //
-  // The same fetch also carries the post-deploy version-drift check (see
-  // `probeVersion` below). Up to 60s is fine for the session-TTL purpose,
-  // but it's a long lag for "the site just updated, please refresh",
-  // so we ALSO probe on tab focus and on socket reconnect (see effects
-  // below). A deploy reliably triggers the socket reconnect path, so in
-  // practice the banner now surfaces within a couple of seconds of the
-  // user's tab regaining the server.
-  const probeVersion = useCallback(async () => {
+  // The same fetch also carries the post-deploy version-drift check and, most
+  // visibly, the email-verification state. `refreshMe` is the single shared
+  // refresh: the 60s interval below runs it, and so do the tab-focus and
+  // socket-reconnect effects further down. Up to 60s is fine for the
+  // session-TTL purpose, but it's a long lag for "the site just updated" and,
+  // worse, for "I just verified my email" — the verify link is redeemed in a
+  // SEPARATE tab (or on a phone), so this tab's `me.emailVerifiedAt` stays
+  // stale and the "verify your email to chat" gate keeps blocking until
+  // something re-reads /auth/me. Running refreshMe on focus clears the gate the
+  // instant the user tabs back to chat, with no manual page refresh.
+  const refreshMe = useCallback(async () => {
     try {
       const r = await fetch("/auth/me");
-      if (!r.ok) return;
-      const j = (await r.json()) as { version?: string; updateMessage?: string | null };
+      if (!r.ok) {
+        // ONLY a definitive 401 means the session is actually gone. Every
+        // other non-2xx is transient and the session is still valid
+        // server-side: 5xx during a synchronous-SQLite event-loop stall,
+        // 502/503 across a deploy or machine restart, 429 from the per-IP
+        // rate limit when several tabs (or NAT/CGNAT-shared users) poll at
+        // once. Treating those as expiry logged healthy users out with a
+        // bogus "inactivity" banner AND wiped their token - forcing a
+        // needless re-login - every single time the backend hiccupped.
+        // Swallow them like the network-blip catch below; the next 60s
+        // tick (or the socket's own auth:expired) surfaces a real expiry.
+        if (r.status === 401) {
+          // Clear the token before disconnecting so an in-flight reconnect
+          // attempt doesn't carry the dead sid back to the server.
+          clearSessionToken();
+          setKickReason("Your session expired due to inactivity. Please log in again.");
+          disconnectSocket();
+          setMe(null);
+        }
+        return;
+      }
+      const j = (await r.json()) as {
+        id: string;
+        username: string;
+        role: Role;
+        permissions?: PermissionKey[];
+        incognitoMode?: boolean;
+        incognitoAlias?: string | null;
+        incognitoCharacterId?: string | null;
+        emailVerifiedAt?: number | null;
+        emailVerificationEnabled?: boolean;
+        emailVerificationMode?: "nudge" | "block";
+        version?: string;
+        updateMessage?: string | null;
+      };
       if (j.version && j.version !== VERSION) {
         useChat.getState().setStaleVersion(j.version, j.updateMessage ?? null);
       }
+      // Refresh me.permissions + email-verification state, but only call
+      // setMe when something actually changed. Calling setMe with a new
+      // object reference re-renders every subscriber of `me` (banner,
+      // message list, composer, etc.), a noticeable hit to pay every 60
+      // seconds when nothing has changed.
+      if (Array.isArray(j.permissions)) {
+        const cur = useChat.getState().me;
+        const nextIncognitoMode = j.incognitoMode ?? false;
+        const nextIncognitoAlias = j.incognitoAlias ?? null;
+        const nextIncognitoCharacterId = j.incognitoCharacterId ?? null;
+        const nextVerifiedAt = typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null;
+        const nextVerifyEnabled = j.emailVerificationEnabled ?? false;
+        const nextVerifyMode = j.emailVerificationMode ?? "nudge";
+        const changed =
+          !cur
+          || cur.id !== j.id
+          || cur.username !== j.username
+          || cur.role !== j.role
+          || cur.incognitoMode !== nextIncognitoMode
+          || cur.incognitoAlias !== nextIncognitoAlias
+          || cur.incognitoCharacterId !== nextIncognitoCharacterId
+          || cur.emailVerifiedAt !== nextVerifiedAt
+          || cur.emailVerificationEnabled !== nextVerifyEnabled
+          || cur.emailVerificationMode !== nextVerifyMode
+          || !samePermissions(cur.permissions, j.permissions);
+        if (changed) {
+          setMe({
+            id: j.id,
+            username: j.username,
+            role: j.role,
+            permissions: j.permissions,
+            incognitoMode: nextIncognitoMode,
+            incognitoAlias: nextIncognitoAlias,
+            incognitoCharacterId: nextIncognitoCharacterId,
+            emailVerifiedAt: nextVerifiedAt,
+            emailVerificationEnabled: nextVerifyEnabled,
+            emailVerificationMode: nextVerifyMode,
+          });
+        }
+      }
     } catch { /* network blip - ignore */ }
-  }, []);
+  }, [setMe, setKickReason]);
   useEffect(() => {
     if (!me) return;
-    const id = window.setInterval(async () => {
-      try {
-        const r = await fetch("/auth/me");
-        if (!r.ok) {
-          // ONLY a definitive 401 means the session is actually gone. Every
-          // other non-2xx is transient and the session is still valid
-          // server-side: 5xx during a synchronous-SQLite event-loop stall,
-          // 502/503 across a deploy or machine restart, 429 from the per-IP
-          // rate limit when several tabs (or NAT/CGNAT-shared users) poll at
-          // once. Treating those as expiry logged healthy users out with a
-          // bogus "inactivity" banner AND wiped their token - forcing a
-          // needless re-login - every single time the backend hiccupped.
-          // Swallow them like the network-blip catch below; the next 60s
-          // tick (or the socket's own auth:expired) surfaces a real expiry.
-          if (r.status === 401) {
-            // Clear the token before disconnecting so an in-flight reconnect
-            // attempt doesn't carry the dead sid back to the server.
-            clearSessionToken();
-            setKickReason("Your session expired due to inactivity. Please log in again.");
-            disconnectSocket();
-            setMe(null);
-          }
-          return;
-        }
-        const j = (await r.json()) as {
-          id: string;
-          username: string;
-          role: Role;
-          permissions?: PermissionKey[];
-          incognitoMode?: boolean;
-          incognitoAlias?: string | null;
-          incognitoCharacterId?: string | null;
-          emailVerifiedAt?: number | null;
-          emailVerificationEnabled?: boolean;
-          emailVerificationMode?: "nudge" | "block";
-          version?: string;
-          updateMessage?: string | null;
-        };
-        if (j.version && j.version !== VERSION) {
-          useChat.getState().setStaleVersion(j.version, j.updateMessage ?? null);
-        }
-        // Refresh me.permissions on every poll so a matrix edit lands
-        // on the affected user's tab within a minute, but only call
-        // setMe when something actually changed. Calling setMe with a
-        // new object reference on every poll re-renders every
-        // subscriber of `me` (banner, message list, composer, etc.),
-        // which is a noticeable hit every 60 seconds even when nothing
-        // has changed.
-        if (Array.isArray(j.permissions)) {
-          const cur = useChat.getState().me;
-          const nextIncognitoMode = j.incognitoMode ?? false;
-          const nextIncognitoAlias = j.incognitoAlias ?? null;
-          const nextIncognitoCharacterId = j.incognitoCharacterId ?? null;
-          const nextVerifiedAt = typeof j.emailVerifiedAt === "number" ? j.emailVerifiedAt : null;
-          const nextVerifyEnabled = j.emailVerificationEnabled ?? false;
-          const nextVerifyMode = j.emailVerificationMode ?? "nudge";
-          const changed =
-            !cur
-            || cur.id !== j.id
-            || cur.username !== j.username
-            || cur.role !== j.role
-            || cur.incognitoMode !== nextIncognitoMode
-            || cur.incognitoAlias !== nextIncognitoAlias
-            || cur.incognitoCharacterId !== nextIncognitoCharacterId
-            || cur.emailVerifiedAt !== nextVerifiedAt
-            || cur.emailVerificationEnabled !== nextVerifyEnabled
-            || cur.emailVerificationMode !== nextVerifyMode
-            || !samePermissions(cur.permissions, j.permissions);
-          if (changed) {
-            setMe({
-              id: j.id,
-              username: j.username,
-              role: j.role,
-              permissions: j.permissions,
-              incognitoMode: nextIncognitoMode,
-              incognitoAlias: nextIncognitoAlias,
-              incognitoCharacterId: nextIncognitoCharacterId,
-              emailVerifiedAt: nextVerifiedAt,
-              emailVerificationEnabled: nextVerifyEnabled,
-              emailVerificationMode: nextVerifyMode,
-            });
-          }
-        }
-      } catch { /* network blip - ignore */ }
-    }, 60_000);
+    const id = window.setInterval(() => { void refreshMe(); }, 60_000);
     return () => window.clearInterval(id);
-  }, [me, setMe, setKickReason]);
+  }, [me, refreshMe]);
 
   // Tab-focus re-probe. A user with a backgrounded tab won't see the
   // 60s poll fire reliably (browsers throttle timers in hidden tabs),
-  // so the version mismatch can sit undetected for many minutes. Firing
-  // `probeVersion` on visibility / focus catches the "I tabbed back
-  // after the site was redeployed" case immediately.
+  // so both the version mismatch AND a just-completed email verification
+  // can sit undetected for many minutes. Firing `refreshMe` on visibility /
+  // focus catches "I tabbed back after the site was redeployed" and "I
+  // tabbed back after clicking the verify link" the instant focus returns.
   useEffect(() => {
     if (!me) return;
     function onVisible() {
-      if (document.visibilityState === "visible") void probeVersion();
+      if (document.visibilityState === "visible") void refreshMe();
     }
     window.addEventListener("focus", onVisible);
     document.addEventListener("visibilitychange", onVisible);
@@ -385,7 +378,7 @@ export function App() {
       window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [me, probeVersion]);
+  }, [me, refreshMe]);
 
   // Socket-reconnect re-probe. The most common cause of a reconnect is
   // a server restart, which is also the most common cause of a fresh
@@ -395,10 +388,10 @@ export function App() {
   useEffect(() => {
     if (!me) return;
     const socket = getSocket();
-    function onConnect() { void probeVersion(); }
+    function onConnect() { void refreshMe(); }
     socket.io.on("reconnect", onConnect);
     return () => { socket.io.off("reconnect", onConnect); };
-  }, [me, probeVersion]);
+  }, [me, refreshMe]);
 
   // /p/<username> deep-link state. Lives at App level (not Chat) so it's
   // available to AuthGate too: anonymous visitors landing on /p/<X> see a
@@ -2588,9 +2581,19 @@ function Chat() {
       setTheaterSync(payload);
     });
     socket.on("theater:reaction", ({ roomId, emoji, side, displayName }) => {
+      // Slow mode (/refresh N): drop ambient floating-emoji churn — see the
+      // rationale on the presence:update handler just below.
+      if (useChat.getState().refreshIntervalSec > 0) return;
       pushTheaterReaction({ roomId, emoji, side, displayName });
     });
     socket.on("presence:update", ({ roomId, occupants }) => {
+      // Slow mode (/refresh N): the user asked to throttle the real-time
+      // firehose to spare a low-end device. Presence is the loudest source —
+      // every join / leave / away / incognito / character-switch by ANYONE in
+      // the room re-renders the whole userlist + rail. While a refresh interval
+      // is set we DROP presence here and let the periodic /refresh re-fetch
+      // (room:state, further down) resync the userlist once per interval.
+      if (useChat.getState().refreshIntervalSec > 0) return;
       setOccupants(roomId, occupants);
       // Push the fresh occupants straight into the rail's roomsTree
       // state too. RoomsTree reads `room.occupants` from this prop, not
@@ -2642,6 +2645,10 @@ function Chat() {
     // already filtered the viewer themselves and anyone they've
     // ignored, so the renderer can show every entry verbatim.
     socket.on("chat:typing:update", ({ roomId, typers }) => {
+      // Slow mode (/refresh N): typing pulses are the highest-frequency ambient
+      // event and purely ephemeral, so drop them entirely while throttled — no
+      // "… is typing" while battery-saving. See presence:update above.
+      if (useChat.getState().refreshIntervalSec > 0) return;
       useChat.getState().setTypers(roomId, typers);
     });
     // Global rooms-tree invalidation. Server-emits this any time room

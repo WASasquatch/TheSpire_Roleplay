@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { RichEditor } from "../shared/RichEditor.js";
-import { RatingPicker } from "./RatingPicker.js";
 import type {
   StoryCard,
   StoryChapter,
@@ -21,14 +19,15 @@ import {
   STORY_COPY_PRICE_MIN,
   STORY_COPY_PRICE_MAX,
   STORY_GENRES,
-  STORY_RATINGS,
   STORY_STATUSES,
   countWords,
   deriveSlug,
 } from "@thekeep/shared";
+import { RichEditor } from "../shared/RichEditor.js";
 import { readError } from "../../lib/http.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
+import { RatingPicker } from "./RatingPicker.js";
 import { StoryCodexTab } from "./StoryCodexTab.js";
 import { StoryCollaboratorsTab } from "./StoryCollaboratorsTab.js";
 

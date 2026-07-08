@@ -4,90 +4,32 @@
  * extraction from registerServerRoutes; behavior is byte-identical.
  */
 import {
-  RESERVED_SERVER_SLUGS,
-  SERVER_MAX_AUTO_RULES,
-  SERVER_MAX_OWNED_DEFAULT,
-  SERVER_MAX_USERGROUPS,
-  SERVER_MOD_DEFAULT_PERMISSIONS,
-  SERVER_MOD_PERMISSIONS,
-  SERVER_NAME_MAX,
-  SERVER_NAME_MIN,
-  SERVER_PERMISSIONS,
-  SERVER_PURPOSE_MAX,
-  SERVER_PURPOSE_MIN,
-  SERVER_REAPPLY_COOLDOWN_DAYS,
-  SERVER_SLUG_RE,
-  SERVER_TAGLINE_MAX,
-  SERVER_USERGROUP_NAME_MAX,
   hasTag,
-  isGrantableServerModPermission,
-  isModeratorRole,
-  isServerFeaturePermission,
-  normalizeServerSlug,
-  normalizeTheme,
   parseTagsJson,
-  serializeTags,
-  parseServerAutoRules,
-  parseServerFeaturePermissions,
-  parseServerModPermissions,
-  serializeServerAutoRules,
-  serializeServerFeaturePermissions,
-  serializeServerModPermissions,
 } from "@thekeep/shared";
-import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
-import { nanoid } from "nanoid";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type {
-  ServerAutoRule,
-  ServerFeaturePermission,
-  ServerModPermission,
-  ServerPermission,
-  ServerRole,
   ServerViewerState,
 } from "@thekeep/shared";
 import {
-  accountMutes,
-  auditLog,
-  characters,
   messages,
   rooms,
-  serverBans,
-  serverCreationApplications,
-  serverInvites,
   serverMembers,
   serverMembershipApplications,
-  serverSettings,
-  serverUsergroupMembers,
-  serverUsergroups,
   serverVisits,
   servers,
-  siteSettings,
   users,
 } from "../db/schema.js";
-import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
-import { serverAuthority, serverCan } from "../servers/authority.js";
-import { isServerModerationActive, serverModerationNotice } from "../servers/moderation.js";
-import { ensureDefaultUsergroup, serverRoomIds } from "../servers/usergroups.js";
-import { notifyUser, emitServersChanged } from "../servers/notifications.js";
-import { invalidateServerSettings } from "../settings.js";
-import {
-  broadcastPresence,
-  broadcastRoomState,
-  emitTreeChanged,
-  findCanonicalLanding,
-  findServerLanding,
-  sendRoomBacklogTo,
-} from "../realtime/broadcast.js";
-import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
-import { softHideUserMessages } from "../lib/purgeUserMessages.js";
+import { serverAuthority } from "../servers/authority.js";
+import { isServerModerationActive } from "../servers/moderation.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { getSessionUser } from "./auth.js";
 import {
-  auditServer,
   buildServerSummary,
   catalogRank,
   parseCrop,
-  roomInServer,
   roomsOfServerWhere,
   SERVER_SUMMARY_COLUMNS,
 } from "./serversShared.js";

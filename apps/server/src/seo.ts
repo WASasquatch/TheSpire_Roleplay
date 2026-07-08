@@ -2,10 +2,10 @@ import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import type { FastifyRequest } from "fastify";
+import { escapeHtml } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { characters, faqs, forums, servers, stories, users, worlds } from "./db/schema.js";
 import { areServersEnabled, getSettings } from "./settings.js";
-import { escapeHtml } from "@thekeep/shared";
 
 /**
  * Site-wide keyword shelf shared across every public route. Lead with

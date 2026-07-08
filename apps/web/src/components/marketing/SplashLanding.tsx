@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { VERSION } from "@thekeep/shared";
-import { isDarkPalette } from "@thekeep/shared";
+import { VERSION , isDarkPalette } from "@thekeep/shared";
 import {
   Check,
   DoorOpen,
@@ -21,8 +20,8 @@ import {
 import { useChat } from "../../state/store.js";
 import { resolveSplashTheme, splashBgClass, themeStyle } from "../../lib/theme.js";
 import { SPLASH_GLOW, SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
-import { SplashNav, type SplashTab } from "./SplashNav.js";
 import { BookshelfStrip } from "../scriptorium/BookshelfStrip.js";
+import { SplashNav, type SplashTab } from "./SplashNav.js";
 import { FeatureShowcase } from "./FeatureShowcase.js";
 import { FeaturedWorldCards } from "./FeaturedWorldCards.js";
 import { PopularCommunities } from "./PopularCommunities.js";

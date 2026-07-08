@@ -2,16 +2,6 @@ import type { FastifyInstance } from "fastify";
 import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { getSessionUser } from "../auth.js";
-import {
-  worldArcs,
-  worldEntities,
-  worldEntityKinds,
-  worldPages,
-  worldSessions,
-  worlds,
-} from "../../db/schema.js";
-import { sanitizeBio } from "../../auth/html.js";
 import {
   BUILTIN_ENTITY_KIND_KEYS,
   WORLD_ARCS_CAP,
@@ -25,6 +15,16 @@ import {
   parseTagList,
   serializeTagList,
 } from "@thekeep/shared";
+import { getSessionUser } from "../auth.js";
+import {
+  worldArcs,
+  worldEntities,
+  worldEntityKinds,
+  worldPages,
+  worldSessions,
+  worlds,
+} from "../../db/schema.js";
+import { sanitizeBio } from "../../auth/html.js";
 import type { Db } from "../../db/index.js";
 import {
   SLUG_RX,
@@ -34,7 +34,6 @@ import {
   entityRowToWire,
   entityKindRowToWire,
   arcRowToWire,
-  sessionLightToWire,
   sessionRowToWire,
 } from "./shared.js";
 import type { Io } from "./shared.js";

@@ -1,7 +1,7 @@
 import type { TourId } from "@thekeep/shared";
 import { useChat } from "../../state/store.js";
-import { CoachTour } from "./CoachTour.js";
 import { TOUR_REGISTRY } from "../../lib/tours/index.js";
+import { CoachTour } from "./CoachTour.js";
 
 /**
  * Contextual first-time tour driver for a single surface.

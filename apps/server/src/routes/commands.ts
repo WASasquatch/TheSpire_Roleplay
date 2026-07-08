@@ -4,8 +4,8 @@ import type { CommandDoc, SubcommandDocWire } from "@thekeep/shared";
 import type { CommandRegistry } from "../commands/registry.js";
 import { customCommandAliases, customCommands, titleKinds } from "../db/schema.js";
 import type { Db } from "../db/index.js";
-import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
+import { getSessionUser } from "./auth.js";
 
 /**
  * GET /commands - what the help modal renders.

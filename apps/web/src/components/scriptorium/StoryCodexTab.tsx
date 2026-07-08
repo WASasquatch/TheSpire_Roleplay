@@ -5,7 +5,6 @@ import type {
   StoryEntityKind,
   StoryPlotStatus,
   WorldDetail,
-  WorldPage,
 } from "@thekeep/shared";
 import {
   STORY_ENTITY_BODY_MAX,

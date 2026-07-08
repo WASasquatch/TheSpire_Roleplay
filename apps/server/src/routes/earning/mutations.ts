@@ -9,21 +9,17 @@
  * passing the shared `EarningRouteDeps`.
  */
 
-import { and, asc, desc, eq, inArray, like, lt, or, sql } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import {
   normalizePresenceTemplate,
   validatePresenceTemplate,
-} from "@thekeep/shared";
-import {
+
   extractFreeformBorderVars,
   isValidFreeformBorderConfigKey,
   isValidFreeformBorderConfigValue,
   FREEFORM_CONFIG_MAX_ENTRIES,
-  PET_NICKNAME_MAX_LENGTH,
-} from "@thekeep/shared";
-import { getRoomTransition, ROOM_TRANSITIONS, ROOM_TRANSITION_PRICE } from "@thekeep/shared";
-import { nanoid } from "nanoid";
+  PET_NICKNAME_MAX_LENGTH, getRoomTransition } from "@thekeep/shared";
 import {
   characterEarning,
   characterOwnedBorders,
@@ -40,49 +36,30 @@ import {
   nameStyles,
   rankTiers,
   ranks,
-  roomTransitions,
-  serverSettings,
   earningLedger,
   userActiveCosmetics,
   userOwnedBorders,
   userOwnedNameStyles,
   userEarning,
-  users,
 } from "../../db/schema.js";
 import { getSessionUser } from "../auth.js";
 import { hasPermission } from "../../auth/permissions.js";
 import {
   ack as ackNotification,
   ackAllForUser,
-  listUnacknowledged,
 } from "../../earning/notifications.js";
 import {
   applyDiscount,
   resolveTodayFlashSale,
 } from "../../earning/flashSale.js";
-import { buildRankings } from "../../earning/rankings.js";
-import { buildGameRankings } from "../../earning/gameRankings.js";
-import { buildFamiliarRankings } from "../../earning/familiarRankings.js";
-import { buildScriptoriumRankings } from "../../earning/scriptoriumRankings.js";
-import { DEFAULT_SERVER_ID, resolveProfileServerId } from "../../earning/pool.js";
-import { serverAuthority } from "../../servers/authority.js";
-import { getSettings, areServersEnabled } from "../../settings.js";
-import type { EarningRouteDeps, PurchaseOutcome, PoolView, TransitionCatalogRow } from "./shared.js";
+import { DEFAULT_SERVER_ID } from "../../earning/pool.js";
+import type { EarningRouteDeps } from "./shared.js";
 import {
-  LEDGER_PAGE_LIMIT,
   ackBody,
-  buildCharacterPoolView,
-  buildTransitionCatalog,
-  buildUserPoolView,
   emitWalletUpdate,
-  groupByCharacter,
-  loadRankTierLookup,
-  parseItemMessages,
   patchSettingsBody,
   resolveTransitionForServer,
   runPurchaseTxn,
-  safeParse,
-  shapeItemCatalogRow,
 } from "./shared.js";
 
 export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Promise<void> {

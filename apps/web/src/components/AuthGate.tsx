@@ -4,11 +4,11 @@ import { Eye, EyeOff } from "lucide-react";
 import DOMPurify from "dompurify";
 import { VERSION, isDarkPalette, type Role } from "@thekeep/shared";
 import { useChat, type AuthMe } from "../state/store.js";
-import { readReturnForum } from "./forums/ForumPublicLanding.js";
 import { setSessionToken } from "../lib/http.js";
 import { markLoginIntent } from "../lib/socket.js";
-import { GoogleFinishSignup } from "./GoogleFinishSignup.js";
 import { resolveSplashTheme, splashBgClass, themeStyle } from "../lib/theme.js";
+import { GoogleFinishSignup } from "./GoogleFinishSignup.js";
+import { readReturnForum } from "./forums/ForumPublicLanding.js";
 
 const PROJECT_URL = "https://github.com/WASasquatch/TheSpire_Roleplay";
 

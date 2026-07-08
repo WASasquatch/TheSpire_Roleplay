@@ -19,7 +19,6 @@
 import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { gunzipSync } from "node:zlib";
-
 import maxmind, { type CityResponse, type Reader } from "maxmind";
 
 /** Re-download when the on-disk DB is older than this (well under the 30d EULA cap). */

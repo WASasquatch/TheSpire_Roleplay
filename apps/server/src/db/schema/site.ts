@@ -1,20 +1,16 @@
 import { sql } from "drizzle-orm";
 import {
-  foreignKey,
   index,
   integer,
   primaryKey,
-  real,
   sqliteTable,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { id, ts } from "./_helpers.js";
-import { messages, rooms } from "./chat.js";
-import { cosmetics, items } from "./earning.js";
+import { rooms } from "./chat.js";
 import { servers } from "./servers.js";
-import { characters, sessions, users } from "./users.js";
-import { worlds } from "./worlds.js";
+import { users } from "./users.js";
 
 /* ---------- nav_links ----------
  * Banner links rendered next to the user's session controls. Admins manage

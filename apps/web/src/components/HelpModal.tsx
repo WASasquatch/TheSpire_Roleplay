@@ -2,10 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CommandDoc } from "@thekeep/shared";
 import { markVerified } from "@thekeep/shared";
 import { parseInline } from "../lib/markdown.js";
+import { useChat } from "../state/store.js";
 import { HelpGuides } from "./HelpGuides.js";
 import { Modal, MODAL_CARD_CONTENT } from "./cosmetics/Modal.js";
 import { TabBtn } from "./shared/TabBtn.js";
-import { useChat } from "../state/store.js";
 import { CloseButton } from "./shared/CloseButton.js";
 
 interface Props {

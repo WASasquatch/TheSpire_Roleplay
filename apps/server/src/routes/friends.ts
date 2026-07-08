@@ -2,14 +2,15 @@ import type { FastifyInstance } from "fastify";
 import type { Server as IoServer } from "socket.io";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
+import type { ClientToServerEvents, ServerToClientEvents , AvatarCrop } from "@thekeep/shared";
+import { clampAvatarCrop } from "@thekeep/shared";
 import { characters, friends, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
-import { getSessionUser } from "./auth.js";
 import { characterIdFromQuery, eqIdentity, ownsCharacter, type Identity } from "../auth/identity.js";
 import { eqNameInsensitive } from "../lib/nameLookup.js";
 import { blockedUserIdsFor, isBlockedBetween } from "../auth/blocks.js";
 import { notify as notifyCenter } from "../notifications/engine.js";
+import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -36,8 +37,6 @@ export interface FriendResolveMatch {
   avatarUrl: string | null;
 }
 
-import type { AvatarCrop } from "@thekeep/shared";
-import { clampAvatarCrop } from "@thekeep/shared";
 
 export interface FriendListEntry {
   userId: string;

@@ -59,7 +59,6 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { randomBytes } from "node:crypto";
 import {
-  BACKUP_FORMAT_VERSION,
   BACKUP_ZIP_CONTENT_JSON,
   BACKUP_ZIP_DATABASE_SQLITE,
   BACKUP_ZIP_UPLOADS_PREFIX,

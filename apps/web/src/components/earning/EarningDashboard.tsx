@@ -12,6 +12,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { extractFreeformBorderVarsWithDefaults, parseFreeformBorderConfig } from "@thekeep/shared";
+import { ROOM_TRANSITIONS, type RoomTransition } from "@thekeep/shared";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { TabBtn } from "../shared/TabBtn.js";
 import { DisplayPrivacyRow } from "../profile/DisplayPrivacyRow.js";
@@ -58,7 +60,6 @@ import {
   type ItemCategory,
   type LedgerEntry,
   type NameStyleCatalogRow,
-  type OwnedStyle,
   type PoolView,
   type RankingsResponse,
   type RankingBoard,
@@ -77,14 +78,12 @@ import {
 } from "../../lib/earning.js";
 import { BorderedAvatar } from "../cosmetics/BorderedAvatar.js";
 import { EmoticonSubmissionModal } from "../emoticons/EmoticonSubmissionModal.js";
-import { CoinAmount } from "./CoinAmount.js";
 import { StyledName } from "../cosmetics/StyledName.js";
 import { CloseButton } from "../shared/CloseButton.js";
-import { extractFreeformBorderVarsWithDefaults, parseFreeformBorderConfig } from "@thekeep/shared";
-import { ROOM_TRANSITIONS, type RoomTransition } from "@thekeep/shared";
 import { previewRoomTransition } from "../../lib/transitions/orchestrator.js";
 import { getServer } from "../../lib/servers.js";
 import { identityEquals } from "../../lib/identity.js";
+import { CoinAmount } from "./CoinAmount.js";
 
 type DashboardTab = "overview" | "ledger" | "settings" | "styles" | "borders" | "transitions" | "cosmetics" | "items" | "rankings";
 type ItemsSubTab = "inventory" | "shop" | "collection" | "pets";

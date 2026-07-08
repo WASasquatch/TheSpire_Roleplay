@@ -41,8 +41,8 @@ import {
 } from "@thekeep/shared";
 import { serverBans, serverMembers, serverUsergroupMembers, serverUsergroups, servers } from "../db/schema.js";
 import { resolveScopedAuthority, scopedCan, type Caller } from "../auth/scopedAuthority.js";
-import { isServerModerationActive } from "./moderation.js";
 import type { Db } from "../db/index.js";
+import { isServerModerationActive } from "./moderation.js";
 
 type ServerRow = typeof servers.$inferSelect;
 

@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 import { roomInvites, rooms, users } from "../db/schema.js";
-import { addMessage } from "./broadcast.js";
 import type { CommandContext } from "../commands/types.js";
+import { addMessage } from "./broadcast.js";
 
 export async function invite(ctx: CommandContext, username: string): Promise<void> {
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];

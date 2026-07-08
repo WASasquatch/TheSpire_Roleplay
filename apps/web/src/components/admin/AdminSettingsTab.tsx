@@ -4,9 +4,9 @@ import { DEFAULT_THEME, normalizeTheme, THEME_PRESETS } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
 import { parseDurationMs } from "../../lib/duration.js";
 import { useChat } from "../../state/store.js";
-import { AdminSaveFooter, useAdminShell, type SettingsRow } from "./adminShell.js";
 import { StylePicker } from "../StylePicker.js";
 import { ThemePicker } from "../cosmetics/ThemePicker.js";
+import { AdminSaveFooter, useAdminShell, type SettingsRow } from "./adminShell.js";
 
 /* =============================================================
  * SETTINGS TAB

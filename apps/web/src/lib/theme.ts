@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { DEFAULT_THEME, isDarkPalette, legibleAgainstBg, legibleThemePalette, THEME_PRESETS, type Theme } from "@thekeep/shared";
-import { applyStyle } from "./ornaments/index.js";
 import { loadCachedActiveTheme, useChat, type SiteBranding } from "../state/store.js";
+import { applyStyle } from "./ornaments/index.js";
 
 /**
  * Read access to the currently-active theme, the same value `applyTheme`

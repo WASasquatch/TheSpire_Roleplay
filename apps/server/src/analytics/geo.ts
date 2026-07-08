@@ -23,7 +23,6 @@
  * automatically. See geoDb.ts. No caller changes are needed either way.
  */
 import geoip from "geoip-lite";
-
 import { lookupCity } from "./geoDb.js";
 
 export interface GeoResult {

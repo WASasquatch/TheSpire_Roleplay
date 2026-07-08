@@ -11,50 +11,24 @@
  */
 
 import type { FastifyInstance } from "fastify";
-import { and, asc, desc, eq, inArray, like, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import {
-  normalizePresenceTemplate,
-  validatePresenceTemplate,
-} from "@thekeep/shared";
-import {
-  extractFreeformBorderVars,
-  isValidFreeformBorderConfigKey,
-  isValidFreeformBorderConfigValue,
-  FREEFORM_CONFIG_MAX_ENTRIES,
-  PET_NICKNAME_MAX_LENGTH,
-} from "@thekeep/shared";
 import { getRoomTransition, ROOM_TRANSITIONS, ROOM_TRANSITION_PRICE } from "@thekeep/shared";
-import type { Db } from "../../db/index.js";
 import { nanoid } from "nanoid";
+import type { Db } from "../../db/index.js";
+import type {
+  items} from "../../db/schema.js";
 import {
   characterEarning,
-  characterOwnedBorders,
-  characterOwnedFreeformBorders,
-  freeformBorders,
-  userOwnedFreeformBorders,
-  characterOwnedNameStyles,
-  characters,
-  cosmetics,
-  identityCollection,
-  identityInventory,
-  identityPetCollection,
-  items,
-  nameStyles,
   rankTiers,
   ranks,
   roomTransitions,
-  serverSettings,
   earningLedger,
-  userActiveCosmetics,
-  userOwnedBorders,
-  userOwnedNameStyles,
   userEarning,
-  users,
 } from "../../db/schema.js";
-import { getSessionUser } from "../auth.js";
+import type { getSessionUser } from "../auth.js";
 import { DEFAULT_SERVER_ID } from "../../earning/pool.js";
 
 export type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;

@@ -27,8 +27,8 @@
  * the per-identity lookup.
  */
 
-import { useChat } from "../../state/store.js";
 import type { TypingEntry } from "@thekeep/shared";
+import { useChat } from "../../state/store.js";
 
 interface Props {
   roomId: string | null | undefined;

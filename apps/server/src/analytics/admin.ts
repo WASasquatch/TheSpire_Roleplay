@@ -22,6 +22,7 @@ import { and, gte, lt, sql, inArray } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { PermissionKey } from "@thekeep/shared";
 import { startOfUtcDayMs } from "@thekeep/shared";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import {
   analyticsDaily,
   analyticsEvent,
@@ -33,7 +34,6 @@ import {
   stories,
   faqs,
 } from "../db/schema.js";
-import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Db } from "../db/index.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 

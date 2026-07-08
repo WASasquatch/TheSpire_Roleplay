@@ -16,10 +16,10 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
 import { type ClientToServerEvents, type PermissionKey, type Role, type ServerToClientEvents } from "@thekeep/shared";
+import { z } from "zod";
 import { hasPermission } from "../auth/permissions.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { emitToUser } from "../realtime/presence.js";
-import { z } from "zod";
 import type { Db } from "../db/index.js";
 import {
   characterEarning,
@@ -42,7 +42,6 @@ import {
   users,
   freeformBorders,
   flashSaleOverrides,
-  flashSales,
   siteSettings,
 } from "../db/schema.js";
 import { getSettings, updateSettings } from "../settings.js";

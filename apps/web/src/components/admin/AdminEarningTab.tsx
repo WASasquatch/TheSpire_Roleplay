@@ -44,7 +44,6 @@ import {
   deleteAdminItem,
   deleteAdminNameStyle,
   deleteAdminRank,
-  deleteAdminTier,
   fetchAdminAwards,
   fetchAdminCosmetics,
   fetchAdminFreeformBorders,

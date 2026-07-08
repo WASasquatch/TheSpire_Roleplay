@@ -6,10 +6,10 @@
 // order and side effects are unchanged.
 import { dirname } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { Server as IoServer } from "socket.io";
+import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
-import { CommandRegistry } from "./commands/registry.js";
+import type { CommandRegistry } from "./commands/registry.js";
 import { getSessionUser } from "./routes/auth.js";
 import { getSettings } from "./settings.js";
 import { registerCharacterRoutes } from "./routes/characters.js";

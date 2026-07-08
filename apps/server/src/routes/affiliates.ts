@@ -19,11 +19,11 @@ import {
 import { affiliateClickLog, affiliates, users } from "../db/schema.js";
 import type { DbAffiliate } from "../db/schema.js";
 import { computePad, type PadResult } from "../affiliates/padding.js";
-import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import { hasPermission } from "../auth/permissions.js";
 import { originFromRequest } from "../seo.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
 
 /* ---------- zod bodies ---------- */
 

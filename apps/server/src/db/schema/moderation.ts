@@ -1,10 +1,7 @@
-import { sql } from "drizzle-orm";
 import {
-  foreignKey,
   index,
   integer,
   primaryKey,
-  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -13,7 +10,7 @@ import { id, ts } from "./_helpers.js";
 import { messages, rooms } from "./chat.js";
 import { directMessages } from "./messaging.js";
 import { servers } from "./servers.js";
-import { characters, friends, users } from "./users.js";
+import { users } from "./users.js";
 
 /* ---------- bans ---------- */
 export const bans = sqliteTable(

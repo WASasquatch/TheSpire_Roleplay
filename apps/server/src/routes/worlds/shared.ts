@@ -1,21 +1,14 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
-import { hasPermission } from "../../auth/permissions.js";
-import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
-import { nanoid } from "nanoid";
+import { and, asc, eq, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import type {
   Role,
   Theme,
   WorldApplicationEntry,
-  WorldApplicationList,
   WorldApplicationStatus,
   WorldCatalogEntry,
-  WorldCatalogPage,
-  WorldDetail,
   WorldGenre,
   WorldJoinMode,
   WorldMemberRef,
-  WorldMembership,
   WorldPacing,
   WorldPage,
   WorldStatus,
@@ -27,10 +20,9 @@ import type {
   WorldArcStatus,
   WorldSession,
   WorldSessionLight,
-  WorldVibeAxisKey,
   WorldVibeStats,
   WorldVisibility,
-} from "@thekeep/shared";
+ ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import {
   CONTENT_WARNINGS,
   WORLD_APP_ANSWER_MAX_LEN,
@@ -39,54 +31,34 @@ import {
   WORLD_APP_REVIEW_NOTE_MAX_LEN,
   WORLD_PAGE_DEPTH_CAP,
   WORLD_VIBE_AXES,
-  BUILTIN_ENTITY_KIND_KEYS,
-  WORLD_ENTITY_BODY_MAX,
-  WORLD_ENTITY_PER_KIND_CAP,
-  WORLD_ENTITY_KINDS_CAP,
-  WORLD_ENTITY_SUMMARY_MAX,
-  WORLD_ENTITY_NAME_MAX,
-  WORLD_ARC_STATUSES,
-  WORLD_ARCS_CAP,
-  WORLD_SESSIONS_CAP,
-  deriveSlug,
   slugRx,
   normalizeTheme,
   parseTagList,
-  serializeTagList,
 } from "@thekeep/shared";
+import type { Server as IoServer } from "socket.io";
+import { hasPermission } from "../../auth/permissions.js";
+import type {
+  worldApplications,
+  worldArcs,
+  worldEntities,
+  worldEntityKinds,
+  worldSessions} from "../../db/schema.js";
 import {
   characters,
   roomMembers,
   roomWorldLinks,
   rooms,
   users,
-  worldApplications,
-  worldArcs,
   worldCollaborators,
-  worldEntities,
-  worldEntityKinds,
   worldMembers,
   worldPages,
-  worldSessions,
   worlds,
 } from "../../db/schema.js";
-import { sanitizeBio } from "../../auth/html.js";
-import { tagIncludes, tagExcludes } from "../../lib/tagFilter.js";
-import { escapeLike } from "../../lib/nameLookup.js";
 import {
   offsetPageQueryShape,
-  resolveOffsetPage,
-  countRows,
-  offsetPageEnvelope,
 } from "../../lib/pagination.js";
-import { resolveIdentityArg } from "../../commands/identityArg.js";
-import { getSessionUser } from "../auth.js";
-import { getSettings } from "../../settings.js";
-import { broadcastRoomState, rebroadcastPresenceForUser } from "../../realtime/broadcast.js";
-import { pushToUser } from "../../push.js";
+import { rebroadcastPresenceForUser } from "../../realtime/broadcast.js";
 import type { Db } from "../../db/index.js";
-import type { Server as IoServer } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 
 export type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

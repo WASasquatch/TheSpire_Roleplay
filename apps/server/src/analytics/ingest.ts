@@ -23,8 +23,8 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { sessions, users } from "../db/schema.js";
 import { eq } from "drizzle-orm";
+import { sessions, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { readBearerToken } from "../routes/auth.js";
 import { getSettings } from "../settings.js";

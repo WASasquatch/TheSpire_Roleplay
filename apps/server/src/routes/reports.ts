@@ -1,16 +1,16 @@
-import type { FastifyInstance, FastifyRequest } from "fastify";
-import { hasPermission } from "../auth/permissions.js";
+import type { FastifyInstance } from "fastify";
 import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { ReportEntry, ReportStatus } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
 import { characters, directConversations, directMessages, messages, reports, rooms, users } from "../db/schema.js";
-import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import { parseLimit } from "../lib/pagination.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
 
 /**
  * Two report shapes share one endpoint. The discriminant is `kind`:

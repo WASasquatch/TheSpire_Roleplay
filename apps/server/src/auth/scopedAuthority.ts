@@ -21,8 +21,8 @@
  * which is always the case for forums).
  */
 import type { PermissionKey, Role } from "@thekeep/shared";
-import { hasPermission } from "./permissions.js";
 import type { Db } from "../db/index.js";
+import { hasPermission } from "./permissions.js";
 
 export type Caller = { id: string; role: Role };
 

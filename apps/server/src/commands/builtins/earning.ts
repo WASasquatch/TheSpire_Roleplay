@@ -24,7 +24,6 @@ import {
   ranks,
   userOwnedBorders,
   userEarning,
-  users,
 } from "../../db/schema.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 import { transferCurrency } from "../../earning/transfer.js";

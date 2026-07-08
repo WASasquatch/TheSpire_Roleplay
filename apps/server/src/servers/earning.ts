@@ -86,7 +86,7 @@ import {
   userOwnedFreeformBorders,
   userOwnedNameStyles,
   users,
-} from "../db/schema.js";
+ serverSettings } from "../db/schema.js";
 import { getSessionUser } from "../routes/auth.js";
 import {
   areServersEnabled,
@@ -103,7 +103,6 @@ import { creditPool } from "../earning/award.js";
 import { DEFAULT_SERVER_ID, readPool } from "../earning/pool.js";
 import { mergeMaxEverHeld, resolveRankForXp } from "../earning/resolver.js";
 import { emitToUser } from "../realtime/presence.js";
-import { serverSettings } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;

@@ -45,6 +45,8 @@
  * pass shows fights resolve too quickly.
  */
 
+import { addSystemMessage } from "../realtime/broadcast.js";
+import type { Db } from "../db/index.js";
 import {
   cancel,
   registerGameKind,
@@ -52,7 +54,6 @@ import {
   type ParticipantRef,
   type ResolveContext,
 } from "./registry.js";
-import { addSystemMessage } from "../realtime/broadcast.js";
 import {
   formatWinningsLine,
   getBuiltinCommandConfig,
@@ -60,7 +61,6 @@ import {
   rewardIsNonZero,
   type BuiltinCommandReward,
 } from "./config.js";
-import type { Db } from "../db/index.js";
 
 export const DUEL_KIND = "duel";
 export const DUEL_COMMAND_NAME = "duel";

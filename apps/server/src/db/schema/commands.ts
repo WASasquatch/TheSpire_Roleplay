@@ -1,17 +1,13 @@
 import { sql } from "drizzle-orm";
 import {
-  foreignKey,
   index,
   integer,
   primaryKey,
-  real,
   sqliteTable,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { id, ts } from "./_helpers.js";
-import { messages } from "./chat.js";
-import { items } from "./earning.js";
 import { servers } from "./servers.js";
 import { users } from "./users.js";
 

@@ -8,7 +8,7 @@
  * on every call (see earning/eidolon.ts), so reads/actions all run a
  * catch-up first, apply their effect, then persist with lastSeenMs=now.
  */
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
@@ -17,7 +17,6 @@ import type { ClientToServerEvents, EidolonHallEntry, EidolonProfileSummary, Eid
 import { EIDOLON_SPECIES_IDS, EIDOLON_MOOD_LABEL, EIDOLON_PAT_COOLDOWN_MS, EIDOLON_PAT_JOY_GAIN, FLAIR_EIDOLON_TAMER, effectiveTraits, eidolonCareXp, eidolonLevelFromXp, eidolonLineageBonusXp, eidolonPrimaryMood, eidolonSaleValueOf, reviveStats, rollTraitId, rollVariant, streakXpMultiplier } from "@thekeep/shared";
 import { characters, earningLedger, eidolonHall, eidolonState, eidolonVisits, identityInventory, items } from "../db/schema.js";
 import type { Db } from "../db/index.js";
-import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { creditPool, debitPool, type DebitPoolResult } from "../earning/award.js";
 import { resolveActiveServerId } from "../earning/pool.js";
@@ -27,6 +26,7 @@ import {
   BASIC_HEAL_AMOUNT, BASIC_HEAL_COST, POTION_HEAL_AMOUNT,
   catchUp, currentSimHour, foodEffect, freshStats, rollCheckIn, rollName, serverDayKey, toyEffect, type EidolonProgress,
 } from "../earning/eidolon.js";
+import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Scope = "user" | "character";

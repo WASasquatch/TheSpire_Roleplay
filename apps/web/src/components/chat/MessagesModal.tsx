@@ -13,16 +13,16 @@ import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { useChat } from "../../state/store.js";
 import { identityKey, identityEquals } from "../../lib/identity.js";
 import { readError, withIdentityQuery } from "../../lib/http.js";
-import { identityArgFor, nameForCommand } from "../../lib/commandText.js";
+import { identityArgFor } from "../../lib/commandText.js";
 import { parseInline } from "../../lib/markdown.js";
 import { FormattingToolbar } from "../shared/FormattingToolbar.js";
 import { SynonymPopup } from "../SynonymPopup.js";
 import { UsernameAutocomplete } from "../UsernameAutocomplete.js";
 import { CloseButton } from "../shared/CloseButton.js";
-import { ReactionBar, ReactionAddButton } from "./ReactionBar.js";
 import { handlePlainTextCopy } from "../../lib/chatCopy.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { createPersistedDimension } from "../../lib/persistedDimension.js";
+import { ReactionBar, ReactionAddButton } from "./ReactionBar.js";
 
 interface Props {
   onClose: () => void;

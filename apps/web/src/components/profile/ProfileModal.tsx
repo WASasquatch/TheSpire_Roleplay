@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Ban, EyeOff, Flag, MessageSquare, Send, X } from "lucide-react";
-import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
-import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
 import { CHARACTER_VIBE_AXES, isAdminRole, isModeratorRole, legibleAgainstBg, legibleThemePalette, parseFreeformBorderConfig } from "@thekeep/shared";
 import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, EidolonProfileSummary, ProfileLibraryEntry, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
+import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
+import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
 import { themeStyle } from "../../lib/theme.js";
 import { buildOrnamentStyle } from "../../lib/ornaments/index.js";
 import { BorderedAvatar } from "../cosmetics/BorderedAvatar.js";
@@ -22,13 +22,13 @@ import { RankSigil } from "../earning/RankSigil.js";
 import { StyledName } from "../cosmetics/StyledName.js";
 import { useChat } from "../../state/store.js";
 import { ProfileMarquee, ProfileVisitorsChip, useTrackProfileView } from "../cosmetics/ProfileFlairSurfaces.js";
-import { EditBioModal } from "./EditBioModal.js";
 import { AccountBanControl } from "../moderation/AccountBanControl.js";
 import { loadViewerHiddenImageIds, saveViewerHiddenImageIds } from "../../lib/viewerNsfw.js";
 import {
   saveModBio,
   setPortraitNsfw,
 } from "../../lib/profileModeration.js";
+import { EditBioModal } from "./EditBioModal.js";
 
 /**
  * Unified profile action-button styling. Every button shares ONE shape; only

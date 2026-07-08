@@ -30,15 +30,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-
 import {
   PERMISSION_GROUPS,
   PERMISSION_KEYS,
-  type PermissionGroup,
   type PermissionKey,
   type Role,
 } from "@thekeep/shared";
-
 import {
   MASTERADMIN_ONLY_KEYS,
   resolveAgainst,

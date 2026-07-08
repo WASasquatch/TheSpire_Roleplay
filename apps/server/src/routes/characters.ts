@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import {
   CHARACTER_ATTRIBUTES_MAX,
   CHARACTER_ATTRIBUTE_LABEL_MAX,
@@ -13,22 +13,21 @@ import {
   CHAR_NAME_RX,
   normalizeCharName,
 } from "@thekeep/shared";
-import type { TourId } from "@thekeep/shared";
-import { hasPermission } from "../auth/permissions.js";
+import type { TourId , ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
 import { characterPortraits, characters, tourSeen, userPortraits, users } from "../db/schema.js";
 import { bioHtmlForEdit, sanitizeBio } from "../auth/html.js";
 import { recordAudit } from "../audit.js";
-import { getSessionUser } from "./auth.js";
-import { getServerSettings, getSettings, parseOwnThemeJson, parseUserThemeJson } from "../settings.js";
+import { getServerSettings, getSettings, parseOwnThemeJson } from "../settings.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { broadcastPresence } from "../realtime/broadcast.js";
 import { eqNameInsensitive } from "../lib/nameLookup.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

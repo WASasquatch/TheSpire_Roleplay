@@ -3,9 +3,9 @@ import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { characters, profileLinks } from "../db/schema.js";
-import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
 
 /** Hard cap matching the editor UX ("up to 6 links per profile"). */
 const MAX_LINKS_PER_PROFILE = 6;

@@ -23,6 +23,8 @@
  * post the resulting chat line).
  */
 
+import type { Server as IoServer } from "socket.io";
+import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import {
   cancel,
   findRoomSession,
@@ -32,7 +34,6 @@ import {
   type ParticipantRef,
 } from "../../games/registry.js";
 import {
-  DUEL_CHALLENGE_MS,
   DUEL_CLASSES,
   DUEL_KIND,
   DUEL_WINDOW_MS,
@@ -54,8 +55,6 @@ import {
 } from "../../games/duel.js";
 import { addSystemMessage } from "../../realtime/broadcast.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
-import type { Server as IoServer } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;

@@ -3,12 +3,12 @@
 // entrypoint's main() stays a thin orchestrator; the logic and ordering are
 // unchanged.
 import { eq } from "drizzle-orm";
-import { Server as IoServer } from "socket.io";
+import type { Server as IoServer } from "socket.io";
+import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { loadSessionUser, resolveDisplayName } from "./auth/session.js";
 import { extractSocketIp } from "./auth/ipLog.js";
 import { isIpBanned, isBlockableIp } from "./auth/ipBan.js";
 import { userIdFromSessionId } from "./routes/auth.js";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { characters } from "./db/schema.js";
 

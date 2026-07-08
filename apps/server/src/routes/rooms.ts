@@ -1,8 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { hasPermission } from "../auth/permissions.js";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
-import { getClearedAt } from "../lib/roomClears.js";
-import { escapeLike } from "../lib/nameLookup.js";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -15,15 +12,28 @@ import type {
   RoomSummary,
   ServerToClientEvents,
   ThreadCategory,
+  ExportManifest,
+  ExportPayload,
 } from "@thekeep/shared";
+import {
+  clampExportMs,
+  DEFAULT_EXPORT_MS,
+  EXPORT_MANIFEST_VERSION,
+  EXPORT_MAX_MESSAGES,
+  EXPORT_SIGN_ALGO,
+  isModeratorRole,
+  mentionsField,
+  parseNpcStats,
+} from "@thekeep/shared";
+import { escapeLike } from "../lib/nameLookup.js";
+import { getClearedAt } from "../lib/roomClears.js";
+import { hasPermission } from "../auth/permissions.js";
 import { exportReceipts, forums, ignores, messages, roomMembers, roomThreadCategories, rooms, users } from "../db/schema.js";
 import { parseNpcList } from "../lib/roomStats.js";
 import { forumBoardReadGate } from "../forums/authority.js";
-import { resolveTopicAuthorFlair } from "./forums.js";
 import { loadPollState } from "../polls.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import type { Db } from "../db/index.js";
-import { getSessionUser } from "./auth.js";
 import { getServerSettings, getSettings, areServersEnabled } from "../settings.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { serverAuthority } from "../servers/authority.js";
@@ -32,9 +42,10 @@ import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
-import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MANIFEST_VERSION, EXPORT_MAX_MESSAGES, EXPORT_SIGN_ALGO, isModeratorRole, mentionsField, parseNpcStats, type ExportManifest, type ExportPayload } from "@thekeep/shared";
 import { buildChatLogHtml, type ExportMessageRow } from "../export/chatLog.js";
 import { signExportPayload } from "../export/sign.js";
+import { getSessionUser } from "./auth.js";
+import { resolveTopicAuthorFlair } from "./forums.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

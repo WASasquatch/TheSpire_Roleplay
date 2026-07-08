@@ -1,128 +1,23 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, desc, eq, inArray, isNull, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { hasPermission } from "../../auth/permissions.js";
 import type {
-  PrivateStoryStub,
-  Role,
-  StoryApplauseState,
-  StoryAuthor,
-  StoryCard,
-  StoryCatalogPage,
-  StoryChapter,
-  StoryChapterLockState,
-  StoryChapterPublishedEvent,
-  StoryChapterRef,
-  StoryChapterStatus,
-  StoryChapterVersion,
-  StoryCollaborator,
-  StoryCollaboratorInvite,
-  StoryCollaboratorRole,
-  StoryDetail,
-  StoryEntity,
-  StoryEntityKind,
-  StoryGenre,
-  StoryRating,
-  StoryReadingPosition,
   StoryReport,
   StoryReportStatus,
-  StoryReportTargetKind,
-  StoryReview,
-  StoryReviewPage,
-  StoryReviewReply,
-  StoryReviewer,
-  StoryStatus,
-  StorySubscriptionState,
-  StoryVisibility,
-  Theme,
-} from "@thekeep/shared";
+  StoryReportTargetKind } from "@thekeep/shared";
+import { hasPermission } from "../../auth/permissions.js";
 import {
-  PUBLIC_READABLE_RATINGS,
-  SFW_RATINGS,
-  STORY_AUTOSAVE_HISTORY_CAP,
-  STORY_CHAPTER_CAP,
-  STORY_CHAPTER_LOCK_LEASE_MS,
-  STORY_CONTENT_WARNINGS,
-  STORY_COPY_PRICE_MIN,
-  STORY_COPY_PRICE_MAX,
-  STORY_SAMPLE_MAX_WORDS,
-  STORY_ENTITY_BODY_MAX,
-  STORY_ENTITY_KINDS,
-  STORY_ENTITY_PER_KIND_CAP,
-  STORY_GENRES,
-  STORY_COLLABORATOR_ROLES,
-  STORY_REVIEW_BODY_MAX,
-  STORY_REVIEW_EDIT_GRACE_MS,
-  STORY_REVIEW_REPLY_MAX,
-  STORY_TAG_CAP,
-  permissionsForCollaboratorRole,
-  countWords,
-  deriveSlug,
-  slugRx,
-  normalizeTheme,
-  parseTagList,
-  serializeTagList,
-  isoWeekKey,
-  rollWeeklyStreak,
-  scriptoriumChapterBaseReward,
-  scriptoriumStreakMultiplier,
-  startOfUtcDayMs,
-} from "@thekeep/shared";
-import {
-  characterEarning,
-  characters,
-  earningLedger,
-  scriptoriumWriteStreaks,
-  storyCopies,
-  userEarning,
   stories,
-  storyApplause,
-  storyChapterLocks,
-  storyChapters,
-  storyChapterVersions,
-  storyCollaborators,
-  storyEntities,
-  storyReadingPositions,
   storyReports,
-  storyReviewReplies,
-  storyReviews,
-  storySubscriptions,
   users,
-  worlds,
 } from "../../db/schema.js";
-import { persistTargetedSystemMessageToActiveRooms } from "../../realtime/targetedMessages.js";
-import { sanitizeBio, stripMarginNotes } from "../../auth/html.js";
-import { tagIncludes, tagExcludes } from "../../lib/tagFilter.js";
-import { escapeLike } from "../../lib/nameLookup.js";
-import {
-  offsetPageQueryShape,
-  resolveOffsetPage,
-  countRows,
-  offsetPageEnvelope,
-} from "../../lib/pagination.js";
 import { getSessionUser } from "../auth.js";
-import { pushToUser } from "../../push.js";
-import { creditPool } from "../../earning/award.js";
-import { earnedTodayForCap } from "../../earning/dailyCap.js";
-import { DEFAULT_SERVER_ID } from "../../earning/pool.js";
-import { detectProseSpam } from "../../earning/messageQuality.js";
-import { getSettings } from "../../settings.js";
 import { recordAudit } from "../../audit.js";
 import type { Db } from "../../db/index.js";
-import type { Server as IoServer } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Io } from "./shared.js";
-import {
-  loadAuthor, parseStoredTheme, loadLinkedWorldRef, toCard, chapterRowToRef, chapterRowToFull,
-  entityRowToWire, injectParagraphAnchors, viewerMayRead, buildChapterSample, resolveReadAccess,
-  resolveStory, resolveStoryByHandle, recountStoryTotals, recountStoryTotalsTx, appendChapterVersion,
-  appendChapterVersionTx, loadLockHolder, isOwnIdentity, effectiveStoryPermissions, loadReviewer,
-  recountStoryReviews, recountStoryApplause, reviewRowToWire, replyRowToWire, emitStoryInvite,
-  captureReportSnapshot, notifyPublish, awardChapterPublishReward, revokeBookEarnings,
-  SLUG_RX, browseLimit, ratingEnum, createStoryBody, updateStoryBody, catalogQuery,
-  createChapterBody, updateChapterBody, upsertReadingPositionBody, createReviewBody, updateReviewBody,
-  moderateReviewBody, createReplyBody, applauseToggleBody, createEntityBody, updateEntityBody,
+import { viewerMayRead,
+  captureReportSnapshot, revokeBookEarnings, ratingEnum,
 } from "./shared.js";
 
 export async function registerStoryReportRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {

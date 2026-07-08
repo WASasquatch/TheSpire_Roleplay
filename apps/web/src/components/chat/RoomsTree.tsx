@@ -9,16 +9,16 @@ import {
   type SVGProps,
 } from "react";
 import { legibleAgainstBg, roleRank, type PermissionKey, type RoomOccupant, type RoomSummary, type ServerModPermission, type Theme } from "@thekeep/shared";
-import { useActiveTheme } from "../../lib/theme.js";
-import { useChat } from "../../state/store.js";
 import { Ban, Bell, BellOff, Clapperboard, Landmark, MessagesSquare, Plus, ScrollText, ShieldAlert, UserX, VolumeX } from "lucide-react";
+import { useChat } from "../../state/store.js";
+import { useActiveTheme } from "../../lib/theme.js";
 import { AdminIcon, CharacterMaskIcon, MasterAdminIcon, ModIcon } from "../moderation/StaffIcons.js";
 import { CreateRoomModal } from "../CreateRoomModal.js";
-import { SearchBar } from "./SearchBar.js";
 import { ToolPanel } from "../ToolPanel.js";
 import { UserNameTag } from "../UserNameTag.js";
 import { identityArgFor } from "../../lib/commandText.js";
 import { createPersistedDimension } from "../../lib/persistedDimension.js";
+import { SearchBar } from "./SearchBar.js";
 
 export interface RoomWithOccupants extends RoomSummary {
   occupants: RoomOccupant[];

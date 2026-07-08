@@ -24,7 +24,6 @@
  */
 
 import { scrubCssUrlSchemes } from "@thekeep/shared";
-
 import { CSP_NONCE } from "./cspNonce.js";
 
 /**

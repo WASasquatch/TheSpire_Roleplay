@@ -4,13 +4,13 @@ import type { Server as IoServer } from "socket.io";
 import { roleRank, type ClientToServerEvents, type ServerToClientEvents } from "@thekeep/shared";
 import { hasPermission } from "../auth/permissions.js";
 import { auditLog, characters, messages, sessions, userEarning, userIpLog, users } from "../db/schema.js";
-import { getSessionUser } from "./auth.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import { recordAudit } from "../audit.js";
 import { canonicalizeNameForLookup, loweredSpaceCanonical, substringNameInsensitive, escapeLike } from "../lib/nameLookup.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { softHideUserMessages } from "../lib/purgeUserMessages.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

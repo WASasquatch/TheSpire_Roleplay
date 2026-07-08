@@ -15,6 +15,7 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
+import type { ArchivedRoomBrief, ForumSummary } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import {
   getReduceMotionToggle,
@@ -29,7 +30,6 @@ import {
 } from "../lib/calmCosmetics.js";
 import { fetchForums } from "../lib/forums.js";
 import { fetchArchivedRooms, hideArchivedRoom } from "../lib/rooms.js";
-import type { ArchivedRoomBrief, ForumSummary } from "@thekeep/shared";
 import { CloseButton } from "./shared/CloseButton.js";
 import { CreateCharacterModal } from "./profile/CreateCharacterModal.js";
 

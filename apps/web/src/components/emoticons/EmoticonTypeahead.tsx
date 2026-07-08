@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { UNICODE_EMOJI_FLAT } from "@thekeep/shared";
 import { useEmoticons } from "../../state/emoticons.js";
-import { EmoticonSprite } from "./EmoticonSprite.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
+import { EmoticonSprite } from "./EmoticonSprite.js";
 
 /**
  * Inline `:emoji-name` typeahead for chat composers.

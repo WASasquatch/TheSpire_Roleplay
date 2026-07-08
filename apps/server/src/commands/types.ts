@@ -2,11 +2,11 @@ import type { Server as IoServer, Socket } from "socket.io";
 import type {
   ClientToServerEvents,
   ServerToClientEvents,
-} from "@thekeep/shared";
+ PermissionKey, Role, ServerModPermission } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import type { CommandRegistry } from "./registry.js";
 
-import type { PermissionKey, Role, ServerModPermission } from "@thekeep/shared";
+
 
 export interface SessionUser {
   id: string;

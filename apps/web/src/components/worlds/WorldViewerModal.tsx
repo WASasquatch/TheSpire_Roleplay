@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
+import type { WorldDetail } from "@thekeep/shared";
 import { sweepOrphanedUserBioStyles } from "../../lib/userHtml.js";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
-import type { WorldDetail } from "@thekeep/shared";
 import { parseWorldFromUrl, syncWorldUrl, worldShareUrl } from "../../lib/worlds.js";
 import { readError } from "../../lib/http.js";
 import { ActiveThemeContext, themeStyle, useActiveTheme } from "../../lib/theme.js";

@@ -4,10 +4,10 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { characterJournalEntries, characters } from "../db/schema.js";
 import { sanitizeBio } from "../auth/html.js";
-import { getSessionUser } from "./auth.js";
 import { getSettings } from "../settings.js";
 import { hasPermission } from "../auth/permissions.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
 
 const TITLE_MAX = 120;
 

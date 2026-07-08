@@ -1,5 +1,4 @@
 import { create } from "zustand";
-import { recordNav } from "../lib/nav-metrics.js";
 import type {
   ChatMessage,
   DirectConversationSummary,
@@ -17,6 +16,7 @@ import type {
   TypingEntry,
 } from "@thekeep/shared";
 import { DEFAULT_THEME } from "@thekeep/shared";
+import { recordNav } from "../lib/nav-metrics.js";
 
 export interface AuthMe {
   id: string;

@@ -34,6 +34,12 @@
  */
 
 import { and, eq } from "drizzle-orm";
+import { addMessageDirect, addSystemMessage } from "../realtime/broadcast.js";
+import { identityInventory, rooms, users } from "../db/schema.js";
+import { creditPool } from "../earning/award.js";
+import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import type { Db } from "../db/index.js";
+import { formatWinningsLine } from "./config.js";
 import {
   registerGameKind,
   type GameScope,
@@ -42,12 +48,6 @@ import {
   type ParticipantRef,
   type ResolveContext,
 } from "./registry.js";
-import { addMessageDirect, addSystemMessage } from "../realtime/broadcast.js";
-import { identityInventory, rooms, users } from "../db/schema.js";
-import { creditPool } from "../earning/award.js";
-import { DEFAULT_SERVER_ID } from "../earning/pool.js";
-import { formatWinningsLine } from "./config.js";
-import type { Db } from "../db/index.js";
 
 export const ROOM_RAFFLE_KIND = "room-raffle";
 export const SITEWIDE_RAFFLE_KIND = "sitewide-raffle";

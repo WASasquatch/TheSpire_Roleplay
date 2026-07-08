@@ -10,7 +10,7 @@
  * simulator's accelerated "Test" mode is dropped.
  */
 import {
-  applyDecay, clampStat, effectiveTraits, eidolonXpGain, freshStats, isNightHour, streakRewardFor, streakXpMultiplier,
+  applyDecay, effectiveTraits, eidolonXpGain, isNightHour, streakRewardFor, streakXpMultiplier,
   type EidolonStats,
 } from "@thekeep/shared";
 

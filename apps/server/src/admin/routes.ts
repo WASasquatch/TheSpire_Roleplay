@@ -8,7 +8,18 @@ import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
+import {
+  type ClientToServerEvents,
+  type ServerToClientEvents,
+  COLOR_TOKEN_OR_HEX_RE,
+  CUSTOM_CMD_CSS_MAX_LEN,
+  extractExportManifest,
+  sanitizeCustomCmdCss,
+  type AuditEntry,
+  type PermissionKey,
+  type Role,
+  type AutomodRule,
+} from "@thekeep/shared";
 import {
   auditLog,
   automodRules,
@@ -28,7 +39,6 @@ import {
   users,
   worlds,
 } from "../db/schema.js";
-import { COLOR_TOKEN_OR_HEX_RE, CUSTOM_CMD_CSS_MAX_LEN, extractExportManifest, sanitizeCustomCmdCss, type AuditEntry, type PermissionKey, type Role } from "@thekeep/shared";
 import { verifyExportManifest } from "../export/sign.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { CRASH_LOG_PATH, readRecentCrashes } from "../crashLog.js";
@@ -49,7 +59,6 @@ import {
   invalidateAutomodCache,
   validateAutomodPattern,
 } from "../realtime/automod.js";
-import type { AutomodRule } from "@thekeep/shared";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { globalAuditScopeWhere, recordAudit } from "../audit.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";

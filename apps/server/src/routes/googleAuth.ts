@@ -41,6 +41,7 @@ import {
   signState,
   verifyState,
 } from "../auth/googleOauth.js";
+import type { Db } from "../db/index.js";
 import {
   getSessionUser,
   issueSession,
@@ -48,7 +49,6 @@ import {
   MASTER_USERNAME_RX,
   normalizeMasterUsername,
 } from "./auth.js";
-import type { Db } from "../db/index.js";
 
 /** Email-verification link validity — mirrors routes/auth.ts (24h). */
 const VERIFY_TTL_MS = 24 * 60 * 60 * 1000;

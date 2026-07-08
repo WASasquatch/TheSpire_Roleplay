@@ -39,6 +39,8 @@
  * round timer explicitly so it can't fire post-resolution.
  */
 
+import { addSystemMessage } from "../realtime/broadcast.js";
+import type { Db } from "../db/index.js";
 import {
   registerGameKind,
   type GameSession,
@@ -47,7 +49,6 @@ import {
   type ResolveContext,
   identityKeyFor,
 } from "./registry.js";
-import { addSystemMessage } from "../realtime/broadcast.js";
 import {
   computePointMultiplier,
   formatWinningsLine,
@@ -57,7 +58,6 @@ import {
   type BuiltinCommandReward,
 } from "./config.js";
 import { pickSourceWord, SCRAMBLE_DICTIONARY } from "./scrambleDictionary.js";
-import type { Db } from "../db/index.js";
 
 export const SCRAMBLE_KIND = "scramble";
 export const SCRAMBLE_COMMAND_NAME = "scramble";

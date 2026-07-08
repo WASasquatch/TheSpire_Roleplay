@@ -2,9 +2,21 @@ import type { FastifyInstance } from "fastify";
 import { and, asc, desc, eq, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import {
+  WORLD_PAGE_DEPTH_CAP,
+  WORLD_VIBE_AXES,
+  deriveSlug,
+  normalizeTheme,
+  serializeTagList,
+} from "@thekeep/shared";
+import type {
+  WorldApplicationEntry,
+  WorldCatalogPage,
+  WorldDetail,
+  WorldStatus,
+} from "@thekeep/shared";
 import { hasPermission } from "../../auth/permissions.js";
 import {
-  characters,
   roomWorldLinks,
   users,
   worldApplications,
@@ -12,7 +24,6 @@ import {
   worldCollaborators,
   worldEntities,
   worldEntityKinds,
-  worldMembers,
   worldPages,
   worldSessions,
   worlds,
@@ -24,22 +35,6 @@ import { resolveOffsetPage, countRows, offsetPageEnvelope } from "../../lib/pagi
 import { getSessionUser } from "../auth.js";
 import { getSettings } from "../../settings.js";
 import { broadcastRoomState } from "../../realtime/broadcast.js";
-import {
-  WORLD_PAGE_DEPTH_CAP,
-  WORLD_VIBE_AXES,
-  deriveSlug,
-  normalizeTheme,
-  parseTagList,
-  serializeTagList,
-} from "@thekeep/shared";
-import type {
-  WorldApplicationEntry,
-  WorldCatalogPage,
-  WorldDetail,
-  WorldJoinMode,
-  WorldStatus,
-  WorldVisibility,
-} from "@thekeep/shared";
 import type { Db } from "../../db/index.js";
 import {
   SLUG_RX,

@@ -10,8 +10,8 @@ import {
   users,
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
-import { getSessionUser } from "./auth.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { getSessionUser } from "./auth.js";
 
 /** Roles that appear on the Staff page, masteradmin first. */
 const STAFF_ROLES = ["mod", "admin", "masteradmin"] as const;

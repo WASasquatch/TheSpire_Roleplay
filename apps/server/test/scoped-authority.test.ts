@@ -13,7 +13,6 @@ import {
   type ForumPermission,
   type ServerPermission,
 } from "@thekeep/shared";
-import { makeTestDb } from "./helpers/harness.js";
 import { invalidatePermissionsCache } from "../src/auth/permissions.js";
 import { isServerModerationActive } from "../src/servers/moderation.js";
 import {
@@ -26,6 +25,7 @@ import {
   type ScopeAuthorityConfig,
 } from "../src/auth/scopedAuthority.js";
 import type { Db } from "../src/db/index.js";
+import { makeTestDb } from "./helpers/harness.js";
 
 /**
  * Characterization test for the scope-parameterized authority scaffold

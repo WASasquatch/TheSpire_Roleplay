@@ -5,6 +5,7 @@
 // hook bodies, ordering, and env reads (CANONICAL_HOST, HSTS-in-prod) are
 // unchanged. The previously module-level `documentRouteTemplate` helper moves
 // here alongside its sole caller (the analytics onRequest hook).
+import type { Server as HttpServer } from "node:http";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
@@ -12,7 +13,6 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { Server as IoServer } from "socket.io";
 import { ZodError } from "zod";
 import type { Logger } from "pino";
-import type { Server as HttpServer } from "node:http";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { recordHttpIp } from "./auth/ipLog.js";

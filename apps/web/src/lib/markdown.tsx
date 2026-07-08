@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { canonicalizeNameForLookup, CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, VMARK_SPAN_RE, type CheckResultData, type MentionRef, type UiRoute } from "@thekeep/shared";
+import { useEmoticons } from "../state/emoticons.js";
+import { EmoticonSprite } from "../components/emoticons/EmoticonSprite.js";
 import { openUiRoute } from "./uiRouteOpen.js";
 import { resolveDynamicChipLabel } from "./uiRouteDynamicLabel.js";
 import { UiRouteIcon } from "./uiRouteIcons.js";
 import { splitMentions } from "./mentions.js";
 import { useActiveTheme } from "./theme.js";
-import { useEmoticons } from "../state/emoticons.js";
-import { EmoticonSprite } from "../components/emoticons/EmoticonSprite.js";
 import { LazyMediaEmbed } from "./LazyMediaEmbed.js";
 
 /**

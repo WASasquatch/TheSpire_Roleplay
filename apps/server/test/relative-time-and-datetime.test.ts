@@ -1,7 +1,7 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { relTimeParts } from "../../web/src/lib/relativeTime.js";
 import { pad2, fmtClockLocal, fmtDateTimeLocal, fmtDateTimeUtc } from "@thekeep/shared";
+import { relTimeParts } from "../../web/src/lib/relativeTime.js";
 
 /**
  * Characterization test for the D1/D2 time-helper consolidation.

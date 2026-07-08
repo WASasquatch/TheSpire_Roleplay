@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { users } from "../../db/schema.js";
 import { addSystemMessage, broadcastPresence, roomsForUser } from "../../realtime/broadcast.js";
 import { emitToUser } from "../../realtime/presence.js";
-import type { CommandContext as Ctx } from "../types.js";
+import type { CommandContext as Ctx , CommandContext, CommandHandler } from "../types.js";
 
 /**
  * Every room the toggling user currently has a live socket in.
@@ -26,7 +26,6 @@ async function roomsUserIsIn(ctx: Ctx): Promise<string[]> {
   return roomsForUser(ctx.io, ctx.user.id, ctx.roomId);
 }
 import { recordAudit } from "../../audit.js";
-import type { CommandContext, CommandHandler } from "../types.js";
 
 /**
  * /incognito (alias /ghost), moderator observation tool.

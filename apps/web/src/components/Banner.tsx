@@ -5,10 +5,10 @@ import { useEarning } from "../state/earning.js";
 import { disconnect } from "../lib/socket.js";
 import { clearSessionToken } from "../lib/http.js";
 import { cropStyleFor } from "../lib/avatarCrop.js";
-import { ConnectionOrb } from "./chat/ConnectionOrb.js";
 import { useStoryInviteCount } from "../lib/storyInvites.js";
 import { navigateToFaqIndex } from "../lib/faqUrl.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";
+import { ConnectionOrb } from "./chat/ConnectionOrb.js";
 
 /** True at Tailwind's `lg` breakpoint (>=1024px). Drives desktop-vs-mobile
  *  banner behavior: desktop always shows the server banner; mobile defaults to

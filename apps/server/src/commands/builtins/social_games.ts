@@ -50,7 +50,6 @@ import {
   parseTriviaArgs,
   readTriviaConfig,
   recordTriviaGuess,
-  type TriviaState,
 } from "../../games/trivia.js";
 import {
   STORYDICE_KIND,
@@ -87,10 +86,10 @@ import {
 } from "../../games/raffle.js";
 import { addMessage, addMessageDirect, addSystemMessage } from "../../realtime/broadcast.js";
 import { rooms, users } from "../../db/schema.js";
-import { findItem } from "./items.js";
 import { creditPool } from "../../earning/award.js";
 import { readPool, resolveRoomServerId } from "../../earning/pool.js";
 import type { CommandContext, CommandHandler } from "../types.js";
+import { findItem } from "./items.js";
 
 function notice(ctx: CommandContext, code: string, message: string): void {
   ctx.socket.emit("error:notice", { code, message });

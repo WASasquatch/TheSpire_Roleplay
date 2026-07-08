@@ -1,18 +1,15 @@
 import { sql } from "drizzle-orm";
 import {
-  foreignKey,
   index,
   integer,
   primaryKey,
-  real,
   sqliteTable,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { id, ts } from "./_helpers.js";
 import { rooms } from "./chat.js";
-import { storyEntities } from "./stories.js";
-import { characters, sessions, users } from "./users.js";
+import { characters, users } from "./users.js";
 
 /* ---------- worldbuilding (worlds + pages + room links) ---------- */
 /**

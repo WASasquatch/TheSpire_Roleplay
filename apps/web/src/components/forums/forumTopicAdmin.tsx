@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
+import type { ChatMessage, ForumTopicCard, ThreadCategory } from "@thekeep/shared";
 import { fetchBoardTopics, fetchRoomCategories, mergeTopicInto, moveTopicToBoard, setTopicCategory } from "../../lib/forums.js";
 import { type ForumTopicAdminBoard } from "../../lib/forumTopicAdminContext.js";
 import { Modal } from "../cosmetics/Modal.js";
-import type { ChatMessage, ForumTopicCard, ThreadCategory } from "@thekeep/shared";
 
 /**
  * Unified "Move topic" modal, opened from the topic toolbar's Move button

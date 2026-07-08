@@ -2,7 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } 
 import type { AvatarCrop, CharacterAttribute, CharacterJournalEntry, CharacterPortrait, CharacterStats, CharacterStatsVisibility, CharacterVibeAxisKey, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
 import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, STAT_FIELD_MAX, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
 import { Code2, HelpCircle, Paintbrush2 } from "lucide-react";
-import { applyStyle } from "../../lib/ornaments/index.js";
+import { applyStyle , DEFAULT_STYLE_KEY } from "../../lib/ornaments/index.js";
 import { DesignerTour } from "../tours/DesignerTour.js";
 import { ProfileFlairEditor, VisitorsVisibilityToggleRow } from "../cosmetics/ProfileFlairEditor.js";
 import { applyTheme } from "../../lib/theme.js";
@@ -26,15 +26,14 @@ import { fetchBlocks, removeBlock, type BlockedUser } from "../../lib/blocks.js"
 import { useChat } from "../../state/store.js";
 import { useEarning, lookupRankTier } from "../../state/earning.js";
 import { StylePicker } from "../admin/AdminPanel.js";
-import { DEFAULT_STYLE_KEY } from "../../lib/ornaments/index.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CreateCharacterModal } from "./CreateCharacterModal.js";
-import { ProfileModal } from "./ProfileModal.js";
 import { ThemePicker } from "../cosmetics/ThemePicker.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { CloseButton } from "../shared/CloseButton.js";
-import { DisplayPrivacyRow } from "./DisplayPrivacyRow.js";
 import { ScriptoriumPrivacyRow } from "../ScriptoriumPrivacyRow.js";
+import { DisplayPrivacyRow } from "./DisplayPrivacyRow.js";
+import { ProfileModal } from "./ProfileModal.js";
+import { CreateCharacterModal } from "./CreateCharacterModal.js";
 
 // GrapesJS is heavy (~hundreds of KB); lazy-load it so it only enters the
 // bundle when a writer opens the visual Designer for their bio.

@@ -37,7 +37,6 @@ import type { FastifyInstance } from "fastify";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { MessageSearchHit, Role } from "@thekeep/shared";
 import { messages, roomMembers, rooms, servers } from "../db/schema.js";
-import { getSessionUser } from "./auth.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import { forumBoardReadGate } from "../forums/authority.js";
 import { serverAuthority } from "../servers/authority.js";
@@ -46,6 +45,7 @@ import { areServersEnabled, getSettings } from "../settings.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { escapeLike } from "../lib/nameLookup.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
 
 /**
  * The subset of a room row this route needs to resolve visibility + context.

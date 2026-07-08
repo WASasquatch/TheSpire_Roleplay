@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
-import { AffiliateCard, type AffiliateCardSize } from "./AffiliateCard.js";
 import type { PublicAffiliateCard } from "../../lib/affiliates.js";
+import { AffiliateCard, type AffiliateCardSize } from "./AffiliateCard.js";
 
 type SortKey = "traffic" | "in" | "out" | "az";
 

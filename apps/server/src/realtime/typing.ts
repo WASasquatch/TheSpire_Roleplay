@@ -31,8 +31,8 @@ import type {
   ClientToServerEvents,
   ServerToClientEvents,
   TypingEntry,
+  Role,
 } from "@thekeep/shared";
-import { type Role } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import { characterEarning, ignores, userActiveCosmetics, userEarning } from "../db/schema.js";
 import { hasPermission } from "../auth/permissions.js";

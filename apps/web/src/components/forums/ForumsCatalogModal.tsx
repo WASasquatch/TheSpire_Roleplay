@@ -19,6 +19,22 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import DOMPurify from "dompurify";
 import { ArrowDown, ArrowLeft, ArrowUp, BarChart3, Bell, Compass, FolderOpen, Globe, HelpCircle, Landmark, Lock, MessagesSquare, Plus, Search, Settings as SettingsIcon, Star, Users, X } from "lucide-react";
 import {
+  type ChatMessage,
+  type ForumCreationApplicationWire,
+  type ForumDetail,
+  type ForumMemberEntry,
+  type ForumMembershipApplicationWire,
+  type ForumModEntry,
+  type ForumModLogEntry,
+  type ForumModPermission,
+  type ForumNotificationWire,
+  type ForumReportWire,
+  type ForumSummary,
+  type ForumUserSearchHit,
+  type NpcStat,
+  type RoomOccupant,
+  type ThreadCategory,
+  type UserNpcWire,
   DEFAULT_THEME,
   FORUM_NAME_MAX,
   FORUM_NAME_MIN,
@@ -49,26 +65,7 @@ import {
   type ForumAutoRule,
   type ForumAutoRuleKind,
   type ForumUsergroupWire,
-  type ForumUsergroupMemberWire,
-} from "@thekeep/shared";
-import type {
-  ChatMessage,
-  ForumCreationApplicationWire,
-  ForumDetail,
-  ForumMemberEntry,
-  ForumMembershipApplicationWire,
-  ForumModEntry,
-  ForumModLogEntry,
-  ForumModPermission,
-  ForumNotificationWire,
-  ForumReportWire,
-  ForumSummary,
-  ForumUserSearchHit,
-  NpcStat,
-  RoomOccupant,
-  ThreadCategory,
-  UserNpcWire,
-} from "@thekeep/shared";
+  type ForumUsergroupMemberWire} from "@thekeep/shared";
 import {
   applyForumMembership,
   archiveBoard,

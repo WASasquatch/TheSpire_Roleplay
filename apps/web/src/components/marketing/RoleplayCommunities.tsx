@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { fetchPublicAffiliates, type PublicAffiliateCard } from "../../lib/affiliates.js";
+import { SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 import { AffiliateCard } from "./AffiliateCard.js";
 import { SubmitAffiliateButton } from "./AffiliateSubmitPortal.js";
-import { SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 
 /**
  * "Top RP Communities" section — the public face of the topsite board on the

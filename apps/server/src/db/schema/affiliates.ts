@@ -1,20 +1,16 @@
-import { sql } from "drizzle-orm";
 import {
-  foreignKey,
   index,
   integer,
-  primaryKey,
-  real,
   sqliteTable,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import { id, ts } from "./_helpers.js";
 import type {
   AffiliateClickDirection,
   AffiliateKind,
   AffiliateStatus,
 } from "@thekeep/shared";
+import { id, ts } from "./_helpers.js";
 import { users } from "./users.js";
 
 /* ---------- affiliates / partners / sponsors ---------- */

@@ -5,9 +5,9 @@ import { eq, sql } from "drizzle-orm";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import { messages, perRoomNotifyPrefs, roomReads, rooms, users } from "../db/schema.js";
-import { getSessionUser } from "./auth.js";
 import { pulseRoomUnread } from "../notifications/engine.js";
 import { emitToUser } from "../realtime/presence.js";
+import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

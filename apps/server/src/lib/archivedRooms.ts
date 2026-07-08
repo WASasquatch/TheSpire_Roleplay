@@ -1,7 +1,7 @@
 import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
+import type { ArchivedRoomBrief } from "@thekeep/shared";
 import { rooms } from "../db/schema.js";
 import type { Db } from "../db/index.js";
-import type { ArchivedRoomBrief } from "@thekeep/shared";
 
 /**
  * The archived rooms a given user owns, sorted by name.

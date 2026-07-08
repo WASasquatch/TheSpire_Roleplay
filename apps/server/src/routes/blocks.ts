@@ -12,14 +12,14 @@
  */
 import type { FastifyInstance } from "fastify";
 import type { Server as IoServer } from "socket.io";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { blocks, characters, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
-import { getSessionUser } from "./auth.js";
 import { createBlock, deleteBlock, isBlockedBetween, isBlockProtected } from "../auth/blocks.js";
 import { notifyBlockChange } from "../realtime/broadcast.js";
 import { resolveIdentityArg } from "../commands/identityArg.js";
+import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

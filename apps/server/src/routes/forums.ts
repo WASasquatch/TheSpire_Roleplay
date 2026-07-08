@@ -16,9 +16,10 @@
  * public fields, and the public `/f/<slug>` page reuses them for logged-out
  * visitors (viewer: null). Forum mutation routes require sessions.
  */
-import type { FastifyInstance } from "fastify";
 import { join } from "node:path";
+import type { FastifyInstance } from "fastify";
 import type { Db } from "../db/index.js";
+import { emailContentBlocked } from "../auth/emailGate.js";
 import type { Io } from "./forums/shared.js";
 import { registerForumCatalogRoutes } from "./forums/catalog.js";
 import { registerForumApplicationRoutes } from "./forums/applications.js";
@@ -26,7 +27,6 @@ import { registerForumBoardRoutes } from "./forums/boards.js";
 import { registerForumModerationRoutes } from "./forums/moderation.js";
 import { registerForumTopicRoutes } from "./forums/topics.js";
 import { getSessionUser } from "./auth.js";
-import { emailContentBlocked } from "../auth/emailGate.js";
 
 // Re-exported on its original path so `rooms.ts` (and any other importer)
 // keeps resolving `resolveTopicAuthorFlair` from `./forums.js`.

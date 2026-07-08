@@ -23,13 +23,13 @@ import { useEarning } from "../../state/earning";
 import { ArcadeError, eidolonAction, fetchEidolon, fetchEidolonHall, feedEidolon, hatchEidolon, playToyEidolon, releaseEidolon, remedyEidolon, reviveEidolon, sellEidolon, setEidolonNudgeOptin } from "../../lib/arcade";
 import { enablePush, isSupported as pushSupported } from "../../lib/push";
 import type { ArcadeAccess, HatchPet, HatchSpecies } from "../../lib/arcade";
+import { CoinAmount } from "../earning/CoinAmount";
+import { ensureInjectedStyle } from "../../lib/injectStyle";
 import {
   Action, EIDOLON_CSS, Egg, Familiar, Gauge, GAUGE_ICON, G, Moon, Ooze, STATUS_LINE, Sun,
   SPECIES_VISUAL, celestial, deriveVisual, fmtClock, growthTier, inv, speciesBase,
 } from "./eidolonEngine";
 import { ItemDrawer } from "./ItemDrawer";
-import { CoinAmount } from "../earning/CoinAmount";
-import { ensureInjectedStyle } from "../../lib/injectStyle";
 
 interface Live {
   stats: EidolonStats;

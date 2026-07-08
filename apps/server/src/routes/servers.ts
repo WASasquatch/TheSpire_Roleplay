@@ -22,14 +22,13 @@
  * The admin review-queue + cross-server oversight routes live in
  * `admin/servers.ts` (registered alongside this from index.ts).
  */
-import type { FastifyInstance } from "fastify";
-import type { Server as IoServer } from "socket.io";
 import { createHash } from "node:crypto";
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { Server as IoServer } from "socket.io";
+import type { FastifyInstance } from "fastify";
 import type { ClientToServerEvents, ServerPermission, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
-import { getSessionUser } from "./auth.js";
 import { serverAuthority, serverCan } from "../servers/authority.js";
 import { resolveIdentityArg } from "../commands/identityArg.js";
 import { getSettings, areServersEnabled } from "../settings.js";
@@ -47,6 +46,7 @@ import { registerServerEventRoutes } from "../servers/events.js";
 // Member-facing self-roles + onboarding (Batch 2). Self-gated on serversEnabled
 // + canParticipate; mounted alongside the manager usergroup routes below.
 import { registerSelfRolesRoutes } from "../servers/selfRoles.js";
+import { getSessionUser } from "./auth.js";
 // Route groups extracted from this file (move-only split). registerServerRoutes
 // builds the shared ServerRoutesCtx below and hands it to each sub-registrar.
 import type { ServerRoutesCtx } from "./serversShared.js";

@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
 import { useChat } from "../state/store.js";
-import { parseScriptoriumFromUrl, storyPermalink } from "./scriptoriumUrl.js";
-import { applyTheme, resolveSplashTheme, splashBgClass, themeStyle } from "./theme.js";
 import { AuthGate, SplashShell } from "../components/AuthGate.js";
 import { SplashLanding } from "../components/marketing/SplashLanding.js";
 import { ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage } from "../components/EmailAuthPages.js";
@@ -9,6 +7,8 @@ import { StoryCatalogModal } from "../components/scriptorium/StoryCatalogModal.j
 import { StoryReaderModal } from "../components/scriptorium/StoryReaderModal.js";
 import { ForumPublicLanding } from "../components/forums/ForumPublicLanding.js";
 import { ServerPublicLanding } from "../components/servers/ServerPublicLanding.js";
+import { applyTheme, resolveSplashTheme, splashBgClass, themeStyle } from "./theme.js";
+import { parseScriptoriumFromUrl, storyPermalink } from "./scriptoriumUrl.js";
 
 /**
  * Unauth-side router. Drives which face of the entrance the visitor sees

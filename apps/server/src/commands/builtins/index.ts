@@ -1,4 +1,10 @@
 import type { CommandRegistry } from "../registry.js";
+import { registerRps } from "../../games/rps.js";
+import { registerRaffle } from "../../games/raffle.js";
+import { registerTrivia } from "../../games/trivia.js";
+import { registerStoryDice } from "../../games/storydice.js";
+import { registerScramble } from "../../games/scramble.js";
+import { registerDuel } from "../../games/duel.js";
 import { meCommand } from "./me.js";
 import { charCommand } from "./char.js";
 import {
@@ -78,12 +84,6 @@ import {
 } from "./social_games.js";
 import { duelCommand } from "./duel.js";
 import { eidolonCommand } from "./eidolon.js";
-import { registerRps } from "../../games/rps.js";
-import { registerRaffle } from "../../games/raffle.js";
-import { registerTrivia } from "../../games/trivia.js";
-import { registerStoryDice } from "../../games/storydice.js";
-import { registerScramble } from "../../games/scramble.js";
-import { registerDuel } from "../../games/duel.js";
 
 /** Registers all built-in commands. Must run before custom commands are loaded. */
 export function registerBuiltins(reg: CommandRegistry): void {

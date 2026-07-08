@@ -9,8 +9,8 @@
  * inner HTML (transactional bodies are built from our own strings; the
  * admin emailer sanitizes tiptap output before it reaches here).
  */
-import type { SiteSettings } from "../settings.js";
 import { escapeHtml } from "@thekeep/shared";
+import type { SiteSettings } from "../settings.js";
 
 const ACCENT = "#7c5cff"; // Spire accent for buttons/links in email
 const DEFAULT_BASE_URL = "https://thespire.games";

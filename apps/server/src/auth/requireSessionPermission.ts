@@ -23,8 +23,8 @@
 
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { PermissionKey, Role } from "@thekeep/shared";
-import { hasPermission } from "./permissions.js";
 import type { Db } from "../db/index.js";
+import { hasPermission } from "./permissions.js";
 
 export interface SessionUserCtx {
   id: string;

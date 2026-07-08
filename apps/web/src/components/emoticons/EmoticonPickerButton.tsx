@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Smile } from "lucide-react";
-import { EmoticonPicker } from "./EmoticonPicker.js";
 import { recordEmoticonPick } from "../../lib/recentEmoticons.js";
+import { EmoticonPicker } from "./EmoticonPicker.js";
 
 /**
  * Toolbar button that opens the emoticon picker and, on pick, hands

@@ -1,6 +1,4 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { useReducedMotion } from "../../lib/reducedMotion.js";
-import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
 import {
   Check,
   ChevronDown,
@@ -18,6 +16,8 @@ import {
 } from "lucide-react";
 import type { PinnedMessage, RoomInfo, RoomSummary } from "@thekeep/shared";
 import { customCmdCssToStyle, resolveMessageColor } from "@thekeep/shared";
+import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
+import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { fetchRoomInfo } from "../../lib/rooms.js";
 import { parseInline } from "../../lib/markdown.js";
 import { useActiveTheme } from "../../lib/theme.js";

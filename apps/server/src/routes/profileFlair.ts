@@ -1,6 +1,6 @@
+import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { and, eq, isNull, sql } from "drizzle-orm";
-import { createHash } from "node:crypto";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import {
@@ -23,9 +23,9 @@ import {
   users,
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
-import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import { resolveProfileServerId } from "../earning/pool.js";
+import { getSessionUser } from "./auth.js";
 
 /**
  * Two profile-customization Flair surfaces (migration 0192):

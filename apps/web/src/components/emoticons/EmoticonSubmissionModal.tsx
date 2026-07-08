@@ -17,6 +17,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { COMMUNITY_EMOTICON_USE_COST, slugRx } from "@thekeep/shared";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
 import { CoinAmount } from "../earning/CoinAmount.js";
@@ -26,7 +27,6 @@ import {
   setEmoticonCommerce,
   type MyEmoticonSubmission,
 } from "../../lib/emoticonSubmissions.js";
-import { COMMUNITY_EMOTICON_USE_COST, slugRx } from "@thekeep/shared";
 import { useChat } from "../../state/store.js";
 
 /** 4×4 grid, same constant the server validates against. */

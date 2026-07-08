@@ -4,8 +4,8 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { pushSubscriptions } from "../db/schema.js";
 import { getSettings } from "../settings.js";
-import { getSessionUser } from "./auth.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
 
 const subscribeBody = z.object({
   endpoint: z.string().url().max(2000),

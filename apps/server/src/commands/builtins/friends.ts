@@ -1,7 +1,6 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import { addSystemMessage } from "../../realtime/broadcast.js";
 import { persistTargetedSystemMessageToActiveRooms } from "../../realtime/targetedMessages.js";
-import { resolveDisplayName } from "../../auth/session.js";
 import { characters, friends, users } from "../../db/schema.js";
 import { eqIdentity, type Identity } from "../../auth/identity.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";

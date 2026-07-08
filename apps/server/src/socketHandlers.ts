@@ -7,7 +7,7 @@
 // explicitly. Behavior and ordering are identical.
 import argon2 from "argon2";
 import { and, eq } from "drizzle-orm";
-import { Server as IoServer } from "socket.io";
+import type { Server as IoServer } from "socket.io";
 import type { Logger } from "pino";
 import {
   DEFAULT_PRESENCE_TEMPLATES,
@@ -33,7 +33,7 @@ import {
 import { DEFAULT_SERVER_ID } from "./earning/pool.js";
 import { hasPermission } from "./auth/permissions.js";
 import { emailContentBlocked } from "./auth/emailGate.js";
-import { CommandRegistry } from "./commands/registry.js";
+import type { CommandRegistry } from "./commands/registry.js";
 import { dispatchChatInput } from "./realtime/dispatch.js";
 import {
   addSystemMessage,

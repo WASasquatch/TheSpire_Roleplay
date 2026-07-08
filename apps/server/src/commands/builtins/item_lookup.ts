@@ -1,6 +1,6 @@
 import type { CommandContext, CommandHandler } from "../types.js";
-import { findItem } from "./items.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
+import { findItem } from "./items.js";
 
 /**
  * /item <name>, open the full-screen item zoom view for a catalog item.

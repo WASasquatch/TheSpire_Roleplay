@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { Compass } from "lucide-react";
-import { CoachTour, type CoachStep } from "./CoachTour.js";
 import { useChat } from "../../state/store.js";
+import { CoachTour, type CoachStep } from "./CoachTour.js";
 
 /**
  * First-run guided tour of the whole chat screen.

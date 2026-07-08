@@ -9,7 +9,6 @@ import type {
   WorldPacing,
   WorldPage,
   WorldStatus,
-  WorldVibeAxisKey,
   WorldVibeStats,
   WorldVisibility,
 } from "@thekeep/shared";
@@ -35,10 +34,10 @@ import { ActiveThemeContext, themeStyle, useActiveTheme } from "../../lib/theme.
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { ThemePicker } from "../cosmetics/ThemePicker.js";
 import { CloseButton } from "../shared/CloseButton.js";
+import { useChat } from "../../state/store.js";
 import { WorldEntitiesTab } from "./WorldEntitiesTab.js";
 import { WorldArcsTab } from "./WorldArcsTab.js";
 import { WorldSessionsTab } from "./WorldSessionsTab.js";
-import { useChat } from "../../state/store.js";
 
 interface Props {
   worldId: string;

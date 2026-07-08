@@ -4,9 +4,9 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Bookmark, BookmarkedMessage } from "@thekeep/shared";
 import { bookmarks, messages, roomMembers, rooms } from "../db/schema.js";
-import { getSessionUser } from "./auth.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
 
 const createBody = z.object({
   messageId: z.string().min(1),

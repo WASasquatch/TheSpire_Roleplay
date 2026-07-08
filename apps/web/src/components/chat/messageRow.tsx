@@ -4,7 +4,6 @@ import { canonicalizeNameForLookup, customCmdCssToStyle, extractMentions, render
 import { useActiveTheme } from "../../lib/theme.js";
 import { BorderedAvatar } from "../cosmetics/BorderedAvatar.js";
 import { UserNameTag } from "../UserNameTag.js";
-import { PollCard } from "./PollCard.js";
 import type { Gender } from "../../lib/gender.js";
 import { parseInline, solitaryEmoticonToken } from "../../lib/markdown.js";
 import { sanitizeUserHtml } from "../../lib/userHtml.js";
@@ -14,11 +13,12 @@ import { EmoticonSprite } from "../emoticons/EmoticonSprite.js";
 import { useEmoticons } from "../../state/emoticons.js";
 import { splitMentions } from "../../lib/mentions.js";
 import { useChat } from "../../state/store.js";
-import { ReactionAddButton, ReactionBar } from "./ReactionBar.js";
 import { LinkPreviewCard } from "../LinkPreviewCard.js";
 import { useMentionsCache, requestMentionResolve } from "../../state/mentions.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { fmtTime } from "../messageTime.js";
+import { ReactionAddButton, ReactionBar } from "./ReactionBar.js";
+import { PollCard } from "./PollCard.js";
 
 /** Kinds eligible for /reports - mirrors the server's privacy gate. */
 export const REPORTABLE_KINDS = new Set(["say", "me", "ooc", "announce", "npc"]);

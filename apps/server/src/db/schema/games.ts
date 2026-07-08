@@ -1,18 +1,12 @@
-import { sql } from "drizzle-orm";
 import {
-  foreignKey,
   index,
   integer,
   primaryKey,
   real,
   sqliteTable,
   text,
-  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import { id, ts } from "./_helpers.js";
-import { items } from "./earning.js";
-import { blocks } from "./moderation.js";
-import { sessions } from "./users.js";
+import { ts } from "./_helpers.js";
 
 /**
  * Per-identity social-game win + points ledger (migration 0195).

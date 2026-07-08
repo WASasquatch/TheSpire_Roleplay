@@ -1,5 +1,5 @@
-import { titleKinds, mutualTitles } from "../../db/schema.js";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { titleKinds, mutualTitles } from "../../db/schema.js";
 import {
   currentIdentity,
   dissolveTitle,

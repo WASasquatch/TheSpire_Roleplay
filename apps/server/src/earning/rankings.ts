@@ -31,7 +31,7 @@
  * given the dashboard is opened a few times per session at most.
  */
 
-import { and, asc, desc, eq, inArray, isNull, isNotNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import {
   characterEarning,

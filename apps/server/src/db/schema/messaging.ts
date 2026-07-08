@@ -1,17 +1,12 @@
-import { sql } from "drizzle-orm";
 import {
-  foreignKey,
   index,
   integer,
   primaryKey,
-  real,
   sqliteTable,
   text,
-  uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { id, ts } from "./_helpers.js";
-import { messages, rooms } from "./chat.js";
-import { characters, friends, users } from "./users.js";
+import { characters, users } from "./users.js";
 
 /* ---------- direct messages (Phase 3) ---------- */
 /**

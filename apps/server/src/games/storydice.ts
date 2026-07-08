@@ -35,15 +35,12 @@
  */
 
 import { eq, and, inArray, sql } from "drizzle-orm";
-import {
-  registerGameKind,
-  type GameSession,
-  type IdentityKey,
-  type ParticipantRef,
-  type ResolveContext,
-} from "./registry.js";
+import { nanoid } from "nanoid";
+import type { Server as IoServer } from "socket.io";
+import type { ClientToServerEvents, ReactionEvent, ServerToClientEvents } from "@thekeep/shared";
 import { addSystemMessage } from "../realtime/broadcast.js";
 import { messageReactions, users } from "../db/schema.js";
+import type { Db } from "../db/index.js";
 import {
   formatWinningsLine,
   getBuiltinCommandConfig,
@@ -51,10 +48,13 @@ import {
   rewardIsNonZero,
   type BuiltinCommandReward,
 } from "./config.js";
-import { nanoid } from "nanoid";
-import type { Db } from "../db/index.js";
-import type { Server as IoServer } from "socket.io";
-import type { ClientToServerEvents, ReactionEvent, ServerToClientEvents } from "@thekeep/shared";
+import {
+  registerGameKind,
+  type GameSession,
+  type IdentityKey,
+  type ParticipantRef,
+  type ResolveContext,
+} from "./registry.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

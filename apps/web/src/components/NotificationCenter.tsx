@@ -35,9 +35,9 @@ import {
   saveNotifPrefs,
 } from "../lib/notificationCenter.js";
 import { disablePush, enablePush, readPushState, type PushState } from "../lib/push.js";
-import { IconCloseButton } from "./shared/CloseButton.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";
 import { relTimeParts } from "../lib/relativeTime.js";
+import { IconCloseButton } from "./shared/CloseButton.js";
 
 /** Track the `lg` (1024px) breakpoint so the panel can be a dropdown on
  *  desktop and a fullscreen modal on phones. */

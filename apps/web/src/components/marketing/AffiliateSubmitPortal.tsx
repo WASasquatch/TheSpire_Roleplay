@@ -11,8 +11,6 @@ import {
 import { useChat } from "../../state/store.js";
 import { Modal } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
-import { AffiliateCard } from "./AffiliateCard.js";
-import { CommunityBoard } from "./CommunityBoard.js";
 import { TagInput } from "../shared/TagInput.js";
 import {
   AFFILIATE_LIMITS,
@@ -28,6 +26,8 @@ import {
   type PublicAffiliateCard,
 } from "../../lib/affiliates.js";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
+import { CommunityBoard } from "./CommunityBoard.js";
+import { AffiliateCard } from "./AffiliateCard.js";
 
 /**
  * Self-service submission portal for the Roleplay Communities section.

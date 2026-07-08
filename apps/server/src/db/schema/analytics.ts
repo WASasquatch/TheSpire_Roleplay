@@ -1,17 +1,13 @@
-import { sql } from "drizzle-orm";
 import {
-  foreignKey,
   index,
   integer,
-  primaryKey,
-  real,
   sqliteTable,
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { id, ts } from "./_helpers.js";
-import { messages, rooms } from "./chat.js";
-import { sessions, users } from "./users.js";
+import { rooms } from "./chat.js";
+import { users } from "./users.js";
 
 /**
  * Tamper-evident chat-export receipts (migration 0261). One row per

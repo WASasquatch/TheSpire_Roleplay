@@ -46,7 +46,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-
 import {
   PERMISSION_GROUPS,
   PERMISSION_KEYS,

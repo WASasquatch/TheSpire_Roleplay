@@ -42,14 +42,13 @@ import {
   rooms,
   serverEventRsvps,
   serverEvents,
-  users,
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "../routes/auth.js";
 import { areServersEnabled, getSettings } from "../settings.js";
-import { serverAuthority, serverCan } from "./authority.js";
 import { notifyMany, type NotifyInput } from "../notifications/engine.js";
+import { serverAuthority, serverCan } from "./authority.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

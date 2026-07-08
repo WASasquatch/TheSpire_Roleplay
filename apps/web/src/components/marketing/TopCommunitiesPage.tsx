@@ -4,8 +4,8 @@ import { Plus } from "lucide-react";
 import { isDarkPalette } from "@thekeep/shared";
 import { useChat } from "../../state/store.js";
 import { resolveSplashTheme, splashBgClass, themeStyle } from "../../lib/theme.js";
-import { CommunityBoard } from "./CommunityBoard.js";
 import { fetchPublicAffiliates, type PublicAffiliateCard } from "../../lib/affiliates.js";
+import { CommunityBoard } from "./CommunityBoard.js";
 
 /**
  * Public /top-communities page — the topsite board mirrored to the open web, so

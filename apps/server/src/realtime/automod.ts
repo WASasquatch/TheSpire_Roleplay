@@ -29,7 +29,7 @@
  * filters chat vs forum so a "forum-only" rule never fires on flat chat.
  */
 
-import { eq, isNull } from "drizzle-orm";
+import { isNull } from "drizzle-orm";
 import type {
   AutomodRule,
   AutomodRuleAction,

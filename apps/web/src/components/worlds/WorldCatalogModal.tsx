@@ -10,8 +10,8 @@ import { CANONICAL_TAGS, CONTENT_WARNINGS, WORLD_VIBE_AXES } from "@thekeep/shar
 import { readError } from "../../lib/http.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
-import { ApplicationFormModal } from "./ApplicationFormModal.js";
 import { useChat } from "../../state/store.js";
+import { ApplicationFormModal } from "./ApplicationFormModal.js";
 
 interface Props {
   /** Current room id for "Use in this room". If null, the link button is hidden. */

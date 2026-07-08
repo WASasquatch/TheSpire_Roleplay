@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type {
   PrivateStoryStub,
   StoryApplauseState,
@@ -15,10 +15,10 @@ import { useChat } from "../../state/store.js";
 import { fetchStoryCopyState, buyStoryCopy, setStoryShowcase, type StoryCopyState } from "../../lib/storyCopies.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
-import { StoryReviewsPanel } from "./StoryReviewsPanel.js";
 import { ScriptoriumReportButton } from "../ScriptoriumReportButton.js";
-import { StoryCodexAppendix } from "./StoryCodexAppendix.js";
 import { decorateMentionsIn, makeChipClickHandler } from "../../lib/storyMentions.js";
+import { StoryReviewsPanel } from "./StoryReviewsPanel.js";
+import { StoryCodexAppendix } from "./StoryCodexAppendix.js";
 
 interface Props {
   /** Story id (UUID) or slug. Both work via the /stories/:idOrSlug route. */

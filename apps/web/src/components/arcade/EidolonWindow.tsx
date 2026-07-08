@@ -16,8 +16,8 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Modal } from "../cosmetics/Modal";
-import { EidolonTamer } from "./EidolonTamer";
 import { ensureInjectedStyle } from "../../lib/injectStyle";
+import { EidolonTamer } from "./EidolonTamer";
 
 const POS_KEY = "tk:eidolonWindow:v1";
 const WIDTH = 452;

@@ -30,6 +30,7 @@
  * who came in mid-round can see who threw what.
  */
 
+import { addSystemMessage } from "../realtime/broadcast.js";
 import {
   registerGameKind,
   type GameSession,
@@ -37,7 +38,6 @@ import {
   type ParticipantRef,
   type ResolveContext,
 } from "./registry.js";
-import { addSystemMessage } from "../realtime/broadcast.js";
 import {
   formatWinningsLine,
   getBuiltinCommandConfig,

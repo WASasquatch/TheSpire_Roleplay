@@ -1,12 +1,11 @@
-import type { FastifyInstance } from "fastify";
+import { createHash } from "node:crypto";
+import { join } from "node:path";
+import { mkdir, writeFile, unlink } from "node:fs/promises";
 import type { Server as IoServer } from "socket.io";
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
-import { createHash } from "node:crypto";
-import { join } from "node:path";
-import { mkdir, writeFile, unlink } from "node:fs/promises";
-import { hasPermission } from "../auth/permissions.js";
+import type { FastifyInstance } from "fastify";
 import type {
   ClientToServerEvents,
   EmoticonSheet as WireEmoticonSheet,
@@ -24,6 +23,7 @@ import {
   lookupUnicodeEmojiName,
   slugRx,
 } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
 import {
   characterEarning,
   characters,
@@ -38,11 +38,11 @@ import {
   users,
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
-import { getSessionUser } from "./auth.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import { recordAudit } from "../audit.js";
 import { loadReactionsForTargets, parseSheetCells } from "../reactions.js";
+import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

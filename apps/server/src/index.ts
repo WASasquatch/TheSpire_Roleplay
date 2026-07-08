@@ -20,7 +20,6 @@ import fastifyStatic from "@fastify/static";
 import { type FastifyReply, type FastifyRequest } from "fastify";
 import { and, eq, isNotNull, isNull, lte } from "drizzle-orm";
 import pino from "pino";
-
 import { db } from "./db/index.js";
 import { createApp, createIo } from "./bootstrap.js";
 import { installHandshake } from "./handshake.js";

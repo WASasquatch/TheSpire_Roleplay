@@ -19,7 +19,6 @@
 import { and, eq, isNotNull, ne } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents, TheaterSource } from "@thekeep/shared";
-
 import type { Db } from "../db/index.js";
 import { rooms } from "../db/schema.js";
 import { fetchVideoTitles, parseYoutubeIds, youtubeConfigured } from "../lib/youtube.js";

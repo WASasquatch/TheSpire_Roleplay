@@ -5,7 +5,6 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../src/db/index.js";
 import * as schema from "../src/db/schema.js";
-import { makeTestDb, createUser } from "./helpers/harness.js";
 import {
   offsetPageQueryShape,
   resolveOffsetPage,
@@ -15,6 +14,7 @@ import {
   parseLimit,
   cursorPageSlice,
 } from "../src/lib/pagination.js";
+import { makeTestDb, createUser } from "./helpers/harness.js";
 
 /**
  * Characterization test for the shared offset-catalog scaffolding

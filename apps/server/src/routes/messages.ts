@@ -1,28 +1,30 @@
 import type { FastifyInstance } from "fastify";
-import { hasPermission } from "../auth/permissions.js";
-import type { Role, ForumPermission, AuditAction } from "@thekeep/shared";
-import { recordAudit } from "../audit.js";
-import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
-import { z } from "zod";
-import { nanoid } from "nanoid";
-import type { Server as IoServer } from "socket.io";
 import type {
+  Role,
+  ForumPermission,
+  AuditAction,
   ChatMessage,
   ClientToServerEvents,
   ServerToClientEvents,
   PinnedMessage,
   MessageKind,
+  ServerPermission,
 } from "@thekeep/shared";
+import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
+import { z } from "zod";
+import { nanoid } from "nanoid";
+import type { Server as IoServer } from "socket.io";
 import { mentionsField, parseNpcStats } from "@thekeep/shared";
+import { recordAudit } from "../audit.js";
 import { messages, rooms, roomThreadCategories, roomMembers, pinnedMessages, users } from "../db/schema.js";
 import { callerCanEditRoom } from "../auth/roomPermissions.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import { sanitizeBio } from "../auth/html.js";
-import { getSessionUser } from "./auth.js";
 import { areServersEnabled, getServerSettings, getSettings } from "../settings.js";
 import { resolveRoomServerId } from "../earning/pool.js";
-import type { ServerPermission } from "@thekeep/shared";
+import { hasPermission } from "../auth/permissions.js";
 import type { Db } from "../db/index.js";
+import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

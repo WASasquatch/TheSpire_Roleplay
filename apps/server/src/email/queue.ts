@@ -10,9 +10,9 @@ import { emailCategoryLabel } from "@thekeep/shared";
 import { emailCampaigns, emailOutbox, emailUnsubscribes } from "../db/schema.js";
 import { getSettings } from "../settings.js";
 import { sendEmail } from "../lib/mailer.js";
+import type { Db } from "../db/index.js";
 import { renderBrandedEmail, publicBaseUrl } from "./layout.js";
 import { unsubscribeUrl } from "./unsubscribe.js";
-import type { Db } from "../db/index.js";
 
 const TICK_MS = 60_000;
 /** Max sends per tick — bounds event-loop time and provider burst rate. */

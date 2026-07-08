@@ -49,7 +49,6 @@ import {
   normalizeTag,
   MAX_TAGS_PER_ENTITY,
   AVATAR_CROP_DEFAULTS,
-  clampAvatarCrop,
   type AvatarCrop,
   type Theme,
   type ServerModPermission,
@@ -70,7 +69,6 @@ import { IconCloseButton } from "../shared/CloseButton.js";
 import { ContextualTour } from "../tours/ContextualTour.js";
 import { BanModal } from "../moderation/BanModal.js";
 import { ProfileModal } from "../profile/ProfileModal.js";
-import { ImageCropField } from "./ImageCropField.js";
 // Per-server admin tabs (Admin Partition — plan_ext.md). Self-contained tabs
 // taking { serverId, viewer, busy, run, onSaved }.
 import ReportsTab from "../server-admin/ReportsTab.js";
@@ -88,6 +86,7 @@ import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { recordNav } from "../../lib/nav-metrics.js";
 import { parseDurationMs } from "../../lib/duration.js";
 import { useChat } from "../../state/store.js";
+import { ImageCropField } from "./ImageCropField.js";
 
 /* ============================================================
  * Wire shapes (consumed read-only from the documented endpoints).

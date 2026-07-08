@@ -22,14 +22,14 @@
  * NLP dependency.
  */
 
+import { addSystemMessage } from "../realtime/broadcast.js";
+import type { Db } from "../db/index.js";
 import {
   registerGameKind,
   type GameSession,
-  type IdentityKey,
   type ParticipantRef,
   type ResolveContext,
 } from "./registry.js";
-import { addSystemMessage } from "../realtime/broadcast.js";
 import {
   formatWinningsLine,
   getBuiltinCommandConfig,
@@ -37,7 +37,6 @@ import {
   rewardIsNonZero,
   type BuiltinCommandReward,
 } from "./config.js";
-import type { Db } from "../db/index.js";
 
 export const TRIVIA_KIND = "trivia";
 export const TRIVIA_COMMAND_NAME = "trivia";

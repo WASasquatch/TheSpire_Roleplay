@@ -4,10 +4,10 @@ import type { EmoticonSheet, UnicodeEmoji } from "@thekeep/shared";
 import { COMMUNITY_EMOTICON_USE_COST, UNICODE_EMOJI_CATEGORIES, UNICODE_EMOJI_FLAT, isEmoticonCellEmpty } from "@thekeep/shared";
 import { useEmoticons } from "../../state/emoticons.js";
 import { useChat } from "../../state/store.js";
-import { EmoticonSprite } from "./EmoticonSprite.js";
 import { MAX_VISIBLE_RECENT, recentPicks } from "../../lib/recentEmoticons.js";
 import { animationClassForLabel } from "../../lib/emoticonMoods.js";
 import { useCommunityEmoticon } from "../../lib/emoticonSubmissions.js";
+import { EmoticonSprite } from "./EmoticonSprite.js";
 
 interface Props {
   /** Called when the user picks a sheet cell. */

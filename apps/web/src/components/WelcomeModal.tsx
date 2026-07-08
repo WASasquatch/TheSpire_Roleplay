@@ -1,6 +1,6 @@
 import DOMPurify from "dompurify";
 import { useState } from "react";
-import { Modal } from "./Modal.js";
+import { Modal } from "./cosmetics/Modal.js";
 
 interface Props {
   /** Sanitized HTML body. Server already ran this through the bio allow-list; we DOMPurify a second time as defense-in-depth. */

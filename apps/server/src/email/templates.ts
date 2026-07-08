@@ -6,10 +6,9 @@ import { getSettings } from "../settings.js";
 import { sendEmail, type SendEmailResult } from "../lib/mailer.js";
 import { publicBaseUrl, renderBrandedEmail } from "./layout.js";
 import type { Db } from "../db/index.js";
-
-function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+// `esc` escapes only `& < >` (text-node context) — the shared
+// `escapeHtml` default, byte-identical to the former inline copy.
+import { escapeHtml as esc } from "@thekeep/shared";
 
 export async function sendPasswordResetEmail(
   db: Db,

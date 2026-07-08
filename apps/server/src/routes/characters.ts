@@ -10,6 +10,8 @@ import {
   TOUR_IDS,
   parseTagList,
   serializeTagList,
+  CHAR_NAME_RX,
+  normalizeCharName,
 } from "@thekeep/shared";
 import type { TourId } from "@thekeep/shared";
 import { hasPermission } from "../auth/permissions.js";
@@ -30,28 +32,9 @@ import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
-/** Same regex used by `/char create` so the two creation paths stay in
- *  lockstep. A non-breaking space (U+00A0) is allowed and PRESERVED, the
- *  command parser treats NBSP as a normal word character (see
- *  commands/parser.ts), so `The\u00A0Watcher` stays one token and works
- *  with /whisper, /char, etc. An ASCII space is still accepted here for
- *  backward compatibility with existing names and the `/char create`
- *  command, but the client creation UIs steer new names away from it
- *  (it splits on whitespace and breaks those same commands). */
-const CHAR_NAME_RX = /^[\p{L}\p{N}_\-'\u00A0 ]{1,40}$/u;
-
-/**
- * Mirrors `normalizeCharName` in commands/builtins/char.ts. Trims
- * surrounding whitespace (including NBSP at the edges) but PRESERVES
- * interior NBSP: folding it to an ASCII space used to defeat the whole
- * point of typing Alt+0160 for a parser-safe name, the stored value
- * came back with a real space and broke commands. Dup detection stays
- * space-insensitive via `eqNameInsensitive` below, so "John Smith" and
- * "John\u00A0Smith" still collide. Keep the two normalizers in sync.
- */
-function normalizeCharName(input: string): string {
-  return input.trim();
-}
+// `CHAR_NAME_RX` and `normalizeCharName` are the canonical shared helpers
+// from @thekeep/shared (packages/shared/src/names.ts); `/char create` and
+// this route both import them so the two creation paths stay in lockstep.
 const createCharacterBody = z.object({ name: z.string().min(1).max(40) }).strict();
 const activeCharacterBody = z.object({
   /** null clears the active character (drops the user back to OOC). */

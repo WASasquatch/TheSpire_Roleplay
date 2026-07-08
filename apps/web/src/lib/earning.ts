@@ -7,7 +7,7 @@
  * admin Awards tab) can import the types without bringing in Zustand.
  */
 
-import { readError } from "./http.js";
+import { jsonOrThrow, readError, withIdentityQuery } from "./http.js";
 
 export interface PoolView {
   scope: "user" | "character";
@@ -483,11 +483,6 @@ export interface AdminAwardsResponse {
 
 /* ---------- fetch helpers ---------- */
 
-async function jsonOrThrow<T>(r: Response): Promise<T> {
-  if (!r.ok) throw new Error(await readError(r));
-  return (await r.json()) as T;
-}
-
 /**
  * Multi-Server Lift: the single place that turns the active server id
  * into the wire field every earning read/write rides on. Append it to
@@ -924,9 +919,8 @@ export async function fetchPublicEarning(
   // for character profiles, since the master pool's XP / currency /
   // rank / border belong to a different identity. Omitted (or null)
   // for master/OOC profiles, which keep the legacy behavior.
-  const qs = characterId ? `?characterId=${encodeURIComponent(characterId)}` : "";
   return jsonOrThrow<PublicEarningResponse>(
-    await fetch(`/earning/users/${encodeURIComponent(userId)}${qs}`, { credentials: "include" }),
+    await fetch(withIdentityQuery(`/earning/users/${encodeURIComponent(userId)}`, characterId), { credentials: "include" }),
   );
 }
 

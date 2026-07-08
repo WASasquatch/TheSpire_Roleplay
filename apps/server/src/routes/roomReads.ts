@@ -7,6 +7,7 @@ import type { Db } from "../db/index.js";
 import { messages, perRoomNotifyPrefs, roomReads, rooms, users } from "../db/schema.js";
 import { getSessionUser } from "./auth.js";
 import { pulseRoomUnread } from "../notifications/engine.js";
+import { emitToUser } from "../realtime/presence.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -217,12 +218,7 @@ export async function registerRoomReadsRoutes(app: FastifyInstance, db: Db, io: 
     // one fetchSockets(), filter by socket.data.userId, emit. Best-effort — a
     // socket hiccup must not fail the mute write that already committed.
     try {
-      const socks = await io.fetchSockets();
-      for (const s of socks) {
-        if ((s.data as { userId?: string }).userId === me.id) {
-          s.emit("room:muted", { roomId, muted: body.muted });
-        }
-      }
+      await emitToUser(io, me.id, "room:muted", { roomId, muted: body.muted });
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error("[roomReads] room:muted fan-out failed", err);

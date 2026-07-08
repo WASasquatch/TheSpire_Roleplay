@@ -31,6 +31,7 @@
 import { and, gte, lt, sql } from "drizzle-orm";
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 import { nanoid } from "nanoid";
+import { startOfUtcDayMs } from "@thekeep/shared";
 import {
   analyticsDaily,
   analyticsEvent,
@@ -46,8 +47,7 @@ function dayKey(ms: number): string {
 
 /** [startMs, endMs) covering the whole UTC day that `ref` falls in. */
 function utcDayBounds(ref: number): { start: number; end: number; day: string } {
-  const d = new Date(ref);
-  const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const start = startOfUtcDayMs(ref);
   return { start, end: start + 24 * 60 * 60 * 1000, day: dayKey(start) };
 }
 

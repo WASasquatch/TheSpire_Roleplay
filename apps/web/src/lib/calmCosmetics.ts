@@ -25,84 +25,42 @@
  * a user can quiet cosmetics for performance without taking on Reduce Motion's
  * broader "freeze auto-playing motion" behavior, and vice-versa.
  */
-import { useSyncExternalStore } from "react";
+import { createPersistedToggleStore } from "./persistedToggleStore.js";
 import { onReduceMotionChange, reduceMotionEnabled } from "./reducedMotion.js";
 import { onPerfModeChange, perfModeEnabled } from "./perfMode.js";
 
 const LS_KEY = "tk.reduceCosmetics";
 
-type Listener = () => void;
-const listeners = new Set<Listener>();
-
-/** The cosmetics-only manual toggle (independent of Reduce Motion / Perf Mode). */
-let cosmeticToggle = readToggle();
-/** Cached so getSnapshot returns a stable value between real changes
- *  (useSyncExternalStore requires snapshot stability or it loops). */
-let snapshot = compute();
-
-function readToggle(): boolean {
-  try {
-    return localStorage.getItem(LS_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function compute(): boolean {
-  return reduceMotionEnabled() || perfModeEnabled() || cosmeticToggle;
-}
-
-function applyRootClass(): void {
-  if (typeof document !== "undefined") {
-    document.documentElement.classList.toggle("calm-cosmetics", snapshot);
-  }
-}
-
-function refresh(): void {
-  const next = compute();
-  if (next === snapshot) return;
-  snapshot = next;
-  applyRootClass();
-  for (const l of listeners) l();
-}
+const store = createPersistedToggleStore<boolean>({
+  storageKey: LS_KEY,
+  rootClass: "calm-cosmetics",
+  read: (raw) => raw === "1",
+  serialize: (on) => (on ? "1" : "0"),
+  // ON when either upstream gate is on, or the cosmetics-only toggle is on.
+  compute: (cosmeticToggle) =>
+    reduceMotionEnabled() || perfModeEnabled() || cosmeticToggle,
+});
 
 /** Non-reactive read for plain modules. */
-export function calmCosmeticsEnabled(): boolean {
-  return snapshot;
-}
+export const calmCosmeticsEnabled = store.enabled;
 
 /** The cosmetics-only toggle's own state (independent of the upstream gates),
  *  for the settings control to reflect what the user themselves chose. */
-export function getReduceCosmeticsToggle(): boolean {
-  return cosmeticToggle;
-}
+export const getReduceCosmeticsToggle = store.getToggle;
 
 /** Flip the cosmetics-only toggle (persists per-device, refreshes the gate). */
-export function setReduceCosmeticsToggle(on: boolean): void {
-  cosmeticToggle = on;
-  try {
-    localStorage.setItem(LS_KEY, on ? "1" : "0");
-  } catch {
-    /* private mode / storage disabled — honored for this session only */
-  }
-  refresh();
-}
-
-function subscribe(listener: Listener): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
+export const setReduceCosmeticsToggle = store.setToggle;
 
 // Re-derive whenever either upstream gate flips. These subscriptions live for
 // the lifetime of the tab (the gate is global), so we never unsubscribe.
-onReduceMotionChange(refresh);
-onPerfModeChange(refresh);
+onReduceMotionChange(store.refresh);
+onPerfModeChange(store.refresh);
 
 // Stamp the initial class as soon as this module loads.
-applyRootClass();
+store.applyRootClass();
 
 /** Reactive hook for React components. Re-renders when the calm-cosmetics gate
  *  flips (Reduce Motion, Performance Mode, or the cosmetics-only toggle). */
 export function useCalmCosmetics(): boolean {
-  return useSyncExternalStore(subscribe, calmCosmeticsEnabled, calmCosmeticsEnabled);
+  return store.use();
 }

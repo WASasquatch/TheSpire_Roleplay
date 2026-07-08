@@ -15,6 +15,7 @@
  *                          none, which is correct when the key uses NO
  *                          restriction or an IP-address restriction instead.
  */
+import { fetchWithTimeout } from "./fetchWithTimeout.js";
 
 const API_KEY = process.env.YOUTUBE_API_KEY ?? "";
 
@@ -68,11 +69,8 @@ interface ApiResult<T> {
  */
 async function apiGet<T = any>(path: string, params: Record<string, string>): Promise<ApiResult<T>> {
   const qs = new URLSearchParams({ ...params, key: API_KEY }).toString();
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   try {
-    const res = await fetch(`${API_BASE}/${path}?${qs}`, {
-      signal: ctrl.signal,
+    const res = await fetchWithTimeout(`${API_BASE}/${path}?${qs}`, {
       // Attach the configured Referer so a key restricted to HTTP referrers
       // accepts the call (a bare backend fetch otherwise sends none → 403
       // "Requests from referer <empty> are blocked"). Node's fetch transmits a
@@ -81,7 +79,7 @@ async function apiGet<T = any>(path: string, params: Record<string, string>): Pr
         accept: "application/json",
         ...(API_REFERER ? { Referer: API_REFERER } : {}),
       },
-    });
+    }, FETCH_TIMEOUT_MS);
     if (!res.ok) {
       // Read + parse YouTube's error body for the specific machine-readable
       // reason (e.g. "forbidden" + "Requests from referer <empty> are blocked"
@@ -110,8 +108,6 @@ async function apiGet<T = any>(path: string, params: Record<string, string>): Pr
     // eslint-disable-next-line no-console
     console.error(`[youtube] ${path} request failed:`, message);
     return { data: null, error: { httpStatus: 0, message } };
-  } finally {
-    clearTimeout(timer);
   }
 }
 

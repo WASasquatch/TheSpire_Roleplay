@@ -5,7 +5,7 @@ import { useEarning } from "../state/earning.js";
 import { disconnect } from "../lib/socket.js";
 import { clearSessionToken } from "../lib/http.js";
 import { cropStyleFor } from "../lib/avatarCrop.js";
-import { ConnectionOrb } from "./ConnectionOrb.js";
+import { ConnectionOrb } from "./chat/ConnectionOrb.js";
 import { useStoryInviteCount } from "../lib/storyInvites.js";
 import { navigateToFaqIndex } from "../lib/faqUrl.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";

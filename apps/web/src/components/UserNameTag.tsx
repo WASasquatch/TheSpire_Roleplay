@@ -3,9 +3,9 @@ import type { Gender } from "../lib/gender.js";
 import { genderGlyph } from "../lib/gender.js";
 import { useChat } from "../state/store.js";
 import { useActiveTheme } from "../lib/theme.js";
-import { BorderedAvatar } from "./BorderedAvatar.js";
-import { RankSigil } from "./RankSigil.js";
-import { StyledName } from "./StyledName.js";
+import { BorderedAvatar } from "./cosmetics/BorderedAvatar.js";
+import { RankSigil } from "./earning/RankSigil.js";
+import { StyledName } from "./cosmetics/StyledName.js";
 
 /**
  * Userlist (`railAlign`) leading-column widths. Pinning the avatar slot and

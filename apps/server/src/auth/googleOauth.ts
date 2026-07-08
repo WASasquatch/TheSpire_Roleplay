@@ -17,6 +17,7 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { FastifyRequest } from "fastify";
+import { fetchWithTimeout } from "../lib/fetchWithTimeout.js";
 
 const clientId = process.env.GOOGLE_CLIENT_ID ?? "";
 const clientSecret = process.env.GOOGLE_CLIENT_SECRET ?? "";
@@ -89,17 +90,13 @@ async function fetchJson(
   url: string,
   init: RequestInit,
 ): Promise<Record<string, unknown> | null> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), EXCHANGE_TIMEOUT_MS);
   try {
-    const res = await fetch(url, { ...init, signal: ctrl.signal });
+    const res = await fetchWithTimeout(url, init, EXCHANGE_TIMEOUT_MS);
     if (!res.ok) return null;
     const j = (await res.json()) as unknown;
     return j && typeof j === "object" ? (j as Record<string, unknown>) : null;
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

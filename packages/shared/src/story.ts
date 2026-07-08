@@ -219,15 +219,6 @@ export const STORY_COPY_PRICE_MAX = 5000;
  *  formatting never breaks. Server-enforced in the chapter-body route. */
 export const STORY_SAMPLE_MAX_WORDS = 150;
 
-/** Slug derivation for stories, same rules as worlds. */
-export function deriveStorySlug(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-}
-
 /**
  * Strip HTML and count whitespace-separated tokens. Same function used
  * server-side on save and client-side in the editor's live word count.

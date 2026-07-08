@@ -536,22 +536,6 @@ export interface WorldApplicationList {
   recent: WorldApplicationEntry[];
 }
 
-/**
- * Slug derivation for worlds and pages: lowercase, non-alphanumerics → `-`,
- * trim leading/trailing dashes, cap at 60 chars. The server uses this as a
- * fallback when the user doesn't supply an explicit slug; the editor uses
- * it for the live preview the user sees while typing a name. Both sides
- * import from here so the preview never lies about what the server will
- * accept.
- */
-export function deriveSlug(input: string): string {
-  return input
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-}
-
 /* =========================================================
  *  World knowledge base — typed entries, kinds, arcs, sessions
  * ========================================================= */

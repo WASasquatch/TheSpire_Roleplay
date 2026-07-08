@@ -22,6 +22,7 @@
  */
 
 import type { NameStyleCatalogRow } from "./earning.js";
+import { createNonceStyleTag } from "./injectStyle.js";
 
 const CATALOG_TAG_ATTR = "data-name-styles";
 const PREVIEW_TAG_ATTR = "data-name-style-preview";
@@ -52,21 +53,6 @@ export function clearNameStylePreview(): void {
   if (tag && tag.parentNode) tag.parentNode.removeChild(tag);
 }
 
-/**
- * Read the per-response CSP nonce surfaced by the server in a meta
- * tag. Dynamic `<style>` elements need this attribute to satisfy a
- * strict `style-src 'self' 'nonce-…'` policy, without it the
- * browser silently drops every catalog rule on prod (name styles
- * stop applying entirely, even though local dev works because there's
- * no CSP header). Returns null when there's no nonce meta (dev mode,
- * tests, or older builds before the meta was added).
- */
-function getCspNonce(): string | null {
-  if (typeof document === "undefined") return null;
-  const meta = document.head.querySelector('meta[name="csp-nonce"]') as HTMLMetaElement | null;
-  return meta?.content || null;
-}
-
 function writeStyleTag(tagAttr: string, styles: readonly NameStyleCatalogRow[]): void {
   if (typeof document === "undefined") return; // SSR / test environments
   const concatenated = styles
@@ -75,10 +61,8 @@ function writeStyleTag(tagAttr: string, styles: readonly NameStyleCatalogRow[]):
     .join("\n\n");
   let tag = document.head.querySelector(`style[${tagAttr}]`) as HTMLStyleElement | null;
   if (!tag) {
-    tag = document.createElement("style");
+    tag = createNonceStyleTag();
     tag.setAttribute(tagAttr, "");
-    const nonce = getCspNonce();
-    if (nonce) tag.setAttribute("nonce", nonce);
     document.head.appendChild(tag);
   }
   if (tag.textContent === concatenated) return;

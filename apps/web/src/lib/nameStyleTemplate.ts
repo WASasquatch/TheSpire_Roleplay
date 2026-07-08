@@ -29,14 +29,7 @@
  * the admin template itself contains).
  */
 
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+import { escapeHtmlAttr } from "@thekeep/shared";
 
 /**
  * Build the per-character markup that `{username-span}` expands to.
@@ -50,7 +43,7 @@ function escapeHtml(s: string): string {
  */
 export function buildUsernameSpan(displayName: string): string {
   return Array.from(displayName)
-    .map((ch, i) => `<span data-i="${i}">${escapeHtml(ch)}</span>`)
+    .map((ch, i) => `<span data-i="${i}">${escapeHtmlAttr(ch)}</span>`)
     .join("");
 }
 
@@ -66,7 +59,7 @@ export function buildUsernameSpan(displayName: string): string {
  * keeps the substitution future-proof against new placeholders.
  */
 export function applyNameStylePlaceholders(template: string, displayName: string): string {
-  const escaped = escapeHtml(displayName);
+  const escaped = escapeHtmlAttr(displayName);
   const spanned = buildUsernameSpan(displayName);
   return template
     .replace(/\{username-span\}/g, spanned)

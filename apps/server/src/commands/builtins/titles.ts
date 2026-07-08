@@ -7,8 +7,8 @@ import {
   emitMutualSettled,
   listTitlesForIdentity,
   requestTitle,
-  resolveIdentityByName,
 } from "../../titles/service.js";
+import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -136,12 +136,19 @@ export const dissolveCommand: CommandHandler = {
 
     if (kindSlug === null) {
       // Infer the kind: find all accepted titles between this identity and
-      // the named target, pick the kind if there's exactly one.
-      const target = await resolveIdentityByName(ctx.db, targetName);
-      if (!target) {
+      // the named target, pick the kind if there's exactly one. Route the
+      // target through the canonical resolver so a name shared by more than
+      // one identity prompts for a token instead of silently picking one.
+      const resolution = await resolveIdentityArg(ctx.db, targetName);
+      if (resolution.kind === "none") {
         notice(ctx, "NO_USER", `No user or character named "${targetName}".`);
         return;
       }
+      if (resolution.kind === "ambiguous") {
+        emitAmbiguousIdentityModal(ctx, targetName, resolution.matches);
+        return;
+      }
+      const target = resolution.target;
       const me = currentIdentity(ctx.user);
       const aChar = me.characterId === null
         ? sql`${mutualTitles.aCharacterId} IS NULL`
@@ -249,13 +256,17 @@ export const titlesCommand: CommandHandler = {
       titles = await listTitlesForIdentity(ctx.db, me);
       identityName = me.displayName;
     } else {
-      const resolved = await resolveIdentityByName(ctx.db, target);
-      if (!resolved) {
+      const resolution = await resolveIdentityArg(ctx.db, target);
+      if (resolution.kind === "none") {
         notice(ctx, "NO_USER", `No user or character named "${target}".`);
         return;
       }
-      titles = await listTitlesForIdentity(ctx.db, resolved);
-      identityName = resolved.displayName;
+      if (resolution.kind === "ambiguous") {
+        emitAmbiguousIdentityModal(ctx, target, resolution.matches);
+        return;
+      }
+      titles = await listTitlesForIdentity(ctx.db, resolution.target);
+      identityName = resolution.target.displayName;
     }
 
     if (titles.length === 0) {

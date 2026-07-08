@@ -1,4 +1,4 @@
-import type { CoachStep } from "../../components/CoachTour.js";
+import type { CoachStep } from "../../components/tours/CoachTour.js";
 
 /**
  * Forums browse tour — the first-run "welcome to the forums" overview. It runs

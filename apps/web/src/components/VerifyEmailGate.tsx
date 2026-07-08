@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useChat } from "../state/store.js";
 import { clearSessionToken } from "../lib/http.js";
+import { isEmailBlockGate } from "../lib/emailGate.js";
 
 /**
  * Email-verification surface for the signed-in user, driven by the
@@ -22,11 +23,11 @@ export function VerifyEmailGate() {
   const [notYet, setNotYet] = useState(false);
 
   if (!me || !me.emailVerificationEnabled || me.emailVerifiedAt != null) return null;
-  // Staff are never hard-blocked (mirrors the server chat:input exemption)
-  // so an unverified admin can't be locked out of the settings that turn
-  // block mode off. They still get the nudge banner.
-  const isStaff = me.role === "admin" || me.role === "masteradmin";
-  const mode = isStaff ? "nudge" : (me.emailVerificationMode ?? "nudge");
+  // Block determination is centralized in isEmailBlockGate (shared with the
+  // chat-feed + forum gates). Staff are never hard-blocked — mirrors the
+  // server chat:input exemption — so an unverified admin can't be locked out
+  // of the settings that turn block mode off. They still get the nudge banner.
+  const mode = isEmailBlockGate(me) ? "block" : "nudge";
 
   async function resend() {
     setSending(true);

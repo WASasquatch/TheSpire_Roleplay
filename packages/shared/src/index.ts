@@ -1,5 +1,6 @@
 export * from "./announcement.js";
 export * from "./backup.js";
+export * from "./html.js";
 export * from "./markdownToHtml.js";
 export * from "./profileFlair.js";
 export * from "./uiRoutes.js";
@@ -45,3 +46,10 @@ export * from "./pinnedMessage.js";
 export * from "./serverEvent.js";
 export * from "./automod.js";
 export * from "./onboarding.js";
+export * from "./time.js";
+export * from "./datetime.js";
+export * from "./duration.js";
+export * from "./regex.js";
+export * from "./slug.js";
+export * from "./names.js";
+export * from "./cssSanitize.js";

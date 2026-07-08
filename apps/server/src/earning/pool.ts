@@ -24,6 +24,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
+import type { Role } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import {
   characterEarning,
@@ -35,6 +36,8 @@ import {
   type DbCharacterEarning,
   type DbUserEarning,
 } from "../db/schema.js";
+import { serverAuthority } from "../servers/authority.js";
+import { getSettings, areServersEnabled } from "../settings.js";
 
 /**
  * The literal id of the undeletable default server (`is_system`). All legacy
@@ -125,6 +128,34 @@ export async function resolveProfileServerId(db: Db, ownerUserId: string): Promi
     .where(and(eq(serverMembers.serverId, favorite), eq(serverMembers.userId, ownerUserId)))
     .limit(1))[0];
   return membership ? favorite : DEFAULT_SERVER_ID;
+}
+
+/**
+ * Resolve the active server an ARCADE reward (and its daily-cap scan) lands on.
+ * The arcade routes are NOT room-scoped, so the active server comes from an
+ * optional `?serverId` (GET) / body.serverId (POST), validated EXACTLY like
+ * `/earning/me` (routes/earning.ts): honored only when the servers flag is on
+ * AND the caller may view that server's economy (it exists and they're a
+ * member, owner/staff folded into serverAuthority.isMember). Anything else —
+ * flag off, unknown id, foreign server — falls back to the default server, so
+ * the cap-count + credit stay on the same pool and the flag-off / single-server
+ * path is byte-identical (no extra DB hits when the query is absent or already
+ * the default).
+ */
+export async function resolveActiveServerId(
+  db: Db,
+  me: { id: string; role: Role },
+  requestedServerId: string | undefined,
+): Promise<string> {
+  if (
+    requestedServerId &&
+    requestedServerId !== DEFAULT_SERVER_ID &&
+    areServersEnabled(await getSettings(db))
+  ) {
+    const authority = await serverAuthority(db, me, requestedServerId);
+    if (authority.server && authority.isMember) return requestedServerId;
+  }
+  return DEFAULT_SERVER_ID;
 }
 
 /**

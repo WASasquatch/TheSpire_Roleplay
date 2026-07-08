@@ -1,5 +1,6 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
+import { CHAR_NAME_RX, normalizeCharName } from "@thekeep/shared";
 import { characters, users } from "../../db/schema.js";
 import { resolveDisplayName } from "../../auth/session.js";
 import { getSettings } from "../../settings.js";
@@ -7,26 +8,12 @@ import { eqNameInsensitive } from "../../lib/nameLookup.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const MAX_NAME_LEN = 40;
-// Mirror of CHAR_NAME_RX in routes/characters.ts, keep in lockstep. A
+// `CHAR_NAME_RX` and `normalizeCharName` are the canonical shared
+// helpers from @thekeep/shared (packages/shared/src/names.ts); both
+// server creation paths import them so they stay in lockstep. A
 // non-breaking space (U+00A0) is allowed and PRESERVED (the parser
 // treats it as a normal word character, so it stays parser-safe); an
 // ASCII space is still accepted for backward compatibility.
-const NAME_RX = /^[\p{L}\p{N}_\-'\u00A0 ]{1,40}$/u;
-
-/**
- * Normalize a typed character name before the regex check. Trims
- * surrounding whitespace (including edge NBSP) but PRESERVES interior
- * NBSP (U+00A0): folding it to an ASCII space used to defeat the
- * Alt+0160 escape hatch, the stored name came back with a real space
- * that breaks /whisper, /char, and every other name-taking command.
- * Name lookups (`findCharacter`) canonicalize NBSP\u2194space via
- * `eqNameInsensitive`, so switching / editing / deleting still
- * resolves regardless of which form the user typed or stored. Keep in
- * sync with `normalizeCharName` in routes/characters.ts.
- */
-function normalizeCharName(input: string): string {
-  return input.trim();
-}
 
 function notice(ctx: CommandContext, code: string, message: string) {
   ctx.socket.emit("error:notice", { code, message });
@@ -67,7 +54,7 @@ async function findCharacter(ctx: CommandContext, name: string) {
 
 async function createSubcommand(ctx: CommandContext, rawName: string) {
   const name = normalizeCharName(rawName);
-  if (!NAME_RX.test(name) || name.length > MAX_NAME_LEN) {
+  if (!CHAR_NAME_RX.test(name) || name.length > MAX_NAME_LEN) {
     return notice(
       ctx,
       "BAD_CHAR_NAME",

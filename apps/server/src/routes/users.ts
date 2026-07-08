@@ -7,7 +7,7 @@ import { auditLog, characters, messages, sessions, userEarning, userIpLog, users
 import { getSessionUser } from "./auth.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import { recordAudit } from "../audit.js";
-import { canonicalizeNameForLookup, loweredSpaceCanonical, substringNameInsensitive } from "../lib/nameLookup.js";
+import { canonicalizeNameForLookup, loweredSpaceCanonical, substringNameInsensitive, escapeLike } from "../lib/nameLookup.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { softHideUserMessages } from "../lib/purgeUserMessages.js";
 import type { Db } from "../db/index.js";
@@ -486,7 +486,7 @@ export async function registerUsersRoutes(
     // Admin search includes email + disabled accounts (for moderation review).
     // `q` is escaped for SQL LIKE wildcards so an admin pasting a literal
     // `_` doesn't match every row of the user table.
-    const escapedQ = q.replace(/[%_]/g, (c) => `\\${c}`);
+    const escapedQ = escapeLike(q);
     const whereExpr = and(
       sql`${users.username} != 'system'`,
       q

@@ -18,7 +18,7 @@
  *   - closing the window calls /arcade/grimhold/end.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Modal } from "../Modal";
+import { Modal } from "../cosmetics/Modal";
 import { ensureInjectedStyle } from "../../lib/injectStyle";
 import { endGrimholdRun, reportGrimholdScore, startGrimholdRun } from "../../lib/grimhold";
 

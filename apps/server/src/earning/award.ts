@@ -35,6 +35,7 @@ import {
   userEarning,
 } from "../db/schema.js";
 import { getSettings } from "../settings.js";
+import { socketsForUser } from "../realtime/presence.js";
 import type { EarningConfig } from "./config.js";
 import { analyzeMessageQuality, recordAwardedMessage } from "./messageQuality.js";
 import {
@@ -206,10 +207,8 @@ export async function creditPool(
       notificationId = record.id;
     }
 
-    const sockets = await io.fetchSockets();
-    for (const s of sockets) {
-      const uid = (s.data as { userId?: string }).userId;
-      if (uid !== input.notifyUserId) continue;
+    const mine = await socketsForUser(io, input.notifyUserId);
+    for (const s of mine) {
       s.emit("earning:earned", {
         scope: input.scope,
         ownerId: input.ownerId,
@@ -242,9 +241,79 @@ export async function creditPool(
   }
 }
 
+/** The synchronous transaction handle better-sqlite3 hands the
+ *  `db.transaction((tx) => …)` callback. Shared by the in-transaction
+ *  primitives below so callers can compose them inside a wider tx. */
+export type EarningTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+export interface DebitPoolInput {
+  /** Per-server economy partition (same grain as {@link CreditPoolInput}). */
+  serverId: string;
+  scope: AwardScopeKind;
+  /** For `"user"` scope this is the userId; for `"character"` the characterId. Also the ledger `ownerId`. */
+  ownerId: string;
+  /**
+   * SIGNED currency change written to BOTH the pool balance and the ledger
+   * row's `currencyDelta`. A debit passes a NEGATIVE value; a credit passes a
+   * positive one. Unlike {@link creditPool} the result is NOT floored at 0,
+   * so with {@link rejectOnInsufficient} off a large negative delta can drive
+   * the balance below zero (no caller does this today).
+   */
+  currencyDelta: number;
+  reason: string;
+  metadata?: Record<string, unknown> | null;
+  /**
+   * When true, reject (return `{ ok: false, balance }`) if applying
+   * `currencyDelta` would drive the balance below zero, leaving the pool and
+   * ledger completely untouched. This is the "spend must not overdraw" guard.
+   */
+  rejectOnInsufficient: boolean;
+}
+
+export type DebitPoolResult =
+  | { ok: true; final: { xp: number; currency: number; rankKey: string | null; tier: number | null } }
+  | { ok: false; balance: number };
+
+/**
+ * Sync currency-only pool mutation that runs INSIDE the caller's transaction
+ * (it does NOT open its own), used by the arcade money paths that must be
+ * atomic with sibling writes (Eidolon basic-heal debit, Eidolon sale credit).
+ *
+ * Deliberately NOT `creditPool`: it opens no transaction, does not floor at 0,
+ * and NEVER recomputes rank placement or fires a rank-up
+ * ({@link recordRankUp}). Only `currency` (+ `updatedAt`) is written on the
+ * pool row; `xp`, `rankKey`, `tier`, and the peak columns are left exactly as
+ * they were and echoed back in `final` for the caller's socket emit. The
+ * ledger row records `xpDelta: 0` and the signed `currencyDelta`.
+ *
+ * Idempotency + notification (emit) are the caller's responsibility.
+ */
+export function debitPool(tx: EarningTx, input: DebitPoolInput): DebitPoolResult {
+  const { serverId, scope, ownerId, currencyDelta, reason } = input;
+  const metadataJson = input.metadata ? JSON.stringify(input.metadata) : null;
+  if (scope === "character") {
+    tx.insert(characterEarning).values({ serverId, characterId: ownerId }).onConflictDoNothing().run();
+    const e = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId))).limit(1).all()[0];
+    const bal = e?.currency ?? 0;
+    const next = bal + currencyDelta;
+    if (input.rejectOnInsufficient && next < 0) return { ok: false, balance: bal };
+    tx.update(characterEarning).set({ currency: next, updatedAt: new Date() }).where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId))).run();
+    tx.insert(earningLedger).values({ id: nanoid(), serverId, scope, ownerId, xpDelta: 0, currencyDelta, reason, metadataJson }).run();
+    return { ok: true, final: { xp: e?.xp ?? 0, currency: next, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null } };
+  }
+  tx.insert(userEarning).values({ serverId, userId: ownerId }).onConflictDoNothing().run();
+  const e = tx.select().from(userEarning).where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, ownerId))).limit(1).all()[0];
+  const bal = e?.currency ?? 0;
+  const next = bal + currencyDelta;
+  if (input.rejectOnInsufficient && next < 0) return { ok: false, balance: bal };
+  tx.update(userEarning).set({ currency: next, updatedAt: new Date() }).where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, ownerId))).run();
+  tx.insert(earningLedger).values({ id: nanoid(), serverId, scope: "user", ownerId, xpDelta: 0, currencyDelta, reason, metadataJson }).run();
+  return { ok: true, final: { xp: e?.xp ?? 0, currency: next, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null } };
+}
+
 /** Sync read of the earning row used inside the transaction. */
 function readPriorEarningSync(
-  tx: Parameters<Parameters<Db["transaction"]>[0]>[0],
+  tx: EarningTx,
   serverId: string,
   scope: AwardScopeKind,
   ownerId: string,

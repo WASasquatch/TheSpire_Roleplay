@@ -1,4 +1,4 @@
-import type { CoachStep } from "../../components/CoachTour.js";
+import type { CoachStep } from "../../components/tours/CoachTour.js";
 
 /**
  * Server-create tour: walks an eligible viewer through the application form for

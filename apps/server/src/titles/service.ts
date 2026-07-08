@@ -8,7 +8,12 @@ import type {
   ServerToClientEvents,
 } from "@thekeep/shared";
 import { characters, ignores, mutualTitles, titleKinds, users } from "../db/schema.js";
-import { eqNameInsensitive } from "../lib/nameLookup.js";
+import {
+  formatTokenFor,
+  resolveIdentityArg,
+  type ResolvedTarget,
+} from "../commands/identityArg.js";
+import { emitToUser, socketsForUsers } from "../realtime/presence.js";
 import type { Db } from "../db/index.js";
 
 /**
@@ -51,59 +56,50 @@ type Side = "a" | "b";
 /* -------------------------------------------------------------------------- */
 
 /**
- * Resolve a name (master username OR character name) to an identity. Mirrors
- * the precedence in /whois: master usernames are globally unique and win
- * over character names. Returns null when the name maps to no live identity
- * (disabled user, soft-deleted character, etc.).
+ * Resolve a name (master username OR character name) or identity token to a
+ * title-bound `Identity`, routing through the canonical `resolveIdentityArg`
+ * so `/request`, `/dissolve`, and `/titles` handle `@id:` / `@cid:` tokens,
+ * master-first name lookup, and NAME COLLISIONS exactly like every other
+ * identity-keyed command.
+ *
+ * Titles used to keep their own copy of this lookup that silently returned
+ * the FIRST matching row when a name mapped to more than one identity — the
+ * exact first-hit-wins bug the shared resolver was written to prevent (a
+ * `/request marriage Jagger` could propose to the wrong Jagger). This wrapper
+ * surfaces that collision instead: `ambiguous` carries every match so the
+ * caller can prompt the user to re-run with a specific token.
+ *
+ * `ResolvedTarget` is a superset of `Identity` (it also carries
+ * `masterUsername`), so callers can use `.target` wherever an `Identity` is
+ * expected without conversion.
  */
-export async function resolveIdentityByName(db: Db, name: string): Promise<Identity | null> {
-  const trimmed = name.trim();
-  if (!trimmed) return null;
+export async function resolveTitleTarget(db: Db, name: string): Promise<
+  | { kind: "unique"; target: ResolvedTarget }
+  | { kind: "ambiguous"; matches: ResolvedTarget[] }
+  | { kind: "none" }
+> {
+  return resolveIdentityArg(db, name);
+}
 
-  // Identity tokens win, paste-friendly from a profile: @cid:<id> targets a
-  // character, @id:<id> a master/OOC account. Bypass the name lookup so a name
-  // with spaces (or a collision) can still be addressed unambiguously.
-  if (trimmed.startsWith("@cid:")) {
-    const charId = trimmed.slice(5).trim();
-    if (!charId || /\s/.test(charId)) return null;
-    const c = (await db.select().from(characters).where(eq(characters.id, charId)).limit(1))[0];
-    if (!c || c.deletedAt) return null;
-    const owner = (await db.select().from(users).where(eq(users.id, c.userId)).limit(1))[0];
-    if (!owner || owner.disabledAt) return null;
-    return { userId: c.userId, characterId: c.id, displayName: c.name };
-  }
-  if (trimmed.startsWith("@id:")) {
-    const userId = trimmed.slice(4).trim();
-    if (!userId || /\s/.test(userId)) return null;
-    const u2 = (await db.select().from(users).where(eq(users.id, userId)).limit(1))[0];
-    if (!u2 || u2.disabledAt) return null;
-    return { userId: u2.id, characterId: null, displayName: u2.username };
-  }
-
-  // Space-insensitive match, NBSP and ASCII space are equivalent on
-  // lookup so a /title or /whois argument typed with a regular space
-  // resolves a master stored with NBSP (the master-username canonical
-  // form).
-  const u = (await db
-    .select()
-    .from(users)
-    .where(eqNameInsensitive(users.username, trimmed))
-    .limit(1))[0];
-  if (u && !u.disabledAt) {
-    return { userId: u.id, characterId: null, displayName: u.username };
-  }
-
-  const c = (await db
-    .select()
-    .from(characters)
-    .where(eqNameInsensitive(characters.name, trimmed))
-    .limit(1))[0];
-  if (!c || c.deletedAt) return null;
-
-  const owner = (await db.select().from(users).where(eq(users.id, c.userId)).limit(1))[0];
-  if (!owner || owner.disabledAt) return null;
-
-  return { userId: c.userId, characterId: c.id, displayName: c.name };
+/**
+ * One-line disambiguation notice for the service-level callers that answer
+ * over `RequestResult` (no socket to open a modal). Lists each candidate with
+ * the token to paste back, mirroring the modal `emitAmbiguousIdentityModal`
+ * shows for the socket-bound `/titles` and `/dissolve` command handlers.
+ */
+export function ambiguousTargetMessage(
+  typedName: string,
+  matches: ResolvedTarget[],
+): string {
+  const list = matches
+    .map((m) => {
+      const label = m.characterId
+        ? `${m.displayName} (${m.masterUsername})`
+        : m.displayName;
+      return `${label} ${formatTokenFor(m)}`;
+    })
+    .join(", ");
+  return `"${typedName}" matches ${matches.length} identities. Re-run with one of: ${list}`;
 }
 
 /**
@@ -497,10 +493,14 @@ export async function requestTitle(
     return { ok: false, code: "NO_KIND", message: `No title type called "${kindSlug}".` };
   }
 
-  const target = await resolveIdentityByName(db, targetName);
-  if (!target) {
+  const resolution = await resolveTitleTarget(db, targetName);
+  if (resolution.kind === "none") {
     return { ok: false, code: "NO_USER", message: `No user or character named "${targetName}".` };
   }
+  if (resolution.kind === "ambiguous") {
+    return { ok: false, code: "AMBIGUOUS", message: ambiguousTargetMessage(targetName, resolution.matches) };
+  }
+  const target = resolution.target;
 
   if (identitiesEqual(requester, target)) {
     return { ok: false, code: "SELF", message: "You can't request a title with yourself." };
@@ -602,10 +602,14 @@ export async function dissolveTitle(
     return { ok: false, code: "NO_KIND", message: `No title type called "${kindSlug}".` };
   }
 
-  const target = await resolveIdentityByName(db, targetName);
-  if (!target) {
+  const resolution = await resolveTitleTarget(db, targetName);
+  if (resolution.kind === "none") {
     return { ok: false, code: "NO_USER", message: `No user or character named "${targetName}".` };
   }
+  if (resolution.kind === "ambiguous") {
+    return { ok: false, code: "AMBIGUOUS", message: ambiguousTargetMessage(targetName, resolution.matches) };
+  }
+  const target = resolution.target;
 
   const row = await findExistingRow(db, kind.id, initiator, target);
   if (!row || row.status !== "accepted") {
@@ -751,12 +755,7 @@ export async function emitMutualPrompt(
   userId: string,
   payload: MutualPromptPayload,
 ): Promise<void> {
-  const sockets = await io.fetchSockets();
-  for (const s of sockets) {
-    if ((s.data as { userId?: string }).userId === userId) {
-      s.emit("mutual:prompt", payload);
-    }
-  }
+  await emitToUser(io, userId, "mutual:prompt", payload);
 }
 
 /**
@@ -769,11 +768,8 @@ export async function emitMutualSettled(
   userIds: string[],
 ): Promise<void> {
   if (userIds.length === 0) return;
-  const ids = new Set(userIds);
-  const sockets = await io.fetchSockets();
-  for (const s of sockets) {
-    const uid = (s.data as { userId?: string }).userId;
-    if (uid && ids.has(uid)) s.emit("mutual:settled");
+  for (const s of await socketsForUsers(io, userIds)) {
+    s.emit("mutual:settled");
   }
 }
 // Silence unused-import warning when the file is consumed without all helpers.

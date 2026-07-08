@@ -8,6 +8,7 @@
 import type { EidolonHallEntry, EidolonProfileSummary, EidolonSnapshot, EidolonStateResponse } from "@thekeep/shared";
 import { FLAIR_EIDOLON_TAMER } from "@thekeep/shared";
 import { purchaseCosmetic } from "./earning";
+import { withIdentityQuery } from "./http.js";
 
 export type ArcadeAccess = "ok" | "locked" | "forbidden";
 
@@ -33,10 +34,6 @@ async function readBody(r: Response): Promise<Record<string, unknown>> {
   try { return (await r.json()) as Record<string, unknown>; } catch { return {}; }
 }
 
-function qsFor(characterId: string | null): string {
-  return characterId ? `?characterId=${encodeURIComponent(characterId)}` : "";
-}
-
 async function post(path: string, body: Record<string, unknown>): Promise<EidolonSnapshot> {
   const r = await fetch(`/arcade/eidolon/${path}`, {
     method: "POST",
@@ -53,7 +50,7 @@ async function post(path: string, body: Record<string, unknown>): Promise<Eidolo
  *  (possibly null = never hatched) snapshot, so the launcher can show the
  *  right CTA without reading the earning snapshot. */
 export async function fetchEidolon(characterId: string | null): Promise<EidolonFetchResult> {
-  const r = await fetch(`/arcade/eidolon${qsFor(characterId)}`, { credentials: "include" });
+  const r = await fetch(withIdentityQuery("/arcade/eidolon", characterId), { credentials: "include" });
   if (r.status === 402) return { access: "locked", eidolon: null };
   if (r.status === 403) return { access: "forbidden", eidolon: null };
   const parsed = await readBody(r);
@@ -159,7 +156,7 @@ export async function setEidolonNudgeOptin(characterId: string | null, on: boole
  *  memorial gallery. Returns [] on any error (display-only). */
 export async function fetchEidolonHall(characterId: string | null): Promise<EidolonHallEntry[]> {
   try {
-    const r = await fetch(`/arcade/eidolon/hall${qsFor(characterId)}`, { credentials: "include" });
+    const r = await fetch(withIdentityQuery("/arcade/eidolon/hall", characterId), { credentials: "include" });
     if (!r.ok) return [];
     const parsed = await readBody(r);
     return (parsed as { hall?: EidolonHallEntry[] }).hall ?? [];

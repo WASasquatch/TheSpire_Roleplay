@@ -54,6 +54,7 @@ import { invalidatePermissionsCache, reloadPermissionsSnapshot } from "../auth/p
 import { runPermissionsDiagnostics } from "../auth/permissionsDiagnostics.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { recordAudit } from "../audit.js";
+import { parseLimit } from "../lib/pagination.js";
 import type { Db } from "../db/index.js";
 
 /** Roles the matrix can edit. Masteradmin is intentionally excluded,
@@ -572,7 +573,7 @@ export function registerAdminPermissionRoutes(
     async (req, reply) => {
       if (!(await requireMatrixPermission(req, reply, "view_admin_permissions"))) return;
       const { auditLog } = await import("../db/schema.js");
-      const limit = Math.min(100, parseInt(req.query.limit ?? "30", 10) || 30);
+      const limit = parseLimit(req.query.limit, { max: 100, default: 30 });
 
       // Filter expressions composed against the action filter so the
       // SELECT only scans rows in the permission-actions subset.

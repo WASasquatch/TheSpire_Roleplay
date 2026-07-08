@@ -1,7 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App.js";
-import { ErrorBoundary } from "./components/ErrorBoundary.js";
+import { ErrorBoundary } from "./components/shared/ErrorBoundary.js";
 import { installAuthFetch } from "./lib/http.js";
 import "./styles.css";
 

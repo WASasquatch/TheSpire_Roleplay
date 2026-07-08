@@ -1,0 +1,494 @@
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { UNICODE_EMOJI_FLAT } from "@thekeep/shared";
+import { useEmoticons } from "../../state/emoticons.js";
+import { EmoticonSprite } from "./EmoticonSprite.js";
+import { useReducedMotion } from "../../lib/reducedMotion.js";
+
+/**
+ * Inline `:emoji-name` typeahead for chat composers.
+ *
+ * Wraps an existing `<textarea>` (passed by ref) and watches its input
+ * stream for the `:` trigger. When the caret sits at the end of a
+ * `:queryword` run (where the colon is at a word boundary so URL-like
+ * `http:`, time-like `12:30`, or the legacy `:slug:idx:` token don't
+ * fire false positives), a floating suggestion list opens beneath the
+ * caret offering up to 10 matching emoji.
+ *
+ * The suggestion blend mixes Unicode emoji (catalog from
+ * `@thekeep/shared/unicodeEmoji.ts`) with sheet emoticons currently
+ * loaded into the emoticon store. Picking Unicode inserts the raw
+ * character (browser-native rendering); picking a sheet entry inserts
+ * the `:slug:idx:` token the existing inline-emoticon renderer
+ * already handles.
+ *
+ * Keyboard contract while the popup is open:
+ *   - Up / Down  → move selection
+ *   - Enter / Tab → accept the selected suggestion
+ *   - Escape     → dismiss the popup (the typed `:query` text stays)
+ *
+ * All four keys call `event.preventDefault()` + `event.stopPropagation()`
+ * so they don't fall through to the composer's own handler (which would
+ * otherwise interpret Enter as "send", Tab as "accept mention", etc.).
+ *
+ * The component renders no visible UI when the popup is closed; the
+ * trigger detection runs on every selection / input change via
+ * onSelect / onInput listeners attached to the textarea element.
+ *
+ * Mount this beside the `<textarea>` and pass the ref + value + onChange
+ * setter, the same triple the parent already uses for its own typing
+ * pipeline. The hook coordinates the cursor position via `selectionStart`
+ * so the parent's `onChange` model stays canonical.
+ */
+
+const MAX_SUGGESTIONS = 10;
+// Length-cap on the query word to keep the regex check cheap and to
+// avoid pathological input ("::::::longstring::::::") triggering
+// repeated catalog scans.
+const MAX_QUERY_LEN = 32;
+// Popup width (px), w-60 below; used to clamp the caret-aligned left edge so
+// a near-right-edge caret doesn't push the list out of the composer.
+const POPUP_WIDTH = 240;
+
+interface SheetSuggestion {
+  kind: "sheet";
+  /** Display label, the sheet cell's label (e.g. "smile_big"). */
+  name: string;
+  /** Insertion token. The composer renders `:slug:N:` as the sheet
+   *  sprite via the existing inline-emoticon path. */
+  token: string;
+  /** For the popup preview thumbnail. */
+  sheetSlug: string;
+  cellIndex: number;
+}
+
+interface UnicodeSuggestion {
+  kind: "unicode";
+  /** Display label (e.g. "smile", "joy"). */
+  name: string;
+  /** Insertion text, the raw Unicode codepoint(s). */
+  char: string;
+}
+
+type Suggestion = SheetSuggestion | UnicodeSuggestion;
+
+interface ActiveTrigger {
+  /** Index of the `:` in the textarea value. The popup replaces text
+   *  from here through the caret. */
+  start: number;
+  /** Caret position when the trigger was last computed. */
+  end: number;
+  /** The lowercase query (chars between `:` and the caret). Empty
+   *  string when only `:` has been typed, we still surface a small
+   *  default suggestion set so the popup hints at usefulness. */
+  query: string;
+}
+
+/**
+ * Best-effort regex that detects a `:trigger` at the end of the text
+ * preceding the caret. The trigger only fires when the `:` is
+ * preceded by start-of-string, whitespace, or another newline, so
+ * `http:` doesn't trigger, `12:30` doesn't trigger, and the legacy
+ * `:slug:idx:` token typed by the picker doesn't accidentally
+ * recurse (the `:idx:` half starts with a digit run after `:`, not
+ * a letter).
+ */
+const TRIGGER_RE = /(?:^|\s)(:([a-z0-9_+-]{0,32}))$/i;
+
+export function EmoticonTypeahead({
+  textareaRef,
+  value,
+  onChange,
+}: {
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const sheets = useEmoticons((s) => s.sheets);
+  const [active, setActive] = useState<ActiveTrigger | null>(null);
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  // Calm-mode ease: the popup's horizontal placement is a JS-computed inline
+  // `left` (caret-anchored), so we fade in (opacity only) rather than slide —
+  // a slide transform would fight the inline positioning.
+  const reduceMotion = useReducedMotion();
+  // The caret column to align the popup's left edge with, measured RELATIVE
+  // to the composer's positioned wrapper (the popup renders `absolute
+  // bottom-full` inside it — see render). Vertical placement needs no JS:
+  // `bottom-full` always pins the list to the top edge of the input, immune
+  // to ancestor transforms/filters and measurement timing. The old
+  // viewport-`fixed` + body-portal approach computed top/bottom from the live
+  // rect and could fling the popup to the top of the screen when the rect read
+  // wrong; the three sibling popups (mentions, synonyms, history) all use this
+  // same `absolute bottom-full` anchor, so this brings the emoji list in line.
+  const [pos, setPos] = useState<{ left: number } | null>(null);
+  // Whether the user has explicitly moved the selection with the arrow
+  // keys. Gates Enter: without an explicit pick, Enter must fall through to
+  // the composer (send the message) instead of auto-accepting the
+  // first-highlighted suggestion. Reset on every new trigger.
+  const [navigated, setNavigated] = useState(false);
+
+  // Build an index of the sheet emoticons just once per sheet-store
+  // snapshot. Each entry carries the same shape as the Unicode flat
+  // catalog so the search loop below can match both sources uniformly.
+  const sheetIndex = useMemo<SheetSuggestion[]>(() => {
+    const out: SheetSuggestion[] = [];
+    for (const sheet of sheets) {
+      sheet.cells.forEach((label, i) => {
+        const trimmed = (label ?? "").trim();
+        if (!trimmed) return;
+        out.push({
+          kind: "sheet",
+          name: trimmed,
+          token: `:${sheet.slug}:${i}:`,
+          sheetSlug: sheet.slug,
+          cellIndex: i,
+        });
+      });
+    }
+    return out;
+  }, [sheets]);
+
+  // Resolve the suggestion list for the current query. Empty query
+  // shows a small default sampler (first 6 Unicode emoji + first 4
+  // sheet emoticons if any) so a bare `:` is informative rather than
+  // empty.
+  const suggestions = useMemo<Suggestion[]>(() => {
+    if (!active) return [];
+    const q = active.query.toLowerCase();
+    if (q.length === 0) {
+      // Bare-`:` sampler, surfaces the picker's intent without
+      // forcing the user to type a query.
+      const sample: Suggestion[] = [];
+      for (const e of UNICODE_EMOJI_FLAT.slice(0, 6)) {
+        sample.push({ kind: "unicode", name: e.name, char: e.char });
+      }
+      for (const s of sheetIndex.slice(0, 4)) sample.push(s);
+      return sample;
+    }
+    // Score: prefix matches rank above substring matches; tag matches
+    // count below name matches. Cap before sort so the work stays
+    // bounded on large catalogs.
+    const scored: Array<{ score: number; suggestion: Suggestion }> = [];
+    for (const e of UNICODE_EMOJI_FLAT) {
+      const nameMatch = e.name.indexOf(q);
+      if (nameMatch >= 0) {
+        scored.push({
+          score: nameMatch === 0 ? 0 : 10 + nameMatch,
+          suggestion: { kind: "unicode", name: e.name, char: e.char },
+        });
+        continue;
+      }
+      if (e.tags?.some((t) => t.includes(q))) {
+        scored.push({
+          score: 100,
+          suggestion: { kind: "unicode", name: e.name, char: e.char },
+        });
+      }
+    }
+    for (const s of sheetIndex) {
+      const idx = s.name.toLowerCase().indexOf(q);
+      if (idx >= 0) {
+        scored.push({ score: idx === 0 ? 5 : 15 + idx, suggestion: s });
+      }
+    }
+    scored.sort((a, b) => a.score - b.score);
+    return scored.slice(0, MAX_SUGGESTIONS).map((s) => s.suggestion);
+  }, [active, sheetIndex]);
+
+  // Detect the `:trigger` at the current caret position. Called on
+  // every input + selection event so the popup tracks the caret in
+  // real time (including back-arrow / mouse-click placements).
+  const checkTrigger = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const caret = el.selectionStart ?? 0;
+    // Only consider triggers if there's no selection (a selected
+    // range would conflict with the "replace `:query` text" pick
+    // semantics).
+    if (el.selectionStart !== el.selectionEnd) {
+      setActive(null);
+      return;
+    }
+    const upto = value.slice(0, caret);
+    const m = TRIGGER_RE.exec(upto);
+    if (!m) {
+      setActive(null);
+      return;
+    }
+    const triggerText = m[1]!; // includes the leading `:`
+    if (triggerText.length > MAX_QUERY_LEN + 1) {
+      setActive(null);
+      return;
+    }
+    const start = caret - triggerText.length;
+    const query = (m[2] ?? "").toLowerCase();
+    setActive({ start, end: caret, query });
+    setSelectedIdx(0);
+    // Fresh trigger → no explicit selection yet, so Enter sends the message
+    // rather than accepting the auto-highlighted first suggestion.
+    setNavigated(false);
+  }, [textareaRef, value]);
+
+  // Track the caret column whenever the trigger appears or moves, measured
+  // relative to the composer's positioned wrapper (the popup's offsetParent)
+  // so the `absolute` left lands correctly regardless of page scroll/transform.
+  useLayoutEffect(() => {
+    if (!active) {
+      setPos(null);
+      return;
+    }
+    const el = textareaRef.current;
+    if (!el) return;
+    // Caret column approximated via a mirror element. Browsers don't
+    // expose a direct API for "give me the caret's pixel coordinates
+    // inside a <textarea>" so we measure by copying the textarea's text +
+    // styles into a hidden <div> and reading the offset of a sentinel span
+    // placed at the caret index. Cheap at chat-input sizes; only runs on
+    // trigger changes, not in a tight loop.
+    const caretOffset = measureCaretOffset(el, active.end);
+    // `offsetLeft` is relative to the offsetParent (the relative wrapper), so
+    // adding the in-textarea caret offset gives the caret's x within that
+    // wrapper. Clamp so the popup never spills past the wrapper's right edge.
+    const wrapperWidth = (el.offsetParent as HTMLElement | null)?.clientWidth ?? el.clientWidth;
+    const rawLeft = el.offsetLeft + caretOffset.left;
+    setPos({ left: Math.max(0, Math.min(rawLeft, Math.max(0, wrapperWidth - POPUP_WIDTH))) });
+  }, [active, textareaRef, value]);
+
+  // Wire selection/input listeners. We mount these once per textarea
+  // ref; the dependency array intentionally only includes the
+  // textareaRef identity (callbacks themselves rebuild but the
+  // effect re-runs cheaply).
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const handler = () => checkTrigger();
+    el.addEventListener("input", handler);
+    el.addEventListener("click", handler);
+    el.addEventListener("keyup", handler);
+    document.addEventListener("selectionchange", handler);
+    return () => {
+      el.removeEventListener("input", handler);
+      el.removeEventListener("click", handler);
+      el.removeEventListener("keyup", handler);
+      document.removeEventListener("selectionchange", handler);
+    };
+  }, [textareaRef, checkTrigger]);
+
+  // Accept a suggestion: replace `:query` text with the suggestion's
+  // insertion content, advance the caret past it.
+  const accept = useCallback(
+    (suggestion: Suggestion) => {
+      if (!active) return;
+      const el = textareaRef.current;
+      if (!el) return;
+      const insert = suggestion.kind === "unicode" ? suggestion.char : suggestion.token;
+      const next = value.slice(0, active.start) + insert + value.slice(active.end);
+      onChange(next);
+      const caret = active.start + insert.length;
+      // Schedule the caret move after onChange flushes; setSelectionRange
+      // before React re-renders would get clobbered.
+      requestAnimationFrame(() => {
+        const el2 = textareaRef.current;
+        if (!el2) return;
+        el2.focus();
+        el2.setSelectionRange(caret, caret);
+      });
+      setActive(null);
+      setSelectedIdx(0);
+    },
+    [active, onChange, textareaRef, value],
+  );
+
+  // Key handler bound directly to the textarea via keydown capture so
+  // it runs ahead of the composer's own onKeyDown (Enter=send,
+  // Tab=mention-accept, etc.). When the popup is closed every key
+  // falls through unchanged.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const handler = (e: globalThis.KeyboardEvent) => {
+      if (!active || suggestions.length === 0) return;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        e.stopPropagation();
+        setNavigated(true);
+        setSelectedIdx((i) => (i + 1) % suggestions.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        e.stopPropagation();
+        setNavigated(true);
+        setSelectedIdx((i) => (i - 1 + suggestions.length) % suggestions.length);
+      } else if (e.key === "Tab") {
+        // Tab is an explicit "complete" gesture (never "submit"), so it
+        // always accepts the highlighted suggestion.
+        e.preventDefault();
+        e.stopPropagation();
+        const pick = suggestions[selectedIdx] ?? suggestions[0];
+        if (pick) accept(pick);
+      } else if (e.key === "Enter") {
+        // Only accept on Enter if the user explicitly arrow-navigated to a
+        // suggestion. Otherwise the popup just auto-highlighted index 0 and
+        // the user is pressing Enter to SEND their message — let it fall
+        // through to the composer (don't preventDefault/stopPropagation) so
+        // e.g. ":P" sends as-is instead of being swapped for an emoji.
+        if (navigated) {
+          e.preventDefault();
+          e.stopPropagation();
+          const pick = suggestions[selectedIdx] ?? suggestions[0];
+          if (pick) accept(pick);
+        } else {
+          setActive(null);
+        }
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        setActive(null);
+      }
+    };
+    // Capture phase so we run BEFORE the textarea's own keydown
+    // (which routes Enter to submit). React attaches its
+    // synthetic handlers in bubble phase so we win.
+    el.addEventListener("keydown", handler, true);
+    return () => el.removeEventListener("keydown", handler, true);
+  }, [active, suggestions, selectedIdx, navigated, accept, textareaRef]);
+
+  if (!active || suggestions.length === 0 || !pos) return null;
+
+  // Anchored inside the composer's `relative` wrapper (same pattern as the
+  // mention / synonym / history popups) instead of a viewport-`fixed` portal:
+  // `absolute bottom-full` always pins the list directly above the input, so
+  // it can't be flung to the top of the screen by an ancestor transform/filter
+  // or a mis-timed rect read. `pos.left` follows the caret, clamped above.
+  return (
+    <ul
+      role="listbox"
+      aria-label="Emoji suggestions"
+      // Plain `bg-keep-bg` (like the mention / synonym / history popups) —
+      // NOT `keep-panel`. Several theme styles override `.keep-panel` with a
+      // higher-specificity `[data-theme-style="…"] .keep-panel { position:
+      // relative }` rule, which would clobber the `absolute` below and drop the
+      // list into the document flow (dead space under the input).
+      className={`pointer-events-auto absolute bottom-full z-[210] mb-1 max-h-60 w-60 overflow-y-auto rounded-lg border border-keep-rule bg-keep-bg shadow-xl${reduceMotion ? " tk-fade-in" : ""}`}
+      style={{ left: pos.left }}
+      // Stop mousedown so clicking a suggestion doesn't steal focus
+      // from the textarea, the caret needs to stay where it is so
+      // setSelectionRange in `accept` lands correctly.
+      onMouseDown={(e) => e.preventDefault()}
+    >
+      {suggestions.map((s, i) => (
+        <li
+          key={s.kind === "unicode" ? `u:${s.char}:${s.name}` : `s:${s.token}`}
+          role="option"
+          aria-selected={i === selectedIdx}
+          onMouseEnter={() => setSelectedIdx(i)}
+          onClick={() => accept(s)}
+          className={`flex cursor-pointer items-center gap-2 px-2 py-1 text-xs ${
+            i === selectedIdx ? "bg-keep-action/15 text-keep-action" : "hover:bg-keep-banner/40"
+          }`}
+        >
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center text-xl leading-none">
+            {s.kind === "unicode" ? s.char : (
+              <EmoticonSprite sheetSlug={s.sheetSlug} cellIndex={s.cellIndex} size={22} />
+            )}
+          </span>
+          <span className="flex-1 truncate font-mono">:{s.name}:</span>
+          <span className="text-[9px] uppercase tracking-widest text-keep-muted">
+            {s.kind === "unicode" ? "emoji" : "sheet"}
+          </span>
+        </li>
+      ))}
+      <li className="border-t border-keep-rule/60 px-2 py-1 text-[10px] italic text-keep-muted">
+        ↑↓ navigate · enter / tab to insert · esc to dismiss
+      </li>
+    </ul>
+  );
+}
+
+/* =============================================================
+ * Caret-pixel-position measurement
+ *
+ * Browsers expose `selectionStart` but not the pixel coordinates of
+ * the caret inside a <textarea>. The standard workaround is to mount
+ * a hidden mirror <div> with the same text + styles up to the caret
+ * index, drop a zero-width sentinel span there, and read the span's
+ * offset. The mirror is reused across calls, we just reset its
+ * content per measurement.
+ * ============================================================= */
+let mirrorEl: HTMLDivElement | null = null;
+let sentinelEl: HTMLSpanElement | null = null;
+
+function ensureMirror(): { mirror: HTMLDivElement; sentinel: HTMLSpanElement } {
+  if (mirrorEl && sentinelEl) return { mirror: mirrorEl, sentinel: sentinelEl };
+  const mirror = document.createElement("div");
+  mirror.style.position = "absolute";
+  mirror.style.visibility = "hidden";
+  mirror.style.whiteSpace = "pre-wrap";
+  mirror.style.wordWrap = "break-word";
+  mirror.style.top = "0";
+  mirror.style.left = "-9999px";
+  const sentinel = document.createElement("span");
+  sentinel.textContent = "​"; // zero-width space for height stability
+  mirror.appendChild(sentinel);
+  document.body.appendChild(mirror);
+  mirrorEl = mirror;
+  sentinelEl = sentinel;
+  return { mirror, sentinel };
+}
+
+const COPIED_STYLES = [
+  "boxSizing",
+  "width",
+  "fontFamily",
+  "fontSize",
+  "fontWeight",
+  "fontStyle",
+  "letterSpacing",
+  "textTransform",
+  "textIndent",
+  "padding",
+  "border",
+  "lineHeight",
+  "tabSize",
+] as const;
+
+function measureCaretOffset(
+  textarea: HTMLTextAreaElement,
+  caretIndex: number,
+): { top: number; left: number; lineHeight: number } {
+  const { mirror, sentinel } = ensureMirror();
+  const cs = window.getComputedStyle(textarea);
+  for (const k of COPIED_STYLES) {
+    // The cast is safe because COPIED_STYLES is hand-picked from
+    // CSSStyleDeclaration's writable subset.
+    (mirror.style as unknown as Record<string, string>)[k] = cs[k];
+  }
+  // Reset content and rebuild up to the caret. We leave the sentinel
+  // as the last child so its rect IS the caret position.
+  mirror.textContent = textarea.value.slice(0, caretIndex);
+  mirror.appendChild(sentinel);
+  const mirrorRect = mirror.getBoundingClientRect();
+  const sentinelRect = sentinel.getBoundingClientRect();
+  const lineHeight = parseFloat(cs.lineHeight || "16") || 16;
+  return {
+    top: sentinelRect.top - mirrorRect.top,
+    left: sentinelRect.left - mirrorRect.left,
+    lineHeight,
+  };
+}
+
+/**
+ * Unused export to keep the file tree-shakable, components that
+ * mount the typeahead should also clean up the global mirror on
+ * teardown if they're the last mount. In practice the mirror is
+ * cheap to keep around (one hidden div per page).
+ */
+export function _disposeTypeaheadMirror(): void {
+  if (mirrorEl) {
+    mirrorEl.remove();
+    mirrorEl = null;
+    sentinelEl = null;
+  }
+}
+
+// Re-export the KeyboardEvent type so the dispatcher cast above
+// stays in one place if it ever needs adjusting.
+export type _KeyboardEvent = KeyboardEvent;

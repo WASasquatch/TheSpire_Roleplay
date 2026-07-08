@@ -23,7 +23,6 @@ import {
   Server as ServerIcon,
   Settings as SettingsIcon,
   UserPlus,
-  X,
 } from "lucide-react";
 import type { NotificationCategory, NotificationWire } from "@thekeep/shared";
 import { NOTIFICATION_CATEGORIES } from "@thekeep/shared";
@@ -36,7 +35,9 @@ import {
   saveNotifPrefs,
 } from "../lib/notificationCenter.js";
 import { disablePush, enablePush, readPushState, type PushState } from "../lib/push.js";
+import { IconCloseButton } from "./shared/CloseButton.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";
+import { relTimeParts } from "../lib/relativeTime.js";
 
 /** Track the `lg` (1024px) breakpoint so the panel can be a dropdown on
  *  desktop and a fullscreen modal on phones. */
@@ -92,15 +93,20 @@ function categoryIcon(n: NotificationWire) {
 
 /** Compact "3m" / "5h" / "2d" relative time. */
 function ago(ms: number): string {
-  const s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
-  if (s < 60) return "now";
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  const d = Math.floor(h / 24);
-  if (d < 7) return `${d}d`;
-  return `${Math.floor(d / 7)}w`;
+  const p = relTimeParts(Date.now() - ms, {
+    justNowSec: 60,
+    hourCutoffHrs: 24,
+    roundMode: "floor",
+    clampNegative: true,
+    addWeeks: true,
+  });
+  switch (p.tier) {
+    case "justNow": return "now";
+    case "minutes": return `${p.value}m`;
+    case "hours": return `${p.value}h`;
+    case "days": return `${p.value}d`;
+    default: return `${p.value}w`;
+  }
 }
 
 function Avatar({ url, name }: { url: string | null; name: string | null }) {
@@ -284,10 +290,7 @@ export function NotificationCenter({
                 className={`rounded border p-1 ${prefsOpen ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}>
                 <SettingsIcon className="h-4 w-4" aria-hidden="true" />
               </button>
-              <button type="button" onClick={() => setOpen(false)} title="Close" aria-label="Close"
-                className="rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text">
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
+              <IconCloseButton onClick={() => setOpen(false)} />
             </header>
 
             {prefsOpen ? (

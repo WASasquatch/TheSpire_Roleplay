@@ -9,48 +9,46 @@ import { arcadeGameByKey, DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, 
 // subtree, which is wrapped in a single <Suspense> boundary — so a lazy
 // descendant can always suspend into an ancestor and never crash. Do NOT
 // lazy-load anything on the anonymous path (SplashLanding, AuthGate, etc.).
-const AdminPanel = lazy(() => import("./components/AdminPanel.js").then((m) => ({ default: m.AdminPanel })));
-import { AuthGate, SplashShell } from "./components/AuthGate.js";
-import { SplashLanding } from "./components/SplashLanding.js";
-import { ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage } from "./components/EmailAuthPages.js";
+const AdminPanel = lazy(() => import("./components/admin/AdminPanel.js").then((m) => ({ default: m.AdminPanel })));
 import { VerifyEmailGate } from "./components/VerifyEmailGate.js";
 import { Banner } from "./components/Banner.js";
-import { Composer } from "./components/Composer.js";
-import { TypingIndicator } from "./components/TypingIndicator.js";
+import { Composer } from "./components/chat/Composer.js";
+import { TypingIndicator } from "./components/chat/TypingIndicator.js";
 const HelpModal = lazy(() => import("./components/HelpModal.js").then((m) => ({ default: m.HelpModal })));
 import { InfoModal } from "./components/InfoModal.js";
-import { MessageList } from "./components/MessageList.js";
+import { MessageList } from "./components/chat/MessageList.js";
 import { TheaterPanel } from "./components/TheaterPanel.js";
 import { MutualPrompts } from "./components/MutualPrompts.js";
-import { StoryInvitePrompts } from "./components/StoryInvitePrompts.js";
+import { StoryInvitePrompts } from "./components/scriptorium/StoryInvitePrompts.js";
 import { FriendRequestPrompts } from "./components/FriendRequestPrompts.js";
-import { BookmarksModal } from "./components/BookmarksModal.js";
-const ProfileEditor = lazy(() => import("./components/ProfileEditor.js").then((m) => ({ default: m.ProfileEditor })));
-import { ProfileModal } from "./components/ProfileModal.js";
+import { BookmarksModal } from "./components/chat/BookmarksModal.js";
+const ProfileEditor = lazy(() => import("./components/profile/ProfileEditor.js").then((m) => ({ default: m.ProfileEditor })));
+import { ProfileModal } from "./components/profile/ProfileModal.js";
 import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
-import { RoomsTree, type RoomWithOccupants } from "./components/RoomsTree.js";
-import { ServerRail } from "./components/ServerRail.js";
-const ServerSettingsView = lazy(() => import("./components/ServerSettingsView.js").then((m) => ({ default: m.ServerSettingsView })));
-const ServerDiscoverModal = lazy(() => import("./components/ServerDiscoverModal.js").then((m) => ({ default: m.ServerDiscoverModal })));
+import { RoomsTree, type RoomWithOccupants } from "./components/chat/RoomsTree.js";
+import { ServerRail } from "./components/servers/ServerRail.js";
+const ServerSettingsView = lazy(() => import("./components/servers/ServerSettingsView.js").then((m) => ({ default: m.ServerSettingsView })));
+const ServerDiscoverModal = lazy(() => import("./components/servers/ServerDiscoverModal.js").then((m) => ({ default: m.ServerDiscoverModal })));
 import { listServers, resolveServerSlug, visitServer, type ServerSummary } from "./lib/servers.js";
-const MessagesModal = lazy(() => import("./components/MessagesModal.js").then((m) => ({ default: m.MessagesModal })));
-import { RulesModal } from "./components/RulesModal.js";
-import { RulesPage } from "./components/RulesPage.js";
+const MessagesModal = lazy(() => import("./components/chat/MessagesModal.js").then((m) => ({ default: m.MessagesModal })));
+import { RulesModal } from "./components/servers/RulesModal.js";
+import { RulesPage } from "./components/servers/RulesPage.js";
 import { isRulesUrl, navigateAwayFromRules } from "./lib/rulesUrl.js";
 import { FaqPage } from "./components/FaqPage.js";
-import { TopCommunitiesPage, isTopCommunitiesUrl, consumeAddCommunityIntent } from "./components/TopCommunitiesPage.js";
+import { TopCommunitiesPage, isTopCommunitiesUrl, consumeAddCommunityIntent } from "./components/marketing/TopCommunitiesPage.js";
 import { faqRoute, type FaqRoute } from "./lib/faqUrl.js";
-const EarningDashboard = lazy(() => import("./components/EarningDashboard.js").then((m) => ({ default: m.EarningDashboard })));
-import { ErrorBoundary } from "./components/ErrorBoundary.js";
+const EarningDashboard = lazy(() => import("./components/earning/EarningDashboard.js").then((m) => ({ default: m.EarningDashboard })));
+import { ErrorBoundary } from "./components/shared/ErrorBoundary.js";
 const ArcadeLauncher = lazy(() => import("./components/arcade/ArcadeLauncher.js").then((m) => ({ default: m.ArcadeLauncher })));
 const EidolonWindow = lazy(() => import("./components/arcade/EidolonWindow.js").then((m) => ({ default: m.EidolonWindow })));
 const UrugalWindow = lazy(() => import("./components/arcade/UrugalWindow.js").then((m) => ({ default: m.UrugalWindow })));
 const GrimholdWindow = lazy(() => import("./components/arcade/GrimholdWindow.js").then((m) => ({ default: m.GrimholdWindow })));
-import { EarningRibbon } from "./components/EarningRibbon.js";
+import { EarningRibbon } from "./components/earning/EarningRibbon.js";
 import { BannerMarquee } from "./components/BannerMarquee.js";
-import { RoomInfoBar } from "./components/RoomInfoBar.js";
+import { RoomInfoBar } from "./components/chat/RoomInfoBar.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
+import { isEmailBlockGate } from "./lib/emailGate.js";
 import { recordNav, recordPageView, classifyPublicPath } from "./lib/nav-metrics.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
 import { playRoomTransition } from "./lib/transitions/orchestrator.js";
@@ -60,28 +58,28 @@ import { reduceMotionEnabled } from "./lib/reducedMotion.js";
 import "./lib/calmCosmetics.js";
 import { fetchSpotlightMember, fetchRoomBrief, fetchStoryBrief } from "./lib/uiRouteDynamicLabel.js";
 import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
-import { ItemZoomView, type ItemZoomEntry } from "./components/ItemZoomView.js";
-const ThreadModal = lazy(() => import("./components/ThreadModal.js").then((m) => ({ default: m.ThreadModal })));
-import { UsersModal } from "./components/UsersModal.js";
-import { WorldCatalogModal } from "./components/WorldCatalogModal.js";
-const WorldEditorModal = lazy(() => import("./components/WorldEditorModal.js").then((m) => ({ default: m.WorldEditorModal })));
-import { WorldViewerModal } from "./components/WorldViewerModal.js";
-const WorldsListModal = lazy(() => import("./components/WorldsListModal.js").then((m) => ({ default: m.WorldsListModal })));
-import { StaffModal } from "./components/StaffModal.js";
-import { AffiliateSubmitPortal } from "./components/AffiliateSubmitPortal.js";
-import { StoryCatalogModal } from "./components/StoryCatalogModal.js";
-const ForumsCatalogModal = lazy(() => import("./components/ForumsCatalogModal.js").then((m) => ({ default: m.ForumsCatalogModal })));
-import { ForumPublicLanding, readReturnForum, RETURN_FORUM_STORAGE_KEY } from "./components/ForumPublicLanding.js";
-import { ServerPublicLanding, readReturnServer, RETURN_SERVER_STORAGE_KEY } from "./components/ServerPublicLanding.js";
+import { ItemZoomView, type ItemZoomEntry } from "./components/cosmetics/ItemZoomView.js";
+const ThreadModal = lazy(() => import("./components/forums/ThreadModal.js").then((m) => ({ default: m.ThreadModal })));
+import { UsersModal } from "./components/chat/UsersModal.js";
+import { WorldCatalogModal } from "./components/worlds/WorldCatalogModal.js";
+const WorldEditorModal = lazy(() => import("./components/worlds/WorldEditorModal.js").then((m) => ({ default: m.WorldEditorModal })));
+import { WorldViewerModal } from "./components/worlds/WorldViewerModal.js";
+const WorldsListModal = lazy(() => import("./components/worlds/WorldsListModal.js").then((m) => ({ default: m.WorldsListModal })));
+import { StaffModal } from "./components/moderation/StaffModal.js";
+import { AffiliateSubmitPortal } from "./components/marketing/AffiliateSubmitPortal.js";
+import { StoryCatalogModal } from "./components/scriptorium/StoryCatalogModal.js";
+const ForumsCatalogModal = lazy(() => import("./components/forums/ForumsCatalogModal.js").then((m) => ({ default: m.ForumsCatalogModal })));
+import { ForumPublicLanding, readReturnForum, RETURN_FORUM_STORAGE_KEY } from "./components/forums/ForumPublicLanding.js";
+import { ServerPublicLanding, readReturnServer, RETURN_SERVER_STORAGE_KEY } from "./components/servers/ServerPublicLanding.js";
 import { fetchForumNotifications, locateForumTopic } from "./lib/forums.js";
 import { fetchNotifBadge } from "./lib/notificationCenter.js";
 const NotificationCenter = lazy(() => import("./components/NotificationCenter.js").then((m) => ({ default: m.NotificationCenter })));
-const StoryEditorModal = lazy(() => import("./components/StoryEditorModal.js").then((m) => ({ default: m.StoryEditorModal })));
-import { StoryReaderModal } from "./components/StoryReaderModal.js";
+const StoryEditorModal = lazy(() => import("./components/scriptorium/StoryEditorModal.js").then((m) => ({ default: m.StoryEditorModal })));
+import { StoryReaderModal } from "./components/scriptorium/StoryReaderModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
-import { ServerOnboardingModal } from "./components/ServerOnboardingModal.js";
-import { ServerEventsPanel, OPEN_SERVER_EVENT, type OpenServerEventDetail } from "./components/ServerEventsPanel.js";
-import { SiteTour } from "./components/SiteTour.js";
+import { ServerOnboardingModal } from "./components/servers/ServerOnboardingModal.js";
+import { ServerEventsPanel, OPEN_SERVER_EVENT, type OpenServerEventDetail } from "./components/servers/ServerEventsPanel.js";
+import { SiteTour } from "./components/tours/SiteTour.js";
 import { getSocket, disconnect as disconnectSocket, hasSessionBeenAnnounced, loadTabCharacter, markLoginIntent, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
@@ -93,11 +91,12 @@ import { identityArgFor, nameForCommand } from "./lib/commandText.js";
 import { playAlert, playPing, playTap, playWhisper } from "./lib/sound.js";
 import { loadCachedActiveStyleKey, loadCachedActiveTheme, saveCachedActiveStyleKey, saveCachedActiveTheme, useChat, type SiteBranding } from "./state/store.js";
 import { fetchEmoticonCatalog, useEmoticons } from "./state/emoticons.js";
-import { parseScriptoriumFromUrl, storyPermalink } from "./lib/scriptoriumUrl.js";
 import { useEarning } from "./state/earning.js";
 import { runStruckEffect } from "./lib/chatEffects.js";
 import { injectNameStyles } from "./lib/nameStyleInjector.js";
 import { injectFreeformBorders } from "./lib/freeformBorderInjector.js";
+import { BootSplash, PublicViewerShell, UnauthRouter } from "./lib/unauthRouter.js";
+import { useRoomBannerDismissal } from "./lib/roomBannerDismissal.js";
 
 export function App() {
   const me = useChat((s) => s.me);
@@ -790,24 +789,6 @@ export function App() {
   return <Chat />;
 }
 
-/**
- * Unauth-side router. Drives which face of the entrance the visitor sees
- * based on `window.location.pathname`:
- *
- *   - `/` (and anything we don't otherwise route)  → SplashLanding (marketing)
- *   - `/login`                                     → AuthGate (login form)
- *   - `/register`                                  → AuthGate (register form)
- *   - deep-link gates (/p/, /w/) come in with a    → AuthGate with hint
- *     `pending*Hint` from the parent; we always
- *     route those to AuthGate regardless of path
- *     so the hint actually surfaces.
- *
- * SPA navigation between these uses pushState + a synthetic popstate so
- * the parent re-renders without a full page reload, keeping bundle warm
- * and theme/state alive across the transition. Hard refresh / direct
- * navigation still works because the server registers `/login` and
- * `/register` as serveSplash routes that ship the same index.html.
- */
 /** Order-insensitive permission-set equality. The server returns
  *  permissions in catalog order, so identical sets are also
  *  identical arrays, but we sort defensively to avoid spurious
@@ -824,311 +805,6 @@ function samePermissions(
     if (a[i] !== b[i]) return false;
   }
   return true;
-}
-
-function UnauthRouter(props: {
-  pendingProfileHint?: { name: string; isPrivate: boolean };
-  pendingWorldHint?: { name: string; slug: string };
-}) {
-  const [path, setPath] = useState<string>(() => window.location.pathname);
-  useEffect(() => {
-    const onPop = () => setPath(window.location.pathname);
-    window.addEventListener("popstate", onPop);
-    return () => window.removeEventListener("popstate", onPop);
-  }, []);
-
-  // Centralized client-side nav: pushState changes the URL, dispatching
-  // popstate manually fires every listener (including this router's) so
-  // the page re-renders without a hard reload.
-  const navigate = (next: string) => {
-    if (window.location.pathname === next) return;
-    window.history.pushState(null, "", next);
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  };
-
-  // Deep-link hints always force AuthGate so the visitor sees the
-  // "this profile is private, sign in to view" banner regardless of
-  // which URL slot they happen to be on.
-  const hasDeepLinkHint = !!(props.pendingProfileHint || props.pendingWorldHint);
-  const serversEnabled = useChat((s) => s.branding.serversEnabled);
-
-  // Scriptorium public surfaces, render the catalog / reader inside
-  // the standalone PublicViewerShell so anonymous visitors can browse
-  // and read up to R-rated stories without an account. NC-17 cards
-  // surface in the catalog but the reader returns a login-prompt
-  // stub when an unauthenticated viewer opens one.
-  if (!hasDeepLinkHint) {
-    const route = parseScriptoriumFromUrl();
-    if (route?.kind === "catalog") {
-      return (
-        <PublicViewerShell isAuthenticated={false}>
-          <StoryCatalogModal
-            onClose={() => navigate("/")}
-            onOpenStory={(_storyId, card) => {
-              // Anonymous catalog: prefer the canonical permalink so
-              // the URL is shareable and stays bookmarkable.
-              if (card) navigate(storyPermalink(card.author.masterUsername, card.slug));
-            }}
-            onOpenEditor={() => navigate("/login")}
-          />
-        </PublicViewerShell>
-      );
-    }
-    if (route?.kind === "story") {
-      return (
-        <PublicViewerShell isAuthenticated={false}>
-          <AnonymousStoryReader
-            handle={route.handle}
-            slug={route.slug}
-            onClose={() => navigate("/scriptorium")}
-            onNavigate={navigate}
-          />
-        </PublicViewerShell>
-      );
-    }
-  }
-
-  // Forum landing (/f/<slug>): the shareable public face of a community
-  // forum. Renders inside the standalone shell so anonymous visitors get
-  // the branded page with its login/register entrance; the chosen forum
-  // is remembered and reopened after the auth round-trip.
-  if (!hasDeepLinkHint) {
-    const fm = /^\/f\/([a-z0-9_]{3,40})(?:\/t\/([A-Za-z0-9_-]{4,64}))?\/?$/.exec(path);
-    if (fm?.[1]) {
-      const anonPost = /^#p-([A-Za-z0-9_-]{4,64})$/.exec(window.location.hash)?.[1];
-      return (
-        <PublicViewerShell isAuthenticated={false}>
-          <ForumPublicLanding
-            slug={fm[1]}
-            initialTopicId={fm[2] ?? null}
-            initialPostId={anonPost ?? null}
-            onNavigate={navigate}
-          />
-        </PublicViewerShell>
-      );
-    }
-  }
-
-  // Community landing (/s/<slug>): the shareable public face of a hosted
-  // community. Logged-out visitors get the branded page + login/register
-  // entrance; signed-in visitors enter the server directly (handled in App).
-  // Gated on the servers flag; server slugs use hyphens (vs forum underscores).
-  if (!hasDeepLinkHint && serversEnabled) {
-    const sm = /^\/s\/([a-z0-9-]{3,40})\/?$/.exec(path);
-    if (sm?.[1]) {
-      return (
-        <PublicViewerShell isAuthenticated={false}>
-          <ServerPublicLanding slug={sm[1]} onNavigate={navigate} />
-        </PublicViewerShell>
-      );
-    }
-  }
-
-  // Email flow pages (logged-out): request a reset link, set a new password
-  // from a ?token= link, confirm an email from a ?token= link. All render
-  // inside SplashShell so they match the login chrome.
-  if (!hasDeepLinkHint && path === "/forgot-password") {
-    return <ForgotPasswordPage onNavigate={navigate} />;
-  }
-  if (!hasDeepLinkHint && path === "/reset-password") {
-    return <ResetPasswordPage onNavigate={navigate} />;
-  }
-  if (!hasDeepLinkHint && path === "/verify-email") {
-    return <VerifyEmailPage onNavigate={navigate} />;
-  }
-
-  if (!hasDeepLinkHint && path === "/") {
-    return <SplashLanding onNavigate={navigate} />;
-  }
-
-  const initialMode: "login" | "register" = path === "/register" ? "register" : "login";
-  return (
-    <AuthGate
-      initialMode={initialMode}
-      onNavigate={navigate}
-      {...(props.pendingProfileHint ? { pendingProfileHint: props.pendingProfileHint } : {})}
-      {...(props.pendingWorldHint ? { pendingWorldHint: props.pendingWorldHint } : {})}
-    />
-  );
-}
-
-/**
- * Anonymous-side reader wrapper. Resolves `@handle/slug` to a story
- * id via the canonical /stories/@h/s endpoint, then mounts the reader
- * with that id. NC-17 stories return a `private: true` stub from the
- * server, we surface a "log in to read this story" card instead of
- * crashing the modal.
- */
-function AnonymousStoryReader({
-  handle,
-  slug,
-  onClose,
-  onNavigate,
-}: {
-  handle: string;
-  slug: string;
-  onClose: () => void;
-  onNavigate: (path: string) => void;
-}) {
-  const [resolved, setResolved] = useState<
-    | { kind: "loading" }
-    | { kind: "ok"; storyId: string }
-    | { kind: "stub"; title: string }
-    | { kind: "notfound" }
-  >({ kind: "loading" });
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/stories/@${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`)
-      .then(async (r) => {
-        if (!r.ok) {
-          if (r.status === 404) return { kind: "notfound" as const };
-          throw new Error("load failed");
-        }
-        const j = await r.json();
-        if (j && j.private === true) {
-          return { kind: "stub" as const, title: typeof j.title === "string" ? j.title : slug };
-        }
-        const id = j?.story?.id;
-        if (typeof id !== "string") return { kind: "notfound" as const };
-        return { kind: "ok" as const, storyId: id };
-      })
-      .then((res) => { if (!cancelled) setResolved(res); })
-      .catch(() => { if (!cancelled) setResolved({ kind: "notfound" }); });
-    return () => { cancelled = true; };
-  }, [handle, slug]);
-
-  if (resolved.kind === "loading") {
-    return <p className="p-8 italic text-keep-muted">Loading story...</p>;
-  }
-  if (resolved.kind === "notfound") {
-    return (
-      <div className="mx-auto max-w-sm p-8 text-center">
-        <p className="font-action text-lg text-keep-text">Story not found</p>
-        <p className="mt-2 text-sm text-keep-muted">
-          This story doesn't exist or has been removed.
-        </p>
-        <button
-          type="button"
-          onClick={() => onNavigate("/scriptorium")}
-          className="mt-4 rounded border border-keep-action bg-keep-action/15 px-3 py-1.5 text-xs uppercase tracking-widest text-keep-action"
-        >
-          Back to Scriptorium
-        </button>
-      </div>
-    );
-  }
-  if (resolved.kind === "stub") {
-    return (
-      <div className="mx-auto max-w-sm p-8 text-center">
-        <p className="font-action text-lg text-keep-text">{resolved.title}</p>
-        <p className="mt-2 text-sm text-keep-muted">
-          This story is rated NC-17 (explicit content). You'll need to log in or register to read it.
-        </p>
-        <div className="mt-4 flex items-center justify-center gap-2">
-          <button
-            type="button"
-            onClick={() => onNavigate(`/login?story=${encodeURIComponent(slug)}`)}
-            className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg"
-          >
-            Log in
-          </button>
-          <button
-            type="button"
-            onClick={() => onNavigate(`/register?story=${encodeURIComponent(slug)}`)}
-            className="rounded border border-keep-action bg-keep-action/15 px-3 py-1.5 text-xs uppercase tracking-widest text-keep-action"
-          >
-            Register
-          </button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <StoryReaderModal
-      storyId={resolved.storyId}
-      onClose={onClose}
-      onBack={() => onNavigate("/scriptorium")}
-    />
-  );
-}
-
-/**
- * Standalone shell for direct-link content viewing. Applies the site's
- * default theme so the modal renders against the configured palette and
- * pins a small action link in the corner so the visitor has a clear path
- * forward, sign-in for anonymous viewers, or "open chat" for already-
- * authed users who landed here from a shared link.
- */
-function PublicViewerShell({
-  children,
-  isAuthenticated,
-}: {
-  children: React.ReactNode;
-  isAuthenticated: boolean;
-}) {
-  const branding = useChat((s) => s.branding);
-  const siteName = branding.siteName || "The Spire";
-
-  // Mirror the authenticated shell's applyTheme onto <html>. The
-  // catalog / reader render through <Modal>, which portals to
-  // document.body and so escapes the subtree theme vars set on the
-  // div below. On a public route the authenticated <Chat> never
-  // mounts, so applyTheme() is otherwise never called and <html>
-  // keeps the static light :root defaults from styles.css — leaving
-  // every portaled modal stuck on that flat palette: illegible
-  // against a dark-device backdrop and ignoring the visitor's
-  // light/dark preference. Stamping the resolved splash palette on
-  // <html> here lets portaled descendants inherit it. Re-resolve on
-  // a prefers-color-scheme flip so toggling the OS theme updates the
-  // page live (resolveSplashTheme reads the media query).
-  useEffect(() => {
-    const apply = () => applyTheme(resolveSplashTheme(branding));
-    apply();
-    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-    mq?.addEventListener?.("change", apply);
-    return () => mq?.removeEventListener?.("change", apply);
-  }, [branding]);
-
-  return (
-    <div
-      style={themeStyle(resolveSplashTheme(branding))}
-      className="relative min-h-screen w-full bg-keep-bg text-keep-text"
-    >
-      {/* Subtle backdrop image, same as the login splash, so the standalone
-          page still feels like part of the site rather than a stripped
-          modal floating on a flat color. Same dark/light swap as the
-          login splash via splashBgUrl (resolved palette decides). */}
-      <div
-        aria-hidden
-        className={`absolute inset-0 bg-cover bg-[position:-175px_center] opacity-40 md:bg-center ${splashBgClass(resolveSplashTheme(branding))}`}
-      />
-      <div aria-hidden className="absolute inset-0 bg-keep-bg/70" />
-      <a
-        href="/"
-        // Mobile: pinned bottom-right so it can't collide with the
-        // full-screen modal's header (the modal's own close button lives
-        // top-right on small screens). Desktop: top-right corner where the
-        // modal has natural margin around it.
-        className="fixed bottom-3 right-4 z-[60] rounded border border-keep-rule bg-keep-bg/90 px-3 py-1 text-xs uppercase tracking-widest text-keep-action shadow hover:bg-keep-bg md:bottom-auto md:top-3"
-      >
-        {isAuthenticated ? `Open ${siteName}` : `Sign in to ${siteName}`}
-      </a>
-      {children}
-    </div>
-  );
-}
-
-function BootSplash() {
-  return (
-    <SplashShell>
-      <div className="flex flex-col items-center gap-3 py-6 text-center">
-        <div className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-keep-muted">
-          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-keep-action" />
-          checking session...
-        </div>
-      </div>
-    </SplashShell>
-  );
 }
 
 function Chat() {
@@ -4251,6 +3927,13 @@ function Chat() {
   // buffer; null when the id isn't present (paged out, deleted, or no
   // active topic). Falls back gracefully if the message isn't loaded.
   const isForumRoom = room?.replyMode === "nested";
+  // Email-verification "block" gate: when on, an unverified non-staff account
+  // has the room-chat feed hidden and the forums blocked (sends are already
+  // stopped at the composer + server; DMs stay open as the escape hatch to
+  // reach staff). Computed here so the gating is a JSX-level conditional
+  // render — never a hook inside MessageList (avoids a rules-of-hooks / React
+  // #185 violation).
+  const emailBlocked = isEmailBlockGate(me);
   // Viewer-side moderator gate. Used to expose Lock/Unlock + cross-
   // author Delete in the forum UI. The server is authoritative on
   // every action, this only controls UI affordance visibility. Gates
@@ -4453,7 +4136,13 @@ function Chat() {
                 openNotifTarget(n.targetKind, n.targetId, n.serverId);
               }
             }}
-            onOpenForums={() => setForumsOpen({})}
+            onOpenForums={() => {
+              if (emailBlocked) {
+                setNotice({ code: "EMAIL_UNVERIFIED", message: "Forums are hidden while you verify your email." });
+                return;
+              }
+              setForumsOpen({});
+            }}
           />
           </>
         }
@@ -4615,6 +4304,11 @@ function Chat() {
               the typing strip when someone is, no layout shift, no
               composer jitter, no chat space lost while typing. */}
           <div className="relative flex min-h-0 flex-1 flex-col">
+          {emailBlocked ? (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center text-sm text-keep-muted">
+              Chat messages are hidden while you verify your email.
+            </div>
+          ) : (
           <MessageList
             messages={messages}
             occupants={occ}
@@ -4692,6 +4386,7 @@ function Chat() {
               setTopicCreateMode(true);
             }}
           />
+          )}
           {/* TypingIndicator overlays the bottom of the message stream
               (absolute-positioned inside the relative wrapper above).
               Renders null when nobody else is typing, so the reserved
@@ -4808,7 +4503,15 @@ function Chat() {
           onOpenMessages={() => { setMessagesOpen(true); setRailOpen(false); }}
           onOpenEarning={() => { setEarningOpen({}); setRailOpen(false); }}
           onOpenArcade={() => { setArcadeOpen(true); setRailOpen(false); }}
-          onOpenForums={() => { setForumsOpen({}); setRailOpen(false); }}
+          onOpenForums={() => {
+            if (emailBlocked) {
+              setNotice({ code: "EMAIL_UNVERIFIED", message: "Forums are hidden while you verify your email." });
+              setRailOpen(false);
+              return;
+            }
+            setForumsOpen({});
+            setRailOpen(false);
+          }}
           onClose={() => setRailOpen(false)}
           fontStep={fontStep}
         />
@@ -5273,7 +4976,7 @@ function Chat() {
           }}
         />
       ) : null}
-      {forumsOpen ? (
+      {forumsOpen && !emailBlocked ? (
         <ForumsCatalogModal
           {...(forumsOpen.key ? { initialKey: forumsOpen.key } : {})}
           {...(forumsOpen.topic ? { initialTopic: forumsOpen.topic } : {})}
@@ -5374,63 +5077,6 @@ function Chat() {
     </Suspense>
     </ActiveThemeContext.Provider>
   );
-}
-
-/**
- * Per-room banner-dismissal memory. Keyed on (roomId, kind) in
- * localStorage; the stored value is the exact world id or topic text
- * the user dismissed, so the banner reappears automatically when the
- * admin edits either one (a fresh value won't match the stored
- * dismissal). When the user leaves the room and comes back the
- * decision persists, sessionStorage would lose it on refresh, which
- * we explicitly don't want for chrome the user has actively hidden.
- *
- * Returns `[dismissed, dismiss]`, `dismissed` is true only when
- * `currentValue` is present AND matches the cached value, so a null
- * `currentValue` (no world linked, no topic set) never reads as
- * dismissed and rendering the banner conditionally on
- * `value && !dismissed` is correct.
- */
-function useRoomBannerDismissal(
-  roomId: string | null,
-  kind: "world" | "topic",
-  currentValue: string | null,
-): readonly [boolean, () => void] {
-  const storageKey = roomId ? `tk:dismissed:room-${kind}:${roomId}` : null;
-  const [stored, setStored] = useState<string | null>(() => {
-    if (!storageKey) return null;
-    try {
-      if (typeof localStorage === "undefined") return null;
-      return localStorage.getItem(storageKey);
-    } catch {
-      return null;
-    }
-  });
-  // Re-read on roomId change so navigating between rooms picks up
-  // each room's own dismissal independently.
-  useEffect(() => {
-    if (!storageKey) {
-      setStored(null);
-      return;
-    }
-    try {
-      setStored(typeof localStorage !== "undefined" ? localStorage.getItem(storageKey) : null);
-    } catch {
-      setStored(null);
-    }
-  }, [storageKey]);
-  const dismissed = !!currentValue && stored === currentValue;
-  const dismiss = useCallback(() => {
-    if (!storageKey || !currentValue) return;
-    try {
-      if (typeof localStorage !== "undefined") localStorage.setItem(storageKey, currentValue);
-    } catch {
-      // Quota or private-mode, best effort; the dismissal still
-      // sticks for the current session via the React state below.
-    }
-    setStored(currentValue);
-  }, [storageKey, currentValue]);
-  return [dismissed, dismiss] as const;
 }
 
 /** Display the per-room expiry window in the most natural unit. Pure helper. */

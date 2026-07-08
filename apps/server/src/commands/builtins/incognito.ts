@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { users } from "../../db/schema.js";
-import { addSystemMessage, broadcastPresence } from "../../realtime/broadcast.js";
+import { addSystemMessage, broadcastPresence, roomsForUser } from "../../realtime/broadcast.js";
+import { emitToUser } from "../../realtime/presence.js";
 import type { CommandContext as Ctx } from "../types.js";
 
 /**
@@ -22,15 +23,7 @@ import type { CommandContext as Ctx } from "../types.js";
  * gone by the time we walk we still want to fire the broadcast).
  */
 async function roomsUserIsIn(ctx: Ctx): Promise<string[]> {
-  const sockets = await ctx.io.fetchSockets();
-  const roomIds = new Set<string>([ctx.roomId]);
-  for (const s of sockets) {
-    if ((s.data as { userId?: string }).userId !== ctx.user.id) continue;
-    for (const r of s.rooms) {
-      if (r.startsWith("room:")) roomIds.add(r.slice(5));
-    }
-  }
-  return [...roomIds];
+  return roomsForUser(ctx.io, ctx.user.id, ctx.roomId);
 }
 import { recordAudit } from "../../audit.js";
 import type { CommandContext, CommandHandler } from "../types.js";
@@ -132,15 +125,11 @@ async function patchUser(
   // moment the toggle / alias change lands, not on the next
   // /auth/me poll. The handler on the client side updates the
   // chat store directly, same posture as `me:character-update`.
-  const allSockets = await ctx.io.fetchSockets();
-  for (const s of allSockets) {
-    if ((s.data as { userId?: string }).userId !== ctx.user.id) continue;
-    s.emit("me:incognito-update", {
-      incognitoMode: fresh.incognitoMode,
-      incognitoAlias: fresh.incognitoAlias,
-      incognitoCharacterId: fresh.incognitoCharacterId,
-    });
-  }
+  await emitToUser(ctx.io, ctx.user.id, "me:incognito-update", {
+    incognitoMode: fresh.incognitoMode,
+    incognitoAlias: fresh.incognitoAlias,
+    incognitoCharacterId: fresh.incognitoCharacterId,
+  });
   return fresh;
 }
 

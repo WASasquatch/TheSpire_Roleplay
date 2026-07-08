@@ -1,4 +1,4 @@
-import type { CoachStep } from "../../components/CoachTour.js";
+import type { CoachStep } from "../../components/tours/CoachTour.js";
 
 /**
  * Server-admin tour: orients the owner (or a mod with the matching grants) in

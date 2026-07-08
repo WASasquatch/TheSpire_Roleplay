@@ -39,6 +39,7 @@
 import type { Role } from "./profile.js";
 import { roleRank } from "./profile.js";
 import { ARCADE_GAMES, type ArcadeGameKey } from "./arcade.js";
+import { escapeHtml, escapeHtmlAttr } from "./html.js";
 
 /** Earning dashboard tabs, mirrors the `EarningOpenSpec` in apps/web. */
 export type UiRouteEarningTab =
@@ -469,26 +470,6 @@ export function splitOnUiRouteTokens(body: string): UiRouteSegment[] {
   }
   if (lastIdx < body.length) out.push({ kind: "text", raw: body.slice(lastIdx) });
   return out;
-}
-
-/** HTML-attribute-safe escape, used by {@link renderUiRouteChipsInHtml}
- *  so the inserted chip markup can't smuggle a token's label into
- *  attribute context. The catalog labels are all hardcoded today,
- *  but the contract should hold if a future entry pulls its label
- *  from a config row. */
-function escapeHtmlAttr(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-}
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
 
 /**

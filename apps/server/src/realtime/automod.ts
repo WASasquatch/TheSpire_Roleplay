@@ -35,7 +35,7 @@ import type {
   AutomodRuleAction,
   AutomodRuleScope,
 } from "@thekeep/shared";
-import { extractMentions } from "@thekeep/shared";
+import { extractMentions, escapeRegExp } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import { automodRules } from "../db/schema.js";
 import { extractFirstUrl } from "../unfurl.js";
@@ -251,11 +251,6 @@ export interface CompiledRuleset {
 }
 
 let cache: CompiledRuleset | null = null;
-
-/** Escape a literal keyword for safe embedding in a RegExp source. */
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /**
  * Build the RegExp for a keyword/regex rule, honoring caseInsensitive +

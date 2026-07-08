@@ -21,7 +21,7 @@
  * the latest milestone for visibility while we wire things up.
  */
 import React, { useEffect, useRef, useState } from "react";
-import { Modal, MODAL_CARD_CONTENT } from "../Modal";
+import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal";
 import { endUrugalRun, reportUrugalEvent, startUrugalRun } from "../../lib/urugal";
 
 const GAME_SRC = "/games/urugal/index.html";

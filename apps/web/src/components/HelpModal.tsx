@@ -3,9 +3,10 @@ import type { CommandDoc } from "@thekeep/shared";
 import { markVerified } from "@thekeep/shared";
 import { parseInline } from "../lib/markdown.js";
 import { HelpGuides } from "./HelpGuides.js";
-import { Modal, MODAL_CARD_CONTENT } from "./Modal.js";
+import { Modal, MODAL_CARD_CONTENT } from "./cosmetics/Modal.js";
+import { TabBtn } from "./shared/TabBtn.js";
 import { useChat } from "../state/store.js";
-import { CloseButton } from "./CloseButton.js";
+import { CloseButton } from "./shared/CloseButton.js";
 
 interface Props {
   /** Initial filter - pre-fills the search box (e.g. /help char). */
@@ -128,13 +129,13 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
           <div className="flex items-center gap-2">
             <h2 className="font-action text-lg">Help</h2>
             <nav className="flex gap-1 text-xs uppercase tracking-widest">
-              <TabBtn active={tab === "guides"} onClick={() => setTab("guides")}>
+              <TabBtn variant="panel" active={tab === "guides"} onClick={() => setTab("guides")}>
                 Guides
               </TabBtn>
-              <TabBtn active={tab === "commands"} onClick={() => setTab("commands")}>
+              <TabBtn variant="panel" active={tab === "commands"} onClick={() => setTab("commands")}>
                 Commands
               </TabBtn>
-              <TabBtn active={tab === "formatting"} onClick={() => setTab("formatting")}>
+              <TabBtn variant="panel" active={tab === "formatting"} onClick={() => setTab("formatting")}>
                 Formatting
               </TabBtn>
             </nav>
@@ -199,27 +200,6 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
   );
 }
 
-function TabBtn({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded border border-keep-border px-2 py-0.5 ${
-        active ? "bg-keep-bg" : "bg-keep-panel/40 hover:bg-keep-panel"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
 
 /**
  * Formatting reference. Each row shows the raw syntax in a code cell and

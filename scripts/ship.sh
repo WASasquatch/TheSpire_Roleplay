@@ -38,6 +38,7 @@
 #                        (fly.toml, Dockerfile, scripts/, etc.). .gitignore
 #                        still filters.
 #   --no-typecheck       Skip the pre-commit typecheck pass (faster, riskier).
+#   --no-test            Skip the pre-commit test suite (faster, riskier).
 #   --no-push            Commit locally only, do not push.
 #   --no-deploy          Push but skip flyctl deploy.
 #   --remote-only        Pass --remote-only to flyctl deploy (build on Fly's
@@ -69,8 +70,9 @@ set -euo pipefail
 # the system Node 18 on this dev box can't run better-sqlite3 (built against
 # v22) so any typecheck involving the server package fails ABI checks.
 # Harmless if v22 is the default.
-if [[ -d "/home/was/.nvm/versions/node/v22.22.2/bin" ]]; then
-  export PATH="/home/was/.nvm/versions/node/v22.22.2/bin:$PATH"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/node-env.sh"
+if [[ -d "$NODE_V22_BIN" ]]; then
+  export PATH="$NODE_V22_BIN:$PATH"
 fi
 
 cd "$(dirname "$0")/.."
@@ -78,6 +80,7 @@ cd "$(dirname "$0")/.."
 # ----- args -----
 MSG=""
 SKIP_TYPECHECK=0
+SKIP_TEST=0
 SKIP_PUSH=0
 SKIP_DEPLOY=0
 DEPLOY_ONLY=0
@@ -94,6 +97,8 @@ while [[ $# -gt 0 ]]; do
       STAGE_ALL=1; shift ;;
     --no-typecheck)
       SKIP_TYPECHECK=1; shift ;;
+    --no-test)
+      SKIP_TEST=1; shift ;;
     --no-push)
       SKIP_PUSH=1; shift ;;
     --no-deploy)
@@ -125,7 +130,7 @@ while [[ $# -gt 0 ]]; do
           exit 1 ;;
       esac ;;
     -h|--help)
-      sed -n '2,63p' "$0"
+      sed -n '2,64p' "$0"
       exit 0 ;;
     -*)
       echo "ship: unknown flag: $1" >&2
@@ -214,6 +219,26 @@ if [[ "$SKIP_TYPECHECK" -eq 0 ]]; then
   pnpm --filter @thekeep/server exec tsc --noEmit
   pnpm --filter @thekeep/web exec tsc --noEmit
 fi
+
+# ----- tests (BLOCKING gate) -----
+# The Node test suite (apps/server/test/*.test.ts) must pass before a deploy.
+# Only the server package has tests today; add other packages' `test` scripts
+# here as they gain suites. --no-test skips for the rare emergency redeploy.
+if [[ "$SKIP_TEST" -eq 0 ]]; then
+  echo "==> Running tests..."
+  pnpm --filter @thekeep/server run test
+fi
+
+# ----- lint + format check (NON-BLOCKING, informational) -----
+# Governance surface (plan_ext.md §5/§6): lint is warn-only and Prettier is
+# report-only for now, so neither aborts a deploy — they just surface drift.
+# `|| true` keeps `set -e` from treating a nonzero exit as fatal.
+echo "==> Lint (warnings are non-blocking)..."
+pnpm lint || echo "ship: lint reported issues (non-blocking; run 'pnpm lint')."
+echo "==> Prettier check (non-blocking)..."
+pnpm format:check >/dev/null 2>&1 \
+  && echo "ship: formatting clean." \
+  || echo "ship: some files aren't Prettier-formatted (non-blocking; run 'pnpm format')."
 
 # ----- stage + commit -----
 # Whether we have anything to commit determines whether MSG is required.

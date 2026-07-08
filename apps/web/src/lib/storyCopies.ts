@@ -4,6 +4,7 @@
  * buyer's profile Library. The buying identity is the active character when
  * one is selected, else the master/OOC pool — passed as `characterId`.
  */
+import { withIdentityQuery } from "./http.js";
 
 export interface StoryCopyState {
   owned: boolean;
@@ -28,8 +29,7 @@ async function readError(r: Response): Promise<string> {
 }
 
 export async function fetchStoryCopyState(storyId: string, characterId: string | null): Promise<StoryCopyState> {
-  const qs = characterId ? `?characterId=${encodeURIComponent(characterId)}` : "";
-  const r = await fetch(`/stories/${encodeURIComponent(storyId)}/copy${qs}`, { credentials: "include" });
+  const r = await fetch(withIdentityQuery(`/stories/${encodeURIComponent(storyId)}/copy`, characterId), { credentials: "include" });
   if (!r.ok) throw new Error(await readError(r));
   return (await r.json()) as StoryCopyState;
 }

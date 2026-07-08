@@ -7,8 +7,13 @@ U="${1:-AdminSmoke$RANDOM}"
 PW="${2:-hunter2hunter2}"
 EMAIL="$(echo "$U" | tr '[:upper:]' '[:lower:]')@t.local"
 
+# Source node-env.sh with the repo root resolved from THIS script's location
+# BEFORE the cd below. A relative $0/BASH_SOURCE resolved after the cd would
+# point at the repo's parent and miss scripts/node-env.sh (aborting under set -e).
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)/scripts/node-env.sh"
+export PATH="$NODE_V22_BIN:$PATH"
+
 cd "$(dirname "$0")/.."
-export PATH="/home/was/.nvm/versions/node/v22.22.2/bin:$PATH"
 
 echo "Registering $U ($EMAIL)…"
 curl -sS -X POST http://127.0.0.1:3001/auth/register \

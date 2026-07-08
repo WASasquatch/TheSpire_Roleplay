@@ -3541,8 +3541,16 @@ foot of the mountains. Speaks little. Watches everything.</p>
         </Bullets>
         <Heading>How to export</Heading>
         <P>
-          Open the <b>Account</b> section from the Tools drawer and pick the export option. The
+          Open the <b>Account</b> section from the Tools drawer and pick the export option. A zip
           file downloads to your device. Keep it somewhere safe.
+        </P>
+        <Heading>What is inside the zip</Heading>
+        <P>
+          Everything is sorted into plain folders so it is easy to find. Each character, world, and
+          story gets its own folder with readable text files for the content and a matching data
+          file with the exact details. Pictures you uploaded are saved right in the folders. For
+          pictures that live elsewhere on the web, such as avatars and portraits, you get a small
+          link file in an <b>Assets</b> folder that opens the original.
         </P>
         <Tip>
           Backups are a snapshot. If you keep writing after exporting, your live profile pulls

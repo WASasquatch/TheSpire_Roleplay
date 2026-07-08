@@ -18,6 +18,7 @@ import { nanoid } from "nanoid";
 import { type ClientToServerEvents, type PermissionKey, type Role, type ServerToClientEvents } from "@thekeep/shared";
 import { hasPermission } from "../auth/permissions.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
+import { emitToUser } from "../realtime/presence.js";
 import { z } from "zod";
 import type { Db } from "../db/index.js";
 import {
@@ -1637,18 +1638,13 @@ export function registerAdminEarningRoutes(
     // its Items tab without a manual reopen. The admin grant
     // bypasses every gate so the inventory delta might be the only
     // signal the receiving user gets that something landed.
-    const recipientSockets = await io.fetchSockets();
-    for (const s of recipientSockets) {
-      const uid = (s.data as { userId?: string }).userId;
-      if (uid !== target.id) continue;
-      s.emit("earning:inventory_changed", {
-        scope: ownerScope,
-        ownerId,
-        itemKey: body.itemKey,
-        delta: body.quantity,
-        reason: "admin_grant",
-      });
-    }
+    await emitToUser(io, target.id, "earning:inventory_changed", {
+      scope: ownerScope,
+      ownerId,
+      itemKey: body.itemKey,
+      delta: body.quantity,
+      reason: "admin_grant",
+    });
     return { ok: true, newQuantity: Math.max(0, desired) };
   });
 

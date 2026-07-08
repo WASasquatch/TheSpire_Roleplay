@@ -44,6 +44,7 @@ import { serverAuthority } from "../servers/authority.js";
 import { isServerModerationActive } from "../servers/moderation.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { escapeLike } from "../lib/nameLookup.js";
 import type { Db } from "../db/index.js";
 
 /**
@@ -178,7 +179,7 @@ export async function registerSearchRoutes(app: FastifyInstance, db: Db): Promis
       if (!scope || scope.rooms.size === 0) return { hits: [] as MessageSearchHit[] };
 
       const roomIds = [...scope.rooms.keys()];
-      const like = `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+      const like = `%${escapeLike(q)}%`;
 
       // Candidate scan: bodies matching the query in any visible room, minus
       // system noise + soft-deletes, with whispers filtered to a party. This is

@@ -22,7 +22,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { ProfileView, ServerViewerState } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
-import { ProfileModal } from "../ProfileModal.js";
+import { ProfileModal } from "../profile/ProfileModal.js";
 
 /* ============================================================
  * Wire shapes (consumed from /servers/:id/mod-cases).

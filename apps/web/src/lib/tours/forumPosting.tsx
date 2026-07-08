@@ -1,4 +1,4 @@
-import type { CoachStep } from "../../components/CoachTour.js";
+import type { CoachStep } from "../../components/tours/CoachTour.js";
 
 /**
  * Forum-posting tour. Fires on a board's front page, where only the section

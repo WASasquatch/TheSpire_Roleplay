@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import { CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, VMARK_SPAN_RE, type CheckResultData, type MentionRef, type UiRoute } from "@thekeep/shared";
+import { canonicalizeNameForLookup, CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, VMARK_SPAN_RE, type CheckResultData, type MentionRef, type UiRoute } from "@thekeep/shared";
 import { openUiRoute } from "./uiRouteOpen.js";
 import { resolveDynamicChipLabel } from "./uiRouteDynamicLabel.js";
 import { UiRouteIcon } from "./uiRouteIcons.js";
 import { splitMentions } from "./mentions.js";
 import { useActiveTheme } from "./theme.js";
 import { useEmoticons } from "../state/emoticons.js";
-import { EmoticonSprite } from "../components/EmoticonSprite.js";
+import { EmoticonSprite } from "../components/emoticons/EmoticonSprite.js";
 import { LazyMediaEmbed } from "./LazyMediaEmbed.js";
 
 /**
@@ -1295,8 +1295,10 @@ function renderPartsInline(
   mentions: ReadonlyArray<MentionRef> = [],
 ): ReactNode[] {
   // Normalize NBSP to a real space so a mention rendered with the "fake space"
-  // matches a self name or a snapshot ref typed with a regular space.
-  const norm = (s: string) => s.toLowerCase().replace(/\u00a0/g, " ");
+  // matches a self name or a snapshot ref typed with a regular space. Shared
+  // `canonicalizeNameForLookup` folds NBSP + lowercases (same fold the server
+  // name lookups use), keeping self-highlight and chip resolution in lockstep.
+  const norm = (s: string) => canonicalizeNameForLookup(s);
   // Lowercase + Set for O(1) per-mention lookup. Cheap to rebuild
   // per render; selfNames is typically 0–2 entries.
   const selfSet = new Set(selfNames.map(norm));

@@ -12,6 +12,7 @@ import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared
 import type { Db } from "../db/index.js";
 import { characters, eidolonState } from "../db/schema.js";
 import { pushToUser } from "../push.js";
+import { onlineUserIds } from "../realtime/broadcast.js";
 import { serverDayKey } from "./eidolon.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -52,9 +53,7 @@ export async function sweepEidolonNudgesOnce(db: Db, io: Io): Promise<void> {
     r.ownerScope === "user" ? r.ownerId : charToUser.get(r.ownerId) ?? null;
 
   // Snapshot the online set ONCE for the whole pass (not once per familiar).
-  const sockets = await io.fetchSockets();
-  const online = new Set<string>();
-  for (const s of sockets) { const uid = (s.data as { userId?: string }).userId; if (uid) online.add(uid); }
+  const online = await onlineUserIds(io);
 
   // Group due familiars by owning user (push subscriptions are per-user, so we
   // nudge a user once and mark all their due familiars). Each entry carries the

@@ -25,6 +25,7 @@ import type {
 } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import { notify, type NotifyTarget } from "../notifications/engine.js";
+import { emitToUser } from "../realtime/presence.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -56,11 +57,7 @@ export async function notifyUser(
   args: { code: string; message: string; persist?: NotifyUserPersist },
 ): Promise<void> {
   try {
-    const sockets = await io.fetchSockets();
-    for (const s of sockets) {
-      if ((s.data as { userId?: string }).userId !== userId) continue;
-      s.emit("error:notice", { code: args.code, message: args.message });
-    }
+    await emitToUser(io, userId, "error:notice", { code: args.code, message: args.message });
   } catch {
     /* live toast is best-effort; the persisted row is the source of truth */
   }
@@ -92,11 +89,7 @@ export async function emitServersChanged(
   addedServerId?: string | null,
 ): Promise<void> {
   try {
-    const sockets = await io.fetchSockets();
-    for (const s of sockets) {
-      if ((s.data as { userId?: string }).userId !== userId) continue;
-      s.emit("servers:changed", { addedServerId: addedServerId ?? null });
-    }
+    await emitToUser(io, userId, "servers:changed", { addedServerId: addedServerId ?? null });
   } catch {
     /* best-effort */
   }

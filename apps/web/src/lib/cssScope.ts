@@ -23,6 +23,8 @@
  * this pass doesn't double up.
  */
 
+import { scrubCssUrlSchemes } from "@thekeep/shared";
+
 import { CSP_NONCE } from "./cspNonce.js";
 
 /**
@@ -53,7 +55,7 @@ export function scopeAndNonceStyleBlocks(html: string, scopeClass: string): stri
   if (!html.includes("<style")) return html;
   const nonce = CSP_NONCE;
   return html.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (_match, attrs: string, cssRaw: string) => {
-    const scoped = scopeCss(scrubStyleUrls(cssRaw), scopeClass);
+    const scoped = scopeCss(scrubCssUrlSchemes(cssRaw), scopeClass);
     // Stamp the nonce on the tag itself. Strict CSP (`style-src 'self'
     // 'nonce-{N}'`) rejects inline `<style>` blocks that don't carry
     // the request nonce. Server-rendered styles get the nonce stamped
@@ -74,22 +76,6 @@ export function scopeAndNonceStyleBlocks(html: string, scopeClass: string): stri
 
 function escapeAttr(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
-}
-
-/**
- * Neutralize `url()` values inside CSS that carry a dangerous scheme.
- * Same intent as the server-side `scrubStyleUrls`, defense-in-depth
- * second pass on the client in case a future server path forgets to
- * sanitize before storage.
- */
-function scrubStyleUrls(css: string): string {
-  return css.replace(/url\s*\(\s*(['"]?)([^'"\s)]*)\1\s*\)/gi, (match, _q: string, raw: string) => {
-    const trimmed = raw.trim().toLowerCase();
-    if (trimmed.startsWith("javascript:") || trimmed.startsWith("data:") || trimmed.startsWith("vbscript:")) {
-      return 'url("")';
-    }
-    return match;
-  });
 }
 
 function stripCssComments(css: string): string {

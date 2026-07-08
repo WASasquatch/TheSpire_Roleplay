@@ -81,7 +81,7 @@ done
 # Mirror ship.sh's Node-v22 override. If the nvm directory disappeared
 # (fresh machine, reinstall), fall through with a warning so the user
 # gets a clear hint rather than a silent module-version mismatch.
-NODE_V22_BIN="/home/was/.nvm/versions/node/v22.22.2/bin"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts/node-env.sh"
 if [[ -d "$NODE_V22_BIN" ]]; then
   export PATH="$NODE_V22_BIN:$PATH"
 else

@@ -153,6 +153,17 @@ export async function readError(r: Response): Promise<string> {
 }
 
 /**
+ * Fetch-response unwrapper: parse the JSON body and return it typed as `T`,
+ * or throw an `Error` whose message comes from `readError` when the response
+ * is non-OK. The canonical `readError`-based form — previously copied
+ * verbatim into earning/emoticonSubmissions/worldEntities client libs.
+ */
+export async function jsonOrThrow<T>(r: Response): Promise<T> {
+  if (!r.ok) throw new Error(await readError(r));
+  return (await r.json()) as T;
+}
+
+/**
  * Read the per-tab session token, or null if the tab isn't signed in.
  *
  * Fast path: sessionStorage hit. Recovery path: when sessionStorage is

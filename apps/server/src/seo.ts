@@ -5,6 +5,7 @@ import type { FastifyRequest } from "fastify";
 import type { Db } from "./db/index.js";
 import { characters, faqs, forums, servers, stories, users, worlds } from "./db/schema.js";
 import { areServersEnabled, getSettings } from "./settings.js";
+import { escapeHtml } from "@thekeep/shared";
 
 /**
  * Site-wide keyword shelf shared across every public route. Lead with
@@ -82,13 +83,11 @@ function applyNonceToInlineTags(html: string, nonce: string): string {
  * crawlers.
  */
 export function escapeHtmlAttr(text: string): string {
-  return text
-    .replace(/\s+/g, " ")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+  // Thin wrapper over the shared escaper: collapse whitespace to a single
+  // line *before* escaping the full attribute set (`& < > " '`), because
+  // `<meta>` tags are single-line and a multi-line value silently truncates
+  // in some crawlers. Byte-identical to the former inline copy.
+  return escapeHtml(text, { collapseWhitespace: true, doubleQuote: true, singleQuote: true });
 }
 
 /**

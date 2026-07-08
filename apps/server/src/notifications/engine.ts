@@ -30,7 +30,9 @@ import type {
 import type { Db } from "../db/index.js";
 import { notifications, servers, users } from "../db/schema.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
+import { cursorPageSlice } from "../lib/pagination.js";
 import { pushToUser } from "../push.js";
+import { emitToUser, socketsForUser } from "../realtime/presence.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -227,8 +229,7 @@ async function serializeRows(db: Db, rows: NotificationRow[]): Promise<Notificat
  *  whether the user had at least one live socket (drives the offline-push). */
 async function pulse(io: Io, db: Db, userId: string, newRowId?: string): Promise<boolean> {
   const badge = await badgeFor(db, userId);
-  const socks = await io.fetchSockets();
-  const mine = socks.filter((s) => (s.data as { userId?: string }).userId === userId);
+  const mine = await socketsForUser(io, userId);
   if (newRowId) {
     const row = (await db.select().from(notifications).where(eq(notifications.id, newRowId)).limit(1))[0];
     const wire = row ? (await serializeRows(db, [row]))[0] : undefined;
@@ -256,10 +257,7 @@ export async function pulseRoomUnread(
   payload: { roomId: string; serverId: string | null; unread: number; hasMention: boolean },
 ): Promise<void> {
   try {
-    const socks = await io.fetchSockets();
-    for (const s of socks) {
-      if ((s.data as { userId?: string }).userId === recipientUserId) s.emit("room:unread", payload);
-    }
+    await emitToUser(io, recipientUserId, "room:unread", payload);
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[notifications] pulseRoomUnread failed", err);
@@ -352,11 +350,9 @@ export async function listNotifications(
     .where(and(...conds))
     .orderBy(desc(notifications.createdAt))
     .limit(opts.limit + 1);
-  const page = rows.slice(0, opts.limit);
+  const { page, nextCursor } = cursorPageSlice(rows, opts.limit, (r) => +r.createdAt);
   const wires = await serializeRows(db, page);
   const badge = await badgeFor(db, userId);
-  const last = page[page.length - 1];
-  const nextCursor = rows.length > opts.limit && last ? +last.createdAt : null;
   return { notifications: wires, unread: badge.unread, nextCursor };
 }
 

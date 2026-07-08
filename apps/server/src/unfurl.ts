@@ -24,6 +24,7 @@ import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, LinkPreview, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { messages, ogUnfurlCache } from "./db/schema.js";
+import { fetchWithTimeout } from "./lib/fetchWithTimeout.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -100,14 +101,11 @@ async function fetchHtml(startUrl: string): Promise<string | null> {
     if (u.protocol !== "http:" && u.protocol !== "https:") return null;
     if (!(await isSafeHost(u.hostname))) return null;
 
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(current, {
+      const res = await fetchWithTimeout(current, {
         redirect: "manual",
-        signal: ctrl.signal,
         headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" },
-      });
+      }, FETCH_TIMEOUT_MS);
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get("location");
         if (!loc) return null;
@@ -136,8 +134,6 @@ async function fetchHtml(startUrl: string): Promise<string | null> {
       return buf.toString("utf8");
     } catch {
       return null;
-    } finally {
-      clearTimeout(timer);
     }
   }
   return null;

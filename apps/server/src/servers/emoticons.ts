@@ -48,7 +48,7 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { mkdir, writeFile, unlink } from "node:fs/promises";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { EMOTICON_SHEET_CELL_COUNT } from "@thekeep/shared";
+import { EMOTICON_SHEET_CELL_COUNT, slugRx } from "@thekeep/shared";
 import {
   auditLog,
   characterEarning,
@@ -67,7 +67,7 @@ import { parseSheetCells } from "../reactions.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
-const SLUG_RX = /^[a-z0-9](?:[a-z0-9-]{0,40}[a-z0-9])?$/;
+const SLUG_RX = slugRx(42);
 
 /* =====================================================================
  *  Image upload helpers — same posture as routes/emoticons.ts: small

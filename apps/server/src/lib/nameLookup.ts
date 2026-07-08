@@ -1,4 +1,5 @@
 import { sql, type SQL, type AnyColumn } from "drizzle-orm";
+import { canonicalizeNameForLookup } from "@thekeep/shared";
 
 /**
  * Space-insensitive, case-insensitive name matching helpers.
@@ -9,7 +10,7 @@ import { sql, type SQL, type AnyColumn } from "drizzle-orm";
  * the validator allows ASCII space, not NBSP. This split was good
  * for storage (each side has a single canonical form) but bad for
  * lookups: a user typing `/whisper John Doe` against a master named
- * `John Doe`, or `+ Friend "Some Char"` against a character
+ * `John Doe`, or `+ Friend "Some Char"` against a character
  * named `Some Char`, ends up with a name string that doesn't
  * literally match either column. The bug surfaced as "I can't
  * whisper this person", "they say my DMs aren't reaching them",
@@ -26,7 +27,7 @@ import { sql, type SQL, type AnyColumn } from "drizzle-orm";
  * Why not just store one canonical form on insert? Two reasons:
  *   1. Existing rows have whichever space form their validator
  *      enforced at registration time. Backfilling would lose the
- *      historical fidelity of `John Doe` vs `John Doe`,
+ *      historical fidelity of `John Doe` vs `John Doe`,
  *      legitimately different display intents for masters who
  *      picked NBSP on purpose.
  *   2. The unique constraint on `lower(username)` already prevents
@@ -34,35 +35,22 @@ import { sql, type SQL, type AnyColumn } from "drizzle-orm";
  *      equivalent at LOOKUP without merging on INSERT preserves
  *      both display forms.
  *
- * Adding new forms here (THIN SPACE U+2009, ZWSP U+200B, etc.) is
- * a one-line change to both `canonicalizeNameForLookup` and
- * `loweredSpaceCanonical`, keep them in lockstep.
+ * The JS-side fold now lives in the shared `canonicalizeNameForLookup`
+ * (packages/shared/src/names.ts) so the two client render paths and
+ * this server side stay in lockstep. Adding new forms there (THIN
+ * SPACE U+2009, ZWSP U+200B, etc.) MUST be mirrored by hand in the
+ * SQL twin {@link loweredSpaceCanonical} below (`char(160)`), the
+ * JS import cannot cover the SQLite side.
  */
 
 /**
- * Set of Unicode codepoints that should be treated as equivalent to
- * a regular ASCII space when matching names. Currently:
- *   - U+0020 SPACE                    (the canonical)
- *   - U+00A0 NO-BREAK SPACE           (Alt+0160; master-username "fake space")
- *
- * U+2009 THIN SPACE, U+200B ZERO-WIDTH SPACE, etc. are NOT included
- * yet, adding them would silently collapse genuinely-different
- * display names. Re-evaluate if a new failure mode shows up.
+ * Re-exported from `@thekeep/shared` for the existing
+ * `../lib/nameLookup.js` importers. Lowercases AND folds every
+ * space-equivalent codepoint to ASCII space; use it on the INPUT side
+ * of a lookup and pair with {@link loweredSpaceCanonical} on the
+ * COLUMN side.
  */
-const SPACE_EQUIVALENTS = /[ ]/g;
-
-/**
- * Canonicalize a name string for lookup comparison. Lowercases AND
- * folds every space-equivalent codepoint to ASCII space. Use this on
- * the INPUT side of a lookup; pair with {@link loweredSpaceCanonical}
- * on the COLUMN side. NB: does NOT trim, leading/trailing whitespace
- * is the caller's call (we don't want to silently strip a leading
- * NBSP from a name that actually starts with one, though that would
- * fail the validator on registration anyway).
- */
-export function canonicalizeNameForLookup(name: string): string {
-  return name.replace(SPACE_EQUIVALENTS, " ").toLowerCase();
-}
+export { canonicalizeNameForLookup };
 
 /**
  * Drizzle SQL fragment that produces the lowered + space-folded form
@@ -90,7 +78,7 @@ export function loweredSpaceCanonical(col: AnyColumn): SQL {
  *   eqNameInsensitive(users.username, "John Doe")
  *     → replace(lower(users.username), char(160), ' ') = 'john doe'
  *
- * Hits a master row whose canonical username is `John Doe`
+ * Hits a master row whose canonical username is `John Doe`
  * (NBSP) AND a master row literally named `John Doe` (ASCII space,
  * if any) AND a character `John Doe`, i.e. every space-equivalent
  * spelling collapses to the same match. The caller still scopes the
@@ -113,6 +101,24 @@ export function eqNameInsensitive(col: AnyColumn, input: string): SQL {
  */
 export function substringNameInsensitive(col: AnyColumn, input: string): SQL {
   const canonical = canonicalizeNameForLookup(input);
-  const escaped = canonical.replace(/[%_]/g, (c) => `\\${c}`);
+  const escaped = escapeLike(canonical);
   return sql`${loweredSpaceCanonical(col)} LIKE ${"%" + escaped + "%"} ESCAPE '\\'`;
+}
+
+/**
+ * Escape the SQL `LIKE` wildcards (`%` and `_`) in a raw search term so
+ * a literal underscore or percent the user typed matches literally
+ * instead of widening the pattern. The backslash is the escape char, so
+ * every wildcard becomes `\%` / `\_`; pair the resulting pattern with an
+ * explicit `ESCAPE '\\'` clause (SQLite has no default LIKE escape).
+ *
+ *   `... LIKE ${"%" + escapeLike(q) + "%"} ESCAPE '\\'`
+ *
+ * This is the narrow, column-agnostic twin of
+ * {@link substringNameInsensitive}: it does ONLY the wildcard escape,
+ * with no lowercasing and no NBSP/space folding, so callers that search
+ * message bodies or non-name columns keep their exact current matching.
+ */
+export function escapeLike(s: string): string {
+  return s.replace(/[%_]/g, (c) => `\\${c}`);
 }

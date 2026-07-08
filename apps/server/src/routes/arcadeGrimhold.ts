@@ -18,7 +18,7 @@
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Server as IoServer } from "socket.io";
-import { and, eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type {
@@ -34,15 +34,16 @@ import {
   GRIMHOLD_RUN_STALE_MS,
   grimholdReward,
   isGrimholdGame,
+  startOfUtcDayMs,
 } from "@thekeep/shared";
-import { characters, earningLedger } from "../db/schema.js";
+import { characters } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { creditPool } from "../earning/award.js";
-import { DEFAULT_SERVER_ID } from "../earning/pool.js";
-import { serverAuthority } from "../servers/authority.js";
-import { getSettings, areServersEnabled } from "../settings.js";
+import { clampToDailyCap, earnedTodayForCap } from "../earning/dailyCap.js";
+import { resolveActiveServerId } from "../earning/pool.js";
+import { ownsPurchase } from "../earning/purchases.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Scope = "user" | "character";
@@ -61,12 +62,6 @@ function pruneStaleRuns(nowMs: number): void {
   for (const [id, r] of RUNS) {
     if (nowMs - r.lastScoreAt > GRIMHOLD_RUN_STALE_MS) RUNS.delete(id);
   }
-}
-
-/** Start of the current UTC day in ms — the window for the daily cap scan. */
-function utcMidnightMs(nowMs: number): number {
-  const d = new Date(nowMs);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
 export async function registerGrimholdRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
@@ -93,37 +88,11 @@ export async function registerGrimholdRoutes(app: FastifyInstance, db: Db, io: I
       if (!c || c.userId !== me.id || c.deletedAt) return { ok: false, code: 403, body: { error: "not your character" } };
       scope = "character"; ownerId = characterId;
     }
-    const owned = (await db
-      .select({ id: earningLedger.id })
-      .from(earningLedger)
-      .where(and(eq(earningLedger.scope, scope), eq(earningLedger.ownerId, ownerId), eq(earningLedger.reason, `purchase_${FLAIR_GRIMHOLD}`)))
-      .limit(1))[0];
+    // Purchase gate checked GLOBALLY (no serverId filter) — the intentional
+    // asymmetry vs the per-server Eidolon Tamer unlock.
+    const owned = await ownsPurchase(db, { flairKey: FLAIR_GRIMHOLD, scope, ownerId });
     if (!owned) return { ok: false, code: 402, body: { error: "locked", needsUnlock: true } };
     return { ok: true, userId: me.id, role: me.role, scope, ownerId };
-  }
-
-  /** Resolve the active server this score's reward (and its daily-cap scan)
-   *  lands on. The cabinet routes are NOT room-scoped, so the active server
-   *  comes from an optional body.serverId, validated EXACTLY like `/earning/me`
-   *  (routes/earning.ts): honored only when the servers flag is on AND the
-   *  caller may view that server's economy (it exists and they're a member,
-   *  owner/staff folded into serverAuthority.isMember). Anything else falls
-   *  back to the default server, so the cap-count + credit stay on the same
-   *  pool and the flag-off path is byte-identical (no extra DB hits when
-   *  absent/default). */
-  async function resolveActiveServerId(
-    me: { id: string; role: import("@thekeep/shared").Role },
-    requestedServerId: string | undefined,
-  ): Promise<string> {
-    if (
-      requestedServerId &&
-      requestedServerId !== DEFAULT_SERVER_ID &&
-      areServersEnabled(await getSettings(db))
-    ) {
-      const authority = await serverAuthority(db, me, requestedServerId);
-      if (authority.server && authority.isMember) return requestedServerId;
-    }
-    return DEFAULT_SERVER_ID;
   }
 
   /* ---- GET /arcade/grimhold ---- access probe for the launcher. */
@@ -138,19 +107,13 @@ export async function registerGrimholdRoutes(app: FastifyInstance, db: Db, io: I
    *  server the credit will land on, so a player active on two servers gets a
    *  full daily allowance on each (mirrors the presence cap in sweeps.ts). */
   function grimholdEarnedToday(serverId: string, scope: Scope, ownerId: string, nowMs: number): number {
-    const since = utcMidnightMs(nowMs);
-    const row = db
-      .select({ c: sql<number>`COALESCE(SUM(${earningLedger.currencyDelta}), 0)` })
-      .from(earningLedger)
-      .where(and(
-        eq(earningLedger.serverId, serverId),
-        eq(earningLedger.scope, scope),
-        eq(earningLedger.ownerId, ownerId),
-        sql`${earningLedger.reason} LIKE 'grimhold\\_%' ESCAPE '\\'`,
-        sql`${earningLedger.createdAt} >= ${since}`,
-      ))
-      .all()[0];
-    return row?.c ?? 0;
+    return earnedTodayForCap(db, {
+      serverId,
+      scope,
+      ownerId,
+      reason: { likePrefix: "grimhold" },
+      sinceMs: startOfUtcDayMs(nowMs),
+    }).currency;
   }
 
   /* ---- POST /arcade/grimhold/start ---- */
@@ -185,7 +148,7 @@ export async function registerGrimholdRoutes(app: FastifyInstance, db: Db, io: I
     const g = await gate(req, body.characterId ?? null);
     if (!g.ok) { reply.code(g.code); return g.body; }
     // The active server the reward (and its daily-cap scan) lands on.
-    const sid = await resolveActiveServerId({ id: g.userId, role: g.role }, body.serverId);
+    const sid = await resolveActiveServerId(db, { id: g.userId, role: g.role }, body.serverId);
 
     const noPay: GrimholdScoreResponse = { ok: false, award: { currency: 0, xp: 0 }, capped: false, credited: false };
 
@@ -212,9 +175,7 @@ export async function registerGrimholdRoutes(app: FastifyInstance, db: Db, io: I
     // games). Once exhausted, XP stops too.
     const earnedToday = grimholdEarnedToday(sid, g.scope, g.ownerId, nowMs);
     const remainingCap = Math.max(0, GRIMHOLD_DAILY_CURRENCY_CAP - earnedToday);
-    const grantedCurrency = Math.min(reward.currency, remainingCap);
-    const grantedXp = remainingCap > 0 ? reward.xp : 0;
-    const capped = grantedCurrency < reward.currency || grantedXp < reward.xp;
+    const { currency: grantedCurrency, xp: grantedXp, capped } = clampToDailyCap(reward, remainingCap);
 
     let credited = false;
     if (grantedCurrency > 0 || grantedXp > 0) {

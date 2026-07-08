@@ -14,6 +14,7 @@
  */
 
 import type { FreeformBorderRow } from "./earning.js";
+import { createNonceStyleTag } from "./injectStyle.js";
 
 const CATALOG_TAG_ATTR = "data-freeform-borders";
 const PREVIEW_TAG_ATTR = "data-freeform-border-preview";
@@ -35,12 +36,6 @@ export function clearFreeformBorderPreview(): void {
   if (typeof document === "undefined") return;
   const tag = document.head.querySelector(`style[${PREVIEW_TAG_ATTR}]`);
   if (tag && tag.parentNode) tag.parentNode.removeChild(tag);
-}
-
-function getCspNonce(): string | null {
-  if (typeof document === "undefined") return null;
-  const meta = document.head.querySelector('meta[name="csp-nonce"]') as HTMLMetaElement | null;
-  return meta?.content || null;
 }
 
 /**
@@ -98,10 +93,8 @@ function writeStyleTag(tagAttr: string, borders: readonly FreeformBorderRow[]): 
   ].join("\n\n");
   let tag = document.head.querySelector(`style[${tagAttr}]`) as HTMLStyleElement | null;
   if (!tag) {
-    tag = document.createElement("style");
+    tag = createNonceStyleTag();
     tag.setAttribute(tagAttr, "");
-    const nonce = getCspNonce();
-    if (nonce) tag.setAttribute("nonce", nonce);
     document.head.appendChild(tag);
   }
   if (tag.textContent === concatenated) return;

@@ -14,8 +14,9 @@ import { and, eq } from "drizzle-orm";
 import { FLAIR_EIDOLON_TAMER, eidolonMoodAction } from "@thekeep/shared";
 import type { CommandContext, CommandHandler } from "../types.js";
 import { addMessage } from "../../realtime/broadcast.js";
-import { eidolonState, earningLedger } from "../../db/schema.js";
+import { eidolonState } from "../../db/schema.js";
 import { hasPermission } from "../../auth/permissions.js";
+import { ownsPurchase } from "../../earning/purchases.js";
 import { catchUp } from "../../earning/eidolon.js";
 
 function notice(ctx: CommandContext, code: string, message: string): void {
@@ -42,10 +43,9 @@ export const eidolonCommand: CommandHandler = {
     const scope = ctx.user.activeCharacterId ? "character" : "user";
     const ownerId = ctx.user.activeCharacterId ?? ctx.user.id;
 
-    // Purchase gate: the per-identity unlock ledger row.
-    const owned = (await ctx.db.select({ id: earningLedger.id }).from(earningLedger)
-      .where(and(eq(earningLedger.scope, scope), eq(earningLedger.ownerId, ownerId), eq(earningLedger.reason, `purchase_${FLAIR_EIDOLON_TAMER}`)))
-      .limit(1))[0];
+    // Purchase gate: the per-identity unlock ledger row, checked GLOBALLY (no
+    // serverId filter — the intentional asymmetry vs the per-server arcade route).
+    const owned = await ownsPurchase(ctx.db, { flairKey: FLAIR_EIDOLON_TAMER, scope, ownerId });
     if (!owned) { notice(ctx, "EIDOLON_LOCKED", "You haven't unlocked the Eidolon Tamer on this identity."); return; }
 
     const row = (await ctx.db.select().from(eidolonState)

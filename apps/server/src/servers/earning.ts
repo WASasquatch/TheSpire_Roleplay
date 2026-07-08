@@ -102,6 +102,7 @@ import {
 import { creditPool } from "../earning/award.js";
 import { DEFAULT_SERVER_ID, readPool } from "../earning/pool.js";
 import { mergeMaxEverHeld, resolveRankForXp } from "../earning/resolver.js";
+import { emitToUser } from "../realtime/presence.js";
 import { serverSettings } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 
@@ -655,18 +656,13 @@ export async function registerServerEarningRoutes(
         characterId,
       }),
     });
-    const recipientSockets = await io.fetchSockets();
-    for (const s of recipientSockets) {
-      const uid = (s.data as { userId?: string }).userId;
-      if (uid !== target.id) continue;
-      s.emit("earning:inventory_changed", {
-        scope: ownerScope,
-        ownerId,
-        itemKey: body.itemKey,
-        delta: body.quantity,
-        reason: "admin_grant",
-      });
-    }
+    await emitToUser(io, target.id, "earning:inventory_changed", {
+      scope: ownerScope,
+      ownerId,
+      itemKey: body.itemKey,
+      delta: body.quantity,
+      reason: "admin_grant",
+    });
     await audit(g.serverId, g.me.id, body.quantity >= 0 ? "server_earning_grant" : "server_earning_revoke",
       { kind: "item", targetUserId: target.id, itemKey: body.itemKey, quantity: body.quantity, characterId });
     return { ok: true, newQuantity: Math.max(0, desired) };

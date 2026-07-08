@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Socket } from "socket.io-client";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
-import { Modal } from "./Modal.js";
+import { Modal } from "./cosmetics/Modal.js";
 
 interface Props {
   roomId: string;

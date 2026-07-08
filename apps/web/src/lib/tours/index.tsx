@@ -9,7 +9,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import type { TourId } from "@thekeep/shared";
-import type { CoachStep } from "../../components/CoachTour.js";
+import type { CoachStep } from "../../components/tours/CoachTour.js";
 import { steps as forumsBrowseSteps } from "./forumsBrowse.js";
 import { steps as forumPostingSteps } from "./forumPosting.js";
 import { steps as forumCreateSteps } from "./forumCreate.js";

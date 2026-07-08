@@ -15,7 +15,7 @@
  */
 import { useEffect, useState } from "react";
 import type { ProfileView, ServerViewerState } from "@thekeep/shared";
-import { ProfileModal } from "../ProfileModal.js";
+import { ProfileModal } from "../profile/ProfileModal.js";
 
 /* ============================================================
  * Wire shapes (consumed read-only from /servers/:id/reports).

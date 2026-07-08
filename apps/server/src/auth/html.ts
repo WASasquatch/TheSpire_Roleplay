@@ -1,4 +1,5 @@
 import sanitizeHtml from "sanitize-html";
+import { scrubCssUrlSchemes } from "@thekeep/shared";
 
 /**
  * What we let writers paste into a bio / world page / admin HTML block.
@@ -182,19 +183,7 @@ export function bioHtmlForEdit(html: string): string {
  * payload.
  */
 function scrubStyleAttrValue(value: string): string {
-  return value
-    // url(...) with dangerous scheme. The inner-group regex handles
-    // ONE level of nested parens (e.g. `url(javascript:alert(1))`) by
-    // alternating `[^()]` (non-paren chars) with `\([^()]*\)` (a
-    // balanced inner pair). A flat `[^)]*` would stop at the first
-    // `)` and leave a stray `)` in the output.
-    .replace(/url\s*\(((?:[^()]|\([^()]*\))*)\)/gi, (match, inner: string) => {
-      const trimmed = inner.trim().replace(/^['"]/, "").replace(/['"]$/, "").trim().toLowerCase();
-      if (trimmed.startsWith("javascript:") || trimmed.startsWith("data:") || trimmed.startsWith("vbscript:") || trimmed.startsWith("file:")) {
-        return "url('')";
-      }
-      return match;
-    })
+  return scrubCssUrlSchemes(value)
     // CSS expression() (old IE inline script execution). Balanced-
     // paren matcher so `expression(alert(1))` is consumed whole
     // instead of leaving the outer `)` behind.
@@ -217,15 +206,7 @@ function scrubStyleAttrValue(value: string): string {
 function scrubStyleBlocks(html: string): string {
   if (!html.includes("<style")) return html;
   return html.replace(/<style\b[^>]*>([\s\S]*?)<\/style>/gi, (_m, css: string) => {
-    const safe = css
-      // Same balanced-paren url() matcher as `scrubStyleAttrValue`.
-      .replace(/url\s*\(((?:[^()]|\([^()]*\))*)\)/gi, (match, inner: string) => {
-        const trimmed = inner.trim().replace(/^['"]/, "").replace(/['"]$/, "").trim().toLowerCase();
-        if (trimmed.startsWith("javascript:") || trimmed.startsWith("data:") || trimmed.startsWith("vbscript:") || trimmed.startsWith("file:")) {
-          return 'url("")';
-        }
-        return match;
-      })
+    const safe = scrubCssUrlSchemes(css)
       // Same balanced-paren matcher as `scrubStyleAttrValue`.
       .replace(/expression\s*\((?:[^()]|\([^()]*\))*\)/gi, "");
     return `<style>${safe}</style>`;

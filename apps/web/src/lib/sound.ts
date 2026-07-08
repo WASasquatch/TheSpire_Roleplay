@@ -33,6 +33,7 @@
  * "ambient chat" feel, the app isn't a slot machine.
  */
 import { useChat } from "../state/store.js";
+import { identityEquals } from "./identity.js";
 
 type SoundEvent = "ping" | "whisper" | "tap" | "alert" | "throw" | "drop";
 
@@ -101,7 +102,7 @@ function isUserAway(): boolean {
   if (!occ) return false;
   const myCharId = s.activeCharacterId;
   return occ.some(
-    (o) => o.userId === myId && o.characterId === myCharId && o.away,
+    (o) => identityEquals(o.userId, o.characterId, myId, myCharId) && o.away,
   );
 }
 

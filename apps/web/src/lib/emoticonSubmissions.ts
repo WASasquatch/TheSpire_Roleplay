@@ -7,7 +7,7 @@
  * snapshotted cost back to the paying identity's pool.
  */
 
-import { readError } from "./http.js";
+import { jsonOrThrow, readError } from "./http.js";
 
 export type EmoticonSubmissionStatus = "pending" | "approved" | "rejected";
 
@@ -99,11 +99,6 @@ export async function useCommunityEmoticon(
   });
   if (!r.ok) throw new Error(await readError(r));
   return (await r.json()) as { ok: true; charged: number; useId: string };
-}
-
-async function jsonOrThrow<T>(r: Response): Promise<T> {
-  if (!r.ok) throw new Error(await readError(r));
-  return (await r.json()) as T;
 }
 
 /**

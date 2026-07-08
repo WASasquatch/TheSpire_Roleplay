@@ -10,14 +10,14 @@
 import type { GrimholdScoreResponse, GrimholdStartResponse } from "@thekeep/shared";
 import { FLAIR_GRIMHOLD } from "@thekeep/shared";
 import { purchaseCosmetic } from "./earning";
+import { withIdentityQuery } from "./http.js";
 
 export type GrimholdAccess = "ok" | "locked" | "forbidden";
 
 /** Probe play access: "ok", "locked" (needs the one-time unlock — 402), or
  *  "forbidden" (permission/auth — 401/403). Mirrors fetchUrugalAccess. */
 export async function fetchGrimholdAccess(characterId: string | null): Promise<GrimholdAccess> {
-  const qs = characterId ? `?characterId=${encodeURIComponent(characterId)}` : "";
-  const r = await fetch(`/arcade/grimhold${qs}`, { credentials: "include" });
+  const r = await fetch(withIdentityQuery("/arcade/grimhold", characterId), { credentials: "include" });
   if (r.status === 402) return "locked";
   if (!r.ok) return "forbidden";
   return "ok";

@@ -38,6 +38,8 @@ interface PublicResponse {
 interface KeyCount {
   key: string;
   count: number;
+  /** Human-readable label resolved server-side; falls back to `key`. */
+  label?: string;
 }
 interface InappResponse {
   range: Range;
@@ -49,6 +51,12 @@ interface InappResponse {
   servers: KeyCount[];
   features: KeyCount[];
   pages: KeyCount[];
+  profiles: KeyCount[];
+  worlds: KeyCount[];
+  forums: KeyCount[];
+  serverPages: KeyCount[];
+  stories: KeyCount[];
+  faqs: KeyCount[];
 }
 
 const RANGES: Range[] = [7, 30, 90];
@@ -475,7 +483,7 @@ export function AnalyticsTab() {
               rows={inapp?.rooms ?? []}
               labelHead="Room"
               empty="No room switches recorded yet."
-              renderLabel={(r) => <span className="font-mono">{r.key}</span>}
+              renderLabel={(r) => <span>{r.label ?? r.key}</span>}
             />
           </div>
           <div>
@@ -484,7 +492,7 @@ export function AnalyticsTab() {
               rows={inapp?.servers ?? []}
               labelHead="Server"
               empty="No server switches recorded yet."
-              renderLabel={(r) => <span className="font-mono">{r.key}</span>}
+              renderLabel={(r) => <span>{r.label ?? r.key}</span>}
             />
           </div>
           <div>
@@ -503,6 +511,69 @@ export function AnalyticsTab() {
               labelHead="Page"
               empty="No public page views recorded yet."
               renderLabel={(r) => <span className="font-mono">{r.key}</span>}
+            />
+          </div>
+        </div>
+      </Section>
+
+      {/* ----- public entity views (which specific page, by name) ----- */}
+      <Section
+        title="Public pages by entity"
+        hint="Which specific public pages got viewed, broken out by name instead of collapsed into the path template above. Deleted entities show their old slug marked (deleted)."
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          <div>
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-keep-muted">Profiles viewed</p>
+            <CountTable
+              rows={inapp?.profiles ?? []}
+              labelHead="Profile"
+              empty="No profile views recorded yet."
+              renderLabel={(r) => <span>{r.label ?? r.key}</span>}
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-keep-muted">Worlds viewed</p>
+            <CountTable
+              rows={inapp?.worlds ?? []}
+              labelHead="World"
+              empty="No world views recorded yet."
+              renderLabel={(r) => <span>{r.label ?? r.key}</span>}
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-keep-muted">Forums viewed</p>
+            <CountTable
+              rows={inapp?.forums ?? []}
+              labelHead="Forum"
+              empty="No forum views recorded yet."
+              renderLabel={(r) => <span>{r.label ?? r.key}</span>}
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-keep-muted">Server pages viewed</p>
+            <CountTable
+              rows={inapp?.serverPages ?? []}
+              labelHead="Server page"
+              empty="No server-page views recorded yet."
+              renderLabel={(r) => <span>{r.label ?? r.key}</span>}
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-keep-muted">Stories viewed</p>
+            <CountTable
+              rows={inapp?.stories ?? []}
+              labelHead="Story"
+              empty="No story views recorded yet."
+              renderLabel={(r) => <span>{r.label ?? r.key}</span>}
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] uppercase tracking-wider text-keep-muted">FAQs viewed</p>
+            <CountTable
+              rows={inapp?.faqs ?? []}
+              labelHead="FAQ"
+              empty="No FAQ views recorded yet."
+              renderLabel={(r) => <span>{r.label ?? r.key}</span>}
             />
           </div>
         </div>

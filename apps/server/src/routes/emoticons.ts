@@ -22,6 +22,7 @@ import {
   isEmoticonCellEmpty,
   lookupUnicodeEmojiCharByName,
   lookupUnicodeEmojiName,
+  slugRx,
 } from "@thekeep/shared";
 import {
   characterEarning,
@@ -45,7 +46,7 @@ import { loadReactionsForTargets, parseSheetCells } from "../reactions.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
-const SLUG_RX = /^[a-z0-9](?:[a-z0-9-]{0,40}[a-z0-9])?$/;
+const SLUG_RX = slugRx(42);
 
 /* =====================================================================
  *  Image upload helpers, same posture as admin/upload/logo: small

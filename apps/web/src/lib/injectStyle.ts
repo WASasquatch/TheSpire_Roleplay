@@ -17,14 +17,29 @@
  */
 import { CSP_NONCE } from "./cspNonce.js";
 
+/**
+ * Create a fresh `<style>` element, CSP-nonce stamped, and return it
+ * UNATTACHED. The caller owns keying/attributes/textContent, where it
+ * gets appended (document head, a shadow root, …), and any rewrite /
+ * cleanup lifecycle.
+ *
+ * The nonce is required in prod: the strict `style-src 'self' 'nonce-…'`
+ * policy drops any `<style>` that doesn't carry the request nonce. In dev
+ * there's no meta tag / no CSP, so `CSP_NONCE` is `""` and browsers ignore
+ * `nonce=""` — harmless there, required on remote. This is the single place
+ * every dynamic-`<style>` injector shares that stamping.
+ */
+export function createNonceStyleTag(): HTMLStyleElement {
+  const el = document.createElement("style");
+  if (CSP_NONCE) el.setAttribute("nonce", CSP_NONCE);
+  return el;
+}
+
 export function ensureInjectedStyle(id: string, css: string): void {
   if (typeof document === "undefined") return;
   if (document.getElementById(id)) return;
-  const el = document.createElement("style");
+  const el = createNonceStyleTag();
   el.id = id;
-  // Empty string in dev (no meta tag / no CSP); browsers ignore nonce="" so
-  // this is harmless there and required in prod.
-  if (CSP_NONCE) el.setAttribute("nonce", CSP_NONCE);
   el.textContent = css;
   document.head.appendChild(el);
 }

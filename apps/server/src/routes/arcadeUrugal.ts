@@ -23,7 +23,7 @@
  * already in place so that flip is small.
  */
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
@@ -35,25 +35,20 @@ import {
   URUGAL_MIN_MS_PER_FLOOR,
   urugalBossReward,
   urugalFloorReward,
+  startOfUtcDayMs,
   type UrugalEventResponse,
 } from "@thekeep/shared";
-import { characters, earningLedger, urugalRun } from "../db/schema.js";
+import { characters, urugalRun } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
 import { creditPool } from "../earning/award.js";
-import { DEFAULT_SERVER_ID } from "../earning/pool.js";
-import { serverAuthority } from "../servers/authority.js";
-import { getSettings, areServersEnabled } from "../settings.js";
+import { clampToDailyCap, earnedTodayForCap } from "../earning/dailyCap.js";
+import { resolveActiveServerId } from "../earning/pool.js";
+import { ownsPurchase } from "../earning/purchases.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Scope = "user" | "character";
-
-/** Start of the current UTC day in ms — the window for the daily cap scan. */
-function utcMidnightMs(nowMs: number): number {
-  const d = new Date(nowMs);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-}
 
 export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
   /* ---- identity + gate ----
@@ -80,38 +75,11 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
       if (!c || c.userId !== me.id || c.deletedAt) return { ok: false, code: 403, body: { error: "not your character" } };
       scope = "character"; ownerId = characterId;
     }
-    // Purchase gate: the per-identity one-time unlock (a ledger row).
-    const owned = (await db
-      .select({ id: earningLedger.id })
-      .from(earningLedger)
-      .where(and(eq(earningLedger.scope, scope), eq(earningLedger.ownerId, ownerId), eq(earningLedger.reason, `purchase_${FLAIR_URUGAL_DESCENT}`)))
-      .limit(1))[0];
+    // Purchase gate: the per-identity one-time unlock (a ledger row). Checked
+    // GLOBALLY (no serverId filter) — the intentional asymmetry vs Eidolon.
+    const owned = await ownsPurchase(db, { flairKey: FLAIR_URUGAL_DESCENT, scope, ownerId });
     if (!owned) return { ok: false, code: 402, body: { error: "locked", needsUnlock: true } };
     return { ok: true, userId: me.id, role: me.role, scope, ownerId };
-  }
-
-  /** Resolve the active server this run's earning lands on. The arcade routes
-   *  are NOT room-scoped, so the active server comes from an optional
-   *  `?serverId` (GET) / body.serverId (POST), validated EXACTLY like
-   *  `/earning/me` (routes/earning.ts): only honored when the servers flag is
-   *  on AND the caller may view that server's economy (it exists and they're a
-   *  member, owner/staff folded into serverAuthority.isMember). Anything else —
-   *  flag off, unknown id, foreign server — falls back to the default server,
-   *  so the cap-count + credit stay on the same pool and the flag-off path is
-   *  byte-identical (no extra DB hits when absent/default). */
-  async function resolveActiveServerId(
-    me: { id: string; role: import("@thekeep/shared").Role },
-    requestedServerId: string | undefined,
-  ): Promise<string> {
-    if (
-      requestedServerId &&
-      requestedServerId !== DEFAULT_SERVER_ID &&
-      areServersEnabled(await getSettings(db))
-    ) {
-      const authority = await serverAuthority(db, me, requestedServerId);
-      if (authority.server && authority.isMember) return requestedServerId;
-    }
-    return DEFAULT_SERVER_ID;
   }
 
   /* ---- GET /arcade/urugal ---- access probe for the launcher: 200 when
@@ -127,19 +95,13 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
    *  server the credit will land on, so a player active on two servers gets a
    *  full daily allowance on each (mirrors the presence cap in sweeps.ts). */
   function urugalEarnedTodayMs(serverId: string, scope: Scope, ownerId: string, nowMs: number): number {
-    const since = utcMidnightMs(nowMs);
-    const row = db
-      .select({ c: sql<number>`COALESCE(SUM(${earningLedger.currencyDelta}), 0)` })
-      .from(earningLedger)
-      .where(and(
-        eq(earningLedger.serverId, serverId),
-        eq(earningLedger.scope, scope),
-        eq(earningLedger.ownerId, ownerId),
-        sql`${earningLedger.reason} LIKE 'urugal\\_%' ESCAPE '\\'`,
-        sql`${earningLedger.createdAt} >= ${since}`,
-      ))
-      .all()[0];
-    return row?.c ?? 0;
+    return earnedTodayForCap(db, {
+      serverId,
+      scope,
+      ownerId,
+      reason: { likePrefix: "urugal" },
+      sinceMs: startOfUtcDayMs(nowMs),
+    }).currency;
   }
 
   /* ---- POST /arcade/urugal/start ---- */
@@ -186,7 +148,7 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
     const g = await gate(req, body.characterId ?? null);
     if (!g.ok) { reply.code(g.code); return g.body; }
     // The active server the reward (and its daily-cap scan) lands on.
-    const sid = await resolveActiveServerId({ id: g.userId, role: g.role }, body.serverId);
+    const sid = await resolveActiveServerId(db, { id: g.userId, role: g.role }, body.serverId);
 
     const nowMs = Date.now();
     const earnedToday = urugalEarnedTodayMs(sid, g.scope, g.ownerId, nowMs);
@@ -232,9 +194,7 @@ export async function registerUrugalRoutes(app: FastifyInstance, db: Db, io: Io)
       // currency to the remaining headroom, and once the day is exhausted
       // stop paying XP too. Mark the milestone paid either way so a
       // capped-out player doesn't keep retrying it.
-      const grantedCurrency = Math.min(award.currency, remainingCap);
-      const grantedXp = remainingCap > 0 ? award.xp : 0;
-      const capped = grantedCurrency < award.currency || grantedXp < award.xp;
+      const { currency: grantedCurrency, xp: grantedXp, capped } = clampToDailyCap(award, remainingCap);
 
       tx.update(urugalRun)
         .set({ maxFloor: nextMaxFloor, bossesJson: nextBosses, lastEventAt: nowMs })

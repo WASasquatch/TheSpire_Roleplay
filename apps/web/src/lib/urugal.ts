@@ -10,6 +10,7 @@
 import type { UrugalEventResponse, UrugalEventType, UrugalStartResponse } from "@thekeep/shared";
 import { FLAIR_URUGAL_DESCENT } from "@thekeep/shared";
 import { purchaseCosmetic } from "./earning";
+import { withIdentityQuery } from "./http.js";
 
 export type UrugalAccess = "ok" | "locked" | "forbidden";
 
@@ -17,8 +18,7 @@ export type UrugalAccess = "ok" | "locked" | "forbidden";
  *  unlock — 402), or "forbidden" (permission/auth — 403/401). Mirrors
  *  fetchEidolon's access tri-state so the launcher shows the right CTA. */
 export async function fetchUrugalAccess(characterId: string | null): Promise<UrugalAccess> {
-  const qs = characterId ? `?characterId=${encodeURIComponent(characterId)}` : "";
-  const r = await fetch(`/arcade/urugal${qs}`, { credentials: "include" });
+  const r = await fetch(withIdentityQuery("/arcade/urugal", characterId), { credentials: "include" });
   if (r.status === 402) return "locked";
   if (!r.ok) return "forbidden";
   return "ok";

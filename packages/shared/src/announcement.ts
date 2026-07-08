@@ -13,6 +13,8 @@
  *     `runAt` so the scheduler only has to deal with two shapes.
  */
 
+import { formatDurationCompact } from "./duration.js";
+
 /**
  * Wire row for a single rotating banner. The shell fetches the
  * enabled set on mount + on the `announcements:banners-changed`
@@ -177,15 +179,8 @@ export function describeSchedule(
 }
 
 function formatDurationMs(ms: number): string {
-  if (ms <= 0) return "0m";
-  const days = Math.floor(ms / (24 * 60 * 60 * 1000));
-  const hours = Math.floor((ms % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
-  const minutes = Math.floor((ms % (60 * 60 * 1000)) / (60 * 1000));
-  const parts: string[] = [];
-  if (days) parts.push(`${days}d`);
-  if (hours) parts.push(`${hours}h`);
-  if (minutes) parts.push(`${minutes}m`);
-  return parts.join("") || "0m";
+  // Bare-concatenated d/h/m, "0m" for anything non-positive.
+  return formatDurationCompact(ms, { zeroLabel: "0m", clampNegative: true });
 }
 
 /**

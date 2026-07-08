@@ -38,6 +38,7 @@ import {
   broadcastRoomState,
   emitTreeChanged,
   findCanonicalLanding,
+  onlineUserIds,
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
 import { applyGeoCredentials, geoDbStatus } from "../analytics/geoDb.js";
@@ -52,6 +53,7 @@ import type { AutomodRule } from "@thekeep/shared";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { globalAuditScopeWhere, recordAudit } from "../audit.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
+import { parseLimit } from "../lib/pagination.js";
 import { registerAdminEarningRoutes } from "./earning.js";
 import { registerAdminBackupRoutes } from "./backup.js";
 import { registerAdminPermissionRoutes } from "./permissions.js";
@@ -474,12 +476,7 @@ export async function registerAdminRoutes(
     const tzShiftSec = -tzOffsetMin * 60;
 
     // Currently-connected users, dedupe by userId across sockets.
-    const sockets = await io.fetchSockets();
-    const onlineUsers = new Set<string>();
-    for (const s of sockets) {
-      const uid = (s.data as { userId?: string }).userId;
-      if (uid) onlineUsers.add(uid);
-    }
+    const onlineUsers = await onlineUserIds(io);
 
     // Registered users exclude the "system" sentinel (owner of server-authored
     // system messages); counting it as a user inflates the figure misleadingly.
@@ -2419,7 +2416,7 @@ export async function registerAdminRoutes(
     // saw the tab but got 403 on the data fetch. Migration 0182
     // dropped `view_audit_log` from the catalog.
     if (!(await requirePermission(req, reply, "view_admin_audit"))) return;
-    const limit = Math.min(500, parseInt(req.query.limit ?? "200", 10) || 200);
+    const limit = parseLimit(req.query.limit, { max: 500, default: 200 });
     // The GLOBAL Audit feed is platform-owned rows only. Server-scoped
     // moderation (stamped via `auditServerAction`) lands in the owning
     // server's per-server Mod Log and is excluded here. Every legacy and

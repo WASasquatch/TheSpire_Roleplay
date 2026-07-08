@@ -9,6 +9,7 @@ import { getSessionUser } from "./auth.js";
 import { recordAudit } from "../audit.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { areServersEnabled, getSettings } from "../settings.js";
+import { parseLimit } from "../lib/pagination.js";
 import type { Db } from "../db/index.js";
 
 /**
@@ -219,7 +220,7 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
     }
 
     const status = req.query.status;
-    const limit = Math.min(200, parseInt(req.query.limit ?? "100", 10) || 100);
+    const limit = parseLimit(req.query.limit, { max: 200, default: 100 });
 
     const statusFilter = status === "open" || status === "reviewed" || status === "dismissed"
       ? eq(reports.status, status)

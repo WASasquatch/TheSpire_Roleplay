@@ -5,6 +5,7 @@ import { characters, sessions, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import type { SessionUser } from "../commands/types.js";
 import { getSettings } from "../settings.js";
+import { socketsForUser } from "../realtime/presence.js";
 
 /**
  * Force a user out of the site, authoritatively:
@@ -28,9 +29,8 @@ export async function forceLogoutUser(
   message: string,
 ): Promise<void> {
   await db.delete(sessions).where(eq(sessions.userId, userId));
-  const socks = await io.fetchSockets();
-  for (const s of socks) {
-    if ((s.data as { userId?: string }).userId !== userId) continue;
+  const mine = await socketsForUser(io, userId);
+  for (const s of mine) {
     s.emit("session:kicked", { message });
     s.emit("auth:expired");
     setTimeout(() => { try { s.disconnect(true); } catch { /* already gone */ } }, 250);

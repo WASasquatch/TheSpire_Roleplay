@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { clampAvatarCrop, roleRank } from "@thekeep/shared";
+import { clampAvatarCrop, isModeratorRole, roleRank } from "@thekeep/shared";
 import {
   userActiveCosmetics,
   userEarning,
@@ -155,7 +155,7 @@ export async function registerStaffRoutes(app: FastifyInstance, db: Db): Promise
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     // Only staff have a card to edit.
-    if (roleRank(me.role) < roleRank("mod")) {
+    if (!isModeratorRole(me.role)) {
       reply.code(403);
       return { error: "not staff" };
     }

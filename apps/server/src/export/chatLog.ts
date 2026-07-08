@@ -28,8 +28,8 @@
  * and renders as literal text. The only HTML that can reach the document is the
  * fixed set above.
  */
-import { resolveMessageColor } from "@thekeep/shared";
-import { EXPORT_MANIFEST_DOM_ID, formatDurationShort, type ExportManifest } from "@thekeep/shared";
+import { resolveMessageColor, escapeHtml as escapeHtmlShared } from "@thekeep/shared";
+import { EXPORT_MANIFEST_DOM_ID, fmtDateTimeUtc, formatDurationShort, type ExportManifest } from "@thekeep/shared";
 
 export type ExportTheme = "light" | "dark";
 
@@ -114,22 +114,16 @@ export interface ChatLogExportOptions {
   manifest?: ExportManifest;
 }
 
+/** Escapes `& < > "` (text + double-quoted attribute context) via the shared
+ *  `escapeHtml` with `doubleQuote`, byte-identical to the former inline copy. */
 function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return escapeHtmlShared(s, { doubleQuote: true });
 }
 
 /** Attribute-safe escaping for a URL we drop into an `href`. Quotes/angle
  *  brackets/ampersands only — the URL is already validated to http(s). */
 function escapeAttrUrl(url: string): string {
-  return url
-    .replace(/&/g, "&amp;")
-    .replace(/"/g, "&quot;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+  return escapeHtmlShared(url, { doubleQuote: true });
 }
 
 /** The chat's inline HTML aliases → the safe tag we emit. Mirrors
@@ -223,12 +217,7 @@ function renderBody(raw: string): string {
 /** Wall-clock `YYYY-MM-DD HH:MM:SS` in the requested tz offset. We shift the
  *  epoch by the offset then read UTC fields, so it matches the user's chat. */
 function fmtTimestamp(ms: number, tzMinutes: number): string {
-  const d = new Date(ms + tzMinutes * 60_000);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
-    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`
-  );
+  return fmtDateTimeUtc(ms + tzMinutes * 60_000);
 }
 
 /** Inline `style="color:…"` for an author/body colour, or "" for the default.

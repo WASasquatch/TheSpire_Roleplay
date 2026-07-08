@@ -21,11 +21,19 @@
 import { and, gte, lt, sql, inArray } from "drizzle-orm";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { PermissionKey } from "@thekeep/shared";
+import { startOfUtcDayMs } from "@thekeep/shared";
 import {
   analyticsDaily,
   analyticsEvent,
   analyticsPageView,
+  rooms,
+  servers,
+  worlds,
+  forums,
+  stories,
+  faqs,
 } from "../db/schema.js";
+import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import type { Db } from "../db/index.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 
@@ -44,12 +52,6 @@ function parseBool(raw: string | undefined): boolean {
 /** 'YYYY-MM-DD' (UTC) for a ms instant. */
 function dayKey(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
-}
-
-/** Start-of-UTC-today in ms. */
-function todayStart(now: number): number {
-  const d = new Date(now);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
 }
 
 /**
@@ -73,7 +75,7 @@ export async function registerAnalyticsAdminRoutes(app: FastifyInstance, db: Db)
       const range = parseRange(req.query.range);
       const includeBots = parseBool(req.query.includeBots);
       const now = Date.now();
-      const tStart = todayStart(now);
+      const tStart = startOfUtcDayMs(now);
       // Rollup covers days strictly before today; the window's first day is
       // (range-1) days back so a 7-day range shows 7 buckets incl. today.
       const fromDay = dayKey(tStart - (range - 1) * DAY_MS);
@@ -210,7 +212,7 @@ export async function registerAnalyticsAdminRoutes(app: FastifyInstance, db: Db)
       const range = parseRange(req.query.range);
       const includeBots = parseBool(req.query.includeBots);
       const now = Date.now();
-      const tStart = todayStart(now);
+      const tStart = startOfUtcDayMs(now);
       const fromDay = dayKey(tStart - (range - 1) * DAY_MS);
 
       const evMetrics = metricSet("event", includeBots);
@@ -255,9 +257,55 @@ export async function registerAnalyticsAdminRoutes(app: FastifyInstance, db: Db)
         series.set(todayKey, (series.get(todayKey) ?? 0) + r.n);
       }
 
-      const topOf = (kind: string, n = 25) =>
+      /* ----- resolve raw id/slug keys → human labels (batch, per table) ----- */
+      // One query per entity table, only for the keys that actually appear in
+      // this window. Deleted/unknown entities fall back to "<key> (deleted)" so
+      // the row still shows something and nothing crashes.
+      const keysOf = (kind: string): string[] => [...(byKind.get(kind) ?? new Map()).keys()] as string[];
+      const labelMap = async (
+        keys: string[],
+        table: Parameters<ReturnType<typeof db.select>["from"]>[0],
+        keyCol: SQLiteColumn,
+        labelCol: SQLiteColumn,
+      ): Promise<Map<string, string>> => {
+        const out = new Map<string, string>();
+        if (keys.length === 0) return out;
+        const rows = await db
+          .select({ k: keyCol, v: labelCol })
+          .from(table)
+          .where(inArray(keyCol, keys));
+        for (const r of rows) {
+          if (r.k != null) out.set(String(r.k), r.v == null ? "" : String(r.v));
+        }
+        return out;
+      };
+
+      const [roomL, serverL, worldL, forumL, serverPageL, storyL, faqL] = await Promise.all([
+        labelMap(keysOf("room"), rooms, rooms.id, rooms.name),
+        labelMap(keysOf("server"), servers, servers.id, servers.name),
+        labelMap(keysOf("world"), worlds, worlds.slug, worlds.name),
+        labelMap(keysOf("forum"), forums, forums.slug, forums.name),
+        labelMap(keysOf("serverPage"), servers, servers.slug, servers.name),
+        labelMap(keysOf("story"), stories, stories.slug, stories.title),
+        labelMap(keysOf("faq"), faqs, faqs.slug, faqs.question),
+      ]);
+
+      // Build ranked rows for a kind. When `labels` is provided, a missing key
+      // means the entity was deleted → fall back to "<key> (deleted)". When no
+      // map is given (profiles: the key is already the username; modals/tabs/
+      // features/pages: raw keys ARE the label), the label is just the key.
+      const topOf = (kind: string, labels?: Map<string, string>, n = 25) =>
         [...(byKind.get(kind) ?? new Map()).entries()]
-          .map(([key, count]) => ({ key, count: count as number }))
+          .map(([key, count]) => {
+            const k = key as string;
+            const resolved = labels?.get(k);
+            const label = labels
+              ? resolved && resolved.length
+                ? resolved
+                : `${k} (deleted)`
+              : k;
+            return { key: k, count: count as number, label };
+          })
           .sort((a, b) => b.count - a.count)
           .slice(0, n);
 
@@ -267,10 +315,18 @@ export async function registerAnalyticsAdminRoutes(app: FastifyInstance, db: Db)
         series: [...series.entries()].map(([day, count]) => ({ day, count })),
         modals: topOf("modal"),
         tabs: topOf("tab"),
-        rooms: topOf("room"),
-        servers: topOf("server"),
+        rooms: topOf("room", roomL),
+        servers: topOf("server", serverL),
         features: topOf("feature"),
         pages: topOf("page"),
+        // Per-entity public-page views (label-resolved; distinct from the
+        // template-collapsed `pages` aggregate above).
+        profiles: topOf("profile"),
+        worlds: topOf("world", worldL),
+        forums: topOf("forum", forumL),
+        serverPages: topOf("serverPage", serverPageL),
+        stories: topOf("story", storyL),
+        faqs: topOf("faq", faqL),
       };
     },
   );

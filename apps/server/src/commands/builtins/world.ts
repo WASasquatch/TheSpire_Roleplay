@@ -1,6 +1,6 @@
 import { and, eq, or, sql } from "drizzle-orm";
 import { roomMembers, roomWorldLinks, rooms, worldMembers, worlds } from "../../db/schema.js";
-import { broadcastPresence, broadcastRoomState } from "../../realtime/broadcast.js";
+import { broadcastRoomState, rebroadcastPresenceForUser } from "../../realtime/broadcast.js";
 import { hasPermission } from "../../auth/permissions.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
@@ -52,17 +52,7 @@ async function resolveWorldForMembership(ctx: CommandContext, slug: string) {
  * occupants payload to re-sort. Mirrors the route-layer helper.
  */
 async function rebroadcastSelfOccupancy(ctx: CommandContext) {
-  const sockets = await ctx.io.fetchSockets();
-  const rooms = new Set<string>();
-  for (const s of sockets) {
-    if ((s.data as { userId?: string }).userId !== ctx.user.id) continue;
-    for (const r of s.rooms) {
-      if (r.startsWith("room:")) rooms.add(r.slice(5));
-    }
-  }
-  for (const rid of rooms) {
-    await broadcastPresence(ctx.io, ctx.db, rid).catch(() => {});
-  }
+  await rebroadcastPresenceForUser(ctx.io, ctx.db, ctx.user.id);
 }
 
 async function callerCanModerateRoom(ctx: CommandContext): Promise<boolean> {

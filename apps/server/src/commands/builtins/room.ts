@@ -1,7 +1,7 @@
 import argon2 from "argon2";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { deriveSlug } from "@thekeep/shared";
+import { deriveSlug, slugRx } from "@thekeep/shared";
 import { bans, roomInvites, roomMembers, rooms } from "../../db/schema.js";
 import { joinRoom } from "../../realtime/broadcast.js";
 import { getServerSettings } from "../../settings.js";
@@ -476,7 +476,7 @@ export const topicCommand: CommandHandler = {
  *  between, 1-60 chars. `deriveSlug` already normalizes to this, but we
  *  re-validate so a normalize-to-empty input (all symbols) is rejected
  *  with a clear message instead of silently writing nothing. */
-const ROOM_SLUG_RX = /^[a-z0-9](?:[a-z0-9-]{0,58}[a-z0-9])?$/;
+const ROOM_SLUG_RX = slugRx(60);
 
 /**
  * /slug [handle]

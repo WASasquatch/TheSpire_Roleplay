@@ -22,14 +22,7 @@
  * the merged output. Admin trust + CSP layer defense-in-depth.
  */
 
-function escapeHtmlAttr(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
+import { escapeHtmlAttr } from "@thekeep/shared";
 
 /**
  * Render the avatar fragment that `{avatar}` expands to. When the

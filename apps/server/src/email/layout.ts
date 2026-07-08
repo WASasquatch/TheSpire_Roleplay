@@ -10,6 +10,7 @@
  * admin emailer sanitizes tiptap output before it reaches here).
  */
 import type { SiteSettings } from "../settings.js";
+import { escapeHtml } from "@thekeep/shared";
 
 const ACCENT = "#7c5cff"; // Spire accent for buttons/links in email
 const DEFAULT_BASE_URL = "https://thespire.games";
@@ -105,11 +106,9 @@ export function renderBrandedEmail(settings: SiteSettings, opts: BrandedEmailOpt
 </html>`;
 }
 
-/** Minimal HTML-escape for interpolated text (not for the trusted bodyHtml). */
+/** Minimal HTML-escape for interpolated text (not for the trusted bodyHtml).
+ *  Escapes `& < > "` (text + double-quoted attribute context) — the shared
+ *  `escapeHtml` with `doubleQuote`, byte-identical to the former inline copy. */
 function esc(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+  return escapeHtml(s, { doubleQuote: true });
 }

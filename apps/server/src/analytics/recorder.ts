@@ -199,6 +199,14 @@ export function recordServerPageView(
   db: Db,
   input: {
     path: string;
+    /**
+     * Optional per-ENTITY hit (kind = "world"/"forum"/"profile"/… , key = the
+     * real slug/name). Recorded as an `analyticsEvent` row so the admin tab can
+     * break public pages out per entity instead of collapsing them into the
+     * `:slug` template. Throttled on its OWN key so it still records when the
+     * page-view below is throttled.
+     */
+    entity?: { kind: string; key: string };
     ip: string | null | undefined;
     userAgent: string | null | undefined;
     referer: string | null | undefined;
@@ -212,6 +220,24 @@ export function recordServerPageView(
     const ua = input.userAgent ?? null;
     const hash = visitorHash(input.ip, ua);
     const now = Date.now();
+    const bot = isBotUA(ua);
+
+    // Per-entity hit (kind/key = the real slug/name). Throttled on a SEPARATE
+    // key and wrapped so it records independently of — and never blocks — the
+    // page-view insert below, even when the page view is throttled away.
+    if (input.entity) {
+      try {
+        const evKey = `ev:${hash ?? "anon:" + (ua ?? "")}:${input.entity.kind}:${input.entity.key}`;
+        if (admit(evKey, now)) {
+          await insertEvents(db, [
+            { kind: input.entity.kind, key: input.entity.key, userId: null, isBot: bot },
+          ]);
+        }
+      } catch {
+        /* entity telemetry never blocks the page-view */
+      }
+    }
+
     // Throttle on (visitorHash, path). When there's no IP to hash we fall back
     // to a UA-scoped key so a headless flood on the same UA still throttles.
     const throttleKey = `pv:${hash ?? "anon:" + (ua ?? "")}:${input.path}`;

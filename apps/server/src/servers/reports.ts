@@ -36,6 +36,7 @@ import type {
 import { auditLog, messages, reports, rooms, users } from "../db/schema.js";
 import { getSessionUser } from "../routes/auth.js";
 import { areServersEnabled, getSettings } from "../settings.js";
+import { parseLimit } from "../lib/pagination.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -72,7 +73,7 @@ export async function registerServerReportRoutes(
       if (!serverCan(a, "manage_reports")) { reply.code(403); return { error: "forbidden" }; }
 
       const status = req.query.status;
-      const limit = Math.min(200, parseInt(req.query.limit ?? "100", 10) || 100);
+      const limit = parseLimit(req.query.limit, { max: 200, default: 100 });
 
       // Always scope to THIS server's message reports (the column is the seam).
       const scope = eq(reports.serverId, req.params.id);

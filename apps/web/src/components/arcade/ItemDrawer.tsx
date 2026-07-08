@@ -14,7 +14,7 @@ import { buyItem } from "../../lib/earning";
 import type { ItemCatalogRow } from "../../lib/earning";
 import { useEarning } from "../../state/earning";
 import { useChat } from "../../state/store";
-import { CoinAmount } from "../CoinAmount";
+import { CoinAmount } from "../earning/CoinAmount";
 
 interface Props {
   mode: "food" | "remedy" | "revive" | "toy";

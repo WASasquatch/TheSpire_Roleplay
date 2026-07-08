@@ -4,7 +4,7 @@
  * page/collaborator helpers in lib/worlds.ts.
  */
 import type { WorldArc, WorldArcStatus, WorldEntity, WorldEntityKind, WorldSession } from "@thekeep/shared";
-import { readError } from "./http.js";
+import { jsonOrThrow, readError } from "./http.js";
 
 export interface WorldEntityInput {
   kind?: string;
@@ -29,10 +29,6 @@ export interface WorldEntityKindInput {
   sortOrder?: number;
 }
 
-async function jsonOrThrow<T>(r: Response): Promise<T> {
-  if (!r.ok) throw new Error(await readError(r));
-  return (await r.json()) as T;
-}
 const wid = encodeURIComponent;
 
 export async function fetchWorldEntity(worldId: string, eid: string): Promise<WorldEntity> {

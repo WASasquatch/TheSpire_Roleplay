@@ -1,5 +1,5 @@
-import { Modal } from "./Modal.js";
-import { CloseButton } from "./CloseButton.js";
+import { Modal } from "./cosmetics/Modal.js";
+import { CloseButton } from "./shared/CloseButton.js";
 
 interface Props {
   title: string;

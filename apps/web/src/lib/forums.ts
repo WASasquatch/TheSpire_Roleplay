@@ -4,6 +4,7 @@
  * Phase-7 public /f/ page reuses them).
  */
 import type { ChatMessage, ForumAutoRule, ForumBoardTopicsPage, ForumCreationApplicationWire, ForumDetail, ForumManagedEntry, ForumMemberEntry, ForumMembershipApplicationWire, ForumModEntry, ForumModLogEntry, ForumModPermission, ForumPermission, ForumReportWire, ForumSummary, ForumUsergroupMemberWire, ForumUsergroupWire, ForumUserSearchHit, NpcStat, ThreadCategory, UserNpcWire } from "@thekeep/shared";
+import { relTimeParts } from "./relativeTime.js";
 
 export async function fetchForums(): Promise<ForumSummary[]> {
   const r = await fetch("/forums", { credentials: "include" });
@@ -65,13 +66,13 @@ export async function fetchForumRegistrationRules(): Promise<string> {
 /** Compact relative time for activity pulses: "just now", "5m", "3h", "2d". */
 export function relTime(ms: number | null): string | null {
   if (!ms) return null;
-  const delta = Date.now() - ms;
-  if (delta < 90_000) return "just now";
-  const m = Math.floor(delta / 60_000);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 48) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  const p = relTimeParts(Date.now() - ms, { justNowSec: 90, hourCutoffHrs: 48, roundMode: "floor" });
+  switch (p.tier) {
+    case "justNow": return "just now";
+    case "minutes": return `${p.value}m ago`;
+    case "hours": return `${p.value}h ago`;
+    default: return `${p.value}d ago`;
+  }
 }
 
 /* ============================================================

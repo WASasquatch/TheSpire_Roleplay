@@ -93,6 +93,12 @@ coverage/
 # Vite bundle analyzer output (only emitted when ROLLUP_INSPECT=1)
 stats.html
 
+# Python bytecode cache from local .py scripts / probes (db inspection,
+# print-crashes helpers, etc.). Never belongs in the repo.
+__pycache__/
+*.pyc
+*.pyo
+
 # =====================================================================
 # Editor / IDE
 # =====================================================================

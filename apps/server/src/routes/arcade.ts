@@ -15,14 +15,13 @@ import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
 import type { ClientToServerEvents, EidolonHallEntry, EidolonProfileSummary, EidolonSnapshot, ServerToClientEvents } from "@thekeep/shared";
 import { EIDOLON_SPECIES_IDS, EIDOLON_MOOD_LABEL, EIDOLON_PAT_COOLDOWN_MS, EIDOLON_PAT_JOY_GAIN, FLAIR_EIDOLON_TAMER, effectiveTraits, eidolonCareXp, eidolonLevelFromXp, eidolonLineageBonusXp, eidolonPrimaryMood, eidolonSaleValueOf, reviveStats, rollTraitId, rollVariant, streakXpMultiplier } from "@thekeep/shared";
-import { characterEarning, characters, earningLedger, eidolonHall, eidolonState, eidolonVisits, identityInventory, items, userEarning } from "../db/schema.js";
+import { characters, earningLedger, eidolonHall, eidolonState, eidolonVisits, identityInventory, items } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 import { hasPermission } from "../auth/permissions.js";
-import { creditPool } from "../earning/award.js";
-import { DEFAULT_SERVER_ID } from "../earning/pool.js";
-import { serverAuthority } from "../servers/authority.js";
-import { getSettings, areServersEnabled } from "../settings.js";
+import { creditPool, debitPool, type DebitPoolResult } from "../earning/award.js";
+import { resolveActiveServerId } from "../earning/pool.js";
+import { ownsPurchase } from "../earning/purchases.js";
 import { fetchDisplayInfo } from "../earning/rankings.js";
 import {
   BASIC_HEAL_AMOUNT, BASIC_HEAL_COST, POTION_HEAL_AMOUNT,
@@ -44,30 +43,6 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     | { ok: true; userId: string; role: import("@thekeep/shared").Role; scope: Scope; ownerId: string; serverId: string }
     | { ok: false; code: number; body: Record<string, unknown> };
 
-  /** Resolve the active server this familiar lives on. The arcade routes are
-   *  NOT room-scoped, so the active server comes from an optional `?serverId`
-   *  (GET) / body.serverId (POST), validated EXACTLY like `/earning/me`
-   *  (routes/earning.ts): honored only when the servers flag is on AND the
-   *  caller may view that server's economy (it exists and they're a member,
-   *  owner/staff folded into serverAuthority.isMember). Anything else — flag
-   *  off, unknown id, foreign server — falls back to the default server, so the
-   *  flag-off / single-server path is byte-identical (no extra DB hits when the
-   *  query is absent or already the default). */
-  async function resolveActiveServerId(
-    me: { id: string; role: import("@thekeep/shared").Role },
-    requestedServerId: string | undefined,
-  ): Promise<string> {
-    if (
-      requestedServerId &&
-      requestedServerId !== DEFAULT_SERVER_ID &&
-      areServersEnabled(await getSettings(db))
-    ) {
-      const authority = await serverAuthority(db, me, requestedServerId);
-      if (authority.server && authority.isMember) return requestedServerId;
-    }
-    return DEFAULT_SERVER_ID;
-  }
-
   async function gate(req: FastifyRequest, characterId: string | null, requestedServerId: string | undefined): Promise<Gate> {
     const me = await getSessionUser(req, db);
     if (!me) return { ok: false, code: 401, body: { error: "auth" } };
@@ -85,16 +60,12 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       if (!c || c.userId !== me.id || c.deletedAt) return { ok: false, code: 403, body: { error: "not your character" } };
       scope = "character"; ownerId = characterId;
     }
-    const serverId = await resolveActiveServerId(me, requestedServerId);
+    const serverId = await resolveActiveServerId(db, me, requestedServerId);
     // Purchase gate: the per-identity, PER-SERVER one-time unlock (a ledger
     // row). The Eidolon is a SEPARATE familiar per server, so the unlock is
     // bought (and checked) per server. With the flag off the only server is the
     // default, so this is byte-identical to the legacy single-pool check.
-    const owned = (await db
-      .select({ id: earningLedger.id })
-      .from(earningLedger)
-      .where(and(eq(earningLedger.serverId, serverId), eq(earningLedger.scope, scope), eq(earningLedger.ownerId, ownerId), eq(earningLedger.reason, `purchase_${FLAIR_EIDOLON_TAMER}`)))
-      .limit(1))[0];
+    const owned = await ownsPurchase(db, { flairKey: FLAIR_EIDOLON_TAMER, scope, ownerId, serverId });
     if (!owned) return { ok: false, code: 402, body: { error: "locked", needsUnlock: true } };
     return { ok: true, userId: me.id, role: me.role, scope, ownerId, serverId };
   }
@@ -242,28 +213,17 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     });
   }
 
-  /** Debit currency from the identity's pool (balance-checked). */
-  function debitCurrency(scope: Scope, userId: string, ownerId: string, serverId: string, amount: number, reason: string):
-    | { ok: true; final: { xp: number; currency: number; rankKey: string | null; tier: number | null } }
-    | { ok: false; balance: number } {
-    return db.transaction((tx) => {
-      if (scope === "character") {
-        tx.insert(characterEarning).values({ serverId, characterId: ownerId }).onConflictDoNothing().run();
-        const e = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId))).limit(1).all()[0];
-        const bal = e?.currency ?? 0;
-        if (bal < amount) return { ok: false as const, balance: bal };
-        tx.update(characterEarning).set({ currency: bal - amount, updatedAt: new Date() }).where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId))).run();
-        tx.insert(earningLedger).values({ id: nanoid(), serverId, scope, ownerId, xpDelta: 0, currencyDelta: -amount, reason, metadataJson: JSON.stringify({ kind: "eidolon_heal" }) }).run();
-        return { ok: true as const, final: { xp: e?.xp ?? 0, currency: bal - amount, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null } };
-      }
-      tx.insert(userEarning).values({ serverId, userId }).onConflictDoNothing().run();
-      const e = tx.select().from(userEarning).where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, userId))).limit(1).all()[0];
-      const bal = e?.currency ?? 0;
-      if (bal < amount) return { ok: false as const, balance: bal };
-      tx.update(userEarning).set({ currency: bal - amount, updatedAt: new Date() }).where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, userId))).run();
-      tx.insert(earningLedger).values({ id: nanoid(), serverId, scope: "user", ownerId: userId, xpDelta: 0, currencyDelta: -amount, reason, metadataJson: JSON.stringify({ kind: "eidolon_heal" }) }).run();
-      return { ok: true as const, final: { xp: e?.xp ?? 0, currency: bal - amount, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null } };
-    });
+  /** Debit currency from the identity's pool (balance-checked). Wraps the
+   *  shared sync {@link debitPool} primitive in its own transaction so the
+   *  balance read + write + ledger insert stay atomic (as this path opened its
+   *  own tx before the extraction). For "user" scope the pool key is `userId`;
+   *  for "character" it is `ownerId` — mirroring the pre-extraction branches. */
+  function debitCurrency(scope: Scope, userId: string, ownerId: string, serverId: string, amount: number, reason: string): DebitPoolResult {
+    const poolOwnerId = scope === "character" ? ownerId : userId;
+    return db.transaction((tx) => debitPool(tx, {
+      serverId, scope, ownerId: poolOwnerId, currencyDelta: -amount, reason,
+      metadata: { kind: "eidolon_heal" }, rejectOnInsufficient: true,
+    }));
   }
 
   async function emitToUser(userId: string, ev: Parameters<Io["emit"]>[0], payload: unknown): Promise<void> {
@@ -298,7 +258,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // Which server's familiar to show. Validated against the VIEWER's
     // membership (resolveActiveServerId) — flag off / absent ⇒ default server,
     // so this is byte-identical to the legacy single-pool read.
-    const sid = await resolveActiveServerId(me, req.query.serverId);
+    const sid = await resolveActiveServerId(db, me, req.query.serverId);
     const row = await loadRow(scope, ownerId, sid);
     if (!row) return { eidolon: null };
     // Respect the target's privacy: fetchDisplayInfo drops hidden / private /
@@ -340,7 +300,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // Which server's familiar is being patted. Validated against the VISITOR's
     // membership (resolveActiveServerId); flag off / absent ⇒ default server.
     // The pat + its 24h cooldown are per-server (a separate familiar per server).
-    const sid = await resolveActiveServerId(me, body.serverId);
+    const sid = await resolveActiveServerId(db, me, body.serverId);
 
     // Resolve the target's owning user to block patting any of your own
     // identities' familiars (the gesture means "someone ELSE cares").
@@ -714,22 +674,16 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       // Memorialize before clearing (feeds the Hall + the next hatch's lineage).
       tx.insert(eidolonHall).values(hallValues(g.scope, g.ownerId, sid, row, prog, "sold", nowMs)).run();
       tx.delete(eidolonState).where(where).run();
-      let final: Final;
-      if (g.scope === "character") {
-        tx.insert(characterEarning).values({ serverId: sid, characterId: g.ownerId }).onConflictDoNothing().run();
-        const e = tx.select().from(characterEarning).where(and(eq(characterEarning.serverId, sid), eq(characterEarning.characterId, g.ownerId))).limit(1).all()[0];
-        const bal = e?.currency ?? 0;
-        tx.update(characterEarning).set({ currency: bal + value, updatedAt: new Date() }).where(and(eq(characterEarning.serverId, sid), eq(characterEarning.characterId, g.ownerId))).run();
-        tx.insert(earningLedger).values({ id: nanoid(), serverId: sid, scope: "character", ownerId: g.ownerId, xpDelta: 0, currencyDelta: value, reason: "eidolon_sale", metadataJson: JSON.stringify({ kind: "eidolon_sale", level }) }).run();
-        final = { xp: e?.xp ?? 0, currency: bal + value, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null };
-      } else {
-        tx.insert(userEarning).values({ serverId: sid, userId: g.userId }).onConflictDoNothing().run();
-        const e = tx.select().from(userEarning).where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, g.userId))).limit(1).all()[0];
-        const bal = e?.currency ?? 0;
-        tx.update(userEarning).set({ currency: bal + value, updatedAt: new Date() }).where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, g.userId))).run();
-        tx.insert(earningLedger).values({ id: nanoid(), serverId: sid, scope: "user", ownerId: g.userId, xpDelta: 0, currencyDelta: value, reason: "eidolon_sale", metadataJson: JSON.stringify({ kind: "eidolon_sale", level }) }).run();
-        final = { xp: e?.xp ?? 0, currency: bal + value, rankKey: e?.rankKey ?? null, tier: e?.tier ?? null };
-      }
+      // Sale proceeds credited via the shared sync primitive (currency-only, no
+      // rank recompute), INSIDE this same tx so the memorial + delete + credit
+      // stay atomic. rejectOnInsufficient:false ⇒ a credit never fails.
+      const res = debitPool(tx, {
+        serverId: sid, scope: g.scope, ownerId: g.ownerId, currencyDelta: value,
+        reason: "eidolon_sale", metadata: { kind: "eidolon_sale", level }, rejectOnInsufficient: false,
+      });
+      /* c8 ignore next */
+      if (!res.ok) throw new Error("unreachable: sale credit rejected");
+      const final: Final = res.final;
       return { kind: "sold", value, level, final };
     });
     if (outcome.kind === "none") { reply.code(404); return { error: "no familiar" }; }

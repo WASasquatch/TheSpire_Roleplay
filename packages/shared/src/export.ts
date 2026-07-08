@@ -11,6 +11,8 @@
  * hard ceiling so a single request can't try to serialize an unbounded history.
  */
 
+import { formatDurationCompact } from "./duration.js";
+
 /** Hard ceiling on the export window regardless of retention (30 days). Keeps
  *  any one request bounded even when retention is "infinite" (global 0). */
 export const MAX_EXPORT_MS = 30 * 24 * 60 * 60 * 1000;
@@ -213,14 +215,8 @@ export function extractExportManifest(html: string): ExportManifest | null {
 }
 
 /** Compact human label for a ms window, e.g. `2d 3h`, `5h`, `45m`. Used in the
- *  clamp notice and the export document header. */
+ *  clamp notice and the export document header. Space-joined, every non-zero
+ *  d/h/m unit, no seconds, no negative guard (callers clamp the window). */
 export function formatDurationShort(ms: number): string {
-  const d = Math.floor(ms / MS.d);
-  const h = Math.floor((ms % MS.d) / MS.h);
-  const m = Math.floor((ms % MS.h) / MS.m);
-  const parts: string[] = [];
-  if (d) parts.push(`${d}d`);
-  if (h) parts.push(`${h}h`);
-  if (m) parts.push(`${m}m`);
-  return parts.length ? parts.join(" ") : "0m";
+  return formatDurationCompact(ms, { separator: " ", zeroLabel: "0m" });
 }

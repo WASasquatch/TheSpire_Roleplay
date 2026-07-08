@@ -9,9 +9,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Monitor } from "lucide-react";
 import { EIDOLON_UNLOCK_COST, URUGAL_UNLOCK_COST, GRIMHOLD_UNLOCK_COST } from "@thekeep/shared";
-import { Modal } from "../Modal";
-import { CloseButton } from "../CloseButton";
-import { CoinAmount } from "../CoinAmount";
+import { Modal } from "../cosmetics/Modal";
+import { CloseButton } from "../shared/CloseButton";
+import { CoinAmount } from "../earning/CoinAmount";
 import { useEarning } from "../../state/earning";
 import { fetchEidolon, unlockEidolon } from "../../lib/arcade";
 import { fetchUrugalAccess, unlockUrugal } from "../../lib/urugal";

@@ -30,8 +30,8 @@ import {
 import { fetchForums } from "../lib/forums.js";
 import { fetchArchivedRooms, hideArchivedRoom } from "../lib/rooms.js";
 import type { ArchivedRoomBrief, ForumSummary } from "@thekeep/shared";
-import { CloseButton } from "./CloseButton.js";
-import { CreateCharacterModal } from "./CreateCharacterModal.js";
+import { CloseButton } from "./shared/CloseButton.js";
+import { CreateCharacterModal } from "./profile/CreateCharacterModal.js";
 
 /** Shape of `/characters` rows, narrow projection of the server payload. */
 interface CharacterRow {
@@ -126,7 +126,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
       if (!r.ok) throw new Error(String(r.status));
       const blob = await r.blob();
       const cd = r.headers.get("content-disposition") ?? "";
-      const name = /filename="([^"]+)"/.exec(cd)?.[1] ?? "thespire-export.json";
+      const name = /filename="([^"]+)"/.exec(cd)?.[1] ?? "thespire-export.zip";
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

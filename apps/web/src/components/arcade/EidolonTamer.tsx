@@ -28,7 +28,7 @@ import {
   SPECIES_VISUAL, celestial, deriveVisual, fmtClock, growthTier, inv, speciesBase,
 } from "./eidolonEngine";
 import { ItemDrawer } from "./ItemDrawer";
-import { CoinAmount } from "../CoinAmount";
+import { CoinAmount } from "../earning/CoinAmount";
 import { ensureInjectedStyle } from "../../lib/injectStyle";
 
 interface Live {

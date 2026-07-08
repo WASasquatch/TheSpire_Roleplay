@@ -1,4 +1,4 @@
-import type { CoachStep } from "../../components/CoachTour.js";
+import type { CoachStep } from "../../components/tours/CoachTour.js";
 
 /**
  * Site Admin Panel first-run tour. Orients a keeper to the tab strip and its

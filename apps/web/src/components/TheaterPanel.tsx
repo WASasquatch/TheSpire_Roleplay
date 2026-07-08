@@ -3,6 +3,8 @@ import ReactPlayer from "react-player";
 import type { Socket } from "socket.io-client";
 import type { ClientToServerEvents, RoomSummary, ServerToClientEvents } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { createPersistedDimension } from "../lib/persistedDimension.js";
+import { useCopyToClipboard } from "../lib/useCopyToClipboard.js";
 
 /**
  * Theater (watch-party) panel.
@@ -66,15 +68,15 @@ const LIVE_EDGE_TOLERANCE_SEC = 6;
 const END_REACHED_GRACE_SEC = 2.5;
 const QUICK_REACTIONS = ["❤️", "😂", "🔥", "👏", "😮", "👍", "😭", "🎉"];
 
-function loadHeight(): number {
-  try {
-    const raw = localStorage.getItem(HEIGHT_KEY);
-    const n = raw ? parseInt(raw, 10) : NaN;
-    return Number.isFinite(n) ? Math.max(MIN_HEIGHT, n) : DEFAULT_HEIGHT;
-  } catch {
-    return DEFAULT_HEIGHT;
-  }
-}
+// Persisted per-device. Floor at MIN_HEIGHT with no ceiling (the drag itself
+// caps against the available viewport), so a saved value only ever gets pulled
+// up to the minimum, never trimmed down.
+const heightDim = createPersistedDimension({
+  key: HEIGHT_KEY,
+  min: MIN_HEIGHT,
+  default: DEFAULT_HEIGHT,
+  outOfRange: "clamp",
+});
 
 // Deterministic pseudo-random in [0,1) from an integer id. Each reaction
 // gets a STABLE scatter offset / wobble / duration keyed on its id, so it
@@ -110,13 +112,13 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
   const [duration, setDuration] = useState(0);
   const [played, setPlayed] = useState(0);
   const [scrub, setScrub] = useState<number | null>(null);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy: copyToClipboard } = useCopyToClipboard({ resetMs: 1500 });
   // Start muted so the browser allows autoplay; the viewer opts into
   // audio with the one-tap unmute overlay. (Autoplay WITH sound is
   // blocked until a user gesture, which would otherwise leave late
   // joiners on a silently-paused player.)
   const [muted, setMuted] = useState(true);
-  const [height, setHeight] = useState(loadHeight);
+  const [height, setHeight] = useState(heightDim.load);
 
   const safeIndex = playlist.length > 0 ? Math.min(sync?.index ?? 0, playlist.length - 1) : 0;
   const current = playlist[safeIndex] ?? null;
@@ -237,11 +239,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
 
   // Persist the resize height (cheap; localStorage write per drag tick).
   useEffect(() => {
-    try {
-      localStorage.setItem(HEIGHT_KEY, String(height));
-    } catch {
-      /* private mode - height just won't persist */
-    }
+    heightDim.save(height);
   }, [height]);
 
   // New source loading → wait for the fresh onReady before seeking, and reset
@@ -417,15 +415,10 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
 
   const react = (emoji: string) => socket.emit("theater:react", { roomId, emoji });
 
-  const copyUrl = async () => {
+  const copyUrl = () => {
     if (!current) return;
-    try {
-      await navigator.clipboard.writeText(current.url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard blocked - the URL is still shown for manual copy */
-    }
+    /* clipboard blocked - the URL is still shown for manual copy */
+    void copyToClipboard(current.url);
   };
 
   /* ---- resize drag ---- */

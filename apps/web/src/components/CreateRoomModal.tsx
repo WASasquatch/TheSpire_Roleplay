@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { Modal } from "./Modal.js";
+import { Modal } from "./cosmetics/Modal.js";
 
 interface Props {
   /** Sends a slash command through the same path the composer uses. The

@@ -15,7 +15,7 @@
  * inline window to a blurred frame and produced the "blank page" on phones.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Modal } from "../Modal";
+import { Modal } from "../cosmetics/Modal";
 import { EidolonTamer } from "./EidolonTamer";
 import { ensureInjectedStyle } from "../../lib/injectStyle";
 

@@ -19,14 +19,13 @@
  * join, posting, and membership applications, and nothing else anywhere.
  */
 import { and, eq, inArray } from "drizzle-orm";
-import type { Role, ForumPermission } from "@thekeep/shared";
+import type { ForumPermission } from "@thekeep/shared";
 import { FORUM_FEATURE_PERMISSIONS, FORUM_PERMISSIONS, parseForumPermissions } from "@thekeep/shared";
 import { forumBans, forumMembers, forumUsergroupMembers, forumUsergroups, forums, roomThreadCategories, rooms } from "../db/schema.js";
-import { hasPermission } from "../auth/permissions.js";
+import { resolveScopedAuthority, scopedCan, type Caller } from "../auth/scopedAuthority.js";
 import type { Db } from "../db/index.js";
 
 type ForumRow = typeof forums.$inferSelect;
-type Caller = { id: string; role: Role };
 
 export interface ForumAuthority {
   forum: ForumRow | null;
@@ -52,110 +51,70 @@ export interface ForumAuthority {
   canParticipate: boolean;
 }
 
-const NONE: ForumAuthority = {
-  forum: null, role: null, isOwner: false, isMod: false,
-  isMember: false, permissions: [], ban: null, canParticipate: false,
-};
-
 /** Does this authority hold a given granular mod permission? Owner/staff
  *  always do. The single helper every forum call site should use so the
  *  owner-implies-all rule lives in one place. */
 export function forumCan(a: ForumAuthority, key: ForumPermission): boolean {
-  return a.isOwner || a.permissions.includes(key);
-}
-
-/**
- * Resolve a member's usergroup-derived permissions for a forum: the default
- * group's baseline (every participant) UNION every non-default group the user
- * is an explicit member of. When the forum has defined NO groups at all, the
- * baseline is the full feature set so behavior is unchanged. Owner/staff skip
- * this (they hold everything). `userId` null = anonymous → no perms.
- */
-async function resolveUsergroupPerms(db: Db, forumId: string, userId: string | null): Promise<ForumPermission[]> {
-  if (!userId) return [];
-  const groups = await db
-    .select({ id: forumUsergroups.id, permissionsJson: forumUsergroups.permissionsJson, isDefault: forumUsergroups.isDefault })
-    .from(forumUsergroups)
-    .where(eq(forumUsergroups.forumId, forumId));
-  if (!groups.length) return [...FORUM_FEATURE_PERMISSIONS];
-  const defaultGroup = groups.find((g) => g.isDefault);
-  const out = new Set<ForumPermission>(
-    defaultGroup ? parseForumPermissions(defaultGroup.permissionsJson) : [...FORUM_FEATURE_PERMISSIONS],
-  );
-  const nonDefaultIds = groups.filter((g) => !g.isDefault).map((g) => g.id);
-  if (nonDefaultIds.length) {
-    const mine = await db
-      .select({ groupId: forumUsergroupMembers.groupId })
-      .from(forumUsergroupMembers)
-      .where(and(eq(forumUsergroupMembers.userId, userId), inArray(forumUsergroupMembers.groupId, nonDefaultIds)));
-    const myIds = new Set(mine.map((m) => m.groupId));
-    for (const g of groups) {
-      if (!g.isDefault && myIds.has(g.id)) for (const p of parseForumPermissions(g.permissionsJson)) out.add(p);
-    }
-  }
-  return [...out];
+  return scopedCan(a, key);
 }
 
 /**
  * Resolve the caller's authority over a forum. `user` null = anonymous
  * (public /f/ page): never participates, never banned, no roles.
+ *
+ * A thin wrapper over the shared {@link resolveScopedAuthority} scaffold: it
+ * feeds in the forum tables + knobs and renames `scope` → `forum`. Forums have
+ * a single `mod` tier, parse the whole registry for both direct grants and
+ * usergroups, and never have a global-moderation gate (`moderationActive` is
+ * always false, so the unified `canParticipate` collapses to the forum formula).
  */
 export async function forumAuthority(
   db: Db,
   user: Caller | null,
   forumId: string,
 ): Promise<ForumAuthority> {
-  const forum = (await db.select().from(forums).where(eq(forums.id, forumId)).limit(1))[0];
-  if (!forum) return NONE;
-  if (!user) return { ...NONE, forum };
-
-  const memberRow = (await db
-    .select()
-    .from(forumMembers)
-    .where(and(eq(forumMembers.forumId, forumId), eq(forumMembers.userId, user.id)))
-    .limit(1))[0];
-  const role = memberRow?.role ?? null;
-
-  // Expired bans are treated as absent (the row is lazily ignored, not
-  // deleted, so the owner's Bans tab can still show history until lifted).
-  const banRow = (await db
-    .select()
-    .from(forumBans)
-    .where(and(eq(forumBans.forumId, forumId), eq(forumBans.userId, user.id)))
-    .limit(1))[0];
-  const banActive = banRow && (!banRow.until || +banRow.until > Date.now());
-  const ban = banActive ? { until: banRow.until ?? null, reason: banRow.reason ?? null } : null;
-
-  const staffOverride = await hasPermission(user, "manage_any_forum", db);
-  const isOwner = staffOverride || forum.ownerUserId === user.id || role === "owner";
-  const isMod = isOwner || role === "mod";
-  // Owner/staff implicitly hold EVERY permission. Everyone else: the union of
-  // their direct mod grant (forum_members.permissions_json) + their usergroup
-  // perms (default group baseline + explicit groups). One unified registry.
-  let permissions: ForumPermission[];
-  if (isOwner) {
-    permissions = [...FORUM_PERMISSIONS];
-  } else {
-    const directGrant = role === "mod" ? parseForumPermissions(memberRow?.permissionsJson) : [];
-    const groupPerms = await resolveUsergroupPerms(db, forumId, user.id);
-    permissions = [...new Set<ForumPermission>([...directGrant, ...groupPerms])];
-  }
-  // The Spire Forums (isSystem) is the site-wide DEFAULT forum: every signed-in
-  // user is implicitly a member, so its members-only categories act as
-  // "signed-in members only" (i.e. everyone but logged-out guests) WITHOUT
-  // needing a forum_members row per account. Without this, members-only
-  // sections of the default forum were invisible to everyone who hadn't been
-  // explicitly enrolled — including the people who posted in them (they could
-  // post via open posting, then the read gate hid the result). Anonymous
-  // callers already returned early above, so this only elevates logged-in users.
-  const isMember = isMod || role === "member" || forum.isSystem === true;
-
-  // Owner/staff can always act (even on a forum they were oddly banned
-  // in — a ban row against the owner is a data bug, not a lockout).
-  const canParticipate =
-    isOwner || (!ban && (forum.postingMode === "open" || isMember));
-
-  return { forum, role, isOwner, isMod, isMember, permissions, ban, canParticipate };
+  const core = await resolveScopedAuthority<ForumRow, "owner" | "mod" | "member", ForumPermission>(db, user, {
+    manageAnyPermission: "manage_any_forum",
+    allPermissions: FORUM_PERMISSIONS,
+    isModForRole: (role) => role === "mod",
+    directGrantForRole: (role, permissionsJson) =>
+      role === "mod" ? parseForumPermissions(permissionsJson) : [],
+    isOpen: (forum) => forum.postingMode === "open",
+    moderationActive: () => false,
+    fetchScope: async () =>
+      (await db.select().from(forums).where(eq(forums.id, forumId)).limit(1))[0],
+    fetchMember: async (userId) => {
+      const row = (await db
+        .select()
+        .from(forumMembers)
+        .where(and(eq(forumMembers.forumId, forumId), eq(forumMembers.userId, userId)))
+        .limit(1))[0];
+      return row ? { role: row.role, permissionsJson: row.permissionsJson ?? null } : undefined;
+    },
+    fetchBan: async (userId) =>
+      (await db
+        .select()
+        .from(forumBans)
+        .where(and(eq(forumBans.forumId, forumId), eq(forumBans.userId, userId)))
+        .limit(1))[0],
+    fetchGroups: async () =>
+      db
+        .select({ id: forumUsergroups.id, permissionsJson: forumUsergroups.permissionsJson, isDefault: forumUsergroups.isDefault })
+        .from(forumUsergroups)
+        .where(eq(forumUsergroups.forumId, forumId)),
+    fetchMemberGroupIds: async (userId, nonDefaultIds) =>
+      (await db
+        .select({ groupId: forumUsergroupMembers.groupId })
+        .from(forumUsergroupMembers)
+        .where(and(eq(forumUsergroupMembers.userId, userId), inArray(forumUsergroupMembers.groupId, nonDefaultIds))))
+        .map((m) => m.groupId),
+    usergroupParse: parseForumPermissions,
+    usergroupFallback: FORUM_FEATURE_PERMISSIONS,
+  });
+  // Rename the generic `scope` field to the forum-specific `forum` field so the
+  // public ForumAuthority shape (and every call site) is unchanged.
+  const { scope, ...rest } = core;
+  return { forum: scope, ...rest };
 }
 
 /**

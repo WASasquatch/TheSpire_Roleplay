@@ -1,3 +1,5 @@
+import { formatDurationCompact } from "@thekeep/shared";
+
 /**
  * Parse a duration string like "5m", "1h20m", "30d", "2h30m15s" into
  * milliseconds. Returns null on bad input.
@@ -43,15 +45,11 @@ export function parseDuration(input: string): number | null {
 
 /** Format a millisecond duration back into "1h20m" form for display. */
 export function formatDuration(ms: number): string {
-  if (ms <= 0) return "0s";
-  const days = Math.floor(ms / 86_400_000);
-  const hours = Math.floor((ms % 86_400_000) / 3_600_000);
-  const mins = Math.floor((ms % 3_600_000) / 60_000);
-  const secs = Math.floor((ms % 60_000) / 1_000);
-  let out = "";
-  if (days) out += `${days}d`;
-  if (hours) out += `${hours}h`;
-  if (mins) out += `${mins}m`;
-  if (secs && !days && !hours) out += `${secs}s`;
-  return out || "0s";
+  // Bare concatenation, every non-zero d/h/m unit, plus seconds only when there
+  // are no days and no hours; "0s" for anything non-positive.
+  return formatDurationCompact(ms, {
+    showSeconds: true,
+    zeroLabel: "0s",
+    clampNegative: true,
+  });
 }

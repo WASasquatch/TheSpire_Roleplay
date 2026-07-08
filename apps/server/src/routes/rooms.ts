@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { hasPermission } from "../auth/permissions.js";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
 import { getClearedAt } from "../lib/roomClears.js";
+import { escapeLike } from "../lib/nameLookup.js";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -31,7 +32,7 @@ import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
-import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MANIFEST_VERSION, EXPORT_MAX_MESSAGES, EXPORT_SIGN_ALGO, mentionsField, parseNpcStats, roleRank, type ExportManifest, type ExportPayload } from "@thekeep/shared";
+import { clampExportMs, DEFAULT_EXPORT_MS, EXPORT_MANIFEST_VERSION, EXPORT_MAX_MESSAGES, EXPORT_SIGN_ALGO, isModeratorRole, mentionsField, parseNpcStats, type ExportManifest, type ExportPayload } from "@thekeep/shared";
 import { buildChatLogHtml, type ExportMessageRow } from "../export/chatLog.js";
 import { signExportPayload } from "../export/sign.js";
 
@@ -207,7 +208,7 @@ export async function registerRoomsRoutes(
       // or a member. A 404 (not 403) keeps a gated room's existence from
       // leaking via the status code.
       if (!me) { reply.code(404); return { error: "not found" }; }
-      const isStaff = roleRank(me.role) >= roleRank("mod");
+      const isStaff = isModeratorRole(me.role);
       let allowed = isStaff || room.ownerId === me.id;
       if (!allowed) {
         const m = (await db
@@ -373,7 +374,7 @@ export async function registerRoomsRoutes(
       // Build the privacy-filtered candidate set, then rank. The whisper
       // filter is parameterized on the caller's userId so even members
       // of a public room only see their own whisper exchanges.
-      const like = `%${q.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+      const like = `%${escapeLike(q)}%`;
       const rows = await db
         .select()
         .from(messages)

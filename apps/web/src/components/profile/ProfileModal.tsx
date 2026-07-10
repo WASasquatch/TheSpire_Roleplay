@@ -17,7 +17,8 @@ import { profileShareUrl, reportProfile } from "../../lib/profiles.js";
 import { fetchPublicEarning, type PublicEarningResponse } from "../../lib/earning.js";
 import { ArcadeError, fetchEidolonSummary, patFamiliar } from "../../lib/arcade.js";
 import { ItemZoomView } from "../cosmetics/ItemZoomView.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
+import { Modal } from "../cosmetics/Modal.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { ForumBanFromProfile } from "../forums/ForumBanFromProfile.js";
 import { LanguageTagChips } from "../flags/LanguageTagChips.js";
@@ -243,7 +244,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
     : undefined;
 
   // Belt-and-suspenders cleanup for the writer's `<style>` blocks.
-  // The bio container is portaled to <body> via <Modal>, and React's
+  // The bio container is portaled to <body> via FloatingWindow, and React's
   // normal teardown removes it (and the scoped `<style>` tags inside)
   // when this component unmounts. But a "the profile's custom CSS
   // bled into the login modal after closing the public profile"
@@ -286,39 +287,42 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
       };
 
   return (
-    <Modal
+    <FloatingWindow
       onClose={onClose}
-      variant="mobile-fullscreen"
+      title={name}
       // Conditional spread, not `prop={maybeUndef}`, `exactOptionalPropertyTypes`
       // in tsconfig rejects `undefined` as a value for optional props.
-      {...(backdropStyle ? { backdropStyle } : {})}
+      // zIndex is the MOBILE plane only (desktop stacking is the window
+      // registry); callers keep passing 60 where they layered above other
+      // modals before.
       {...(zIndex !== undefined ? { zIndex } : {})}
+      // Owner-design attributes go on the window's OUTER wrapper: every
+      // `[data-theme-style="…"] .keep-frame` / `.keep-panel` / `.keep-button`
+      // rule in styles.css uses a DESCENDANT combinator, so the shell can
+      // only get the OWNER's design treatments from an ancestor carrying
+      // the attribute — regardless of what the viewer's <html> is wearing
+      // (overlay mode) or that nothing is (deep-link standalone shell).
+      outerAttrs={{
+        "data-theme-style": ownerOrnaments.styleKey,
+        ...(profileBgUrl ? { "data-profile-bg": "1" } : {}),
+      }}
+      // Shell style: the owner's theme/ornament vars (so the TITLEBAR is
+      // painted in the owner's palette, not the viewer's), plus the
+      // owner's public-profile background image — it paints the WINDOW
+      // shell now (there's no full-screen backdrop anymore; the page
+      // behind stays visible and usable). The card surface above it goes
+      // slightly translucent (see below) so the image ghosts through
+      // without re-creating the white-on-white legibility bug.
+      // backgroundAttachment swaps fixed→scroll: a viewport-fixed image
+      // inside a draggable window would slide under the frame.
+      style={{
+        ...themeStyle(ownerTheme),
+        ...ownerOrnaments.vars,
+        ...legibilityVars,
+        ...(backdropStyle ? { ...backdropStyle, backgroundAttachment: "scroll" } : {}),
+      }}
+      className="keep-frame bg-keep-bg text-keep-text lg:rounded"
     >
-      {/* Layout-transparent wrapper that hosts the owner-design
-          attributes. Every `[data-theme-style="…"] .keep-frame`,
-          `… .keep-panel`, `… .keep-button`, etc. rule in styles.css
-          uses a DESCENDANT combinator, so the card-as-keep-frame can
-          only get those design treatments via an ANCESTOR carrying
-          the attribute. In overlay mode (chat mounted) the viewer's
-          `applyStyle` writes the attribute onto `<html>` and the
-          modal card coincidentally matches via that ancestor, with
-          the VIEWER's design, not the owner's. On a deep-link
-          refresh the standalone shell is rendered (Chat never
-          mounts, `applyStyle` never runs), `<html>` carries no
-          attribute, and the card lost every design treatment ("the
-          custom theme isn't applied correctly after refresh").
-          Stamping the attributes on this contents-wrapper fixes both
-          cases: the card is now a descendant of an element carrying
-          the OWNER's style, so the rules engage with the correct
-          values regardless of what `<html>` is wearing. `contents`
-          collapses the wrapper out of layout so the card's
-          MODAL_CARD_CONTENT sizing measures against the modal
-          backdrop directly, exactly as before. */}
-      <div
-        data-theme-style={ownerOrnaments.styleKey}
-        {...(profileBgUrl ? { "data-profile-bg": "1" } : {})}
-        className="contents"
-      >
       <div
         // Inline-style override scopes the theme to this card only. The
         // explicit bg/color use rgb(var()) because the variables now hold
@@ -349,14 +353,19 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
           ...themeStyle(ownerTheme),
           ...ownerOrnaments.vars,
           ...legibilityVars,
-          // Opaque fill for every non-frost case (also defeats the scifi
+          // Fill for every non-frost case (also defeats the scifi
           // .keep-frame 50%-alpha bleed). Omitted when frosting so the glass
           // CSS tint (the translucent --keep-glass-bg-tint above) + the
-          // backdrop-blur let the page/backdrop show through.
-          ...(frostCard ? {} : { backgroundColor: "rgb(var(--keep-bg))" }),
+          // backdrop-blur let the page/backdrop show through. With an owner
+          // BG image set, the fill drops to 92% so the image (painted on
+          // the window shell BELOW this surface) ghosts through the whole
+          // card — far from the ~50%-alpha white-on-white bug, close enough
+          // to opaque that the legibility contrast math still holds.
+          ...(frostCard
+            ? {}
+            : { backgroundColor: profileBgUrl ? "rgb(var(--keep-bg) / 0.92)" : "rgb(var(--keep-bg))" }),
         }}
-        className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
-        onClick={(e) => e.stopPropagation()}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden text-keep-text"
       >
         {ageBlocked ? (
           <AgeRestrictedNotice onClose={onClose} />
@@ -394,8 +403,7 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
           />
         )}
       </div>
-      </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 
@@ -998,11 +1006,9 @@ function ProfileBody({
               that this slot used to enforce is gone too, the rank
               inline above already pushes the close button right via
               its own flex math. */}
-          {/* `self-start` anchors the close affordance to the top of
-              the vertically-centered hero so the hero text can ride
-              the avatar's midline without dragging the close button
-              with it. */}
-          <CloseButton onClick={onClose} className="ml-auto self-start" />
+          {/* Close lives on the FloatingWindow titlebar now — no in-hero
+              close button, so the hero band's right edge is free for the
+              rank/mod chips. */}
         </div>
         {/* Action bar — full-width footer of the hero band, below the avatar
             and profile info. ALL affordances (switch identity, message /

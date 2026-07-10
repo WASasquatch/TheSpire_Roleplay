@@ -13,16 +13,32 @@
  */
 import { useTranslation } from "react-i18next";
 
-export function RatingChip({ nsfw, className }: { nsfw: boolean; className?: string }) {
+export function RatingChip({ nsfw, prominent = false, className }: {
+  nsfw: boolean;
+  /** Larger, always-colored variant for the room info bar + dossier, where
+   *  the rating must be readable at a glance: SFW gets a concrete green
+   *  (same reasoning as the 18+ red — a safety marker must read the same
+   *  on every palette) instead of the list rows' deliberately muted gray. */
+  prominent?: boolean;
+  className?: string;
+}) {
   const { t } = useTranslation("common");
-  const base =
-    "inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 text-[10px] uppercase leading-none tracking-widest";
+  const base = prominent
+    ? "inline-flex shrink-0 items-center rounded border px-2 py-0.5 text-xs uppercase leading-none tracking-widest"
+    : "inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 text-[10px] uppercase leading-none tracking-widest";
   return nsfw ? (
     <span
       title={t("rating.nsfwTitle")}
-      className={`${base} border-[#e06070] bg-[#e06070]/10 font-bold text-[#e06070] ${className ?? ""}`}
+      className={`${base} border-[#e06070] ${prominent ? "bg-[#e06070]/20" : "bg-[#e06070]/10"} font-bold text-[#e06070] ${className ?? ""}`}
     >
       {t("rating.nsfw")}
+    </span>
+  ) : prominent ? (
+    <span
+      title={t("rating.sfwTitle")}
+      className={`${base} border-[#4caf7d]/70 bg-[#4caf7d]/10 font-bold text-[#4caf7d] ${className ?? ""}`}
+    >
+      {t("rating.sfw")}
     </span>
   ) : (
     <span

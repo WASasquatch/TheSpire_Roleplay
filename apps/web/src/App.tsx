@@ -2656,8 +2656,8 @@ function Chat() {
       // same pipeline — /help, /users, /shop… typed there would otherwise
       // open their window invisibly behind the topic.
       const opensWindowSurface = new Set([
-        "open-my-editor", "open-character-editor", "open-help", "open-users",
-        "open-worlds-list", "open-world-catalog", "open-world",
+        "open-profile", "open-my-editor", "open-character-editor", "open-help",
+        "open-users", "open-worlds-list", "open-world-catalog", "open-world",
         "open-scriptorium", "open-forums", "open-story-editor", "open-story",
         "open-bookmarks", "open-earning",
       ]);
@@ -4919,9 +4919,12 @@ function Chat() {
           canPin={canPin}
           canAdminEdit={canAdminEdit}
           occupants={occ}
-          onIconClick={onIconClick}
-          onNameClick={onNameClick}
-          onMentionClick={onMentionClick}
+          // Profiles are floating WINDOWS (below the true-modal plane), so
+          // any avatar/name/mention click must close this popped topic
+          // first or the profile opens invisibly behind its backdrop.
+          onIconClick={(u, n, c) => { setPoppedTopicId(null); onIconClick(u, n, c); }}
+          onNameClick={(u, n, c) => { setPoppedTopicId(null); onNameClick(u, n, c); }}
+          onMentionClick={(n) => { setPoppedTopicId(null); onMentionClick(n); }}
           // The world viewer is a floating window (below the true-modal
           // plane) — close the popped topic first or its backdrop buries it.
           onWorldClick={(slug) => { setPoppedTopicId(null); setWorldViewerId(slug); }}

@@ -353,7 +353,8 @@
     "someone": "Alguien",
     "pinnedBy": "fijado por {{name}}",
     "pinGone": "El mensaje original ya no existe; se muestra la copia fijada.",
-    "unpin": "Desfijar este mensaje"
+    "unpin": "Desfijar este mensaje",
+    "rating": "Clasificación"
   },
   "feed": {
     "loadFailed": "error al cargar",

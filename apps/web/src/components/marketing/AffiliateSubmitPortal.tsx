@@ -10,8 +10,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useChat } from "../../state/store.js";
-import { Modal } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { TagInput } from "../shared/TagInput.js";
 import {
   AFFILIATE_LIMITS,
@@ -136,11 +135,13 @@ export function AffiliateSubmitPortal({
   const [view, setView] = useState<PortalView>(initialView);
 
   return (
-    <Modal onClose={onClose} variant="mobile-fullscreen">
-      <div
-        className="keep-frame flex h-full w-full flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg lg:h-[88vh] lg:w-[80vw] lg:max-w-[960px]"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <FloatingWindow
+      onClose={onClose}
+      title={t("portal.title")}
+      initialWidth={960}
+      className="keep-frame rounded border border-keep-rule bg-keep-bg"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-keep-rule bg-keep-banner/30 px-4 py-2.5">
           <div className="flex min-w-0 items-center gap-2">
             {view === "add" ? (
@@ -154,7 +155,6 @@ export function AffiliateSubmitPortal({
                 <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
-            <h3 className="truncate font-action text-lg text-keep-text">{t("portal.title")}</h3>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {view === "list" ? (
@@ -167,8 +167,6 @@ export function AffiliateSubmitPortal({
                 {t("portal.addYourCommunity")}
               </button>
             ) : null}
-            {/* No explicit label: CloseButton defaults to the localized "Close". */}
-            <CloseButton onClick={onClose} />
           </div>
         </div>
 
@@ -185,7 +183,7 @@ export function AffiliateSubmitPortal({
           )}
         </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 

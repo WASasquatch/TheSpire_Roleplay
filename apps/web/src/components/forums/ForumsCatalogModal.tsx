@@ -502,7 +502,10 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                       Popular / New rails. Toggles back to the open forum.
                       Anchored for the browse tour — this chrome button is the
                       one Discover affordance visible on BOTH mobile and desktop
-                      (the rail is hidden under lg, the drawer starts closed). */}
+                      (the rail is hidden under lg, the drawer starts closed),
+                      so it wears the accent + a text label at all times: with
+                      a default forum set, users land INSIDE a forum and this
+                      is their only obvious way out to the rest of the catalog. */}
                   <button
                     type="button"
                     data-tour="forums-chrome-discover-btn"
@@ -510,9 +513,14 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     title={t("chrome.discoverTitle")}
                     aria-label={t("chrome.discoverAria")}
                     aria-pressed={view.kind === "discover"}
-                    className={`rounded border p-1.5 ${view.kind === "discover" ? "border-keep-action/60 bg-keep-action/10 text-keep-action" : "border-keep-rule bg-keep-bg/70 text-keep-muted hover:border-keep-action hover:text-keep-action"}`}
+                    className={`flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs font-semibold uppercase tracking-widest ${
+                      view.kind === "discover"
+                        ? "border-keep-action bg-keep-action/25 text-keep-action"
+                        : "border-keep-action/60 bg-keep-action/10 text-keep-action hover:border-keep-action hover:bg-keep-action/20"
+                    }`}
                   >
                     <Compass className="h-4 w-4" aria-hidden="true" />
+                    <span className="hidden sm:inline">{t("chrome.discover")}</span>
                   </button>
                   {/* Set / unset this forum as your default landing spot. */}
                   {view.kind === "forum" && detail ? (

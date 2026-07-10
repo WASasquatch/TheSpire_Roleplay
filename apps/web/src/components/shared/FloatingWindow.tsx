@@ -93,6 +93,13 @@ interface Props {
    *  (Admin's Ctrl/Cmd+K find-a-setting). Attached above the bar so focus
    *  resting on the collapse/close buttons still reaches it. */
   onKeyDown?: React.KeyboardEventHandler<HTMLDivElement>;
+  /** Extra attributes for the OUTER wrapper (an ANCESTOR of the shell).
+   *  Exists for scoped-design attributes like ProfileModal's
+   *  `data-theme-style`: every `[data-theme-style] .keep-frame` rule in
+   *  styles.css uses a descendant combinator, so the shell can only pick
+   *  up an owner's design from an element above it. Spread first — the
+   *  window's own props always win. */
+  outerAttrs?: Record<string, string>;
   children: ReactNode;
 }
 
@@ -133,6 +140,7 @@ export function FloatingWindow({
   initialHeight,
   style,
   onKeyDown,
+  outerAttrs,
   children,
 }: Props) {
   const { t } = useTranslation("common");
@@ -309,6 +317,7 @@ export function FloatingWindow({
   // a breakpoint crossing in place and children never remount.
   return createPortal(
     <div
+      {...outerAttrs}
       role="dialog"
       aria-modal={mobile ? "true" : undefined}
       aria-labelledby={titleId}

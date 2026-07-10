@@ -197,9 +197,11 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
           ) : null}
           <span className="truncate font-action tracking-wide text-keep-text">{room.name}</span>
           {/* Rating chip (age-restriction plan, Phase 2): the current room's
-              effective 18+/SFW state, always visible in the bar. Minors never
-              receive an 18+ room at all, so they only ever see SFW here. */}
-          <RatingChip nsfw={!!room.isNsfw} />
+              effective 18+/SFW state, always visible in the bar — prominent
+              (colored both ways) so which side of the partition you're in is
+              readable at a glance. Minors never receive an 18+ room at all,
+              so they only ever see the green SFW here. */}
+          <RatingChip nsfw={!!room.isNsfw} prominent />
         </div>
 
         <Bevel />
@@ -268,6 +270,10 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
 
               <Card icon={<Info size={12} aria-hidden />} title={t("roomInfo.details")}>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs leading-tight">
+                  {/* Rating leads the dossier so the room's 18+/SFW state is
+                      the first fact you read with the details open. */}
+                  <dt className="self-center text-keep-muted">{t("roomInfo.rating")}</dt>
+                  <dd><RatingChip nsfw={!!room.isNsfw} prominent /></dd>
                   <Meta label={t("roomInfo.type")} value={info.type === "private" ? t("roomInfo.private") : t("roomInfo.public")} />
                   {info.slug ? <LinkRow slug={info.slug} /> : null}
                   {info.ownerName ? <Meta label={t("common:owner")} value={info.ownerName} /> : null}

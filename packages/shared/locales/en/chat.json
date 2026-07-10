@@ -349,7 +349,8 @@
     "someone": "Someone",
     "pinnedBy": "pinned by {{name}}",
     "pinGone": "The original message is gone; showing the pinned copy.",
-    "unpin": "Unpin this message"
+    "unpin": "Unpin this message",
+    "rating": "Rating"
   },
   "feed": {
     "loadFailed": "load failed",

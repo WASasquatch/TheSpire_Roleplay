@@ -3,12 +3,26 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
+import Fastify from "fastify";
+import { ZodError } from "zod";
 import * as schema from "../src/db/schema.js";
 import type { Db } from "../src/db/index.js";
 import { findLinkedAnnex, isInPair, linkRoomPair, unlinkRoomPair } from "../src/lib/roomLinks.js";
 import { setRoomNsfw } from "../src/lib/nsfwRooms.js";
 import { buildRoomSummary } from "../src/realtime/broadcast.js";
-import { createUser, makeTestDb } from "./helpers/harness.js";
+import { registerRoomsRoutes } from "../src/routes/rooms.js";
+import { auth, createUser, makeTestDb, tokenFor } from "./helpers/harness.js";
+
+/** Just enough socket.io surface for the link routes' side effects
+ *  (setRoomNsfw eviction sweep, broadcasts, tree pulses) over an empty
+ *  room population. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const fakeIo: any = {
+  async fetchSockets() { return []; },
+  in() { return { async fetchSockets() { return []; }, emit() {} }; },
+  to() { return { emit() {} }; },
+  emit() {},
+};
 
 /**
  * Linked SFW/18+ room pairs (migration 0343): the shape rules in
@@ -177,3 +191,94 @@ describe("linked-pair wire pointers", () => {
 async function refetch(db: Db, id: string): Promise<RoomRow | undefined> {
   return (await db.select().from(schema.rooms).where(eq(schema.rooms.id, id)).limit(1))[0];
 }
+
+describe("POST /rooms/link + /rooms/unlink (Room Builder pathway)", () => {
+  test("owner links existing rooms, auto-flagging the unflagged 18+ side; strangers are refused", async () => {
+    const { db } = makeTestDb();
+    const app = Fastify();
+    app.setErrorHandler((err, _req, reply) => {
+      if (err instanceof ZodError) { reply.code(400); return reply.send({ error: "validation" }); }
+      throw err;
+    });
+    await registerRoomsRoutes(app, db, fakeIo);
+    await app.ready();
+
+    const owner = await createUser(db, { birthdate: "1990-01-01" });
+    const stranger = await createUser(db, { birthdate: "1990-01-01" });
+    const ownerTok = await tokenFor(db, owner.id);
+    const strangerTok = await tokenFor(db, stranger.id);
+    // The prod shape this pathway exists for: two plain public rooms that
+    // already exist, NEITHER flagged yet (owners never ran /nsfw).
+    const base = await mkRoom(db, owner.id);
+    const adultRoom = await mkRoom(db, owner.id);
+
+    // A stranger with no edit rights on the rooms is refused.
+    const denied = await app.inject({
+      method: "POST",
+      url: "/rooms/link",
+      headers: auth(strangerTok),
+      payload: { sfwRoomId: base.id, nsfwRoomId: adultRoom.id },
+    });
+    assert.equal(denied.statusCode, 403);
+
+    // The owner links; the chosen 18+ side gets flagged as part of linking.
+    const ok = await app.inject({
+      method: "POST",
+      url: "/rooms/link",
+      headers: auth(ownerTok),
+      payload: { sfwRoomId: base.id, nsfwRoomId: adultRoom.id },
+    });
+    assert.equal(ok.statusCode, 200);
+    const annexRow = (await refetch(db, adultRoom.id))!;
+    assert.equal(annexRow.isNsfw, true);
+    assert.equal(annexRow.linkedRoomId, base.id);
+
+    // Double-link refused.
+    const third = await mkRoom(db, owner.id, { isNsfw: true });
+    const dup = await app.inject({
+      method: "POST",
+      url: "/rooms/link",
+      headers: auth(ownerTok),
+      payload: { sfwRoomId: base.id, nsfwRoomId: third.id },
+    });
+    assert.equal(dup.statusCode, 400);
+
+    // Unlink from the Builder; a second unlink reports "not linked".
+    const un = await app.inject({
+      method: "POST",
+      url: "/rooms/unlink",
+      headers: auth(ownerTok),
+      payload: { roomId: base.id },
+    });
+    assert.equal(un.statusCode, 200);
+    assert.equal((await refetch(db, adultRoom.id))!.linkedRoomId, null);
+    const unAgain = await app.inject({
+      method: "POST",
+      url: "/rooms/unlink",
+      headers: auth(ownerTok),
+      payload: { roomId: base.id },
+    });
+    assert.equal(unAgain.statusCode, 400);
+
+    await app.close();
+  });
+
+  test("refuses when the picked SFW side is itself flagged 18+", async () => {
+    const { db } = makeTestDb();
+    const app = Fastify();
+    await registerRoomsRoutes(app, db, fakeIo);
+    await app.ready();
+    const owner = await createUser(db, { birthdate: "1990-01-01" });
+    const tok = await tokenFor(db, owner.id);
+    const flagged = await mkRoom(db, owner.id, { isNsfw: true });
+    const other = await mkRoom(db, owner.id);
+    const r = await app.inject({
+      method: "POST",
+      url: "/rooms/link",
+      headers: auth(tok),
+      payload: { sfwRoomId: flagged.id, nsfwRoomId: other.id },
+    });
+    assert.equal(r.statusCode, 400);
+    await app.close();
+  });
+});

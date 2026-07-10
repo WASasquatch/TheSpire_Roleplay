@@ -663,7 +663,7 @@ export function RoomsTree({
         {...(onOpenArcade ? { onOpenArcade } : {})}
       />
       {showCreateRoom ? (
-        <CreateRoomModal onCommand={onCommand} onClose={() => setShowCreateRoom(false)} />
+        <CreateRoomModal onCommand={onCommand} rooms={rooms} onClose={() => setShowCreateRoom(false)} />
       ) : null}
     </aside>
   );

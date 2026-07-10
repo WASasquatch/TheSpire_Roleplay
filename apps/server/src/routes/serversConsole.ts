@@ -376,6 +376,9 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     persistent: z.boolean().default(true),
     /** Create the room already flagged 18+ (age plan, Phase 2; adults only). */
     isNsfw: z.boolean().default(false),
+    /** Create the room with an 18+ channel (lib/adultChannel.ts; adults only,
+     *  public all-ages rooms only — mutually exclusive with isNsfw). */
+    adultChannel: z.boolean().default(false),
   }).strict();
   app.post<{ Params: { id: string }; Body: unknown }>("/servers/:id/rooms", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
@@ -411,7 +414,21 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       persistent: body.persistent,
       isNsfw: body.isNsfw,
     });
-    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_create", targetRoomId: id, metadata: { name: body.name, ...(body.isNsfw ? { isNsfw: true } : {}) } });
+    // Optional 18+ channel alongside the fresh room. Failure here is
+    // non-fatal for the create itself (the room exists); surface the
+    // channel error so the admin can retry from the editor's checkbox.
+    if (body.adultChannel && !body.isNsfw && body.type === "public") {
+      const created = (await db.select().from(rooms).where(eq(rooms.id, id)).limit(1))[0];
+      if (created) {
+        const { enableAdultChannel } = await import("../lib/adultChannel.js");
+        const ch = await enableAdultChannel(db, created);
+        if (!ch.ok) {
+          reply.code(400);
+          return { error: tFor(gate.me.locale, `errors:server.rooms.adultChannel.${ch.error}`), id };
+        }
+      }
+    }
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_create", targetRoomId: id, metadata: { name: body.name, ...(body.isNsfw ? { isNsfw: true } : {}), ...(body.adultChannel ? { adultChannel: true } : {}) } });
     emitTreeChanged(io, gate.server.id);
     return { ok: true, id };
   });
@@ -430,6 +447,12 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
      *  core, not the generic update: adult-only, landing-room rule, minor
      *  eviction, audit, system line. */
     isNsfw: z.boolean().optional(),
+    /**
+     * Per-room 18+ CHANNEL (lib/adultChannel.ts): an adults-only side feed
+     * behind a SFW/18+ toggle on the room's rail row. Orthogonal to
+     * `isNsfw` (which makes the WHOLE room 18+). Adults-only write.
+     */
+    adultChannel: z.boolean().optional(),
   }).strict();
 
   app.patch<{ Params: { id: string; roomId: string }; Body: unknown }>("/servers/:id/rooms/:roomId", async (req, reply) => {
@@ -493,12 +516,34 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       }
       nsfwChanged = result.changed;
     }
+    // 18+ CHANNEL toggle (lib/adultChannel.ts). Enable revives/creates the
+    // hidden companion feed; disable parks it (history kept) unless people
+    // are inside. Adults-only write, mirroring the isNsfw posture.
+    let channelChanged = false;
+    if (body.adultChannel !== undefined) {
+      if (!gate.me.isAdult) {
+        reply.code(403);
+        return { error: tFor(gate.me.locale, "errors:server.common.nsfwSettingAdultsOnly") };
+      }
+      const { enableAdultChannel, disableAdultChannel } = await import("../lib/adultChannel.js");
+      const res = body.adultChannel
+        ? await enableAdultChannel(db, room)
+        : await disableAdultChannel(db, io, room);
+      if (!res.ok) {
+        reply.code(res.error === "CHANNEL_OCCUPIED" ? 409 : 400);
+        return { error: tFor(gate.me.locale, `errors:server.rooms.adultChannel.${res.error}`) };
+      }
+      channelChanged = res.changed;
+      if (res.changed && res.channelRoomId) {
+        await broadcastRoomState(io, db, res.channelRoomId).catch(() => {});
+      }
+    }
     // An isNsfw-only patch leaves `update` empty; drizzle rejects an empty
     // SET, and the toggle core already broadcast, so skip the generic write.
     if (Object.keys(update).length > 0) {
       await db.update(rooms).set(update).where(eq(rooms.id, room.id));
     }
-    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_update", targetRoomId: room.id, metadata: { fields: [...Object.keys(update), ...(nsfwChanged ? ["isNsfw"] : [])] } });
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_update", targetRoomId: room.id, metadata: { fields: [...Object.keys(update), ...(nsfwChanged ? ["isNsfw"] : []), ...(channelChanged ? ["adultChannel"] : [])] } });
     await broadcastRoomState(io, db, room.id);
     emitTreeChanged(io, gate.server.id);
     return { ok: true };

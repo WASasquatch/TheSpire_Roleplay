@@ -41,7 +41,7 @@ import { worldCommand, worldsCommand } from "./world.js";
 import { forumsCommand } from "./forums.js";
 import { scriptoriumCommand, storyCommand, writeCommand } from "./scriptorium.js";
 import { expiryCommand, nsfwCommand, replyModeCommand } from "./room_modes.js";
-import { goPairCommand, linkRoomCommand, unlinkRoomCommand } from "./room_link.js";
+import { goPairCommand } from "./room_link.js";
 import { iconCommand } from "./icon.js";
 import { theaterCommand } from "./theater.js";
 import { trashCommand } from "./trash.js";
@@ -133,8 +133,6 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(expiryCommand);
   reg.registerBuiltin(replyModeCommand);
   reg.registerBuiltin(nsfwCommand);
-  reg.registerBuiltin(linkRoomCommand);
-  reg.registerBuiltin(unlinkRoomCommand);
   reg.registerBuiltin(goPairCommand);
   reg.registerBuiltin(theaterCommand);
   reg.registerBuiltin(trashCommand);

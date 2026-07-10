@@ -2,8 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import type { AvatarCrop, Role } from "@thekeep/shared";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { BorderedAvatar } from "../cosmetics/BorderedAvatar.js";
 import { StyledName } from "../cosmetics/StyledName.js";
 import { readError } from "../../lib/http.js";
@@ -91,17 +90,15 @@ export function StaffModal({
   }, []);
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg lg:rounded`}
-      >
-        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <div>
-            <h2 className="font-action text-lg">{t("staff.title", { siteName })}</h2>
-            <p className="text-[14px] text-keep-muted">{t("staff.description", { siteName })}</p>
-          </div>
-          <CloseButton onClick={onClose} />
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      title={t("staff.title", { siteName })}
+      className="keep-frame bg-keep-bg lg:rounded"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <header className="shrink-0 border-b border-keep-rule bg-keep-banner px-4 py-2">
+          <p className="text-[14px] text-keep-muted">{t("staff.description", { siteName })}</p>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -140,7 +137,7 @@ export function StaffModal({
           )}
         </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 

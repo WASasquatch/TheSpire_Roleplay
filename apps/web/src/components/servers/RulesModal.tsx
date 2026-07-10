@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Trans, useTranslation } from "react-i18next";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { useTranslation } from "react-i18next";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { BackToTop } from "../shared/BackToTop.js";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
 import { useRulesHashHighlight } from "../../lib/rulesHashHighlight.js";
@@ -192,16 +191,8 @@ export function RulesModal({ onClose }: Props) {
     "mb-2 shrink-0 border-b border-keep-border pb-1.5 font-action text-sm uppercase tracking-widest text-keep-muted";
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className={`${MODAL_CARD_CONTENT} keep-frame relative rounded bg-keep-bg`}
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-keep-border bg-keep-panel px-4 py-2">
-          <h2 className="font-action text-lg">{t("rules.title")}</h2>
-          <CloseButton onClick={onClose} />
-        </div>
-
+    <FloatingWindow onClose={onClose} zIndex={50} title={t("rules.title")} className="keep-frame rounded bg-keep-bg">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
           ref={setScrollerEl}
           className={`min-h-0 flex-1 px-5 py-4 ${hasPrivacy ? "overflow-y-auto lg:overflow-hidden" : "overflow-y-auto"}`}
@@ -284,10 +275,7 @@ export function RulesModal({ onClose }: Props) {
           )}
         </div>
 
-        <div className="shrink-0 border-t border-keep-border bg-keep-panel/40 px-4 py-2 text-[10px] text-keep-muted">
-          <Trans t={t} i18nKey="rules.escClose" components={{ kbd: <kbd className="rounded border border-keep-border bg-keep-bg px-1" /> }} />
-        </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }

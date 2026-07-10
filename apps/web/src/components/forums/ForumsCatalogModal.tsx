@@ -149,6 +149,7 @@ import { Modal } from "../cosmetics/Modal.js";
 import { UserLookupPicker } from "../moderation/UserLookupPicker.js";
 import { StylePicker } from "../admin/AdminPanel.js";
 import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { RatingChip } from "../shared/RatingChip.js";
 import { ContextualTour } from "../tours/ContextualTour.js";
 import { FormattingToolbar } from "../shared/FormattingToolbar.js";
@@ -411,22 +412,24 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
   useScopedRootDesign(forumTheme ?? activeTheme, detail?.themeStyleKey ?? null, !!detail, activeTheme);
 
   return (
-    <Modal onClose={onClose} variant="mobile-fullscreen">
-      {/* Full-screen card (per user): fills the viewport over the chat —
-          edge-to-edge on mobile, a slim backdrop ring on lg+ (the
-          variant's p-4) — instead of MODAL_CARD_CONTENT's 75vw/90vh.
-          The title bar's X (top right) is the close affordance. */}
-      <div
-        // text-keep-text on the CARD re-anchors the inherited text color
-        // to the forum's scoped palette. Without it, plain text inside
-        // inherits the color computed at the APP shell (the viewer's
-        // theme) — white text washing out over a parchment forum.
-        className="keep-frame relative flex h-full w-full flex-col overflow-hidden border border-keep-rule bg-keep-bg text-keep-text"
-        style={forumTheme ? themeStyle(forumTheme) : undefined}
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* No big title bar: the forum's own banner IS the header. The
-            app chrome lives in a slim bar at the top of the CONTENT
+    <FloatingWindow
+      onClose={onClose}
+      title={t("chrome.forums")}
+      // Forums opens near-fullscreen BY USER REQUEST (the old card filled
+      // the viewport over the chat) — still a window, so it can be dragged
+      // or resized down from there.
+      initialWidth={window.innerWidth - 32}
+      initialHeight={window.innerHeight - 32}
+      // text-keep-text on the window shell re-anchors the inherited text
+      // color to the forum's scoped palette. Without it, plain text inside
+      // inherits the color computed at the APP shell (the viewer's
+      // theme) — white text washing out over a parchment forum.
+      className="keep-frame border border-keep-rule bg-keep-bg text-keep-text"
+      {...(forumTheme ? { style: themeStyle(forumTheme) } : {})}
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* No big title bar inside: the forum's own banner IS the header.
+            The app chrome lives in a slim bar at the top of the CONTENT
             pane (see below) — breadcrumbs left, actions right — so it
             never floats over the rail column. */}
 
@@ -560,7 +563,6 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                       </span>
                     ) : null}
                   </button>
-                  <CloseButton onClick={onClose} />
                 </div>
               </div>
               {notifOpen ? (
@@ -701,7 +703,7 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
       />
       <ContextualTour tourId="forum-admin" active={view.kind === "settings" && !!detail && !createOpen} />
       {createOpen ? <CreateForumModal onClose={() => setCreateOpen(false)} /> : null}
-    </Modal>
+    </FloatingWindow>
   );
 }
 

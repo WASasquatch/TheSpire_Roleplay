@@ -14,7 +14,7 @@
     "loadFailed": "load failed",
     "loadStatus": "status {{status}}",
     "footerMention": "Mention someone in chat by typing <1>@username</1> - clickable, opens their active profile.",
-    "footerTip": "Tip: <1>/help char</1> jumps right here. Press <3>Esc</3> to close."
+    "footerTip": "Tip: <1>/help char</1> jumps right here."
   },
   "commands": {
     "customBadge": "custom",

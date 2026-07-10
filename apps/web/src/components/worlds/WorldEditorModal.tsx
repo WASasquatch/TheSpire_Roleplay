@@ -33,9 +33,8 @@ import {
 import { formatDateTime, formatTime } from "../../lib/intlFormat.js";
 import { readError } from "../../lib/http.js";
 import { ActiveThemeContext, themeStyle, useActiveTheme } from "../../lib/theme.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { ThemePicker } from "../cosmetics/ThemePicker.js";
-import { CloseButton } from "../shared/CloseButton.js";
 import { useChat } from "../../state/store.js";
 import { WorldEntitiesTab } from "./WorldEntitiesTab.js";
 import { WorldArcsTab } from "./WorldArcsTab.js";
@@ -124,21 +123,20 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
   const scopedTheme = detail?.world.theme ?? viewerTheme;
   const modalStyle = detail?.world.theme ? themeStyle(detail.world.theme) : undefined;
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      {...(modalStyle ? { style: modalStyle } : {})}
+      className="keep-frame keep-frame--reading rounded bg-keep-bg text-keep-text"
+      title={
+        <>
+          {detail ? t("editor.titleNamed", { name: detail.world.name }) : t("editor.title")}
+          {detail ? <span className="ml-2 text-xs font-normal text-keep-muted">/{detail.world.slug}</span> : null}
+        </>
+      }
+    >
       <ActiveThemeContext.Provider value={scopedTheme}>
-      <div
-        style={modalStyle}
-        className={`${MODAL_CARD_CONTENT} keep-frame keep-frame--reading rounded bg-keep-bg text-keep-text`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">
-            {detail ? t("editor.titleNamed", { name: detail.world.name }) : t("editor.title")}
-            {detail ? <span className="ml-2 text-xs text-keep-muted">/{detail.world.slug}</span> : null}
-          </h2>
-          <CloseButton onClick={onClose} />
-        </header>
-
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {error ? (
           <div className="mx-4 mt-3 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
             {error}
@@ -251,7 +249,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
         )}
       </div>
       </ActiveThemeContext.Provider>
-    </Modal>
+    </FloatingWindow>
   );
 }
 

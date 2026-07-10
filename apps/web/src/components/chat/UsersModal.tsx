@@ -4,8 +4,7 @@ import type { Gender } from "../../lib/gender.js";
 import { genderGlyph } from "../../lib/gender.js";
 import { formatDate, formatNumber } from "../../lib/intlFormat.js";
 import { useEarning } from "../../state/earning.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { RankSigil } from "../earning/RankSigil.js";
 
 export interface UserRow {
@@ -95,15 +94,11 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
   }, [rows]);
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg`}
-      >
+    <FloatingWindow onClose={onClose} zIndex={50} title={t("users.title")} className="keep-frame rounded bg-keep-bg">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex shrink-0 flex-col gap-2 border-b border-keep-border bg-keep-panel px-4 py-2">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-baseline gap-2">
-              <h2 className="font-action text-lg">{t("users.title")}</h2>
               <span className="text-xs text-keep-muted">
                 {t("users.counts", { online: counts.online, shown: counts.total })}
               </span>
@@ -115,7 +110,6 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
               autoFocus
               className="flex-1 rounded border border-keep-border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
             />
-            <CloseButton onClick={onClose} />
           </div>
           {/* Filter + sort controls. Render even when the catalog
               hasn't loaded (the rank dropdown just shows "Any rank"
@@ -249,6 +243,6 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
           {t("users.footer")}
         </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }

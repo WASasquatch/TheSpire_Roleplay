@@ -22,6 +22,7 @@
  * the look is consistent regardless of how the user got there.
  */
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 
@@ -55,7 +56,11 @@ export function ItemZoomView({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  return (
+  // Portaled to <body>: the app shell is its own stacking context, so an
+  // in-shell overlay would paint UNDER any body-portaled FloatingWindow
+  // (`/item` runs from the composer while windows are open). At body level
+  // the z-60 sits above windows (30..39) and the profile modal (50).
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -95,6 +100,7 @@ export function ItemZoomView({
           {t("itemZoom.closeHint")}
         </p>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

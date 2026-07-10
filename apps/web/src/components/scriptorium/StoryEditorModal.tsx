@@ -27,8 +27,7 @@ import {
 import { RichEditor } from "../shared/RichEditor.js";
 import { readError } from "../../lib/http.js";
 import { formatDateTime, formatNumber } from "../../lib/intlFormat.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { RatingPicker } from "./RatingPicker.js";
 import { StoryCodexTab } from "./StoryCodexTab.js";
 import { StoryCollaboratorsTab } from "./StoryCollaboratorsTab.js";
@@ -101,44 +100,51 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
 
   if (!storyId) {
     return (
-      <Modal onClose={onClose} zIndex={60} variant="mobile-fullscreen">
-        <div
-          className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg text-keep-text`}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-            <div className="flex min-w-0 items-center gap-2">
-              {onBack ? (
-                <button
-                  type="button"
-                  onClick={onBack}
-                  className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-                  title={t("backToScriptorium")}
-                >
-                  {t("back")}
-                </button>
-              ) : null}
-              <h2 className="font-action text-lg">{t("editor.startNewStory")}</h2>
-            </div>
-            <CloseButton onClick={onClose} />
-          </header>
+      <FloatingWindow
+        onClose={onClose}
+        zIndex={60}
+        title={t("editor.startNewStory")}
+        className="keep-frame rounded bg-keep-bg text-keep-text"
+      >
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {onBack ? (
+            <header className="flex shrink-0 items-center border-b border-keep-rule bg-keep-banner px-4 py-2">
+              <button
+                type="button"
+                onClick={onBack}
+                className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
+                title={t("backToScriptorium")}
+              >
+                {t("back")}
+              </button>
+            </header>
+          ) : null}
           <NewStoryWizard
             onCreated={(card) => setStoryId(card.id)}
             onCancel={onClose}
           />
         </div>
-      </Modal>
+      </FloatingWindow>
     );
   }
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg text-keep-text`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          {onBack ? (
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      className="keep-frame rounded bg-keep-bg text-keep-text"
+      title={
+        <>
+          {detail ? t("editor.editTitle", { title: detail.story.title }) : t("common:loadingDots")}
+          {detail ? (
+            <span className="ml-2 text-xs text-keep-muted">/{detail.story.slug}</span>
+          ) : null}
+        </>
+      }
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {onBack ? (
+          <header className="flex shrink-0 items-center border-b border-keep-rule bg-keep-banner px-4 py-2">
             <button
               type="button"
               onClick={onBack}
@@ -147,17 +153,8 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
             >
               {t("back")}
             </button>
-          ) : null}
-          <div className="min-w-0 flex-1">
-            <h2 className="truncate font-action text-lg">
-              {detail ? t("editor.editTitle", { title: detail.story.title }) : t("common:loadingDots")}
-              {detail ? (
-                <span className="ml-2 text-xs text-keep-muted">/{detail.story.slug}</span>
-              ) : null}
-            </h2>
-          </div>
-          <CloseButton onClick={onClose} />
-        </header>
+          </header>
+        ) : null}
 
         <nav className="flex shrink-0 items-center gap-1 border-b border-keep-rule bg-keep-panel/30 px-3 py-1.5 text-sm">
           <TabButton active={tab === "overview"} onClick={() => setTab("overview")}>{t("editor.tabs.overview")}</TabButton>
@@ -194,7 +191,7 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
           <StoryCollaboratorsTab detail={detail} />
         )}
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 

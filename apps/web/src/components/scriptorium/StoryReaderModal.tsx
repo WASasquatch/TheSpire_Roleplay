@@ -16,8 +16,7 @@ import { formatNumber } from "../../lib/intlFormat.js";
 import { themeStyle } from "../../lib/theme.js";
 import { useChat } from "../../state/store.js";
 import { fetchStoryCopyState, buyStoryCopy, setStoryShowcase, type StoryCopyState } from "../../lib/storyCopies.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { ScriptoriumReportButton } from "../ScriptoriumReportButton.js";
 import { decorateMentionsIn, makeChipClickHandler } from "../../lib/storyMentions.js";
 import { StoryReviewsPanel } from "./StoryReviewsPanel.js";
@@ -338,12 +337,14 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
   }, [navOpen]);
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        style={themeOverride}
-        className={`${MODAL_CARD_CONTENT} keep-frame relative rounded bg-keep-bg text-keep-text`}
-        onClick={(e) => e.stopPropagation()}
-      >
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      {...(themeOverride ? { style: themeOverride } : {})}
+      className="keep-frame rounded bg-keep-bg text-keep-text"
+      title={detail ? detail.story.title : stub ? stub.title : t("common:loadingDots")}
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule bg-keep-banner px-3 py-2">
           {/* Mobile-only "Contents" trigger. Opens the drawer that holds
               the sidebar (info, Buy a Copy, chapters, codex) — all of
@@ -371,9 +372,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
               <span className="hidden md:inline">{t("back")}</span>
             </button>
           ) : null}
-          <h2 className="min-w-0 flex-1 truncate font-action text-lg">
-            {detail ? detail.story.title : stub ? stub.title : t("common:loadingDots")}
-          </h2>
+          <span className="flex-1" />
           <div className="flex items-center gap-1">
             <button type="button" onClick={() => setMode("book")}
               className={`rounded border px-2 py-0.5 text-[11px] uppercase tracking-widest ${
@@ -394,7 +393,6 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
               </button>
             ) : null}
           </div>
-          <CloseButton onClick={onClose} />
         </header>
 
         {typoOpen ? (
@@ -548,7 +546,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
           </div>
         ) : null}
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 
@@ -614,6 +612,8 @@ function BookPagedView({
    */
   const containerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
+  /** Whole book-view root — scopes the global paging keys (see onKey). */
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [pageIdx, setPageIdx] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [pageWidth, setPageWidth] = useState(0);
@@ -668,6 +668,14 @@ function BookPagedView({
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      // The reader is a non-modal WINDOW now — the page behind stays
+      // usable, so these keys must only page when the reader owns the
+      // interaction: the event comes from inside it, or nothing else has
+      // focus (body). A focused button/panel elsewhere keeps its Space /
+      // PageDown behavior instead of flipping pages invisibly.
+      const root = rootRef.current;
+      const inside = !!root && !!t && root.contains(t);
+      if (!inside && t !== document.body && t !== null) return;
       if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") {
         e.preventDefault();
         goNext();
@@ -692,7 +700,7 @@ function BookPagedView({
   // (medieval / modern / scifi / glass) so the reader pane looks
   // like a "page" sitting on the modal's surface.
   return (
-    <div className="keep-panel flex min-h-0 w-full flex-1 flex-col overflow-hidden">
+    <div ref={rootRef} className="keep-panel flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       <PageNavBar
         position="top"
         pageIdx={pageIdx}

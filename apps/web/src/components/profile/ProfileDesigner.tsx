@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import GjsEditor from "@grapesjs/react";
 import grapesjs, { type Editor, type Panel, type Button } from "grapesjs";
+import { FLOATING_WINDOW_MOVED_EVENT } from "../shared/FloatingWindow.js";
 // Side-effect import: Vite bundles this into a linked stylesheet in prod
 // (CSP `style-src 'self'` safe) and injects it in dev (no CSP there). The
 // GrapesJS UI keys off `.gjs-*` classes, so a global import is fine.
@@ -528,6 +529,19 @@ export default function ProfileDesigner({ value, onChange }: Props) {
 
   // Tear the observer down when the Designer unmounts (mode switch / close).
   useEffect(() => () => bridgeRef.current?.disconnect(), []);
+
+  // GrapesJS caches the canvas's viewport offset and only invalidates it on
+  // browser-window resize/scroll. Dragging the ProfileEditor's floating
+  // window moves the canvas WITHOUT firing either, leaving the hover
+  // highlighter / selection outline / toolbar drawn at the pre-drag spot —
+  // so refresh the caches whenever a window finishes a drag/resize gesture.
+  useEffect(() => {
+    const onWindowMoved = () => {
+      try { editorRef.current?.refresh(); } catch { /* editor mid-teardown */ }
+    };
+    window.addEventListener(FLOATING_WINDOW_MOVED_EVENT, onWindowMoved);
+    return () => window.removeEventListener(FLOATING_WINDOW_MOVED_EVENT, onWindowMoved);
+  }, []);
 
   // Emit synchronously on every change (no debounce) so switching to Source
   // mode never loses the last edit. The bio is small, so serializing the tree

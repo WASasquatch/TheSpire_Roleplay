@@ -210,7 +210,16 @@
       "landingRoomCantBeNsfw": "This is the landing room, so it can't be 18+. Members under 18 need somewhere to arrive.",
       "nowAdultsOnly": "This room is now for adults only.",
       "removedByAdmin": "Room \"{{name}}\" was removed by an administrator.",
-      "nsfwLinkedPair": "This room is part of a linked SFW/18+ pair, so its 18+ setting is locked. Run /unlinkroom first, then change it."
+      "nsfwLinkedPair": "This room has an 18+ channel, so its whole-room 18+ setting is locked. Turn the channel off first (/nsfw channel off), then change it.",
+      "adultChannel": {
+        "ROOM_IS_NSFW": "This room is already 18+ everywhere, so it can't also have an 18+ channel.",
+        "FORUM_BOARD": "Forum boards can't have an 18+ channel.",
+        "ARCHIVED": "This room is parked; bring it back before adding an 18+ channel.",
+        "NOT_PUBLIC": "Only public rooms can have an 18+ channel.",
+        "NAME_TOO_LONG": "This room's name is too long to add an 18+ channel (34 characters at most).",
+        "NAME_TAKEN": "A separate room named \"<this room>_Adult\" already exists. Delete or rename it first.",
+        "CHANNEL_OCCUPIED": "People are in the 18+ channel right now. Ask them to switch to the SFW side first."
+      }
     },
     "reports": {
       "whispersNotReportable": "whispers cannot be reported",

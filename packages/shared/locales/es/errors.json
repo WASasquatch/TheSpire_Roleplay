@@ -211,7 +211,16 @@
       "landingRoomCantBeNsfw": "Esta es la sala de llegada, así que no puede ser 18+. Los miembros menores de 18 necesitan un lugar adonde llegar.",
       "nowAdultsOnly": "Esta sala ahora es solo para adultos.",
       "removedByAdmin": "Un administrador eliminó la sala \"{{name}}\".",
-      "nsfwLinkedPair": "Esta sala forma parte de un par SFW/18+ enlazado, así que su configuración de 18+ está bloqueada. Ejecuta /unlinkroom primero y luego cámbiala."
+      "nsfwLinkedPair": "Esta sala tiene un canal 18+, así que su configuración de 18+ para toda la sala está bloqueada. Desactiva el canal primero (/nsfw channel off) y luego cámbiala.",
+      "adultChannel": {
+        "ROOM_IS_NSFW": "Esta sala ya es 18+ por completo, así que no puede tener además un canal 18+.",
+        "FORUM_BOARD": "Los tableros de foros no pueden tener un canal 18+.",
+        "ARCHIVED": "Esta sala está archivada; recupérala antes de añadir un canal 18+.",
+        "NOT_PUBLIC": "Solo las salas públicas pueden tener un canal 18+.",
+        "NAME_TOO_LONG": "El nombre de esta sala es demasiado largo para añadir un canal 18+ (34 caracteres como máximo).",
+        "NAME_TAKEN": "Ya existe una sala aparte llamada \"<esta sala>_Adult\". Elimínala o renómbrala primero.",
+        "CHANNEL_OCCUPIED": "Hay gente en el canal 18+ ahora mismo. Pídeles que cambien al lado SFW primero."
+      }
     },
     "reports": {
       "whispersNotReportable": "los susurros no se pueden reportar",

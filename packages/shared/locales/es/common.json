@@ -297,14 +297,38 @@
     "applyPreset": "Aplicar preajuste: {{name}}",
     "revertTitle": "Volver al predeterminado del sistema",
     "slots": {
-      "bg": { "label": "Fondo", "hint": "Fondo principal del chat" },
-      "panel": { "label": "Panel", "hint": "Banner, barras laterales, encabezados de ventanas" },
-      "border": { "label": "Borde", "hint": "Líneas divisorias y bordes de los marcos" },
-      "text": { "label": "Texto", "hint": "Texto principal legible" },
-      "muted": { "label": "Atenuado", "hint": "Marcas de tiempo, pistas, texto secundario" },
-      "action": { "label": "Acción", "hint": "Resaltados, sala actual, enlaces" },
-      "accent": { "label": "Acento", "hint": "Llamado a la acción fuerte / botón Salir" },
-      "system": { "label": "Sistema", "hint": "Mensajes del sistema en cursiva" }
+      "bg": {
+        "label": "Fondo",
+        "hint": "Fondo principal del chat"
+      },
+      "panel": {
+        "label": "Panel",
+        "hint": "Banner, barras laterales, encabezados de ventanas"
+      },
+      "border": {
+        "label": "Borde",
+        "hint": "Líneas divisorias y bordes de los marcos"
+      },
+      "text": {
+        "label": "Texto",
+        "hint": "Texto principal legible"
+      },
+      "muted": {
+        "label": "Atenuado",
+        "hint": "Marcas de tiempo, pistas, texto secundario"
+      },
+      "action": {
+        "label": "Acción",
+        "hint": "Resaltados, sala actual, enlaces"
+      },
+      "accent": {
+        "label": "Acento",
+        "hint": "Llamado a la acción fuerte / botón Salir"
+      },
+      "system": {
+        "label": "Sistema",
+        "hint": "Mensajes del sistema en cursiva"
+      }
     },
     "preview": {
       "caption": "· vista previa",
@@ -321,27 +345,15 @@
   },
   "createRoom": {
     "title": "Constructor de salas",
-    "tabCreate": "Sala nueva",
-    "tabPair": "Enlazar par 18+",
-    "pairIntro": "Muestra una sala y su versión 18+ como UNA sola sala en la lista, con un selector SFW/18+ dentro. Elige las dos salas; si la sala 18+ aún no está marcada como 18+, el enlace la marca por ti.",
-    "pairSfwLabel": "Sala para todas las edades",
-    "pairNsfwLabel": "Sala 18+",
-    "pairPick": "Elige una sala…",
-    "pairWillFlag": "{{name}} se marcará como 18+ al enlazarla. Los miembros menores de 18 dejarán de verla.",
-    "pairSubmit": "Enlazar salas",
-    "pairNoEligible": "Necesitas dos salas públicas propias que aún no estén enlazadas. Los mods de sala que no sean propietarios pueden enlazar con /linkroom.",
-    "pairExisting": "Tus pares enlazados",
-    "pairUnlink": "Desenlazar",
-    "pairNetworkError": "No se pudo contactar con el servidor. Inténtalo de nuevo.",
     "intro": "Elige un nombre. Los espacios se vuelven guiones bajos, así que <1>Oak Tavern</1> se convierte en <3>Oak_Tavern</3>.",
     "nameLabel": "Nombre de la sala",
     "namePlaceholder": "p. ej. Oak_Tavern",
     "privateLabel": "Privada <1>(se requiere contraseña para entrar)</1>",
-    "pairLabel": "Con una sala 18+ enlazada <1>(añade un lado solo para adultos tras un selector SFW/18+)</1>",
+    "pairLabel": "Con un canal 18+ <1>(un lado solo para adultos de la sala tras un selector SFW/18+)</1>",
     "submit": "Crear",
     "errorNameRequired": "Escribe un nombre para la sala.",
     "errorNameInvalid": "Los nombres pueden usar letras, números y _ - ' (hasta 40 caracteres).",
-    "errorPairNameTooLong": "Con una sala 18+ enlazada el nombre puede tener como máximo 34 caracteres, para que \"_Adult\" quepa.",
+    "errorPairNameTooLong": "Con un canal 18+ el nombre puede tener como máximo 34 caracteres.",
     "errorPasswordRequired": "Una sala privada necesita una contraseña."
   },
   "password": "Contraseña",
@@ -511,5 +523,10 @@
       "visitors_other": "visitantes",
       "visitors_many": "visitantes"
     }
+  },
+  "window": {
+    "collapse": "Contraer a la barra de título",
+    "expand": "Expandir",
+    "resize": "Arrastra para cambiar el tamaño"
   }
 }

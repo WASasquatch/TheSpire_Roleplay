@@ -289,10 +289,8 @@
     "banConfirm": "Ban {{name}} from this room? They won't be able to re-enter until unbanned.",
     "pairSfw": "SFW",
     "pairNsfw": "18+",
-    "pairChipTitle": "This room has a linked 18+ side. Enter it and use the SFW/18+ toggle to switch.",
-    "pairSideLabel": "Side",
-    "pairToSfwTitle": "Switch to the all-ages side of this room",
-    "pairToNsfwTitle": "Switch to the 18+ side of this room (adults only)"
+    "pairToSfwTitle": "Switch to this room's all-ages channel",
+    "pairToNsfwTitle": "Switch to this room's 18+ channel (adults only)"
   },
   "staff": {
     "roomOwner": "Room owner",

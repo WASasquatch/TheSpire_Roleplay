@@ -7,10 +7,9 @@ import { recordNav } from "../../lib/nav-metrics.js";
 import { TabBtn } from "../shared/TabBtn.js";
 import { groupVisibleTabs, withGroupSeparators } from "../shared/tabGroups.js";
 import { ContextualTour } from "../tours/ContextualTour.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { useChat } from "../../state/store.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { AdminBackupsTab } from "./AdminBackupsTab.js";
 import { AdminSystemTab } from "./AdminSystemTab.js";
 import { AdminVerifyLogTab } from "./AdminVerifyLogTab.js";
@@ -365,12 +364,14 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
   };
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={onShellKeyDown}
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
-      >
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      title={t("panel.title")}
+      onKeyDown={onShellKeyDown}
+      className="keep-frame rounded border border-keep-border bg-keep-parchment"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Header. On mobile (< md) we collapse the tab strip to a
             full-width <select> dropdown showing the active section,
             with the close button glued to its right edge, earlier
@@ -403,7 +404,6 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
               />
             ) : (
               <>
-                <h2 className="shrink-0 font-action text-base">{t("panel.title")}</h2>
                 <select
                   value={tab}
                   onChange={(e) => changeTab(e.target.value as Tab)}
@@ -429,23 +429,21 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
                 >
                   <Search className="h-4 w-4" aria-hidden />
                 </button>
-                <CloseButton onClick={onClose} />
               </>
             )}
           </div>
 
-          {/* Desktop: title + horizontally-scrollable tab strip + close.
-              A hairline vertical separator renders between groups so the
+          {/* Desktop: WRAPPING tab strip + find-a-setting. The panel lives
+              in a resizable floating window now, so a fixed one-row strip
+              clips its tail behind a hidden scrollbar at narrow widths;
+              wrapping keeps every tab reachable at any window size. A
+              hairline vertical separator renders between groups so the
               eye can pick out the five clusters without reading every
               label first. The walk threads the visible-tab list through
               `withGroupSeparators` so a hidden tab (gated out by a
               missing permission) doesn't leave an orphaned divider. */}
           <div className="hidden items-center gap-2 px-4 py-2 md:flex">
-            <h2 className="shrink-0 font-action text-lg">{t("panel.title")}</h2>
-            {/* `keep-scroll-strip` hides the scrollbar on touch and
-                swaps in a thin themed scrollbar on md+ so it never
-                underlines the tab labels. */}
-            <nav data-tour="admin-tab-strip" className="keep-scroll-strip flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-xs uppercase tracking-widest">
+            <nav data-tour="admin-tab-strip" className="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-xs uppercase tracking-widest">
               {withGroupSeparators(visibleTabs).map(
                 (entry) =>
                   entry.kind === "separator" ? (
@@ -493,7 +491,6 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
             >
               <HelpCircle className="h-4 w-4" aria-hidden />
             </button>
-            <CloseButton onClick={onClose} />
           </div>
         </div>
 
@@ -576,6 +573,6 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
           )}
         </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }

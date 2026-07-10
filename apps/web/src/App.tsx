@@ -1,21 +1,23 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal, flushSync } from "react-dom";
 import { Trans, useTranslation } from "react-i18next";
 import type { ChatMessage, PermissionKey, PinnedMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, TourId, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
 import { arcadeGameByKey, DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
+import { lazyModal } from "./components/shared/lazyModal.js";
 // Heavy, authenticated-only surfaces are code-split (B1, plan.md §3) so
 // the anonymous splash / login / boot bundle never downloads them. Each
 // is a NAMED export, so we adapt it to the default-export shape React.lazy
-// expects. Every one of these renders only inside the authenticated <Chat>
-// subtree, which is wrapped in a single <Suspense> boundary — so a lazy
-// descendant can always suspend into an ancestor and never crash. Do NOT
-// lazy-load anything on the anonymous path (SplashLanding, AuthGate, etc.).
-const AdminPanel = lazy(() => import("./components/admin/AdminPanel.js").then((m) => ({ default: m.AdminPanel })));
+// expects. `lazyModal` gives each surface its OWN Suspense boundary (a
+// brief translucent veil) — a bare React.lazy here would suspend into the
+// shell-wide <Suspense fallback={null}> below and blank the whole app on
+// first open. Do NOT lazy-load anything on the anonymous path
+// (SplashLanding, AuthGate, etc.).
+const AdminPanel = lazyModal(() => import("./components/admin/AdminPanel.js").then((m) => ({ default: m.AdminPanel })));
 import { VerifyEmailGate } from "./components/VerifyEmailGate.js";
 import { Banner } from "./components/Banner.js";
 import { Composer } from "./components/chat/Composer.js";
 import { TypingIndicator } from "./components/chat/TypingIndicator.js";
-const HelpModal = lazy(() => import("./components/HelpModal.js").then((m) => ({ default: m.HelpModal })));
+const HelpModal = lazyModal(() => import("./components/HelpModal.js").then((m) => ({ default: m.HelpModal })));
 import { InfoModal } from "./components/InfoModal.js";
 import { MessageList } from "./components/chat/MessageList.js";
 import { TheaterPanel } from "./components/TheaterPanel.js";
@@ -23,27 +25,27 @@ import { MutualPrompts } from "./components/MutualPrompts.js";
 import { StoryInvitePrompts } from "./components/scriptorium/StoryInvitePrompts.js";
 import { FriendRequestPrompts } from "./components/FriendRequestPrompts.js";
 import { BookmarksModal } from "./components/chat/BookmarksModal.js";
-const ProfileEditor = lazy(() => import("./components/profile/ProfileEditor.js").then((m) => ({ default: m.ProfileEditor })));
+const ProfileEditor = lazyModal(() => import("./components/profile/ProfileEditor.js").then((m) => ({ default: m.ProfileEditor })));
 import { ProfileModal } from "./components/profile/ProfileModal.js";
 import { RoomPasswordModal } from "./components/RoomPasswordModal.js";
 import { RoomsTree, type RoomWithOccupants } from "./components/chat/RoomsTree.js";
 import { ServerRail } from "./components/servers/ServerRail.js";
-const ServerSettingsView = lazy(() => import("./components/servers/ServerSettingsView.js").then((m) => ({ default: m.ServerSettingsView })));
-const ServerDiscoverModal = lazy(() => import("./components/servers/ServerDiscoverModal.js").then((m) => ({ default: m.ServerDiscoverModal })));
+const ServerSettingsView = lazyModal(() => import("./components/servers/ServerSettingsView.js").then((m) => ({ default: m.ServerSettingsView })));
+const ServerDiscoverModal = lazyModal(() => import("./components/servers/ServerDiscoverModal.js").then((m) => ({ default: m.ServerDiscoverModal })));
 import { listServers, resolveServerSlug, visitServer, type ServerSummary } from "./lib/servers.js";
-const MessagesModal = lazy(() => import("./components/chat/MessagesModal.js").then((m) => ({ default: m.MessagesModal })));
+const MessagesModal = lazyModal(() => import("./components/chat/MessagesModal.js").then((m) => ({ default: m.MessagesModal })));
 import { RulesModal } from "./components/servers/RulesModal.js";
 import { RulesPage } from "./components/servers/RulesPage.js";
 import { isRulesUrl, navigateAwayFromRules } from "./lib/rulesUrl.js";
 import { FaqPage } from "./components/FaqPage.js";
 import { TopCommunitiesPage, isTopCommunitiesUrl, consumeAddCommunityIntent } from "./components/marketing/TopCommunitiesPage.js";
 import { faqRoute, type FaqRoute } from "./lib/faqUrl.js";
-const EarningDashboard = lazy(() => import("./components/earning/EarningDashboard.js").then((m) => ({ default: m.EarningDashboard })));
+const EarningDashboard = lazyModal(() => import("./components/earning/EarningDashboard.js").then((m) => ({ default: m.EarningDashboard })));
 import { ErrorBoundary } from "./components/shared/ErrorBoundary.js";
-const ArcadeLauncher = lazy(() => import("./components/arcade/ArcadeLauncher.js").then((m) => ({ default: m.ArcadeLauncher })));
-const EidolonWindow = lazy(() => import("./components/arcade/EidolonWindow.js").then((m) => ({ default: m.EidolonWindow })));
-const UrugalWindow = lazy(() => import("./components/arcade/UrugalWindow.js").then((m) => ({ default: m.UrugalWindow })));
-const GrimholdWindow = lazy(() => import("./components/arcade/GrimholdWindow.js").then((m) => ({ default: m.GrimholdWindow })));
+const ArcadeLauncher = lazyModal(() => import("./components/arcade/ArcadeLauncher.js").then((m) => ({ default: m.ArcadeLauncher })));
+const EidolonWindow = lazyModal(() => import("./components/arcade/EidolonWindow.js").then((m) => ({ default: m.EidolonWindow })));
+const UrugalWindow = lazyModal(() => import("./components/arcade/UrugalWindow.js").then((m) => ({ default: m.UrugalWindow })));
+const GrimholdWindow = lazyModal(() => import("./components/arcade/GrimholdWindow.js").then((m) => ({ default: m.GrimholdWindow })));
 import { EarningRibbon } from "./components/earning/EarningRibbon.js";
 import { BannerMarquee } from "./components/BannerMarquee.js";
 import { RoomInfoBar } from "./components/chat/RoomInfoBar.js";
@@ -60,22 +62,25 @@ import "./lib/calmCosmetics.js";
 import { fetchSpotlightMember, fetchRoomBrief, fetchStoryBrief } from "./lib/uiRouteDynamicLabel.js";
 import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/cosmetics/ItemZoomView.js";
-const ThreadModal = lazy(() => import("./components/forums/ThreadModal.js").then((m) => ({ default: m.ThreadModal })));
+const ThreadModal = lazyModal(() => import("./components/forums/ThreadModal.js").then((m) => ({ default: m.ThreadModal })));
 import { UsersModal } from "./components/chat/UsersModal.js";
 import { WorldCatalogModal } from "./components/worlds/WorldCatalogModal.js";
-const WorldEditorModal = lazy(() => import("./components/worlds/WorldEditorModal.js").then((m) => ({ default: m.WorldEditorModal })));
+const WorldEditorModal = lazyModal(() => import("./components/worlds/WorldEditorModal.js").then((m) => ({ default: m.WorldEditorModal })));
 import { WorldViewerModal } from "./components/worlds/WorldViewerModal.js";
-const WorldsListModal = lazy(() => import("./components/worlds/WorldsListModal.js").then((m) => ({ default: m.WorldsListModal })));
+const WorldsListModal = lazyModal(() => import("./components/worlds/WorldsListModal.js").then((m) => ({ default: m.WorldsListModal })));
 import { StaffModal } from "./components/moderation/StaffModal.js";
 import { AffiliateSubmitPortal } from "./components/marketing/AffiliateSubmitPortal.js";
 import { StoryCatalogModal } from "./components/scriptorium/StoryCatalogModal.js";
-const ForumsCatalogModal = lazy(() => import("./components/forums/ForumsCatalogModal.js").then((m) => ({ default: m.ForumsCatalogModal })));
+const ForumsCatalogModal = lazyModal(() => import("./components/forums/ForumsCatalogModal.js").then((m) => ({ default: m.ForumsCatalogModal })));
 import { readReturnForum, RETURN_FORUM_STORAGE_KEY } from "./components/forums/ForumPublicLanding.js";
 import { readReturnServer, RETURN_SERVER_STORAGE_KEY } from "./components/servers/ServerPublicLanding.js";
 import { fetchForumNotifications, locateForumTopic } from "./lib/forums.js";
 import { fetchNotifBadge } from "./lib/notificationCenter.js";
-const NotificationCenter = lazy(() => import("./components/NotificationCenter.js").then((m) => ({ default: m.NotificationCenter })));
-const StoryEditorModal = lazy(() => import("./components/scriptorium/StoryEditorModal.js").then((m) => ({ default: m.StoryEditorModal })));
+// Always-mounted (the bell renders with the shell, not on user action), so
+// no loading veil — a boot-time veil would dim and click-block every page
+// load. The bell simply pops in when its chunk lands.
+const NotificationCenter = lazyModal(() => import("./components/NotificationCenter.js").then((m) => ({ default: m.NotificationCenter })), null);
+const StoryEditorModal = lazyModal(() => import("./components/scriptorium/StoryEditorModal.js").then((m) => ({ default: m.StoryEditorModal })));
 import { StoryReaderModal } from "./components/scriptorium/StoryReaderModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
 import { ServerOnboardingModal } from "./components/servers/ServerOnboardingModal.js";
@@ -741,7 +746,12 @@ export function App() {
   if (arrivedViaDeepLink && (openProfileForSync || publicWorldDetail)) {
     return (
       <PublicViewerShell isAuthenticated={!!me}>
-        {openProfileForSync ? (
+        {/* Hide (don't unmount state for) the profile while a world is up:
+            the world viewer is a floating WINDOW below the true-modal
+            plane, so a still-rendered profile backdrop would bury it.
+            Closing the world re-renders the profile (state persists) and
+            its onClose below restores the /p/<name> URL. */}
+        {openProfileForSync && !publicWorldDetail ? (
           <ProfileModal
             profile={openProfileForSync}
             onClose={() => {
@@ -968,6 +978,9 @@ function Chat() {
   // Worldbuilding modals. Only one is visible at a time but state lives
   // independently so e.g. closing the viewer doesn't tear down the list.
   const [worldsListOpen, setWorldsListOpen] = useState(false);
+  // My Worlds opens with the New World form already showing (the World
+  // Catalog's "Create World" button). Reset on close.
+  const [worldsListCreate, setWorldsListCreate] = useState(false);
   const [worldEditorId, setWorldEditorId] = useState<string | null>(null);
   // Seed from the URL: if the page loaded at /w/<slug>, the viewer opens
   // immediately so deep-links work pre- and post-login. WorldViewerModal
@@ -1128,9 +1141,13 @@ function Chat() {
   const setOpenStoryReader = useChat((s) => s.setOpenStoryReader);
   useEffect(() => {
     if (!openStoryReaderId) return;
+    // The reader is a floating window (below the true-modal plane); if the
+    // request came from a profile's Library pin, the profile modal must
+    // close or its backdrop buries the reader. No-op for other callers.
+    setOpenProfile(null);
     setStoryReader({ storyId: openStoryReaderId });
     setOpenStoryReader(null);
-  }, [openStoryReaderId, setOpenStoryReader]);
+  }, [openStoryReaderId, setOpenStoryReader, setOpenProfile]);
   const [navLinksVersion, setNavLinksVersion] = useState(0);
 
   /**
@@ -1144,6 +1161,11 @@ function Chat() {
    */
   useEffect(() => onUiRouteOpen((detail) => {
     const t = detail.entry.target;
+    // Route chips can be clicked inside a popped forum topic (a true
+    // modal). Most routes open floating WINDOWS, which stack below the
+    // topic's backdrop — close the topic first so the destination is
+    // actually visible. Harmless for the routes that open true modals.
+    setPoppedTopicId(null);
     switch (t.kind) {
       case "modal-earning": {
         const spec: EarningOpenSpec = {};
@@ -2628,6 +2650,18 @@ function Chat() {
       setMe(null);
     });
     socket.on("ui:hint", (h) => {
+      // Hints that open a floating WINDOW must first close a popped forum
+      // topic: the topic dialog is a true modal (backdropped, above the
+      // window plane), and its composer routes slash commands through the
+      // same pipeline — /help, /users, /shop… typed there would otherwise
+      // open their window invisibly behind the topic.
+      const opensWindowSurface = new Set([
+        "open-my-editor", "open-character-editor", "open-help", "open-users",
+        "open-worlds-list", "open-world-catalog", "open-world",
+        "open-scriptorium", "open-forums", "open-story-editor", "open-story",
+        "open-bookmarks", "open-earning",
+      ]);
+      if (opensWindowSurface.has(h.kind)) setPoppedTopicId(null);
       switch (h.kind) {
         case "open-profile":
           setOpenProfile(h.profile);
@@ -4762,11 +4796,11 @@ function Chat() {
               if (res.ok) setOpenProfile(res.profile);
             });
           }}
-          // Worlds chips on the profile open the viewer on top of the
-          // profile modal. Closing the world viewer drops the user back to
-          // the profile they were reading, which matches how the room
-          // banner's world button stacks above other open modals.
-          onOpenWorld={(slug) => setWorldViewerId(slug)}
+          // Worlds chips on the profile open the world viewer. The viewer
+          // is a floating WINDOW now (below the true-modal plane), so the
+          // profile modal must close first or its backdrop would bury the
+          // freshly opened viewer.
+          onOpenWorld={(slug) => { setOpenProfile(null); setWorldViewerId(slug); }}
         />
       ) : null}
       {editor ? (
@@ -4888,7 +4922,9 @@ function Chat() {
           onIconClick={onIconClick}
           onNameClick={onNameClick}
           onMentionClick={onMentionClick}
-          onWorldClick={(slug) => setWorldViewerId(slug)}
+          // The world viewer is a floating window (below the true-modal
+          // plane) — close the popped topic first or its backdrop buries it.
+          onWorldClick={(slug) => { setPoppedTopicId(null); setWorldViewerId(slug); }}
           onTimeClick={onTimeClick}
           onJumpToReply={(id) => {
             if (currentRoomId) void jumpToMessage(currentRoomId, id);
@@ -4960,17 +4996,24 @@ function Chat() {
       ) : null}
       {worldsListOpen ? (
         <WorldsListModal
-          onClose={() => setWorldsListOpen(false)}
+          // Remount when the create-first flag flips so `initialCreate`
+          // (read once at mount) takes effect even if the list is open.
+          key={worldsListCreate ? "create" : "list"}
+          initialCreate={worldsListCreate}
+          onClose={() => { setWorldsListOpen(false); setWorldsListCreate(false); }}
           onOpenEditor={(worldId) => {
             setWorldsListOpen(false);
+            setWorldsListCreate(false);
             setWorldEditorId(worldId);
           }}
           onOpenViewer={(worldId) => {
             setWorldsListOpen(false);
+            setWorldsListCreate(false);
             setWorldViewerId(worldId);
           }}
           onOpenCatalog={() => {
             setWorldsListOpen(false);
+            setWorldsListCreate(false);
             setWorldCatalogOpen(true);
           }}
         />
@@ -5038,6 +5081,11 @@ function Chat() {
           onOpenViewer={(worldId) => {
             setWorldCatalogOpen(false);
             setWorldViewerId(worldId);
+          }}
+          onCreateWorld={() => {
+            setWorldCatalogOpen(false);
+            setWorldsListCreate(true);
+            setWorldsListOpen(true);
           }}
         />
       ) : null}
@@ -5149,11 +5197,16 @@ function Toast({ notice, onDismiss }: { notice: { code: string; message: string 
     const t = setTimeout(onDismiss, 6000);
     return () => clearTimeout(t);
   }, [notice, onDismiss]);
-  return (
-    <div className="pointer-events-none fixed bottom-16 left-1/2 z-30 -translate-x-1/2 max-w-[80vw] rounded border border-keep-rule bg-keep-parchment px-3 py-2 text-sm shadow">
+  // Portaled to <body>: the app shell is its own stacking context, so an
+  // inline toast could never paint above a body-portaled FloatingWindow —
+  // and users now chat with windows covering bottom-center. z-[39] keeps
+  // it above the window plane (30..39) but under true modals (40+).
+  return createPortal(
+    <div className="pointer-events-none fixed bottom-16 left-1/2 z-[39] -translate-x-1/2 max-w-[80vw] rounded border border-keep-rule bg-keep-parchment px-3 py-2 text-sm shadow">
       <span className="text-keep-muted">[{notice.code}]</span>{" "}
       <span className="whitespace-pre-wrap">{notice.message}</span>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

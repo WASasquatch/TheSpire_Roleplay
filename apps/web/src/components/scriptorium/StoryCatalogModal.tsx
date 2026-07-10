@@ -22,8 +22,7 @@ import { useChat } from "../../state/store.js";
 import { readError } from "../../lib/http.js";
 import { formatNumber } from "../../lib/intlFormat.js";
 import { buyStoryCopy } from "../../lib/storyCopies.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 
 type CatalogTab = "find" | "my" | "reading" | "following";
 
@@ -49,16 +48,13 @@ export function StoryCatalogModal({ initialTab = "find", onClose, onOpenStory, o
   const [tab, setTab] = useState<CatalogTab>(initialTab);
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg text-keep-text`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">{t("catalog.title")}</h2>
-          <CloseButton onClick={onClose} />
-        </header>
-
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      title={t("catalog.title")}
+      className="keep-frame rounded bg-keep-bg text-keep-text"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <nav className="flex shrink-0 items-center gap-1 border-b border-keep-rule bg-keep-panel/30 px-3 py-1.5 text-sm">
           <TabButton active={tab === "find"} onClick={() => setTab("find")}>{t("catalog.tabs.find")}</TabButton>
           {me ? (
@@ -92,7 +88,7 @@ export function StoryCatalogModal({ initialTab = "find", onClose, onOpenStory, o
           )}
         </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 

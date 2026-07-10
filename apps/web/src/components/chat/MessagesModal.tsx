@@ -10,7 +10,6 @@ import type {
 } from "@thekeep/shared";
 import { cropStyleFor } from "../../lib/avatarCrop.js";
 import { EmoticonTypeahead } from "../emoticons/EmoticonTypeahead.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { useChat } from "../../state/store.js";
 import { identityKey, identityEquals } from "../../lib/identity.js";
 import { readError, withIdentityQuery } from "../../lib/http.js";
@@ -19,7 +18,7 @@ import { parseInline } from "../../lib/markdown.js";
 import { FormattingToolbar } from "../shared/FormattingToolbar.js";
 import { SynonymPopup } from "../SynonymPopup.js";
 import { UsernameAutocomplete } from "../UsernameAutocomplete.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { handlePlainTextCopy } from "../../lib/chatCopy.js";
 import { formatDateTime } from "../../lib/intlFormat.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
@@ -874,23 +873,18 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   }
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        onClick={(e) => e.stopPropagation()}
-        // Mobile: edge-to-edge fullscreen via MODAL_CARD_CONTENT.
-        // Desktop: centered card at the standard 75vw/2400px cap.
-        // `keep-frame` lets each theme own the border, corner radius,
-        // shadow, and the parchment/cyber texture overlay, same
-        // pattern AdminPanel / ProfileEditor / EarningDashboard use
-        // so DM modal matches the rest of the themed shell instead
-        // of reading as a bare bg-keep-bg rectangle.
-        className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg lg:rounded`}
-      >
-        <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">{t("messages.title")}</h2>
-          <CloseButton onClick={onClose} />
-        </header>
-
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      title={t("messages.title")}
+      // `keep-frame` lets each theme own the border, corner radius,
+      // shadow, and the parchment/cyber texture overlay, same
+      // pattern AdminPanel / ProfileEditor / EarningDashboard use
+      // so DM modal matches the rest of the themed shell instead
+      // of reading as a bare bg-keep-bg rectangle.
+      className="keep-frame bg-keep-bg lg:rounded"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {/* Mobile-only tab strip. Lets users flip between the inbox
             (Friends + Recents + add forms) and the active conversation
             without relying on the per-row back-arrow inside the thread
@@ -944,7 +938,11 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
           <aside
             style={{ "--list-width": `${listWidth}px` } as React.CSSProperties}
             className={
-              "flex min-h-0 w-full flex-col border-keep-rule md:w-[var(--list-width)] md:shrink-0 md:flex-none " +
+              // max-w caps the persisted width against the CURRENT
+              // container: the window is user-resizable now, so a wide
+              // saved list must not swallow the thread pane and push the
+              // drag divider outside the overflow-hidden row.
+              "flex min-h-0 w-full flex-col border-keep-rule md:w-[var(--list-width)] md:max-w-[calc(100%-10rem)] md:shrink-0 md:flex-none " +
               (mobileView === "list" ? "flex-1" : "hidden md:flex")
             }
           >
@@ -1303,7 +1301,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
           </section>
         </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 

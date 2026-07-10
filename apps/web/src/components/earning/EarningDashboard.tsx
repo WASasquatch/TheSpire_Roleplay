@@ -7,8 +7,9 @@
  * are stubbed with "coming in a later phase" placeholders so the tab
  * routing is in place from day one.
  *
- * Opens from the Banner's "Earning" link. Same `Modal` shell every
- * other modal uses.
+ * Opens from the Banner's "Earning" link. Renders in the shared
+ * `FloatingWindow` shell (free-floating window on desktop, fullscreen
+ * on mobile).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -16,7 +17,7 @@ import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { extractFreeformBorderVarsWithDefaults, parseFreeformBorderConfig } from "@thekeep/shared";
 import { ROOM_TRANSITIONS, type RoomTransition } from "@thekeep/shared";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { TabBtn } from "../shared/TabBtn.js";
 import { DisplayPrivacyRow } from "../profile/DisplayPrivacyRow.js";
 import { useEarning, lookupRankTier, progressToNextTier } from "../../state/earning.js";
@@ -81,7 +82,6 @@ import {
 import { BorderedAvatar } from "../cosmetics/BorderedAvatar.js";
 import { EmoticonSubmissionModal } from "../emoticons/EmoticonSubmissionModal.js";
 import { StyledName } from "../cosmetics/StyledName.js";
-import { CloseButton } from "../shared/CloseButton.js";
 import { previewRoomTransition } from "../../lib/transitions/orchestrator.js";
 import { getServer } from "../../lib/servers.js";
 import { identityEquals } from "../../lib/identity.js";
@@ -174,19 +174,20 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
   }, [currentServerId]);
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
-      >
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      title={t("header.title")}
+      className="keep-frame rounded bg-keep-parchment"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex shrink-0 items-center gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="shrink-0 font-action text-lg">{t("header.title")}</h2>
-          {/* Mobile: a single full-width dropdown for the active tab,
-              with the X button flush to its right. The horizontal
-              tab strip was hard to scan at <lg widths, even the
-              `overflow-x-auto` scroll didn't help when six labels
-              crowded the same space the header title + close button
-              wanted. */}
+          {/* Mobile: a single full-width dropdown for the active tab
+              (the title + close X now live in the FloatingWindow
+              titlebar). The horizontal tab strip was hard to scan at
+              <lg widths, even the `overflow-x-auto` scroll didn't help
+              when six labels crowded the same space the header title +
+              close button wanted. */}
           <select
             value={tab}
             onChange={(e) => setTab(e.target.value as typeof tab)}
@@ -217,7 +218,6 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
             <TabBtn includeShrink active={tab === "items"} onClick={() => setTab("items")}>{t("tabs.items")}</TabBtn>
             <TabBtn includeShrink active={tab === "settings"} onClick={() => setTab("settings")}>{t("tabs.settings")}</TabBtn>
           </nav>
-          <CloseButton onClick={onClose} />
         </div>
 
         {/* Multi-Server Lift: which server's economy is this? Only
@@ -259,7 +259,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
           {snapshot && tab === "styles" ? <NameStylesTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
           {snapshot && tab === "borders" ? <BordersTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
           {snapshot && tab === "transitions" ? <RoomTransitionsTab snapshot={snapshot} /> : null}
-          {snapshot && tab === "cosmetics" ? <CosmeticsTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} /> : null}
+          {snapshot && tab === "cosmetics" ? <CosmeticsTab snapshot={snapshot} flashSale={flashSale} focusKey={focusKey} onCloseDashboard={onClose} /> : null}
           {snapshot && tab === "items" ? (
             <ItemsTab
               snapshot={snapshot}
@@ -270,7 +270,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
           ) : null}
         </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 
@@ -2924,10 +2924,14 @@ function BorderCard({
  *  Purchase is one-time; the toggle is free to flip after.
  * ========================================================= */
 
-function CosmeticsTab({ snapshot, flashSale, focusKey }: {
+function CosmeticsTab({ snapshot, flashSale, focusKey, onCloseDashboard }: {
   snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {};
   flashSale: FlashSaleResponse | null;
   focusKey: string | null;
+  /** The flair buy cards deep-link into the Profile Editor, which is a
+   *  floating window UNDER the modal plane — the dashboard must close
+   *  first or its backdrop buries the editor. */
+  onCloseDashboard: () => void;
 }) {
   const { t } = useTranslation("earning");
   useShopRowFocus(focusKey);
@@ -3484,11 +3488,14 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
             ownedCopy={t("cosmetics.visitorsOwnedCopy")}
             buyDisabled={busy || activeWallet < profileVisitorsSale.effectivePrice}
             onBuy={() => void doBuyProfileVisitors()}
-            onOpenConfig={() => openEditor({
-              mode: activeCharacterId ? "character" : "master",
-              characterId: activeCharacterId,
-              initialTab: "flair",
-            })}
+            onOpenConfig={() => {
+              onCloseDashboard();
+              openEditor({
+                mode: activeCharacterId ? "character" : "master",
+                characterId: activeCharacterId,
+                initialTab: "flair",
+              });
+            }}
           />
         ) : null}
 
@@ -3500,11 +3507,14 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
             ownedCopy={t("cosmetics.marqueeOwnedCopy")}
             buyDisabled={busy || activeWallet < profileMarqueeSale.effectivePrice}
             onBuy={() => void doBuyProfileMarquee()}
-            onOpenConfig={() => openEditor({
-              mode: activeCharacterId ? "character" : "master",
-              characterId: activeCharacterId,
-              initialTab: "flair",
-            })}
+            onOpenConfig={() => {
+              onCloseDashboard();
+              openEditor({
+                mode: activeCharacterId ? "character" : "master",
+                characterId: activeCharacterId,
+                initialTab: "flair",
+              });
+            }}
           />
         ) : null}
       </div>

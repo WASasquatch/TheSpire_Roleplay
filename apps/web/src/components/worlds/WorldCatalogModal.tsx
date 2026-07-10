@@ -9,8 +9,7 @@ import type {
 } from "@thekeep/shared";
 import { CANONICAL_TAGS, CONTENT_WARNINGS, WORLD_VIBE_AXES } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { useChat } from "../../state/store.js";
 import { ApplicationFormModal } from "./ApplicationFormModal.js";
 
@@ -19,6 +18,8 @@ interface Props {
   currentRoomId: string | null;
   onClose: () => void;
   onOpenViewer: (worldId: string) => void;
+  /** Jump to My Worlds with the New World form open. */
+  onCreateWorld: () => void;
 }
 
 /**
@@ -45,7 +46,7 @@ const PAGE_SIZE = 24;
  * uniform. Cards are clickable to open the viewer; the secondary
  * actions (Join, Use in this room) sit in a small footer row.
  */
-export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Props) {
+export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer, onCreateWorld }: Props) {
   const { t } = useTranslation("worlds");
   // Viewer's own username so owner-of-this-card detection can skip
   // the join/apply button (owners are implicit members of their own
@@ -234,14 +235,23 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
   }
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">{t("catalog.title")}</h2>
-          <CloseButton onClick={onClose} />
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      title={t("catalog.title")}
+      className="keep-frame rounded bg-keep-parchment"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* Header toolbar: the clear "make one" path next to browsing —
+            jumps to My Worlds with the New World form already open. */}
+        <header className="flex shrink-0 items-center justify-end border-b border-keep-rule bg-keep-banner px-4 py-2">
+          <button
+            type="button"
+            onClick={onCreateWorld}
+            className="keep-button rounded border border-keep-action/60 bg-keep-bg px-2.5 py-0.5 text-sm font-semibold text-keep-action hover:bg-keep-banner"
+          >
+            {t("catalog.createWorld")}
+          </button>
         </header>
 
         {/* Filter strip. Search + genre on the first row; tags + CWs as
@@ -595,7 +605,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
           }}
         />
       ) : null}
-    </Modal>
+    </FloatingWindow>
   );
 }
 

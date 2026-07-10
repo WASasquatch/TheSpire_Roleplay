@@ -5,8 +5,7 @@ import { formatDateTime } from "../../lib/intlFormat.js";
 import { parseInline } from "../../lib/markdown.js";
 import { useActiveTheme } from "../../lib/theme.js";
 import { readError } from "../../lib/http.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 
 interface Props {
   onClose: () => void;
@@ -136,16 +135,12 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
   }
 
   return (
-    <Modal onClose={onClose} variant="mobile-fullscreen">
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
-      >
-        <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">{t("bookmarks.title")}</h2>
-          <CloseButton onClick={onClose} />
-        </header>
-
+    <FloatingWindow
+      onClose={onClose}
+      title={t("bookmarks.title")}
+      className="keep-frame bg-keep-bg text-keep-text lg:rounded"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {bookmarks && bookmarks.length > 0 ? (
           <div className="shrink-0 border-b border-keep-rule/50 px-3 py-2">
             <input
@@ -222,7 +217,7 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
           })}
         </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { isAdminRole, resolveMessageColor, type ChatMessage, type RoomOccupant } from "@thekeep/shared";
 import type { Gender } from "../../lib/gender.js";
@@ -168,9 +169,17 @@ export function ThreadModal({
   const themeBg = useActiveTheme().bg;
   const topicAuthorColor = resolveMessageColor(topic.color, themeBg);
 
-  return (
+  // Portaled to <body> like the shared Modal: the app shell is its own
+  // stacking context, so an in-shell dialog would paint UNDER any
+  // body-portaled FloatingWindow (forum topics stay clickable in chat
+  // while an editor window is open). z-40 = the shared Modal BASE, above
+  // the window plane (30..39) but NOT above sibling modals: a profile
+  // opened from a post's avatar (also z-40, portaled later) must paint
+  // over this dialog, and InfoModal (45) / nested dialogs (50+) beat it
+  // outright. Anything higher here buries those.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-stretch justify-stretch bg-black/60 lg:items-center lg:justify-center lg:p-4"
+      className="fixed inset-0 z-40 flex items-stretch justify-stretch bg-black/60 lg:items-center lg:justify-center lg:p-4"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -344,6 +353,7 @@ export function ThreadModal({
           </>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

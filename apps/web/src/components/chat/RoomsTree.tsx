@@ -663,7 +663,7 @@ export function RoomsTree({
         {...(onOpenArcade ? { onOpenArcade } : {})}
       />
       {showCreateRoom ? (
-        <CreateRoomModal onCommand={onCommand} rooms={rooms} onClose={() => setShowCreateRoom(false)} />
+        <CreateRoomModal onCommand={onCommand} onClose={() => setShowCreateRoom(false)} />
       ) : null}
     </aside>
   );
@@ -864,15 +864,33 @@ function RoomGroup({
                 EFFECTIVE rating (server OR room); under-18 viewers never
                 receive 18+ rows at all, so they only ever see SFW here. */}
             {pairAnnex ? (
-              /* Linked pair: one chip carrying both sides, so the row reads
-                 as a single room with an 18+ wing. The side toggle appears
-                 while the viewer is inside the pair. */
-              <span
-                title={t("rooms.pairChipTitle")}
-                className="ml-1.5 inline-flex shrink-0 items-center self-center overflow-hidden rounded border border-keep-rule/60 text-[10px] uppercase leading-none tracking-widest"
-              >
-                <span className="px-1 py-0.5 font-semibold text-keep-muted/70">{t("rooms.pairSfw")}</span>
-                <span className="border-l border-[#e06070]/60 bg-[#e06070]/10 px-1 py-0.5 font-bold text-[#e06070]">
+              /* Linked pair: the chip IS the channel toggle — click a side
+                 to stand in it (the viewer's current side highlights while
+                 they're inside the pair). Spans, not buttons: this sits
+                 inside the row's room-switch <button> and button-in-button
+                 is invalid HTML; stopPropagation keeps a side click from
+                 also firing the row join. Switching sides is a normal room
+                 join, so every join gate (age, bans, mutes) still applies
+                 server-side. */
+              <span className="ml-1.5 inline-flex shrink-0 items-center self-center overflow-hidden rounded border border-keep-rule/60 text-[10px] uppercase leading-none tracking-widest">
+                <span
+                  onClick={(e) => { e.stopPropagation(); if (pairSide !== "sfw") onRoomClick(room.id); }}
+                  title={t("rooms.pairToSfwTitle")}
+                  className={`px-1 py-0.5 font-semibold ${
+                    pairSide === "sfw"
+                      ? "bg-keep-action/20 text-keep-text"
+                      : "text-keep-muted/70 hover:bg-keep-action/10 hover:text-keep-text"
+                  }`}
+                >
+                  {t("rooms.pairSfw")}
+                </span>
+                <span
+                  onClick={(e) => { e.stopPropagation(); if (pairSide !== "nsfw") onRoomClick(pairAnnex.id); }}
+                  title={t("rooms.pairToNsfwTitle")}
+                  className={`border-l border-[#e06070]/60 px-1 py-0.5 font-bold text-[#e06070] ${
+                    pairSide === "nsfw" ? "bg-[#e06070]/25" : "bg-[#e06070]/10 hover:bg-[#e06070]/20"
+                  }`}
+                >
                   {t("rooms.pairNsfw")}
                 </span>
               </span>
@@ -894,42 +912,6 @@ function RoomGroup({
           <RoomMuteToggle roomId={room.id} {...(pairAnnex ? { pairRoomId: pairAnnex.id } : {})} />
         </div>
       </div>
-      {/* Linked-pair side toggle — appears while the viewer is inside either
-          side of this pair. Switching sides is a normal room join, so every
-          join gate (age, bans, mutes) still applies server-side. */}
-      {pairAnnex && pairSide ? (
-        <div className="flex items-center gap-1.5 border-b border-keep-rule/30 bg-keep-banner/20 px-3 py-1">
-          <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("rooms.pairSideLabel")}</span>
-          <span className="inline-flex overflow-hidden rounded border border-keep-rule/60 text-[10px] font-bold uppercase leading-none tracking-widest">
-            <button
-              type="button"
-              onClick={() => { if (pairSide !== "sfw") onRoomClick(room.id); }}
-              aria-pressed={pairSide === "sfw"}
-              title={t("rooms.pairToSfwTitle")}
-              className={`px-2 py-1 ${
-                pairSide === "sfw"
-                  ? "bg-keep-action/20 text-keep-text"
-                  : "text-keep-muted hover:bg-keep-action/10 hover:text-keep-text"
-              }`}
-            >
-              {t("rooms.pairSfw")}
-            </button>
-            <button
-              type="button"
-              onClick={() => { if (pairSide !== "nsfw") onRoomClick(pairAnnex.id); }}
-              aria-pressed={pairSide === "nsfw"}
-              title={t("rooms.pairToNsfwTitle")}
-              className={`border-l border-keep-rule/60 px-2 py-1 ${
-                pairSide === "nsfw"
-                  ? "bg-[#e06070]/20 text-[#e06070]"
-                  : "text-keep-muted hover:bg-[#e06070]/10 hover:text-[#e06070]"
-              }`}
-            >
-              {t("rooms.pairNsfw")}
-            </button>
-          </span>
-        </div>
-      ) : null}
       {displayedOccupants.length === 0 ? (
         <div className="px-5 pb-2 text-[11px] italic text-keep-muted lg:pb-1">{t("rooms.empty")}</div>
       ) : (

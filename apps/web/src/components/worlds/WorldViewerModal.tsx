@@ -6,8 +6,7 @@ import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
 import { parseWorldFromUrl, syncWorldUrl, worldShareUrl } from "../../lib/worlds.js";
 import { readError } from "../../lib/http.js";
 import { ActiveThemeContext, themeStyle, useActiveTheme } from "../../lib/theme.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { ApplicationFormModal } from "./ApplicationFormModal.js";
 import { WorldKnowledgeBase } from "./WorldKnowledgeBase.js";
 
@@ -148,7 +147,13 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
   const scopedTheme = detail?.world.theme ?? viewerTheme;
   const modalStyle = detail?.world.theme ? themeStyle(detail.world.theme) : undefined;
   return (
-    <Modal onClose={onClose} variant="mobile-fullscreen" zIndex={50}>
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      {...(modalStyle ? { style: modalStyle } : {})}
+      className="keep-frame keep-frame--reading bg-keep-bg text-keep-text lg:rounded"
+      title={detail?.world.name ?? t("viewer.fallbackTitle")}
+    >
       {/* Republish the scoped theme on React context so descendant
           components calling `useActiveTheme()` (resolveMessageColor,
           legibility passes on user HTML, mention chips, etc.) measure
@@ -159,16 +164,11 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
           picked colors that read fine on light Parchment chat went
           invisible on a dark navy world. */}
       <ActiveThemeContext.Provider value={scopedTheme}>
-      <div
-        style={modalStyle}
-        className={`${MODAL_CARD_CONTENT} keep-frame keep-frame--reading bg-keep-bg text-keep-text lg:rounded`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              <h2 className="truncate font-action text-lg">{detail?.world.name ?? t("viewer.fallbackTitle")}</h2>
-              {detail?.world.isNsfw ? (
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {detail ? (
+          <header className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-rule bg-keep-banner px-4 py-2">
+            <div className="min-w-0">
+              {detail.world.isNsfw ? (
                 <span
                   className="shrink-0 rounded bg-keep-accent/90 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-widest text-keep-bg"
                   title={t("nsfwChipTitle")}
@@ -176,8 +176,6 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
                   {t("common:rating.nsfw")}
                 </span>
               ) : null}
-            </div>
-            {detail ? (
               <div className="text-[11px] text-keep-muted">
                 {t("byOwner", { name: detail.world.ownerUsername })}
                 <span className="mx-1">·</span>
@@ -192,36 +190,35 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
                   {copied ? t("viewer.copied") : `/w/${detail.world.slug}`}
                 </button>
               </div>
-            ) : null}
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {detail && isAuthenticated ? (
-              <MembershipControls
-                detail={detail}
-                busy={busy}
-                onJoin={join}
-                onLeave={leave}
-                onApply={() => setShowApplicationForm(true)}
-              />
-            ) : null}
-            {/* Edit button only shows when the viewer can actually edit
-                (owner, admin, or invited collaborator). Previously this
-                rendered for any logged-in user, so non-editors could
-                open the editor UI and only learn they lacked permission
-                when the first save returned 403. The server still
-                enforces the same gate on every mutation. */}
-            {onEdit && isAuthenticated && detail?.viewerCanEdit ? (
-              <button
-                type="button"
-                onClick={onEdit}
-                className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
-              >
-                {t("actions.edit")}
-              </button>
-            ) : null}
-            <CloseButton onClick={onClose} />
-          </div>
-        </header>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {isAuthenticated ? (
+                <MembershipControls
+                  detail={detail}
+                  busy={busy}
+                  onJoin={join}
+                  onLeave={leave}
+                  onApply={() => setShowApplicationForm(true)}
+                />
+              ) : null}
+              {/* Edit button only shows when the viewer can actually edit
+                  (owner, admin, or invited collaborator). Previously this
+                  rendered for any logged-in user, so non-editors could
+                  open the editor UI and only learn they lacked permission
+                  when the first save returned 403. The server still
+                  enforces the same gate on every mutation. */}
+              {onEdit && isAuthenticated && detail.viewerCanEdit ? (
+                <button
+                  type="button"
+                  onClick={onEdit}
+                  className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
+                >
+                  {t("actions.edit")}
+                </button>
+              ) : null}
+            </div>
+          </header>
+        ) : null}
 
         {error ? (
           <div className="mx-4 mt-3 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
@@ -256,7 +253,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
           }}
         />
       ) : null}
-    </Modal>
+    </FloatingWindow>
   );
 }
 

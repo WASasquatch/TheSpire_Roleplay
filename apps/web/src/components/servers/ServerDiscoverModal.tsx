@@ -70,6 +70,7 @@ import {
 import { Modal } from "../cosmetics/Modal.js";
 import { useChat } from "../../state/store.js";
 import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { ContextualTour } from "../tours/ContextualTour.js";
 import { cropStyleFor } from "../../lib/avatarCrop.js";
 import { isDarkSurface, useActiveTheme } from "../../lib/theme.js";
@@ -135,21 +136,17 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
   }
 
   return (
-    <Modal onClose={onClose} variant="mobile-fullscreen">
-      {/* Sized like the app's other content modals: edge-to-edge on phones,
-          a large centred card on desktop (was a cramped max-w-2xl box). */}
-      <div
-        className="keep-frame flex h-full w-full flex-col overflow-hidden rounded border border-keep-rule bg-keep-bg lg:h-[88vh] lg:w-[80vw] lg:max-w-[1100px]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner/30 px-4 py-2.5">
-          <h3 className="flex items-center gap-2 font-action text-lg text-keep-text">
-            <Compass className="h-5 w-5 text-keep-accent" aria-hidden="true" />
-            {t("discover.title")}
-          </h3>
-          <CloseButton onClick={onClose} />
-        </div>
-
+    <FloatingWindow
+      onClose={onClose}
+      title={
+        <>
+          <Compass className="mr-2 inline-block h-5 w-5 align-[-0.2em] text-keep-accent" aria-hidden="true" />
+          {t("discover.title")}
+        </>
+      }
+      className="keep-frame rounded border border-keep-rule bg-keep-bg"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
           {err ? (
             <p className="rounded border border-keep-rule bg-keep-panel/40 px-3 py-2 text-sm text-keep-accent">{err}</p>
@@ -201,7 +198,7 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
           fires only while the form is actually up (and unseen), and is
           replayable from the form's "?" button. */}
       <ContextualTour tourId="server-create" active={createOpen} />
-    </Modal>
+    </FloatingWindow>
   );
 }
 

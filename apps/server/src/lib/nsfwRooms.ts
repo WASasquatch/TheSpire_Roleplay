@@ -233,15 +233,17 @@ export async function setRoomNsfw(opts: {
   }
   if (room.isNsfw === value) return { ok: true, changed: false, isNsfw: value };
 
-  // Linked SFW/18+ pairs (migration 0343): the room-level flags ARE the
-  // pair's structure — the flagged side is the hidden annex, the unflagged
-  // side the listed base. Flipping either while linked would break the
-  // exactly-one-18+ shape (mislabelled toggles for adults; for minors, an
-  // all-ages annex that is hidden yet unreachable). Require /unlinkroom
-  // first, mirroring how /linkroom demands the shape up front.
+  // 18+ CHANNEL lock (migration 0343): the room-level flags ARE the
+  // channel pairing's structure — the flagged side is the hidden channel
+  // feed, the unflagged side the listed room. Flipping either while a LIVE
+  // channel exists would break that shape (mislabelled toggles for adults;
+  // for minors, an all-ages feed that is hidden yet unreachable). A PARKED
+  // (disabled) channel doesn't lock anything — its link edge is inert until
+  // re-enabled, and enabling refuses on a whole-room-18+ base anyway.
   {
-    const { isInPair } = await import("./roomLinks.js");
-    if (await isInPair(db, room)) {
+    const { findLinkedAnnex } = await import("./roomLinks.js");
+    const isLiveChannel = room.linkedRoomId != null && !room.archivedAt;
+    if (isLiveChannel || (await findLinkedAnnex(db, room.id))) {
       return {
         ok: false,
         code: "LINKED_PAIR",

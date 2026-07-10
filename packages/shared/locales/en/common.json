@@ -293,14 +293,38 @@
     "applyPreset": "Apply preset: {{name}}",
     "revertTitle": "Revert to system default",
     "slots": {
-      "bg": { "label": "Background", "hint": "Main chat backdrop" },
-      "panel": { "label": "Panel", "hint": "Banner, side rails, modal headers" },
-      "border": { "label": "Border", "hint": "Rule lines and frame edges" },
-      "text": { "label": "Text", "hint": "Primary readable text" },
-      "muted": { "label": "Muted", "hint": "Timestamps, hints, secondary text" },
-      "action": { "label": "Action", "hint": "Highlights, current room, links" },
-      "accent": { "label": "Accent", "hint": "Strong call-to-action / Exit button" },
-      "system": { "label": "System", "hint": "Italic system messages" }
+      "bg": {
+        "label": "Background",
+        "hint": "Main chat backdrop"
+      },
+      "panel": {
+        "label": "Panel",
+        "hint": "Banner, side rails, modal headers"
+      },
+      "border": {
+        "label": "Border",
+        "hint": "Rule lines and frame edges"
+      },
+      "text": {
+        "label": "Text",
+        "hint": "Primary readable text"
+      },
+      "muted": {
+        "label": "Muted",
+        "hint": "Timestamps, hints, secondary text"
+      },
+      "action": {
+        "label": "Action",
+        "hint": "Highlights, current room, links"
+      },
+      "accent": {
+        "label": "Accent",
+        "hint": "Strong call-to-action / Exit button"
+      },
+      "system": {
+        "label": "System",
+        "hint": "Italic system messages"
+      }
     },
     "preview": {
       "caption": "· preview",
@@ -317,27 +341,15 @@
   },
   "createRoom": {
     "title": "Room Builder",
-    "tabCreate": "New room",
-    "tabPair": "Link 18+ pair",
-    "pairIntro": "Show a room and its 18+ version as ONE room in the list, with a SFW/18+ switch inside. Pick the two rooms; if the 18+ room isn't marked 18+ yet, linking marks it for you.",
-    "pairSfwLabel": "All-ages room",
-    "pairNsfwLabel": "18+ room",
-    "pairPick": "Choose a room…",
-    "pairWillFlag": "{{name}} will be marked 18+ as part of linking. Members under 18 will no longer see it.",
-    "pairSubmit": "Link rooms",
-    "pairNoEligible": "You need two of your own public rooms that aren't already linked. Room mods who aren't owners can link with /linkroom instead.",
-    "pairExisting": "Your linked pairs",
-    "pairUnlink": "Unlink",
-    "pairNetworkError": "Couldn't reach the server. Try again.",
     "intro": "Pick a name. Spaces become underscores, so <1>Oak Tavern</1> becomes <3>Oak_Tavern</3>.",
     "nameLabel": "Room name",
     "namePlaceholder": "e.g. Oak_Tavern",
     "privateLabel": "Private <1>(password required to join)</1>",
-    "pairLabel": "With a linked 18+ room <1>(adds an adults-only side behind a SFW/18+ toggle)</1>",
+    "pairLabel": "With an 18+ channel <1>(an adults-only side of the room behind a SFW/18+ toggle)</1>",
     "submit": "Create",
     "errorNameRequired": "Enter a room name.",
     "errorNameInvalid": "Names can use letters, numbers, and _ - ' (up to 40 characters).",
-    "errorPairNameTooLong": "With a linked 18+ room the name can be at most 34 characters, so \"_Adult\" still fits.",
+    "errorPairNameTooLong": "With an 18+ channel the name can be at most 34 characters.",
     "errorPasswordRequired": "A private room needs a password."
   },
   "password": "Password",
@@ -506,5 +518,10 @@
       "visitors_one": "visitor",
       "visitors_other": "visitors"
     }
+  },
+  "window": {
+    "collapse": "Collapse to title bar",
+    "expand": "Expand",
+    "resize": "Drag to resize"
   }
 }

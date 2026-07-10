@@ -4,9 +4,8 @@ import type { CommandDoc } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { FormattingHelp } from "./FormattingHelp.js";
 import { HelpGuides } from "./HelpGuides.js";
-import { Modal, MODAL_CARD_CONTENT } from "./cosmetics/Modal.js";
 import { TabBtn } from "./shared/TabBtn.js";
-import { CloseButton } from "./shared/CloseButton.js";
+import { FloatingWindow } from "./shared/FloatingWindow.js";
 
 interface Props {
   /** Initial filter - pre-fills the search box (e.g. /help char). */
@@ -121,26 +120,20 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
   }, [commands, filter]);
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        onClick={(e) => e.stopPropagation()}
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg`}
-      >
+    <FloatingWindow onClose={onClose} zIndex={50} title={t("modal.title")} className="keep-frame rounded bg-keep-bg">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-border bg-keep-panel px-4 py-2">
-          <div className="flex items-center gap-2">
-            <h2 className="font-action text-lg">{t("modal.title")}</h2>
-            <nav className="flex gap-1 text-xs uppercase tracking-widest">
-              <TabBtn variant="panel" active={tab === "guides"} onClick={() => setTab("guides")}>
-                {t("modal.tabs.guides")}
-              </TabBtn>
-              <TabBtn variant="panel" active={tab === "commands"} onClick={() => setTab("commands")}>
-                {t("modal.tabs.commands")}
-              </TabBtn>
-              <TabBtn variant="panel" active={tab === "formatting"} onClick={() => setTab("formatting")}>
-                {t("modal.tabs.formatting")}
-              </TabBtn>
-            </nav>
-          </div>
+          <nav className="flex gap-1 text-xs uppercase tracking-widest">
+            <TabBtn variant="panel" active={tab === "guides"} onClick={() => setTab("guides")}>
+              {t("modal.tabs.guides")}
+            </TabBtn>
+            <TabBtn variant="panel" active={tab === "commands"} onClick={() => setTab("commands")}>
+              {t("modal.tabs.commands")}
+            </TabBtn>
+            <TabBtn variant="panel" active={tab === "formatting"} onClick={() => setTab("formatting")}>
+              {t("modal.tabs.formatting")}
+            </TabBtn>
+          </nav>
           {tab === "commands" ? (
             <input
               ref={inputRef}
@@ -163,7 +156,6 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
               ) : null}
             </div>
           )}
-          <CloseButton onClick={onClose} />
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -195,13 +187,15 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
             </Trans>
           </div>
           <div>
+            {/* No Esc mention: the desktop window deliberately ignores
+                Escape (workspace, not dialog) — close lives on the bar. */}
             <Trans t={t} i18nKey="modal.footerTip">
-              Tip: <code>/help char</code> jumps right here. Press <kbd className="rounded border border-keep-border bg-keep-bg px-1">Esc</kbd> to close.
+              Tip: <code>/help char</code> jumps right here.
             </Trans>
           </div>
         </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 

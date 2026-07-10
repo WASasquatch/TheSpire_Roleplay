@@ -38,8 +38,7 @@
     "loading": "loading...",
     "appTab": "App Rules",
     "serverTab": "Server Rules",
-    "serverNone": "This server has not posted its own rules.",
-    "escClose": "Press <kbd>Esc</kbd> to close."
+    "serverNone": "This server has not posted its own rules."
   },
   "joinFlow": {
     "genericError": "Something went wrong. Please try again.",
@@ -304,6 +303,9 @@
       "none": "No rooms yet.",
       "privateChip": "private",
       "nsfwChip": "18+",
+      "adultChannelChip": "18+ channel",
+      "adultChannel": "18+ channel",
+      "adultChannelHint": "Adds an adults-only side to this room with its own chat feed, behind a SFW/18+ toggle on the room's row. Members under 18 only ever see the SFW side. Turning it off keeps its history for later.",
       "occupantsHere_one": "{{count}} here",
       "occupantsHere_other": "{{count}} here",
       "done": "Done",

@@ -38,8 +38,7 @@
     "loading": "cargando...",
     "appTab": "Reglas de la app",
     "serverTab": "Reglas del servidor",
-    "serverNone": "Este servidor no ha publicado sus propias reglas.",
-    "escClose": "Presiona <kbd>Esc</kbd> para cerrar."
+    "serverNone": "Este servidor no ha publicado sus propias reglas."
   },
   "joinFlow": {
     "genericError": "Algo salió mal. Intenta de nuevo.",
@@ -308,6 +307,9 @@
       "none": "Aún no hay salas.",
       "privateChip": "privada",
       "nsfwChip": "18+",
+      "adultChannelChip": "Canal 18+",
+      "adultChannel": "Canal 18+",
+      "adultChannelHint": "Añade a esta sala un lado solo para adultos con su propio chat, tras un selector SFW/18+ en la fila de la sala. Los miembros menores de 18 solo ven el lado SFW. Al desactivarlo, su historial se conserva para más adelante.",
       "occupantsHere_one": "{{count}} aquí",
       "occupantsHere_other": "{{count}} aquí",
       "occupantsHere_many": "{{count}} aquí",

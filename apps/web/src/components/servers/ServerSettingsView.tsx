@@ -35,7 +35,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { HelpCircle, Search, Settings as SettingsIcon } from "lucide-react";
+import { HelpCircle, Search } from "lucide-react";
 import {
   DEFAULT_THEME,
   SERVER_MOD_PERMISSIONS,
@@ -66,8 +66,7 @@ import {
   type OnboardingOption,
   type ProfileView,
 } from "@thekeep/shared";
-import { Modal } from "../cosmetics/Modal.js";
-import { IconCloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { ContextualTour } from "../tours/ContextualTour.js";
 import { BanModal } from "../moderation/BanModal.js";
 import { ProfileModal } from "../profile/ProfileModal.js";
@@ -256,6 +255,13 @@ interface RoomListRow {
   persistent?: boolean;
   /** Effective 18+ rating (age-restriction plan, Phase 2); absent = all-ages. */
   isNsfw?: boolean;
+  /** Set on forum BOARD rooms — managed by the forums system, not this tab. */
+  forumId?: string | null;
+  /** 18+ channel plumbing (lib/adultChannel.ts): a room whose
+   *  `linkedSfwRoomId` is set IS a hidden 18+ channel (never listed here);
+   *  a room with `linkedNsfwRoomId` HAS one (the editor's checkbox). */
+  linkedSfwRoomId?: string | null;
+  linkedNsfwRoomId?: string | null;
   occupants?: unknown[];
 }
 
@@ -1120,8 +1126,13 @@ function RoomsTab({ detail, busy, run }: TabProps) {
     apiGetRooms(detail.id)
       .then((rs) => {
         if (!alive) return;
-        const tagged = rs.filter((r) => r.serverId != null);
-        setRooms(tagged.length ? tagged.filter((r) => r.serverId === detail.id) : rs);
+        // Two partitions stay OUT of this tab: forum BOARDS (rooms with a
+        // forumId — the forums system manages those, and deleting one here
+        // would maim a forum) and hidden 18+ CHANNELS (linkedSfwRoomId —
+        // they're a facet of their base room, toggled via its editor).
+        const managed = rs.filter((r) => !r.forumId && !r.linkedSfwRoomId);
+        const tagged = managed.filter((r) => r.serverId != null);
+        setRooms(tagged.length ? tagged.filter((r) => r.serverId === detail.id) : managed);
       })
       .catch(() => { if (alive) setRooms([]); });
     return () => { alive = false; };
@@ -1162,6 +1173,9 @@ function RoomsTab({ detail, busy, run }: TabProps) {
                       visible in this list the moment it saves. Mirrors the
                       admin Banned badge red — a warning on every palette. */}
                   {r.isNsfw ? <span className="ml-1.5 rounded border border-[#e06070] px-1 text-[9px] font-semibold uppercase tracking-widest text-[#e06070]">{t("console.rooms.nsfwChip")}</span> : null}
+                  {/* The room carries a hidden 18+ channel behind its
+                      SFW/18+ toggle (managed via the editor's checkbox). */}
+                  {r.linkedNsfwRoomId ? <span className="ml-1.5 rounded border border-[#e06070]/60 px-1 text-[9px] font-semibold uppercase tracking-widest text-[#e06070]/80">{t("console.rooms.adultChannelChip")}</span> : null}
                 </span>
                 {Array.isArray(r.occupants) ? <span className="shrink-0 text-[10px] text-keep-muted">{t("console.rooms.occupantsHere", { count: r.occupants.length })}</span> : null}
                 <button type="button" disabled={busy} onClick={() => { setEditingId((id) => (id === r.id ? null : r.id)); setCreating(false); }}
@@ -1192,6 +1206,7 @@ function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsol
   const [topic, setTopic] = useState("");
   const [persistent, setPersistent] = useState(true);
   const [nsfw, setNsfw] = useState(false);
+  const [adultChannel, setAdultChannel] = useState(false);
   // 18+ room checkbox (age-restriction plan, Phase 2): hidden from under-18
   // viewers entirely (the route rejects the write regardless), and moot
   // inside an 18+ community, where every room is 18+ by the server flag.
@@ -1233,10 +1248,21 @@ function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsol
       ) : isAdultViewer && serverIsNsfw ? (
         <p className="text-[10px] text-keep-muted">{t("console.rooms.allNsfwNote")}</p>
       ) : null}
+      {/* 18+ CHANNEL at create time — same visibility rules as the editor's
+          checkbox (adults, all-ages community, room itself not 18+, public). */}
+      {isAdultViewer && !serverIsNsfw && !nsfw && type === "public" ? (
+        <label className="flex items-start gap-2 text-xs text-keep-text">
+          <input type="checkbox" className="mt-0.5" checked={adultChannel} onChange={(e) => setAdultChannel(e.target.checked)} />
+          <span>
+            <span className="block">{t("console.rooms.adultChannel")}</span>
+            <span className="block text-[10px] text-keep-muted">{t("console.rooms.adultChannelHint")}</span>
+          </span>
+        </label>
+      ) : null}
       <div className="flex justify-end">
         <button type="button" disabled={busy || !canSave}
           onClick={() => void run(async () => {
-            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(nsfw ? { isNsfw: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}) });
+            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(nsfw ? { isNsfw: true } : {}), ...(adultChannel && !nsfw && type === "public" ? { adultChannel: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}) });
             onCreated();
           })}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.rooms.createRoom")}</button>
@@ -1253,12 +1279,17 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
   const [expiry, setExpiry] = useState<string>(room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "");
   const [persistent, setPersistent] = useState(room.persistent ?? true);
   const [nsfw, setNsfw] = useState(room.isNsfw ?? false);
+  // 18+ CHANNEL: an adults-only side feed behind a SFW/18+ toggle on the
+  // room's rail row. One checkbox — enabling creates (or revives, history
+  // intact) the hidden channel; disabling parks it.
+  const [adultChannel, setAdultChannel] = useState(!!room.linkedNsfwRoomId);
   // Same gating as the create form: no 18+ control for under-18 viewers,
   // and none inside an 18+ community (the server flag already covers it).
   const isAdultViewer = useChat((s) => s.viewerAge.isAdult);
   const serverIsNsfw = detail.isNsfw ?? false;
   const nsfwDirty = nsfw !== (room.isNsfw ?? false);
-  const dirty = name !== room.name || topic !== (room.topic ?? "") || expiry !== (room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "") || persistent !== (room.persistent ?? true) || nsfwDirty;
+  const channelDirty = adultChannel !== !!room.linkedNsfwRoomId;
+  const dirty = name !== room.name || topic !== (room.topic ?? "") || expiry !== (room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "") || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty;
   return (
     <div className="mt-2 space-y-2 border-t border-keep-rule/60 pt-2">
       <label className="block text-xs">
@@ -1294,6 +1325,17 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
       ) : isAdultViewer && serverIsNsfw ? (
         <p className="text-[10px] text-keep-muted">{t("console.rooms.allNsfwNote")}</p>
       ) : null}
+      {/* 18+ CHANNEL — hidden when the whole room is 18+ (nothing to split)
+          and inside an 18+ community (every room is already adults-only). */}
+      {isAdultViewer && !serverIsNsfw && !nsfw ? (
+        <label className="flex items-start gap-2 text-xs text-keep-text">
+          <input type="checkbox" className="mt-0.5" checked={adultChannel} onChange={(e) => setAdultChannel(e.target.checked)} />
+          <span>
+            <span className="block">{t("console.rooms.adultChannel")}</span>
+            <span className="block text-[10px] text-keep-muted">{t("console.rooms.adultChannelHint")}</span>
+          </span>
+        </label>
+      ) : null}
       <div className="flex justify-end">
         <button type="button" disabled={busy || !dirty}
           onClick={() => void run(async () => {
@@ -1305,6 +1347,7 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
               // Only on change, and the control only renders for adults, so a
               // plain rename can never trip the route's adult-only rejection.
               ...(nsfwDirty ? { isNsfw: nsfw } : {}),
+              ...(channelDirty ? { adultChannel } : {}),
             });
             onSaved();
           })}
@@ -2870,9 +2913,11 @@ function ServerSettingsBody({ detail, viewer, onSaved, findRequest, onFindHandle
 
   return (
     <div className="px-4 py-3">
-      {/* Tab nav: a horizontally-scrollable strip on desktop (one tidy row
-          instead of tabs wrapping into several scrunched rows), collapsed to a
-          dropdown on mobile. Both feed the same changeTab; the desktop strip
+      {/* Tab nav: a WRAPPING strip on desktop — the console lives in a
+          resizable floating window now, so a fixed one-row strip clips its
+          tail behind a hidden scrollbar at narrow widths; wrapping keeps
+          every tab reachable at any window size. Collapsed to a dropdown
+          on mobile. Both feed the same changeTab; the desktop strip
           carries the tour anchors. Tabs cluster into the five plain-language
           groups from docs/ADMIN_IA.md §6 — <optgroup>s on the dropdown,
           hairline separators on the strip — so an owner scans five buckets
@@ -2890,7 +2935,7 @@ function ServerSettingsBody({ detail, viewer, onSaved, findRequest, onFindHandle
             </optgroup>
           ))}
         </select>
-        <div data-tour="server-settings-tab-strip" className="keep-scroll-strip hidden min-w-0 items-center gap-1 overflow-x-auto md:flex">
+        <div data-tour="server-settings-tab-strip" className="hidden min-w-0 flex-wrap items-center gap-1 md:flex">
           {withGroupSeparators(tabs).map((entry) =>
             entry.kind === "separator" ? (
               <span
@@ -3037,15 +3082,26 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
   };
 
   return (
-    <Modal onClose={onClose} variant="mobile-fullscreen">
-      {/* Stop inner clicks (tabs, buttons, inputs) from bubbling to the shared
-          Modal backdrop, whose onClick fires onClose with no target guard. */}
-      <div
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={onShellKeyDown}
-        className="flex h-full w-full flex-col overflow-hidden bg-keep-bg text-keep-text lg:h-[90vh] lg:max-h-[90vh] lg:w-[75vw] lg:max-w-[2400px] lg:rounded-lg lg:border lg:border-keep-rule lg:shadow-2xl"
-      >
-        <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule px-4 py-3">
+    <FloatingWindow
+      onClose={onClose}
+      onKeyDown={onShellKeyDown}
+      title={
+        state ? (
+          <>
+            {state.detail.name}
+            <span className="ml-2 text-xs font-normal text-keep-muted">{t("console.shell.title")}</span>
+          </>
+        ) : (
+          t("console.shell.title")
+        )
+      }
+      className="rounded-lg border border-keep-rule bg-keep-bg text-keep-text"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* Toolbar row (search + tour). The window title lives on the
+            FloatingWindow bar now; hide the row entirely when it has
+            nothing to show so loading doesn't paint an empty strip. */}
+        <header className={`${searchReady || (state && state.viewer.isOwner) ? "flex" : "hidden"} shrink-0 items-center gap-2 border-b border-keep-rule px-4 py-2`}>
           {searchReady && mobileSearchOpen ? (
             /* Find-a-setting, mobile: the search row swaps in over the
                normal header content; picking a hit or tapping the X swaps
@@ -3064,12 +3120,7 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
               />
             </div>
           ) : null}
-          <div className={`${searchReady && mobileSearchOpen ? "hidden md:flex" : "flex"} min-w-0 flex-1 items-center gap-2`}>
-            <SettingsIcon className="h-5 w-5 text-keep-action" aria-hidden="true" />
-            <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-keep-text">
-              {state ? state.detail.name : t("console.shell.title")}
-              <span className="ml-2 text-xs font-normal text-keep-muted">{t("console.shell.title")}</span>
-            </h2>
+          <div className={`${searchReady && mobileSearchOpen ? "hidden md:flex" : "flex"} min-w-0 flex-1 items-center justify-end gap-2`}>
             {searchReady ? (
               <>
                 {/* Find-a-setting, desktop: type what you're looking for and
@@ -3105,7 +3156,6 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
                 <HelpCircle className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
-            <IconCloseButton onClick={onClose} shrink />
           </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -3127,6 +3177,6 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
             is on screen; self-fires when unseen and replays from the header "?". */}
         <ContextualTour tourId="server-admin" active={!!state && !!state.viewer.isOwner} />
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }

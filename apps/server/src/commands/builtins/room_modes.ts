@@ -154,17 +154,63 @@ export const replyModeCommand: CommandHandler = {
 export const nsfwCommand: CommandHandler = {
   name: "nsfw",
   aliases: ["adult", "18plus"],
-  usage: "/nsfw [on|off]",
-  description: "Show or set this room's 18+ setting (owner/mod only to set; adults only).",
+  usage: "/nsfw [on|off] | /nsfw channel [on|off]",
+  description: "Show or set this room's 18+ setting, or manage its 18+ channel (owner/mod only to set; adults only).",
   subcommands: [
     { verb: "(no args)", usage: "/nsfw", description: "Show whether this room is 18+." },
     { verb: "on", usage: "/nsfw on", description: "Mark the room 18+. Members under 18 can no longer see or join it.", aliases: ["true", "1"] },
     { verb: "off", usage: "/nsfw off", description: "Clear the 18+ setting. Messages written while it was 18+ stay hidden from members under 18.", aliases: ["false", "0"] },
+    { verb: "channel on", usage: "/nsfw channel on", description: "Add an 18+ channel: an adults-only side of this room with its own chat feed, behind a SFW/18+ toggle on the room's row." },
+    { verb: "channel off", usage: "/nsfw channel off", description: "Turn the 18+ channel off. Its history is kept and comes back if you turn it on again." },
   ],
   async run(ctx) {
     const arg = ctx.argsText.trim().toLowerCase();
     const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
     if (!room) return notice(ctx, "NO_ROOM", tFor(ctx.user.locale, "commands:shared.roomNotFound"));
+
+    // /nsfw channel [on|off] — the per-room 18+ CHANNEL (lib/adultChannel):
+    // an adults-only side feed behind the rail row's SFW/18+ toggle,
+    // orthogonal to the whole-room flag below.
+    if (/^channel\b/.test(arg)) {
+      const sub = arg.replace(/^channel\s*/, "");
+      if (!(await callerCanEditRoom(ctx.db, ctx.user, ctx.roomId))) {
+        return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:nsfw.permission"));
+      }
+      if (!ctx.user.isAdult) {
+        return notice(ctx, "AGE_RESTRICTED", tFor(ctx.user.locale, "errors:server.common.nsfwSettingAdultsOnly"));
+      }
+      let value: boolean;
+      if (/^(on|true|1)$/.test(sub)) value = true;
+      else if (/^(off|false|0)$/.test(sub)) value = false;
+      else return notice(ctx, "BAD_NSFW", tFor(ctx.user.locale, "commands:nsfw.channelUsage"));
+
+      const { enableAdultChannel, disableAdultChannel } = await import("../../lib/adultChannel.js");
+      const res = value
+        ? await enableAdultChannel(ctx.db, room)
+        : await disableAdultChannel(ctx.db, ctx.io, room);
+      if (!res.ok) {
+        return notice(ctx, `CHANNEL_${res.error}`, tFor(ctx.user.locale, `errors:server.rooms.adultChannel.${res.error}`));
+      }
+      if (!res.changed) {
+        return notice(ctx, "NSFW", tFor(ctx.user.locale, value ? "commands:nsfw.channelAlreadyOn" : "commands:nsfw.channelAlreadyOff"));
+      }
+      const { recordAudit } = await import("../../audit.js");
+      await recordAudit(ctx.db, {
+        actorUserId: ctx.user.id,
+        action: value ? "room_link" : "room_unlink",
+        targetRoomId: room.id,
+        metadata: { adultChannel: true, channelRoomId: res.channelRoomId },
+      });
+      const { addMessage, broadcastRoomState, emitTreeChanged } = await import("../../realtime/broadcast.js");
+      await addMessage(ctx, {
+        kind: "system",
+        body: tFor(ctx.user.locale, value ? "commands:nsfw.channelOn" : "commands:nsfw.channelOff"),
+      });
+      await broadcastRoomState(ctx.io, ctx.db, room.id).catch(() => {});
+      if (res.channelRoomId) await broadcastRoomState(ctx.io, ctx.db, res.channelRoomId).catch(() => {});
+      emitTreeChanged(ctx.io, room.serverId ?? null);
+      return;
+    }
 
     if (!arg) {
       // Bare /nsfw reports the EFFECTIVE state. Inside an 18+ community the

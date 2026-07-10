@@ -30,10 +30,9 @@ import { fetchBlocks, removeBlock, type BlockedUser } from "../../lib/blocks.js"
 import { useChat } from "../../state/store.js";
 import { useEarning, lookupRankTier } from "../../state/earning.js";
 import { StylePicker } from "../admin/AdminPanel.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { ThemePicker } from "../cosmetics/ThemePicker.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
-import { CloseButton } from "../shared/CloseButton.js";
 import { ScriptoriumPrivacyRow } from "../ScriptoriumPrivacyRow.js";
 import { BirthDateRow } from "./BirthDateRow.js";
 import { DisplayPrivacyRow } from "./DisplayPrivacyRow.js";
@@ -1258,16 +1257,19 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   }, [theme, siteDefaultTheme, userStyleKey, publicProfileBgUrl, publicProfileBgMode, loadingTarget]);
 
   return (
-    <Modal onClose={onClose} zIndex={isAdminEdit ? 60 : 50} variant="mobile-fullscreen">
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={isAdminEdit ? 60 : 50}
+      title={t("editor.header.title")}
+      className="keep-frame rounded border border-keep-border bg-keep-parchment"
+    >
       <form
         onSubmit={save}
-        onClick={(e) => e.stopPropagation()}
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
       >
-        {/* header - fixed */}
+        {/* header - fixed (title + close live on the window bar) */}
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
           <div className="flex min-w-0 items-center gap-2">
-            <h2 className="shrink-0 font-action text-lg">{t("editor.header.title")}</h2>
             {isAdminEdit ? (
               // Admin-acting-on-other-user banner. Replaces the
               // master/character switcher + side buttons (those are
@@ -1332,7 +1334,6 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               </>
             )}
           </div>
-          <CloseButton onClick={onClose} />
         </div>
 
         {/* Tab strip. Replaces the old mobile-only Settings/Description
@@ -2278,7 +2279,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           />
         </div>
       ) : null}
-    </Modal>
+    </FloatingWindow>
   );
 }
 

@@ -18,6 +18,7 @@
  *   - closing the window calls /arcade/grimhold/end.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Modal } from "../cosmetics/Modal";
 import { ensureInjectedStyle } from "../../lib/injectStyle";
@@ -225,8 +226,13 @@ export function GrimholdWindow({ characterId, onClose }: { characterId: string |
     );
   }
 
-  // Desktop: free-floating, draggable, non-modal window.
-  return (
+  // Desktop: free-floating, draggable, non-modal window. Portaled to
+  // <body> so its z-index:39 applies at body level — the TOP of the
+  // FloatingWindow plane (30..39), strictly below true modals (40+) —
+  // instead of being trapped under every floating window inside the
+  // shell's stacking context. Portaled from the FIRST render, so the
+  // game iframe is never reparented (a move would reload it).
+  return createPortal(
     <div ref={winRef} className="gh-window" style={{ left: pos.x, top: pos.y }}>
       <div className="gh-window-bar" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
         <span className="gh-window-title">{t("arcade.grimhold.windowTitle")}</span>
@@ -234,12 +240,13 @@ export function GrimholdWindow({ characterId, onClose }: { characterId: string |
         <button className="gh-window-x" onClick={onClose} aria-label={t("common:close")} onPointerDown={(e) => e.stopPropagation()}>✕</button>
       </div>
       <div className="gh-window-body" style={{ height: bodyH }}>{frame}</div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
 const WINDOW_CSS = `
-.gh-window{position:fixed; z-index:41; width:${WIDTH}px; max-width:calc(100vw - 16px); border-radius:14px; overflow:hidden;
+.gh-window{position:fixed; z-index:39; width:${WIDTH}px; max-width:calc(100vw - 16px); border-radius:14px; overflow:hidden;
   background:rgb(var(--keep-panel) / 1); border:1px solid rgb(var(--keep-border) / .8);
   box-shadow:0 18px 50px rgba(0,0,0,.5), 0 0 0 1px rgb(var(--keep-border) / .3);}
 .gh-window-bar{display:flex; align-items:center; gap:8px; padding:8px 10px; cursor:grab; touch-action:none; user-select:none;

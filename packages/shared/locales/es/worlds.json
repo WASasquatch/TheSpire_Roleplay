@@ -54,21 +54,60 @@
     "other": "Otro"
   },
   "vibeAxes": {
-    "combat": { "label": "Combate", "desc": "Qué tan centrales son el conflicto físico y las escenas de acción en el juego." },
-    "magic": { "label": "Magia", "desc": "Qué tan presentes están los elementos sobrenaturales / mágicos en la ambientación." },
-    "technology": { "label": "Tecnología", "desc": "Nivel tecnológico desde lo primitivo (bajo) hasta el futuro lejano (alto)." },
-    "romance": { "label": "Romance", "desc": "Peso esperado de las tramas románticas entre personajes." },
-    "politics": { "label": "Política", "desc": "Intrigas de corte, facciones, gobierno, conspiraciones." },
-    "mystery": { "label": "Misterio", "desc": "Investigación, acertijos, verdades ocultas, revelaciones lentas." },
-    "horror": { "label": "Terror", "desc": "Pavor, horror corporal, terror psicológico, temas oscuros." },
-    "exploration": { "label": "Exploración", "desc": "Descubrimiento, viajes, tierras salvajes, cartografiar lo desconocido." }
+    "combat": {
+      "label": "Combate",
+      "desc": "Qué tan centrales son el conflicto físico y las escenas de acción en el juego."
+    },
+    "magic": {
+      "label": "Magia",
+      "desc": "Qué tan presentes están los elementos sobrenaturales / mágicos en la ambientación."
+    },
+    "technology": {
+      "label": "Tecnología",
+      "desc": "Nivel tecnológico desde lo primitivo (bajo) hasta el futuro lejano (alto)."
+    },
+    "romance": {
+      "label": "Romance",
+      "desc": "Peso esperado de las tramas románticas entre personajes."
+    },
+    "politics": {
+      "label": "Política",
+      "desc": "Intrigas de corte, facciones, gobierno, conspiraciones."
+    },
+    "mystery": {
+      "label": "Misterio",
+      "desc": "Investigación, acertijos, verdades ocultas, revelaciones lentas."
+    },
+    "horror": {
+      "label": "Terror",
+      "desc": "Pavor, horror corporal, terror psicológico, temas oscuros."
+    },
+    "exploration": {
+      "label": "Exploración",
+      "desc": "Descubrimiento, viajes, tierras salvajes, cartografiar lo desconocido."
+    }
   },
   "kinds": {
-    "lore": { "label": "Lore", "description": "Cosmología e historia" },
-    "npc": { "label": "NPCs", "description": "Personas del mundo" },
-    "location": { "label": "Ubicaciones", "description": "Lugares y sitios" },
-    "faction": { "label": "Facciones", "description": "Poderes y alianzas" },
-    "item": { "label": "Objetos", "description": "Reliquias y artefactos" }
+    "lore": {
+      "label": "Lore",
+      "description": "Cosmología e historia"
+    },
+    "npc": {
+      "label": "NPCs",
+      "description": "Personas del mundo"
+    },
+    "location": {
+      "label": "Ubicaciones",
+      "description": "Lugares y sitios"
+    },
+    "faction": {
+      "label": "Facciones",
+      "description": "Poderes y alianzas"
+    },
+    "item": {
+      "label": "Objetos",
+      "description": "Reliquias y artefactos"
+    }
   },
   "arcStatus": {
     "planned": "planeado",
@@ -224,7 +263,8 @@
     "joinTitle": "Únete a este mundo para declarar una afiliación. No afecta el acceso a las salas.",
     "useInRoom": "Usar en esta sala",
     "useInRoomTitle": "Vincula este mundo a la sala en la que estás (solo propietario/mod)",
-    "loadMore": "Cargar más"
+    "loadMore": "Cargar más",
+    "createWorld": "Crear mundo"
   },
   "kb": {
     "tabOverview": "Resumen",

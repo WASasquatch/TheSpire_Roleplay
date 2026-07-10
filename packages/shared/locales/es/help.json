@@ -14,7 +14,7 @@
     "loadFailed": "error al cargar",
     "loadStatus": "estado {{status}}",
     "footerMention": "Menciona a alguien en el chat escribiendo <1>@username</1> - un enlace que abre su perfil activo.",
-    "footerTip": "Consejo: <1>/help char</1> te trae directo aquí. Presiona <3>Esc</3> para cerrar."
+    "footerTip": "Consejo: <1>/help char</1> te trae directo aquí."
   },
   "commands": {
     "customBadge": "personalizado",

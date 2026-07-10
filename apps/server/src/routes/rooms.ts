@@ -50,10 +50,6 @@ import { blockedUserIdsFor } from "../auth/blocks.js";
 import { buildChatLogHtml, type ExportMessageRow } from "../export/chatLog.js";
 import { signExportPayload } from "../export/sign.js";
 import { tFor } from "../i18n.js";
-import { callerCanEditRoom } from "../auth/roomPermissions.js";
-import { linkRoomPair, unlinkRoomPair, type RoomLinkError } from "../lib/roomLinks.js";
-import { setRoomNsfw } from "../lib/nsfwRooms.js";
-import { recordAudit } from "../audit.js";
 import { getSessionUser } from "./auth.js";
 import { resolveTopicAuthorFlair } from "./forums.js";
 
@@ -224,116 +220,6 @@ export async function registerRoomsRoutes(
     return { rooms: result };
   });
 
-  /**
-   * POST /rooms/link — pair an SFW base room with its 18+ annex so the rail
-   * lists them as ONE room with a side toggle (the Room Builder's "Link 18+
-   * pair" tab; /linkroom is the chat-first equivalent). The caller must hold
-   * room-edit rights on BOTH rooms. Best-practice pathway: when the chosen
-   * 18+ side isn't flagged yet, it is flagged HERE via the shared
-   * `setRoomNsfw` core (adult-only write, landing-room rule, minor eviction,
-   * audit, broadcasts) instead of bouncing the user to /nsfw first.
-   */
-  app.post<{ Body: unknown }>("/rooms/link", async (req, reply) => {
-    const me = await getSessionUser(req, db);
-    if (!me) { reply.code(401); return { error: "auth" }; }
-    const body = z.object({ sfwRoomId: z.string().min(1), nsfwRoomId: z.string().min(1) }).parse(req.body);
-
-    const load = async (id: string) =>
-      (await db.select().from(rooms).where(eq(rooms.id, id)).limit(1))[0];
-    let sfwRoom = await load(body.sfwRoomId);
-    let nsfwRoom = await load(body.nsfwRoomId);
-    if (!sfwRoom || !nsfwRoom) {
-      reply.code(404);
-      return { error: tFor(me.locale, "commands:shared.roomNotFound") };
-    }
-    if (
-      !(await callerCanEditRoom(db, me, sfwRoom.id))
-      || !(await callerCanEditRoom(db, me, nsfwRoom.id))
-    ) {
-      reply.code(403);
-      return { error: tFor(me.locale, "commands:linkRoom.permission") };
-    }
-    // The picked SFW side must actually be SFW — auto-UNflagging a room
-    // someone deliberately marked 18+ is not this route's call to make.
-    if (sfwRoom.isNsfw) {
-      reply.code(400);
-      return { error: tFor(me.locale, "commands:linkRoom.needOneNsfw") };
-    }
-    // Auto-flag the chosen 18+ side when needed. setRoomNsfw owns every
-    // age rule (adult-only write, landing room, eviction, audit, system
-    // line, broadcasts); its refusals surface verbatim.
-    if (!nsfwRoom.isNsfw) {
-      const flag = await setRoomNsfw({ db, io, room: nsfwRoom, value: true, actor: me });
-      if (!flag.ok) {
-        reply.code(400);
-        return { error: flag.message };
-      }
-      nsfwRoom = (await load(nsfwRoom.id))!;
-    }
-
-    const result = await linkRoomPair(db, sfwRoom, nsfwRoom);
-    if (!result.ok) {
-      const keys: Record<RoomLinkError, string> = {
-        SELF: "commands:linkRoom.self",
-        FORUM_BOARD: "commands:linkRoom.forumBoard",
-        SYSTEM: "commands:linkRoom.system",
-        ARCHIVED: "commands:linkRoom.archived",
-        DIFFERENT_SERVER: "commands:linkRoom.differentServer",
-        NOT_PUBLIC: "commands:linkRoom.notPublic",
-        NEED_ONE_NSFW: "commands:linkRoom.needOneNsfw",
-        ALREADY_LINKED: "commands:linkRoom.alreadyLinked",
-      };
-      reply.code(400);
-      return { error: tFor(me.locale, keys[result.error]) };
-    }
-    await recordAudit(db, {
-      actorUserId: me.id,
-      action: "room_link",
-      targetRoomId: result.base.id,
-      metadata: { baseName: result.base.name, annexId: result.annex.id, annexName: result.annex.name },
-    });
-    const { broadcastRoomState, emitTreeChanged } = await import("../realtime/broadcast.js");
-    await broadcastRoomState(io, db, result.base.id).catch(() => {});
-    await broadcastRoomState(io, db, result.annex.id).catch(() => {});
-    emitTreeChanged(io, result.base.serverId ?? null);
-    return { ok: true, baseId: result.base.id, annexId: result.annex.id };
-  });
-
-  /**
-   * POST /rooms/unlink — dissolve a linked pair from either side (Room
-   * Builder "Unlink"; /unlinkroom is the chat-first equivalent). Edit
-   * rights on the named room suffice, matching the command.
-   */
-  app.post<{ Body: unknown }>("/rooms/unlink", async (req, reply) => {
-    const me = await getSessionUser(req, db);
-    if (!me) { reply.code(401); return { error: "auth" }; }
-    const body = z.object({ roomId: z.string().min(1) }).parse(req.body);
-    const room = (await db.select().from(rooms).where(eq(rooms.id, body.roomId)).limit(1))[0];
-    if (!room) {
-      reply.code(404);
-      return { error: tFor(me.locale, "commands:shared.roomNotFound") };
-    }
-    if (!(await callerCanEditRoom(db, me, room.id))) {
-      reply.code(403);
-      return { error: tFor(me.locale, "commands:linkRoom.permission") };
-    }
-    const pair = await unlinkRoomPair(db, room);
-    if (!pair) {
-      reply.code(400);
-      return { error: tFor(me.locale, "commands:linkRoom.notLinked") };
-    }
-    await recordAudit(db, {
-      actorUserId: me.id,
-      action: "room_unlink",
-      targetRoomId: pair.baseId,
-      metadata: { annexId: pair.annexId },
-    });
-    const { broadcastRoomState, emitTreeChanged } = await import("../realtime/broadcast.js");
-    await broadcastRoomState(io, db, pair.baseId).catch(() => {});
-    await broadcastRoomState(io, db, pair.annexId).catch(() => {});
-    emitTreeChanged(io, room.serverId ?? null);
-    return { ok: true };
-  });
 
   /**
    * GET /rooms/by-slug/:slug

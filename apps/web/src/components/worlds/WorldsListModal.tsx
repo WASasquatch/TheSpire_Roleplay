@@ -4,14 +4,16 @@ import type { WorldMembership, WorldSummary, WorldVisibility } from "@thekeep/sh
 import { deriveSlug } from "../../lib/worlds.js";
 import { formatDate } from "../../lib/intlFormat.js";
 import { readError } from "../../lib/http.js";
-import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
-import { CloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 
 interface Props {
   onClose: () => void;
   onOpenEditor: (worldId: string) => void;
   onOpenViewer: (worldId: string) => void;
   onOpenCatalog: () => void;
+  /** Open with the New World form already showing (the catalog's
+   *  "Create World" button lands here). */
+  initialCreate?: boolean;
 }
 
 /**
@@ -20,11 +22,11 @@ interface Props {
  * other author's open world they joined). Members can set a primary
  * affiliation, used to group them in chat userlists.
  */
-export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCatalog }: Props) {
+export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCatalog, initialCreate }: Props) {
   const { t } = useTranslation("worlds");
   const [worlds, setWorlds] = useState<WorldSummary[] | null>(null);
   const [memberships, setMemberships] = useState<WorldMembership[] | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(initialCreate ?? false);
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -83,31 +85,29 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
   }
 
   return (
-    <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
-      <div
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">{t("myWorlds.title")}</h2>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={onOpenCatalog}
-              className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
-              title={t("myWorlds.browseCatalogTitle")}
-            >
-              {t("myWorlds.browseCatalog")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setCreating(true)}
-              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
-            >
-              {t("myWorlds.newWorld")}
-            </button>
-            <CloseButton onClick={onClose} />
-          </div>
+    <FloatingWindow
+      onClose={onClose}
+      zIndex={50}
+      title={t("myWorlds.title")}
+      className="keep-frame rounded bg-keep-parchment"
+    >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <header className="flex shrink-0 items-center justify-end gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
+          <button
+            type="button"
+            onClick={onOpenCatalog}
+            className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
+            title={t("myWorlds.browseCatalogTitle")}
+          >
+            {t("myWorlds.browseCatalog")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setCreating(true)}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
+          >
+            {t("myWorlds.newWorld")}
+          </button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {error ? (
@@ -248,7 +248,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
           ) : null}
         </div>
       </div>
-    </Modal>
+    </FloatingWindow>
   );
 }
 

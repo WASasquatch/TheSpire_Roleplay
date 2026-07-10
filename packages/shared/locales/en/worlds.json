@@ -53,21 +53,60 @@
     "other": "Other"
   },
   "vibeAxes": {
-    "combat": { "label": "Combat", "desc": "How central physical conflict and action scenes are to play." },
-    "magic": { "label": "Magic", "desc": "How present supernatural / magical elements are in the setting." },
-    "technology": { "label": "Technology", "desc": "Tech baseline from primitive (low) to far-future (high)." },
-    "romance": { "label": "Romance", "desc": "Expected weight of romantic plotlines between characters." },
-    "politics": { "label": "Politics", "desc": "Court intrigue, factions, governance, scheming." },
-    "mystery": { "label": "Mystery", "desc": "Investigation, puzzles, hidden truths, slow reveals." },
-    "horror": { "label": "Horror", "desc": "Dread, body horror, psychological terror, dark themes." },
-    "exploration": { "label": "Exploration", "desc": "Discovery, travel, wilderness, mapping the unknown." }
+    "combat": {
+      "label": "Combat",
+      "desc": "How central physical conflict and action scenes are to play."
+    },
+    "magic": {
+      "label": "Magic",
+      "desc": "How present supernatural / magical elements are in the setting."
+    },
+    "technology": {
+      "label": "Technology",
+      "desc": "Tech baseline from primitive (low) to far-future (high)."
+    },
+    "romance": {
+      "label": "Romance",
+      "desc": "Expected weight of romantic plotlines between characters."
+    },
+    "politics": {
+      "label": "Politics",
+      "desc": "Court intrigue, factions, governance, scheming."
+    },
+    "mystery": {
+      "label": "Mystery",
+      "desc": "Investigation, puzzles, hidden truths, slow reveals."
+    },
+    "horror": {
+      "label": "Horror",
+      "desc": "Dread, body horror, psychological terror, dark themes."
+    },
+    "exploration": {
+      "label": "Exploration",
+      "desc": "Discovery, travel, wilderness, mapping the unknown."
+    }
   },
   "kinds": {
-    "lore": { "label": "Lore", "description": "Cosmology & history" },
-    "npc": { "label": "NPCs", "description": "People in the world" },
-    "location": { "label": "Locations", "description": "Places & sites" },
-    "faction": { "label": "Factions", "description": "Powers & alliances" },
-    "item": { "label": "Items", "description": "Relics & artifacts" }
+    "lore": {
+      "label": "Lore",
+      "description": "Cosmology & history"
+    },
+    "npc": {
+      "label": "NPCs",
+      "description": "People in the world"
+    },
+    "location": {
+      "label": "Locations",
+      "description": "Places & sites"
+    },
+    "faction": {
+      "label": "Factions",
+      "description": "Powers & alliances"
+    },
+    "item": {
+      "label": "Items",
+      "description": "Relics & artifacts"
+    }
   },
   "arcStatus": {
     "planned": "planned",
@@ -221,7 +260,8 @@
     "joinTitle": "Join this world to declare an affiliation. Doesn't affect room access.",
     "useInRoom": "Use in this room",
     "useInRoomTitle": "Attach this world to the room you're currently in (owner/mod only)",
-    "loadMore": "Load more"
+    "loadMore": "Load more",
+    "createWorld": "Create World"
   },
   "kb": {
     "tabOverview": "Overview",

@@ -2,8 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
+import { BackToTop } from "../shared/BackToTop.js";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
 import { useRulesHashHighlight } from "../../lib/rulesHashHighlight.js";
+import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { useChat } from "../../state/store.js";
 
 /**
@@ -68,6 +70,14 @@ export function RulesModal({ onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<RulesTab>("app");
   const rulesRef = useRef<HTMLDivElement>(null);
+  const reduceMotion = useReducedMotion();
+  // The mobile scroll container (state, not a plain ref, so BackToTop
+  // re-renders and attaches its listener once the element mounts).
+  const [scrollerEl, setScrollerEl] = useState<HTMLDivElement | null>(null);
+  const privacySectionRef = useRef<HTMLElement>(null);
+  const rulesSectionRef = useRef<HTMLElement>(null);
+  // Active state for the mobile jump tabs (privacy stacks first).
+  const [activeJump, setActiveJump] = useState<"privacy" | "rules">("privacy");
 
   const hasServerRules = !!data?.serverRules?.trim();
   const activeTab: RulesTab = tab === "server" && hasServerRules ? "server" : "app";
@@ -97,6 +107,24 @@ export function RulesModal({ onClose }: Props) {
   // Sweep any orphaned scoped <style> blocks when the modal unmounts (same
   // belt-and-suspenders cleanup bios use, so admin CSS never bleeds onward).
   useEffect(() => () => sweepOrphanedUserBioStyles(), []);
+
+  // Flip the mobile jump-tab highlight as the stacked sections scroll past
+  // the sticky bar. No-ops on desktop where the tabs are hidden.
+  useEffect(() => {
+    if (!scrollerEl) return;
+    const onScroll = () => {
+      const containerTop = scrollerEl.getBoundingClientRect().top;
+      const top = rulesSectionRef.current?.getBoundingClientRect().top;
+      setActiveJump(top !== undefined && top - containerTop <= 64 ? "rules" : "privacy");
+    };
+    scrollerEl.addEventListener("scroll", onScroll, { passive: true });
+    return () => scrollerEl.removeEventListener("scroll", onScroll);
+  }, [scrollerEl]);
+
+  const jumpTo = (which: "privacy" | "rules") => {
+    const el = which === "privacy" ? privacySectionRef.current : rulesSectionRef.current;
+    el?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  };
 
   const sanitizedActive = useMemo(
     () => (activeHtml.trim() ? sanitizeUserHtml(activeHtml) : ""),
@@ -167,44 +195,90 @@ export function RulesModal({ onClose }: Props) {
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg`}
+        className={`${MODAL_CARD_CONTENT} keep-frame relative rounded bg-keep-bg`}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-keep-border bg-keep-panel px-4 py-2">
           <h2 className="font-action text-lg">{t("rules.title")}</h2>
           <CloseButton onClick={onClose} />
         </div>
 
-        <div className={`min-h-0 flex-1 px-5 py-4 ${hasPrivacy ? "overflow-y-auto lg:overflow-hidden" : "overflow-y-auto"}`}>
+        <div
+          ref={setScrollerEl}
+          className={`min-h-0 flex-1 px-5 py-4 ${hasPrivacy ? "overflow-y-auto lg:overflow-hidden" : "overflow-y-auto"}`}
+        >
           {error ? (
             <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
           ) : !data ? (
             <div className="text-keep-muted">{t("rules.loading")}</div>
           ) : hasPrivacy ? (
-            <div className="grid gap-x-6 gap-y-6 lg:h-full lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)]">
-              {/* Privacy column (left on wide screens, second on mobile). */}
-              <section className="order-2 flex min-h-0 flex-col lg:order-1" aria-labelledby="rules-privacy-heading">
-                <h3 id="rules-privacy-heading" className={columnHeading}>
-                  {t("rules.privacyColumn")}
-                </h3>
-                <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1.5">
-                  <div
-                    className={`prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-3 ${USER_HTML_SCOPE_CLASS}`}
-                    dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
-                  />
-                </div>
-              </section>
-
-              {/* Rules column (right on wide screens, FIRST on mobile so
-                  the long privacy statement can't bury the rules). */}
-              <section className="order-1 flex min-h-0 flex-col lg:order-2" aria-labelledby="rules-rules-heading">
-                <h3 id="rules-rules-heading" className={columnHeading}>
+            <>
+              {/* Mobile-only sticky jump tabs — either document one tap away
+                  while the two stack. Hidden on desktop where they sit side
+                  by side. */}
+              <nav
+                aria-label={t("rules.jumpAria")}
+                className="sticky top-0 z-10 -mx-5 -mt-4 mb-3 flex gap-1 border-b border-keep-border bg-keep-bg/95 px-5 py-2 backdrop-blur lg:hidden"
+              >
+                <button
+                  type="button"
+                  onClick={() => jumpTo("privacy")}
+                  aria-current={activeJump === "privacy" ? "true" : undefined}
+                  className={`rounded-full border px-3 py-1 text-xs font-action uppercase tracking-widest ${
+                    activeJump === "privacy"
+                      ? "border-keep-action bg-keep-action/15 text-keep-text"
+                      : "border-keep-border text-keep-muted"
+                  }`}
+                >
+                  {t("rules.privacyTab")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => jumpTo("rules")}
+                  aria-current={activeJump === "rules" ? "true" : undefined}
+                  className={`rounded-full border px-3 py-1 text-xs font-action uppercase tracking-widest ${
+                    activeJump === "rules"
+                      ? "border-keep-action bg-keep-action/15 text-keep-text"
+                      : "border-keep-border text-keep-muted"
+                  }`}
+                >
                   {t("rules.title")}
-                </h3>
-                <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1.5">
-                  {rulesBlock}
-                </div>
-              </section>
-            </div>
+                </button>
+              </nav>
+              <div className="grid gap-x-6 gap-y-6 lg:h-full lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)]">
+                {/* Privacy column: left on wide screens, first on mobile. */}
+                <section
+                  ref={privacySectionRef}
+                  className="flex min-h-0 scroll-mt-12 flex-col lg:scroll-mt-0"
+                  aria-labelledby="rules-privacy-heading"
+                >
+                  <h3 id="rules-privacy-heading" className={columnHeading}>
+                    {t("rules.privacyColumn")}
+                  </h3>
+                  <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1.5">
+                    <div
+                      className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
+                      dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
+                    />
+                  </div>
+                </section>
+
+                {/* Rules column: right on wide screens, below privacy on
+                    mobile (the sticky tabs keep it one tap away). */}
+                <section
+                  ref={rulesSectionRef}
+                  className="flex min-h-0 scroll-mt-12 flex-col lg:scroll-mt-0"
+                  aria-labelledby="rules-rules-heading"
+                >
+                  <h3 id="rules-rules-heading" className={columnHeading}>
+                    {t("rules.title")}
+                  </h3>
+                  <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1.5">
+                    {rulesBlock}
+                  </div>
+                </section>
+              </div>
+              <BackToTop scroller={scrollerEl} className="absolute bottom-12 right-4 lg:hidden" />
+            </>
           ) : (
             rulesBlock
           )}

@@ -325,9 +325,11 @@
     "nameLabel": "Nombre de la sala",
     "namePlaceholder": "p. ej. Oak_Tavern",
     "privateLabel": "Privada <1>(se requiere contraseña para entrar)</1>",
+    "pairLabel": "Con una sala 18+ enlazada <1>(añade un lado solo para adultos tras un selector SFW/18+)</1>",
     "submit": "Crear",
     "errorNameRequired": "Escribe un nombre para la sala.",
     "errorNameInvalid": "Los nombres pueden usar letras, números y _ - ' (hasta 40 caracteres).",
+    "errorPairNameTooLong": "Con una sala 18+ enlazada el nombre puede tener como máximo 34 caracteres, para que \"_Adult\" quepa.",
     "errorPasswordRequired": "Una sala privada necesita una contraseña."
   },
   "password": "Contraseña",

@@ -209,7 +209,8 @@
       "categoryHasSubcategories": "move or delete its subcategories first",
       "landingRoomCantBeNsfw": "This is the landing room, so it can't be 18+. Members under 18 need somewhere to arrive.",
       "nowAdultsOnly": "This room is now for adults only.",
-      "removedByAdmin": "Room \"{{name}}\" was removed by an administrator."
+      "removedByAdmin": "Room \"{{name}}\" was removed by an administrator.",
+      "nsfwLinkedPair": "This room is part of a linked SFW/18+ pair, so its 18+ setting is locked. Run /unlinkroom first, then change it."
     },
     "reports": {
       "whispersNotReportable": "whispers cannot be reported",

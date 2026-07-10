@@ -30,6 +30,9 @@
   "rules": {
     "title": "Rules",
     "privacyColumn": "Privacy Policy",
+    "privacyTab": "Privacy",
+    "jumpAria": "Jump to a document",
+    "backToTop": "Back to top",
     "back": "← Back",
     "none": "No rules have been posted yet.",
     "loading": "loading...",

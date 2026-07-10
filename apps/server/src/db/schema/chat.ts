@@ -6,6 +6,7 @@ import {
   sqliteTable,
   text,
   uniqueIndex,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 import { id, ts } from "./_helpers.js";
 import { forumPrefixes, forums } from "./forums.js";
@@ -139,6 +140,18 @@ export const rooms = sqliteTable(
      * resurfaces in the chat list.
      */
     forumId: text("forum_id").references(() => forums.id, { onDelete: "set null" }),
+    /**
+     * Linked SFW/18+ room pair (migration 0343). Set ONLY on the 18+
+     * "annex" side, pointing at its SFW base room. A linked annex is
+     * hidden from the room rail; the base room's row grows a SFW/18+
+     * toggle (adults only) that switches between the two, so an 18+
+     * variant no longer doubles the room list. Exactly one direction is
+     * ever stored (annex → base); the base's pointer to its annex is
+     * computed at read time in `buildRoomSummary`. ON DELETE SET NULL:
+     * deleting the base dissolves the pair and the annex becomes an
+     * ordinary standalone 18+ room again.
+     */
+    linkedRoomId: text("linked_room_id").references((): AnySQLiteColumn => rooms.id, { onDelete: "set null" }),
     /**
      * Board-level "members only" gate (migration 0239). Only meaningful
      * when `forumId` is set: when true, this board is PRIVATE — only the

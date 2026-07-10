@@ -8,6 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SVGProps,
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { legibleAgainstBg, roleRank, type PermissionKey, type RoomOccupant, type RoomSummary, type ServerModPermission, type Theme } from "@thekeep/shared";
@@ -151,13 +152,20 @@ function ForumNotifBadge() {
  * Renders nothing when there's neither an unread nor a mention. Mirrors the
  * ForumNotifBadge pill styling so the two read as one family.
  */
-function RoomUnreadCue({ roomId }: { roomId: string }) {
+function RoomUnreadCue({ roomId, pairRoomId }: { roomId: string; pairRoomId?: string }) {
   const { t } = useTranslation("chat");
-  const unread = useChat((s) => s.roomUnread[roomId] ?? 0);
-  const hasMention = useChat((s) => !!s.roomHasMention[roomId]);
-  const muted = useChat((s) => !!s.roomMuted[roomId]);
+  // Linked pair rows merge both sides' cues: unreads sum, mentions OR, and
+  // each side's mute suppresses only its own ambient contribution (a muted
+  // SFW side must not silence fresh 18+-side activity, and vice versa).
+  const pairKey = pairRoomId ?? "";
+  const baseUnread = useChat((s) => s.roomUnread[roomId] ?? 0);
+  const pairUnread = useChat((s) => (pairKey ? s.roomUnread[pairKey] ?? 0 : 0));
+  const hasMention = useChat((s) => !!s.roomHasMention[roomId] || (!!pairKey && !!s.roomHasMention[pairKey]));
+  const baseMuted = useChat((s) => !!s.roomMuted[roomId]);
+  const pairMuted = useChat((s) => (pairKey ? !!s.roomMuted[pairKey] : true));
+  const unread = baseUnread + pairUnread;
   // Mentions always pill; the ambient dot is hidden under a mute.
-  const showDot = unread > 0 && !muted;
+  const showDot = (baseUnread > 0 && !baseMuted) || (pairUnread > 0 && !pairMuted);
   if (!showDot && !hasMention) return null;
   return (
     <span className="ml-1.5 inline-flex shrink-0 items-center gap-1 align-middle">
@@ -189,25 +197,31 @@ function RoomUnreadCue({ roomId }: { roomId: string }) {
  * Kept as a SIBLING of the room-switch button (not nested — invalid HTML), so
  * toggling mute never also switches into the room.
  */
-function RoomMuteToggle({ roomId }: { roomId: string }) {
+function RoomMuteToggle({ roomId, pairRoomId }: { roomId: string; pairRoomId?: string }) {
   const { t } = useTranslation("chat");
   const muted = useChat((s) => !!s.roomMuted[roomId]);
   const setRoomMuted = useChat((s) => s.setRoomMuted);
-  function toggle() {
-    const next = !muted;
-    // Optimistic flip; the mute PUT response + the server's room:unread
-    // re-emit will confirm (and any sibling tab picks it up via the socket).
-    setRoomMuted(roomId, next);
-    void fetch(`/me/rooms/${encodeURIComponent(roomId)}/mute`, {
+  const putMute = (id: string, next: boolean, rollback: boolean) => {
+    setRoomMuted(id, next);
+    void fetch(`/me/rooms/${encodeURIComponent(id)}/mute`, {
       method: "PUT",
       credentials: "include",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ muted: next }),
     })
       .then((r) => {
-        if (!r.ok) setRoomMuted(roomId, muted); // roll back on rejection
+        if (!r.ok) setRoomMuted(id, rollback); // roll back on rejection
       })
-      .catch(() => setRoomMuted(roomId, muted));
+      .catch(() => setRoomMuted(id, rollback));
+  };
+  function toggle() {
+    const next = !muted;
+    // Optimistic flip; the mute PUT response + the server's room:unread
+    // re-emit will confirm (and any sibling tab picks it up via the socket).
+    // A linked pair mutes as ONE room: the bell drives both sides together
+    // (display state follows the base's flag).
+    putMute(roomId, next, muted);
+    if (pairRoomId) putMute(pairRoomId, next, muted);
   }
   return (
     <button
@@ -354,9 +368,30 @@ export function RoomsTree({
   // standalone nested room someone made via /replymode stays listed. The
   // caller's CURRENT room is always kept even when it's a board, so being
   // inside one never strands you with no rail entry for where you are.
+  const roomsById = useMemo(() => new Map(rooms.map((r) => [r.id, r])), [rooms]);
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
+
+  // Linked SFW/18+ pairs (migration 0343): the 18+ annex never gets its own
+  // rail row — its SFW base's row represents the pair (with a side toggle
+  // while you're inside it). When the viewer is currently IN an annex, the
+  // rail treats the BASE as the active row, so pinning/highlight/mod-caps
+  // all land on the one visible entry for the pair.
+  const currentRoom = currentRoomId ? roomsById.get(currentRoomId) : undefined;
+  const railCurrentId =
+    currentRoom?.linkedSfwRoomId && roomsById.has(currentRoom.linkedSfwRoomId)
+      ? currentRoom.linkedSfwRoomId
+      : currentRoomId;
+
   const visibleRooms = useMemo(
-    () => rooms.filter((r) => !r.forumId || r.id === currentRoomId),
-    [rooms, currentRoomId],
+    () =>
+      rooms.filter((r) => {
+        // A linked annex hides behind its base's row — but only while the
+        // base is actually present in the payload (a missing/archived base
+        // must not strand the annex with no rail entry at all).
+        if (r.linkedSfwRoomId && roomsById.has(r.linkedSfwRoomId)) return false;
+        return !r.forumId || r.id === currentRoomId;
+      }),
+    [rooms, roomsById, currentRoomId],
   );
 
   // Pin the caller's current room to the top of the rail so it stays
@@ -365,11 +400,11 @@ export function RoomsTree({
   // room out and leave the rest in their original order. No-op when
   // the user isn't in any room or the room isn't in this list.
   const orderedRooms = useMemo(() => {
-    if (!currentRoomId) return visibleRooms;
-    const idx = visibleRooms.findIndex((r) => r.id === currentRoomId);
+    if (!railCurrentId) return visibleRooms;
+    const idx = visibleRooms.findIndex((r) => r.id === railCurrentId);
     if (idx <= 0) return visibleRooms;
     return [visibleRooms[idx]!, ...visibleRooms.slice(0, idx), ...visibleRooms.slice(idx + 1)];
-  }, [visibleRooms, currentRoomId]);
+  }, [visibleRooms, railCurrentId]);
 
   // The viewer's own per-identity room role in the CURRENT room, used to unlock
   // the userlist mod actions for a room owner/mod. Owner shows on the OOC row,
@@ -587,22 +622,33 @@ export function RoomsTree({
           <div className="px-3 py-2 text-xs text-keep-muted">{t("rooms.noRooms")}</div>
         ) : (
           <ul>
-            {orderedRooms.map((r) => (
-              <RoomGroup
-                key={r.id}
-                room={r}
-                isCurrent={r.id === currentRoomId}
-                selfUserId={selfUserId}
-                onIconClick={onIconClick}
-                onNameClick={onNameClick}
-                onRoomClick={onRoomClick}
-                onWorldClick={onWorldClick}
-                onCommand={onCommand}
-                // Mod actions only bind to the room the viewer is standing in;
-                // every other room in the rail renders its userlist read-only.
-                modCaps={r.id === currentRoomId ? modCaps : NO_MOD_CAPS}
-              />
-            ))}
+            {orderedRooms.map((r) => {
+              // Linked pair: hand the base row its 18+ annex (when the viewer
+              // received one — minors and non-linked rooms get none) so the
+              // row can merge occupants and offer the SFW/18+ side toggle.
+              // The adult gate is defense in depth: the server already scrubs
+              // the pointer and drops the annex row for under-18 viewers.
+              const pairAnnex = viewerIsAdult && r.linkedNsfwRoomId ? roomsById.get(r.linkedNsfwRoomId) : undefined;
+              const isCurrent = r.id === railCurrentId;
+              return (
+                <RoomGroup
+                  key={r.id}
+                  room={r}
+                  {...(pairAnnex ? { pairAnnex } : {})}
+                  currentRoomId={currentRoomId ?? null}
+                  isCurrent={isCurrent}
+                  selfUserId={selfUserId}
+                  onIconClick={onIconClick}
+                  onNameClick={onNameClick}
+                  onRoomClick={onRoomClick}
+                  onWorldClick={onWorldClick}
+                  onCommand={onCommand}
+                  // Mod actions only bind to the room the viewer is standing in;
+                  // every other room in the rail renders its userlist read-only.
+                  modCaps={isCurrent ? modCaps : NO_MOD_CAPS}
+                />
+              );
+            })}
           </ul>
         )}
       </div>
@@ -625,6 +671,8 @@ export function RoomsTree({
 
 function RoomGroup({
   room,
+  pairAnnex,
+  currentRoomId,
   isCurrent,
   selfUserId,
   onIconClick,
@@ -635,6 +683,12 @@ function RoomGroup({
   modCaps,
 }: {
   room: RoomWithOccupants;
+  /** The 18+ annex of this room's linked pair, when one exists and the
+   *  viewer is allowed to know about it (adults only — the server scrubs
+   *  the pointer and drops the row for minors). Merges into this row. */
+  pairAnnex?: RoomWithOccupants;
+  /** The room the viewer is actually in (may be this row's annex). */
+  currentRoomId: string | null;
   isCurrent: boolean;
   selfUserId: string | null;
   onIconClick: (userId: string, displayName: string, characterId?: string | null) => void;
@@ -649,6 +703,15 @@ function RoomGroup({
 }) {
   const { t } = useTranslation("chat");
   const isPrivate = room.type === "private";
+  // Which side of a linked pair the viewer is standing in (null when this
+  // row isn't the viewer's current pair). Drives the side toggle strip.
+  const pairSide: "sfw" | "nsfw" | null = !pairAnnex
+    ? null
+    : currentRoomId === room.id
+      ? "sfw"
+      : currentRoomId === pairAnnex.id
+        ? "nsfw"
+        : null;
   /**
    * Flicker guard: bridge transient empty `occupants` arrays so the
    * userlist doesn't vanish for the brief window where a /rooms
@@ -670,9 +733,31 @@ function RoomGroup({
    * once that root cause is fixed is safe.
    */
   const FLICKER_GUARD_MS = 1200;
+  // A linked pair presents as ONE room, so the row's userlist and count are
+  // the union of both sides (the sides are distinct rooms server-side).
+  // Deduped on the identity tuple: the same identity with a tab on each
+  // side must render (and count) once, not twice — and duplicate React
+  // keys would corrupt row reconciliation. Base side wins.
+  const rawOccupants = pairAnnex
+    ? [...new Map(
+        [...pairAnnex.occupants, ...room.occupants]
+          .map((o) => [`${o.userId}:${o.characterId ?? ""}`, o] as const),
+      ).values()]
+    : room.occupants;
+  // Which merged occupants stand in the viewer's ACTUAL current room —
+  // /kick, /mute and /ban act only there, so the mod menu must not offer
+  // itself on other-side occupants (the command would misfire or no-op).
+  const currentSideKeys = new Set(
+    (currentRoomId === room.id
+      ? room.occupants
+      : pairAnnex && currentRoomId === pairAnnex.id
+        ? pairAnnex.occupants
+        : room.occupants
+    ).map((o) => `${o.userId}:${o.characterId ?? ""}`),
+  );
   const lastNonEmptyRef = useRef<{ list: RoomOccupant[]; at: number }>({ list: [], at: 0 });
-  if (room.occupants.length > 0) {
-    lastNonEmptyRef.current = { list: room.occupants, at: Date.now() };
+  if (rawOccupants.length > 0) {
+    lastNonEmptyRef.current = { list: rawOccupants, at: Date.now() };
   }
   // Skip the cache fallback when the cached list contained only the
   // viewing user. A fresh empty list in that case is legitimate (self
@@ -689,12 +774,12 @@ function RoomGroup({
     && lastNonEmptyRef.current.list.length > 0
     && lastNonEmptyRef.current.list.every((o) => o.userId === selfUserId);
   const displayedOccupants =
-    room.occupants.length === 0
+    rawOccupants.length === 0
     && lastNonEmptyRef.current.list.length > 0
     && !cachedHasOnlySelf
     && Date.now() - lastNonEmptyRef.current.at < FLICKER_GUARD_MS
       ? lastNonEmptyRef.current.list
-      : room.occupants;
+      : rawOccupants;
   // Per migration 0187 the userlist no longer groups by primary
   // world, primary-world is gone now that memberships are
   // per-identity, and the grouping was the surface that leaked
@@ -778,12 +863,27 @@ function RoomGroup({
                 the partition each room is on. `room.isNsfw` is the
                 EFFECTIVE rating (server OR room); under-18 viewers never
                 receive 18+ rows at all, so they only ever see SFW here. */}
-            <RatingChip nsfw={!!room.isNsfw} className="ml-1.5 self-center" />
+            {pairAnnex ? (
+              /* Linked pair: one chip carrying both sides, so the row reads
+                 as a single room with an 18+ wing. The side toggle appears
+                 while the viewer is inside the pair. */
+              <span
+                title={t("rooms.pairChipTitle")}
+                className="ml-1.5 inline-flex shrink-0 items-center self-center overflow-hidden rounded border border-keep-rule/60 text-[10px] uppercase leading-none tracking-widest"
+              >
+                <span className="px-1 py-0.5 font-semibold text-keep-muted/70">{t("rooms.pairSfw")}</span>
+                <span className="border-l border-[#e06070]/60 bg-[#e06070]/10 px-1 py-0.5 font-bold text-[#e06070]">
+                  {t("rooms.pairNsfw")}
+                </span>
+              </span>
+            ) : (
+              <RatingChip nsfw={!!room.isNsfw} className="ml-1.5 self-center" />
+            )}
             {/* Unread dot / mention pill (per-channel). Sits right after the
                 name, before the occupant count, so it reads as a property of
                 the room. Suppressed on the current room's dot by the server
                 (entering marks it read). */}
-            <RoomUnreadCue roomId={room.id} />
+            <RoomUnreadCue roomId={room.id} {...(pairAnnex ? { pairRoomId: pairAnnex.id } : {})} />
           </span>
           <span className="ml-2 shrink-0 font-normal text-keep-muted">({displayedOccupants.length})</span>
         </button>
@@ -791,9 +891,45 @@ function RoomGroup({
             the room button stays full-width. Click-through wrapper; the toggle
             re-enables pointer events on itself when visible. */}
         <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-1.5">
-          <RoomMuteToggle roomId={room.id} />
+          <RoomMuteToggle roomId={room.id} {...(pairAnnex ? { pairRoomId: pairAnnex.id } : {})} />
         </div>
       </div>
+      {/* Linked-pair side toggle — appears while the viewer is inside either
+          side of this pair. Switching sides is a normal room join, so every
+          join gate (age, bans, mutes) still applies server-side. */}
+      {pairAnnex && pairSide ? (
+        <div className="flex items-center gap-1.5 border-b border-keep-rule/30 bg-keep-banner/20 px-3 py-1">
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("rooms.pairSideLabel")}</span>
+          <span className="inline-flex overflow-hidden rounded border border-keep-rule/60 text-[10px] font-bold uppercase leading-none tracking-widest">
+            <button
+              type="button"
+              onClick={() => { if (pairSide !== "sfw") onRoomClick(room.id); }}
+              aria-pressed={pairSide === "sfw"}
+              title={t("rooms.pairToSfwTitle")}
+              className={`px-2 py-1 ${
+                pairSide === "sfw"
+                  ? "bg-keep-action/20 text-keep-text"
+                  : "text-keep-muted hover:bg-keep-action/10 hover:text-keep-text"
+              }`}
+            >
+              {t("rooms.pairSfw")}
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (pairSide !== "nsfw") onRoomClick(pairAnnex.id); }}
+              aria-pressed={pairSide === "nsfw"}
+              title={t("rooms.pairToNsfwTitle")}
+              className={`border-l border-keep-rule/60 px-2 py-1 ${
+                pairSide === "nsfw"
+                  ? "bg-[#e06070]/20 text-[#e06070]"
+                  : "text-keep-muted hover:bg-[#e06070]/10 hover:text-[#e06070]"
+              }`}
+            >
+              {t("rooms.pairNsfw")}
+            </button>
+          </span>
+        </div>
+      ) : null}
       {displayedOccupants.length === 0 ? (
         <div className="px-5 pb-2 text-[11px] italic text-keep-muted lg:pb-1">{t("rooms.empty")}</div>
       ) : (
@@ -950,7 +1086,11 @@ function RoomGroup({
                         <OccupantModMenu
                           occupant={o}
                           selfUserId={selfUserId}
-                          caps={modCaps}
+                          // On a merged pair row, mod commands only reach the
+                          // side the viewer is standing in; other-side rows
+                          // render read-only rather than offering actions
+                          // that would no-op (or post false success lines).
+                          caps={currentSideKeys.has(`${o.userId}:${o.characterId ?? ""}`) ? modCaps : NO_MOD_CAPS}
                           onCommand={onCommand}
                         />
                       </div>
@@ -998,13 +1138,56 @@ function OccupantModMenu({
 }) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
+  // Fixed-position anchor for the portaled menu. Captured from the shield
+  // button's rect at open time; `right` (not left) so a menu near the rail's
+  // right edge can't overflow the viewport.
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const myRole = useChat((s) => s.me?.role ?? null);
+  // Any scroll or resize detaches a fixed-position menu from its anchor row;
+  // close instead of chasing the row (capture phase catches the rail's own
+  // scroll container, not just the window).
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [open]);
+  // Occupant churn (joins/leaves re-sorting the list) moves the anchor row
+  // WITHOUT a scroll event; re-pin the open menu to the shield's live rect so
+  // it can't sit beside a different name while still targeting the original.
+  // The 1px guard keeps the identical-rect case from re-render looping.
+  useEffect(() => {
+    if (!open) return undefined;
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return undefined;
+    const next = { top: r.bottom + 4, right: window.innerWidth - r.right };
+    setMenuPos((prev) =>
+      prev && Math.abs(prev.top - next.top) < 1 && Math.abs(prev.right - next.right) < 1 ? prev : next,
+    );
+    return undefined;
+  });
   const anyCap = caps.kick || caps.mute || caps.ban;
   const isSelf = selfUserId !== null && occupant.userId === selfUserId;
   // Don't offer actions the viewer can't win: a target whose ACCOUNT role
   // out-ranks the viewer is untouchable (mirrors mod.ts roleRank guards).
   const outranksMe = myRole !== null && roleRank(occupant.accountRole) > roleRank(myRole);
   if (!anyCap || isSelf || outranksMe) return null;
+
+  const toggleOpen = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const r = btnRef.current?.getBoundingClientRect();
+    if (!r) return;
+    setMenuPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    setOpen(true);
+  };
 
   // Target the exact identity shown in the row (character token when voicing
   // one, else the master token). resolveIdentityArg maps either back to the
@@ -1027,7 +1210,8 @@ function OccupantModMenu({
     <span className="relative inline-flex shrink-0">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        ref={btnRef}
+        onClick={toggleOpen}
         className="flex h-5 w-5 items-center justify-center rounded text-keep-muted opacity-70 transition-colors hover:bg-keep-system/15 hover:text-keep-system focus:opacity-100"
         title={t("rooms.moderate", { name: occupant.displayName })}
         aria-label={t("rooms.moderate", { name: occupant.displayName })}
@@ -1036,7 +1220,13 @@ function OccupantModMenu({
       >
         <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
       </button>
-      {open ? (
+      {/* PORTALED to <body>: occupant rows carry cosmetic name styles whose
+          transforms/filters mint stacking contexts, so an absolutely
+          positioned menu inside the row rendered UNDER the next row (barely
+          a sliver visible — the reported bug). A fixed-position portal
+          escapes every row context and the rail's scroll clipping. */}
+      {open && menuPos ? (
+        createPortal(
         <>
           {/* Click-away scrim: closes the menu when the viewer clicks anywhere
               else. Transparent + fixed so it covers the viewport without
@@ -1048,7 +1238,8 @@ function OccupantModMenu({
           />
           <span
             role="menu"
-            className="absolute right-0 top-full z-50 mt-1 flex min-w-[7rem] flex-col overflow-hidden rounded border border-keep-rule bg-keep-panel py-0.5 text-xs shadow-lg"
+            style={{ top: menuPos.top, right: menuPos.right }}
+            className="fixed z-50 flex min-w-[7rem] flex-col overflow-hidden rounded border border-keep-rule bg-keep-panel py-0.5 text-xs shadow-lg"
           >
             {caps.kick ? (
               <button
@@ -1086,7 +1277,9 @@ function OccupantModMenu({
               </button>
             ) : null}
           </span>
-        </>
+        </>,
+        document.body,
+        )
       ) : null}
     </span>
   );

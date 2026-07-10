@@ -198,7 +198,7 @@ export async function evictMinorsFromServer(
 
 export type SetRoomNsfwResult =
   | { ok: true; changed: boolean; isNsfw: boolean }
-  | { ok: false; code: "AGE_RESTRICTED" | "LANDING_ROOM"; message: string };
+  | { ok: false; code: "AGE_RESTRICTED" | "LANDING_ROOM" | "LINKED_PAIR"; message: string };
 
 /**
  * The one room-toggle core all three write surfaces call. Enforces:
@@ -232,6 +232,23 @@ export async function setRoomNsfw(opts: {
     };
   }
   if (room.isNsfw === value) return { ok: true, changed: false, isNsfw: value };
+
+  // Linked SFW/18+ pairs (migration 0343): the room-level flags ARE the
+  // pair's structure — the flagged side is the hidden annex, the unflagged
+  // side the listed base. Flipping either while linked would break the
+  // exactly-one-18+ shape (mislabelled toggles for adults; for minors, an
+  // all-ages annex that is hidden yet unreachable). Require /unlinkroom
+  // first, mirroring how /linkroom demands the shape up front.
+  {
+    const { isInPair } = await import("./roomLinks.js");
+    if (await isInPair(db, room)) {
+      return {
+        ok: false,
+        code: "LINKED_PAIR",
+        message: tFor(actor.locale, "errors:server.rooms.nsfwLinkedPair"),
+      };
+    }
+  }
 
   if (value) {
     // Landing-room rule (§E). Only meaningful in an ALL-AGES server: the

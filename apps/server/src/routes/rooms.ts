@@ -205,6 +205,12 @@ export async function registerRoomsRoutes(
     );
     const result: RoomWithOccupants[] = assembled.map(({ summary, occupants }) => ({
       ...summary,
+      // Linked-pair scrub for under-18 (and anonymous) viewers: the 18+
+      // annex row is already dropped by the age gate above; also blank the
+      // base's pointer to it so a minor's rail draws a plain single room
+      // with no SFW/18+ toggle (the toggle's join would be refused anyway —
+      // this keeps the dead control from ever rendering).
+      ...(me?.isAdult ? {} : { linkedNsfwRoomId: null }),
       occupants: occupants
         .filter((o) => !blocked.has(o.userId) && !isolationHidden.has(o.userId))
         .slice()

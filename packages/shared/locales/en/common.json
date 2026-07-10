@@ -321,9 +321,11 @@
     "nameLabel": "Room name",
     "namePlaceholder": "e.g. Oak_Tavern",
     "privateLabel": "Private <1>(password required to join)</1>",
+    "pairLabel": "With a linked 18+ room <1>(adds an adults-only side behind a SFW/18+ toggle)</1>",
     "submit": "Create",
     "errorNameRequired": "Enter a room name.",
     "errorNameInvalid": "Names can use letters, numbers, and _ - ' (up to 40 characters).",
+    "errorPairNameTooLong": "With a linked 18+ room the name can be at most 34 characters, so \"_Adult\" still fits.",
     "errorPasswordRequired": "A private room needs a password."
   },
   "password": "Password",

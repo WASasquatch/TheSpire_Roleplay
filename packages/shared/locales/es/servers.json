@@ -30,6 +30,9 @@
   "rules": {
     "title": "Reglas",
     "privacyColumn": "Política de privacidad",
+    "privacyTab": "Privacidad",
+    "jumpAria": "Ir a un documento",
+    "backToTop": "Volver arriba",
     "back": "← Volver",
     "none": "Aún no se han publicado reglas.",
     "loading": "cargando...",

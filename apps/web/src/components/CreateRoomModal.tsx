@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { useChat } from "../state/store.js";
 import { Modal } from "./cosmetics/Modal.js";
 
 interface Props {
@@ -29,8 +30,12 @@ export function CreateRoomModal({ onCommand, onClose }: Props) {
   const [name, setName] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [password, setPassword] = useState("");
+  const [withNsfwPair, setWithNsfwPair] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameRef = useRef<HTMLInputElement | null>(null);
+  // Creating an 18+ room is an adult-only write (the server refuses it
+  // anyway); minors simply don't see the pair option.
+  const isAdult = useChat((s) => s.viewerAge.isAdult);
 
   useEffect(() => {
     nameRef.current?.focus();
@@ -49,6 +54,12 @@ export function CreateRoomModal({ onCommand, onClose }: Props) {
       setError(t("createRoom.errorNameInvalid"));
       return;
     }
+    // The pair's 18+ twin is "<name>_Adult" and must fit the same 40-char
+    // room-name cap, so the base name loses 6 characters of headroom.
+    if (withNsfwPair && !isPrivate && cleanName.length > 34) {
+      setError(t("createRoom.errorPairNameTooLong"));
+      return;
+    }
     if (isPrivate && !password.trim()) {
       setError(t("createRoom.errorPasswordRequired"));
       return;
@@ -56,6 +67,10 @@ export function CreateRoomModal({ onCommand, onClose }: Props) {
 
     if (isPrivate) {
       onCommand(`/private ${cleanName} ${password.trim()}`);
+    } else if (withNsfwPair) {
+      // Creates <name> (SFW) + <name>_Adult (18+), linked as one rail entry
+      // with a SFW/18+ side toggle, and joins the SFW side.
+      onCommand(`/gopair ${cleanName}`);
     } else {
       onCommand(`/go ${cleanName}`);
     }
@@ -104,6 +119,25 @@ export function CreateRoomModal({ onCommand, onClose }: Props) {
             </Trans>
           </span>
         </label>
+
+        {/* Linked 18+ twin (adults, public rooms only): one checkbox turns the
+            create into a pair — <name> plus <name>_Adult — listed as a single
+            room with a SFW/18+ toggle instead of two rail entries. */}
+        {!isPrivate && isAdult ? (
+          <label className="mt-3 flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={withNsfwPair}
+              onChange={(e) => { setWithNsfwPair(e.target.checked); setError(null); }}
+              className="h-4 w-4 accent-keep-action"
+            />
+            <span>
+              <Trans t={t} i18nKey="createRoom.pairLabel">
+                With a linked 18+ room <span className="text-keep-muted">(adds an adults-only side behind a SFW/18+ toggle)</span>
+              </Trans>
+            </span>
+          </label>
+        ) : null}
 
         {isPrivate ? (
           <>

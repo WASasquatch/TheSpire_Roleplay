@@ -210,7 +210,8 @@
       "categoryHasSubcategories": "primero mueve o elimina sus subcategorías",
       "landingRoomCantBeNsfw": "Esta es la sala de llegada, así que no puede ser 18+. Los miembros menores de 18 necesitan un lugar adonde llegar.",
       "nowAdultsOnly": "Esta sala ahora es solo para adultos.",
-      "removedByAdmin": "Un administrador eliminó la sala \"{{name}}\"."
+      "removedByAdmin": "Un administrador eliminó la sala \"{{name}}\".",
+      "nsfwLinkedPair": "Esta sala forma parte de un par SFW/18+ enlazado, así que su configuración de 18+ está bloqueada. Ejecuta /unlinkroom primero y luego cámbiala."
     },
     "reports": {
       "whispersNotReportable": "los susurros no se pueden reportar",

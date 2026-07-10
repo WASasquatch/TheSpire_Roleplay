@@ -59,6 +59,7 @@ import {
 import { DEFAULT_SERVER_ID, resolveRoomServerId } from "../../earning/pool.js";
 import { serverAuthority } from "../../servers/authority.js";
 import { effectiveRoomNsfw } from "../../lib/nsfwRooms.js";
+import { findLinkedAnnex } from "../../lib/roomLinks.js";
 import { tFor } from "../../i18n.js";
 import { addSystemMessage, sendRoomBacklogTo } from "./persistence.js";
 import { isHiddenIncognitoIdentity } from "./incognito.js";
@@ -1161,6 +1162,14 @@ export async function buildRoomSummary(
     theaterLoop: room.theaterLoop,
     theaterPlaylist: parsePlaylist(room.theaterPlaylist),
     forumId: room.forumId ?? null,
+    // Linked SFW/18+ pair (migration 0343). The annex carries the stored
+    // pointer to its base; the base's reverse pointer is looked up live so
+    // the rail can draw the SFW/18+ toggle on the listed row. An archived
+    // annex reads as "no pair" (the toggle would join a parked room).
+    linkedSfwRoomId: room.linkedRoomId ?? null,
+    linkedNsfwRoomId: room.linkedRoomId
+      ? null
+      : (await findLinkedAnnex(db, room.id))?.id ?? null,
     // The client derives its CURRENT server from the room it occupies, which
     // drives the rail's active pill and the per-server rooms scoping. Emit the
     // EFFECTIVE server (a NULL row is adopted by the default/is_system server)
@@ -1308,12 +1317,21 @@ async function emitRoomStateWith(
   // Per-viewer block filtering (see roomBlockGraph). Fast path: no blocks
   // among the room → one room-wide emit. Otherwise fan out filtered lists.
   const { sockets, blockGraph } = precomputedGraph ?? (await roomBlockGraph(io, db, roomId, occupants));
-  if (blockGraph.size === 0) {
+  // Linked-pair scrub (same contract as GET /rooms): a base room's pointer
+  // to its 18+ annex must never reach an under-18 occupant of the (all-ages)
+  // base, so a summary carrying one forces the per-socket fan-out and nulls
+  // the pointer for non-adult viewers.
+  const summaryFor = (s: (typeof sockets)[number]) => {
+    if (!summary.linkedNsfwRoomId) return summary;
+    const su = (s.data as { user?: { isAdult?: boolean } }).user;
+    return su?.isAdult ? summary : { ...summary, linkedNsfwRoomId: null };
+  };
+  if (blockGraph.size === 0 && !summary.linkedNsfwRoomId) {
     io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
   } else {
     for (const s of sockets) {
       const uid = (s.data as { userId?: string }).userId;
-      s.emit("room:state", { room: summary, occupants: occupantsForViewer(occupants, blockGraph, uid) });
+      s.emit("room:state", { room: summaryFor(s), occupants: occupantsForViewer(occupants, blockGraph, uid) });
     }
   }
   // Tree-wide invalidate. Room metadata changed (topic, replyMode,
@@ -1598,9 +1616,33 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
   // board 60s after start, stranding its topics in an archived room. Board
   // lifecycle is owner-driven (the forums boards DELETE route archives).
   if (room.forumId) return false;
+  // A linked 18+ annex sits empty most of the time BY DESIGN — it's reached
+  // through the base row's SFW/18+ toggle, not the rail, so empty is its
+  // steady state, not abandonment. Keep it alive while its base room is
+  // alive; once the base itself archives (or the pair is dissolved), the
+  // annex becomes an ordinary room and the next sweep can park it.
+  if (room.linkedRoomId) {
+    const base = (await db
+      .select({ archivedAt: rooms.archivedAt })
+      .from(rooms)
+      .where(eq(rooms.id, room.linkedRoomId))
+      .limit(1))[0];
+    if (base && !base.archivedAt) return false;
+  }
   if (room.archivedAt) return false;
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   if (sockets.length > 0) return false;
+  // The BASE of a linked pair is one occupancy unit with its annex: the
+  // pair's primary flow (everyone toggles to the 18+ side) empties the base
+  // while the pair is in active use, and archiving it would tear the rail
+  // row (and the way back) out from under the annex's occupants. Survive
+  // while the annex holds live sockets or idle ghosts; a fully-empty pair
+  // still parks (base first, then the annex via the cascade below).
+  const pairAnnex = await findLinkedAnnex(db, roomId);
+  if (pairAnnex) {
+    const annexSockets = await io.in(`room:${pairAnnex.id}`).fetchSockets();
+    if (annexSockets.length > 0 || hasIdleGhostsForRoom(pairAnnex.id)) return false;
+  }
   // Idle ghosts hold a room open against archival the same way live
   // sockets do, the user is conceptually "still here, just idle." If
   // we archived now we'd race the ghost's eventual sweep (which calls
@@ -1615,6 +1657,11 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
   // is in hand, so its serverId is free; emitTreeChanged falls back to the
   // bare global pulse when the flag is off.
   emitTreeChanged(io, room.serverId);
+  // A base just parked: its (empty — the guard above proved it) annex lost
+  // its keep-alive and would otherwise linger as an orphaned rail row until
+  // the next boot sweep. Re-run the sweep on it now; its own annex-side
+  // exemption sees the base archived and lets it park in this same pass.
+  if (pairAnnex) await expireIfEmpty(io, db, pairAnnex.id).catch(() => false);
   return true;
 }
 
@@ -1646,7 +1693,12 @@ export async function sendRoomStateTo(
     blocked.add(hiddenId);
   }
   const view = blocked.size ? occupants.filter((o) => !blocked.has(o.userId)) : occupants;
-  socket.emit("room:state", { room: summary, occupants: view });
+  // Linked-pair scrub (same contract as GET /rooms + emitRoomStateWith):
+  // never hand a non-adult viewer the base room's pointer to its 18+ annex.
+  const scrubbedSummary = summary.linkedNsfwRoomId && !viewerSnapshot?.isAdult
+    ? { ...summary, linkedNsfwRoomId: null }
+    : summary;
+  socket.emit("room:state", { room: scrubbedSummary, occupants: view });
   socket.emit("presence:update", { roomId, occupants: view });
   // Re-snap to live theater playback on resync (reconnect, tab wake).
   const tp = theaterSyncPayload(roomId);

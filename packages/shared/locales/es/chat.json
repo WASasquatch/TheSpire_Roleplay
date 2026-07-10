@@ -290,7 +290,13 @@
     "muteActionTitle": "Silenciar por 10 minutos (ajusta la duración desde el chat)",
     "ban": "Banear",
     "banTitle": "Impedir la entrada a esta sala hasta el desbaneo",
-    "banConfirm": "¿Banear a {{name}} de esta sala? No podrá volver a entrar hasta que se le desbanee."
+    "banConfirm": "¿Banear a {{name}} de esta sala? No podrá volver a entrar hasta que se le desbanee.",
+    "pairSfw": "SFW",
+    "pairNsfw": "18+",
+    "pairChipTitle": "Esta sala tiene un lado 18+ enlazado. Entra y usa el selector SFW/18+ para cambiar.",
+    "pairSideLabel": "Lado",
+    "pairToSfwTitle": "Cambiar al lado apto para todas las edades de esta sala",
+    "pairToNsfwTitle": "Cambiar al lado 18+ de esta sala (solo adultos)"
   },
   "staff": {
     "roomOwner": "Propietario de la sala",

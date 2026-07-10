@@ -249,6 +249,28 @@
     "already18": "Esta sala ya es 18+.",
     "alreadyNot18": "Esta sala ya está marcada como no 18+."
   },
+  "linkRoom": {
+    "usage": "Usa /linkroom <sala> para emparejar esta sala con su contraparte SFW o 18+.",
+    "notFound": "No se encontró ninguna sala llamada \"{{name}}\".",
+    "permission": "Solo un propietario / mod / admin de AMBAS salas puede enlazarlas o desenlazarlas.",
+    "self": "Una sala no puede enlazarse consigo misma.",
+    "forumBoard": "Los tableros de foros no pueden formar parte de un par enlazado.",
+    "system": "Las salas del sistema no pueden formar parte de un par enlazado.",
+    "archived": "Ambas salas deben estar activas (no archivadas) para enlazarlas.",
+    "differentServer": "Ambas salas deben pertenecer a la misma comunidad para enlazarlas.",
+    "notPublic": "Ambas salas deben ser públicas para enlazarlas.",
+    "needOneNsfw": "Exactamente una de las dos salas debe estar marcada como 18+ primero: ejecuta /nsfw on en la sala para adultos y luego enlázalas.",
+    "alreadyLinked": "Una de estas salas ya forma parte de un par enlazado. Desenlázala primero con /unlinkroom.",
+    "linked": "{{base}} y {{annex}} ahora están enlazadas: aparecen como una sola sala con un selector SFW/18+.",
+    "unlinked": "El par enlazado se disolvió. Ambas salas vuelven a aparecer por separado.",
+    "notLinked": "Esta sala no forma parte de un par enlazado."
+  },
+  "goPair": {
+    "usage": "Usa /gopair <nombre> para crear <nombre> junto con una sala <nombre>_Adult enlazada.",
+    "adultsOnly": "Solo las cuentas adultas pueden crear una sala 18+.",
+    "badName": "Ese nombre no se puede usar: solo letras, números, _ - ', y lo bastante corto para que \"_Adult\" quepa (40 caracteres en total).",
+    "nameTaken": "Ya existe una sala con ese nombre (o su gemela _Adult). Crea las salas con /go, marca una con /nsfw on y luego empareja con /linkroom."
+  },
   "list": {
     "title": "Salas públicas",
     "empty": "Todavía no existen salas públicas.",

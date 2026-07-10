@@ -34,6 +34,16 @@ export interface RoomSummary {
    * populated) means all-ages.
    */
   isNsfw?: boolean;
+  /**
+   * Linked SFW/18+ pair (migration 0343). When this room is the hidden 18+
+   * ANNEX of a pair, `linkedSfwRoomId` points at its listed SFW base. When
+   * this room is the BASE, `linkedNsfwRoomId` points at its annex. The rail
+   * hides annex rows and draws a SFW/18+ toggle on the base row (adults
+   * only); minors get the annex dropped server-side and this pointer
+   * scrubbed, so they see a plain single room. Optional for older bundles.
+   */
+  linkedSfwRoomId?: string | null;
+  linkedNsfwRoomId?: string | null;
   /** World linked to this room (one per room). Surfaced as a banner in chat. Null when no world is linked. */
   linkedWorld: LinkedWorldRef | null;
   /**

@@ -16,7 +16,7 @@ import type { CommandContext, CommandHandler } from "../types.js";
  * allowed. Counts only non-system rooms the user currently owns; deleted /
  * auto-expired rooms cascade away so they don't count.
  */
-async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
+export async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
   if (await hasPermission(ctx.user, "bypass_room_cap", ctx.db)) return true;
   // Cap is the value configured on the server the new room will land in — the
   // creator's current room→server (`resolveRoomServerId`, NULL/legacy →
@@ -56,9 +56,9 @@ async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
   return true;
 }
 
-const NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
+export const NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
 
-async function findRoomByName(ctx: CommandContext, name: string) {
+export async function findRoomByName(ctx: CommandContext, name: string) {
   // Returns ARCHIVED rooms too, callers branch on `row.archivedAt` to
   // decide between "join existing", "resurrect", and "name conflict".
   // Filtering archived rows here would break the resurrect path
@@ -124,8 +124,17 @@ async function resurrectArchivedRoom(
         : {}),
       ...(overrides?.type !== undefined ? { type: overrides.type } : {}),
       ...(overrides?.passwordHash !== undefined ? { passwordHash: overrides.passwordHash } : {}),
+      // A resurrection can hand the room to a brand-new owner, so any linked
+      // SFW/18+ pair edge from the previous incarnation must not survive it:
+      // carrying it over would silently re-pair two rooms across unrelated
+      // owners, bypassing /linkroom's edit-rights-on-both check. The new
+      // owner can re-run /linkroom deliberately.
+      linkedRoomId: null,
     })
     .where(eq(rooms.id, roomId));
+  // Same reasoning for the REVERSE edge: if this room used to be the BASE
+  // of a pair, dissolve the stale annex pointer too.
+  await ctx.db.update(rooms).set({ linkedRoomId: null }).where(eq(rooms.linkedRoomId, roomId));
   // Wipe any stale per-user state from the previous incarnation. FK
   // cascades did this on hard-delete; we replicate it explicitly now
   // that the row sticks around.

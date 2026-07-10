@@ -249,6 +249,28 @@
     "already18": "This room is already 18+.",
     "alreadyNot18": "This room is already not 18+."
   },
+  "linkRoom": {
+    "usage": "Use /linkroom <room> to pair this room with its SFW or 18+ counterpart.",
+    "notFound": "No room named \"{{name}}\" was found.",
+    "permission": "Only an owner / mod / admin of BOTH rooms can link or unlink them.",
+    "self": "A room can't be linked to itself.",
+    "forumBoard": "Forum boards can't be part of a linked pair.",
+    "system": "System rooms can't be part of a linked pair.",
+    "archived": "Both rooms must be active (not parked) to link them.",
+    "differentServer": "Both rooms must belong to the same community to link them.",
+    "notPublic": "Both rooms must be public to link them.",
+    "needOneNsfw": "Exactly one of the two rooms must be flagged 18+ first — run /nsfw on in the adults-only room, then link.",
+    "alreadyLinked": "One of these rooms is already part of a linked pair. Unlink it first with /unlinkroom.",
+    "linked": "{{base}} and {{annex}} are now linked — they list as one room with a SFW/18+ toggle.",
+    "unlinked": "The linked pair was dissolved. Both rooms list separately again.",
+    "notLinked": "This room isn't part of a linked pair."
+  },
+  "goPair": {
+    "usage": "Use /gopair <name> to create <name> plus a linked <name>_Adult room.",
+    "adultsOnly": "Only adult accounts can create an 18+ room.",
+    "badName": "That name can't be used — letters, numbers, _ - ' only, and short enough that \"_Adult\" still fits (40 characters total).",
+    "nameTaken": "A room by that name (or its _Adult twin) already exists. Create the rooms with /go, flag one with /nsfw on, then pair them with /linkroom."
+  },
   "list": {
     "title": "Public rooms",
     "empty": "No public rooms exist yet.",

@@ -4,6 +4,8 @@ import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } f
 import { useRulesHashHighlight } from "../../lib/rulesHashHighlight.js";
 import { useChat } from "../../state/store.js";
 import { resolveSplashTheme, themeStyle } from "../../lib/theme.js";
+import { useReducedMotion } from "../../lib/reducedMotion.js";
+import { BackToTop } from "../shared/BackToTop.js";
 
 interface RulesPayload {
   // The app-wide governing rules. This public page mounts BEFORE auth /
@@ -55,9 +57,32 @@ export function RulesPage({ onBack }: Props) {
   // rest of the site rather than the flat light :root defaults (keep-* vars are
   // otherwise unset here — the authed shell never mounts on this route).
   const branding = useChat((s) => s.branding);
+  const reduceMotion = useReducedMotion();
   const rulesRef = useRef<HTMLDivElement>(null);
+  const privacySectionRef = useRef<HTMLElement>(null);
+  const rulesSectionRef = useRef<HTMLElement>(null);
+  // Which stacked section the viewport is currently in — drives the active
+  // state of the mobile jump tabs. Privacy sits first, so it's the default.
+  const [activeJump, setActiveJump] = useState<"privacy" | "rules">("privacy");
   // Deep-link highlight (e.g. /rules#3.6) once the rules HTML is injected.
   useRulesHashHighlight(rulesRef, !!data?.appRules?.trim());
+
+  // One passive scroll listener flips the mobile jump-tab highlight when the
+  // rules section reaches the sticky bar. Cheap enough to run unconditionally
+  // (it no-ops while the two-column desktop layout hides the tabs).
+  useEffect(() => {
+    const onScroll = () => {
+      const top = rulesSectionRef.current?.getBoundingClientRect().top;
+      setActiveJump(top !== undefined && top <= 96 ? "rules" : "privacy");
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const jumpTo = (which: "privacy" | "rules") => {
+    const el = which === "privacy" ? privacySectionRef.current : rulesSectionRef.current;
+    el?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -126,41 +151,74 @@ export function RulesPage({ onBack }: Props) {
           </div>
         ) : data.securityNoticeHtml.trim() ? (
           /* Two cards side by side on wide screens: privacy left, rules
-             right, each under its own header. The privacy statement grew
-             into a full policy document; stacked above the rules it buried
-             them. On narrow screens they stack with the RULES first for
-             the same reason. */
-          <div className="grid items-start gap-4 lg:grid-cols-2">
-            <section
-              className="keep-frame order-2 rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5 lg:order-1"
-              aria-labelledby="rules-page-privacy-heading"
+             right, each under its own header. On narrow screens they stack
+             in the same order (privacy first), with a sticky jump-tab bar
+             so either document is one tap away. */
+          <>
+            <nav
+              aria-label={t("rules.jumpAria")}
+              className="sticky top-0 z-10 -mx-4 -mt-2 flex gap-1 border-b border-keep-border bg-keep-bg/95 px-4 py-2 backdrop-blur lg:hidden"
             >
-              <h2 id="rules-page-privacy-heading" className="mb-3 border-b border-keep-border pb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
-                {t("rules.privacyColumn")}
-              </h2>
-              <div
-                className={`prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-3 ${USER_HTML_SCOPE_CLASS}`}
-                dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
-              />
-            </section>
-            <section
-              className="keep-frame order-1 rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5 lg:order-2"
-              aria-labelledby="rules-page-rules-heading"
-            >
-              <h2 id="rules-page-rules-heading" className="mb-3 border-b border-keep-border pb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
+              <button
+                type="button"
+                onClick={() => jumpTo("privacy")}
+                aria-current={activeJump === "privacy" ? "true" : undefined}
+                className={`rounded-full border px-3 py-1 text-xs font-action uppercase tracking-widest ${
+                  activeJump === "privacy"
+                    ? "border-keep-action bg-keep-action/15 text-keep-text"
+                    : "border-keep-border text-keep-muted"
+                }`}
+              >
+                {t("rules.privacyTab")}
+              </button>
+              <button
+                type="button"
+                onClick={() => jumpTo("rules")}
+                aria-current={activeJump === "rules" ? "true" : undefined}
+                className={`rounded-full border px-3 py-1 text-xs font-action uppercase tracking-widest ${
+                  activeJump === "rules"
+                    ? "border-keep-action bg-keep-action/15 text-keep-text"
+                    : "border-keep-border text-keep-muted"
+                }`}
+              >
                 {t("rules.title")}
-              </h2>
-              {data.appRules?.trim() ? (
+              </button>
+            </nav>
+            <div className="grid items-start gap-4 lg:grid-cols-2">
+              <section
+                ref={privacySectionRef}
+                className="keep-frame scroll-mt-14 rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5 lg:scroll-mt-4"
+                aria-labelledby="rules-page-privacy-heading"
+              >
+                <h2 id="rules-page-privacy-heading" className="mb-3 border-b border-keep-border pb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
+                  {t("rules.privacyColumn")}
+                </h2>
                 <div
-                  ref={rulesRef}
                   className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
-                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.appRules) }}
+                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
                 />
-              ) : (
-                <p className="italic text-keep-muted">{t("rules.none")}</p>
-              )}
-            </section>
-          </div>
+              </section>
+              <section
+                ref={rulesSectionRef}
+                className="keep-frame scroll-mt-14 rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5 lg:scroll-mt-4"
+                aria-labelledby="rules-page-rules-heading"
+              >
+                <h2 id="rules-page-rules-heading" className="mb-3 border-b border-keep-border pb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
+                  {t("rules.title")}
+                </h2>
+                {data.appRules?.trim() ? (
+                  <div
+                    ref={rulesRef}
+                    className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
+                    dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.appRules) }}
+                  />
+                ) : (
+                  <p className="italic text-keep-muted">{t("rules.none")}</p>
+                )}
+              </section>
+            </div>
+            <BackToTop className="fixed bottom-4 right-4" />
+          </>
         ) : (
           <div className="keep-frame rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5">
             {data.appRules?.trim() ? (

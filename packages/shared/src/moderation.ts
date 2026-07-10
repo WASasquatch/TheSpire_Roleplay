@@ -32,6 +32,9 @@ export type AuditAction =
   // Room/site management
   | "settings_update"
   | "room_delete"
+  // Linked SFW/18+ room pairs (migration 0343): pairing / dissolving
+  | "room_link"
+  | "room_unlink"
   | "custom_command_create"
   | "custom_command_update"
   | "custom_command_delete"

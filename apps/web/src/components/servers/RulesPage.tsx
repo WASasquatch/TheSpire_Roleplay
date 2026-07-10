@@ -98,7 +98,11 @@ export function RulesPage({ onBack }: Props) {
       style={themeStyle(resolveSplashTheme(branding))}
       className="min-h-screen w-full bg-keep-bg px-4 py-6 text-keep-text md:py-10"
     >
-      <div className="mx-auto flex max-w-3xl flex-col gap-4">
+      {/* Two-column mode gets a generous cap (100rem ≈ 1600px) so large
+          displays actually use their width — each column still lands near
+          a comfortable ~75-90ch reading measure at prose-sm. The single-
+          column fallback keeps the tighter document width. */}
+      <div className={`mx-auto flex flex-col gap-4 ${data?.securityNoticeHtml.trim() ? "max-w-[100rem]" : "max-w-3xl"}`}>
         <header className="flex items-baseline justify-between gap-2 border-b border-keep-border pb-3">
           <h1 className="font-action text-2xl">{t("rules.title")}</h1>
           <a
@@ -110,21 +114,42 @@ export function RulesPage({ onBack }: Props) {
           </a>
         </header>
 
-        <div className="keep-frame rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5">
-          {error ? (
+        {error ? (
+          <div className="keep-frame rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5">
             <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
               {error}
             </div>
-          ) : !data ? (
+          </div>
+        ) : !data ? (
+          <div className="keep-frame rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5">
             <p className="italic text-keep-muted">{t("shared.loading")}</p>
-          ) : (
-            <div className="space-y-4">
-              {data.securityNoticeHtml.trim() ? (
-                <div
-                  className={`prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-3 ${USER_HTML_SCOPE_CLASS}`}
-                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
-                />
-              ) : null}
+          </div>
+        ) : data.securityNoticeHtml.trim() ? (
+          /* Two cards side by side on wide screens: privacy left, rules
+             right, each under its own header. The privacy statement grew
+             into a full policy document; stacked above the rules it buried
+             them. On narrow screens they stack with the RULES first for
+             the same reason. */
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <section
+              className="keep-frame order-2 rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5 lg:order-1"
+              aria-labelledby="rules-page-privacy-heading"
+            >
+              <h2 id="rules-page-privacy-heading" className="mb-3 border-b border-keep-border pb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
+                {t("rules.privacyColumn")}
+              </h2>
+              <div
+                className={`prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-3 ${USER_HTML_SCOPE_CLASS}`}
+                dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
+              />
+            </section>
+            <section
+              className="keep-frame order-1 rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5 lg:order-2"
+              aria-labelledby="rules-page-rules-heading"
+            >
+              <h2 id="rules-page-rules-heading" className="mb-3 border-b border-keep-border pb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
+                {t("rules.title")}
+              </h2>
               {data.appRules?.trim() ? (
                 <div
                   ref={rulesRef}
@@ -134,9 +159,21 @@ export function RulesPage({ onBack }: Props) {
               ) : (
                 <p className="italic text-keep-muted">{t("rules.none")}</p>
               )}
-            </div>
-          )}
-        </div>
+            </section>
+          </div>
+        ) : (
+          <div className="keep-frame rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5">
+            {data.appRules?.trim() ? (
+              <div
+                ref={rulesRef}
+                className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
+                dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.appRules) }}
+              />
+            ) : (
+              <p className="italic text-keep-muted">{t("rules.none")}</p>
+            )}
+          </div>
+        )}
       </div>
     </main>
   );

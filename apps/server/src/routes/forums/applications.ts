@@ -37,7 +37,6 @@ import {
   forumMembers,
   forumMembershipApplications,
   forums,
-  messages,
   rooms,
   siteSettings,
   users,

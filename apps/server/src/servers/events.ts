@@ -48,8 +48,8 @@ import { sanitizeBio } from "../auth/html.js";
 import { getSessionUser } from "../routes/auth.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import { notifyMany, type NotifyInput } from "../notifications/engine.js";
-import { serverAuthority, serverCan } from "./authority.js";
 import { tFor } from "../i18n.js";
+import { serverAuthority, serverCan } from "./authority.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

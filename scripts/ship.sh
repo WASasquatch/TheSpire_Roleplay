@@ -3,8 +3,12 @@
 #
 # Default flow:
 #   1. Refuse to run from a non-main branch (use git directly for PR work)
-#   2. Type-check shared / server / web (catch obvious mistakes pre-deploy)
-#   3. Stage all tracked-file modifications (`git add -u` across the whole
+#   2. Lint with auto-fix (`pnpm lint:fix`) so eslint-fixable warnings are
+#      repaired and ride into the deploy commit; remaining warnings stay
+#      non-blocking. Runs before typecheck/tests so those gates validate
+#      the post-fix tree.
+#   3. Type-check shared / server / web (catch obvious mistakes pre-deploy)
+#   4. Stage all tracked-file modifications (`git add -u` across the whole
 #      repo) PLUS new untracked files under apps/ + packages/. The -u
 #      pass catches edits to root-level deploy / build infra
 #      (fly.toml, Dockerfile, .dockerignore, pnpm-workspace.yaml,
@@ -14,9 +18,9 @@
 #      stays in place for the project root, so a stray .env or scratch
 #      file there can't sneak into a commit. Use --all to also pick up
 #      NEW untracked root-level files (e.g. a brand-new Dockerfile.dev).
-#   4. Commit with the supplied message (skipped if there's nothing staged)
-#   5. Push origin main
-#   6. flyctl deploy
+#   5. Commit with the supplied message (skipped if there's nothing staged)
+#   6. Push origin main
+#   7. flyctl deploy
 #
 # Usage:
 #   ./scripts/ship.sh "your commit message"
@@ -212,6 +216,22 @@ if [[ -n "$BUMP_LEVEL" ]]; then
   bash scripts/bump.sh "$BUMP_LEVEL"
 fi
 
+# ----- lint (AUTO-FIX, then report) + format check (report-only) -----
+# Governance surface (plan_ext.md §5/§6): lint warnings stay non-blocking,
+# but eslint's auto-fixable ones are REPAIRED here rather than just
+# reported — a deploy commits as it goes, so this is the last chance for
+# `--fix` output to make the release. Runs BEFORE typecheck + tests so
+# the tree those gates validate is the tree that gets committed.
+# Prettier stays report-only on purpose: a tree-wide reformat should be
+# its own deliberate commit, not a deploy side effect. `|| echo` keeps
+# `set -e` from treating a nonzero exit (warnings remain) as fatal.
+echo "==> Lint (auto-fixing what eslint can; remaining warnings are non-blocking)..."
+pnpm lint:fix || echo "ship: lint reported issues (non-blocking; run 'pnpm lint')."
+echo "==> Prettier check (non-blocking)..."
+pnpm format:check >/dev/null 2>&1 \
+  && echo "ship: formatting clean." \
+  || echo "ship: some files aren't Prettier-formatted (non-blocking; run 'pnpm format')."
+
 # ----- typecheck -----
 if [[ "$SKIP_TYPECHECK" -eq 0 ]]; then
   echo "==> Type-checking..."
@@ -228,17 +248,6 @@ if [[ "$SKIP_TEST" -eq 0 ]]; then
   echo "==> Running tests..."
   pnpm --filter @thekeep/server run test
 fi
-
-# ----- lint + format check (NON-BLOCKING, informational) -----
-# Governance surface (plan_ext.md §5/§6): lint is warn-only and Prettier is
-# report-only for now, so neither aborts a deploy — they just surface drift.
-# `|| true` keeps `set -e` from treating a nonzero exit as fatal.
-echo "==> Lint (warnings are non-blocking)..."
-pnpm lint || echo "ship: lint reported issues (non-blocking; run 'pnpm lint')."
-echo "==> Prettier check (non-blocking)..."
-pnpm format:check >/dev/null 2>&1 \
-  && echo "ship: formatting clean." \
-  || echo "ship: some files aren't Prettier-formatted (non-blocking; run 'pnpm format')."
 
 # ----- stage + commit -----
 # Whether we have anything to commit determines whether MSG is required.

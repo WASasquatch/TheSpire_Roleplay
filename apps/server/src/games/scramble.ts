@@ -41,6 +41,7 @@
 
 import { addSystemMessage } from "../realtime/broadcast.js";
 import type { Db } from "../db/index.js";
+import { tFor } from "../i18n.js";
 import {
   registerGameKind,
   type GameSession,
@@ -58,7 +59,6 @@ import {
   type BuiltinCommandReward,
 } from "./config.js";
 import { pickSourceWord, SCRAMBLE_DICTIONARY } from "./scrambleDictionary.js";
-import { tFor } from "../i18n.js";
 
 export const SCRAMBLE_KIND = "scramble";
 export const SCRAMBLE_COMMAND_NAME = "scramble";

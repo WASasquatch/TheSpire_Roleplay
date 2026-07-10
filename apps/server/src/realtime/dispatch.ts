@@ -16,10 +16,10 @@ import { areServersEnabled, getServerSettings, getSettings } from "../settings.j
 import { resolveRoomServerId } from "../earning/pool.js";
 import { hasPermission } from "../auth/permissions.js";
 import { recordAudit } from "../audit.js";
+import { tFor } from "../i18n.js";
 import { addMessage, addMessageDirect, exitIncognitoOnCharSwitch } from "./broadcast.js";
 import { evaluateAntiSpam } from "./antiSpam.js";
 import { applyFilters, AUTOMOD_DEFAULT_MUTE_MS, getCompiledRuleset } from "./automod.js";
-import { tFor } from "../i18n.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents>;

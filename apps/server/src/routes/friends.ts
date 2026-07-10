@@ -11,8 +11,8 @@ import { eqNameInsensitive } from "../lib/nameLookup.js";
 import { blockedUserIdsFor, isBlockedBetween } from "../auth/blocks.js";
 import { isIsolatedBetweenIds, isolationHiddenSetFor } from "../auth/ageIsolation.js";
 import { notify as notifyCenter } from "../notifications/engine.js";
-import { getSessionUser } from "./auth.js";
 import { tFor } from "../i18n.js";
+import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

@@ -65,6 +65,7 @@ import { globalAuditScopeWhere, recordAudit } from "../audit.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
 import { setRoomNsfw } from "../lib/nsfwRooms.js";
 import { parseLimit } from "../lib/pagination.js";
+import { tFor } from "../i18n.js";
 import { registerAdminEarningRoutes } from "./earning.js";
 import { registerAdminBackupRoutes } from "./backup.js";
 import { registerAdminPermissionRoutes } from "./permissions.js";
@@ -72,7 +73,6 @@ import { registerAdminAnnouncementRoutes } from "./announcements.js";
 import { registerAdminModCaseRoutes } from "./modCases.js";
 import { registerAdminFaqRoutes } from "./faqs.js";
 import { registerAdminEmailRoutes } from "./email.js";
-import { tFor } from "../i18n.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 

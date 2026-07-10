@@ -83,6 +83,15 @@ export async function drainEmailQueue(db: Db): Promise<number> {
   const base = publicBaseUrl(settings);
   let sent = 0;
   for (const row of batch) {
+    // A null userId means the recipient's account was deleted after the
+    // campaign was queued (email_outbox.user_id is ON DELETE SET NULL).
+    // Skip the row: mailing an address whose account no longer exists is
+    // unwanted on its face, and the send would also bypass the opt-out
+    // re-check and carry no unsubscribe link (both derive from userId).
+    if (!row.userId) {
+      await db.update(emailOutbox).set({ status: "skipped" }).where(eq(emailOutbox.id, row.id));
+      continue;
+    }
     // Re-check opt-out at SEND time, not just enqueue time. A scheduled
     // newsletter can sit for days; if the recipient unsubscribed from this
     // category in the meantime, skip them now instead of mailing anyway.

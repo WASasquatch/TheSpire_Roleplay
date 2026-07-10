@@ -3,10 +3,10 @@ import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { characters, sessions, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
-import { isAdultUser } from "./ageGate.js";
 import type { SessionUser } from "../commands/types.js";
 import { getSettings } from "../settings.js";
 import { socketsForUser } from "../realtime/presence.js";
+import { isAdultUser } from "./ageGate.js";
 
 /**
  * Force a user out of the site, authoritatively:

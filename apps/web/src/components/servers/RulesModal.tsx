@@ -49,9 +49,12 @@ type RulesTab = "app" | "server";
  * App Rules tab renders, so the view is byte-identical to the old
  * single-rules modal.
  *
- * The privacy notice is rendered above the rules, in an action-tinted
- * band, so the admin-can't-read-privates contract is the first thing
- * users see.
+ * Layout: on wide screens the privacy statement and the rules render as
+ * two INDEPENDENTLY SCROLLING columns (privacy left, rules right), each
+ * under its own header. The privacy statement grew into a full policy
+ * document; stacked above the rules it buried them below several screens
+ * of scrolling. On narrow screens the columns stack with the RULES first
+ * for the same reason. The privacy body keeps its action-tinted band.
  */
 export function RulesModal({ onClose }: Props) {
   const { t } = useTranslation("servers");
@@ -100,6 +103,66 @@ export function RulesModal({ onClose }: Props) {
     [activeHtml],
   );
 
+  const hasPrivacy = !!data?.securityNoticeHtml.trim();
+
+  // The rules half (tabs + body) is identical in both layouts, so build it
+  // once and slot it into whichever wrapper applies.
+  const rulesBlock = data ? (
+    <div className="space-y-4">
+      {/* Tabs. The Server Rules tab only renders when the active
+          server has posted its own rules; otherwise the row holds
+          the App Rules tab alone, matching the old single view. */}
+      {hasServerRules ? (
+        <div className="flex gap-1 border-b border-keep-border" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "app"}
+            onClick={() => setTab("app")}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-action ${
+              activeTab === "app"
+                ? "border-keep-action text-keep-text"
+                : "border-transparent text-keep-muted hover:text-keep-text"
+            }`}
+          >
+            {t("rules.appTab")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "server"}
+            onClick={() => setTab("server")}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-action ${
+              activeTab === "server"
+                ? "border-keep-action text-keep-text"
+                : "border-transparent text-keep-muted hover:text-keep-text"
+            }`}
+          >
+            {t("rules.serverTab")}
+          </button>
+        </div>
+      ) : null}
+
+      {sanitizedActive ? (
+        <div
+          key={activeTab}
+          ref={rulesRef}
+          className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
+          dangerouslySetInnerHTML={{ __html: sanitizedActive }}
+        />
+      ) : (
+        <p className="italic text-keep-muted">
+          {activeTab === "server"
+            ? t("rules.serverNone")
+            : t("rules.none")}
+        </p>
+      )}
+    </div>
+  ) : null;
+
+  const columnHeading =
+    "mb-2 shrink-0 border-b border-keep-border pb-1.5 font-action text-sm uppercase tracking-widest text-keep-muted";
+
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
@@ -111,69 +174,39 @@ export function RulesModal({ onClose }: Props) {
           <CloseButton onClick={onClose} />
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className={`min-h-0 flex-1 px-5 py-4 ${hasPrivacy ? "overflow-y-auto lg:overflow-hidden" : "overflow-y-auto"}`}>
           {error ? (
             <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
           ) : !data ? (
             <div className="text-keep-muted">{t("rules.loading")}</div>
-          ) : (
-            <div className="space-y-4">
-              {data.securityNoticeHtml.trim() ? (
-                <div
-                  className={`prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-3 ${USER_HTML_SCOPE_CLASS}`}
-                  dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
-                />
-              ) : null}
-
-              {/* Tabs. The Server Rules tab only renders when the active
-                  server has posted its own rules; otherwise the row holds
-                  the App Rules tab alone, matching the old single view. */}
-              {hasServerRules ? (
-                <div className="flex gap-1 border-b border-keep-border" role="tablist">
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === "app"}
-                    onClick={() => setTab("app")}
-                    className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-action ${
-                      activeTab === "app"
-                        ? "border-keep-action text-keep-text"
-                        : "border-transparent text-keep-muted hover:text-keep-text"
-                    }`}
-                  >
-                    {t("rules.appTab")}
-                  </button>
-                  <button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === "server"}
-                    onClick={() => setTab("server")}
-                    className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-action ${
-                      activeTab === "server"
-                        ? "border-keep-action text-keep-text"
-                        : "border-transparent text-keep-muted hover:text-keep-text"
-                    }`}
-                  >
-                    {t("rules.serverTab")}
-                  </button>
+          ) : hasPrivacy ? (
+            <div className="grid gap-x-6 gap-y-6 lg:h-full lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)]">
+              {/* Privacy column (left on wide screens, second on mobile). */}
+              <section className="order-2 flex min-h-0 flex-col lg:order-1" aria-labelledby="rules-privacy-heading">
+                <h3 id="rules-privacy-heading" className={columnHeading}>
+                  {t("rules.privacyColumn")}
+                </h3>
+                <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1.5">
+                  <div
+                    className={`prose prose-sm max-w-none rounded border border-keep-action/40 bg-keep-action/5 p-3 ${USER_HTML_SCOPE_CLASS}`}
+                    dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
+                  />
                 </div>
-              ) : null}
+              </section>
 
-              {sanitizedActive ? (
-                <div
-                  key={activeTab}
-                  ref={rulesRef}
-                  className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
-                  dangerouslySetInnerHTML={{ __html: sanitizedActive }}
-                />
-              ) : (
-                <p className="italic text-keep-muted">
-                  {activeTab === "server"
-                    ? t("rules.serverNone")
-                    : t("rules.none")}
-                </p>
-              )}
+              {/* Rules column (right on wide screens, FIRST on mobile so
+                  the long privacy statement can't bury the rules). */}
+              <section className="order-1 flex min-h-0 flex-col lg:order-2" aria-labelledby="rules-rules-heading">
+                <h3 id="rules-rules-heading" className={columnHeading}>
+                  {t("rules.title")}
+                </h3>
+                <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1.5">
+                  {rulesBlock}
+                </div>
+              </section>
             </div>
+          ) : (
+            rulesBlock
           )}
         </div>
 

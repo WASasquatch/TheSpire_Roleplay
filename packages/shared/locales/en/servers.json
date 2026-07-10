@@ -29,6 +29,7 @@
   },
   "rules": {
     "title": "Rules",
+    "privacyColumn": "Privacy Policy",
     "back": "← Back",
     "none": "No rules have been posted yet.",
     "loading": "loading...",

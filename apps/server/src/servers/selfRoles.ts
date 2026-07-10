@@ -51,8 +51,8 @@ import {
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "../routes/auth.js";
 import { areServersEnabled, getServerSettings, getSettings } from "../settings.js";
-import { serverAuthority } from "./authority.js";
 import { tFor } from "../i18n.js";
+import { serverAuthority } from "./authority.js";
 
 /**
  * Stable short hash of an onboarding config, matching settings.ts' hashWelcome

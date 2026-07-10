@@ -106,9 +106,10 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
   const [scheme, setScheme] = useReaderPref<ReaderScheme>("scriptorium.scheme", "auto");
 
   const [typoOpen, setTypoOpen] = useState(false);
-  // Mobile-only "Contents" drawer. The whole sidebar (info, Buy a Copy,
-  // chapters, codex) is `hidden md:flex` on desktop, so on phones it has
-  // no home; this slides the same panel in full-screen over the reader.
+  // Narrow-window "Contents" drawer. The whole sidebar (info, Buy a Copy,
+  // chapters, codex) only shows when the WINDOW is ≥768px wide (container
+  // query), so in a narrow window it has no home; this slides the same
+  // panel in full-screen over the reader.
   const [navOpen, setNavOpen] = useState(false);
   const [chapterIdx, setChapterIdx] = useState<number>(initialChapterIndex ?? 0);
   const [chapterBodies, setChapterBodies] = useState<Record<string, StoryChapter>>({});
@@ -354,7 +355,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
             <button
               type="button"
               onClick={() => setNavOpen(true)}
-              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-base leading-none text-keep-muted hover:text-keep-text md:hidden"
+              className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-base leading-none text-keep-muted hover:text-keep-text [@container(min-width:768px)]:hidden"
               title={t("reader.contentsTitle")}
               aria-label={t("reader.contentsAria")}
             >
@@ -368,8 +369,8 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
               title={t("backToScriptorium")}
             >
-              <span className="md:hidden" aria-hidden>←</span>
-              <span className="hidden md:inline">{t("back")}</span>
+              <span className="[@container(min-width:768px)]:hidden" aria-hidden>←</span>
+              <span className="hidden [@container(min-width:768px)]:inline">{t("back")}</span>
             </button>
           ) : null}
           <span className="flex-1" />
@@ -440,9 +441,10 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
                 container also tints the modal area beneath via the
                 gap + panel chrome contrast, so the sidebar reads as
                 a distinct frame instead of merging with the bg.
-                Hidden below md so the reading column gets the whole
-                viewport on mobile. */}
-            <aside className="keep-panel reader-sidebar hidden md:flex md:w-80 md:shrink-0 md:flex-col md:overflow-y-auto">
+                Hidden below a 768px WINDOW width (container query on
+                the FloatingWindow content box, not the viewport) so the
+                reading column gets the whole window when it's narrow. */}
+            <aside className="keep-panel reader-sidebar hidden [@container(min-width:768px)]:flex [@container(min-width:768px)]:w-80 [@container(min-width:768px)]:shrink-0 [@container(min-width:768px)]:flex-col [@container(min-width:768px)]:overflow-y-auto">
               <ReaderSidebar
                 detail={detail}
                 chapters={chapters}
@@ -517,13 +519,15 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
           </div>
         )}
 
-        {/* Mobile contents drawer. Full-screen panel (md:hidden) layered
-            over the whole reader card so phone readers can reach book
+        {/* Narrow-window contents drawer. Full-window panel (hidden once
+            the WINDOW is ≥768px wide, container query) layered over the
+            whole reader card so narrow-window readers can reach book
             info, Buy a Copy, chapters, and the codex — all of which live
-            in the desktop-only sidebar otherwise. Tapping a chapter jumps
-            + closes; the codex expands inline so it stays readable here. */}
+            in the wide-window-only sidebar otherwise. Tapping a chapter
+            jumps + closes; the codex expands inline so it stays readable
+            here. */}
         {navOpen && detail ? (
-          <div className="absolute inset-0 z-30 flex flex-col bg-keep-bg md:hidden">
+          <div className="absolute inset-0 z-30 flex flex-col bg-keep-bg [@container(min-width:768px)]:hidden">
             <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule bg-keep-banner px-3 py-2">
               <h3 className="min-w-0 flex-1 truncate font-action text-base">{t("reader.contents")}</h3>
               <button

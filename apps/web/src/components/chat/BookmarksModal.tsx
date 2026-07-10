@@ -181,11 +181,11 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
                   onClick={() => toggleSection(category)}
                   className="flex w-full items-center justify-between border-b border-keep-rule/60 bg-keep-banner/40 px-2 py-1 text-left text-xs uppercase tracking-widest text-keep-muted hover:bg-keep-banner/60"
                 >
-                  <span>
+                  <span className="min-w-0 truncate">
                     <span aria-hidden className="mr-1">{isCollapsed ? "▶" : "▼"}</span>
                     {category === UNCATEGORIZED ? t("bookmarks.uncategorized") : category}
                   </span>
-                  <span className="tabular-nums">{rows.length}</span>
+                  <span className="shrink-0 tabular-nums">{rows.length}</span>
                 </button>
                 {isCollapsed ? null : (
                   <ul className="divide-y divide-keep-rule/30">

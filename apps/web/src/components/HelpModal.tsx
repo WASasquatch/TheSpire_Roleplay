@@ -140,7 +140,7 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
               placeholder={t("modal.searchPlaceholder")}
-              className="flex-1 rounded border border-keep-border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
+              className="min-w-0 flex-1 rounded border border-keep-border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
             />
           ) : (
             <div className="flex flex-1 justify-end">

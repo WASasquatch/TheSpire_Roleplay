@@ -1367,14 +1367,17 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               className="shrink-0 border-b border-keep-rule bg-keep-banner/40"
               role="tablist"
             >
-              {/* Mobile (<md): collapse the tab strip to a full-width
-                  dropdown. The horizontal-scroll strip pushed the last
-                  tab(s) off-screen on phones and made discovery
-                  hostile, Gallery/Journal frequently fell into the
-                  hidden overflow on character profiles. This pattern
-                  mirrors AdminPanel + EarningDashboard, so the whole
-                  app reads consistently on mobile. */}
-              <div className="px-2 py-1 md:hidden">
+              {/* Narrow window (<768px container width): collapse the
+                  tab strip to a full-width dropdown. The horizontal-
+                  scroll strip pushed the last tab(s) off-screen on
+                  phones and made discovery hostile, Gallery/Journal
+                  frequently fell into the hidden overflow on character
+                  profiles. This pattern mirrors AdminPanel +
+                  EarningDashboard, so the whole app reads consistently
+                  on mobile. Keyed on the FloatingWindow's container
+                  width (not the viewport) so resizing the window
+                  swaps layouts too. */}
+              <div className="px-2 py-1 [@container(min-width:768px)]:hidden">
                 <select
                   value={activeTab}
                   onChange={(e) => setActiveTab(e.target.value as EditorTab)}
@@ -1386,12 +1389,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   ))}
                 </select>
               </div>
-              {/* Desktop (md+): the original horizontal strip. Hidden
-                  on mobile by the matching `md:hidden` on the dropdown
-                  above. `overflow-x-auto` is kept as a safety net for
-                  narrow desktop widths but should rarely engage with
+              {/* Wide window (768px+ container width): the original
+                  horizontal strip. Hidden on narrow windows by the
+                  matching container variant on the dropdown above.
+                  `overflow-x-auto` is kept as a safety net for
+                  narrow-ish windows but should rarely engage with
                   only 5-7 tabs at the typical desktop font size. */}
-              <div className="hidden flex-nowrap overflow-x-auto md:flex">
+              <div className="hidden flex-nowrap overflow-x-auto [@container(min-width:768px)]:flex">
                 {visible.map((t) => (
                   <button
                     key={t.id}

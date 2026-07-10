@@ -190,8 +190,8 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
   function reset() { setPage(0); setFilters(DEFAULT_FIND_FILTERS); }
 
   return (
-    <div className="flex flex-col gap-3 p-3 md:flex-row md:items-start">
-      <aside className="md:sticky md:top-0 md:w-64 md:shrink-0 md:border-r md:border-keep-rule md:pr-3">
+    <div className="flex flex-col gap-3 p-3 [@container(min-width:768px)]:flex-row [@container(min-width:768px)]:items-start">
+      <aside className="[@container(min-width:768px)]:sticky [@container(min-width:768px)]:top-0 [@container(min-width:768px)]:w-64 [@container(min-width:768px)]:shrink-0 [@container(min-width:768px)]:border-r [@container(min-width:768px)]:border-keep-rule [@container(min-width:768px)]:pr-3">
         <FilterRail
           filters={filters}
           onChange={(next) => { setPage(0); setFilters(next); }}
@@ -214,7 +214,7 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
             {total === 0 ? t("catalog.noMatches") : t("catalog.emptyPage")}
           </p>
         ) : (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:1280px)]:grid-cols-3">
             {entries.map((s) => (
               <StoryCardTile
                 key={s.id}
@@ -494,7 +494,7 @@ function MyStoriesTab({
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:1280px)]:grid-cols-3">
           {stories.map((s) => (
             <StoryCardTile
               key={s.id}
@@ -673,7 +673,7 @@ function SimpleStoryList({
     return <p className="p-6 text-center text-sm text-keep-muted">{emptyMessage}</p>;
   }
   return (
-    <div className="grid grid-cols-1 gap-3 p-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 p-3 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:1280px)]:grid-cols-3">
       {stories.map((s) => (
         <StoryCardTile key={s.id} card={s} onOpen={() => onOpenStory(s.id)} />
       ))}

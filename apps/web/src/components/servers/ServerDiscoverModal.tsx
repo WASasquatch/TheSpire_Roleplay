@@ -376,7 +376,7 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
           {canApply ? t("discover.emptyCatalogApply") : ""}
         </p>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 [@container(min-width:640px)]:grid-cols-2">
           <DiscoverColumn
             icon={<Flame className="h-3.5 w-3.5" aria-hidden="true" />}
             label={t("discover.popular")}
@@ -470,7 +470,7 @@ function CreateServerCta({
 
   return (
     <section className="overflow-hidden rounded border border-keep-action/50 bg-gradient-to-br from-keep-action/15 to-keep-action/5">
-      <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 p-4 [@container(min-width:640px)]:flex-row [@container(min-width:640px)]:items-center [@container(min-width:640px)]:justify-between">
         <div className="flex items-start gap-3">
           <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-keep-action/50 bg-keep-action/10 text-keep-action">
             <Crown className="h-5 w-5" aria-hidden="true" />
@@ -488,7 +488,7 @@ function CreateServerCta({
         <button
           type="button"
           onClick={onCreate}
-          className="group flex shrink-0 items-center justify-center gap-1.5 self-start rounded border border-keep-action bg-keep-action px-4 py-2 text-xs font-semibold uppercase tracking-widest text-keep-bg transition-colors hover:bg-keep-action/90 sm:self-auto"
+          className="group flex shrink-0 items-center justify-center gap-1.5 self-start rounded border border-keep-action bg-keep-action px-4 py-2 text-xs font-semibold uppercase tracking-widest text-keep-bg transition-colors hover:bg-keep-action/90 [@container(min-width:640px)]:self-auto"
         >
           {rejected ? <RotateCcw className="h-4 w-4" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />}
           {rejected ? t("discover.cta.tryAgain") : t("discover.createYourServer")}

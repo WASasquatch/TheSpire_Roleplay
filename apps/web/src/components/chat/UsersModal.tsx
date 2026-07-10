@@ -108,7 +108,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
               onChange={(e) => setQ(e.target.value)}
               placeholder={t("users.searchPlaceholder")}
               autoFocus
-              className="flex-1 rounded border border-keep-border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
+              className="min-w-0 flex-1 rounded border border-keep-border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
             />
           </div>
           {/* Filter + sort controls. Render even when the catalog
@@ -215,7 +215,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
                           <button
                             type="button"
                             onClick={() => onOpenName(c.name)}
-                            className={`rounded px-1 py-0.5 text-left hover:bg-keep-panel ${
+                            className={`min-w-0 truncate rounded px-1 py-0.5 text-left hover:bg-keep-panel ${
                               c.id === u.activeCharacterId ? "font-semibold text-keep-action" : ""
                             }`}
                             title={

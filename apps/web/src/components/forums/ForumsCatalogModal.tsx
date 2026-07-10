@@ -433,10 +433,17 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
             pane (see below) — breadcrumbs left, actions right — so it
             never floats over the rail column. */}
 
-        {/* Body = content + rail; the transition wrapper covers BOTH. */}
-        <div ref={bodyRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row">
+        {/* Body = content + rail; the transition wrapper covers BOTH.
+            Layout splits use CONTAINER queries (the FloatingWindow content
+            box is an inline-size container): the rail shows when the
+            WINDOW is wide, not the screen — a window resized narrow swaps
+            to the drawer layout instead of clipping. `min-w-0` on the
+            content pane is load-bearing: without it wide topic rows set
+            the row's min-content width past the window edge and the rail
+            gets clipped off the right side. */}
+        <div ref={bodyRef} className="relative flex min-h-0 flex-1 flex-col overflow-hidden [@container(min-width:1024px)]:flex-row">
           {/* Content pane */}
-          <div className="order-2 flex min-h-0 flex-1 flex-col lg:order-1">
+          <div className="order-2 flex min-h-0 min-w-0 flex-1 flex-col [@container(min-width:1024px)]:order-1">
             {/* Chrome bar: breadcrumbs on the left, actions (settings ·
                 notifications · close) aligned right. One predictable
                 home for the controls on every view — nothing floats
@@ -487,14 +494,14 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                   )}
                 </nav>
                 <div className="flex shrink-0 items-center gap-1.5">
-                  {/* Mobile: open the forum-list drawer (the rail is hidden
-                      under lg). Desktop keeps the always-visible rail. */}
+                  {/* Narrow window / mobile: open the forum-list drawer
+                      (the rail shows itself once the WINDOW is wide). */}
                   <button
                     type="button"
                     onClick={() => setDrawerOpen(true)}
                     title={t("chrome.browseForums")}
                     aria-label={t("chrome.browseForums")}
-                    className="rounded border border-keep-rule bg-keep-bg/70 p-1.5 text-keep-muted hover:border-keep-action hover:text-keep-action lg:hidden"
+                    className="rounded border border-keep-rule bg-keep-bg/70 p-1.5 text-keep-muted hover:border-keep-action hover:text-keep-action [@container(min-width:1024px)]:hidden"
                   >
                     <MessagesSquare className="h-4 w-4" aria-hidden="true" />
                   </button>
@@ -621,9 +628,10 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
             )}
           </div>
 
-          {/* Forums rail — desktop only (right side, mirrors the chat
-              userlist). On mobile it lives in the slide-out drawer below. */}
-          <aside className="hidden shrink-0 lg:order-2 lg:flex lg:min-h-0 lg:w-64 lg:flex-col lg:border-l lg:border-keep-rule lg:bg-keep-banner/20">
+          {/* Forums rail — wide-window only (right side, mirrors the chat
+              userlist). In narrow windows (and on phones) it lives in the
+              slide-out drawer below. */}
+          <aside className="hidden shrink-0 [@container(min-width:1024px)]:order-2 [@container(min-width:1024px)]:flex [@container(min-width:1024px)]:min-h-0 [@container(min-width:1024px)]:w-64 [@container(min-width:1024px)]:flex-col [@container(min-width:1024px)]:border-l [@container(min-width:1024px)]:border-keep-rule [@container(min-width:1024px)]:bg-keep-banner/20">
             <div className="flex items-center justify-between px-3 py-1.5">
               <span className="text-xs uppercase tracking-widest text-keep-muted">
                 {t("chrome.forums")} <span className="text-keep-rule">({list?.length ?? "…"})</span>
@@ -652,10 +660,11 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
           </aside>
         </div>
 
-        {/* Mobile forum-list drawer — slides in from the right (mirrors the
-            chat userlist); hidden on lg where the rail is always present. */}
+        {/* Narrow-window forum-list drawer — slides in from the right
+            (mirrors the chat userlist); hides itself once the WINDOW is
+            wide enough for the always-visible rail. */}
         {drawerOpen ? (
-          <div className="absolute inset-0 z-40 flex lg:hidden">
+          <div className="absolute inset-0 z-40 flex [@container(min-width:1024px)]:hidden">
             <button
               type="button"
               aria-label={t("chrome.closeForumList")}

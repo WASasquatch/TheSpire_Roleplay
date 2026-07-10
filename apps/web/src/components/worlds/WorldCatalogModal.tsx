@@ -318,7 +318,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer, onCrea
               {vibeOpen ? "▾" : "▸"} {t("catalog.vibeFilters")}{anyVibeFilter ? ` (${Object.keys(vibeRanges).length})` : ""}
             </button>
             {vibeOpen ? (
-              <div className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">
+              <div className="mt-2 grid grid-cols-1 gap-1 [@container(min-width:640px)]:grid-cols-2">
                 {WORLD_VIBE_AXES.map((axis) => {
                   const r = vibeRanges[axis.key];
                   const active = !!r;
@@ -416,7 +416,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer, onCrea
               <div className="mb-3 text-[10px] uppercase tracking-widest text-keep-muted">
                 {t("catalog.worldCount", { count: total })}
               </div>
-              <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <ul className="grid grid-cols-1 gap-3 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:1024px)]:grid-cols-3">
                 {entries.map((e) => (
                   <li
                     key={e.id}

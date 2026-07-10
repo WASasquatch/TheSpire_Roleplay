@@ -56,9 +56,10 @@ function roleClasses(role: Role): string {
  * introduction, and a Message button. Staff can edit the bio/intro on
  * their OWN card inline.
  *
- * Layout: a centered flex-wrap grid, up to 4 cards per row on wide
- * screens, narrowing to 2 then 1; cards stay centered when there are
- * fewer than a full row. Full-width single column on mobile.
+ * Layout: a centered flex-wrap grid, up to 4 cards per row in a wide
+ * window, narrowing to 2 then 1; cards stay centered when there are
+ * fewer than a full row. Breakpoints key on the FloatingWindow's own
+ * width (container queries), so resizing the window reflows the grid.
  */
 export function StaffModal({
   onClose,
@@ -115,9 +116,12 @@ export function StaffModal({
               {cards.map((c) => (
                 <li
                   key={c.userId}
-                  // 1 / row on mobile, 2 on sm, 4 on xl; flex-wrap +
-                  // justify-center keeps a partial last row centered.
-                  className="w-full sm:w-[calc(50%-0.5rem)] xl:w-[calc(25%-0.75rem)]"
+                  // 1 / row in a narrow window, 2 from 640px, 4 from 1280px —
+                  // keyed on the WINDOW's width (FloatingWindow is a container),
+                  // not the viewport, so a narrow-resized window reflows too.
+                  // flex-wrap + justify-center keeps a partial last row centered;
+                  // min-w-0 stops long card content from stretching the row.
+                  className="w-full min-w-0 [@container(min-width:640px)]:w-[calc(50%-0.5rem)] [@container(min-width:1280px)]:w-[calc(25%-0.75rem)]"
                 >
                   <StaffCardView
                     card={c}

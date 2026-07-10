@@ -191,7 +191,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
           <select
             value={tab}
             onChange={(e) => setTab(e.target.value as typeof tab)}
-            className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs uppercase tracking-widest text-keep-text outline-none focus:border-keep-action lg:hidden"
+            className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs uppercase tracking-widest text-keep-text outline-none focus:border-keep-action [@container(min-width:1024px)]:hidden"
             aria-label={t("header.sectionAria")}
           >
             <option value="overview">{t("tabs.overview")}</option>
@@ -205,9 +205,9 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
             <option value="settings">{t("tabs.settings")}</option>
           </select>
           {/* Desktop: the horizontal tab strip stays as the primary
-              affordance. Hidden on mobile (lg:flex pairs with the
-              `lg:hidden` on the select above). */}
-          <nav className="keep-scroll-strip hidden min-w-0 flex-1 gap-1 overflow-x-auto text-xs uppercase tracking-widest lg:flex">
+              affordance. Hidden in narrow windows (the container flex
+              pairs with the container hidden on the select above). */}
+          <nav className="keep-scroll-strip hidden min-w-0 flex-1 gap-1 overflow-x-auto text-xs uppercase tracking-widest [@container(min-width:1024px)]:flex">
             <TabBtn includeShrink active={tab === "overview"} onClick={() => setTab("overview")}>{t("tabs.overview")}</TabBtn>
             <TabBtn includeShrink active={tab === "ledger"} onClick={() => setTab("ledger")}>{t("tabs.activity")}</TabBtn>
             <TabBtn includeShrink active={tab === "rankings"} onClick={() => setTab("rankings")}>{t("tabs.rankings")}</TabBtn>
@@ -499,10 +499,10 @@ function FlashSaleSection({ flashSale, previewName, previewAvatarUrl, onNavigate
   const colsClass = picks.length === 1
     ? ""
     : picks.length === 2
-      ? "sm:grid-cols-2"
+      ? "[@container(min-width:640px)]:grid-cols-2"
       : picks.length === 3
-        ? "sm:grid-cols-2 lg:grid-cols-3"
-        : "sm:grid-cols-2 lg:grid-cols-4";
+        ? "[@container(min-width:640px)]:grid-cols-2 [@container(min-width:1024px)]:grid-cols-3"
+        : "[@container(min-width:640px)]:grid-cols-2 [@container(min-width:1024px)]:grid-cols-4";
 
   return (
     <section className="relative overflow-hidden rounded-lg border-2 border-keep-action/60 bg-gradient-to-br from-keep-action/15 via-keep-bg/20 to-keep-bg/40 p-5 shadow-[0_0_28px_-6px_var(--keep-action,rgba(255,128,0,0.45))]">
@@ -976,7 +976,7 @@ function RankingsTab({ initialBoard }: { initialBoard?: RankingBoardKey }) {
   return (
     <div className="space-y-6">
       <RankingsSpotlight champions={data.champions} />
-      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid gap-4 [@container(min-width:1024px)]:grid-cols-2 [@container(min-width:1536px)]:grid-cols-3">
         {data.boards.map((board) =>
           board.entries.length > 0 ? <RankingBoardCard key={board.key} board={board} /> : null,
         )}
@@ -1013,7 +1013,7 @@ function ScriptoriumRankingsSection({ data }: { data: ScriptoriumRankingsRespons
         <h3 className="font-action text-base">{t("rankings.scriptoriumTitle")}</h3>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("rankings.booksAndAuthors")}</span>
       </header>
-      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid gap-4 [@container(min-width:1024px)]:grid-cols-2 [@container(min-width:1536px)]:grid-cols-3">
         {authorBoards.map((b) => (
           <section key={b.key} className="rounded border border-keep-rule bg-keep-bg/40 p-3">
             <header className="mb-2 flex items-baseline justify-between">
@@ -1107,7 +1107,7 @@ function FamiliarRankingsSection({ data }: { data: FamiliarRankingsResponse }) {
         <h3 className="font-action text-base">{t("rankings.familiarTitle")}</h3>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("rankings.eidolonTamer")}</span>
       </header>
-      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid gap-4 [@container(min-width:1024px)]:grid-cols-2 [@container(min-width:1536px)]:grid-cols-3">
         {boards.map((b) => (
           <section key={b.key} className="rounded border border-keep-rule bg-keep-bg/40 p-3">
             <header className="mb-2 flex items-baseline justify-between">
@@ -1170,7 +1170,7 @@ function GameRankingsSection({ data }: { data: GameRankingsResponse }) {
           {t("rankings.gamesTracked", { count: data.games.length })}
         </span>
       </header>
-      <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+      <div className="grid gap-4 [@container(min-width:1024px)]:grid-cols-2 [@container(min-width:1536px)]:grid-cols-3">
         {data.overall.length > 0 ? <OverallGameBoardCard rows={data.overall} /> : null}
         {data.games.map((g) => (
           <PerGameBoardCard key={g.gameKind} gameKind={g.gameKind} label={g.label} rows={g.leaderboard} />
@@ -1318,7 +1318,7 @@ function RankingsSpotlight({ champions }: { champions: RankingChampion[] }) {
           ))}
         </div>
       </div>
-      <div className="flex flex-col items-center gap-3 text-center sm:flex-row sm:gap-5 sm:text-left">
+      <div className="flex flex-col items-center gap-3 text-center [@container(min-width:640px)]:flex-row [@container(min-width:640px)]:gap-5 [@container(min-width:640px)]:text-left">
         {/* `key` tied to the champion pool id forces a full remount of
             the avatar on rotation. Without this, React reuses the
             BorderedAvatar instance and only swaps the template HTML
@@ -1970,7 +1970,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
             // `auto-rows-fr` keeps the per-row card heights aligned
             // so a card with no description doesn't run shorter than
             // its neighbor and break the visual rhythm.
-            <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+            <div className="grid auto-rows-fr gap-3 [@container(min-width:768px)]:grid-cols-2">
               {owned.map((s) => (
                 <div key={s.key} data-shop-row={s.key} className="rounded">
                   <OwnedStyleCard
@@ -1995,7 +1995,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
           {available.length === 0 ? (
             <p className="text-sm text-keep-muted">{t("styles.allOwned")}</p>
           ) : (
-            <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+            <div className="grid auto-rows-fr gap-3 [@container(min-width:768px)]:grid-cols-2">
               {available.map((s) => (
                 <div key={s.key} data-shop-row={s.key} className="rounded">
                   <AvailableStyleCard
@@ -2454,7 +2454,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
         {owned.length === 0 ? (
           <p className="text-sm text-keep-muted">{t("borders.noneOwned")}</p>
         ) : (
-          <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+          <div className="grid auto-rows-fr gap-3 [@container(min-width:768px)]:grid-cols-2">
             {owned.map(({ tier, rank }) => (
               <BorderCard
                 key={tier.rankKey}
@@ -2478,7 +2478,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
         {available.length === 0 ? (
           <p className="text-sm text-keep-muted">{t("borders.noneAvailable")}</p>
         ) : (
-          <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+          <div className="grid auto-rows-fr gap-3 [@container(min-width:768px)]:grid-cols-2">
             {available.map(({ tier, rank }) => (
               <BorderCard
                 key={tier.rankKey}
@@ -2501,7 +2501,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
           <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
             {t("lockedCount", { count: locked.length })}
           </h3>
-          <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+          <div className="grid auto-rows-fr gap-3 [@container(min-width:768px)]:grid-cols-2">
             {locked.map(({ tier, rank }) => (
               <BorderCard
                 key={tier.rankKey}
@@ -2551,7 +2551,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
               <h4 className="mb-2 font-action text-xs uppercase tracking-widest text-keep-muted">
                 {t("ownedCount", { count: ownedFreeform.length })}
               </h4>
-              <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+              <div className="grid auto-rows-fr gap-3 [@container(min-width:768px)]:grid-cols-2">
                 {ownedFreeform.map((b) => (
                   <div key={b.key} data-shop-row={b.key} className="rounded">
                     <FreeformBorderCard
@@ -2575,7 +2575,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
               <h4 className="mb-2 font-action text-xs uppercase tracking-widest text-keep-muted">
                 {t("availableCount", { count: availableFreeform.length })}
               </h4>
-              <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
+              <div className="grid auto-rows-fr gap-3 [@container(min-width:768px)]:grid-cols-2">
                 {availableFreeform.map((b) => {
                   const sale = flashSalePriceFor(flashSale, "freeformBorder", b.key, b.cost);
                   return (
@@ -2778,7 +2778,7 @@ function FreeformBorderCard({
               {t("borders.slotCount", { count: slots.length })}
             </span>
           </div>
-          <div className="grid gap-2 sm:grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]">
+          <div className="grid gap-2 [@container(min-width:640px)]:grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]">
             {slots.map(({ name: slot, defaultColor }) => {
               // Starting swatch precedence:
               //   1. User's current draft pick (if set).
@@ -3275,7 +3275,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey, onCloseDashboard }: {
       {/* Grid container, pre-arranges so adding a Flair row in admin
           auto-fills the next grid slot rather than requiring another
           layout pass. */}
-      <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid auto-rows-fr gap-3 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:1024px)]:grid-cols-3">
         {inlineAvatarRow && inlineAvatarSale ? (
           <section data-shop-row={inlineAvatarRow.key} className="flex flex-col rounded border border-keep-rule bg-keep-bg/40 p-3">
             <header className="flex flex-wrap items-baseline justify-between gap-2">
@@ -3593,7 +3593,7 @@ function RoomTransitionsTab({ snapshot }: {
           {equippedKey === null ? t("transitions.offActive") : t("transitions.turnOff")}
         </button>
       </div>
-      <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      <ul className="mt-3 grid grid-cols-1 gap-2 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:1024px)]:grid-cols-3">
         {ROOM_TRANSITIONS.map((transition) => {
           const isOwned = owned.has(transition.key);
           const isEquipped = equippedKey === transition.key;
@@ -4531,7 +4531,7 @@ function ItemsTab({
           inline. Same select-on-mobile pattern the rest of the
           dashboard / admin panel uses to keep tab strips from
           overflowing tight viewports. */}
-      <div className="flex items-center gap-2 border-b border-keep-rule pb-2 md:hidden">
+      <div className="flex items-center gap-2 border-b border-keep-rule pb-2 [@container(min-width:768px)]:hidden">
         <select
           value={tab}
           onChange={(e) => setTab(e.target.value as typeof tab)}
@@ -4555,7 +4555,7 @@ function ItemsTab({
           from the muted "manage" tabs so a user opening this view
           for the first time spots the shop entry point without
           hunting through the strip. */}
-      <div className="hidden flex-wrap items-center gap-2 border-b border-keep-rule pb-2 text-xs uppercase tracking-widest md:flex">
+      <div className="hidden flex-wrap items-center gap-2 border-b border-keep-rule pb-2 text-xs uppercase tracking-widest [@container(min-width:768px)]:flex">
         <button
           type="button"
           onClick={() => setTab("inventory")}
@@ -4674,7 +4674,7 @@ function ItemsTab({
                   // to the catalog above. `auto-rows-fr` keeps cards in
                   // the same row height-aligned regardless of which
                   // ones have a 3-line description vs a one-liner.
-                  <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <div className="grid auto-rows-fr gap-3 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:1024px)]:grid-cols-3">
                     {filtered.map((entry) => {
                       const row = catalogByKey.get(entry.itemKey);
                       if (!row) {
@@ -4721,8 +4721,8 @@ function ItemsTab({
             const labelFor = (c: ItemCategory | "all") => c === "all" ? t("items.all") : t(`items.category.${c}`, { defaultValue: ITEM_CATEGORY_LABELS[c] });
             return (
               <>
-                {/* Mobile dropdown */}
-                <div className="md:hidden">
+                {/* Narrow-window dropdown */}
+                <div className="[@container(min-width:768px)]:hidden">
                   <select
                     value={shopCategory}
                     onChange={(e) => setShopCategory(e.target.value as ItemCategory | "all")}
@@ -4736,8 +4736,8 @@ function ItemsTab({
                     ))}
                   </select>
                 </div>
-                {/* Desktop chips */}
-                <div className="hidden flex-wrap gap-1 border-b border-keep-rule/40 pb-2 text-[10px] uppercase tracking-widest md:flex">
+                {/* Wide-window chips */}
+                <div className="hidden flex-wrap gap-1 border-b border-keep-rule/40 pb-2 text-[10px] uppercase tracking-widest [@container(min-width:768px)]:flex">
                   {cats.map((c) => {
                     const active = shopCategory === c;
                     return (
@@ -4798,7 +4798,7 @@ function ItemsTab({
             // card heights aligned even when one card has a longer
             // description than its neighbor.
             return (
-              <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid auto-rows-fr gap-3 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:1024px)]:grid-cols-3">
                 {filtered.map((item) => {
                   const owned = inventoryByKey.get(item.key)?.quantity ?? 0;
                   return (
@@ -5256,7 +5256,7 @@ function CollectionEditor({
                       : t("items.noneInCategory")}
                   </p>
                 ) : (
-                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-1 [@container(min-width:640px)]:grid-cols-2">
                     {filtered.map(({ entry, row }) => {
                       const alreadyPinnedElsewhere = pinnedKeysExceptEditing.has(entry.itemKey);
                       return (

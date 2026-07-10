@@ -146,9 +146,9 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
         {detail === null ? (
           <p className="p-4 italic text-keep-muted">{t("common:loadingDots")}</p>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+          <div className="flex min-h-0 flex-1 flex-col [@container(min-width:768px)]:flex-row">
             {/* Left: page tree */}
-            <aside className="flex shrink-0 flex-col border-keep-rule md:w-72 md:border-r">
+            <aside className="flex shrink-0 flex-col border-keep-rule [@container(min-width:768px)]:w-72 [@container(min-width:768px)]:border-r">
               <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-1.5 text-xs">
                 <span className="uppercase tracking-widest text-keep-muted">{t("editor.pages")}</span>
                 <button
@@ -204,7 +204,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
             </aside>
 
             {/* Right: editor pane */}
-            <section className="min-h-0 flex-1 overflow-y-auto p-4">
+            <section className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4">
               {kbView === "entries" ? (
                 <WorldEntitiesTab worldId={worldId} detail={detail} onChanged={load} />
               ) : kbView === "arcs" ? (
@@ -588,7 +588,7 @@ function WorldMetaEditor({
               }}
               placeholder={t("editor.addTagPlaceholder")}
               maxLength={32}
-              className="flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
+              className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
             />
             <button
               type="button"
@@ -701,7 +701,7 @@ function WorldMetaEditor({
         <p className="text-[11px] text-keep-muted">
           {t("editor.vibeIntro")}
         </p>
-        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <ul className="grid grid-cols-1 gap-2 [@container(min-width:640px)]:grid-cols-2">
           {WORLD_VIBE_AXES.map((axis) => {
             const value = vibeStats[axis.key];
             return (
@@ -1129,7 +1129,7 @@ function PageEditor({
         </span>
       </label>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 [@container(min-width:640px)]:grid-cols-2">
         <label className="block">
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("page.parentPage")}</span>
           <select

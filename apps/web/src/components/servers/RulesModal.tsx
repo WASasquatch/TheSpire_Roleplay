@@ -50,11 +50,12 @@ type RulesTab = "app" | "server";
  * App Rules tab renders, so the view is byte-identical to the old
  * single-rules modal.
  *
- * Layout: on wide screens the privacy statement and the rules render as
+ * Layout: in wide WINDOWS (container query on the FloatingWindow content
+ * box, not the viewport) the privacy statement and the rules render as
  * two INDEPENDENTLY SCROLLING columns (privacy left, rules right), each
  * under its own header. The privacy statement grew into a full policy
  * document; stacked above the rules it buried them below several screens
- * of scrolling. On narrow screens the columns stack with the RULES first
+ * of scrolling. In narrow windows the columns stack with the RULES first
  * for the same reason. The privacy body keeps its action-tinted band.
  */
 export function RulesModal({ onClose }: Props) {
@@ -195,7 +196,7 @@ export function RulesModal({ onClose }: Props) {
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
           ref={setScrollerEl}
-          className={`min-h-0 flex-1 px-5 py-4 ${hasPrivacy ? "overflow-y-auto lg:overflow-hidden" : "overflow-y-auto"}`}
+          className={`min-h-0 flex-1 px-5 py-4 ${hasPrivacy ? "overflow-y-auto [@container(min-width:1024px)]:overflow-hidden" : "overflow-y-auto"}`}
         >
           {error ? (
             <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
@@ -203,12 +204,12 @@ export function RulesModal({ onClose }: Props) {
             <div className="text-keep-muted">{t("rules.loading")}</div>
           ) : hasPrivacy ? (
             <>
-              {/* Mobile-only sticky jump tabs — either document one tap away
-                  while the two stack. Hidden on desktop where they sit side
-                  by side. */}
+              {/* Narrow-window sticky jump tabs — either document one tap away
+                  while the two stack. Hidden once the WINDOW is wide enough
+                  for the columns to sit side by side. */}
               <nav
                 aria-label={t("rules.jumpAria")}
-                className="sticky top-0 z-10 -mx-5 -mt-4 mb-3 flex gap-1 border-b border-keep-border bg-keep-bg/95 px-5 py-2 backdrop-blur lg:hidden"
+                className="sticky top-0 z-10 -mx-5 -mt-4 mb-3 flex gap-1 border-b border-keep-border bg-keep-bg/95 px-5 py-2 backdrop-blur [@container(min-width:1024px)]:hidden"
               >
                 <button
                   type="button"
@@ -235,17 +236,17 @@ export function RulesModal({ onClose }: Props) {
                   {t("rules.title")}
                 </button>
               </nav>
-              <div className="grid gap-x-6 gap-y-6 lg:h-full lg:grid-cols-2 lg:grid-rows-[minmax(0,1fr)]">
-                {/* Privacy column: left on wide screens, first on mobile. */}
+              <div className="grid grid-cols-1 gap-x-6 gap-y-6 [@container(min-width:1024px)]:h-full [@container(min-width:1024px)]:grid-cols-2 [@container(min-width:1024px)]:grid-rows-[minmax(0,1fr)]">
+                {/* Privacy column: left in wide windows, first when stacked. */}
                 <section
                   ref={privacySectionRef}
-                  className="flex min-h-0 scroll-mt-12 flex-col lg:scroll-mt-0"
+                  className="flex min-h-0 min-w-0 scroll-mt-12 flex-col [@container(min-width:1024px)]:scroll-mt-0"
                   aria-labelledby="rules-privacy-heading"
                 >
                   <h3 id="rules-privacy-heading" className={columnHeading}>
                     {t("rules.privacyColumn")}
                   </h3>
-                  <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1.5">
+                  <div className="[@container(min-width:1024px)]:min-h-0 [@container(min-width:1024px)]:flex-1 [@container(min-width:1024px)]:overflow-y-auto [@container(min-width:1024px)]:pr-1.5">
                     <div
                       className={`prose prose-sm max-w-none ${USER_HTML_SCOPE_CLASS}`}
                       dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.securityNoticeHtml) }}
@@ -253,22 +254,22 @@ export function RulesModal({ onClose }: Props) {
                   </div>
                 </section>
 
-                {/* Rules column: right on wide screens, below privacy on
-                    mobile (the sticky tabs keep it one tap away). */}
+                {/* Rules column: right in wide windows, below privacy when
+                    stacked (the sticky tabs keep it one tap away). */}
                 <section
                   ref={rulesSectionRef}
-                  className="flex min-h-0 scroll-mt-12 flex-col lg:scroll-mt-0"
+                  className="flex min-h-0 min-w-0 scroll-mt-12 flex-col [@container(min-width:1024px)]:scroll-mt-0"
                   aria-labelledby="rules-rules-heading"
                 >
                   <h3 id="rules-rules-heading" className={columnHeading}>
                     {t("rules.title")}
                   </h3>
-                  <div className="lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1.5">
+                  <div className="[@container(min-width:1024px)]:min-h-0 [@container(min-width:1024px)]:flex-1 [@container(min-width:1024px)]:overflow-y-auto [@container(min-width:1024px)]:pr-1.5">
                     {rulesBlock}
                   </div>
                 </section>
               </div>
-              <BackToTop scroller={scrollerEl} className="absolute bottom-12 right-4 lg:hidden" />
+              <BackToTop scroller={scrollerEl} className="absolute bottom-12 right-4 [@container(min-width:1024px)]:hidden" />
             </>
           ) : (
             rulesBlock

@@ -393,8 +393,9 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) {
         </div>
       </div>
 
-      {/* Fields. */}
-      <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+      {/* Fields. Two-column split keys on the WINDOW width (container query),
+          not the viewport, so a narrow-resized window stacks the fields. */}
+      <div className="grid gap-x-4 gap-y-3 [@container(min-width:640px)]:grid-cols-2">
         <div>
           <label className={labelClass} htmlFor="aff-title">{t("portal.fieldTitle")}</label>
           <input
@@ -419,7 +420,7 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) {
             <p className="mt-1 text-[11px] text-keep-accent">{t("portal.urlHint")}</p>
           ) : null}
         </div>
-        <div className="sm:col-span-2">
+        <div className="[@container(min-width:640px)]:col-span-2">
           <label className={labelClass} htmlFor="aff-desc">{t("portal.fieldDescription")}</label>
           <textarea
             id="aff-desc"
@@ -456,7 +457,7 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) {
             <p className="mt-1 text-[11px] text-keep-accent">{t("portal.urlHint")}</p>
           ) : null}
         </div>
-        <div className="sm:col-span-2">
+        <div className="[@container(min-width:640px)]:col-span-2">
           <label className={labelClass}>{t("portal.fieldTags")}</label>
           <div className="mt-1">
             <TagInput
@@ -589,7 +590,7 @@ function MySubmissionRow({
               readOnly
               value={entry.linkBackUrl}
               onFocus={(e) => e.currentTarget.select()}
-              className="w-full rounded border border-keep-rule bg-keep-bg/60 px-2 py-1 text-xs text-keep-text"
+              className="w-full min-w-0 rounded border border-keep-rule bg-keep-bg/60 px-2 py-1 text-xs text-keep-text"
             />
             <button
               type="button"

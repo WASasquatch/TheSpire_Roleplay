@@ -2927,7 +2927,7 @@ function ServerSettingsBody({ detail, viewer, onSaved, findRequest, onFindHandle
           value={tab}
           onChange={(e) => changeTab(e.target.value as ServerSettingsTab)}
           aria-label={t("console.shell.sectionAria")}
-          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm md:hidden"
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm [@container(min-width:768px)]:hidden"
         >
           {groupVisibleTabs(tabs).map(([group, items]) => (
             <optgroup key={group} label={t(GROUP_LABEL_KEY[group])}>
@@ -2935,7 +2935,7 @@ function ServerSettingsBody({ detail, viewer, onSaved, findRequest, onFindHandle
             </optgroup>
           ))}
         </select>
-        <div data-tour="server-settings-tab-strip" className="hidden min-w-0 flex-wrap items-center gap-1 md:flex">
+        <div data-tour="server-settings-tab-strip" className="hidden min-w-0 flex-wrap items-center gap-1 [@container(min-width:768px)]:flex">
           {withGroupSeparators(tabs).map((entry) =>
             entry.kind === "separator" ? (
               <span
@@ -3105,9 +3105,10 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
           {searchReady && mobileSearchOpen ? (
             /* Find-a-setting, mobile: the search row swaps in over the
                normal header content; picking a hit or tapping the X swaps
-               it back. The input autofocuses. md:hidden so a viewport grown
-               to desktop falls back to the normal row (inline search). */
-            <div className="min-w-0 flex-1 md:hidden">
+               it back. The input autofocuses. Container-hidden ≥768px so a
+               WINDOW grown to desktop width falls back to the normal row
+               (inline search). */
+            <div className="min-w-0 flex-1 [@container(min-width:768px)]:hidden">
               <FindSetting
                 layout="mobile"
                 entries={CONSOLE_SEARCH_ENTRIES}
@@ -3120,14 +3121,14 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
               />
             </div>
           ) : null}
-          <div className={`${searchReady && mobileSearchOpen ? "hidden md:flex" : "flex"} min-w-0 flex-1 items-center justify-end gap-2`}>
+          <div className={`${searchReady && mobileSearchOpen ? "hidden [@container(min-width:768px)]:flex" : "flex"} min-w-0 flex-1 items-center justify-end gap-2`}>
             {searchReady ? (
               <>
                 {/* Find-a-setting, desktop: type what you're looking for and
                     jump straight to the tab that owns it. Results pop over
                     the body, anchored under the input. Ctrl/Cmd+K focuses
                     it from anywhere in the console. */}
-                <div className="hidden md:block">
+                <div className="hidden [@container(min-width:768px)]:block">
                   <FindSetting
                     layout="desktop"
                     entries={CONSOLE_SEARCH_ENTRIES}
@@ -3144,7 +3145,7 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
                   onClick={() => setMobileSearchOpen(true)}
                   title={tAdmin("panel.search.open")}
                   aria-label={tAdmin("panel.search.open")}
-                  className="shrink-0 rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text md:hidden"
+                  className="shrink-0 rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text [@container(min-width:768px)]:hidden"
                 >
                   <Search className="h-4 w-4" aria-hidden="true" />
                 </button>

@@ -358,10 +358,20 @@ export function FloatingWindow({
       >
         {bar(mobile)}
         {/* Children stay mounted while collapsed (display:none) so editors
-            keep their unsaved state; only the box shrinks to the bar. */}
+            keep their unsaved state; only the box shrinks to the bar.
+
+            `container-type: inline-size` makes this content box a CSS
+            container: window contents must key their layout splits
+            (rails, side-by-side panes, grids) on `[@container(min-width:
+            …px)]:` variants instead of viewport `lg:`/`md:` — the window
+            is user-resizable, so viewport media queries lie about the
+            space actually available and desktop layouts would clip
+            instead of adapting. On the mobile fullscreen path the
+            container equals the viewport, so container variants behave
+            exactly like the media queries they replace. */}
         <div
           style={!mobile && collapsed ? { display: "none" } : undefined}
-          className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
+          className="relative flex min-h-0 flex-1 flex-col overflow-hidden [container-type:inline-size]"
         >
           {children}
         </div>

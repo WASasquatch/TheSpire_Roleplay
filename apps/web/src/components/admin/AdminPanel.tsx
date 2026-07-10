@@ -387,7 +387,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
               model (docs/ADMIN_IA.md §2: Keeping watch / Members & roles
               / Communities & content / Site setup / Growth & email /
               Backups & maintenance) surfaces on both layouts. */}
-          <div className="flex items-center gap-2 px-2 py-2 md:hidden">
+          <div className="flex items-center gap-2 px-2 py-2 [@container(min-width:768px)]:hidden">
             {mobileSearchOpen ? (
               /* Find-a-setting, mobile: the search row swaps in over the
                  normal title + dropdown row; picking a hit or tapping the
@@ -442,7 +442,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
               label first. The walk threads the visible-tab list through
               `withGroupSeparators` so a hidden tab (gated out by a
               missing permission) doesn't leave an orphaned divider. */}
-          <div className="hidden items-center gap-2 px-4 py-2 md:flex">
+          <div className="hidden items-center gap-2 px-4 py-2 [@container(min-width:768px)]:flex">
             <nav data-tour="admin-tab-strip" className="flex min-w-0 flex-1 flex-wrap items-center gap-1 text-xs uppercase tracking-widest">
               {withGroupSeparators(visibleTabs).map(
                 (entry) =>

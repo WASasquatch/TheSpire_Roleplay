@@ -885,14 +885,17 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       className="keep-frame bg-keep-bg lg:rounded"
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* Mobile-only tab strip. Lets users flip between the inbox
+        {/* Narrow-window tab strip. Lets users flip between the inbox
             (Friends + Recents + add forms) and the active conversation
             without relying on the per-row back-arrow inside the thread
-            header. Hidden on md+ where both panes are visible at once.
+            header. Hidden once the WINDOW is wide enough to show both
+            panes at once — container query, not viewport: the modal is
+            a resizable FloatingWindow, so a narrow-dragged window on a
+            desktop screen still gets the tabbed single-pane layout.
             The Chat tab is disabled until a conversation is selected,
             tapping it with no selection would surface the empty-state
             pane, which is more confusing than a dimmed-out tab. */}
-        <div className="flex shrink-0 border-b border-keep-rule bg-keep-banner/40 md:hidden" role="tablist">
+        <div className="flex shrink-0 border-b border-keep-rule bg-keep-banner/40 [@container(min-width:768px)]:hidden" role="tablist">
           <button
             type="button"
             role="tab"
@@ -928,13 +931,16 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
         </div>
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
-          {/* LEFT pane, list. Hidden on mobile when thread is visible.
-              The state-driven `listWidth` (set by the drag-resize
-              handle) only applies on md+; on mobile the aside fills
-              the full modal width. We pass the width as a CSS custom
-              property so the responsive `md:w-[var(...)]` class can
-              consume it, using `style={{ width }}` directly would win
-              over `w-full` on mobile via specificity. */}
+          {/* LEFT pane, list. Hidden in a narrow window when the thread
+              is visible. The state-driven `listWidth` (set by the
+              drag-resize handle) only applies once the WINDOW is wide
+              (container query — the modal is a resizable FloatingWindow,
+              so the split keys on window width, not viewport); in a
+              narrow window the aside fills the full modal width. We
+              pass the width as a CSS custom property so the container-
+              variant `w-[var(...)]` class can consume it, using
+              `style={{ width }}` directly would win over `w-full` on
+              the narrow layout via specificity. */}
           <aside
             style={{ "--list-width": `${listWidth}px` } as React.CSSProperties}
             className={
@@ -942,8 +948,8 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
               // container: the window is user-resizable now, so a wide
               // saved list must not swallow the thread pane and push the
               // drag divider outside the overflow-hidden row.
-              "flex min-h-0 w-full flex-col border-keep-rule md:w-[var(--list-width)] md:max-w-[calc(100%-10rem)] md:shrink-0 md:flex-none " +
-              (mobileView === "list" ? "flex-1" : "hidden md:flex")
+              "flex min-h-0 min-w-0 w-full flex-col border-keep-rule [@container(min-width:768px)]:w-[var(--list-width)] [@container(min-width:768px)]:max-w-[calc(100%-10rem)] [@container(min-width:768px)]:shrink-0 [@container(min-width:768px)]:flex-none " +
+              (mobileView === "list" ? "flex-1" : "hidden [@container(min-width:768px)]:flex")
             }
           >
             {error ? (
@@ -1239,14 +1245,18 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
             aria-orientation="vertical"
             aria-label={t("messages.resizeAria")}
             title={t("messages.resizeTitle")}
-            className="hidden w-1 shrink-0 cursor-col-resize touch-none bg-keep-rule/40 hover:bg-keep-action/40 md:block"
+            className="hidden w-1 shrink-0 cursor-col-resize touch-none bg-keep-rule/40 hover:bg-keep-action/40 [@container(min-width:768px)]:block"
           />
 
-          {/* RIGHT pane, thread. Hidden on mobile when list is visible. */}
+          {/* RIGHT pane, thread. Hidden in a narrow window when the list
+              is visible (container query — keys on the resizable window's
+              width, not the viewport). `min-w-0` is load-bearing: without
+              it long message content sets the pane's min-content width
+              and can push the row past the window edge. */}
           <section
             className={
-              "flex min-h-0 flex-col " +
-              (mobileView === "thread" ? "flex-1" : "hidden md:flex md:flex-1")
+              "flex min-h-0 min-w-0 flex-col " +
+              (mobileView === "thread" ? "flex-1" : "hidden [@container(min-width:768px)]:flex [@container(min-width:768px)]:flex-1")
             }
           >
             {selectedTarget ? (() => {
@@ -2066,7 +2076,10 @@ function ThreadPane({
         <button
           type="button"
           onClick={onBack}
-          className="rounded px-1 text-keep-muted hover:text-keep-text md:hidden"
+          // Container query, not viewport: the back-to-list chevron
+          // belongs to the narrow-WINDOW single-pane layout, so it
+          // must show whenever the window (not the screen) is narrow.
+          className="rounded px-1 text-keep-muted hover:text-keep-text [@container(min-width:768px)]:hidden"
           aria-label={t("messages.backToList")}
         >
           ←

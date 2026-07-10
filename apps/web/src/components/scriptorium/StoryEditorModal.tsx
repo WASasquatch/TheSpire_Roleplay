@@ -473,7 +473,7 @@ function OverviewEditor({
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{err}</div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 [@container(min-width:768px)]:grid-cols-2">
         <Field label={t("editor.titleLabel")}>
           <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5" />
@@ -507,7 +507,7 @@ function OverviewEditor({
         ) : null}
       </Field>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 [@container(min-width:768px)]:grid-cols-3">
         <Field label={t("genre")}>
           <select value={genre} onChange={(e) => setGenre(e.target.value as StoryGenre)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
@@ -578,7 +578,7 @@ function OverviewEditor({
         </div>
       </Field>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 [@container(min-width:768px)]:grid-cols-2">
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={allowReviews} onChange={(e) => setAllowReviews(e.target.checked)} />
           {t("editor.allowReviews")}
@@ -738,8 +738,8 @@ function ChaptersTab({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-      <aside className="flex shrink-0 flex-col border-keep-rule md:w-72 md:border-r">
+    <div className="flex min-h-0 flex-1 flex-col [@container(min-width:768px)]:flex-row">
+      <aside className="flex shrink-0 flex-col border-keep-rule [@container(min-width:768px)]:w-72 [@container(min-width:768px)]:border-r">
         <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-1.5 text-xs">
           <span className="uppercase tracking-widest text-keep-muted">{t("editor.tabs.chapters")}</span>
           <button type="button" onClick={addChapter} disabled={busy}
@@ -765,7 +765,7 @@ function ChaptersTab({
         </div>
       </aside>
 
-      <section className="min-h-0 flex-1 overflow-y-auto">
+      <section className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         {selectedRef ? (
           <ChapterEditor
             key={selectedRef.id}
@@ -1282,8 +1282,8 @@ function VersionHistoryPane({
   }, [storyId, chapterId]);
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col md:flex-row">
-      <aside className="md:w-56 md:shrink-0 md:border-r border-keep-rule">
+    <div className="flex flex-1 min-h-0 flex-col [@container(min-width:768px)]:flex-row">
+      <aside className="border-keep-rule [@container(min-width:768px)]:w-56 [@container(min-width:768px)]:shrink-0 [@container(min-width:768px)]:border-r">
         <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-1.5">
           <span className="text-xs uppercase tracking-widest text-keep-muted">{t("editor.history")}</span>
           <button type="button" onClick={onClose} className="text-keep-muted hover:text-keep-text" title={t("editor.closeHistory")}>×</button>
@@ -1316,7 +1316,7 @@ function VersionHistoryPane({
           ))}
         </ul>
       </aside>
-      <section className="flex min-h-0 flex-1 flex-col">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-keep-rule bg-keep-panel/30 px-3 py-1.5">
           <span className="text-xs text-keep-muted">
             {active ? t("editor.previewVersion", { version: active.version }) : t("editor.pickVersion")}

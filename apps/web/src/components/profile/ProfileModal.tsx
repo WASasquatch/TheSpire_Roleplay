@@ -643,7 +643,7 @@ function ProfileBody({
         // (see the absolute-positioned `<img>` inside the hero band
         // below) so we don't burn 220px of precious mobile vertical
         // space on a separate banner strip.
-        <div className="hidden shrink-0 overflow-hidden border-b border-keep-rule bg-keep-panel sm:block">
+        <div className="hidden shrink-0 overflow-hidden border-b border-keep-rule bg-keep-panel [@container(min-width:640px)]:block">
           {/* Adaptive sizing: full-width, natural aspect ratio up to a
               `max-h-[220px]` ceiling. Wide banner-shaped uploads (3:1
               and wider) render at their true proportions and stay
@@ -692,7 +692,7 @@ function ProfileBody({
               src={bannerUrl}
               alt=""
               loading="lazy"
-              className="pointer-events-none absolute inset-0 h-full w-full object-cover object-center sm:hidden"
+              className="pointer-events-none absolute inset-0 h-full w-full object-cover object-center [@container(min-width:640px)]:hidden"
               onError={(e) => {
                 const el = e.currentTarget as HTMLImageElement;
                 el.style.display = "none";
@@ -711,7 +711,7 @@ function ProfileBody({
                 chips readable while letting the banner read through. */}
             <div
               aria-hidden
-              className="pointer-events-none absolute inset-0 sm:hidden"
+              className="pointer-events-none absolute inset-0 [@container(min-width:640px)]:hidden"
               style={{ backgroundColor: "rgb(var(--keep-bg) / 0.45)" }}
             />
           </>
@@ -737,7 +737,7 @@ function ProfileBody({
               render time so a single instance can't responsively
               swap. The cached image bytes are reused across both
               renders. */}
-          <div className="sm:hidden">
+          <div className="[@container(min-width:640px)]:hidden">
             <BorderedAvatar
               avatarUrl={avatar}
               avatarCrop={avatarCrop}
@@ -748,7 +748,7 @@ function ProfileBody({
               freeformConfig={freeformConfig}
             />
           </div>
-          <div className="hidden sm:block">
+          <div className="hidden [@container(min-width:640px)]:block">
             <BorderedAvatar
               avatarUrl={avatar}
               avatarCrop={avatarCrop}
@@ -802,7 +802,7 @@ function ProfileBody({
                   parent lets the rank chip drop to the next line if
                   the name + meta line gets long. */}
               {earning?.rankKey && earning.tier != null ? (
-                <div className="hidden items-center gap-1.5 lg:flex">
+                <div className="hidden items-center gap-1.5 [@container(min-width:1024px)]:flex">
                   <span aria-hidden className="text-keep-muted/60">|</span>
                   <RankSigil rankKey={earning.rankKey} tier={earning.tier} size="md" />
                   <span className="font-action text-sm uppercase tracking-widest text-keep-text">
@@ -818,7 +818,7 @@ function ProfileBody({
                 change). Hidden on mobile in favor of an inline meta
                 line that wraps everything together. */}
             {earning?.xp != null || earning?.currency != null ? (
-              <div className="mt-1 hidden flex-wrap items-center gap-2 sm:flex">
+              <div className="mt-1 hidden flex-wrap items-center gap-2 [@container(min-width:640px)]:flex">
                 {earning?.xp != null ? (
                   <span
                     className="inline-flex h-8 items-center gap-1 rounded border border-keep-rule bg-keep-bg/60 px-2 text-sm uppercase tracking-widest text-keep-muted"
@@ -856,7 +856,7 @@ function ProfileBody({
                 pushing the meta line down; hidden at lg+ where the
                 desktop column-right lockup takes over. */}
             {earning?.rankKey && earning.tier != null ? (
-              <div className="mb-0 mt-1 flex items-center gap-1.5 lg:hidden">
+              <div className="mb-0 mt-1 flex items-center gap-1.5 [@container(min-width:1024px)]:hidden">
                 <RankSigil rankKey={earning.rankKey} tier={earning.tier} size="md" variant="gem" />
                 <span className="font-action text-[11px] uppercase tracking-widest text-keep-text sm:text-xs">
                   {earning.rankName ?? earning.rankKey}
@@ -875,12 +875,12 @@ function ProfileBody({
                   anything yet so the meta line doesn't lead with a
                   zero. */}
               {earning?.xp != null ? (
-                <span className="sm:hidden">
+                <span className="[@container(min-width:640px)]:hidden">
                   <span className="font-semibold tabular-nums normal-case tracking-normal text-keep-text">{formatNumber(earning.xp)}</span> {t("modal.hero.xp")}
                 </span>
               ) : null}
               {earning?.currency != null ? (
-                <span className="inline-flex items-center gap-1 sm:hidden">
+                <span className="inline-flex items-center gap-1 [@container(min-width:640px)]:hidden">
                   <img
                     src="/assets/earning/cache_pouch.png"
                     alt=""
@@ -893,7 +893,7 @@ function ProfileBody({
                 </span>
               ) : null}
               {(earning?.xp != null || earning?.currency != null) ? (
-                <span className="sm:hidden" aria-hidden>·</span>
+                <span className="[@container(min-width:640px)]:hidden" aria-hidden>·</span>
               ) : null}
               {profile.kind === "character" ? (
                 <span>{t("modal.meta.character")}</span>
@@ -1263,11 +1263,11 @@ function ProfileBody({
                   left column owns its own `mb-5` rhythm via the
                   Section component; the grid `gap-x-5` separates the
                   two columns on desktop without doubling padding. */}
-              <div className="mb-5 grid grid-cols-1 gap-x-5 lg:grid-cols-4">
-                <div className="lg:col-span-3">
+              <div className="mb-5 grid grid-cols-1 gap-x-5 [@container(min-width:1024px)]:grid-cols-4">
+                <div className="[@container(min-width:1024px)]:col-span-3">
                   {statEntries.length > 0 ? (
                     <Section title={t("modal.sections.stats")}>
-                      <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
+                      <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm [@container(min-width:640px)]:grid-cols-2">
                         {statEntries.map(([k, v]) => (
                           <div
                             key={k}
@@ -1303,7 +1303,7 @@ function ProfileBody({
                       hiding the whole tile would read as "they never
                       posted any forum topics" which is a different claim. */}
                   <Section title={t("modal.sections.activity")}>
-                    <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+                    <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm [@container(min-width:640px)]:grid-cols-3">
                       {[
                         { key: "chat", label: t("modal.activity.chatMessages"), value: profile.profile.metrics.chatMessages },
                         { key: "topics", label: t("modal.activity.forumTopics"), value: profile.profile.metrics.forumTopics },
@@ -1344,7 +1344,7 @@ function ProfileBody({
                     double-nest) and lays out axes in a single
                     column. */}
                 {stats && collectVibeAxes(stats, bypassVisibility).length > 0 ? (
-                  <div className="lg:col-span-1">
+                  <div className="[@container(min-width:1024px)]:col-span-1">
                     {/* Compact VibeSection drops its own Section chrome, so the
                         hidden-from-others marker rides this outer Section's
                         header (the owner/admin is the only one who reaches here
@@ -1401,15 +1401,15 @@ function ProfileBody({
               {(profile.profile.collection.length > 0
                 || profile.profile.petCollection.length > 0
                 || profile.profile.library.length > 0) ? (
-                <div className="mb-5 grid grid-cols-1 gap-x-5 lg:grid-cols-4">
-                  <div className="lg:col-span-3">
+                <div className="mb-5 grid grid-cols-1 gap-x-5 [@container(min-width:1024px)]:grid-cols-4">
+                  <div className="[@container(min-width:1024px)]:col-span-3">
                     {profile.profile.collection.length > 0 ? (
                       <Section title={t("modal.sections.collection")}>
                         {/* Grid (not flex-wrap) so the pinned tiles distribute
                             across the row. 3-up on phones, 5-up on small/medium,
                             8-up on lg+ (the column is 3/4 width here, so 8 keeps
                             the tiles from getting cramped). */}
-                        <ul className="grid grid-cols-3 gap-3 sm:grid-cols-5 lg:grid-cols-8">
+                        <ul className="grid grid-cols-3 gap-3 [@container(min-width:640px)]:grid-cols-5 [@container(min-width:1024px)]:grid-cols-8">
                           {profile.profile.collection.map((c) => (
                             <li key={c.slot} className="flex justify-center">
                               <CollectionPin entry={c} variant="item" onClick={() => setZoomedPin(c)} />
@@ -1424,7 +1424,7 @@ function ProfileBody({
                         as the item collection above. */}
                     {profile.profile.petCollection.length > 0 ? (
                       <Section title={t("modal.sections.pets")}>
-                        <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
+                        <ul className="grid grid-cols-2 gap-3 [@container(min-width:640px)]:grid-cols-3 [@container(min-width:768px)]:grid-cols-5">
                           {profile.profile.petCollection.map((c) => (
                             <li key={c.slot} className="flex justify-center">
                               <CollectionPin entry={c} variant="pet" onClick={() => setZoomedPin(c)} />
@@ -1440,9 +1440,9 @@ function ProfileBody({
                       2:3), more columns when stacked full-width on mobile. Each
                       cover opens the story in the reader. */}
                   {profile.profile.library.length > 0 ? (
-                    <div className="lg:col-span-1">
+                    <div className="[@container(min-width:1024px)]:col-span-1">
                       <Section title={t("modal.sections.library")}>
-                        <ul className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-2">
+                        <ul className="grid grid-cols-3 gap-3 [@container(min-width:640px)]:grid-cols-4 [@container(min-width:1024px)]:grid-cols-2">
                           {profile.profile.library.map((b) => (
                             <li key={b.slot} className="flex justify-center">
                               <LibraryPin entry={b} />
@@ -1904,8 +1904,8 @@ function CollectionPin({
   // grid-cell-sized via w-full), so they look proportional regardless
   // of the cell width.
   const iconCls = variant === "pet"
-    ? "h-20 w-20 sm:h-24 sm:w-24 md:h-32 md:w-32 lg:h-48 lg:w-48 xl:h-64 xl:w-64"
-    : "h-16 w-16 sm:h-20 sm:w-20 md:h-24 md:w-24 lg:h-32 lg:w-32";
+    ? "h-20 w-20 [@container(min-width:640px)]:h-24 [@container(min-width:640px)]:w-24 [@container(min-width:768px)]:h-32 [@container(min-width:768px)]:w-32 [@container(min-width:1024px)]:h-48 [@container(min-width:1024px)]:w-48 [@container(min-width:1280px)]:h-64 [@container(min-width:1280px)]:w-64"
+    : "h-16 w-16 [@container(min-width:640px)]:h-20 [@container(min-width:640px)]:w-20 [@container(min-width:768px)]:h-24 [@container(min-width:768px)]:w-24 [@container(min-width:1024px)]:h-32 [@container(min-width:1024px)]:w-32";
 
   return (
     <button
@@ -2116,9 +2116,9 @@ function PortraitGallery({
         // rail (~15%) on the left, the full image reserved on the right.
         // Mobile: the rail becomes a horizontal-scroll strip ABOVE the image.
         // The per-image label is the header bar over the full image in both.
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
+        <div className="flex flex-col gap-3 [@container(min-width:1024px)]:flex-row [@container(min-width:1024px)]:items-start">
           {/* Thumbnail rail — horizontal row on mobile, vertical column on lg+. */}
-          <div className="flex shrink-0 flex-row gap-2 overflow-x-auto p-1 lg:max-h-[78vh] lg:w-24 lg:flex-col lg:overflow-x-hidden lg:overflow-y-auto">
+          <div className="flex shrink-0 flex-row gap-2 overflow-x-auto p-1 [@container(min-width:1024px)]:max-h-[78vh] [@container(min-width:1024px)]:w-24 [@container(min-width:1024px)]:flex-col [@container(min-width:1024px)]:overflow-x-hidden [@container(min-width:1024px)]:overflow-y-auto">
             {portraits.map((p) => {
               const tileCensored = isCensored(p);
               return (
@@ -2129,7 +2129,7 @@ function PortraitGallery({
                   title={tileCensored
                     ? t(p.nsfw ? "modal.gallery.censoredTitleNsfw" : "modal.gallery.censoredTitleHidden", { label: p.label ?? t("modal.gallery.portraitFallback") })
                     : p.label ?? t("modal.gallery.portraitFallback")}
-                  className={`relative aspect-square h-16 w-16 shrink-0 overflow-hidden rounded border transition lg:h-auto lg:w-full ${
+                  className={`relative aspect-square h-16 w-16 shrink-0 overflow-hidden rounded border transition [@container(min-width:1024px)]:h-auto [@container(min-width:1024px)]:w-full ${
                     activeId === p.id ? "border-keep-action ring-2 ring-keep-action" : "border-keep-rule hover:ring-2 hover:ring-keep-action/50"
                   }`}
                 >
@@ -2663,7 +2663,7 @@ function VibeSection({
         // stack of 8 axes fits cleanly beside the 3/4-width Stats
         // column without dead space.
         "grid grid-cols-1 gap-y-2"
-      : "grid grid-cols-1 gap-x-5 gap-y-3 sm:grid-cols-2";
+      : "grid grid-cols-1 gap-x-5 gap-y-3 [@container(min-width:640px)]:grid-cols-2";
   const list = (
     <ul className={gridClass}>
       {axes.map((axis) => (

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   PROFILE_MARQUEE_MAX_QUOTES,
   PROFILE_MARQUEE_QUOTE_MAX_LEN,
@@ -22,6 +23,7 @@ import { readError, withIdentityQuery } from "../../lib/http.js";
  * editor reads + writes the correct row.
  */
 export function ProfileFlairEditor({ characterId }: { characterId: string | null }) {
+  const { t } = useTranslation("common");
   const [marquee, setMarquee] = useState<ProfileMarqueeConfig | null>(null);
   const [visitors, setVisitors] = useState<ProfileVisitorOwnerSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -42,7 +44,7 @@ export function ProfileFlairEditor({ characterId }: { characterId: string | null
       setQuotesDraft(j.marquee.quotes);
       setVisitorsVisibleDraft(j.visitors.visible);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Load failed.");
+      setError(e instanceof Error ? e.message : t("errors:loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -62,7 +64,7 @@ export function ProfileFlairEditor({ characterId }: { characterId: string | null
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed.");
+      setError(e instanceof Error ? e.message : t("errors:saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -80,13 +82,13 @@ export function ProfileFlairEditor({ characterId }: { characterId: string | null
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed.");
+      setError(e instanceof Error ? e.message : t("errors:saveFailed"));
     } finally {
       setSaving(false);
     }
   }
 
-  if (loading) return <p className="text-xs italic text-keep-muted">Loading profile-flair settings…</p>;
+  if (loading) return <p className="text-xs italic text-keep-muted">{t("flair.loadingSettings")}</p>;
   if (!marquee || !visitors) return null;
 
   return (
@@ -96,25 +98,24 @@ export function ProfileFlairEditor({ characterId }: { characterId: string | null
       {/* ----- Visitors counter ----- */}
       <fieldset className="rounded border border-keep-rule p-3">
         <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
-          Profile visitors
+          {t("flair.visitors.legend")}
         </legend>
         {visitors.ownsFlair ? (
           <>
             <p className="mb-2 text-[10px] text-keep-muted">
-              Distinct visitors counted with one-per-day dedupe.
-              Members are signed-in viewers; external counts anonymous traffic.
+              {t("flair.visitors.description")}
             </p>
             <dl className="mb-3 grid grid-cols-3 gap-2 text-center text-xs">
               <div className="rounded border border-keep-rule bg-keep-bg/40 p-2">
-                <dt className="text-[10px] uppercase tracking-widest text-keep-muted">Members</dt>
+                <dt className="text-[10px] uppercase tracking-widest text-keep-muted">{t("flair.visitors.members")}</dt>
                 <dd className="text-base tabular-nums">{visitors.members}</dd>
               </div>
               <div className="rounded border border-keep-rule bg-keep-bg/40 p-2">
-                <dt className="text-[10px] uppercase tracking-widest text-keep-muted">External</dt>
+                <dt className="text-[10px] uppercase tracking-widest text-keep-muted">{t("flair.visitors.external")}</dt>
                 <dd className="text-base tabular-nums">{visitors.external}</dd>
               </div>
               <div className="rounded border border-keep-rule bg-keep-bg/40 p-2">
-                <dt className="text-[10px] uppercase tracking-widest text-keep-muted">Total</dt>
+                <dt className="text-[10px] uppercase tracking-widest text-keep-muted">{t("flair.visitors.total")}</dt>
                 <dd className="text-base tabular-nums">{visitors.total}</dd>
               </div>
             </dl>
@@ -128,12 +129,14 @@ export function ProfileFlairEditor({ characterId }: { characterId: string | null
                   void saveVisibility(e.target.checked);
                 }}
               />
-              <span>Show the visitors counter on my public profile.</span>
+              <span>{t("flair.visitors.showToggle")}</span>
             </label>
           </>
         ) : (
           <p className="text-xs italic text-keep-muted">
-            Purchase the <b>Profile Visitor Counter</b> Flair to track and display visitor counts.
+            <Trans t={t} i18nKey="flair.visitors.purchase">
+              Purchase the <b>Profile Visitor Counter</b> Flair to track and display visitor counts.
+            </Trans>
           </p>
         )}
       </fieldset>
@@ -141,12 +144,12 @@ export function ProfileFlairEditor({ characterId }: { characterId: string | null
       {/* ----- Marquee quotes ----- */}
       <fieldset className="rounded border border-keep-rule p-3">
         <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
-          Quote marquee
+          {t("flair.marquee.legend")}
         </legend>
         {marquee.ownsFlair ? (
           <>
             <p className="mb-2 text-[10px] text-keep-muted">
-              Up to {PROFILE_MARQUEE_MAX_QUOTES} short quotes ({PROFILE_MARQUEE_QUOTE_MAX_LEN} characters each) that rotate on your profile every ~8 seconds. Markdown supported.
+              {t("flair.marquee.description", { max: PROFILE_MARQUEE_MAX_QUOTES, maxLen: PROFILE_MARQUEE_QUOTE_MAX_LEN })}
             </p>
             <QuotesEditor
               value={quotesDraft}
@@ -158,7 +161,9 @@ export function ProfileFlairEditor({ characterId }: { characterId: string | null
           </>
         ) : (
           <p className="text-xs italic text-keep-muted">
-            Purchase the <b>Profile Quote Marquee</b> Flair to add rotating quotes to your profile.
+            <Trans t={t} i18nKey="flair.marquee.purchase">
+              Purchase the <b>Profile Quote Marquee</b> Flair to add rotating quotes to your profile.
+            </Trans>
           </p>
         )}
       </fieldset>
@@ -180,6 +185,7 @@ export function ProfileFlairEditor({ characterId }: { characterId: string | null
  * row is just the public-visibility switch.
  */
 export function VisitorsVisibilityToggleRow({ characterId }: { characterId: string | null }) {
+  const { t } = useTranslation("common");
   const [ownsFlair, setOwnsFlair] = useState(false);
   const [visible, setVisible] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -203,10 +209,14 @@ export function VisitorsVisibilityToggleRow({ characterId }: { characterId: stri
       })
       .catch((e) => {
         if (cancelled) return;
-        setError(e instanceof Error ? e.message : "Load failed.");
+        setError(e instanceof Error ? e.message : t("errors:loadFailed"));
         setLoaded(true);
       });
     return () => { cancelled = true; };
+    // `t` is deliberately omitted: the effect is a data fetch keyed on the
+    // identity, not on the language (the fallback copy resolves at
+    // catch-time with whatever language is then active).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [characterId]);
 
   async function save(next: boolean) {
@@ -221,7 +231,7 @@ export function VisitorsVisibilityToggleRow({ characterId }: { characterId: stri
       });
       if (!r.ok) throw new Error(await readError(r));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Save failed.");
+      setError(e instanceof Error ? e.message : t("errors:saveFailed"));
       // Revert the optimistic flip so the checkbox stays honest.
       setVisible(!next);
     } finally {
@@ -237,7 +247,7 @@ export function VisitorsVisibilityToggleRow({ characterId }: { characterId: stri
   return (
     <fieldset className="rounded border border-keep-rule p-3">
       <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
-        Visitor counter
+        {t("flair.visitorToggle.legend")}
       </legend>
       <label className="flex items-center gap-2 text-xs">
         <input
@@ -250,10 +260,10 @@ export function VisitorsVisibilityToggleRow({ characterId }: { characterId: stri
             void save(next);
           }}
         />
-        <span>Show the visitor counter on my public profile.</span>
+        <span>{t("flair.visitorToggle.show")}</span>
       </label>
       <p className="mt-1 text-[10px] italic text-keep-muted">
-        When off, only you see the member / external breakdown in Edit Profile → Flair.
+        {t("flair.visitorToggle.note")}
       </p>
       {error ? <p className="mt-1 text-xs text-keep-accent">{error}</p> : null}
     </fieldset>
@@ -273,6 +283,7 @@ function QuotesEditor({
   disabled: boolean;
   originalSaved: string[];
 }) {
+  const { t } = useTranslation("common");
   // Always render MAX_QUOTES rows so the user has visible empty
   // slots to fill in; non-empty rows survive the save filter,
   // empty rows are dropped server-side.
@@ -305,7 +316,7 @@ function QuotesEditor({
                 disabled={disabled}
                 rows={1}
                 maxLength={PROFILE_MARQUEE_QUOTE_MAX_LEN * 2 /* let the user paste over so the count flag is visible */}
-                placeholder="A short, memorable line…"
+                placeholder={t("flair.marquee.quotePlaceholder")}
                 className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
               />
               <div className="flex justify-end text-[10px] text-keep-muted">
@@ -324,12 +335,12 @@ function QuotesEditor({
           onClick={onSave}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          {disabled ? "Saving…" : "Save quotes"}
+          {disabled ? t("saving") : t("flair.marquee.saveQuotes")}
         </button>
       </div>
       {slots.some((q) => q.trim().length > 0) ? (
         <div className="rounded border border-keep-rule bg-keep-bg/40 p-2">
-          <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Preview</div>
+          <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("preview")}</div>
           {slots.filter((q) => q.trim().length > 0).map((q, i) => (
             <div
               key={i}

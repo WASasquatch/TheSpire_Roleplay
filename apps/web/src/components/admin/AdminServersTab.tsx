@@ -15,7 +15,10 @@
  * the servers flag is off, so the tab is only reachable when it's on.
  */
 import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { ServerStatus, ServerVisibility, ServerJoinMode } from "@thekeep/shared";
+import { i18n } from "../../lib/i18n.js";
+import { formatDate, formatDateTime } from "../../lib/intlFormat.js";
 import { useChat } from "../../state/store.js";
 import { BanModal } from "../moderation/BanModal.js";
 import { Modal } from "../cosmetics/Modal.js";
@@ -62,7 +65,7 @@ interface AdminServerRow {
 /** Pull `{ error }` out of a non-OK response, falling back to the status. */
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   const j = (await r.json().catch(() => null)) as ({ error?: string } & T) | null;
-  if (!r.ok) throw new Error(j?.error ?? `Request failed (${r.status}).`);
+  if (!r.ok) throw new Error(j?.error ?? i18n.t("admin:servers.requestFailedStatus", { status: r.status }));
   return j as T;
 }
 
@@ -151,6 +154,7 @@ export function AdminServersTab({ onOpenConsole, onEnterServer }: {
   /** Step into a server's chat rooms to moderate (global-staff bypass). */
   onEnterServer?: (serverId: string, name: string) => void;
 } = {}) {
+  const { t } = useTranslation("admin");
   const me = useChat((s) => s.me);
   const canReview = !!me?.permissions?.includes("review_server_applications");
   const [pending, setPending] = useState<ServerCreationApplicationWire[] | null>(null);
@@ -161,21 +165,21 @@ export function AdminServersTab({ onOpenConsole, onEnterServer }: {
   const reload = useCallback(() => {
     adminFetchServerApplications()
       .then((j) => { setPending(j.pending); setRecent(j.recent); setErr(null); })
-      .catch((e) => setErr(e instanceof Error ? e.message : "load failed"));
-  }, []);
+      .catch((e) => setErr(e instanceof Error ? e.message : t("loadFailed")));
+  }, [t]);
   useEffect(() => { reload(); }, [reload]);
 
   async function review(app: ServerCreationApplicationWire, action: "approve" | "reject") {
     let note: string | undefined;
     if (action === "reject") {
       const v = window.prompt(
-        `Decline "${app.requestedName}"? Optional note shown to the applicant (they can re-apply after the cooldown):`,
+        t("review.declinePrompt", { name: app.requestedName }),
         "",
       );
       if (v === null) return; // prompt cancelled = no decision
       note = v.trim() || undefined;
     } else if (!window.confirm(
-      `Approve "${app.requestedName}" (/s/${app.requestedSlug})?\n\n${app.applicantUsername} becomes its owner; the server + a starter room are created immediately.`,
+      t("servers.approveConfirm", { name: app.requestedName, slug: app.requestedSlug, applicant: app.applicantUsername }),
     )) {
       return;
     }
@@ -184,7 +188,7 @@ export function AdminServersTab({ onOpenConsole, onEnterServer }: {
       await adminReviewServerApplication(app.id, action, note);
       reload();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "review failed");
+      setErr(e instanceof Error ? e.message : t("review.reviewFailed"));
     } finally {
       setBusyId(null);
     }
@@ -193,22 +197,21 @@ export function AdminServersTab({ onOpenConsole, onEnterServer }: {
   return (
     <section className="space-y-5">
       <div>
-        <h3 className="font-action text-lg text-keep-text">Server applications</h3>
+        <h3 className="font-action text-lg text-keep-text">{t("servers.title")}</h3>
         <p className="text-xs text-keep-muted">
-          Approving creates the server with the applicant as owner, a starter room, and a welcome
-          message. Declining starts the re-apply cooldown; the note is shown to the applicant.
+          {t("servers.description")}
         </p>
       </div>
       {err ? <p className="text-sm text-keep-accent">{err}</p> : null}
 
       <div>
         <h4 className="mb-2 text-xs uppercase tracking-widest text-keep-muted">
-          Pending {pending ? `(${pending.length})` : ""}
+          {pending ? t("review.pendingCount", { count: pending.length }) : t("review.pending")}
         </h4>
         {!pending ? (
-          <p className="text-sm italic text-keep-muted">Loading…</p>
+          <p className="text-sm italic text-keep-muted">{t("common:loading")}</p>
         ) : pending.length === 0 ? (
-          <p className="text-sm italic text-keep-muted">No applications waiting. The queue is clear.</p>
+          <p className="text-sm italic text-keep-muted">{t("review.queueClear")}</p>
         ) : (
           <ul className="space-y-2">
             {pending.map((a) => (
@@ -219,8 +222,11 @@ export function AdminServersTab({ onOpenConsole, onEnterServer }: {
                     <span className="ml-2 font-mono text-xs text-keep-muted">/s/{a.requestedSlug}</span>
                   </div>
                   <span className="text-[11px] text-keep-muted">
-                    by <span className="text-keep-text">{a.applicantUsername}</span>
-                    {" · "}{new Date(a.submittedAt).toLocaleString()}
+                    <Trans t={t} i18nKey="review.byUserStyled" values={{ name: a.applicantUsername }}>
+                      {"by "}
+                      <span className="text-keep-text">{"{{name}}"}</span>
+                    </Trans>
+                    {" · "}{formatDateTime(a.submittedAt)}
                   </span>
                 </div>
                 <p className="mt-1.5 whitespace-pre-wrap text-sm text-keep-text/90">{a.purpose}</p>
@@ -232,7 +238,7 @@ export function AdminServersTab({ onOpenConsole, onEnterServer }: {
                       onClick={() => void review(a, "approve")}
                       className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50"
                     >
-                      {busyId === a.id ? "…" : "Approve"}
+                      {busyId === a.id ? "…" : t("review.approve")}
                     </button>
                     <button
                       type="button"
@@ -240,12 +246,12 @@ export function AdminServersTab({ onOpenConsole, onEnterServer }: {
                       onClick={() => void review(a, "reject")}
                       className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-accent disabled:opacity-50"
                     >
-                      Decline
+                      {t("review.decline")}
                     </button>
                   </div>
                 ) : (
                   <p className="mt-2 text-[11px] italic text-keep-muted">
-                    You can view the queue; deciding requires the review permission.
+                    {t("review.readOnlyQueue")}
                   </p>
                 )}
               </li>
@@ -261,18 +267,18 @@ export function AdminServersTab({ onOpenConsole, onEnterServer }: {
 
       {recent.length > 0 ? (
         <div>
-          <h4 className="mb-2 text-xs uppercase tracking-widest text-keep-muted">Recent decisions</h4>
+          <h4 className="mb-2 text-xs uppercase tracking-widest text-keep-muted">{t("review.recentDecisions")}</h4>
           <ul className="space-y-1">
             {recent.map((a) => (
               <li key={a.id} className="flex flex-wrap items-baseline gap-x-2 rounded border border-keep-rule/50 px-2 py-1 text-xs text-keep-muted">
                 <span className={a.status === "approved" ? "font-semibold uppercase text-keep-action" : "font-semibold uppercase text-keep-accent"}>
-                  {a.status}
+                  {t(`review.status.${a.status}`)}
                 </span>
                 <span className="text-keep-text">{a.requestedName}</span>
                 <span className="font-mono">/s/{a.requestedSlug}</span>
-                <span>by {a.applicantUsername}</span>
-                {a.reviewedByUsername ? <span>· decided by {a.reviewedByUsername}</span> : null}
-                {a.reviewedAt ? <span>· {new Date(a.reviewedAt).toLocaleDateString()}</span> : null}
+                <span>{t("review.byUser", { name: a.applicantUsername })}</span>
+                {a.reviewedByUsername ? <span>{t("review.decidedBy", { name: a.reviewedByUsername })}</span> : null}
+                {a.reviewedAt ? <span>· {formatDate(a.reviewedAt)}</span> : null}
                 {a.reviewNote ? <span className="w-full italic">"{a.reviewNote}"</span> : null}
               </li>
             ))}
@@ -293,6 +299,7 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
   onOpenConsole?: (serverId: string) => void;
   onEnterServer?: (serverId: string, name: string) => void;
 }) {
+  const { t } = useTranslation("admin");
   const me = useChat((s) => s.me);
   const canCurate = !!me?.permissions?.includes("manage_any_server");
   const [rows, setRows] = useState<AdminServerRow[] | null>(null);
@@ -308,17 +315,17 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
     let alive = true;
     adminFetchServers()
       .then((s) => { if (alive) setRows(s.sort((a, b) => a.name.localeCompare(b.name))); })
-      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : t("loadFailed")); });
     return () => { alive = false; };
-  }, [tick]);
+  }, [tick, t]);
 
   async function setStatus(row: AdminServerRow, status: AdminServerRow["status"]) {
     if (status === "archived" && !window.confirm(
-      `Archive "${row.name}"? It leaves the catalog (rooms and messages are kept) and can be restored here.`,
+      t("servers.archiveConfirm", { name: row.name }),
     )) return;
     setBusyId(row.id); setErr(null);
     try { await adminSetServerStatus(row.id, status); setTick((t) => t + 1); }
-    catch (e) { setErr(e instanceof Error ? e.message : "update failed"); }
+    catch (e) { setErr(e instanceof Error ? e.message : t("updateFailed")); }
     finally { setBusyId(null); }
   }
 
@@ -331,13 +338,13 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
   ) {
     setBusyId(row.id); setErr(null);
     try { await adminSetServerModeration(row.id, state, null, note); setTick((t) => t + 1); }
-    catch (e) { setErr(e instanceof Error ? e.message : "update failed"); }
+    catch (e) { setErr(e instanceof Error ? e.message : t("updateFailed")); }
     finally { setBusyId(null); }
   }
 
   function askSuspend(row: AdminServerRow) {
     const v = window.prompt(
-      `Suspend "${row.name}"? It's put under review and blocked to everyone but its owner, that server's staff, and global staff (who can enter to fix it). Optional note shown to blocked users:`,
+      t("servers.suspendPrompt", { name: row.name }),
       "",
     );
     if (v === null) return; // cancelled = no change
@@ -346,7 +353,9 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
 
   function askLift(row: AdminServerRow) {
     if (!window.confirm(
-      `Lift the ${row.moderationState === "banned" ? "ban" : "suspension"} on "${row.name}"? It becomes fully accessible again.`,
+      row.moderationState === "banned"
+        ? t("servers.liftBanConfirm", { name: row.name })
+        : t("servers.liftSuspensionConfirm", { name: row.name }),
     )) return;
     void moderate(row, "none");
   }
@@ -358,48 +367,48 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
       setDeleteRow(null);
       setTick((t) => t + 1);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "delete failed");
+      setErr(e instanceof Error ? e.message : t("deleteFailed"));
     } finally {
       setBusyId(null);
     }
   }
 
   return (
-    <div>
+    <div data-admin-anchor="servers.servers">
       <h4 className="mb-2 text-xs uppercase tracking-widest text-keep-muted">
-        Servers {rows ? `(${rows.length})` : ""}
+        {rows ? t("servers.serversCount", { count: rows.length }) : t("servers.servers")}
       </h4>
       {err ? <p className="mb-1 text-xs text-keep-accent">{err}</p> : null}
       {!rows ? (
-        <p className="text-sm italic text-keep-muted">Loading…</p>
+        <p className="text-sm italic text-keep-muted">{t("common:loading")}</p>
       ) : rows.length === 0 ? (
-        <p className="text-sm italic text-keep-muted">No servers yet.</p>
+        <p className="text-sm italic text-keep-muted">{t("servers.none")}</p>
       ) : (
         <ul className="space-y-1">
           {rows.map((s) => (
             <li key={s.id} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1 text-sm">
               <span className="font-semibold text-keep-text">{s.name}</span>
               <span className="font-mono text-[11px] text-keep-muted">/s/{s.slug}</span>
-              <span className="text-[11px] text-keep-muted">by {s.ownerUsername}</span>
+              <span className="text-[11px] text-keep-muted">{t("review.byUser", { name: s.ownerUsername })}</span>
               <span className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
                 s.status === "featured" ? "border-keep-accent/60 text-keep-accent"
                 : s.status === "archived" ? "border-keep-rule text-keep-muted line-through"
                 : "border-keep-rule text-keep-muted"
               }`}>
-                {s.isSystem ? "system" : s.status}
+                {s.isSystem ? t("review.entityStatus.system") : t(`review.entityStatus.${s.status}`)}
               </span>
               {/* Moderation badge — the server already lazy-expires bans in
                   GET /admin/servers, so "banned" here is always still-active. */}
               {s.moderationState === "suspended" ? (
                 <span className="rounded border border-[#e0a020] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#e0a020]">
-                  Suspended
+                  {t("servers.suspendedBadge")}
                 </span>
               ) : s.moderationState === "banned" ? (
                 <span
                   className="rounded border border-[#e06070] px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#e06070]"
                   title={s.moderationNote ?? undefined}
                 >
-                  Banned{s.moderationUntil ? ` until ${new Date(s.moderationUntil).toLocaleDateString()}` : ""}
+                  {s.moderationUntil ? t("servers.bannedUntilBadge", { date: formatDate(s.moderationUntil) }) : t("servers.bannedBadge")}
                 </span>
               ) : null}
               {canCurate ? (
@@ -412,10 +421,10 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
                     <button
                       type="button"
                       onClick={() => onEnterServer(s.id, s.name)}
-                      title="Enter this server's chat to moderate"
+                      title={t("servers.enterTitle")}
                       className="rounded border border-keep-action bg-keep-action/10 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
                     >
-                      Enter
+                      {t("servers.enter")}
                     </button>
                   ) : null}
                   {/* Oversight drill-in: opens THIS server's per-server admin
@@ -426,10 +435,10 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
                     <button
                       type="button"
                       onClick={() => onOpenConsole(s.id)}
-                      title="Open this server's admin console"
+                      title={t("servers.openAdminTitle")}
                       className="rounded border border-keep-action/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/10"
                     >
-                      Open admin
+                      {t("servers.openAdmin")}
                     </button>
                   ) : null}
                   {!s.isSystem ? (
@@ -440,14 +449,14 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
                           onClick={() => void setStatus(s, s.status === "featured" ? "active" : "featured")}
                           className="rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
                         >
-                          {s.status === "featured" ? "Unfeature" : "Feature"}
+                          {s.status === "featured" ? t("review.unfeature") : t("review.feature")}
                         </button>
                         <button
                           type="button" disabled={busyId !== null}
                           onClick={() => void setStatus(s, "archived")}
                           className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50"
                         >
-                          Archive
+                          {t("review.archive")}
                         </button>
                       </>
                     ) : (
@@ -456,7 +465,7 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
                         onClick={() => void setStatus(s, "active")}
                         className="rounded border border-keep-action/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
                       >
-                        Restore
+                        {t("review.restore")}
                       </button>
                     )
                   ) : null}
@@ -470,38 +479,38 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
                         <button
                           type="button" disabled={busyId !== null}
                           onClick={() => askLift(s)}
-                          title="Lift the suspension / ban — the server becomes accessible again"
+                          title={t("servers.liftTitle")}
                           className="rounded border border-keep-action/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
                         >
-                          Lift
+                          {t("servers.lift")}
                         </button>
                       ) : (
                         <>
                           <button
                             type="button" disabled={busyId !== null}
                             onClick={() => askSuspend(s)}
-                            title="Put under review — block everyone but the owner and staff"
+                            title={t("servers.suspendTitle")}
                             className="rounded border border-[#e0a020]/70 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-[#e0a020] hover:bg-[#e0a020]/10 disabled:opacity-50"
                           >
-                            Suspend
+                            {t("servers.suspend")}
                           </button>
                           <button
                             type="button" disabled={busyId !== null}
                             onClick={() => setBanRow(s)}
-                            title="Ban for a set duration — auto-lifts when it expires"
+                            title={t("servers.banTitle")}
                             className="rounded border border-[#e06070]/70 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-[#e06070] hover:bg-[#e06070]/10 disabled:opacity-50"
                           >
-                            Ban
+                            {t("servers.ban")}
                           </button>
                         </>
                       )}
                       <button
                         type="button" disabled={busyId !== null}
                         onClick={() => setDeleteRow(s)}
-                        title="Permanently delete this server and all its data"
+                        title={t("servers.deleteTitleAttr")}
                         className="rounded border border-[#e06070] bg-[#e06070]/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-[#e06070] hover:bg-[#e06070]/20 disabled:opacity-50"
                       >
-                        Delete
+                        {t("common:delete")}
                       </button>
                     </>
                   ) : null}
@@ -516,13 +525,13 @@ function ServerCurationSection({ onOpenConsole, onEnterServer }: {
           shown to blocked users. No post-sweep for servers (showPurge=false). */}
       {banRow ? (
         <BanModal
-          targetName={`server "${banRow.name}"`}
-          description="Blocks everyone but the owner, that server's staff, and global staff. Auto-lifts when the duration elapses."
+          targetName={t("servers.banTargetName", { name: banRow.name })}
+          description={t("servers.banDescription")}
           reasonRequired={false}
-          reasonPlaceholder="Optional note shown to blocked users beneath the ban notice."
+          reasonPlaceholder={t("servers.banReasonPlaceholder")}
           showPurge={false}
-          confirmLabel="Ban server"
-          busyLabel="Banning…"
+          confirmLabel={t("servers.banConfirmLabel")}
+          busyLabel={t("servers.banBusyLabel")}
           onConfirm={async (durationMs, reason) => {
             const untilMs = durationMs === null ? null : Date.now() + durationMs;
             await adminSetServerModeration(banRow.id, "banned", untilMs, reason);
@@ -559,6 +568,7 @@ function DeleteServerModal({ row, busy, onConfirm, onClose }: {
   onConfirm: () => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("admin");
   const [typed, setTyped] = useState("");
   const matches = typed.trim() === row.slug;
   return (
@@ -567,14 +577,17 @@ function DeleteServerModal({ row, busy, onConfirm, onClose }: {
         className="w-[min(440px,94vw)] rounded-lg border border-keep-rule bg-keep-bg p-4 text-keep-text shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-1 text-base font-semibold text-[#e06070]">Delete "{row.name}"</h3>
+        <h3 className="mb-1 text-base font-semibold text-[#e06070]">{t("servers.deleteModalTitle", { name: row.name })}</h3>
         <p className="mb-3 text-xs text-keep-muted">
-          This permanently removes the server, its rooms and messages, members,
-          invites, and every scrap of its data. There is no undo.
+          {t("servers.deleteModalBody")}
         </p>
         <label className="mb-3 block">
           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-widest text-keep-muted">
-            Type <span className="font-mono text-keep-text">{row.slug}</span> to confirm
+            <Trans t={t} i18nKey="servers.typeToConfirm" values={{ slug: row.slug }}>
+              {"Type "}
+              <span className="font-mono text-keep-text">{"{{slug}}"}</span>
+              {" to confirm"}
+            </Trans>
           </span>
           <input
             value={typed}
@@ -592,7 +605,7 @@ function DeleteServerModal({ row, busy, onConfirm, onClose }: {
             onClick={onClose}
             className="rounded border border-keep-rule bg-keep-panel px-3 py-1.5 text-xs text-keep-text hover:bg-keep-banner"
           >
-            Cancel
+            {t("common:cancel")}
           </button>
           <button
             type="button"
@@ -600,7 +613,7 @@ function DeleteServerModal({ row, busy, onConfirm, onClose }: {
             disabled={busy || !matches}
             className="rounded border border-[#e06070]/80 bg-[#e06070] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {busy ? "Deleting…" : "Delete server"}
+            {busy ? t("servers.deleting") : t("servers.deleteServer")}
           </button>
         </div>
       </div>

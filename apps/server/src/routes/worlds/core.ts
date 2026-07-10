@@ -15,6 +15,7 @@ import type {
   WorldDetail,
   WorldStatus,
 } from "@thekeep/shared";
+import { canSeeNsfw } from "../../auth/ageGate.js";
 import { hasPermission } from "../../auth/permissions.js";
 import {
   roomWorldLinks,
@@ -32,6 +33,7 @@ import { sanitizeBio } from "../../auth/html.js";
 import { tagIncludes, tagExcludes } from "../../lib/tagFilter.js";
 import { escapeLike } from "../../lib/nameLookup.js";
 import { resolveOffsetPage, countRows, offsetPageEnvelope } from "../../lib/pagination.js";
+import { tFor } from "../../i18n.js";
 import { getSessionUser } from "../auth.js";
 import { getSettings } from "../../settings.js";
 import { broadcastRoomState } from "../../realtime/broadcast.js";
@@ -67,10 +69,17 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
   app.get("/me/worlds", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
+    // A minor's own list also drops 18+ entries (an adult staffer may
+    // have flagged their world): the card could only open a 404, and
+    // minors must never be shown dead buttons. The row itself is kept
+    // — it comes back at 18 or when the flag flips off. Adults always
+    // see their own worlds, hide preference or not (HARD tier).
     const rows = await db
       .select()
       .from(worlds)
-      .where(eq(worlds.ownerUserId, me.id))
+      .where(me.isAdult
+        ? eq(worlds.ownerUserId, me.id)
+        : and(eq(worlds.ownerUserId, me.id), eq(worlds.isNsfw, false)))
       .orderBy(asc(worlds.name));
     const summaries = await Promise.all(rows.map((w) => toSummary(db, w)));
     return { worlds: summaries };
@@ -88,7 +97,13 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
    * cache to bust on world edits, and no popularity bias either.
    */
   app.get<{ Querystring: { limit?: string } }>("/worlds/featured", browseLimit, async (req) => {
+    const me = await getSessionUser(req, db);
     const limit = Math.min(10, Math.max(1, parseInt(req.query.limit ?? "10", 10) || 10));
+    // SOFT age tier (age-restriction plan Phase 4): 18+ worlds never
+    // surface on browse strips for anonymous visitors, minors, or
+    // adults with "Hide 18+ content" on. The splash fetches this
+    // pre-login, so in practice the strip is always all-ages there.
+    const nsfwClause = canSeeNsfw(me) ? [] : [eq(worlds.isNsfw, false)];
     // Featured rotation: prefer admin-curated `status="featured"`, fall
     // back to the random sample of open worlds when there aren't enough
     // featured rows to fill the strip. Curated worlds always lead so
@@ -96,7 +111,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
     const featured = await db
       .select()
       .from(worlds)
-      .where(and(eq(worlds.visibility, "open"), eq(worlds.status, "featured")))
+      .where(and(eq(worlds.visibility, "open"), eq(worlds.status, "featured"), ...nsfwClause))
       .orderBy(sql`random()`)
       .limit(limit);
     const need = limit - featured.length;
@@ -104,7 +119,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       ? await db
           .select()
           .from(worlds)
-          .where(and(eq(worlds.visibility, "open"), ne(worlds.status, "featured"), ne(worlds.status, "archived")))
+          .where(and(eq(worlds.visibility, "open"), ne(worlds.status, "featured"), ne(worlds.status, "archived"), ...nsfwClause))
           .orderBy(sql`random()`)
           .limit(need)
       : [];
@@ -114,6 +129,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
 
   /* ---------- World catalog (open visibility, filterable) ---------- */
   app.get<{ Querystring: Record<string, string | string[]> }>("/worlds/catalog", browseLimit, async (req) => {
+    const me = await getSessionUser(req, db);
     const parsed = catalogQuery.safeParse(req.query);
     const q = parsed.success ? parsed.data : ({} as z.infer<typeof catalogQuery>);
     const { page, pageSize } = resolveOffsetPage(q);
@@ -124,6 +140,11 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       eq(worlds.visibility, "open"),
       ne(worlds.status, "archived"),
     ];
+    // SOFT age tier (age-restriction plan Phase 4): hide 18+ worlds
+    // from anonymous viewers, minors, and hide-pref adults. Adults who
+    // keep 18+ visible still see them here (with the "18+" card chip);
+    // direct links stay adult-openable regardless of this listing rule.
+    if (!canSeeNsfw(me)) conds.push(eq(worlds.isNsfw, false));
     if (q.genre) conds.push(eq(worlds.genre, q.genre));
     if (q.status) conds.push(eq(worlds.status, q.status));
     // Text search across name + description + tags. SQLite LIKE is
@@ -211,10 +232,16 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
     try { body = createWorldBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
 
+    // "18+ world" is adult-only to set (age-restriction plan Phase 4).
+    if (body.isNsfw && !me.isAdult) {
+      reply.code(400);
+      return { error: tFor(me.locale, "errors:server.worlds.adultsOnlySetting") };
+    }
+
     const slug = (body.slug ?? deriveSlug(body.name)).toLowerCase();
     if (!SLUG_RX.test(slug)) {
       reply.code(400);
-      return { error: "slug must be 1-60 lowercase letters, numbers, hyphens" };
+      return { error: tFor(me.locale, "errors:server.common.slugRule") };
     }
 
     // Per-owner uniqueness.
@@ -223,7 +250,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       .from(worlds)
       .where(and(eq(worlds.ownerUserId, me.id), sql`lower(${worlds.slug}) = ${slug}`))
       .limit(1))[0];
-    if (dup) { reply.code(409); return { error: "you already have a world with that slug" }; }
+    if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.duplicateSlug") }; }
 
     // `featured` is admin-curated only; silently downgrade to `active`
     // when an owner attempts to self-promote on create. We don't error
@@ -244,6 +271,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       name: body.name.trim(),
       description: body.description?.trim() || null,
       visibility: body.visibility ?? "private",
+      isNsfw: body.isNsfw ?? false,
       genre: body.genre ?? "other",
       tags: body.tags ? serializeTagList(body.tags) : "",
       contentWarnings: body.contentWarnings ? serializeTagList(body.contentWarnings) : "",
@@ -285,7 +313,10 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
             sql`lower(${worlds.slug}) = ${req.params.idOrSlug.toLowerCase()}`,
           ))
           .limit(1))[0];
-        if (raw && raw.visibility === "private") {
+        // 18+ worlds never get the stub: even the name stays hidden
+        // from anonymous visitors (HARD tier — plain 404 below,
+        // mirroring the 18+ room deep-link posture).
+        if (raw && raw.visibility === "private" && !raw.isNsfw) {
           return {
             private: true as const,
             name: raw.name,
@@ -416,7 +447,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
         .limit(1))[0];
       if (!user) { reply.code(404); return { error: "no such user" }; }
       if (user.id === w.ownerUserId) {
-        reply.code(409); return { error: "owner is already an editor" };
+        reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.ownerAlreadyEditor") };
       }
       await db
         .insert(worldCollaborators)
@@ -472,6 +503,23 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
     if (body.name !== undefined) update.name = body.name.trim();
     if (body.description !== undefined) update.description = body.description?.trim() || null;
     if (body.visibility !== undefined) update.visibility = body.visibility;
+    if (body.isNsfw !== undefined && body.isNsfw !== w.isNsfw) {
+      // Owner-set, adults only (age-restriction plan Phase 4).
+      // Collaborators pass canEditWorld for pages/metadata but may NOT
+      // re-rate the whole world; staff with edit_others_world may
+      // (mirrors the room-toggle authority shape). Flips never touch
+      // membership or collaborator rows — keep-but-hide: minors simply
+      // stop resolving the world while the flag is on.
+      if (!me.isAdult) {
+        reply.code(400);
+        return { error: tFor(me.locale, "errors:server.worlds.adultsOnlySetting") };
+      }
+      if (w.ownerUserId !== me.id && !(await hasPermission(me, "edit_others_world", db))) {
+        reply.code(403);
+        return { error: tFor(me.locale, "errors:server.worlds.nsfwOwnerOnly") };
+      }
+      update.isNsfw = body.isNsfw;
+    }
     if (body.theme !== undefined) {
       // null clears it; any object is normalized to a Theme shape (drops
       // unknown keys, falls back to defaults for missing ones).
@@ -520,14 +568,14 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
     }
     if (body.slug !== undefined) {
       const slug = body.slug.toLowerCase();
-      if (!SLUG_RX.test(slug)) { reply.code(400); return { error: "slug must be 1-60 lowercase letters, numbers, hyphens" }; }
+      if (!SLUG_RX.test(slug)) { reply.code(400); return { error: tFor(me.locale, "errors:server.common.slugRule") }; }
       if (slug !== w.slug.toLowerCase()) {
         const dup = (await db
           .select()
           .from(worlds)
           .where(and(eq(worlds.ownerUserId, w.ownerUserId), sql`lower(${worlds.slug}) = ${slug}`, ne(worlds.id, w.id)))
           .limit(1))[0];
-        if (dup) { reply.code(409); return { error: "you already have a world with that slug" }; }
+        if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.duplicateSlug") }; }
         update.slug = slug;
       }
     }
@@ -586,20 +634,20 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       const newDepth = await depthOf(db, body.parentPageId ?? null);
       if (newDepth > WORLD_PAGE_DEPTH_CAP - 1) {
         reply.code(400);
-        return { error: `Page tree is capped at ${WORLD_PAGE_DEPTH_CAP} levels.` };
+        return { error: tFor(me.locale, "errors:server.worlds.pageDepthCap", { max: WORLD_PAGE_DEPTH_CAP }) };
       }
 
       const slug = (body.slug ?? deriveSlug(body.title)).toLowerCase();
       if (!SLUG_RX.test(slug)) {
         reply.code(400);
-        return { error: "slug must be 1-60 lowercase letters, numbers, hyphens" };
+        return { error: tFor(me.locale, "errors:server.common.slugRule") };
       }
 
       // Body cap follows the bio cap (admin-tunable).
       const { maxBioLength } = await getSettings(db);
       if ((body.bodyHtml ?? "").length > maxBioLength) {
         reply.code(413);
-        return { error: `Page body capped at ${maxBioLength} chars.` };
+        return { error: tFor(me.locale, "errors:server.worlds.pageBodyCap", { max: maxBioLength }) };
       }
 
       const id = nanoid();
@@ -646,7 +694,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       if (body.parentPageId !== undefined && body.parentPageId !== existing.parentPageId) {
         if (body.parentPageId) {
           if (body.parentPageId === existing.id) {
-            reply.code(400); return { error: "page can't be its own parent" };
+            reply.code(400); return { error: tFor(me.locale, "errors:server.worlds.pageOwnParent") };
           }
           // Walk new parent up to ensure existing.id isn't an ancestor.
           let cursor: string | null = body.parentPageId;
@@ -662,14 +710,14 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
               reply.code(400); return { error: "parent page does not belong to this world" };
             }
             if (parentRow.id === existing.id) {
-              reply.code(400); return { error: "moving here would create a cycle" };
+              reply.code(400); return { error: tFor(me.locale, "errors:server.worlds.pageCycle") };
             }
             cursor = parentRow.parentPageId;
           }
           const newDepth = await depthOf(db, body.parentPageId);
           if (newDepth > WORLD_PAGE_DEPTH_CAP - 1) {
             reply.code(400);
-            return { error: `Page tree is capped at ${WORLD_PAGE_DEPTH_CAP} levels.` };
+            return { error: tFor(me.locale, "errors:server.worlds.pageDepthCap", { max: WORLD_PAGE_DEPTH_CAP }) };
           }
         }
       }
@@ -678,7 +726,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
         const { maxBioLength } = await getSettings(db);
         if (body.bodyHtml.length > maxBioLength) {
           reply.code(413);
-          return { error: `Page body capped at ${maxBioLength} chars.` };
+          return { error: tFor(me.locale, "errors:server.worlds.pageBodyCap", { max: maxBioLength }) };
         }
       }
 
@@ -690,7 +738,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       if (body.slug !== undefined) {
         const slug = body.slug.toLowerCase();
         if (!SLUG_RX.test(slug)) {
-          reply.code(400); return { error: "slug must be 1-60 lowercase letters, numbers, hyphens" };
+          reply.code(400); return { error: tFor(me.locale, "errors:server.common.slugRule") };
         }
         update.slug = slug;
       }

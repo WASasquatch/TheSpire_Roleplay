@@ -1,5 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { ReactionEntry, ReactionRef, ReactionTargetKind } from "@thekeep/shared";
 import { lookupUnicodeEmojiCharByName, reactionRefKey } from "@thekeep/shared";
 import { useEmoticons, reactionsKey } from "../../state/emoticons.js";
@@ -94,7 +96,7 @@ export function ReactionAddButton({
   targetId,
   asCharacterId = null,
   className,
-  title = "Add reaction",
+  title,
   label = "+ 😊",
 }: {
   targetKind: ReactionTargetKind;
@@ -104,6 +106,8 @@ export function ReactionAddButton({
   title?: string;
   label?: React.ReactNode;
 }) {
+  const { t } = useTranslation("chat");
+  const effectiveTitle = title ?? t("reactions.add");
   const [pickerOpen, setPickerOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   return (
@@ -113,8 +117,8 @@ export function ReactionAddButton({
         type="button"
         onClick={() => setPickerOpen((v) => !v)}
         className={className ?? "emoticon-add-btn inline-flex items-center justify-center rounded-full border border-keep-rule bg-keep-bg text-keep-muted transition hover:scale-110 hover:border-keep-action hover:text-keep-action"}
-        title={title}
-        aria-label={title}
+        title={effectiveTitle}
+        aria-label={effectiveTitle}
         onMouseDown={(e) => e.preventDefault()}
       >
         {label}
@@ -164,6 +168,7 @@ const MAX_VISIBLE_MOBILE = 4;
 const MOBILE_MQ = "(max-width: 639px)";
 
 export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterId = null, readOnly, hideAddButton }: Props) {
+  const { t } = useTranslation("chat");
   const cached = useEmoticons((s) => s.reactions[reactionsKey(targetKind, targetId)]);
   const primeReactions = useEmoticons((s) => s.primeReactions);
   const [listOpen, setListOpen] = useState(false);
@@ -231,9 +236,9 @@ export function ReactionBar({ targetKind, targetId, initialEntries, asCharacterI
           type="button"
           onClick={() => setListOpen(true)}
           className="rounded-full border border-keep-rule bg-keep-panel/40 px-2 py-0.5 text-[11px] text-keep-muted hover:text-keep-text"
-          title="See all reactions"
+          title={t("reactions.seeAll")}
         >
-          +{overflowCount} more
+          {t("reactions.more", { count: overflowCount })}
         </button>
       ) : null}
       {!readOnly && !hideAddButton ? (
@@ -473,22 +478,36 @@ function ReactionGlyph({
  *  trailing "with …" so the tooltip doesn't end with a dangling
  *  preposition. */
 function formatReactorsTooltip(
+  t: TFunction<"chat">,
   reactors: ReadonlyArray<{ displayName: string }>,
   label: string,
 ): string {
   const names = reactors.map((r) => r.displayName);
-  let prefix: string;
-  if (names.length === 1) prefix = `${names[0]} reacted`;
-  else if (names.length === 2) prefix = `${names[0]} and ${names[1]} reacted`;
-  else if (names.length === 3) prefix = `${names[0]}, ${names[1]}, and ${names[2]} reacted`;
-  else prefix = `${names[0]}, ${names[1]}, and ${names.length - 2} others reacted`;
-  return label ? `${prefix} with ${label}` : prefix;
+  if (names.length === 1) {
+    return label
+      ? t("reactions.tooltipOneWith", { a: names[0], label })
+      : t("reactions.tooltipOne", { a: names[0] });
+  }
+  if (names.length === 2) {
+    return label
+      ? t("reactions.tooltipTwoWith", { a: names[0], b: names[1], label })
+      : t("reactions.tooltipTwo", { a: names[0], b: names[1] });
+  }
+  if (names.length === 3) {
+    return label
+      ? t("reactions.tooltipThreeWith", { a: names[0], b: names[1], c: names[2], label })
+      : t("reactions.tooltipThree", { a: names[0], b: names[1], c: names[2] });
+  }
+  return label
+    ? t("reactions.tooltipManyWith", { a: names[0], b: names[1], count: names.length - 2, label })
+    : t("reactions.tooltipMany", { a: names[0], b: names[1], count: names.length - 2 });
 }
 
 function ReactionChip({ entry, onClick }: { entry: ReactionEntry; onClick: () => void }) {
+  const { t } = useTranslation("chat");
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [hovered, setHovered] = useState(false);
-  const tooltip = formatReactorsTooltip(entry.reactors, entry.label);
+  const tooltip = formatReactorsTooltip(t, entry.reactors, entry.label);
   // Mood class is sheet-label-driven; Unicode reactions don't carry a
   // sheet animation hint, so they render with no jiggle. Pass the
   // sheet's label only when the ref is a sheet, empty string for
@@ -631,16 +650,17 @@ function ReactionTooltip({
  *  Full reaction list modal
  * ============================================================= */
 function ReactionListModal({ entries, onClose }: { entries: ReactionEntry[]; onClose: () => void }) {
+  const { t } = useTranslation("chat");
   return (
     <Modal onClose={onClose} zIndex={70}>
       <div className={`${MODAL_CARD_CONTENT} max-w-md rounded border border-keep-rule bg-keep-bg`} onClick={(e) => e.stopPropagation()}>
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-base">Reactions</h2>
+          <h2 className="font-action text-base">{t("reactions.title")}</h2>
           <CloseButton onClick={onClose} />
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto p-3">
           {entries.length === 0 ? (
-            <p className="text-xs italic text-keep-muted">No reactions yet.</p>
+            <p className="text-xs italic text-keep-muted">{t("reactions.empty")}</p>
           ) : (
             <ul className="space-y-3">
               {entries.map((e) => (

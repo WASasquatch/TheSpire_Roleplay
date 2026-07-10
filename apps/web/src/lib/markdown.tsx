@@ -1,7 +1,9 @@
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { canonicalizeNameForLookup, CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, VMARK_SPAN_RE, type CheckResultData, type MentionRef, type UiRoute } from "@thekeep/shared";
 import { useEmoticons } from "../state/emoticons.js";
 import { EmoticonSprite } from "../components/emoticons/EmoticonSprite.js";
+import { i18n } from "./i18n.js";
 import { openUiRoute } from "./uiRouteOpen.js";
 import { resolveDynamicChipLabel } from "./uiRouteDynamicLabel.js";
 import { UiRouteIcon } from "./uiRouteIcons.js";
@@ -657,7 +659,7 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
             node: (
               <button
                 type="button"
-                title="Tap to load this command into your message box"
+                title={i18n.t("chat:markdown.composeChipTitle")}
                 onClick={(e) => {
                   e.stopPropagation();
                   window.dispatchEvent(
@@ -686,7 +688,7 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
               <button
                 type="button"
                 data-quote-ref={messageId}
-                title="Jump to the quoted post"
+                title={i18n.t("chat:markdown.quoteChipTitle")}
                 onClick={(e) => {
                   e.stopPropagation();
                   window.dispatchEvent(new CustomEvent("spire:quote-ref", { detail: { messageId } }));
@@ -985,6 +987,7 @@ function VerifiedInline({
   color: string | null;
   children: ReactNode;
 }) {
+  const { t } = useTranslation("chat");
   // Read the viewer's theme so an admin-picked color inside the CSS
   // gets legibility-nudged the same way per-user chat colors do.
   // Subtle: the verification ring (`bg-keep-system-100/40`) already
@@ -1005,12 +1008,12 @@ function VerifiedInline({
   return (
     <span
       className="rounded bg-keep-system-100/40 px-0.5 ring-1 ring-inset ring-keep-system/40"
-      title={`Verified: ran the /${cmd} command`}
+      title={t("markdown.verifiedTitle", { cmd })}
       style={finalStyle ?? undefined}
     >
       {children}
       <span aria-hidden className="ml-0.5 align-super text-[0.7em] text-keep-system">✓</span>
-      <span className="sr-only"> (verified /{cmd} output)</span>
+      <span className="sr-only">{t("markdown.verifiedSr", { cmd })}</span>
     </span>
   );
 }
@@ -1035,6 +1038,7 @@ const CHK_FAIL_RGB = "244 63 94";
  * rather than inline with the surrounding action text.
  */
 function CheckResultBlock({ data, depth }: { data: CheckResultData; depth: number }) {
+  const { t } = useTranslation("chat");
   const passWon = data.outcome === "pass";
   const accent = passWon ? CHK_PASS_RGB : CHK_FAIL_RGB;
   return (
@@ -1049,19 +1053,19 @@ function CheckResultBlock({ data, depth }: { data: CheckResultData; depth: numbe
           className="rounded px-1.5 py-0.5 text-[0.85em] font-bold uppercase tracking-wide"
           style={{ background: `rgb(${accent} / 0.2)`, color: `rgb(${accent})` }}
         >
-          {passWon ? "✓ Pass" : "✗ Fail"}
+          {passWon ? t("markdown.passVerdict") : t("markdown.failVerdict")}
         </span>
         {data.detail ? (
           <span className="font-mono text-[0.85em] text-keep-muted">{data.detail}</span>
         ) : null}
       </span>
       {data.pass ? (
-        <CheckBranch label="Pass" rgb={CHK_PASS_RGB} active={passWon} startOpen={passWon} glyph="✓">
+        <CheckBranch label={t("markdown.passBranch")} rgb={CHK_PASS_RGB} active={passWon} startOpen={passWon} glyph="✓">
           {parseInline(data.pass, depth + 1)}
         </CheckBranch>
       ) : null}
       {data.fail ? (
-        <CheckBranch label="Fail" rgb={CHK_FAIL_RGB} active={!passWon} startOpen={!passWon} glyph="✗">
+        <CheckBranch label={t("markdown.failBranch")} rgb={CHK_FAIL_RGB} active={!passWon} startOpen={!passWon} glyph="✗">
           {parseInline(data.fail, depth + 1)}
         </CheckBranch>
       ) : null}
@@ -1123,12 +1127,13 @@ function CheckBranch({
  * it stays revealed for that render.
  */
 function SpoilerSpan({ children }: { children: ReactNode }) {
+  const { t } = useTranslation("chat");
   const [revealed, setRevealed] = useState(false);
   if (revealed) {
     return (
       <span
         className="rounded bg-keep-panel/50 px-1"
-        title="Spoiler revealed - click to hide"
+        title={t("markdown.spoilerRevealedTitle")}
         onClick={() => setRevealed(false)}
       >
         {children}
@@ -1144,7 +1149,7 @@ function SpoilerSpan({ children }: { children: ReactNode }) {
       // can't be read. The background covers them; selection still leaks
       // them, which is intentional - this is a courtesy mask, not a secret.
       className="rounded bg-keep-text/85 px-1 text-keep-text [color:transparent] hover:bg-keep-text/70"
-      title="Spoiler - click to reveal"
+      title={t("markdown.spoilerHiddenTitle")}
     >
       {children}
     </button>
@@ -1314,7 +1319,7 @@ function renderPartsInline(
           type="button"
           onClick={() => onWorldClick(p.slug)}
           className="rounded border border-keep-action/40 bg-keep-action/10 px-1 text-[0.95em] font-semibold text-keep-action hover:bg-keep-action/20 focus:outline-none focus:ring-1 focus:ring-keep-action"
-          title={`Open the ${p.slug} world`}
+          title={i18n.t("chat:markdown.openWorldTitle", { slug: p.slug })}
         >
           @world:{p.slug}
         </button>,
@@ -1370,7 +1375,11 @@ function renderMentionButton(
       type="button"
       onClick={() => onMentionClick(clickTarget)}
       className={className}
-      title={isSelf ? `You were mentioned (${raw})` : `View ${raw}'s profile`}
+      title={
+        isSelf
+          ? i18n.t("chat:markdown.mentionSelfTitle", { name: raw })
+          : i18n.t("chat:markdown.mentionProfileTitle", { name: raw })
+      }
     >
       @{raw}
     </button>
@@ -1618,6 +1627,7 @@ interface UrlOrMediaProps {
  * explicit `![alt](url)` markdown sets `forceImage`.
  */
 function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
+  const { t } = useTranslation("chat");
   const [shown, setShown] = useState(false);
   const looksLikeImage = forceImage || looksLikeImageUrl(url);
   // Skip video detection when the URL is already claimed by an image, saves
@@ -1644,12 +1654,16 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
 
   if (!looksLikeImage && !video) return link;
 
-  const buttonLabel = shown ? "Hide" : looksLikeImage ? "Show image" : "Show video";
-  const buttonTitle = shown
-    ? "Hide the inline preview"
+  const buttonLabel = shown
+    ? t("markdown.hide")
     : looksLikeImage
-      ? "Load and display this image inline"
-      : "Load and play this video inline";
+      ? t("markdown.showImage")
+      : t("markdown.showVideo");
+  const buttonTitle = shown
+    ? t("markdown.hidePreviewTitle")
+    : looksLikeImage
+      ? t("markdown.showImageTitle")
+      : t("markdown.showVideoTitle");
 
   return (
     <span>
@@ -1687,7 +1701,7 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
             src={url}
             alt={alt ?? ""}
             className="block max-h-[60vh] max-w-[95vw] rounded border border-keep-rule object-contain md:max-w-[30vw]"
-            placeholderLabel="image (offscreen)"
+            placeholderLabel={t("markdown.imageOffscreen")}
           />
         </span>
       ) : null}
@@ -1717,12 +1731,16 @@ function UrlOrMedia({ url, alt, forceImage }: UrlOrMediaProps) {
           <LazyMediaEmbed
             kind="iframe"
             src={video.src}
-            title={video.provider === "youtube" ? "YouTube video player" : "Vimeo video player"}
+            title={
+              video.provider === "youtube"
+                ? t("markdown.youtubePlayerTitle")
+                : t("markdown.vimeoPlayerTitle")
+            }
             iframeReferrerPolicy="strict-origin-when-cross-origin"
             iframeAllow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
             iframeAllowFullScreen
             className="block aspect-video w-full rounded border border-keep-rule"
-            placeholderLabel="video (offscreen)"
+            placeholderLabel={t("markdown.videoOffscreen")}
           />
         </span>
       ) : null}

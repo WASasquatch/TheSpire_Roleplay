@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, notInArray, or, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -40,10 +40,16 @@ import { serverAuthority } from "../servers/authority.js";
 import { isServerModerationActive } from "../servers/moderation.js";
 import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
+import { canSeeNsfw } from "../auth/ageGate.js";
+import { isolationHiddenSetFor, isolationVisibleSql } from "../auth/ageIsolation.js";
+import { maskForMinors, maskMessageForMinors } from "../realtime/minorLanguageFilter.js";
+import { effectiveRoomNsfwWith, nsfwServerIds } from "../lib/nsfwRooms.js";
+import { boardAgeDenied, nsfwForumIds } from "../forums/nsfw.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import { buildChatLogHtml, type ExportMessageRow } from "../export/chatLog.js";
 import { signExportPayload } from "../export/sign.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 import { resolveTopicAuthorFlair } from "./forums.js";
 
@@ -148,7 +154,22 @@ export async function registerRoomsRoutes(
       }
     }
 
-    const allRooms = [...publicRows, ...extraPrivate];
+    let allRooms = [...publicRows, ...extraPrivate];
+
+    // HARD age gate (age plan, Phase 2): 18+ rooms — by their own flag OR by
+    // their server's — are dropped ENTIRELY for minors and logged-out
+    // viewers (hidden, not shown-locked; decision #3). Adults always get
+    // them, hide preference or not: the rail is navigation, not discovery,
+    // so the client just chips them "18+". Phase 3 extends the drop to
+    // boards of 18+ FORUMS: a board room isn't individually flagged when
+    // only its parent forum is, so the row-level filter alone can't see it.
+    if (!me?.isAdult) {
+      const nsfwServers = await nsfwServerIds(db);
+      const nsfwForums = await nsfwForumIds(db);
+      allRooms = allRooms.filter((r) =>
+        !effectiveRoomNsfwWith(r, nsfwServers)
+        && !(r.forumId && nsfwForums.has(r.forumId)));
+    }
     if (allRooms.length === 0) return { rooms: [] };
 
     // Hide occupants this viewer is mutually blocked with — the same
@@ -165,16 +186,30 @@ export async function registerRoomsRoutes(
     // `presence:update` events. Without unification, fields like
     // `linkedWorld`/`primaryWorld`/`accountRole`/`mood` were silently
     // missing from /rooms and the rail UI lost half its features.
-    const result: RoomWithOccupants[] = await Promise.all(
-      allRooms.map(async (r): Promise<RoomWithOccupants> => {
-        const summary = await buildRoomSummary(db, r);
-        const occupants = (await currentOccupants(io, db, r.id))
-          .filter((o) => !blocked.has(o.userId))
-          .slice()
-          .sort((a, b) => a.displayName.localeCompare(b.displayName));
-        return { ...summary, occupants };
-      }),
+    const assembled = await Promise.all(
+      allRooms.map(async (r) => ({
+        room: r,
+        summary: await buildRoomSummary(db, r),
+        occupants: await currentOccupants(io, db, r.id),
+      })),
     );
+    // Isolation (age plan, Phase 5): occupants the viewer is isolated with
+    // vanish from the rail exactly like blocked ones — same per-viewer
+    // filter the websocket presence path applies via the isolation graph.
+    // One bounded lookup over every occupant id across the tree; empty for
+    // staff / anonymous / plain-minor viewers without touching the DB.
+    const isolationHidden = await isolationHiddenSetFor(
+      db,
+      me,
+      assembled.flatMap((a) => a.occupants.map((o) => o.userId)),
+    );
+    const result: RoomWithOccupants[] = assembled.map(({ summary, occupants }) => ({
+      ...summary,
+      occupants: occupants
+        .filter((o) => !blocked.has(o.userId) && !isolationHidden.has(o.userId))
+        .slice()
+        .sort((a, b) => a.displayName.localeCompare(b.displayName)),
+    }));
 
     return { rooms: result };
   });
@@ -212,6 +247,13 @@ export async function registerRoomsRoutes(
       if (sa.server && isServerModerationActive(sa.server) && !sa.isMod) {
         reply.code(404); return { error: "not found" };
       }
+    }
+    // HARD age gate: an 18+ room's deep link 404s for minors and anonymous
+    // viewers (mirrors the server-moderation posture above) so a shared
+    // {room:slug} chip degrades to plain text instead of resolving. Board-
+    // aware: a board inside an 18+ FORUM 404s the same way (Phase 3).
+    if (await boardAgeDenied(db, me, room)) {
+      reply.code(404); return { error: "not found" };
     }
     const openToAll = room.type === "public" && !room.forumMembersOnly;
     if (!openToAll) {
@@ -284,6 +326,9 @@ export async function registerRoomsRoutes(
     if (!me) { reply.code(401); return { error: "auth" }; }
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
     if (!room || room.archivedAt) { reply.code(404); return { error: "no room" }; }
+    // HARD age gate: the dossier (name, description, NPC roster) of an 18+
+    // room is withheld from minors — 404, matching the by-slug posture.
+    if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no room" }; }
     if (room.type === "private") {
       const member = (await db
         .select()
@@ -323,6 +368,9 @@ export async function registerRoomsRoutes(
       messageExpiryMinutes: room.messageExpiryMinutes,
       difficultyClass: room.difficultyClass ?? null,
       theaterMode: room.theaterMode,
+      // Effective 18+ rating (server OR room) for the info bar's chip. Only
+      // adults ever reach this line — the age gate above 404s everyone else.
+      isNsfw: summary.isNsfw ?? false,
       linkedWorld: summary.linkedWorld,
     };
     return { info };
@@ -370,6 +418,10 @@ export async function registerRoomsRoutes(
       const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
       if (!room) { reply.code(404); return { error: "no room" }; }
 
+      // HARD age gate: an 18+ room (or a board of an 18+ forum) isn't
+      // searchable by minors at all.
+      if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no room" }; }
+
       // Private-room membership gate. Site admins are NOT bypassed here
       //, the privacy contract is that admins can't read private room
       // content even via search.
@@ -380,6 +432,19 @@ export async function registerRoomsRoutes(
           .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, me.id)))
           .limit(1))[0];
         if (!member) { reply.code(403); return { error: "not a member" }; }
+      }
+
+      // Members-only board gate (adjacent bugfix, age plan audit §I1): this
+      // route previously gated only `type = "private"` rooms, so any logged-
+      // in user could read a members-only forum board's BODIES out of search
+      // even though the topics/thread routes withhold them. Mirror those
+      // routes' posture: a locked board refuses outright; a board with
+      // members-only categories keeps searching but drops hits filed under
+      // them (below). No-op for ordinary chat rooms.
+      const readGate = await forumBoardReadGate(db, me, room.id);
+      if (readGate.boardLocked) {
+        reply.code(403);
+        return { error: tFor(me.locale, "errors:server.rooms.boardMembersOnly"), code: "FORUM_BOARD_MEMBERS_ONLY" };
       }
 
       // Build the privacy-filtered candidate set, then rank. The whisper
@@ -394,6 +459,15 @@ export async function registerRoomsRoutes(
           isNull(messages.deletedAt),
           sql`${messages.kind} != 'system'`,
           sql`${messages.body} LIKE ${like} ESCAPE '\\'`,
+          // SOFT tier (age plan, Phase 2): rows stamped 18+ at write time
+          // (a flipped-back room's 18+ era; Phase 3 NSFW topics) are hidden
+          // from anyone who can't see NSFW, including adults with the
+          // "Hide 18+ content" preference on.
+          ...(canSeeNsfw(me) ? [] : [eq(messages.isNsfw, false)]),
+          // Isolation (Phase 5): hits authored by an account the viewer is
+          // isolated with drop, mirroring the blocked-author posture of the
+          // server-wide search. Undefined for non-isolating viewer classes.
+          isolationVisibleSql(me, messages.userId),
           // Whisper privacy: visible only to sender or recipient.
           or(
             sql`${messages.kind} != 'whisper'`,
@@ -404,12 +478,38 @@ export async function registerRoomsRoutes(
         .orderBy(desc(messages.createdAt))
         .limit(limit * 4); // overfetch so the in-memory rank has options
 
+      // Members-only CATEGORY filter (the other half of the §I1 bugfix): a
+      // topic carries its category itself; a reply inherits its topic's, so
+      // resolve the category off the PARENT for reply hits — the same rule
+      // the server-wide search and the permalink locator apply.
+      let visibleRows = rows;
+      if (readGate.lockedCatIds.size > 0) {
+        const parentIds = [...new Set(
+          rows.map((m) => m.replyToId).filter((v): v is string => !!v),
+        )];
+        const parentCatById = new Map(
+          parentIds.length
+            ? (await db
+                .select({ id: messages.id, cat: messages.threadCategoryId })
+                .from(messages)
+                .where(inArray(messages.id, parentIds)))
+                .map((p) => [p.id, p.cat ?? null])
+            : [],
+        );
+        visibleRows = rows.filter((m) => {
+          const catId = m.replyToId
+            ? parentCatById.get(m.replyToId) ?? null
+            : m.threadCategoryId ?? null;
+          return !catId || !readGate.lockedCatIds.has(catId);
+        });
+      }
+
       // Frequency-based relevance: count occurrences of the query in the
       // body (case-insensitive). Ties broken by recency. The UI displays
       // results in ascending relevance so the most-relevant hit sits
       // closest to the search input, see the SearchBar component.
       const needle = q.toLowerCase();
-      const hits = rows.map((m): MessageSearchHit & { _ts: number } => {
+      const hits = visibleRows.map((m): MessageSearchHit & { _ts: number } => {
         const lc = m.body.toLowerCase();
         let count = 0;
         let idx = 0;
@@ -429,6 +529,12 @@ export async function registerRoomsRoutes(
       });
       hits.sort((a, b) => b.relevance - a.relevance || b._ts - a._ts);
       const trimmed = hits.slice(0, limit).map(({ _ts, ...rest }) => rest);
+      // Minor language filter (§J): result snippets are raw bodies — mask
+      // them for an under-18 viewer. Per-viewer response objects, so
+      // in-place replacement is safe; adults skip the loop entirely.
+      if (!me.isAdult) {
+        for (const h of trimmed) h.snippet = maskForMinors(h.snippet) ?? h.snippet;
+      }
       return { hits: trimmed };
     },
   );
@@ -460,6 +566,8 @@ export async function registerRoomsRoutes(
 
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
     if (!room) { reply.code(404); return { error: "no room" }; }
+    // HARD age gate: no jump-window reads out of an 18+ room for minors.
+    if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no room" }; }
     if (room.type === "private") {
       const member = (await db
         .select()
@@ -484,7 +592,11 @@ export async function registerRoomsRoutes(
 
     // Cross-room whisper overlay, see the union in
     // sendRoomBacklogTo / GET /rooms/:id/messages for the rationale.
-    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID);
+    // HARD tier on the stamped-history clause: adults always see it.
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult);
+    // Isolation (Phase 5): the jump window drops rows authored by accounts
+    // the viewer is isolated with, same author-keyed rule as the backlog.
+    const isolationClause = isolationVisibleSql(me, messages.userId);
 
     // Pull `before` rows with createdAt <= target (inclusive of target via
     // <= + de-dup below), and `after` rows strictly newer.
@@ -493,7 +605,14 @@ export async function registerRoomsRoutes(
       .from(messages)
       .where(and(
         roomOrPartyWhisper,
-        sql`${messages.createdAt} <= ${target.createdAt}`,
+        isolationClause,
+        // `lte` (not a raw sql fragment): the comparator runs the column's
+        // driver mapping, turning the Date into ms. The old raw
+        // `sql\`... <= ${target.createdAt}\`` handed better-sqlite3 a bare
+        // Date object, which it refuses to bind — this route 500'd on
+        // every call. The `gt` on the newer-half query below always did
+        // the right thing; this brings the older half in line.
+        lte(messages.createdAt, target.createdAt),
       ))
       .orderBy(desc(messages.createdAt))
       .limit(before + 1); // +1 to include the target itself
@@ -502,6 +621,7 @@ export async function registerRoomsRoutes(
       .from(messages)
       .where(and(
         roomOrPartyWhisper,
+        isolationClause,
         gt(messages.createdAt, target.createdAt),
       ))
       .orderBy(asc(messages.createdAt))
@@ -550,6 +670,12 @@ export async function registerRoomsRoutes(
       // above this map so we don't fire a permission lookup per row.
       ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
     }));
+    // Minor language filter (§J): the jump window masks bodies / titles /
+    // quote snippets for an under-18 viewer, same as the live backlog.
+    // Adults skip the loop (byte-identical responses).
+    if (!me.isAdult) {
+      for (let i = 0; i < wire.length; i++) wire[i] = maskMessageForMinors(wire[i]!) ?? wire[i]!;
+    }
     return { messages: wire };
   });
 
@@ -577,6 +703,8 @@ export async function registerRoomsRoutes(
     if (!me) { reply.code(401); return { error: "auth" }; }
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
     if (!room) { reply.code(404); return { error: "no room" }; }
+    // HARD age gate: no scroll-up history out of an 18+ room for minors.
+    if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no room" }; }
     if (room.type === "private") {
       const member = (await db
         .select()
@@ -609,8 +737,8 @@ export async function registerRoomsRoutes(
     // Whispers overlay across rooms, see the matching union in
     // sendRoomBacklogTo. Non-whisper rows are scoped to THIS room;
     // whisper rows the caller is a party to are pulled regardless of
-    // their original room.
-    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID);
+    // their original room. HARD tier on stamped 18+ history.
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult);
 
     // Per-viewer `/clear` marker: never page back past the point this
     // user cleared the room. Keeps the scroll-up loader from resurrecting
@@ -624,6 +752,9 @@ export async function registerRoomsRoutes(
         roomOrPartyWhisper,
         lt(messages.createdAt, new Date(before)),
         clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
+        // Isolation (Phase 5): older pages drop isolated-pair authors, the
+        // same author rule the live backlog + hide set apply.
+        isolationVisibleSql(me, messages.userId),
       ))
       .orderBy(desc(messages.createdAt))
       .limit(limit + 1);
@@ -670,6 +801,12 @@ export async function registerRoomsRoutes(
       ...(m.tier != null ? { tier: m.tier } : {}),
       ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
     }));
+    // Minor language filter (§J): older pages mask for an under-18 viewer
+    // exactly like the first-50 backlog (sendRoomBacklogTo), so scrolling
+    // up can't resurface what the live path masked.
+    if (!me.isAdult) {
+      for (let i = 0; i < wire.length; i++) wire[i] = maskMessageForMinors(wire[i]!) ?? wire[i]!;
+    }
     // Hydrate poll state on any poll rows in this older page (same per-viewer
     // shape the live backlog attaches).
     const pollJsonById = new Map(window.filter((m) => m.kind === "poll").map((m) => [m.id, m.pollDataJson]));
@@ -715,6 +852,9 @@ export async function registerRoomsRoutes(
     if (!me) { reply.code(401); return { error: "auth" }; }
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.id)).limit(1))[0];
     if (!room) { reply.code(404); return { error: "no room" }; }
+    // HARD age gate: minors can't export an 18+ room at all. (A flipped-back
+    // room exports for them, minus its stamped 18+ era — the clause below.)
+    if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no room" }; }
     if (room.type === "private") {
       const member = (await db
         .select()
@@ -750,7 +890,7 @@ export async function registerRoomsRoutes(
         .where(eq(ignores.userId, me.id))).map((r) => r.ignoredUserId),
     );
     for (const blockedId of await blockedUserIdsFor(db, me.id)) ignoredIds.add(blockedId);
-    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID);
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult);
     const clearedAt = await getClearedAt(db, me.id, room.id);
 
     // Most recent (window ∩ cap) rows DESC; overfetch one to detect that the
@@ -763,6 +903,9 @@ export async function registerRoomsRoutes(
         gt(messages.createdAt, cutoff),
         clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
         isNull(messages.deletedAt),
+        // Isolation (Phase 5): an exported log excludes isolated-pair
+        // authors just like the ignored/blocked filter below does.
+        isolationVisibleSql(me, messages.userId),
       ))
       .orderBy(desc(messages.createdAt))
       .limit(EXPORT_MAX_MESSAGES + 1);
@@ -771,10 +914,29 @@ export async function registerRoomsRoutes(
       .filter((m) => !ignoredIds.has(m.userId));
     capped.reverse();
 
+    // Minor language filter (§J): an under-18 requester's export is masked —
+    // in the RENDERED log AND in the signed payload below, because the
+    // manifest embeds full bodies into the same downloaded file (leaving
+    // them raw would hand the minor every original one View-Source away).
+    // Masked once per row here and shared by both consumers; the signature
+    // is computed over the masked payload, so the document, its embedded
+    // manifest, and the stored receipt stay self-consistent. Adults' exports
+    // are byte-identical to today (empty map ⇒ every lookup misses). The
+    // stored `messages` rows are never touched.
+    const minorMaskedById = new Map<string, string>();
+    if (!me.isAdult) {
+      for (const m of capped) {
+        const masked = maskForMinors(m.body);
+        if (masked !== null) minorMaskedById.set(m.id, masked);
+      }
+    }
+    const exportBody = (m: { id: string; body: string }): string =>
+      minorMaskedById.get(m.id) ?? m.body;
+
     const exportRows: ExportMessageRow[] = capped.map((m) => ({
       kind: m.kind,
       displayName: m.displayName,
-      body: m.body,
+      body: exportBody(m),
       color: m.color,
       createdAt: +m.createdAt,
       toDisplayName: m.toDisplayName,
@@ -807,7 +969,10 @@ export async function registerRoomsRoutes(
         id: m.id,
         kind: m.kind,
         displayName: m.displayName,
-        body: m.body,
+        // Masked for a minor requester (see minorMaskedById above) — the
+        // manifest ships inside the downloaded file, so it must carry the
+        // same variant the rendered log shows.
+        body: exportBody(m),
         color: m.color,
         createdAt: +m.createdAt,
         toDisplayName: m.toDisplayName ?? null,
@@ -882,11 +1047,14 @@ export async function registerRoomsRoutes(
     // the forum opts into public browsing (migration 0239).
     if (room.forumMembersOnly) return false;
     const f = (await db
-      .select({ publicBrowsing: forums.publicBrowsing })
+      .select({ publicBrowsing: forums.publicBrowsing, isNsfw: forums.isNsfw })
       .from(forums)
       .where(eq(forums.id, room.forumId))
       .limit(1))[0];
-    return !!f?.publicBrowsing;
+    // An 18+ forum is never anonymously readable either, whatever its
+    // public-browsing toggle says: anonymous = no NSFW, always (age plan,
+    // Phase 3 — /f/<slug> presents such a forum as non-public).
+    return !!f?.publicBrowsing && !f.isNsfw;
   }
 
   /**
@@ -924,13 +1092,25 @@ export async function registerRoomsRoutes(
         reply.code(401); return { error: "auth" };
       }
 
+      // HARD age gate (age plan, Phase 2): threads in an 18+ room/board 404
+      // for minors and anonymous viewers — this is the room gate Phase 3's
+      // 18+ boards inherit, extended to the parent FORUM's whole-forum flag.
+      const threadRoomRating = (await db
+        .select({ isNsfw: rooms.isNsfw, serverId: rooms.serverId, forumId: rooms.forumId })
+        .from(rooms)
+        .where(eq(rooms.id, req.params.id))
+        .limit(1))[0];
+      if (!threadRoomRating || (await boardAgeDenied(db, me, threadRoomRating))) {
+        reply.code(404); return { error: "not found" };
+      }
+
       // Private board / category gate (migration 0239): deep links can't be
       // used to read a topic in a members-only board, nor one filed under a
       // members-only category, as a non-member.
       const readGate = await forumBoardReadGate(db, me, req.params.id);
       if (readGate.boardLocked) {
         reply.code(403);
-        return { error: "This board is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+        return { error: tFor(me?.locale ?? null, "errors:server.rooms.boardMembersOnly"), code: "FORUM_BOARD_MEMBERS_ONLY" };
       }
 
       const roomId = req.params.id;
@@ -950,7 +1130,25 @@ export async function registerRoomsRoutes(
       }
       if (topicRow.threadCategoryId && readGate.lockedCatIds.has(topicRow.threadCategoryId)) {
         reply.code(403);
-        return { error: "This category is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+        return { error: tFor(me?.locale ?? null, "errors:server.rooms.categoryMembersOnly"), code: "FORUM_BOARD_MEMBERS_ONLY" };
+      }
+      // HARD age gate (age plan, Phase 3): an NSFW-tagged topic — and any
+      // message inside it; the walk above resolved replies to their parent —
+      // 404s for minors and anonymous viewers. Adults always pass, hide
+      // preference or not, so a direct link still opens for a hide-pref
+      // adult even though the topic left their lists.
+      if (topicRow.isNsfw && !me?.isAdult) {
+        reply.code(404);
+        return { error: "not found" };
+      }
+      // Isolation (age plan, Phase 5): a topic authored by an account the
+      // viewer is isolated with doesn't exist for them — 404 the whole
+      // thread (blocks never covered this route; isolation must). Replies
+      // by isolated-pair authors inside a visible thread are filtered from
+      // the reply query below instead.
+      if (me && (await isolationHiddenSetFor(db, me, [topicRow.userId])).size > 0) {
+        reply.code(404);
+        return { error: "not found" };
       }
       if (topicRow.deletedAt) {
         // Topic was soft-deleted, surface a 404 rather than handing
@@ -972,6 +1170,16 @@ export async function registerRoomsRoutes(
           eq(messages.roomId, roomId),
           eq(messages.replyToId, topicId),
           isNull(messages.deletedAt),
+          // HARD age gate (Phase 2/3): replies STAMPED is_nsfw at write time
+          // (sent while the board/server was 18+, or tag-inherited) never
+          // reach minors or anonymous viewers, even when the topic itself is
+          // untagged and the board has since flipped back to SFW — matching
+          // roomVisibilityWhere's tier for every other backlog read. Adults
+          // always pass, hide preference or not. The topic card's replyCount
+          // may exceed the visible replies for minors; numbers-not-content.
+          ...(me?.isAdult ? [] : [eq(messages.isNsfw, false)]),
+          // Isolation (Phase 5): replies by isolated-pair authors drop.
+          isolationVisibleSql(me, messages.userId),
         ))
         .orderBy(asc(messages.createdAt));
 
@@ -1015,6 +1223,9 @@ export async function registerRoomsRoutes(
           ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
           ...(m.rankKey ? { rankKey: m.rankKey } : {}),
           ...(m.tier != null ? { tier: m.tier } : {}),
+          // NSFW tag/stamp (age plan, Phase 3) — drives the thread header's
+          // NSFW chip. Only adults ever reach this line for a tagged topic.
+          ...(m.isNsfw ? { isNsfw: true } : {}),
           ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
         };
       }
@@ -1027,9 +1238,17 @@ export async function registerRoomsRoutes(
         const state = await loadPollState(db, topicRow.id, me?.id ?? null, topicRow.pollDataJson);
         if (state) topicWire.poll = state;
       }
+      // Minor language filter (§J): thread bodies, the topic title, and
+      // quote snippets mask for under-18 viewers. Anonymous readers (public-
+      // browsing boards) mask too — they're not a known adult, and leaving
+      // them raw would make "log out" the trivial filter bypass. Adults are
+      // byte-identical.
+      const maskThread = !me?.isAdult;
       return {
-        topic: topicWire,
-        replies: replyRows.map(rowToWire),
+        topic: maskThread ? (maskMessageForMinors(topicWire) ?? topicWire) : topicWire,
+        replies: replyRows
+          .map(rowToWire)
+          .map((w) => (maskThread ? (maskMessageForMinors(w) ?? w) : w)),
       };
     },
   );
@@ -1102,13 +1321,25 @@ export async function registerRoomsRoutes(
         reply.code(401); return { error: "auth" };
       }
 
+      // HARD age gate (age plan, Phase 2): topic lists in an 18+ room/board
+      // 404 for minors and anonymous viewers — the room gate Phase 3's 18+
+      // boards inherit, extended to the parent FORUM's whole-forum flag.
+      const topicsRoomRating = (await db
+        .select({ isNsfw: rooms.isNsfw, serverId: rooms.serverId, forumId: rooms.forumId })
+        .from(rooms)
+        .where(eq(rooms.id, req.params.id))
+        .limit(1))[0];
+      if (!topicsRoomRating || (await boardAgeDenied(db, me, topicsRoomRating))) {
+        reply.code(404); return { error: "not found" };
+      }
+
       // Private board / category gate (migration 0239): non-members can't read
       // a members-only board at all, nor topics filed under a members-only
       // category. No-op for ordinary chat rooms.
       const readGate = await forumBoardReadGate(db, me, req.params.id);
       if (readGate.boardLocked) {
         reply.code(403);
-        return { error: "This board is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+        return { error: tFor(me?.locale ?? null, "errors:server.rooms.boardMembersOnly"), code: "FORUM_BOARD_MEMBERS_ONLY" };
       }
 
       let q;
@@ -1118,10 +1349,16 @@ export async function registerRoomsRoutes(
       // Asking for a specific members-only category the viewer can't read.
       if (q.category && readGate.lockedCatIds.has(q.category)) {
         reply.code(403);
-        return { error: "This category is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+        return { error: tFor(me?.locale ?? null, "errors:server.rooms.categoryMembersOnly"), code: "FORUM_BOARD_MEMBERS_ONLY" };
       }
 
       const settings = await getSettings(db);
+      // Isolation (age plan, Phase 5): topics authored by an account the
+      // viewer is isolated with leave the list — blocks never covered this
+      // route; isolation must. Undefined (no clause) for anonymous, staff,
+      // and plain-minor viewers. Kept in the WHERE (not a post-filter) so
+      // the COUNT/pagination and the unread computation stay exact.
+      const topicsIsolationClause = isolationVisibleSql(me, messages.userId);
       const perPage = q.perPage ?? q.limit ?? settings.forumTopicsPerPage;
       const page = q.page ?? 1;
       // Cursor mode wins ONLY when no `page` was supplied AND a
@@ -1154,6 +1391,14 @@ export async function registerRoomsRoutes(
         // `ooc`, is a chat-shaped event, not a discussion thread, and must
         // not surface in the forum topics list.
         inArray(messages.kind, ["say", "poll"]),
+        // SOFT tier (age plan, Phase 3): NSFW-tagged topics leave the list
+        // for anyone who can't see NSFW — minors, anonymous public browsing,
+        // and adults with "Hide 18+ content" on. The thread route gates on
+        // the HARD tier instead, so a hide-pref adult can still open a
+        // direct link. Because the page is filtered here, the unread /
+        // watched computation below inherits the exclusion for free.
+        ...(canSeeNsfw(me) ? [] : [eq(messages.isNsfw, false)]),
+        ...(topicsIsolationClause ? [topicsIsolationClause] : []),
       ];
       if (q.category !== undefined) {
         if (q.category === "") {
@@ -1306,6 +1551,9 @@ export async function registerRoomsRoutes(
           ...mentionsField(m.mentionsJson),
           ...(m.rankKey ? { rankKey: m.rankKey } : {}),
           ...(m.tier != null ? { tier: m.tier } : {}),
+          // NSFW tag (age plan, Phase 3) — the built-in chip. Rows carrying
+          // it only ever reach viewers who can see NSFW (filter above).
+          ...(m.isNsfw ? { isNsfw: true } : {}),
           ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
           ...(flair
             ? {
@@ -1320,6 +1568,15 @@ export async function registerRoomsRoutes(
             : {}),
         };
       });
+      // Minor language filter (§J): topic titles, bodies, and quote
+      // snippets mask for under-18 viewers — anonymous public browsing
+      // included (not a known adult; fail closed like every other age
+      // check on this route). Adults keep byte-identical cards.
+      if (!me?.isAdult) {
+        for (let i = 0; i < topics.length; i++) {
+          topics[i] = maskMessageForMinors(topics[i]!) ?? topics[i]!;
+        }
+      }
       // Reply counts per topic, so the COLLAPSED topic card shows the
       // true count without first opening the thread. Forum replies always
       // attach directly to the topic (`replyToId === topicId`; reply-to-
@@ -1410,11 +1667,23 @@ export async function registerRoomsRoutes(
     if (!me && !(await boardAllowsAnonymousRead(req.params.id))) {
       reply.code(401); return { error: "auth" };
     }
+    // HARD age gate (age plan, Phase 3): even the category NAMES of an 18+
+    // room/board — or of a board inside an 18+ forum — are withheld from
+    // minors and anonymous viewers, matching the topics-route posture. A
+    // missing room keeps today's empty-list response.
+    const catsRoomRating = (await db
+      .select({ isNsfw: rooms.isNsfw, serverId: rooms.serverId, forumId: rooms.forumId })
+      .from(rooms)
+      .where(eq(rooms.id, req.params.id))
+      .limit(1))[0];
+    if (catsRoomRating && (await boardAgeDenied(db, me, catsRoomRating))) {
+      reply.code(404); return { error: "not found" };
+    }
     // A private board's category list is itself withheld from non-members.
     const readGate = await forumBoardReadGate(db, me, req.params.id);
     if (readGate.boardLocked) {
       reply.code(403);
-      return { error: "This board is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+      return { error: tFor(me?.locale ?? null, "errors:server.rooms.boardMembersOnly"), code: "FORUM_BOARD_MEMBERS_ONLY" };
     }
     const cats = await db
       .select()
@@ -1506,7 +1775,7 @@ export async function registerRoomsRoutes(
         const msg = err instanceof Error ? err.message : "";
         if (/UNIQUE/i.test(msg)) {
           reply.code(409);
-          return { error: "a category with that name already exists in this room" };
+          return { error: tFor(me.locale, "errors:server.rooms.categoryNameExists") };
         }
         throw err;
       }
@@ -1568,7 +1837,7 @@ export async function registerRoomsRoutes(
             .from(roomThreadCategories)
             .where(eq(roomThreadCategories.parentId, row.id))
             .limit(1))[0];
-          if (child) { reply.code(400); return { error: "move or delete its subcategories first" }; }
+          if (child) { reply.code(400); return { error: tFor(me.locale, "errors:server.rooms.categoryHasSubcategories") }; }
         }
         update.parentId = body.parentId;
       }
@@ -1579,7 +1848,7 @@ export async function registerRoomsRoutes(
         const msg = err instanceof Error ? err.message : "";
         if (/UNIQUE/i.test(msg)) {
           reply.code(409);
-          return { error: "a category with that name already exists in this room" };
+          return { error: tFor(me.locale, "errors:server.rooms.categoryNameExists") };
         }
         throw err;
       }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { isAdminRole, resolveMessageColor, type ChatMessage, type RoomOccupant } from "@thekeep/shared";
 import type { Gender } from "../../lib/gender.js";
 import { Composer } from "../chat/Composer.js";
@@ -92,6 +93,7 @@ export function ThreadModal({
   highlightMessageId,
   onHighlightDone,
 }: Props) {
+  const { t } = useTranslation("forums");
   // Reply composer's text state lives here so it's scoped to the
   // modal instance, closing and reopening on a different topic
   // starts with a clean draft. The Composer is controlled; this
@@ -172,7 +174,7 @@ export function ThreadModal({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label={`Topic: ${heading}`}
+      aria-label={t("thread.topicAria", { heading })}
     >
       <div
         onClick={(e) => e.stopPropagation()}
@@ -196,8 +198,8 @@ export function ThreadModal({
             <div className="flex items-baseline gap-2">
               {topic.lockedAt ? (
                 <span
-                  aria-label="Locked"
-                  title="This topic is locked, no new replies."
+                  aria-label={t("thread.lockedAria")}
+                  title={t("thread.lockedTitle")}
                   className="shrink-0 text-keep-muted"
                 >
                   🔒
@@ -208,7 +210,7 @@ export function ThreadModal({
               </div>
             </div>
             <div className="flex items-baseline gap-2 text-[11px] text-keep-muted">
-              <span>by</span>
+              <span>{t("thread.by")}</span>
               <button
                 type="button"
                 onClick={() => onNameClick(topic.userId, topic.displayName, topic.characterId ?? null)}
@@ -224,7 +226,7 @@ export function ThreadModal({
                 {topic.displayName}
               </button>
               <span className="tabular-nums">
-                · {replies.length} {replies.length === 1 ? "reply" : "replies"}
+                · {t("thread.replyCount", { count: replies.length })}
               </span>
             </div>
           </div>
@@ -234,7 +236,7 @@ export function ThreadModal({
               higher and we want visual parity with the other modals. */}
           <CloseButton
             onClick={onClose}
-            label="Close focused view"
+            label={t("thread.closeLabel")}
             className="h-10 w-10 md:h-7 md:w-7"
           />
         </header>
@@ -265,7 +267,7 @@ export function ThreadModal({
           </div>
           {replies.length === 0 ? (
             <div className="px-1 py-2 text-xs italic text-keep-muted">
-              No replies yet. Be the first.
+              {t("thread.noReplies")}
             </div>
           ) : (
             <div className="flex flex-col gap-2 border-t border-keep-rule/30 pt-2">
@@ -308,14 +310,14 @@ export function ThreadModal({
         {topic.lockedAt && !canModerate ? (
           <div className="flex shrink-0 items-center gap-2 border-t border-keep-rule bg-keep-banner/40 px-3 py-3 text-sm text-keep-muted">
             <span aria-hidden>🔒</span>
-            <span>This topic is locked. No new replies are accepted.</span>
+            <span>{t("thread.lockedNotice")}</span>
           </div>
         ) : (
           <>
             {topic.lockedAt && canModerate ? (
               <div className="flex shrink-0 items-center gap-2 border-t border-keep-rule bg-keep-accent/10 px-3 py-2 text-xs text-keep-accent">
                 <span aria-hidden>🔒</span>
-                <span>This topic is locked, your reply will post as a moderator notice.</span>
+                <span>{t("thread.lockedModNotice")}</span>
               </div>
             ) : null}
             {/* Reuses the main `<Composer>` so `/command` autocomplete,
@@ -335,8 +337,8 @@ export function ThreadModal({
               occupants={occupants}
               placeholder={
                 topic.lockedAt
-                  ? `Post a moderator reply to "${heading}"... (Shift+Enter for a new line)`
-                  : `Reply to "${heading}"... (Shift+Enter for a new line)`
+                  ? t("thread.modReplyPlaceholder", { heading })
+                  : t("thread.replyPlaceholder", { heading })
               }
             />
           </>

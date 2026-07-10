@@ -7,7 +7,11 @@
  *   - sender + recipient account age minimums
  *   - per-day send + receive caps
  *   - min / max single-transfer amounts
- *   - no self-sends (including character ↔ character of the same user)
+ *   - no same-pool sends. Transfers BETWEEN a user's own identities
+ *     (master ↔ own character, character ↔ sibling character) are
+ *     allowed — each identity keeps its own pool — only sending a
+ *     pool to itself is refused. (Owner decision 2026-07-09,
+ *     reversing the original account-wide block.)
  *   - source pool has the funds
  *
  * Source pool follows the sender's currently-active identity (master
@@ -33,6 +37,7 @@ import {
   users,
 } from "../db/schema.js";
 import { getSettings } from "../settings.js";
+import { tFor } from "../i18n.js";
 import { creditPool } from "./award.js";
 import { DEFAULT_SERVER_ID } from "./pool.js";
 
@@ -88,6 +93,7 @@ export interface TransferResult {
 export async function resolveTransferTarget(
   db: Db,
   name: string,
+  locale: string | null = null,
 ): Promise<{ ok: true; target: TransferTarget } | { ok: false; error: TransferError } | null> {
   const trimmed = name.trim();
   if (!trimmed) return null;
@@ -154,7 +160,7 @@ export async function resolveTransferTarget(
       ok: false,
       error: {
         code: "did_you_mean",
-        message: `"${trimmed}" matches a character and a user, be more specific.`,
+        message: tFor(locale, "commands:earning.transfer.matchesCharAndUser", { name: trimmed }),
         suggestions: [...characterCandidates, userCandidate],
       },
     };
@@ -167,7 +173,7 @@ export async function resolveTransferTarget(
       ok: false,
       error: {
         code: "did_you_mean",
-        message: `"${trimmed}" matches multiple characters, be more specific.`,
+        message: tFor(locale, "commands:earning.transfer.matchesMultipleCharacters", { name: trimmed }),
         suggestions: characterCandidates,
       },
     };
@@ -242,6 +248,9 @@ export interface TransferInput {
   senderCharacterId: string | null;
   rawTarget: string;
   amount: number;
+  /** Sender's locale — every error here is ephemeral and sender-facing,
+   *  so messages render in the sender's language (null → en). */
+  locale: string | null;
 }
 
 /**
@@ -257,13 +266,13 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
     if (!cfg.enabled) {
       return {
         ok: false,
-        error: { code: "transfers_disabled", message: "Currency transfers are disabled." },
+        error: { code: "transfers_disabled", message: tFor(input.locale, "commands:earning.transfer.transfersDisabled") },
       };
     }
     if (!Number.isFinite(input.amount) || !Number.isInteger(input.amount)) {
       return {
         ok: false,
-        error: { code: "amount_out_of_range", message: "Amount must be a whole number." },
+        error: { code: "amount_out_of_range", message: tFor(input.locale, "commands:earning.transfer.amountWhole") },
       };
     }
     if (input.amount < cfg.minTransferAmount || input.amount > cfg.maxTransferAmount) {
@@ -271,17 +280,20 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         ok: false,
         error: {
           code: "amount_out_of_range",
-          message: `Amount must be between ${cfg.minTransferAmount} and ${cfg.maxTransferAmount} Currency.`,
+          message: tFor(input.locale, "commands:earning.transfer.amountRange", {
+            min: cfg.minTransferAmount,
+            max: cfg.maxTransferAmount,
+          }),
         },
       };
     }
 
     // Resolve target.
-    const resolved = await resolveTransferTarget(input.db, input.rawTarget);
+    const resolved = await resolveTransferTarget(input.db, input.rawTarget, input.locale);
     if (!resolved) {
       return {
         ok: false,
-        error: { code: "target_not_found", message: `No user or character named "${input.rawTarget}".` },
+        error: { code: "target_not_found", message: tFor(input.locale, "commands:earning.transfer.targetNotFound", { name: input.rawTarget }) },
       };
     }
     if (!resolved.ok) return resolved;
@@ -296,7 +308,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         .where(eq(characters.id, input.senderCharacterId))
         .limit(1))[0];
       if (!c) {
-        return { ok: false, error: { code: "internal", message: "Sender character not found." } };
+        return { ok: false, error: { code: "internal", message: tFor(input.locale, "commands:earning.transfer.senderCharacterMissing") } };
       }
       source = {
         kind: "character",
@@ -312,7 +324,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         .where(eq(users.id, input.senderUserId))
         .limit(1))[0];
       if (!u) {
-        return { ok: false, error: { code: "internal", message: "Sender not found." } };
+        return { ok: false, error: { code: "internal", message: tFor(input.locale, "commands:earning.transfer.senderMissing") } };
       }
       source = {
         kind: "user",
@@ -323,13 +335,18 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
       };
     }
 
-    // Self-send checks: same identity, OR same master account regardless of
-    // which character is involved. The latter blocks farming Currency on
-    // sock characters and consolidating onto the main.
-    if (source.userId === target.userId) {
+    // Self-send = the exact same pool (kind + owner + server). Transfers
+    // BETWEEN a user's own identities are deliberately allowed (owner
+    // decision 2026-07-09, reversing the original account-wide block): the
+    // master handle and each character keep separate pools and inventories,
+    // and moving Currency among them is zero-sum. The sock-consolidation
+    // concern the old account-wide check cited stays bounded by the
+    // per-identity daily send/receive caps below, which apply to own-account
+    // transfers all the same.
+    if (source.kind === target.kind && source.ownerId === target.ownerId && source.serverId === target.serverId) {
       return {
         ok: false,
-        error: { code: "self_send", message: "You can't send Currency to yourself." },
+        error: { code: "self_send", message: tFor(input.locale, "commands:earning.transfer.selfSend") },
       };
     }
 
@@ -339,7 +356,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
     if (source.serverId !== target.serverId) {
       return {
         ok: false,
-        error: { code: "cross_server", message: "You can't send Currency to a pool on a different server." },
+        error: { code: "cross_server", message: tFor(input.locale, "commands:earning.transfer.crossServer") },
       };
     }
 
@@ -354,7 +371,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         ok: false,
         error: {
           code: "sender_too_new",
-          message: `Your account needs to be at least ${cfg.minSenderAccountAgeDays} days old to send Currency.`,
+          message: tFor(input.locale, "commands:earning.transfer.senderTooNew", { days: cfg.minSenderAccountAgeDays }),
         },
       };
     }
@@ -363,7 +380,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         ok: false,
         error: {
           code: "recipient_too_new",
-          message: `Recipient's account needs to be at least ${cfg.minRecipientAccountAgeDays} days old.`,
+          message: tFor(input.locale, "commands:earning.transfer.recipientTooNew", { days: cfg.minRecipientAccountAgeDays }),
         },
       };
     }
@@ -376,7 +393,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         ok: false,
         error: {
           code: "daily_send_cap",
-          message: `That exceeds your daily send cap. ${remaining} Currency remaining today.`,
+          message: tFor(input.locale, "commands:earning.transfer.dailySendCap", { remaining }),
         },
       };
     }
@@ -386,7 +403,7 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         ok: false,
         error: {
           code: "daily_receive_cap",
-          message: `${target.displayName} has reached their daily receive cap. Try again tomorrow.`,
+          message: tFor(input.locale, "commands:earning.transfer.dailyReceiveCap", { name: target.displayName }),
         },
       };
     }
@@ -398,7 +415,9 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         ok: false,
         error: {
           code: "insufficient_funds",
-          message: `You only have ${balance} Currency in your ${source.kind === "character" ? source.displayName : "master"} pool.`,
+          message: source.kind === "character"
+            ? tFor(input.locale, "commands:earning.transfer.insufficientFundsCharacter", { balance, name: source.displayName })
+            : tFor(input.locale, "commands:earning.transfer.insufficientFundsMaster", { balance }),
         },
       };
     }
@@ -428,6 +447,6 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error("[earning] transferCurrency failed", { err });
-    return { ok: false, error: { code: "internal", message: "Transfer failed. Try again in a moment." } };
+    return { ok: false, error: { code: "internal", message: tFor(input.locale, "commands:earning.transfer.failed") } };
   }
 }

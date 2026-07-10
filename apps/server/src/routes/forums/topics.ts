@@ -14,6 +14,7 @@ import { z } from "zod";
 import { forums, messages, rooms } from "../../db/schema.js";
 import type { Db } from "../../db/index.js";
 import { getSessionUser } from "../auth.js";
+import { tFor } from "../../i18n.js";
 
 export async function registerForumTopicRoutes(app: FastifyInstance, db: Db): Promise<void> {
   /** Resolve a topic id to a live forum topic (board room + title row).
@@ -32,9 +33,11 @@ export async function registerForumTopicRoutes(app: FastifyInstance, db: Db): Pr
     if (!me) { reply.code(401); return { error: "auth" }; }
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 40));
     const { listForumNotifications, unreadForumNotifications } = await import("../../forums/notifications.js");
-    const rows = await listForumNotifications(db, me.id, limit);
+    // Viewer-aware (age plan, Phase 3): a minor's inbox re-filters rows
+    // whose topic is CURRENTLY NSFW-tagged, covering "watched, then tagged".
+    const rows = await listForumNotifications(db, me.id, limit, me);
     return {
-      unread: await unreadForumNotifications(db, me.id),
+      unread: await unreadForumNotifications(db, me.id, me),
       notifications: rows.map((n) => ({
         id: n.id,
         kind: n.kind,
@@ -45,6 +48,8 @@ export async function registerForumTopicRoutes(app: FastifyInstance, db: Db): Pr
         actorName: n.actorName,
         topicTitle: n.topicTitle,
         snippet: n.snippet,
+        forumName: n.forumName ?? null,
+        boardName: n.boardName ?? null,
         createdAt: +n.createdAt,
         read: n.readAt != null,
       })),
@@ -63,7 +68,7 @@ export async function registerForumTopicRoutes(app: FastifyInstance, db: Db): Pr
     catch { reply.code(400); return { error: "invalid body" }; }
     const { markForumNotificationsRead, unreadForumNotifications } = await import("../../forums/notifications.js");
     await markForumNotificationsRead(db, me.id, "all" in body ? "all" : body.ids);
-    return { ok: true, unread: await unreadForumNotifications(db, me.id) };
+    return { ok: true, unread: await unreadForumNotifications(db, me.id, me) };
   });
 
   /**
@@ -88,13 +93,22 @@ export async function registerForumTopicRoutes(app: FastifyInstance, db: Db): Pr
     const { forumBoardReadGate } = await import("../../forums/authority.js");
     const readGate = await forumBoardReadGate(db, me, room.id);
     const topicId = m.replyToId ?? m.id;
-    const topicCatId = m.replyToId
-      ? (await db.select({ c: messages.threadCategoryId }).from(messages)
-          .where(eq(messages.id, topicId)).limit(1))[0]?.c ?? null
-      : m.threadCategoryId ?? null;
+    const topicRow = m.replyToId
+      ? (await db.select({ c: messages.threadCategoryId, isNsfw: messages.isNsfw }).from(messages)
+          .where(eq(messages.id, topicId)).limit(1))[0]
+      : { c: m.threadCategoryId ?? null, isNsfw: m.isNsfw };
+    const topicCatId = topicRow?.c ?? null;
+    // HARD age gate (age plan, Phase 3): permalinks into an NSFW-tagged
+    // topic, an 18+ board (room/server flag), or any board of an 18+ forum
+    // resolve only for adults — the thread route 404s everyone else anyway,
+    // so refuse the coordinates here instead of bouncing the client.
+    const { boardAgeDenied } = await import("../../forums/nsfw.js");
+    if (!me?.isAdult && (!!topicRow?.isNsfw || (await boardAgeDenied(db, me, room)))) {
+      reply.code(404); return { error: "not found" };
+    }
     if (readGate.boardLocked || (topicCatId && readGate.lockedCatIds.has(topicCatId))) {
       reply.code(403);
-      return { error: "This is a members-only section of the forum.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+      return { error: tFor(me?.locale ?? null, "errors:server.forums.membersOnlySection"), code: "FORUM_BOARD_MEMBERS_ONLY" };
     }
     return {
       forumId: forum.id,
@@ -109,6 +123,10 @@ export async function registerForumTopicRoutes(app: FastifyInstance, db: Db): Pr
     if (!me) { reply.code(401); return { error: "auth" }; }
     const t = await resolveForumTopic(req.params.topicId);
     if (!t) { reply.code(404); return { error: "no such topic" }; }
+    // Minors can't watch an NSFW topic (age plan, Phase 3): they can't read
+    // it, and the watch would only sit silent behind the notification
+    // write-skip. Same "doesn't exist" posture as the thread route.
+    if (t.topic.isNsfw && !me.isAdult) { reply.code(404); return { error: "no such topic" }; }
     const { ensureTopicWatch } = await import("../../forums/notifications.js");
     await ensureTopicWatch(db, me.id, t.topic.id);
     return { ok: true };

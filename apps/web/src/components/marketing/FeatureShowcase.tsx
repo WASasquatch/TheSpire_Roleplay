@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   BookOpen,
   Check,
@@ -31,15 +32,20 @@ import { SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 
 const ROTATE_MS = 6000;
 
+/**
+ * Feature catalog metadata. All user-facing copy (title / tagline / desc /
+ * bullet points / CTA label) lives in the `marketing` catalog under
+ * `features.items.<key>.*`, resolved with t() at render time so a language
+ * switch re-renders the tour; only the non-copy config stays here.
+ */
 interface Feature {
   key: string;
   icon: LucideIcon;
-  title: string;
-  tagline: string;
-  desc: string;
-  points: string[];
-  /** Optional public destination ("see it live"). Paths must be reachable anonymously. */
-  cta?: { label: string; path: string };
+  /** Number of highlight bullets under `features.items.<key>.points`. */
+  pointCount: number;
+  /** Optional public destination ("see it live"). Paths must be reachable
+   *  anonymously. Label lives at `features.items.<key>.ctaLabel`. */
+  cta?: { path: string };
   /** When true the cta only renders while registration is open. */
   ctaNeedsRegistration?: boolean;
 }
@@ -48,119 +54,53 @@ const FEATURES: ReadonlyArray<Feature> = [
   {
     key: "characters",
     icon: VenetianMask,
-    title: "Characters",
-    tagline: "Play a whole cast, not just one face",
-    desc: "Create up to 100 distinct characters on a single account, each with their own portrait, bio, stats, and inventory. Switch personas instantly, and join several games in different tabs at once.",
-    points: [
-      "Up to 100 characters per account",
-      "Portraits, bios, stats & inventory",
-      "Per-character account management",
-    ],
-    cta: { label: "Create your cast", path: "/register" },
+    pointCount: 3,
+    cta: { path: "/register" },
     ctaNeedsRegistration: true,
   },
   {
     key: "communities",
     icon: Server,
-    title: "Communities",
-    tagline: "Host your own community, or join one",
-    desc: "Beyond the native Spire, anyone can create their own community: a space with its own chat rooms, members, roles, economy, and moderation. Run it your way, or join communities other people have built.",
-    points: [
-      "Your own rooms, members & roles",
-      "Per-community economy & cosmetics",
-      "Moderation tools you control",
-    ],
-    cta: { label: "Start a community", path: "/register" },
+    pointCount: 3,
+    cta: { path: "/register" },
     ctaNeedsRegistration: true,
   },
   {
     key: "rooms",
     icon: MessagesSquare,
-    title: "Live Roleplay",
-    tagline: "Real-time scenes, day or night",
-    desc: "Write together in open public rooms, or private rooms. Set the scene, and use NPC speakers to bring characters to life. Dice rolls, whispers, emotes, and slash commands keep the scene moving.",
-    points: [
-      "Public & private password protected rooms",
-      "Room descriptions, scenes, and NPC speakers to enrich storytelling",
-      "Dice, actions, and whispers commands",
-      "Emoticons and emote stickers + custom emotes",
-    ],
+    pointCount: 4,
   },
   {
     key: "worlds",
     icon: Globe,
-    title: "Worlds & Wikis",
-    tagline: "Build the setting, not just the scene",
-    desc: "Give your game a permanent home: a world wiki with typed entries for locations, NPCs, items, and factions, a lore page tree, story arcs, and session logs, all cross-linked like a real knowledge base.",
-    points: [
-      "Typed entries: locations, NPCs, items, factions",
-      "Lore pages, story arcs & session logs",
-      "Vibe sliders show players what to expect",
-    ],
+    pointCount: 3,
   },
   {
     key: "forums",
     icon: Landmark,
-    title: "Forums & PBP",
-    tagline: "Join or host your own forums here",
-    desc: "Join an existing forum hosting Play-by-Post games, or run a forum for your own games, guilds, or fandoms. You get your own boards, a moderator team, and membership rules.",
-    points: [
-      "Your own boards & moderator roles",
-      "Open, application, or invite-only membership",
-      "A public page at your own /f/ address",
-    ],
-    cta: { label: "Browse the community forums", path: "/f/spire" },
+    pointCount: 3,
+    cta: { path: "/f/spire" },
   },
   {
     key: "scriptorium",
     icon: BookOpen,
-    title: "The Scriptorium",
-    tagline: "Publish original fiction & fanfiction",
-    desc: "Post your stories with chapters, content ratings, and reviews in a rich editor built for writers. Readers can shelve your books in their library, and you can even offer paid copies with in-app point currency.",
-    points: [
-      "Original fiction & fanfiction with chapters",
-      "Reviews, ratings & reader libraries",
-      "Earn gold, and offer paid copies of your work",
-    ],
-    cta: { label: "Browse the Scriptorium", path: "/scriptorium" },
+    pointCount: 3,
+    cta: { path: "/scriptorium" },
   },
   {
     key: "profiles",
     icon: Palette,
-    title: "Profiles",
-    tagline: "A page that is truly yours",
-    desc: "Every character gets a customizable profile page: custom CSS, backgrounds, image galleries, and links. Make it match your character, not a template.",
-    points: [
-      "Custom HTML, CSS & backgrounds",
-      "Image galleries & links",
-      "Distinct looks per character",
-      "Show off item collections & pets"
-    ],
+    pointCount: 4,
   },
   {
     key: "earning",
     icon: Coins,
-    title: "Earning & Rewards",
-    tagline: "Progress that respects your time",
-    desc: "Active writers earn XP, ranks, and currency just by playing. Spend it on cosmetics, name styles, room transitions, and gifts for friends. No decay, no daily chores.",
-    points: [
-      "XP, ranks & point currency for writing",
-      "Shop with collectible items, gifts, throwables, and pets",
-      "Customizable Name Styles, Border Frames, and more",
-      "No grind required to keep your standing",
-    ],
+    pointCount: 4,
   },
   {
     key: "community",
     icon: HeartHandshake,
-    title: "Find Your Circle",
-    tagline: "Built for long-lived communities",
-    desc: "Friends lists, per-character presence, and safety tools like blocking and ignores keep the community healthy. Themes from medieval to sci-fi make it feel like home.",
-    points: [
-      "Friends & online presence",
-      "Blocking, ignore & moderation tools",
-      "Light & dark themes for every taste + customize your own",
-    ],
+    pointCount: 3,
   },
 ];
 
@@ -171,6 +111,7 @@ interface Props {
 }
 
 export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
+  const { t } = useTranslation("marketing");
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
   // Once the visitor picks a chip themselves, stop the slideshow,
@@ -213,22 +154,22 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
 
   return (
     <section
-      aria-label="What you can do here"
+      aria-label={t("features.kicker")}
       onFocus={() => setPaused(true)}
       onBlur={resume}
       className={`${SPLASH_PANEL} ${SPLASH_PANEL_HOVER} p-5 sm:p-6`}
     >
       <header className="mb-5 text-center">
         <p className="text-[11px] uppercase tracking-[0.3em] text-keep-muted">
-          What you can do here
+          {t("features.kicker")}
         </p>
         <h2 className="font-action mt-1 text-2xl text-keep-text sm:text-3xl">
-          Everything Your Story Needs
+          {t("features.heading")}
         </h2>
         {/* One-line greeting (replaces the old standalone welcome block that
             pushed the feature layout down). Welcomes everyone in a breath. */}
         <p className="mx-auto mt-2 max-w-xl text-sm text-keep-text/75 sm:text-base">
-          Welcome, every writer, dreamer, and creature from all walks of life. There's a place for your stories here.
+          {t("features.welcome")}
         </p>
       </header>
 
@@ -246,13 +187,14 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
             auto-advance countdown. */}
         <div
           role="tablist"
-          aria-label="Feature list"
+          aria-label={t("features.listAria")}
           className="mb-4 flex flex-wrap items-center justify-center gap-2"
         >
           {Array.from({ length: SLIDE_COUNT }, (_, i) => {
             const activeDot = i === index;
             // Slide 0 = the overview screenshot; 1..N = features.
-            const label = i === 0 ? "Overview" : FEATURES[i - 1]!.title;
+            const label =
+              i === 0 ? t("features.overview") : t(`features.items.${FEATURES[i - 1]!.key}.title`);
             return (
               <button
                 key={i === 0 ? "overview" : FEATURES[i - 1]!.key}
@@ -290,7 +232,7 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
             {/* Themed headline above the screenshot (the baked-in image text
                 didn't match the palette). */}
             <h3 className="font-action mb-4 text-center text-2xl uppercase tracking-[0.12em] text-keep-text sm:text-3xl lg:text-4xl">
-              Play and pick-up games on any device
+              {t("features.introHeading")}
             </h3>
             {/* Explicit intrinsic size + aspect-ratio reserves the slot before
                 the image loads so it can't shove the layout (CLS). The image is
@@ -298,7 +240,7 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
                 reserving; the width/height attributes are the fallback. */}
             <img
               src="/spire_screenshots.png"
-              alt="A look inside The Spire"
+              alt={t("features.introAlt")}
               width={2605}
               height={969}
               className="h-auto w-full select-none rounded"
@@ -325,10 +267,10 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
               </div>
               <div className="min-w-0">
                 <h3 className="font-action text-xl text-keep-text sm:text-2xl">
-                  {active!.title}
+                  {t(`features.items.${active!.key}.title`)}
                 </h3>
                 <p className="text-xs uppercase tracking-[0.2em] text-keep-accent sm:text-sm">
-                  {active!.tagline}
+                  {t(`features.items.${active!.key}.tagline`)}
                 </p>
               </div>
             </div>
@@ -338,7 +280,7 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
             <div className="gap-8 lg:grid lg:grid-cols-[3fr_2fr]">
               <div className="min-w-0">
                 <p className="text-base leading-relaxed text-keep-text/85 lg:text-lg">
-                  {active!.desc}
+                  {t(`features.items.${active!.key}.desc`)}
                 </p>
                 {showCta ? (
                   <a
@@ -346,12 +288,14 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
                     onClick={(e) => go(e, active!.cta!.path)}
                     className="mt-5 inline-flex items-center gap-1 text-base font-semibold text-keep-action underline-offset-4 hover:underline lg:text-lg"
                   >
-                    {active!.cta!.label} →
+                    {t(`features.items.${active!.key}.ctaLabel`)} →
                   </a>
                 ) : null}
               </div>
               <ul className="mt-4 space-y-2.5 lg:mt-0">
-                {active!.points.map((p) => (
+                {Array.from({ length: active!.pointCount }, (_, i) =>
+                  t(`features.items.${active!.key}.points.${i}`),
+                ).map((p) => (
                   <li
                     key={p}
                     className="flex items-start gap-2.5 text-[15px] text-keep-text/85 lg:text-base"

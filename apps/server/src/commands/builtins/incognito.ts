@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { users } from "../../db/schema.js";
 import { addSystemMessage, broadcastPresence, roomsForUser } from "../../realtime/broadcast.js";
 import { emitToUser } from "../../realtime/presence.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext as Ctx , CommandContext, CommandHandler } from "../types.js";
 
 /**
@@ -184,7 +185,7 @@ async function enterIncognito(ctx: CommandContext, opts: { aliasOverride?: strin
   // ack so they know the toggle landed.
   ctx.socket.emit("error:notice", {
     code: "INCOGNITO_ON",
-    message: `You're now incognito as "${fresh.incognitoAlias ?? "System"}". The room sees you as having left. Use /incognito again to return.`,
+    message: tFor(ctx.user.locale, "commands:incognito.on", { alias: fresh.incognitoAlias ?? "System" }),
   });
 }
 
@@ -229,7 +230,7 @@ async function leaveIncognito(ctx: CommandContext): Promise<void> {
 
   ctx.socket.emit("error:notice", {
     code: "INCOGNITO_OFF",
-    message: "You're back. The room sees you as having joined.",
+    message: tFor(ctx.user.locale, "commands:incognito.off"),
   });
 }
 
@@ -278,7 +279,7 @@ export const incognitoCommand: CommandHandler = {
       if (meRow.incognitoMode) {
         ctx.socket.emit("error:notice", {
           code: "INCOGNITO_ALREADY_ON",
-          message: "You're already incognito.",
+          message: tFor(ctx.user.locale, "commands:incognito.alreadyOn"),
         });
         return;
       }
@@ -289,7 +290,7 @@ export const incognitoCommand: CommandHandler = {
       if (!meRow.incognitoMode) {
         ctx.socket.emit("error:notice", {
           code: "INCOGNITO_ALREADY_OFF",
-          message: "You're not incognito.",
+          message: tFor(ctx.user.locale, "commands:incognito.alreadyOff"),
         });
         return;
       }
@@ -304,21 +305,21 @@ export const incognitoCommand: CommandHandler = {
       if (!alias) {
         ctx.socket.emit("error:notice", {
           code: "INCOGNITO_ALIAS_USAGE",
-          message: "Usage: /incognito alias <name>",
+          message: tFor(ctx.user.locale, "commands:incognito.aliasUsage"),
         });
         return;
       }
       if (alias.length > 60) {
         ctx.socket.emit("error:notice", {
           code: "INCOGNITO_ALIAS_TOO_LONG",
-          message: "Alias must be 60 characters or fewer.",
+          message: tFor(ctx.user.locale, "commands:incognito.aliasTooLong"),
         });
         return;
       }
       await patchUser(ctx, { incognitoAlias: alias });
       ctx.socket.emit("error:notice", {
         code: "INCOGNITO_ALIAS_SET",
-        message: `Incognito alias set to "${alias}".`,
+        message: tFor(ctx.user.locale, "commands:incognito.aliasSet", { alias }),
       });
       return;
     }
@@ -327,21 +328,21 @@ export const incognitoCommand: CommandHandler = {
       if (!message) {
         ctx.socket.emit("error:notice", {
           code: "INCOGNITO_EXIT_USAGE",
-          message: "Usage: /incognito exit <message>",
+          message: tFor(ctx.user.locale, "commands:incognito.exitUsage"),
         });
         return;
       }
       if (message.length > 280) {
         ctx.socket.emit("error:notice", {
           code: "INCOGNITO_EXIT_TOO_LONG",
-          message: "Exit message must be 280 characters or fewer.",
+          message: tFor(ctx.user.locale, "commands:incognito.exitTooLong"),
         });
         return;
       }
       await patchUser(ctx, { incognitoExitMessage: message });
       ctx.socket.emit("error:notice", {
         code: "INCOGNITO_EXIT_SET",
-        message: "Incognito exit message saved.",
+        message: tFor(ctx.user.locale, "commands:incognito.exitSaved"),
       });
       return;
     }
@@ -350,21 +351,21 @@ export const incognitoCommand: CommandHandler = {
       if (!message) {
         ctx.socket.emit("error:notice", {
           code: "INCOGNITO_RETURN_USAGE",
-          message: "Usage: /incognito return <message>",
+          message: tFor(ctx.user.locale, "commands:incognito.returnUsage"),
         });
         return;
       }
       if (message.length > 280) {
         ctx.socket.emit("error:notice", {
           code: "INCOGNITO_RETURN_TOO_LONG",
-          message: "Return message must be 280 characters or fewer.",
+          message: tFor(ctx.user.locale, "commands:incognito.returnTooLong"),
         });
         return;
       }
       await patchUser(ctx, { incognitoReturnMessage: message });
       ctx.socket.emit("error:notice", {
         code: "INCOGNITO_RETURN_SET",
-        message: "Incognito return message saved.",
+        message: tFor(ctx.user.locale, "commands:incognito.returnSaved"),
       });
       return;
     }
@@ -376,7 +377,7 @@ export const incognitoCommand: CommandHandler = {
       });
       ctx.socket.emit("error:notice", {
         code: "INCOGNITO_CLEARED",
-        message: "Incognito alias and custom messages reset to defaults.",
+        message: tFor(ctx.user.locale, "commands:incognito.cleared"),
       });
       return;
     }
@@ -388,7 +389,7 @@ export const incognitoCommand: CommandHandler = {
     if (alias.length > 60) {
       ctx.socket.emit("error:notice", {
         code: "INCOGNITO_ALIAS_TOO_LONG",
-        message: "Alias must be 60 characters or fewer.",
+        message: tFor(ctx.user.locale, "commands:incognito.aliasTooLong"),
       });
       return;
     }
@@ -397,7 +398,7 @@ export const incognitoCommand: CommandHandler = {
       await patchUser(ctx, { incognitoAlias: alias });
       ctx.socket.emit("error:notice", {
         code: "INCOGNITO_ALIAS_SET",
-        message: `Incognito alias set to "${alias}".`,
+        message: tFor(ctx.user.locale, "commands:incognito.aliasSet", { alias }),
       });
       return;
     }

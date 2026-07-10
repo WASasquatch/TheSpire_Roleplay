@@ -1,5 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react";
+import { i18n } from "../../lib/i18n.js";
+import { formatNumber } from "../../lib/intlFormat.js";
 import { AffiliateCard } from "../marketing/AffiliateCard.js";
 import { TagInput } from "../shared/TagInput.js";
 import {
@@ -35,18 +38,19 @@ import {
  *      render as legacy badges, not cards.
  */
 
-/** Status chip colouring + label, matching the house copy in plan_ext §10. */
-function affiliateStatusChip(status: AdminAffiliate["status"]): { label: string; className: string } {
+/** Status chip colouring + label key (admin ns), matching the house copy in
+ *  plan_ext §10. The caller resolves the label with t(). */
+function affiliateStatusChip(status: AdminAffiliate["status"]): { labelKey: string; className: string } {
   switch (status) {
     case "pending":
-      return { label: "Pending review", className: "border-keep-action/50 bg-keep-action/10 text-keep-action" };
+      return { labelKey: "affiliates.statusPending", className: "border-keep-action/50 bg-keep-action/10 text-keep-action" };
     case "approved":
-      return { label: "Live", className: "border-emerald-500/50 bg-emerald-500/10 text-emerald-500" };
+      return { labelKey: "affiliates.statusLive", className: "border-emerald-500/50 bg-emerald-500/10 text-emerald-500" };
     case "rejected":
-      return { label: "Needs changes", className: "border-keep-accent/50 bg-keep-accent/10 text-keep-accent" };
+      return { labelKey: "affiliates.statusRejected", className: "border-keep-accent/50 bg-keep-accent/10 text-keep-accent" };
     case "disabled":
     default:
-      return { label: "Hidden", className: "border-keep-rule bg-keep-panel/40 text-keep-muted" };
+      return { labelKey: "affiliates.statusHidden", className: "border-keep-rule bg-keep-panel/40 text-keep-muted" };
   }
 }
 
@@ -55,7 +59,7 @@ function affiliateStatusChip(status: AdminAffiliate["status"]): { label: string;
 function toCardPreview(row: AdminAffiliate): PublicAffiliateCard {
   return {
     id: row.id,
-    title: row.title || row.label || "(untitled)",
+    title: row.title || row.label || i18n.t("admin:affiliates.untitled"),
     description: row.description ?? "",
     iconUrl: row.iconUrl,
     bannerUrl: row.bannerUrl,
@@ -66,6 +70,7 @@ function toCardPreview(row: AdminAffiliate): PublicAffiliateCard {
 }
 
 export function AffiliatesTab() {
+  const { t } = useTranslation("admin");
   const [rows, setRows] = useState<AdminAffiliate[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creatingCard, setCreatingCard] = useState(false);
@@ -77,7 +82,7 @@ export function AffiliatesTab() {
     try {
       setRows(await fetchAdminAffiliates());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "load failed");
+      setError(err instanceof Error ? err.message : t("loadFailed"));
     }
   }
   useEffect(() => { load(); }, []);
@@ -90,7 +95,7 @@ export function AffiliatesTab() {
       await adminUpdateAffiliate(id, body);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("saveFailed"));
     }
   }
 
@@ -100,7 +105,7 @@ export function AffiliatesTab() {
       await adminDeleteAffiliate(id);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "delete failed");
+      setError(err instanceof Error ? err.message : t("deleteFailed"));
     }
   }
 
@@ -111,11 +116,9 @@ export function AffiliatesTab() {
   return (
     <section className="space-y-5 text-sm">
       <header>
-        <h3 className="font-action text-base">Top RP Communities</h3>
+        <h3 className="font-action text-base">{t("affiliates.title")}</h3>
         <p className="mt-1 text-[11px] text-keep-muted">
-          Partner community cards for the splash, ranked by traffic (busiest first). Members submit their own entries
-          here for review; approved cards go live in the Top RP Communities section and each one carries a link-back the
-          partner puts on their site.
+          {t("affiliates.description")}
         </p>
       </header>
 
@@ -124,14 +127,14 @@ export function AffiliatesTab() {
       ) : null}
 
       {rows === null ? (
-        <p className="italic text-keep-muted">Loading...</p>
+        <p className="italic text-keep-muted">{t("common:loadingDots")}</p>
       ) : (
         <>
           {/* ---- 1. Pending approvals (hidden when the queue is empty) ---- */}
           {pending.length > 0 ? (
-            <div className="space-y-2">
+            <div data-admin-anchor="affiliates.pendingApprovals" className="space-y-2">
               <h4 className="font-action text-sm">
-                Pending approvals
+                {t("affiliates.pendingApprovals")}
                 <span className="ml-2 rounded-full border border-keep-action/50 bg-keep-action/10 px-1.5 py-0.5 text-[10px] text-keep-action">
                   {pending.length}
                 </span>
@@ -150,15 +153,15 @@ export function AffiliatesTab() {
           ) : null}
 
           {/* ---- 2. Live cards + admin "Add card" ---- */}
-          <div className="space-y-2">
+          <div data-admin-anchor="affiliates.liveCards" className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h4 className="font-action text-sm">Live cards</h4>
+              <h4 className="font-action text-sm">{t("affiliates.liveCards")}</h4>
               <button
                 type="button"
                 onClick={() => setCreatingCard(true)}
                 className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-xs hover:bg-keep-banner/80"
               >
-                + Add card
+                {t("affiliates.addCard")}
               </button>
             </div>
             {creatingCard ? (
@@ -170,7 +173,7 @@ export function AffiliatesTab() {
             ) : null}
             {liveCards.length === 0 && !creatingCard ? (
               <p className="italic text-keep-muted">
-                No cards yet. Add one, or approve a member submission to surface it in the Top RP Communities section.
+                {t("affiliates.noCards")}
               </p>
             ) : (
               <ul className="space-y-3">
@@ -179,7 +182,7 @@ export function AffiliatesTab() {
                     key={row.id}
                     row={row}
                     onPatch={(body) => patch(row.id, body)}
-                    onDelete={() => remove(row.id, "Delete this card? Its click stats and link-back go with it.")}
+                    onDelete={() => remove(row.id, t("affiliates.deleteCardConfirm"))}
                   />
                 ))}
               </ul>
@@ -187,7 +190,7 @@ export function AffiliatesTab() {
           </div>
 
           {/* ---- 3. Legacy raw-HTML badges (collapsed) ---- */}
-          <div className="space-y-2 border-t border-keep-rule/40 pt-4">
+          <div data-admin-anchor="affiliates.legacyTitle" className="space-y-2 border-t border-keep-rule/40 pt-4">
             <button
               type="button"
               onClick={() => setLegacyOpen((o) => !o)}
@@ -199,7 +202,7 @@ export function AffiliatesTab() {
               ) : (
                 <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />
               )}
-              <span>Legacy badges (HTML)</span>
+              <span>{t("affiliates.legacyTitle")}</span>
               <span className="rounded-full border border-keep-rule bg-keep-panel/40 px-1.5 py-0.5 text-[10px] text-keep-muted">
                 {legacy.length}
               </span>
@@ -207,9 +210,7 @@ export function AffiliatesTab() {
             {legacyOpen ? (
               <div className="space-y-2 pl-6">
                 <p className="text-[11px] text-keep-muted">
-                  Old raw-HTML entries from topsite networks (toprpsites etc.). These render as verbatim badges, not
-                  cards, and are NOT sanitized so their tracking pixels pass through. Only paste HTML you trust. New
-                  partners should use cards instead.
+                  {t("affiliates.legacyDescription")}
                 </p>
                 <div className="flex justify-end">
                   <button
@@ -217,7 +218,7 @@ export function AffiliatesTab() {
                     onClick={() => setCreatingLegacy(true)}
                     className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-xs hover:bg-keep-banner/80"
                   >
-                    + Add legacy badge
+                    {t("affiliates.addLegacy")}
                   </button>
                 </div>
                 {creatingLegacy ? (
@@ -228,7 +229,7 @@ export function AffiliatesTab() {
                   />
                 ) : null}
                 {legacy.length === 0 && !creatingLegacy ? (
-                  <p className="italic text-keep-muted">No legacy badges.</p>
+                  <p className="italic text-keep-muted">{t("affiliates.noLegacy")}</p>
                 ) : (
                   <ul className="space-y-2">
                     {legacy.map((row) => (
@@ -236,7 +237,7 @@ export function AffiliatesTab() {
                         key={row.id}
                         row={row}
                         onPatch={(body) => patch(row.id, body)}
-                        onDelete={() => remove(row.id, "Delete this legacy badge?")}
+                        onDelete={() => remove(row.id, t("affiliates.deleteLegacyConfirm"))}
                       />
                     ))}
                   </ul>
@@ -254,6 +255,7 @@ export function AffiliatesTab() {
  *  password-copy pattern already in this file: best-effort clipboard with a
  *  brief "Copied" confirmation, falling back to selecting the text. */
 function CopyableUrl({ label, url }: { label: string; url: string }) {
+  const { t } = useTranslation("admin");
   const [copied, setCopied] = useState(false);
   async function copy() {
     try {
@@ -289,12 +291,12 @@ function CopyableUrl({ label, url }: { label: string; url: string }) {
         <button
           type="button"
           onClick={copy}
-          title="Copy to clipboard"
-          aria-label="Copy to clipboard"
+          title={t("affiliates.copyTitle")}
+          aria-label={t("affiliates.copyTitle")}
           className="inline-flex shrink-0 items-center gap-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
         >
           {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
-          <span>{copied ? "Copied" : "Copy"}</span>
+          <span>{copied ? t("common:copied") : t("common:copy")}</span>
         </button>
       </div>
     </label>
@@ -312,6 +314,7 @@ function AffiliatePendingItem({
   onApprove: () => Promise<void>;
   onReject: (note: string) => Promise<void>;
 }) {
+  const { t } = useTranslation("admin");
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -328,17 +331,20 @@ function AffiliatePendingItem({
         <AffiliateCard card={toCardPreview(row)} size="large" />
         <div className="min-w-0 space-y-2">
           <div className="text-[11px] text-keep-muted">
-            Submitted by <span className="font-semibold text-keep-text">{row.ownerName ?? "unknown"}</span>
+            <Trans t={t} i18nKey="affiliates.submittedBy" values={{ name: row.ownerName ?? t("affiliates.unknown") }}>
+              {"Submitted by "}
+              <span className="font-semibold text-keep-text">{"{{name}}"}</span>
+            </Trans>
           </div>
           <div className="space-y-1">
             <div className="break-all">
-              <span className="text-keep-muted">Target:</span> {row.targetUrl || "(none)"}
+              <span className="text-keep-muted">{t("affiliates.targetLabel")}</span> {row.targetUrl || t("noneParen")}
             </div>
             {row.iconUrl ? (
-              <div className="break-all"><span className="text-keep-muted">Icon:</span> {row.iconUrl}</div>
+              <div className="break-all"><span className="text-keep-muted">{t("affiliates.iconLabel")}</span> {row.iconUrl}</div>
             ) : null}
             {row.bannerUrl ? (
-              <div className="break-all"><span className="text-keep-muted">Banner:</span> {row.bannerUrl}</div>
+              <div className="break-all"><span className="text-keep-muted">{t("affiliates.bannerLabel")}</span> {row.bannerUrl}</div>
             ) : null}
           </div>
           {rejecting ? (
@@ -347,7 +353,7 @@ function AffiliatePendingItem({
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 rows={2}
-                placeholder="What needs changing? (shown to the submitter)"
+                placeholder={t("affiliates.rejectPlaceholder")}
                 className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
               />
               <div className="flex justify-end gap-2">
@@ -356,7 +362,7 @@ function AffiliatePendingItem({
                   onClick={() => { setRejecting(false); setNote(""); }}
                   className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-0.5 hover:bg-keep-banner"
                 >
-                  Cancel
+                  {t("common:cancel")}
                 </button>
                 <button
                   type="button"
@@ -364,7 +370,7 @@ function AffiliatePendingItem({
                   onClick={() => run(async () => { await onReject(note.trim()); })}
                   className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-3 py-0.5 text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
                 >
-                  {busy ? "Rejecting..." : "Confirm reject"}
+                  {busy ? t("affiliates.rejecting") : t("affiliates.confirmReject")}
                 </button>
               </div>
             </div>
@@ -376,7 +382,7 @@ function AffiliatePendingItem({
                 onClick={() => run(onApprove)}
                 className="keep-button rounded border border-emerald-500/50 bg-keep-bg px-3 py-0.5 text-emerald-500 hover:bg-emerald-500/10 disabled:opacity-50"
               >
-                {busy ? "Approving..." : "Approve"}
+                {busy ? t("affiliates.approving") : t("review.approve")}
               </button>
               <button
                 type="button"
@@ -384,7 +390,7 @@ function AffiliatePendingItem({
                 onClick={() => setRejecting(true)}
                 className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-3 py-0.5 text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
               >
-                Reject
+                {t("affiliates.reject")}
               </button>
             </div>
           )}
@@ -405,6 +411,7 @@ function AffiliateCardItem({
   onPatch: (body: Record<string, unknown>) => Promise<void>;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("admin");
   const [editing, setEditing] = useState(false);
   const chip = affiliateStatusChip(row.status);
   // Prefer the server-approved absolute link-back; fall back to composing one
@@ -430,45 +437,51 @@ function AffiliateCardItem({
         <AffiliateCard card={toCardPreview(row)} size="large" />
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate font-semibold">{row.title || row.label || "(untitled)"}</span>
-            <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${chip.className}`}>{chip.label}</span>
+            <span className="truncate font-semibold">{row.title || row.label || t("affiliates.untitled")}</span>
+            <span className={`rounded-full border px-1.5 py-0.5 text-[10px] ${chip.className}`}>{t(chip.labelKey)}</span>
             <span className="text-[10px] text-keep-muted">
-              {row.ownerName ? `by ${row.ownerName}` : "admin-authored"}
+              {row.ownerName ? t("review.byUser", { name: row.ownerName }) : t("affiliates.adminAuthored")}
             </span>
           </div>
 
           {/* Traffic counters. clicksIn/Out are the SHOWN totals (real + any
               synthetic padding); the breakdown appears only when padding is live. */}
           <div className="flex flex-wrap gap-4 text-[11px] text-keep-muted">
-            <span title="Shown = real + padded">
-              in: <span className="text-keep-text">{row.clicksIn.toLocaleString()}</span>
+            <span title={t("affiliates.shownTotalsTitle")}>
+              <Trans t={t} i18nKey="affiliates.inCount" values={{ count: formatNumber(row.clicksIn) }}>
+                {"in: "}
+                <span className="text-keep-text">{"{{count}}"}</span>
+              </Trans>
               {row.padClicksIn > 0 ? (
-                <span> ({row.realClicksIn.toLocaleString()} real + {row.padClicksIn.toLocaleString()} padded)</span>
+                <span>{t("affiliates.realPadded", { real: formatNumber(row.realClicksIn), pad: formatNumber(row.padClicksIn) })}</span>
               ) : null}
             </span>
-            <span title="Shown = real + padded">
-              out: <span className="text-keep-text">{row.clicksOut.toLocaleString()}</span>
+            <span title={t("affiliates.shownTotalsTitle")}>
+              <Trans t={t} i18nKey="affiliates.outCount" values={{ count: formatNumber(row.clicksOut) }}>
+                {"out: "}
+                <span className="text-keep-text">{"{{count}}"}</span>
+              </Trans>
               {row.padClicksOut > 0 ? (
-                <span> ({row.realClicksOut.toLocaleString()} real + {row.padClicksOut.toLocaleString()} padded)</span>
+                <span>{t("affiliates.realPadded", { real: formatNumber(row.realClicksOut), pad: formatNumber(row.padClicksOut) })}</span>
               ) : null}
             </span>
           </div>
           {row.padInEnabled || row.padOutEnabled ? (
             <div className="text-[10px] text-keep-muted">
-              Padding on
-              {row.padInEnabled ? ` · in up to ${row.padInMax.toLocaleString()}/day` : ""}
-              {row.padOutEnabled ? ` · out up to ${row.padOutMax.toLocaleString()}/day` : ""}
+              {t("affiliates.paddingOn")}
+              {row.padInEnabled ? t("affiliates.padInUpTo", { max: formatNumber(row.padInMax) }) : ""}
+              {row.padOutEnabled ? t("affiliates.padOutUpTo", { max: formatNumber(row.padOutMax) }) : ""}
             </div>
           ) : null}
 
           {row.reviewNote ? (
-            <div className="text-[11px] text-keep-muted">Last note: {row.reviewNote}</div>
+            <div className="text-[11px] text-keep-muted">{t("affiliates.lastNote", { note: row.reviewNote })}</div>
           ) : null}
 
           {backUrl ? (
-            <CopyableUrl label="Link-back (partner puts this on their site)" url={backUrl} />
+            <CopyableUrl label={t("affiliates.linkBackLabel")} url={backUrl} />
           ) : (
-            <p className="text-[11px] italic text-keep-muted">No link-back yet (assigned on approval).</p>
+            <p className="text-[11px] italic text-keep-muted">{t("affiliates.noLinkBack")}</p>
           )}
 
           <div className="flex flex-wrap gap-1">
@@ -477,23 +490,23 @@ function AffiliateCardItem({
               onClick={() => onPatch({ status: row.status === "disabled" ? "approved" : "disabled" })}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
             >
-              {row.status === "disabled" ? "Enable" : "Disable"}
+              {row.status === "disabled" ? t("affiliates.enable") : t("affiliates.disable")}
             </button>
             <button
               type="button"
               onClick={() => setEditing(true)}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
             >
-              Edit
+              {t("edit")}
             </button>
             {row.padClicksIn > 0 || row.padClicksOut > 0 ? (
               <button
                 type="button"
                 onClick={() => onPatch({ resetPad: true })}
-                title="Zero out the accumulated synthetic traffic"
+                title={t("affiliates.resetPaddingTitle")}
                 className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
               >
-                Reset padding
+                {t("affiliates.resetPadding")}
               </button>
             ) : null}
             <button
@@ -501,7 +514,7 @@ function AffiliateCardItem({
               onClick={onDelete}
               className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
             >
-              Delete
+              {t("common:delete")}
             </button>
           </div>
         </div>
@@ -524,6 +537,7 @@ function AffiliateCardForm({
   onCancel: () => void;
   onSaved: (body: Record<string, unknown>) => Promise<void>;
 }) {
+  const { t } = useTranslation("admin");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [description, setDescription] = useState(initial?.description ?? "");
   const [iconUrl, setIconUrl] = useState(initial?.iconUrl ?? "");
@@ -570,7 +584,7 @@ function AffiliateCardForm({
         await onSaved(body);
       }
     } catch (error) {
-      setErr(error instanceof Error ? error.message : "save failed");
+      setErr(error instanceof Error ? error.message : t("saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -582,29 +596,29 @@ function AffiliateCardForm({
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{err}</div>
       ) : null}
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Title</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("affiliates.formTitle")}</span>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           maxLength={AFFILIATE_LIMITS.title}
-          placeholder="e.g. The Sunken Court"
+          placeholder={t("affiliates.titlePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
         />
       </label>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Description</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("affiliates.formDescription")}</span>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           maxLength={AFFILIATE_LIMITS.description}
           rows={2}
-          placeholder="A short blurb shown on the card."
+          placeholder={t("affiliates.descriptionPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
         />
       </label>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Target URL</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("affiliates.targetUrl")}</span>
         <input
           type="url"
           value={targetUrl}
@@ -616,12 +630,12 @@ function AffiliateCardForm({
           }`}
         />
         {targetUrl && !targetOk ? (
-          <span className="mt-0.5 block text-[10px] text-keep-accent">Must be a http(s) link.</span>
+          <span className="mt-0.5 block text-[10px] text-keep-accent">{t("affiliates.urlError")}</span>
         ) : null}
       </label>
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="block">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Icon URL (optional)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("affiliates.iconUrl")}</span>
           <input
             type="url"
             value={iconUrl}
@@ -634,7 +648,7 @@ function AffiliateCardForm({
           />
         </label>
         <label className="block">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Banner URL (optional)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("affiliates.bannerUrl")}</span>
           <input
             type="url"
             value={bannerUrl}
@@ -648,20 +662,18 @@ function AffiliateCardForm({
         </label>
       </div>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Tags</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("affiliates.tags")}</span>
         <TagInput tags={tags} onChange={setTags} />
       </label>
 
       {/* Traffic padding: optional synthetic in/out visits so a quiet listing
           still shows some life. Real counters are never touched. */}
-      <fieldset className="rounded border border-keep-rule/60 p-2">
+      <fieldset data-admin-anchor="affiliates.paddingLegend" className="rounded border border-keep-rule/60 p-2">
         <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">
-          Traffic padding (synthetic)
+          {t("affiliates.paddingLegend")}
         </legend>
         <p className="mb-2 text-[10px] leading-relaxed text-keep-muted">
-          Adds fake daily visits, a random amount up to the max each day, spread out
-          through the day, so a quiet community still shows some traffic. Real visit
-          counts are never changed.
+          {t("affiliates.paddingDescription")}
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1">
@@ -671,9 +683,9 @@ function AffiliateCardForm({
                 checked={padInEnabled}
                 onChange={(e) => setPadInEnabled(e.target.checked)}
               />
-              <span>Pad incoming visits</span>
+              <span>{t("affiliates.padIncoming")}</span>
             </label>
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Max in / day</span>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("affiliates.maxInDay")}</span>
             <input
               type="number"
               min={0}
@@ -691,9 +703,9 @@ function AffiliateCardForm({
                 checked={padOutEnabled}
                 onChange={(e) => setPadOutEnabled(e.target.checked)}
               />
-              <span>Pad outgoing visits</span>
+              <span>{t("affiliates.padOutgoing")}</span>
             </label>
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Max out / day</span>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("affiliates.maxOutDay")}</span>
             <input
               type="number"
               min={0}
@@ -713,14 +725,14 @@ function AffiliateCardForm({
           onClick={onCancel}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-0.5 hover:bg-keep-banner"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           disabled={busy || !canSubmit}
           className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
         >
-          {busy ? "Saving..." : mode === "create" ? "Create" : "Save"}
+          {busy ? t("common:savingDots") : mode === "create" ? t("create") : t("common:save")}
         </button>
       </div>
     </form>
@@ -738,6 +750,7 @@ function AffiliateLegacyItem({
   onPatch: (body: Record<string, unknown>) => Promise<void>;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("admin");
   const [editing, setEditing] = useState(false);
   if (editing) {
     return (
@@ -764,26 +777,26 @@ function AffiliateLegacyItem({
             onClick={() => onPatch({ enabled: !row.enabled })}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
           >
-            {row.enabled ? "Disable" : "Enable"}
+            {row.enabled ? t("affiliates.disable") : t("affiliates.enable")}
           </button>
           <button
             type="button"
             onClick={() => setEditing(true)}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
           >
-            Edit
+            {t("edit")}
           </button>
           <button
             type="button"
             onClick={onDelete}
             className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
           >
-            Delete
+            {t("common:delete")}
           </button>
         </div>
       </div>
       <details className="mt-1">
-        <summary className="cursor-pointer text-[10px] uppercase tracking-widest text-keep-muted">HTML preview</summary>
+        <summary className="cursor-pointer text-[10px] uppercase tracking-widest text-keep-muted">{t("affiliates.htmlPreview")}</summary>
         <div
           className="mt-1 rounded border border-keep-rule/40 bg-keep-panel/30 p-2 [&_img]:max-h-12"
           // eslint-disable-next-line react/no-danger
@@ -807,6 +820,7 @@ function AffiliateLegacyForm({
   onCancel: () => void;
   onSaved: (body: Record<string, unknown>) => Promise<void>;
 }) {
+  const { t } = useTranslation("admin");
   const [label, setLabel] = useState(initial?.label ?? "");
   const [html, setHtml] = useState(initial?.html ?? "");
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
@@ -827,7 +841,7 @@ function AffiliateLegacyForm({
         await onSaved(body);
       }
     } catch (error) {
-      setErr(error instanceof Error ? error.message : "save failed");
+      setErr(error instanceof Error ? error.message : t("saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -839,33 +853,33 @@ function AffiliateLegacyForm({
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{err}</div>
       ) : null}
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Label (admin-only)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("affiliates.legacyLabel")}</span>
         <input
           type="text"
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           maxLength={80}
-          placeholder="e.g. Top RP Sites"
+          placeholder={t("affiliates.legacyLabelPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
         />
       </label>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">HTML snippet</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("affiliates.htmlSnippet")}</span>
         <textarea
           value={html}
           onChange={(e) => setHtml(e.target.value)}
           rows={6}
-          placeholder='<a href="..."><img src="..." alt="..." /></a>'
+          placeholder={t("affiliates.htmlSnippetPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px] outline-none focus:border-keep-action"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          Paste verbatim from the affiliate's provided code. Tracking pixels and similar pass through unchanged.
+          {t("affiliates.htmlSnippetHelp")}
         </span>
       </label>
       <div className="flex items-center gap-3">
         <label className="flex items-center gap-1">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          <span>Enabled</span>
+          <span>{t("enabled")}</span>
         </label>
       </div>
       <div className="flex justify-end gap-2">
@@ -874,14 +888,14 @@ function AffiliateLegacyForm({
           onClick={onCancel}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-0.5 hover:bg-keep-banner"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           disabled={busy || !label.trim() || !html.trim()}
           className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
         >
-          {busy ? "Saving..." : mode === "create" ? "Create" : "Save"}
+          {busy ? t("common:savingDots") : mode === "create" ? t("create") : t("common:save")}
         </button>
       </div>
     </form>

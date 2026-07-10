@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   StoryCard,
   StoryChapter,
@@ -25,6 +26,7 @@ import {
 } from "@thekeep/shared";
 import { RichEditor } from "../shared/RichEditor.js";
 import { readError } from "../../lib/http.js";
+import { formatDateTime, formatNumber } from "../../lib/intlFormat.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
 import { RatingPicker } from "./RatingPicker.js";
@@ -54,6 +56,7 @@ type Tab = "overview" | "chapters" | "codex" | "collaborators";
  * WorldEditorModal's tabbed layout.
  */
 export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBack }: Props) {
+  const { t } = useTranslation("scriptorium");
   const [storyId, setStoryId] = useState<string | null>(initialId);
   const [detail, setDetail] = useState<StoryDetail | null>(null);
   const [tab, setTab] = useState<Tab>("overview");
@@ -71,7 +74,7 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
         setSelectedChapterId(null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -84,7 +87,7 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
   async function deleteStory() {
     if (!detail) return;
     if (!window.confirm(
-      `Delete "${detail.story.title}"? This cascades to all ${detail.chapters.length} chapter(s) and any reading positions. Cannot be undone.`,
+      t("editor.confirmDeleteStory", { title: detail.story.title, count: detail.chapters.length }),
     )) return;
     try {
       const r = await fetch(`/stories/${detail.story.id}`, { method: "DELETE" });
@@ -92,7 +95,7 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
       onDeleted?.();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "delete failed");
+      setError(e instanceof Error ? e.message : t("errors.deleteFailed"));
     }
   }
 
@@ -110,12 +113,12 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
                   type="button"
                   onClick={onBack}
                   className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-                  title="Back to Scriptorium"
+                  title={t("backToScriptorium")}
                 >
-                  ← Back
+                  {t("back")}
                 </button>
               ) : null}
-              <h2 className="font-action text-lg">Start a new story</h2>
+              <h2 className="font-action text-lg">{t("editor.startNewStory")}</h2>
             </div>
             <CloseButton onClick={onClose} />
           </header>
@@ -140,14 +143,14 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
               type="button"
               onClick={onBack}
               className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Back to Scriptorium"
+              title={t("backToScriptorium")}
             >
-              ← Back
+              {t("back")}
             </button>
           ) : null}
           <div className="min-w-0 flex-1">
             <h2 className="truncate font-action text-lg">
-              {detail ? `Edit: ${detail.story.title}` : "Loading..."}
+              {detail ? t("editor.editTitle", { title: detail.story.title }) : t("common:loadingDots")}
               {detail ? (
                 <span className="ml-2 text-xs text-keep-muted">/{detail.story.slug}</span>
               ) : null}
@@ -157,12 +160,12 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
         </header>
 
         <nav className="flex shrink-0 items-center gap-1 border-b border-keep-rule bg-keep-panel/30 px-3 py-1.5 text-sm">
-          <TabButton active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabButton>
+          <TabButton active={tab === "overview"} onClick={() => setTab("overview")}>{t("editor.tabs.overview")}</TabButton>
           <TabButton active={tab === "chapters"} onClick={() => setTab("chapters")}>
-            Chapters {detail ? <span className="text-keep-muted">({detail.chapters.length})</span> : null}
+            {t("editor.tabs.chapters")} {detail ? <span className="text-keep-muted">({detail.chapters.length})</span> : null}
           </TabButton>
-          <TabButton active={tab === "codex"} onClick={() => setTab("codex")}>Codex</TabButton>
-          <TabButton active={tab === "collaborators"} onClick={() => setTab("collaborators")}>Collaborators</TabButton>
+          <TabButton active={tab === "codex"} onClick={() => setTab("codex")}>{t("editor.tabs.codex")}</TabButton>
+          <TabButton active={tab === "collaborators"} onClick={() => setTab("collaborators")}>{t("editor.tabs.collaborators")}</TabButton>
           <span className="flex-1" />
         </nav>
 
@@ -173,7 +176,7 @@ export function StoryEditorModal({ storyId: initialId, onClose, onDeleted, onBac
         ) : null}
 
         {detail === null ? (
-          <p className="p-4 italic text-keep-muted">Loading...</p>
+          <p className="p-4 italic text-keep-muted">{t("common:loadingDots")}</p>
         ) : tab === "overview" ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-4">
             <OverviewEditor detail={detail} onSaved={() => load(storyId)} onDelete={deleteStory} />
@@ -222,6 +225,7 @@ function NewStoryWizard({
   onCreated: (card: StoryCard) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
   const [genre, setGenre] = useState<StoryGenre>("other");
@@ -272,7 +276,7 @@ function NewStoryWizard({
       const card = (await r.json()) as StoryCard;
       onCreated(card);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "create failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.createFailed"));
     } finally {
       setBusy(false);
     }
@@ -283,52 +287,52 @@ function NewStoryWizard({
       {err ? <p className="text-xs text-keep-accent">{err}</p> : null}
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Title</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("editor.titleLabel")}</label>
         <input
           autoFocus
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           maxLength={120}
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-base"
-          placeholder="The Long Road"
+          placeholder={t("editor.titlePlaceholder")}
         />
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Slug</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("editor.slugLabel")}</label>
         <input
           value={slug}
           onChange={(e) => setSlug(e.target.value)}
           maxLength={60}
-          placeholder="auto-generated from title"
+          placeholder={t("editor.slugPlaceholder")}
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm font-mono"
         />
         <p className="mt-1 text-[10px] text-keep-muted">
-          URL: <code>/stories/@you/{previewSlug || "your-slug"}</code>
+          {t("editor.urlLabel")} <code>/stories/@you/{previewSlug || "your-slug"}</code>
         </p>
       </div>
 
       {characters.length > 0 ? (
         <div>
-          <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Posting as</label>
+          <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("editor.postingAs")}</label>
           <select
             value={authorCharacterId}
             onChange={(e) => setAuthorCharacterId(e.target.value)}
             className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm"
           >
-            <option value="">You (your account byline)</option>
+            <option value="">{t("editor.postingAsYou")}</option>
             {characters.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
           <p className="mt-1 text-[10px] text-keep-muted">
-            Pick a character to publish in-character. You can change this later.
+            {t("editor.postingAsHint")}
           </p>
         </div>
       ) : null}
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Genre</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("genre")}</label>
         <select
           value={genre}
           onChange={(e) => setGenre(e.target.value as StoryGenre)}
@@ -340,14 +344,14 @@ function NewStoryWizard({
         </select>
       </div>
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Rating</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("rating.legend")}</label>
         <div className="mt-1">
           <RatingPicker value={rating} onChange={setRating} name="new-story-rating" compact />
         </div>
       </div>
 
       <p className="rounded border border-keep-rule bg-keep-panel/40 px-2 py-1.5 text-[11px] text-keep-muted">
-        Starts as a private draft. Fill out the rest, write a chapter, then switch it to public when you're ready.
+        {t("editor.startsPrivateNote")}
       </p>
 
       <div className="flex items-center justify-end gap-2 pt-2">
@@ -356,14 +360,14 @@ function NewStoryWizard({
           onClick={onCancel}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm text-keep-muted hover:text-keep-text"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           disabled={busy || !title.trim()}
           className="rounded border border-keep-action bg-keep-action px-4 py-1 text-sm font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          {busy ? "Creating..." : "Create draft"}
+          {busy ? t("editor.creatingDots") : t("editor.createDraft")}
         </button>
       </div>
     </form>
@@ -383,6 +387,7 @@ function OverviewEditor({
   onSaved: () => Promise<void> | void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const s = detail.story;
   const [title, setTitle] = useState(s.title);
   const [slug, setSlug] = useState(s.slug);
@@ -442,7 +447,7 @@ function OverviewEditor({
       if (priceTrimmed !== "") {
         const n = Math.round(Number(priceTrimmed));
         if (!Number.isFinite(n) || n < STORY_COPY_PRICE_MIN || n > STORY_COPY_PRICE_MAX) {
-          setErr(`Price must be a whole number between ${STORY_COPY_PRICE_MIN} and ${STORY_COPY_PRICE_MAX}.`);
+          setErr(t("editor.priceRangeError", { min: STORY_COPY_PRICE_MIN, max: STORY_COPY_PRICE_MAX }));
           setBusy(false);
           return;
         }
@@ -459,7 +464,7 @@ function OverviewEditor({
       setSavedAt(Date.now());
       await onSaved();
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "save failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -472,67 +477,67 @@ function OverviewEditor({
       ) : null}
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <Field label="Title">
+        <Field label={t("editor.titleLabel")}>
           <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5" />
         </Field>
-        <Field label="Slug">
+        <Field label={t("editor.slugLabel")}>
           <input value={slug} onChange={(e) => setSlug(e.target.value)} maxLength={60}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 font-mono text-sm" />
         </Field>
       </div>
 
-      <Field label={`Summary (${summary.length}/280), shown on catalog cards`}>
+      <Field label={t("editor.summaryLabel", { length: summary.length })}>
         <textarea value={summary} onChange={(e) => setSummary(e.target.value)} maxLength={280} rows={2}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm" />
       </Field>
 
-      <Field label="Synopsis, shown on the story landing page">
+      <Field label={t("editor.synopsisLabel")}>
         <RichEditor
           value={synopsisHtml}
           onChange={setSynopsisHtml}
-          placeholder="A longer pitch, the hook that gets readers to start chapter 1."
+          placeholder={t("editor.synopsisPlaceholder")}
           minHeight="10rem"
         />
       </Field>
 
-      <Field label="Cover image URL (https only)">
+      <Field label={t("editor.coverImageLabel")}>
         <input value={coverImageUrl} onChange={(e) => setCoverImageUrl(e.target.value)}
           placeholder="https://..." className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm" />
         {coverImageUrl ? (
-          <img src={coverImageUrl} alt="cover preview" referrerPolicy="no-referrer"
+          <img src={coverImageUrl} alt={t("editor.coverPreviewAlt")} referrerPolicy="no-referrer"
             className="mt-2 h-32 w-auto rounded border border-keep-rule object-cover" />
         ) : null}
       </Field>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-        <Field label="Genre">
+        <Field label={t("genre")}>
           <select value={genre} onChange={(e) => setGenre(e.target.value as StoryGenre)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
             {STORY_GENRES.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </Field>
-        <Field label="Visibility">
+        <Field label={t("editor.visibilityLabel")}>
           <select value={visibility} onChange={(e) => setVisibility(e.target.value as StoryVisibility)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
-            <option value="private">Private, only you</option>
-            <option value="unlisted">Unlisted, link only</option>
-            <option value="public">Public, listed</option>
+            <option value="private">{t("editor.visibility.private")}</option>
+            <option value="unlisted">{t("editor.visibility.unlisted")}</option>
+            <option value="public">{t("editor.visibility.public")}</option>
           </select>
         </Field>
-        <Field label="Status">
+        <Field label={t("statusLabel")}>
           <select value={status} onChange={(e) => setStatus(e.target.value as StoryStatus)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
-            {STORY_STATUSES.map((s) => <option key={s} value={s}>{s.replace("_", " ")}</option>)}
+            {STORY_STATUSES.map((s) => <option key={s} value={s}>{t(`statusesLower.${s}`)}</option>)}
           </select>
         </Field>
       </div>
 
-      <Field label="Rating, sets who can read this story">
+      <Field label={t("editor.ratingFieldLabel")}>
         <RatingPicker value={rating} onChange={setRating} name="story-rating" />
       </Field>
 
-      <Field label="Tags">
+      <Field label={t("catalog.tags")}>
         <div className="flex flex-wrap gap-1">
           {tags.map((t) => (
             <button key={t} type="button"
@@ -545,7 +550,7 @@ function OverviewEditor({
         <div className="mt-1 flex items-center gap-2">
           <input value={tagDraft} onChange={(e) => setTagDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTag(tagDraft); } }}
-            placeholder="add tag, press Enter"
+            placeholder={t("editor.addTagPlaceholder")}
             className="w-48 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs" />
           <span className="text-[10px] text-keep-muted">{tags.length}/20</span>
         </div>
@@ -559,7 +564,7 @@ function OverviewEditor({
         </div>
       </Field>
 
-      <Field label="Content warnings">
+      <Field label={t("editor.contentWarningsLabel")}>
         <div className="flex flex-wrap gap-1">
           {STORY_CONTENT_WARNINGS.map((c) => {
             const on = cws.includes(c);
@@ -579,15 +584,15 @@ function OverviewEditor({
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={allowReviews} onChange={(e) => setAllowReviews(e.target.checked)} />
-          Allow reviews
+          {t("editor.allowReviews")}
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={allowApplause} onChange={(e) => setAllowApplause(e.target.checked)} />
-          Allow applause (👏)
+          {t("editor.allowApplause")}
         </label>
       </div>
 
-      <Field label="Price to buy a copy">
+      <Field label={t("editor.copyPriceLabel")}>
         <input
           type="number"
           inputMode="numeric"
@@ -595,16 +600,19 @@ function OverviewEditor({
           max={STORY_COPY_PRICE_MAX}
           value={copyPrice}
           onChange={(e) => setCopyPrice(e.target.value)}
-          placeholder={`Default (${detail.copyPriceDefault}g)`}
+          placeholder={t("editor.priceDefaultPlaceholder", { price: detail.copyPriceDefault })}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5"
         />
         <p className="mt-1 text-[11px] text-keep-muted">
-          What readers pay to buy a copy and showcase your book on their profile (you earn a royalty on each sale).
-          Leave blank to use the site default ({detail.copyPriceDefault}g). A custom price must be {STORY_COPY_PRICE_MIN}–{STORY_COPY_PRICE_MAX}g.
+          {t("editor.copyPriceHelp", {
+            price: detail.copyPriceDefault,
+            min: STORY_COPY_PRICE_MIN,
+            max: STORY_COPY_PRICE_MAX,
+          })}
         </p>
       </Field>
 
-      <Field label="Buy to read">
+      <Field label={t("editor.buyToReadLabel")}>
         <label className="flex items-start gap-2 text-sm">
           <input
             type="checkbox"
@@ -613,8 +621,7 @@ function OverviewEditor({
             className="mt-0.5"
           />
           <span>
-            Readers see a short sample of the first chapter, then must buy a copy (at the price above)
-            to read the rest. Moderators can read it in full with a warning.
+            {t("editor.buyToReadHint")}
           </span>
         </label>
       </Field>
@@ -622,13 +629,13 @@ function OverviewEditor({
       <div className="flex items-center justify-between border-t border-keep-rule pt-3">
         <button type="button" onClick={onDelete}
           className="rounded border border-keep-accent/40 bg-keep-accent/10 px-3 py-1 text-xs text-keep-accent hover:bg-keep-accent/20">
-          Delete story
+          {t("editor.deleteStory")}
         </button>
         <div className="flex items-center gap-3">
-          {savedAt ? <span className="text-[11px] italic text-keep-muted">Saved</span> : null}
+          {savedAt ? <span className="text-[11px] italic text-keep-muted">{t("saved")}</span> : null}
           <button type="submit" disabled={busy}
             className="rounded border border-keep-action bg-keep-action px-4 py-1 text-sm font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
-            {busy ? "Saving..." : "Save"}
+            {busy ? t("common:savingDots") : t("common:save")}
           </button>
         </div>
       </div>
@@ -660,6 +667,7 @@ function ChaptersTab({
   onSelectChapter: (id: string | null) => void;
   onReload: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -678,7 +686,7 @@ function ChaptersTab({
 
   async function addChapter() {
     if (detail.chapters.length >= STORY_CHAPTER_CAP) {
-      setErr(`Chapter cap (${STORY_CHAPTER_CAP}) reached.`);
+      setErr(t("editor.chapterCapReached", { cap: STORY_CHAPTER_CAP }));
       return;
     }
     setBusy(true);
@@ -694,7 +702,7 @@ function ChaptersTab({
       await onReload();
       onSelectChapter(created.id);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "create failed");
+      setErr(e instanceof Error ? e.message : t("errors.createFailed"));
     } finally {
       setBusy(false);
     }
@@ -703,14 +711,16 @@ function ChaptersTab({
   async function deleteChapter(id: string) {
     const c = chapterMap.get(id);
     if (!c) return;
-    if (!window.confirm(`Delete "${c.title || `Chapter ${c.sortOrder + 1}`}"? Cannot be undone.`)) return;
+    if (!window.confirm(t("editor.confirmDeleteChapter", {
+      title: c.title || t("editor.chapterN", { number: c.sortOrder + 1 }),
+    }))) return;
     try {
       const r = await fetch(`/stories/${detail.story.id}/chapters/${id}`, { method: "DELETE" });
       if (!r.ok) throw new Error(await readError(r));
       if (selectedChapterId === id) onSelectChapter(null);
       await onReload();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "delete failed");
+      setErr(e instanceof Error ? e.message : t("errors.deleteFailed"));
     }
   }
 
@@ -725,7 +735,7 @@ function ChaptersTab({
       if (!r.ok) throw new Error(await readError(r));
       await onReload();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "reorder failed");
+      setErr(e instanceof Error ? e.message : t("errors.reorderFailed"));
       setOrderedIds(detail.chapters.map((c) => c.id));
     }
   }
@@ -734,17 +744,17 @@ function ChaptersTab({
     <div className="flex min-h-0 flex-1 flex-col md:flex-row">
       <aside className="flex shrink-0 flex-col border-keep-rule md:w-72 md:border-r">
         <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-1.5 text-xs">
-          <span className="uppercase tracking-widest text-keep-muted">Chapters</span>
+          <span className="uppercase tracking-widest text-keep-muted">{t("editor.tabs.chapters")}</span>
           <button type="button" onClick={addChapter} disabled={busy}
             className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[11px] hover:bg-keep-banner disabled:opacity-50"
-            title="Add chapter">
-            + Chapter
+            title={t("editor.addChapterTitle")}>
+            {t("editor.addChapter")}
           </button>
         </div>
         {err ? <p className="border-b border-keep-rule bg-keep-accent/10 px-2 py-1 text-[11px] text-keep-accent">{err}</p> : null}
         <div className="min-h-0 flex-1 overflow-y-auto p-1">
           {orderedIds.length === 0 ? (
-            <p className="p-3 text-xs italic text-keep-muted">No chapters yet, add one to start writing.</p>
+            <p className="p-3 text-xs italic text-keep-muted">{t("editor.noChaptersYet")}</p>
           ) : (
             <ChapterList
               orderedIds={orderedIds}
@@ -769,8 +779,8 @@ function ChaptersTab({
         ) : (
           <div className="flex h-full items-center justify-center p-8 text-center text-sm text-keep-muted">
             {detail.chapters.length === 0
-              ? "Click + Chapter to begin."
-              : "Pick a chapter on the left to edit."}
+              ? t("editor.clickAddChapter")
+              : t("editor.pickChapter")}
           </div>
         )}
       </section>
@@ -793,6 +803,7 @@ function ChapterList({
   onDelete: (id: string) => void;
   onReorder: (nextOrder: string[]) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   function move(id: string, dir: -1 | 1) {
     const idx = orderedIds.indexOf(id);
     if (idx < 0) return;
@@ -814,32 +825,32 @@ function ChapterList({
               <span className="w-6 text-right text-[10px] tabular-nums text-keep-muted">{idx + 1}.</span>
               <button type="button" onClick={() => onSelect(c.id)}
                 className={`min-w-0 flex-1 truncate text-left text-xs ${selected ? "text-keep-action" : "text-keep-text"}`}
-                title={c.title || `Chapter ${idx + 1}`}>
-                {c.title || `Chapter ${idx + 1}`}
+                title={c.title || t("editor.chapterN", { number: idx + 1 })}>
+                {c.title || t("editor.chapterN", { number: idx + 1 })}
                 {c.status === "published" ? (
                   <span className="ml-1 rounded bg-emerald-500/15 px-1 py-0 text-[9px] uppercase tracking-widest text-emerald-300">
-                    pub
+                    {t("editor.pubChip")}
                   </span>
                 ) : (
                   <span className="ml-1 rounded bg-keep-muted/25 px-1 py-0 text-[9px] uppercase tracking-widest text-keep-muted">
-                    draft
+                    {t("editor.draftChip")}
                   </span>
                 )}
               </button>
               <div className="flex gap-0.5 opacity-60 group-hover:opacity-100 focus-within:opacity-100">
                 <button type="button" onClick={() => move(c.id, -1)} disabled={idx === 0}
                   className="rounded border border-keep-rule px-1 text-[10px] text-keep-muted disabled:opacity-30"
-                  title="Move up">↑</button>
+                  title={t("editor.moveUp")}>↑</button>
                 <button type="button" onClick={() => move(c.id, 1)} disabled={idx === orderedIds.length - 1}
                   className="rounded border border-keep-rule px-1 text-[10px] text-keep-muted disabled:opacity-30"
-                  title="Move down">↓</button>
+                  title={t("editor.moveDown")}>↓</button>
                 <button type="button" onClick={() => onDelete(c.id)}
                   className="rounded border border-keep-accent/40 px-1 text-[10px] text-keep-accent"
-                  title="Delete">×</button>
+                  title={t("common:delete")}>×</button>
               </div>
             </div>
             <div className="pl-7 pr-2 pb-1 text-[10px] text-keep-muted tabular-nums">
-              {c.wordCount.toLocaleString()} words
+              {t("editor.wordsCount", { formatted: formatNumber(c.wordCount) })}
             </div>
           </li>
         );
@@ -861,6 +872,7 @@ function ChapterEditor({
   chapterRef: StoryChapterRef;
   onSaved: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [full, setFull] = useState<StoryChapter | null>(null);
   const [title, setTitle] = useState(chapterRef.title);
   const [body, setBody] = useState("");
@@ -911,8 +923,9 @@ function ChapterEditor({
       setLastDivergedAt(0);
       setDivergeDismissedFor(0);
     } catch (e) {
-      if (!signal?.cancelled) setErr(e instanceof Error ? e.message : "load failed");
+      if (!signal?.cancelled) setErr(e instanceof Error ? e.message : t("errors.loadFailed"));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storyId, chapterRef.id]);
 
   useEffect(() => {
@@ -1037,7 +1050,7 @@ function ChapterEditor({
       }, 4000);
       await onSaved();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "save failed");
+      setErr(e instanceof Error ? e.message : t("errors.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -1047,7 +1060,7 @@ function ChapterEditor({
     return <p className="p-4 text-xs text-keep-accent">{err}</p>;
   }
   if (!full) {
-    return <p className="p-4 italic text-keep-muted">Loading chapter...</p>;
+    return <p className="p-4 italic text-keep-muted">{t("editor.loadingChapter")}</p>;
   }
 
   const published = full.status === "published";
@@ -1056,101 +1069,101 @@ function ChapterEditor({
     <div className="flex h-full flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-keep-rule bg-keep-panel/30 px-3 py-2 text-xs">
         <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120}
-          placeholder={`Chapter ${chapterRef.sortOrder + 1}`}
+          placeholder={t("editor.chapterN", { number: chapterRef.sortOrder + 1 })}
           readOnly={isReadOnly}
           className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm read-only:opacity-60" />
-        <span className="text-[11px] tabular-nums text-keep-muted">{liveWords.toLocaleString()} words</span>
+        <span className="text-[11px] tabular-nums text-keep-muted">{t("editor.wordsCount", { formatted: formatNumber(liveWords) })}</span>
         <button type="button" onClick={() => setPreviewing((v) => !v)}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1">
-          {previewing ? "Edit" : "Preview"}
+          {previewing ? t("edit") : t("common:preview")}
         </button>
         <button type="button" onClick={() => setShowHistory((v) => !v)}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1">
-          {showHistory ? "Hide history" : "History"}
+          {showHistory ? t("editor.hideHistory") : t("editor.history")}
         </button>
         {published ? (
           <button
             type="button"
             onClick={() => {
-              if (window.confirm("Unpublish this chapter? Subscribers won't see it on the catalog or in the reader until it's republished.")) {
+              if (window.confirm(t("editor.confirmUnpublish"))) {
                 void save("unpublish");
               }
             }}
             disabled={busy || isReadOnly}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted disabled:opacity-50"
           >
-            Unpublish
+            {t("editor.unpublish")}
           </button>
         ) : (
           <button
             type="button"
             onClick={() => {
-              if (window.confirm("Publish this chapter? Subscribers will be notified and it'll show up in the reader.")) {
+              if (window.confirm(t("editor.confirmPublish"))) {
                 void save("publish");
               }
             }}
             disabled={busy || isReadOnly}
             className="rounded border border-emerald-500 bg-emerald-500/15 px-2 py-1 font-semibold uppercase tracking-widest text-emerald-300 disabled:opacity-50"
           >
-            Publish
+            {t("editor.publish")}
           </button>
         )}
         <button type="button" onClick={() => save("manual")} disabled={busy || isReadOnly}
           className="rounded border border-keep-action bg-keep-action px-2 py-1 font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
-          {busy ? "Saving..." : "Save"}
+          {busy ? t("common:savingDots") : t("common:save")}
         </button>
         {busy ? null : isDirty ? (
-          <span className="text-[10px] italic text-amber-300">Unsaved changes</span>
+          <span className="text-[10px] italic text-amber-300">{t("editor.unsavedChanges")}</span>
         ) : savedAt ? (
-          <span className="text-[10px] italic text-keep-muted">Saved</span>
+          <span className="text-[10px] italic text-keep-muted">{t("saved")}</span>
         ) : null}
       </div>
 
       {isReadOnly && lock?.holder ? (
         <div className="flex flex-wrap items-center gap-2 border-b border-keep-rule bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-          <span className="font-semibold">📖 {lock.holder.username} is editing this chapter.</span>
-          <span className="text-amber-300/80">You're in read-only mode so you don't overwrite their work.</span>
+          <span className="font-semibold">{t("editor.lockHolder", { name: lock.holder.username })}</span>
+          <span className="text-amber-300/80">{t("editor.readOnlyNote")}</span>
           <button
             type="button"
             onClick={() => setForceEdit(true)}
             className="ml-auto rounded border border-amber-400 bg-amber-500/20 px-2 py-1 font-semibold uppercase tracking-widest text-amber-100"
           >
-            Force edit
+            {t("editor.forceEdit")}
           </button>
         </div>
       ) : null}
 
       {forceEdit && lock && !lock.heldByMe ? (
         <div className="border-b border-keep-rule bg-amber-500/5 px-3 py-1 text-[11px] italic text-amber-300/80">
-          Force-editing while {lock.holder?.username ?? "another collaborator"} is in the chapter. Both versions are kept in history.
+          {t("editor.forceEditingNote", { name: lock.holder?.username ?? t("editor.anotherCollaborator") })}
         </div>
       ) : null}
 
       {showDivergence ? (
         <div className="flex flex-wrap items-center gap-2 border-b border-keep-rule bg-keep-accent/10 px-3 py-2 text-xs text-keep-accent">
-          <span className="font-semibold">⚠ Someone saved this chapter since you opened it.</span>
-          <span className="opacity-80">Your unsaved edits will overwrite theirs unless you reload.</span>
+          <span className="font-semibold">{t("editor.divergenceWarning")}</span>
+          <span className="opacity-80">{t("editor.divergenceNote")}</span>
           <button
             type="button"
             onClick={() => setShowHistory(true)}
             className="rounded border border-keep-accent/60 bg-keep-bg px-2 py-1"
           >
-            View history
+            {t("editor.viewHistory")}
           </button>
           <button
             type="button"
             onClick={() => { void loadChapter(); }}
             className="rounded border border-keep-accent bg-keep-accent/20 px-2 py-1 font-semibold uppercase tracking-widest"
           >
-            Reload
+            {t("editor.reload")}
           </button>
           <button
             type="button"
             onClick={() => setDivergeDismissedFor(lastDivergedAt)}
-            title="Hide this warning until another save happens"
+            title={t("editor.dismissTitle")}
             className="ml-auto rounded border border-keep-accent/40 bg-keep-bg px-2 py-1"
           >
-            Dismiss
+            {t("editor.dismiss")}
           </button>
         </div>
       ) : null}
@@ -1170,11 +1183,17 @@ function ChapterEditor({
         />
       ) : previewing ? (
         <div className="flex-1 overflow-y-auto p-6">
-          <article className="prose mx-auto max-w-prose text-keep-text"
-            dangerouslySetInnerHTML={{ __html: body || "<p><i>Empty chapter, nothing to preview.</i></p>" }} />
+          {body ? (
+            <article className="prose mx-auto max-w-prose text-keep-text"
+              dangerouslySetInnerHTML={{ __html: body }} />
+          ) : (
+            <article className="prose mx-auto max-w-prose text-keep-text">
+              <p><i>{t("editor.emptyChapterPreview")}</i></p>
+            </article>
+          )}
           {notes ? (
             <div className="mx-auto mt-6 max-w-prose border-t border-keep-rule pt-3 text-sm text-keep-muted">
-              <h4 className="mb-1 text-xs uppercase tracking-widest">Author's notes</h4>
+              <h4 className="mb-1 text-xs uppercase tracking-widest">{t("authorsNotes")}</h4>
               <div className="prose prose-sm" dangerouslySetInnerHTML={{ __html: notes }} />
             </div>
           ) : null}
@@ -1186,26 +1205,26 @@ function ChapterEditor({
             onChange={setBody}
             readOnly={isReadOnly}
             enableMarginNote
-            placeholder="Start writing your chapter."
+            placeholder={t("editor.chapterBodyPlaceholder")}
             minHeight="24rem"
           />
           <details className="rounded border border-keep-rule bg-keep-panel/30">
             <summary className="cursor-pointer px-3 py-1.5 text-xs uppercase tracking-widest text-keep-muted">
-              Author's notes (optional)
+              {t("editor.authorsNotesOptional")}
             </summary>
             <div className="border-t border-keep-rule p-2">
               <RichEditor
                 value={notes}
                 onChange={setNotes}
                 readOnly={isReadOnly}
-                placeholder="Notes shown above or below the chapter, context, citations, dedications..."
+                placeholder={t("editor.notesPlaceholder")}
                 minHeight="6rem"
               />
             </div>
           </details>
           <details className="rounded border border-keep-rule bg-keep-panel/30">
             <summary className="cursor-pointer px-3 py-1.5 text-xs uppercase tracking-widest text-keep-muted">
-              Chapter-specific content warnings
+              {t("editor.chapterCwLabel")}
             </summary>
             <div className="flex flex-wrap gap-1 border-t border-keep-rule p-2">
               {STORY_CONTENT_WARNINGS.map((c) => {
@@ -1243,6 +1262,7 @@ function VersionHistoryPane({
   onRestore: (v: StoryChapterVersion) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [versions, setVersions] = useState<StoryChapterVersion[] | null>(null);
   const [active, setActive] = useState<StoryChapterVersion | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -1259,20 +1279,21 @@ function VersionHistoryPane({
         setVersions(j.versions);
         setActive(j.versions[0] ?? null);
       })
-      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : t("errors.loadFailed")); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storyId, chapterId]);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col md:flex-row">
       <aside className="md:w-56 md:shrink-0 md:border-r border-keep-rule">
         <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-1.5">
-          <span className="text-xs uppercase tracking-widest text-keep-muted">History</span>
-          <button type="button" onClick={onClose} className="text-keep-muted hover:text-keep-text" title="Close history">×</button>
+          <span className="text-xs uppercase tracking-widest text-keep-muted">{t("editor.history")}</span>
+          <button type="button" onClick={onClose} className="text-keep-muted hover:text-keep-text" title={t("editor.closeHistory")}>×</button>
         </div>
         {err ? <p className="p-2 text-xs text-keep-accent">{err}</p> : null}
-        {versions === null ? <p className="p-2 italic text-keep-muted">Loading...</p> : null}
-        {versions?.length === 0 ? <p className="p-2 italic text-keep-muted">No saved versions yet.</p> : null}
+        {versions === null ? <p className="p-2 italic text-keep-muted">{t("common:loadingDots")}</p> : null}
+        {versions?.length === 0 ? <p className="p-2 italic text-keep-muted">{t("editor.noVersions")}</p> : null}
         <ul className="overflow-y-auto">
           {versions?.map((v) => (
             <li key={v.id}>
@@ -1291,7 +1312,7 @@ function VersionHistoryPane({
                   }`}>{v.reason}</span>
                 </div>
                 <div className="text-[10px] text-keep-muted">
-                  {new Date(v.savedAt).toLocaleString()}
+                  {formatDateTime(v.savedAt)}
                 </div>
               </button>
             </li>
@@ -1301,19 +1322,25 @@ function VersionHistoryPane({
       <section className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-keep-rule bg-keep-panel/30 px-3 py-1.5">
           <span className="text-xs text-keep-muted">
-            {active ? `Preview, v${active.version}` : "Pick a version on the left."}
+            {active ? t("editor.previewVersion", { version: active.version }) : t("editor.pickVersion")}
           </span>
           {active ? (
             <button type="button" onClick={() => onRestore(active)}
               className="rounded border border-keep-action bg-keep-action px-2 py-0.5 text-xs font-semibold uppercase tracking-widest text-keep-bg">
-              Restore into draft
+              {t("editor.restoreIntoDraft")}
             </button>
           ) : null}
         </div>
         <div className="flex-1 overflow-y-auto p-4">
           {active ? (
-            <article className="prose max-w-prose text-keep-text"
-              dangerouslySetInnerHTML={{ __html: active.bodyHtml || "<p><i>Empty version.</i></p>" }} />
+            active.bodyHtml ? (
+              <article className="prose max-w-prose text-keep-text"
+                dangerouslySetInnerHTML={{ __html: active.bodyHtml }} />
+            ) : (
+              <article className="prose max-w-prose text-keep-text">
+                <p><i>{t("editor.emptyVersion")}</i></p>
+              </article>
+            )
           ) : null}
         </div>
       </section>

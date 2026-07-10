@@ -17,6 +17,7 @@
  * profile bios use), so an unsupported tag is filtered before storage.
  */
 import { createElement, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   ANNOUNCEMENT_BANNER_BODY_MAX,
   COLOR_TOKEN_OR_HEX_RE,
@@ -33,6 +34,7 @@ import {
   type ThemeableTextSlot,
 } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { hydrateDynamicUiRouteChips } from "../../lib/hydrateDynamicUiRouteChips.js";
 import { useActiveTheme } from "../../lib/theme.js";
 import { sanitizeUserHtml } from "../../lib/userHtml.js";
@@ -86,6 +88,7 @@ function ChipHtml({
  * ============================================================ */
 
 export default function AnnouncementsTab({ serverId, viewer }: AnnouncementsTabProps) {
+  const { t } = useTranslation("servers");
   // The tab only mounts when the viewer holds manage_announcements (registry
   // gate); we re-read it so a viewer who lost the grant mid-session sees a
   // read-only surface rather than dead buttons. The routes re-check regardless.
@@ -95,25 +98,20 @@ export default function AnnouncementsTab({ serverId, viewer }: AnnouncementsTabP
     <div className="max-w-3xl space-y-6">
       <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
-          Banner marquee
+          {t("announceTab.bannerHeading")}
         </h2>
         <p className="mb-3 text-xs text-keep-muted">
-          Rows here render in a rotating banner above this server's chat. The marquee
-          fades between entries every few seconds when two or more are enabled. Members
-          can dismiss the bar for themselves; the dismissal persists in their browser.
+          {t("announceTab.bannerBlurb")}
         </p>
         <BannerSection serverId={serverId} canManage={canManage} />
       </section>
 
       <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
-          Scheduled <code>/announce</code> cronjobs
+          <Trans t={t} i18nKey="announceTab.scheduledHeading" components={{ code: <code /> }} />
         </h2>
         <p className="mb-3 text-xs text-keep-muted">
-          Rows here fire as an <code>/announce</code> at the configured time. With no
-          target room, the announcement reaches every room in this server. One-shot rows
-          auto-disable after firing; recurring rows re-arm to <em>now + interval</em> on
-          each fire, so a restart mid-cycle won't double-fire to catch up.
+          <Trans t={t} i18nKey="announceTab.scheduledBlurb" components={{ code: <code />, em: <em /> }} />
         </p>
         <ScheduledSection serverId={serverId} canManage={canManage} />
       </section>
@@ -126,6 +124,7 @@ export default function AnnouncementsTab({ serverId, viewer }: AnnouncementsTabP
  * ============================================================ */
 
 function BannerSection({ serverId, canManage }: { serverId: string; canManage: boolean }) {
+  const { t } = useTranslation("servers");
   const [banners, setBanners] = useState<AnnouncementBanner[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AnnouncementBanner | null>(null);
@@ -139,7 +138,7 @@ function BannerSection({ serverId, canManage }: { serverId: string; canManage: b
       const j = (await r.json()) as { banners: AnnouncementBanner[] };
       setBanners(j.banners);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("shared.loadFailed"));
     }
   }
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [serverId]);
@@ -155,12 +154,12 @@ function BannerSection({ serverId, canManage }: { serverId: string; canManage: b
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "toggle failed");
+      setError(e instanceof Error ? e.message : t("announceTab.toggleFailed"));
     }
   }
 
   async function remove(b: AnnouncementBanner) {
-    if (!window.confirm("Delete this banner? Members lose it on next refresh.")) return;
+    if (!window.confirm(t("announceTab.deleteBannerConfirm"))) return;
     try {
       const r = await fetch(`/servers/${sid(serverId)}/announcements/banners/${sid(b.id)}`, {
         method: "DELETE",
@@ -169,11 +168,11 @@ function BannerSection({ serverId, canManage }: { serverId: string; canManage: b
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "delete failed");
+      setError(e instanceof Error ? e.message : t("announceTab.deleteFailed"));
     }
   }
 
-  if (banners === null) return <p className="text-xs italic text-keep-muted">Loading…</p>;
+  if (banners === null) return <p className="text-xs italic text-keep-muted">{t("shared.loading")}</p>;
   return (
     <div className="space-y-3">
       {error ? <p className="text-xs text-keep-accent">{error}</p> : null}
@@ -183,7 +182,7 @@ function BannerSection({ serverId, canManage }: { serverId: string; canManage: b
           onClick={() => { setAdding(true); setEditing(null); }}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/25"
         >
-          + New banner
+          {t("announceTab.newBanner")}
         </button>
       ) : null}
       {(adding || editing) && canManage ? (
@@ -195,14 +194,14 @@ function BannerSection({ serverId, canManage }: { serverId: string; canManage: b
         />
       ) : null}
       {banners.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No banners yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("announceTab.noBanners")}</p>
       ) : (
         <table className="w-full min-w-[520px] text-xs">
           <thead>
             <tr className="border-b border-keep-rule text-keep-muted">
-              <th className="px-2 py-1 text-left">Preview</th>
-              <th className="px-2 py-1">Order</th>
-              <th className="px-2 py-1">Enabled</th>
+              <th className="px-2 py-1 text-left">{t("announceTab.colPreview")}</th>
+              <th className="px-2 py-1">{t("announceTab.colOrder")}</th>
+              <th className="px-2 py-1">{t("announceTab.colEnabled")}</th>
               <th className="px-2 py-1"></th>
             </tr>
           </thead>
@@ -220,7 +219,7 @@ function BannerSection({ serverId, canManage }: { serverId: string; canManage: b
                   {canManage ? (
                     <input type="checkbox" checked={b.enabled} onChange={() => void toggleEnabled(b)} />
                   ) : (
-                    <span>{b.enabled ? "yes" : "no"}</span>
+                    <span>{b.enabled ? t("announceTab.yes") : t("announceTab.no")}</span>
                   )}
                 </td>
                 <td className="px-2 py-2 text-right">
@@ -231,14 +230,14 @@ function BannerSection({ serverId, canManage }: { serverId: string; canManage: b
                         onClick={() => { setEditing(b); setAdding(false); }}
                         className="mr-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
                       >
-                        Edit
+                        {t("shared.edit")}
                       </button>
                       <button
                         type="button"
                         onClick={() => void remove(b)}
                         className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/20"
                       >
-                        Delete
+                        {t("shared.delete")}
                       </button>
                     </>
                   ) : null}
@@ -263,6 +262,7 @@ function BannerForm({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const { t } = useTranslation("servers");
   // Existing rows store sanitized HTML; the editor seeds the textarea with it
   // directly (admins who typed markdown see the converted HTML on edit).
   const [body, setBody] = useState(initial?.bodyHtml ?? "");
@@ -291,7 +291,7 @@ function BannerForm({
       if (!r.ok) throw new Error(await readError(r));
       await onSaved();
     } catch (e2) {
-      setError(e2 instanceof Error ? e2.message : "save failed");
+      setError(e2 instanceof Error ? e2.message : t("shared.saveFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -300,27 +300,27 @@ function BannerForm({
   return (
     <form onSubmit={submit} className="space-y-2 rounded border border-keep-rule bg-keep-panel/30 p-3 text-xs">
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Body (HTML or Markdown)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("announceTab.bodyLabel")}</span>
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={4}
           maxLength={ANNOUNCEMENT_BANNER_BODY_MAX}
-          placeholder="**Welcome!** Read the [house rules](/rules) before posting."
+          placeholder={t("announceTab.bannerBodyPlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px]"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          {body.length} / {ANNOUNCEMENT_BANNER_BODY_MAX}. Both formats supported; Markdown converts to HTML on save.
+          {t("announceTab.bannerCount", { len: body.length, max: ANNOUNCEMENT_BANNER_BODY_MAX })}
         </span>
       </label>
 
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-1">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          <span>Enabled</span>
+          <span>{t("shared.enabled")}</span>
         </label>
         <label className="flex items-center gap-1">
-          <span>Order</span>
+          <span>{t("announceTab.orderLabel")}</span>
           <input
             type="number"
             value={sortOrder}
@@ -332,7 +332,7 @@ function BannerForm({
 
       {body.trim() ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-2">
-          <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Preview</div>
+          <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("announceTab.preview")}</div>
           <ChipHtml className="prose prose-sm max-w-none [&_p]:m-0" html={previewHtml} />
         </div>
       ) : null}
@@ -341,11 +341,11 @@ function BannerForm({
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onCancel}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner">
-          Cancel
+          {t("shared.cancel")}
         </button>
         <button type="submit" disabled={submitting}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50">
-          {submitting ? "Saving…" : initial ? "Save changes" : "Create banner"}
+          {submitting ? t("shared.saving") : initial ? t("announceTab.saveChanges") : t("announceTab.createBanner")}
         </button>
       </div>
     </form>
@@ -357,6 +357,7 @@ function BannerForm({
  * ============================================================ */
 
 function ScheduledSection({ serverId, canManage }: { serverId: string; canManage: boolean }) {
+  const { t } = useTranslation("servers");
   const [rows, setRows] = useState<ScheduledAnnouncement[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ScheduledAnnouncement | null>(null);
@@ -392,7 +393,7 @@ function ScheduledSection({ serverId, canManage }: { serverId: string; canManage
       const j = (await r.json()) as { scheduled: ScheduledAnnouncement[] };
       setRows(j.scheduled);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("shared.loadFailed"));
     }
   }
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [serverId]);
@@ -408,12 +409,12 @@ function ScheduledSection({ serverId, canManage }: { serverId: string; canManage
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "toggle failed");
+      setError(e instanceof Error ? e.message : t("announceTab.toggleFailed"));
     }
   }
 
   async function remove(row: ScheduledAnnouncement) {
-    if (!window.confirm("Delete this scheduled announcement?")) return;
+    if (!window.confirm(t("announceTab.deleteScheduledConfirm"))) return;
     try {
       const r = await fetch(`/servers/${sid(serverId)}/announcements/scheduled/${sid(row.id)}`, {
         method: "DELETE",
@@ -422,11 +423,11 @@ function ScheduledSection({ serverId, canManage }: { serverId: string; canManage
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "delete failed");
+      setError(e instanceof Error ? e.message : t("announceTab.deleteFailed"));
     }
   }
 
-  if (rows === null) return <p className="text-xs italic text-keep-muted">Loading…</p>;
+  if (rows === null) return <p className="text-xs italic text-keep-muted">{t("shared.loading")}</p>;
   return (
     <div className="space-y-3">
       {error ? <p className="text-xs text-keep-accent">{error}</p> : null}
@@ -436,7 +437,7 @@ function ScheduledSection({ serverId, canManage }: { serverId: string; canManage
           onClick={() => { setAdding(true); setEditing(null); }}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/25"
         >
-          + New scheduled announcement
+          {t("announceTab.newScheduled")}
         </button>
       ) : null}
       {(adding || editing) && canManage ? (
@@ -449,15 +450,15 @@ function ScheduledSection({ serverId, canManage }: { serverId: string; canManage
         />
       ) : null}
       {rows.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No scheduled announcements yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("announceTab.noScheduled")}</p>
       ) : (
         <table className="w-full min-w-[640px] text-xs">
           <thead>
             <tr className="border-b border-keep-rule text-keep-muted">
-              <th className="px-2 py-1 text-left">Body</th>
-              <th className="px-2 py-1 text-left">Schedule</th>
-              <th className="px-2 py-1 text-left">Target</th>
-              <th className="px-2 py-1">Enabled</th>
+              <th className="px-2 py-1 text-left">{t("announceTab.colBody")}</th>
+              <th className="px-2 py-1 text-left">{t("announceTab.colSchedule")}</th>
+              <th className="px-2 py-1 text-left">{t("announceTab.colTarget")}</th>
+              <th className="px-2 py-1">{t("announceTab.colEnabled")}</th>
               <th className="px-2 py-1"></th>
             </tr>
           </thead>
@@ -481,13 +482,13 @@ function ScheduledSection({ serverId, canManage }: { serverId: string; canManage
                 <td className="px-2 py-2">
                   {r.targetRoomId
                     ? (roomNameById.get(r.targetRoomId) ?? <code className="text-keep-muted">{r.targetRoomId}</code>)
-                    : <em className="text-keep-muted">every room</em>}
+                    : <em className="text-keep-muted">{t("announceTab.everyRoom")}</em>}
                 </td>
                 <td className="px-2 py-2 text-center">
                   {canManage ? (
                     <input type="checkbox" checked={r.enabled} onChange={() => void toggleEnabled(r)} />
                   ) : (
-                    <span>{r.enabled ? "yes" : "no"}</span>
+                    <span>{r.enabled ? t("announceTab.yes") : t("announceTab.no")}</span>
                   )}
                 </td>
                 <td className="px-2 py-2 text-right">
@@ -498,14 +499,14 @@ function ScheduledSection({ serverId, canManage }: { serverId: string; canManage
                         onClick={() => { setEditing(r); setAdding(false); }}
                         className="mr-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
                       >
-                        Edit
+                        {t("shared.edit")}
                       </button>
                       <button
                         type="button"
                         onClick={() => void remove(r)}
                         className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/20"
                       >
-                        Delete
+                        {t("shared.delete")}
                       </button>
                     </>
                   ) : null}
@@ -533,6 +534,7 @@ function ScheduledForm({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const { t } = useTranslation("servers");
   const [body, setBody] = useState(initial?.bodyMarkdown ?? "");
   const [scheduleSpec, setScheduleSpec] = useState(initial?.scheduleSpec ?? "");
   const [color, setColor] = useState<string | null>(initial?.color ?? null);
@@ -555,10 +557,10 @@ function ScheduledForm({
     setError(null);
     try {
       if (!parsed || !parsed.ok) {
-        throw new Error(parsed && !parsed.ok ? parsed.message : "Schedule is required.");
+        throw new Error(parsed && !parsed.ok ? parsed.message : t("announceTab.scheduleRequired"));
       }
       if (color !== null && !COLOR_TOKEN_OR_HEX_RE.test(color)) {
-        throw new Error("Color must be `#rrggbb` or a `theme:<slot>` token.");
+        throw new Error(t("announceTab.colorInvalid"));
       }
       const payload = {
         scheduleSpec,
@@ -580,7 +582,7 @@ function ScheduledForm({
       if (!r.ok) throw new Error(await readError(r));
       await onSaved();
     } catch (e2) {
-      setError(e2 instanceof Error ? e2.message : "save failed");
+      setError(e2 instanceof Error ? e2.message : t("shared.saveFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -589,49 +591,48 @@ function ScheduledForm({
   return (
     <form onSubmit={submit} className="space-y-2 rounded border border-keep-rule bg-keep-panel/30 p-3 text-xs">
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Body (HTML or Markdown)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("announceTab.bodyLabel")}</span>
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={3}
           maxLength={SCHEDULED_ANNOUNCEMENT_BODY_MAX}
-          placeholder="**Daily reminder:** Check the [event board](/rules#events) for tonight's sessions."
+          placeholder={t("announceTab.scheduledBodyPlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px]"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">{body.length} / {SCHEDULED_ANNOUNCEMENT_BODY_MAX}</span>
       </label>
 
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Schedule</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("announceTab.scheduleLabel")}</span>
         <input
           type="text"
           value={scheduleSpec}
           onChange={(e) => setScheduleSpec(e.target.value)}
-          placeholder="1d8h  /  3h  /  30m  /  2026-06-04T18:00"
+          placeholder={t("announceTab.schedulePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px]"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          Interval (e.g. <code>1d8h</code>) for recurring, or an ISO datetime for a one-shot.
-          Minimum interval is 1 minute; maximum 30 days.
+          <Trans t={t} i18nKey="announceTab.scheduleHint" components={{ code: <code /> }} />
           {parsed && !parsed.ok ? <span className="ml-2 text-keep-accent">{parsed.message}</span> : null}
           {parsed && parsed.ok ? (
             <span className="ml-2 text-keep-action">
               {parsed.parsed.kind === "interval"
-                ? `Recurring every ${formatIntervalMs(parsed.parsed.intervalMs)}.`
-                : `Fires once on ${new Date(parsed.parsed.runAt).toLocaleString()}.`}
+                ? t("announceTab.recurringEvery", { interval: formatIntervalMs(parsed.parsed.intervalMs) })
+                : t("announceTab.firesOnceOn", { date: formatDateTime(parsed.parsed.runAt) })}
             </span>
           ) : null}
         </span>
       </label>
 
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Target room</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("announceTab.targetRoomLabel")}</span>
         <select
           value={targetRoomId ?? ""}
           onChange={(e) => setTargetRoomId(e.target.value || null)}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
         >
-          <option value="">Every room in this server</option>
+          <option value="">{t("announceTab.everyRoomOption")}</option>
           {rooms.map((r) => (
             <option key={r.id} value={r.id}>{r.name}</option>
           ))}
@@ -639,7 +640,7 @@ function ScheduledForm({
       </label>
 
       <fieldset className="space-y-1">
-        <legend className="mb-1 block uppercase tracking-widest text-keep-muted">Color (optional)</legend>
+        <legend className="mb-1 block uppercase tracking-widest text-keep-muted">{t("announceTab.colorLabel")}</legend>
         <div className="flex flex-wrap gap-1">
           <button
             type="button"
@@ -648,7 +649,7 @@ function ScheduledForm({
               color === null ? "border-keep-action bg-keep-action/15" : "border-keep-rule bg-keep-bg hover:bg-keep-banner"
             }`}
           >
-            none
+            {t("announceTab.colorNone")}
           </button>
           {THEMEABLE_TEXT_SLOTS.map((slot: ThemeableTextSlot) => {
             const token = `theme:${slot}`;
@@ -674,13 +675,13 @@ function ScheduledForm({
             value={color && color.startsWith("#") ? color : "#990000"}
             onChange={(e) => setColor(e.target.value)}
             className="h-7 w-10 cursor-pointer rounded border border-keep-rule"
-            aria-label="Custom hex color"
+            aria-label={t("announceTab.customHexAria")}
           />
           <input
             type="text"
             value={color && color.startsWith("#") ? color : ""}
             onChange={(e) => setColor(e.target.value || null)}
-            placeholder={color && color.startsWith("theme:") ? `(using ${color})` : "(no override)"}
+            placeholder={color && color.startsWith("theme:") ? t("announceTab.usingColor", { color }) : t("announceTab.noOverride")}
             maxLength={7}
             pattern="^#[0-9a-fA-F]{6}$"
             className="flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
@@ -690,13 +691,13 @@ function ScheduledForm({
 
       <label className="flex items-center gap-1">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        <span>Enabled</span>
+        <span>{t("shared.enabled")}</span>
       </label>
 
       {body.trim() ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-2">
           <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-widest text-keep-muted">
-            <span>Preview (as it will render in chat)</span>
+            <span>{t("announceTab.chatPreview")}</span>
             {previewColor ? (
               <span className="flex items-center gap-1 normal-case tracking-normal">
                 <span
@@ -721,11 +722,11 @@ function ScheduledForm({
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onCancel}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner">
-          Cancel
+          {t("shared.cancel")}
         </button>
         <button type="submit" disabled={submitting}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50">
-          {submitting ? "Saving…" : initial ? "Save changes" : "Schedule announcement"}
+          {submitting ? t("shared.saving") : initial ? t("announceTab.saveChanges") : t("announceTab.scheduleAnnouncement")}
         </button>
       </div>
     </form>

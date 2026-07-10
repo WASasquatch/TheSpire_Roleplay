@@ -55,7 +55,8 @@ import {
 } from "../../games/duel.js";
 import { addSystemMessage } from "../../realtime/broadcast.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
-import type { CommandContext, CommandHandler } from "../types.js";
+import { tFor } from "../../i18n.js";
+import type { CommandContext, CommandHandler, SessionUser } from "../types.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -90,7 +91,15 @@ function participantFor(ctx: CommandContext): ParticipantRef {
  * lands in the chat view they actually see rather than only the
  * room the duel started in.
  */
-async function emitDuelPrivate(io: Io, session: GameSession, body: string): Promise<void> {
+async function emitDuelPrivate(
+  io: Io,
+  session: GameSession,
+  /** The line to send. A plain string is emitted as-is (used for lines
+   *  composed by the games module); a builder is called per recipient
+   *  with THAT socket's session locale so each duelist reads the line
+   *  in their own language (null → en, byte-identical to before). */
+  body: string | ((locale: string | null) => string),
+): Promise<void> {
   const state = session.state as DuelState;
   const userIds = new Set<string>();
   userIds.add(state.challenger.participant.userId);
@@ -103,7 +112,6 @@ async function emitDuelPrivate(io: Io, session: GameSession, body: string): Prom
     characterId: null,
     displayName: "system",
     kind: "system" as const,
-    body,
     color: null,
     createdAt: Date.now(),
   };
@@ -111,7 +119,10 @@ async function emitDuelPrivate(io: Io, session: GameSession, body: string): Prom
     const uid = (s.data as { userId?: string }).userId;
     if (!uid || !userIds.has(uid)) continue;
     const tabRoom = (s.data as { roomId?: string }).roomId ?? fallbackRoom;
-    s.emit("message:new", { ...out, roomId: tabRoom });
+    const rendered = typeof body === "string"
+      ? body
+      : body((s.data as { user?: SessionUser }).user?.locale ?? null);
+    s.emit("message:new", { ...out, body: rendered, roomId: tabRoom });
   }
 }
 
@@ -196,21 +207,21 @@ export const duelCommand: CommandHandler = {
   ],
   async run(ctx) {
     if (ctx.user.incognitoMode) {
-      return notice(ctx, "DUEL_INCOGNITO", "You can't /duel while in /incognito, every turn line names the participants.");
+      return notice(ctx, "DUEL_INCOGNITO", tFor(ctx.user.locale, "commands:duel.incognito"));
     }
     const [sub, ...rest] = ctx.args;
     const subLower = (sub ?? "").toLowerCase();
     const active = findRoomSession(ctx.roomId);
 
     if (!sub) {
-      return notice(ctx, "DUEL_USAGE", "Usage: /duel <opponent> [class]");
+      return notice(ctx, "DUEL_USAGE", tFor(ctx.user.locale, "commands:duel.usage"));
     }
 
     // Routing, accept / decline / combat actions / status / forfeit
     // first, then fall through to "challenge a new opponent."
     if (subLower === "accept") {
       if (!active || active.kind !== DUEL_KIND) {
-        return notice(ctx, "DUEL_NONE", "No duel challenge is pending in this room.");
+        return notice(ctx, "DUEL_NONE", tFor(ctx.user.locale, "commands:duel.nonePending"));
       }
       const classArg = rest[0] ?? "";
       const requestedClass = parseClassArg(classArg);
@@ -233,14 +244,14 @@ export const duelCommand: CommandHandler = {
 
     if (subLower === "decline") {
       if (!active || active.kind !== DUEL_KIND) {
-        return notice(ctx, "DUEL_NONE", "No duel challenge is pending in this room.");
+        return notice(ctx, "DUEL_NONE", tFor(ctx.user.locale, "commands:duel.nonePending"));
       }
       const state = active.state as DuelState;
       if (state.phase !== "challenge") {
-        return notice(ctx, "DUEL_DECLINE", "That duel is already underway.");
+        return notice(ctx, "DUEL_DECLINE", tFor(ctx.user.locale, "commands:duel.alreadyUnderway"));
       }
       if (!state.pendingOpponent || state.pendingOpponent.userId !== ctx.user.id) {
-        return notice(ctx, "DUEL_DECLINE_PERM", "This challenge isn't addressed to you.");
+        return notice(ctx, "DUEL_DECLINE_PERM", tFor(ctx.user.locale, "commands:duel.notAddressed"));
       }
       declineChallenge(active);
       await cancel(active, { db: ctx.db, io: ctx.io });
@@ -252,15 +263,15 @@ export const duelCommand: CommandHandler = {
     const action = parseDuelAction(sub!);
     if (action || subLower === "status" || subLower === "forfeit") {
       if (!active || active.kind !== DUEL_KIND) {
-        return notice(ctx, "DUEL_NONE", "No duel is running in this room.");
+        return notice(ctx, "DUEL_NONE", tFor(ctx.user.locale, "commands:duel.noneRunning"));
       }
       const state = active.state as DuelState;
       if (state.phase !== "active") {
-        return notice(ctx, "DUEL_NOT_ACTIVE", "That duel hasn't started, opponent still hasn't accepted.");
+        return notice(ctx, "DUEL_NOT_ACTIVE", tFor(ctx.user.locale, "commands:duel.notActive"));
       }
       const callerIdx = fighterIndexFor(active, participantFor(ctx));
       if (callerIdx === null) {
-        return notice(ctx, "DUEL_NOT_FIGHTER", "Only the two duelists can act here.");
+        return notice(ctx, "DUEL_NOT_FIGHTER", tFor(ctx.user.locale, "commands:duel.notFighter"));
       }
 
       if (subLower === "status") {
@@ -271,7 +282,18 @@ export const duelCommand: CommandHandler = {
         return notice(
           ctx,
           "DUEL_STATUS",
-          `${state.challenger.participant.displayName} (${DUEL_CLASSES[state.challenger.classKey].label}) HP ${state.challenger.hp}/${cMax} vs ${state.defender!.participant.displayName} (${DUEL_CLASSES[state.defender!.classKey].label}) HP ${state.defender!.hp}/${dMax}. ${turnName}'s turn, ${secsLeft}s left.`,
+          tFor(ctx.user.locale, "commands:duel.status", {
+            challenger: state.challenger.participant.displayName,
+            challengerClass: DUEL_CLASSES[state.challenger.classKey].label,
+            challengerHp: state.challenger.hp,
+            challengerMax: cMax,
+            defender: state.defender!.participant.displayName,
+            defenderClass: DUEL_CLASSES[state.defender!.classKey].label,
+            defenderHp: state.defender!.hp,
+            defenderMax: dMax,
+            turn: turnName,
+            seconds: secsLeft,
+          }),
         );
       }
 
@@ -285,7 +307,7 @@ export const duelCommand: CommandHandler = {
       if (action) {
         if (callerIdx !== state.turn) {
           const activeName = activeFighter(active)?.participant.displayName ?? "?";
-          return notice(ctx, "DUEL_OUT_OF_TURN", `Not your turn, waiting on ${activeName}.`);
+          return notice(ctx, "DUEL_OUT_OF_TURN", tFor(ctx.user.locale, "commands:duel.outOfTurn", { name: activeName }));
         }
         const result = applyDuelAction(active, callerIdx, action);
         // Action result goes to BOTH duelists privately. Room and
@@ -324,14 +346,17 @@ export const duelCommand: CommandHandler = {
         if (nextFighter) {
           const sessionRef = active;
           const io = ctx.io;
-          const turnAnnounce = `${nextFighter.participant.displayName}'s turn (HP ${nextFighter.hp}/${DUEL_CLASSES[nextFighter.classKey].maxHp}). /duel attack | defend | parry | rest.`;
+          const turnName = nextFighter.participant.displayName;
+          const turnHp = nextFighter.hp;
+          const turnMax = DUEL_CLASSES[nextFighter.classKey].maxHp;
           setTimeout(() => {
             // Bail if the duel ended during the delay (KO, forfeit,
             // cancel, etc.). The registry sets `resolved` on cancel
             // / timer-fire so this check is enough to prevent a
             // stale next-turn line from landing after resolution.
             if (sessionRef.resolved) return;
-            void emitDuelPrivate(io, sessionRef, turnAnnounce);
+            void emitDuelPrivate(io, sessionRef, (locale) =>
+              tFor(locale, "commands:duel.turnAnnounce", { name: turnName, hp: turnHp, max: turnMax }));
           }, 1500);
         }
         return;
@@ -349,13 +374,13 @@ export const duelCommand: CommandHandler = {
       return notice(
         ctx,
         "DUEL_CONFLICT",
-        `A ${active.kind} session is already running in this room. Wait for it to finish.`,
+        tFor(ctx.user.locale, "commands:shared.sessionConflict", { kind: active.kind }),
       );
     }
     const opponentName = sub!;
     const resolution = await resolveIdentityArg(ctx.db, opponentName);
     if (resolution.kind === "none") {
-      return notice(ctx, "DUEL_NO_OPPONENT", `No user or character matched "${opponentName}".`);
+      return notice(ctx, "DUEL_NO_OPPONENT", tFor(ctx.user.locale, "commands:duel.noOpponent", { name: opponentName }));
     }
     if (resolution.kind === "ambiguous") {
       emitAmbiguousIdentityModal(ctx, opponentName, resolution.matches);
@@ -368,7 +393,7 @@ export const duelCommand: CommandHandler = {
     };
     if (opponent.userId === ctx.user.id
       && (opponent.characterId ?? null) === (ctx.user.activeCharacterId ?? null)) {
-      return notice(ctx, "DUEL_SELF", "You can't duel yourself.");
+      return notice(ctx, "DUEL_SELF", tFor(ctx.user.locale, "commands:duel.self"));
     }
     const { challengerClass, opponentClass } = parseDuelStartArgs(rest);
     const { challengeMs, reward } = await readDuelConfig(ctx.db, (ctx.socket.data as { serverId?: string }).serverId);

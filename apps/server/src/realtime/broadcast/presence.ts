@@ -41,6 +41,7 @@ import {
   persistTargetedSystemMessageToActiveRooms,
 } from "../targetedMessages.js";
 import { blockedUserIdsFor, blocksAmong } from "../../auth/blocks.js";
+import { isolationAmong, isolationHiddenSetFor, unionGraphInto } from "../../auth/ageIsolation.js";
 import type { SessionUser } from "../../commands/types.js";
 import { getSettings, areServersEnabledCached } from "../../settings.js";
 import { getAway, clearAllAwayForUser } from "../awayState.js";
@@ -57,6 +58,8 @@ import {
 } from "../theaterState.js";
 import { DEFAULT_SERVER_ID, resolveRoomServerId } from "../../earning/pool.js";
 import { serverAuthority } from "../../servers/authority.js";
+import { effectiveRoomNsfw } from "../../lib/nsfwRooms.js";
+import { tFor } from "../../i18n.js";
 import { addSystemMessage, sendRoomBacklogTo } from "./persistence.js";
 import { isHiddenIncognitoIdentity } from "./incognito.js";
 
@@ -519,16 +522,39 @@ async function joinRoomBody(
 ): Promise<void> {
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room) {
-    socket.emit("error:notice", { code: "NO_ROOM", message: "Room not found." });
+    socket.emit("error:notice", { code: "NO_ROOM", message: tFor(user.locale, "errors:server.realtime.roomNotFound") });
     return;
   }
   if (room.archivedAt) {
-    // Stale id from before the room auto-archived. The room is
-    // effectively gone to end users; the row only exists to preserve
-    // settings for a future same-name resurrect via the create path.
-    // Treat as 404 for this socket.
-    socket.emit("error:notice", { code: "NO_ROOM", message: "Room not found." });
-    return;
+    if (!room.isSystem && room.ownerId === user.id) {
+      // OWNER SELF-HEAL. The auto-parker (expireIfEmpty) archives a
+      // user room the moment it sits empty, and only the /go-by-NAME
+      // create path resurrected it. Every join-by-ID path (tab
+      // restore, reconnect, rail click, slug link) hit the 404 below
+      // instead — so an owner who made a room, left, and came back
+      // through any of those landed in a stale view of a room the
+      // server considered gone, invisible in everyone's rail. Revive
+      // the row in place for its CURRENT owner: no ownership
+      // transfer and no member/ban/invite wipe (that reset belongs
+      // to the name-resurrect TAKEOVER in room.ts, where ownership
+      // changes hands). Non-owners still 404: a parked room stays
+      // parked until its owner returns or someone claims the name.
+      await db
+        .update(rooms)
+        .set({ archivedAt: null, archiveHiddenAt: null })
+        .where(eq(rooms.id, room.id));
+      room.archivedAt = null;
+      room.archiveHiddenAt = null;
+      // Rails everywhere just gained a room back.
+      emitTreeChanged(io, room.serverId);
+    } else {
+      // Stale id from before the room auto-archived. The room is
+      // effectively gone to end users; the row only exists to preserve
+      // settings for a future same-name resurrect via the create path.
+      // Treat as 404 for this socket.
+      socket.emit("error:notice", { code: "NO_ROOM", message: tFor(user.locale, "errors:server.realtime.roomNotFound") });
+      return;
+    }
   }
 
   // Forum boards live ENTIRELY in the Forums Catalog (Forums revamp,
@@ -541,7 +567,24 @@ async function joinRoomBody(
   if (room.forumId) {
     socket.emit("error:notice", {
       code: "FORUM_BOARD",
-      message: "That's a forum board - it lives in the Forums Catalog. Type /forums to open it.",
+      message: tFor(user.locale, "errors:server.realtime.forumBoardRefusal"),
+    });
+    return;
+  }
+
+  // HARD age gate (age-restriction plan, Phase 2): an 18+ room refuses
+  // minors outright — no password, invite, membership, or staff role gets
+  // a minor account past this. Adults always pass, hide preference or not.
+  // The EFFECTIVE rating (room flag OR its server's) is checked here, like
+  // every other surface (rail listing, by-slug, read routes, reconnect
+  // placement): the serversEnabled block below also folds the server flag
+  // into canParticipate, but that block is skipped entirely when the
+  // servers feature is toggled OFF — and an 18+ SERVER's rooms must stay
+  // refused by id even then, or they'd be hidden-but-joinable.
+  if (!user.isAdult && (await effectiveRoomNsfw(db, room))) {
+    socket.emit("error:notice", {
+      code: "AGE_RESTRICTED",
+      message: tFor(user.locale, "errors:server.realtime.adultsOnlyRoom"),
     });
     return;
   }
@@ -552,7 +595,7 @@ async function joinRoomBody(
     .where(and(eq(bans.roomId, roomId), eq(bans.userId, user.id)))
     .limit(1))[0];
   if (banned && (!banned.until || +banned.until > Date.now())) {
-    socket.emit("error:notice", { code: "BANNED", message: "You are banished from this room." });
+    socket.emit("error:notice", { code: "BANNED", message: tFor(user.locale, "errors:server.realtime.banishedFromRoom") });
     return;
   }
 
@@ -564,11 +607,17 @@ async function joinRoomBody(
   if (areServersEnabledCached() && room.serverId && room.serverId !== DEFAULT_SERVER_ID) {
     const sa = await serverAuthority(db, user, room.serverId);
     if (!sa.canParticipate) {
+      // Age fold: serverAuthority zeroes canParticipate for a minor on an
+      // 18+ server. Surface that as the same "adults only" refusal a
+      // room-level flag gives, not the misleading "join first" copy.
+      const ageBlocked = !!sa.server?.isNsfw && !user.isAdult;
       socket.emit("error:notice", {
-        code: sa.ban ? "SERVER_BANNED" : "SERVER_NO_ACCESS",
-        message: sa.ban
-          ? "You are banned from this server."
-          : "You need to join this server before entering its rooms.",
+        code: ageBlocked ? "AGE_RESTRICTED" : sa.ban ? "SERVER_BANNED" : "SERVER_NO_ACCESS",
+        message: ageBlocked
+          ? tFor(user.locale, "errors:server.realtime.adultsOnlyRoom")
+          : sa.ban
+            ? tFor(user.locale, "errors:server.servers.banned")
+            : tFor(user.locale, "errors:server.realtime.joinServerFirst"),
       });
       return;
     }
@@ -1101,6 +1150,10 @@ export async function buildRoomSummary(
     memberCount: memberCountRows[0]?.n ?? 0,
     npcDisabled: room.npcDisabled,
     persistent: room.persistent,
+    // EFFECTIVE 18+ rating (server OR room — age plan, Phase 2). Drives the
+    // rail/info-bar "18+" chip. Minors never receive a summary with this set
+    // because the /rooms route + join gates drop 18+ rooms for them first.
+    isNsfw: await effectiveRoomNsfw(db, room),
     linkedWorld: await loadLinkedWorld(db, room.id),
     messageExpiryMinutes: room.messageExpiryMinutes,
     replyMode: room.replyMode,
@@ -1195,6 +1248,13 @@ export async function hydrateTheaterFromDb(db: Db): Promise<number> {
  * room sockets (reused by the caller to emit) and the graph. An empty graph
  * (`.size === 0`) means no two of them are blocked, so the caller can take the
  * single room-wide emit fast path instead of fanning out per-socket.
+ *
+ * Isolation (age plan, Phase 5) rides the same graph: `isolationAmong`
+ * returns the block-shaped Map of isolated-minor × adult pairs among the
+ * same ids, unioned in so every per-viewer consumer (occupantsForViewer,
+ * room:state / presence:update fan-outs) inherits the mutual hiding with
+ * zero extra plumbing. Empty in the common no-isolated-minors case, so the
+ * fast path survives.
  */
 async function roomBlockGraph(
   io: Io,
@@ -1209,7 +1269,7 @@ async function roomBlockGraph(
     if (uid) ids.add(uid);
   }
   const blockGraph = await blocksAmong(db, [...ids]);
-  return { sockets, blockGraph };
+  return { sockets, blockGraph: unionGraphInto(blockGraph, await isolationAmong(db, [...ids])) };
 }
 
 /** The occupant list a given viewer should see: occupants they're blocked
@@ -1438,6 +1498,10 @@ async function pingWatchers(
   // Drop any friend who is now blocked with this user (either direction): a
   // block must suppress the "online" ping the same way it hides chat/presence.
   for (const blockedId of await blockedUserIdsFor(db, user.id)) friendSet.delete(blockedId);
+  // Isolation (age plan, Phase 5): friendships across the isolation fence
+  // are hidden-not-severed, so a watcher the user is isolated with must not
+  // get the "online" ping (or the persisted ☆ line below) either way round.
+  for (const hiddenId of await isolationHiddenSetFor(db, user, friendSet)) friendSet.delete(hiddenId);
   if (friendSet.size === 0) return;
   const sockets = await io.fetchSockets();
   const payload = {
@@ -1527,6 +1591,13 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
   // Persistent rooms (server channels by default) survive an empty moment the
   // same way system rooms do — they're the server's structure, not throwaways.
   if (room.persistent) return false;
+  // Forum boards live entirely in the Forums Catalog: chat joins are refused
+  // outright (see the FORUM_BOARD refusal in `join`), so a board NEVER holds
+  // sockets — zero occupants is its permanent steady state, not a sign of
+  // abandonment. Without this exemption the boot zombie sweep archived every
+  // board 60s after start, stranding its topics in an archived room. Board
+  // lifecycle is owner-driven (the forums boards DELETE route archives).
+  if (room.forumId) return false;
   if (room.archivedAt) return false;
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   if (sockets.length > 0) return false;
@@ -1567,6 +1638,13 @@ export async function sendRoomStateTo(
   // here, so a direct block-set lookup is cheaper than the room graph.
   const viewerUserId = (socket.data as { userId?: string }).userId;
   const blocked = viewerUserId ? await blockedUserIdsFor(db, viewerUserId) : new Set<string>();
+  // Isolation (age plan, Phase 5): same per-viewer hiding as the broadcast
+  // paths. The viewer side rides the socket's session snapshot (set at
+  // handshake, patched by the settings toggle), so no extra viewer lookup.
+  const viewerSnapshot = (socket.data as { user?: SessionUser }).user;
+  for (const hiddenId of await isolationHiddenSetFor(db, viewerSnapshot, occupants.map((o) => o.userId))) {
+    blocked.add(hiddenId);
+  }
   const view = blocked.size ? occupants.filter((o) => !blocked.has(o.userId)) : occupants;
   socket.emit("room:state", { room: summary, occupants: view });
   socket.emit("presence:update", { roomId, occupants: view });

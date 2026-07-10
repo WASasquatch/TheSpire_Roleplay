@@ -34,6 +34,7 @@
 import DOMPurify from "dompurify";
 import { legibleAgainstBg } from "@thekeep/shared";
 import { scopeAndNonceStyleBlocks, USER_HTML_STYLE_MARKER } from "./cssScope.js";
+import { i18n } from "./i18n.js";
 import { parseVideoEmbed } from "./markdown.js";
 
 /**
@@ -103,7 +104,16 @@ function transformYoutubeTags(html: string): string {
     if (!url) return "";
     const embed = parseVideoEmbed(url);
     if (!embed || embed.provider !== "youtube") return "";
-    return `<div class="user-yt-embed"><iframe src="${embed.src}" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin" title="YouTube video"></iframe></div>`;
+    // Screen-reader label for the embed (app chrome, not user content). The
+    // value lands inside an HTML ATTRIBUTE in an innerHTML string and i18next
+    // interpolation runs with escapeValue:false, so escape it for the
+    // attribute context explicitly — never feed raw t() output into markup.
+    const titleAttr = String(i18n.t("common:userHtml.youtubeTitle"))
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+    return `<div class="user-yt-embed"><iframe src="${embed.src}" frameborder="0" allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin" title="${titleAttr}"></iframe></div>`;
   });
 }
 

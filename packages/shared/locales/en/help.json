@@ -1,0 +1,29 @@
+{
+  "modal": {
+    "title": "Help",
+    "tabs": {
+      "guides": "Guides",
+      "commands": "Commands",
+      "formatting": "Formatting"
+    },
+    "searchPlaceholder": "Search commands, aliases, subcommands...",
+    "takeTour": "Take the tour",
+    "takeTourTitle": "Replay the guided walkthrough of the interface",
+    "loading": "loading...",
+    "noMatches": "no matches.",
+    "loadFailed": "load failed",
+    "loadStatus": "status {{status}}",
+    "footerMention": "Mention someone in chat by typing <1>@username</1> - clickable, opens their active profile.",
+    "footerTip": "Tip: <1>/help char</1> jumps right here. Press <3>Esc</3> to close."
+  },
+  "commands": {
+    "customBadge": "custom",
+    "also": "also: {{aliases}}",
+    "options": "Options",
+    "aliases": "aliases: {{aliases}}"
+  },
+  "guides": {
+    "intro": "Plain-language walkthroughs of the site's main features. The Commands tab is the precise reference for every slash command; this tab is the \"why and when\" behind them.",
+    "jumpTo": "Jump to"
+  }
+}

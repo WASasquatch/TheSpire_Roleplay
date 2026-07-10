@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { StoryEntity, StoryEntityKind } from "@thekeep/shared";
 
 /**
@@ -8,6 +9,7 @@ import type { StoryEntity, StoryEntityKind } from "@thekeep/shared";
  * entries, author notes, plot outlines, never reach this surface).
  */
 export function StoryCodexAppendix({ storyId }: { storyId: string }) {
+  const { t } = useTranslation("scriptorium");
   const [entities, setEntities] = useState<StoryEntity[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -32,7 +34,7 @@ export function StoryCodexAppendix({ storyId }: { storyId: string }) {
 
   return (
     <section className="mx-auto mt-10 max-w-prose border-t border-current/20 pt-5">
-      <h3 className="mb-3 font-action text-lg">Cast &amp; Places</h3>
+      <h3 className="mb-3 font-action text-lg">{t("appendix.castPlaces")}</h3>
       {characters.length > 0 ? (
         <KindList kind="character" entities={characters} openId={openId} onToggle={(id) => setOpenId(openId === id ? null : id)} />
       ) : null}
@@ -54,7 +56,8 @@ function KindList({
   openId: string | null;
   onToggle: (id: string) => void;
 }) {
-  const heading = kind === "character" ? "Characters" : kind === "location" ? "Places" : "Plot";
+  const { t } = useTranslation("scriptorium");
+  const heading = kind === "character" ? t("appendix.characters") : kind === "location" ? t("appendix.places") : t("appendix.plot");
   return (
     <div className="mb-5">
       <h4 className="mb-2 text-xs uppercase tracking-widest opacity-70">{heading}</h4>

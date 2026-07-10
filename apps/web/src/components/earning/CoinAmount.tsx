@@ -8,6 +8,9 @@
  * which has its own pouch-themed treatment.
  */
 
+import { useTranslation } from "react-i18next";
+import { formatNumber } from "../../lib/intlFormat.js";
+
 interface Props {
   amount: number;
   /** Optional className for context-specific spacing / weight. */
@@ -24,6 +27,7 @@ const SIZE_PX: Record<NonNullable<Props["size"]>, number> = {
 };
 
 export function CoinAmount({ amount, className, title, size = "sm" }: Props) {
+  const { t } = useTranslation("earning");
   const px = SIZE_PX[size];
   // Guard against a non-finite amount (e.g. undefined from a partial payload),
   // which would otherwise throw on .toLocaleString() and crash the tree.
@@ -31,7 +35,7 @@ export function CoinAmount({ amount, className, title, size = "sm" }: Props) {
   return (
     <span
       className={`inline-flex items-center gap-1 tabular-nums ${className ?? ""}`}
-      title={title ?? "Currency"}
+      title={title ?? t("coin.currency")}
     >
       <img
         src="/assets/earning/coin.png"
@@ -43,7 +47,7 @@ export function CoinAmount({ amount, className, title, size = "sm" }: Props) {
         draggable={false}
         onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
       />
-      <span>{safe.toLocaleString()}</span>
+      <span>{formatNumber(safe)}</span>
     </span>
   );
 }

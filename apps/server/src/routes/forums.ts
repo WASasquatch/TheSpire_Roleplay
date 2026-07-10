@@ -27,6 +27,7 @@ import { registerForumBoardRoutes } from "./forums/boards.js";
 import { registerForumModerationRoutes } from "./forums/moderation.js";
 import { registerForumTopicRoutes } from "./forums/topics.js";
 import { getSessionUser } from "./auth.js";
+import { tFor } from "../i18n.js";
 
 // Re-exported on its original path so `rooms.ts` (and any other importer)
 // keeps resolving `resolveTopicAuthorFlair` from `./forums.js`.
@@ -49,7 +50,7 @@ export async function registerForumRoutes(app: FastifyInstance, db: Db, io: Io, 
     if (await emailContentBlocked(me, db)) {
       return reply
         .code(403)
-        .send({ error: "EMAIL_UNVERIFIED", message: "Verify your email to access the forums." });
+        .send({ error: "EMAIL_UNVERIFIED", message: tFor(me.locale, "errors:server.realtime.verifyEmailForums") });
     }
   });
 

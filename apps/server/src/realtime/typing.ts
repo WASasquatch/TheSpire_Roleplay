@@ -37,6 +37,7 @@ import type { Db } from "../db/index.js";
 import { characterEarning, ignores, userActiveCosmetics, userEarning } from "../db/schema.js";
 import { hasPermission } from "../auth/permissions.js";
 import { blocksAmong } from "../auth/blocks.js";
+import { isolationAmong, unionGraphInto } from "../auth/ageIsolation.js";
 import { resolveRoomServerId } from "../earning/pool.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -305,7 +306,9 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
   // Mutual-block filtering: a receiver must not see a typer they're blocked
   // with (and vice versa, handled symmetrically since each receiver filters
   // their own view). Batched over the typers + receivers; empty when no pair
-  // is blocked, the common case.
+  // is blocked, the common case. The Phase 5 isolation graph (isolated
+  // minor × adult pairs) unions into the same map, so the receiver loop
+  // below hides isolated-pair typers with the identical lookup.
   let blockGraph = new Map<string, Set<string>>();
   if (allTypers.length > 0) {
     const ids = new Set<string>(allTypers.map((t) => t.userId));
@@ -313,7 +316,7 @@ async function broadcastTyperSet(io: Io, db: Db, roomId: string): Promise<void> 
       const uid = (s.data as { userId?: string }).userId;
       if (uid) ids.add(uid);
     }
-    blockGraph = await blocksAmong(db, [...ids]);
+    blockGraph = unionGraphInto(await blocksAmong(db, [...ids]), await isolationAmong(db, [...ids]));
   }
 
   for (const s of sockets) {

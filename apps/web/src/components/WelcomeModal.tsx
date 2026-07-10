@@ -1,5 +1,6 @@
 import DOMPurify from "dompurify";
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "./cosmetics/Modal.js";
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
  * see it twice.
  */
 export function WelcomeModal({ html, hash, onDismissed }: Props) {
+  const { t } = useTranslation("common");
   const [busy, setBusy] = useState(false);
 
   async function dismiss() {
@@ -53,7 +55,7 @@ export function WelcomeModal({ html, hash, onDismissed }: Props) {
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
           <h2 id="welcome-modal-title" className="font-action text-lg">
-            Welcome
+            {t("welcome.title")}
           </h2>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -69,7 +71,7 @@ export function WelcomeModal({ html, hash, onDismissed }: Props) {
             disabled={busy}
             className="rounded border border-keep-action/60 bg-keep-action/10 px-3 py-1 text-sm font-semibold text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
           >
-            {busy ? "Saving..." : "Got it"}
+            {busy ? t("savingDots") : t("welcome.gotIt")}
           </button>
         </footer>
       </div>

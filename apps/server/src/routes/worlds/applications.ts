@@ -4,6 +4,7 @@ import { nanoid } from "nanoid";
 import type { WorldApplicationList, WorldApplicationStatus } from "@thekeep/shared";
 import { hasPermission } from "../../auth/permissions.js";
 import { worldApplications, worldMembers } from "../../db/schema.js";
+import { tFor } from "../../i18n.js";
 import { getSessionUser } from "../auth.js";
 import type { Db } from "../../db/index.js";
 import {
@@ -43,11 +44,11 @@ export async function registerWorldApplicationRoutes(app: FastifyInstance, db: D
       if (!w) { reply.code(404); return { error: "not found" }; }
       if ((w.joinMode ?? "open") !== "application") {
         reply.code(400);
-        return { error: "this world doesn't accept applications" };
+        return { error: tFor(me.locale, "errors:server.worlds.noApplications") };
       }
       if (w.ownerUserId === me.id) {
         reply.code(400);
-        return { error: "owners don't apply to their own worlds" };
+        return { error: tFor(me.locale, "errors:server.worlds.ownerApplication") };
       }
       // Per-identity scope: the applying face is the caller's
       // currently-voiced character (or OOC if no character is
@@ -69,7 +70,7 @@ export async function registerWorldApplicationRoutes(app: FastifyInstance, db: D
         .limit(1))[0];
       if (alreadyMember) {
         reply.code(409);
-        return { error: "you're already a member of this world (as this identity)" };
+        return { error: tFor(me.locale, "errors:server.worlds.alreadyMemberIdentity") };
       }
       let body;
       try { body = submitApplicationBody.parse(req.body); }
@@ -78,7 +79,7 @@ export async function registerWorldApplicationRoutes(app: FastifyInstance, db: D
       if (body.answers.length !== questions.length) {
         reply.code(400);
         return {
-          error: "answer count doesn't match the world's questions; reload the form",
+          error: tFor(me.locale, "errors:server.worlds.answerCountMismatch"),
         };
       }
       const appIdentityMatch = applicantCharId === null
@@ -101,7 +102,7 @@ export async function registerWorldApplicationRoutes(app: FastifyInstance, db: D
       if (existingPending) {
         reply.code(409);
         return {
-          error: "you already have a pending application for this world (as this identity)",
+          error: tFor(me.locale, "errors:server.worlds.pendingApplicationIdentity"),
           applicationId: existingPending.id,
         };
       }
@@ -134,7 +135,7 @@ export async function registerWorldApplicationRoutes(app: FastifyInstance, db: D
             .limit(1))[0];
           reply.code(409);
           return {
-            error: "you already have a pending application for this world (as this identity)",
+            error: tFor(me.locale, "errors:server.worlds.pendingApplicationIdentity"),
             applicationId: existing?.id,
           };
         }
@@ -323,7 +324,7 @@ export async function registerWorldApplicationRoutes(app: FastifyInstance, db: D
       if (!app) { reply.code(404); return { error: "application not found" }; }
       if (app.applicantUserId !== me.id) {
         reply.code(403);
-        return { error: "only the applicant can withdraw their application" };
+        return { error: tFor(me.locale, "errors:server.worlds.withdrawApplicantOnly") };
       }
       if (app.status !== "pending") {
         reply.code(409);
@@ -345,7 +346,7 @@ export async function registerWorldApplicationRoutes(app: FastifyInstance, db: D
         ));
       if (r.changes === 0) {
         reply.code(409);
-        return { error: "application was decided by the owner before you withdrew" };
+        return { error: tFor(me.locale, "errors:server.worlds.decidedBeforeWithdraw") };
       }
       return { ok: true };
     },

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { Trans, useTranslation } from "react-i18next";
 import { Ban, EyeOff, Flag, MessageSquare, Send, X } from "lucide-react";
 import { CHARACTER_VIBE_AXES, isAdminRole, isModeratorRole, legibleAgainstBg, legibleThemePalette, parseFreeformBorderConfig } from "@thekeep/shared";
 import type { CharacterAttribute, CharacterPortrait, CharacterVibeAxisKey, EidolonProfileSummary, ProfileLibraryEntry, ProfileLink, ProfileView, WorldMembership } from "@thekeep/shared";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
+import { formatDate, formatDateTime, formatNumber } from "../../lib/intlFormat.js";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
 import { themeStyle } from "../../lib/theme.js";
 import { buildOrnamentStyle } from "../../lib/ornaments/index.js";
@@ -18,6 +20,7 @@ import { ItemZoomView } from "../cosmetics/ItemZoomView.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { ForumBanFromProfile } from "../forums/ForumBanFromProfile.js";
+import { LanguageTagChips } from "../flags/LanguageTagChips.js";
 import { RankSigil } from "../earning/RankSigil.js";
 import { StyledName } from "../cosmetics/StyledName.js";
 import { useChat } from "../../state/store.js";
@@ -166,6 +169,17 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   const requiresGate = (profile.profile.isNsfw || anyPortraitNsfw) && !bypassNsfwGate;
   const [gateAccepted, setGateAccepted] = useState(false);
   const gated = requiresGate && !gateAccepted;
+
+  // Age-blocked stub (age plan Phase 1). When the viewer's account is
+  // under 18 and the profile is marked 18+, the server already withheld
+  // the payload (the resolver hands minors a hollowed view), so this is
+  // the cosmetic mirror: render the "marked 18+" notice with NO proceed
+  // path instead of the adult NsfwGate splash. `viewerAge` defaults to
+  // adult before /me/profile seeds it (and for anonymous viewers), so
+  // adults and logged-out visitors never flash the stub, their proceed
+  // splash and red-eye censor behave exactly as before.
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
+  const ageBlocked = profile.profile.isNsfw && !viewerIsAdult;
 
   // Visibility-gate bypass for the rendered profile. Two viewer
   // classes get the full stats regardless of the owner's hide flags:
@@ -344,7 +358,9 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
         onClick={(e) => e.stopPropagation()}
       >
-        {gated ? (
+        {ageBlocked ? (
+          <AgeRestrictedNotice onClose={onClose} />
+        ) : gated ? (
           <NsfwGate
             name={name}
             kind={isChar ? "character" : "master"}
@@ -458,6 +474,7 @@ function ProfileBody({
   activeCharacterAction: { label: string; onClick: () => void } | undefined;
   onModerated: (() => void) | undefined;
 }) {
+  const { t } = useTranslation("profile");
   const isChar = profile.kind === "character";
   // Viewer's role drives the mod-tools row: mod+ sees copy-id chips so
   // moderation flows (kick/ban/disable, admin tab lookups) can grab
@@ -749,7 +766,7 @@ function ProfileBody({
               <span
                 aria-hidden
                 className="text-base leading-none sm:text-lg"
-                title={genderGlyph(gender).title}
+                title={t(`gender.glyph.${gender}`)}
                 style={{ color: genderGlyph(gender).color }}
               >
                 {genderGlyph(gender).icon}
@@ -783,16 +800,16 @@ function ProfileBody({
                 {earning?.xp != null ? (
                   <span
                     className="inline-flex h-8 items-center gap-1 rounded border border-keep-rule bg-keep-bg/60 px-2 text-sm uppercase tracking-widest text-keep-muted"
-                    title="Experience"
+                    title={t("modal.hero.experienceTitle")}
                   >
-                    <span className="font-semibold tabular-nums text-keep-text">{earning.xp.toLocaleString()}</span>
-                    <span>XP</span>
+                    <span className="font-semibold tabular-nums text-keep-text">{formatNumber(earning.xp)}</span>
+                    <span>{t("modal.hero.xp")}</span>
                   </span>
                 ) : null}
                 {earning?.currency != null ? (
                   <span
                     className="inline-flex h-8 items-center gap-1 rounded border border-keep-rule bg-keep-bg/60 px-2 text-sm"
-                    title="Currency"
+                    title={t("modal.hero.currencyTitle")}
                   >
                     <img
                       src="/assets/earning/cache_pouch.png"
@@ -803,7 +820,7 @@ function ProfileBody({
                       draggable={false}
                       onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                     />
-                    <span className="font-semibold tabular-nums text-keep-text">{earning.currency.toLocaleString()}</span>
+                    <span className="font-semibold tabular-nums text-keep-text">{formatNumber(earning.currency)}</span>
                   </span>
                 ) : null}
               </div>
@@ -837,7 +854,7 @@ function ProfileBody({
                   zero. */}
               {earning?.xp != null ? (
                 <span className="sm:hidden">
-                  <span className="font-semibold tabular-nums normal-case tracking-normal text-keep-text">{earning.xp.toLocaleString()}</span> XP
+                  <span className="font-semibold tabular-nums normal-case tracking-normal text-keep-text">{formatNumber(earning.xp)}</span> {t("modal.hero.xp")}
                 </span>
               ) : null}
               {earning?.currency != null ? (
@@ -850,27 +867,27 @@ function ProfileBody({
                     draggable={false}
                     onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
                   />
-                  <span className="font-semibold tabular-nums normal-case tracking-normal text-keep-text">{earning.currency.toLocaleString()}</span>
+                  <span className="font-semibold tabular-nums normal-case tracking-normal text-keep-text">{formatNumber(earning.currency)}</span>
                 </span>
               ) : null}
               {(earning?.xp != null || earning?.currency != null) ? (
                 <span className="sm:hidden" aria-hidden>·</span>
               ) : null}
               {profile.kind === "character" ? (
-                <span>Character</span>
+                <span>{t("modal.meta.character")}</span>
               ) : (
                 <span>
-                  Master account
+                  {t("modal.meta.masterAccount")}
                   {/* Account-level role marker - only meaningful on the master
                       profile (characters are owned by a master that already
                       shows it). Site admins/mods are surfaced so visitors can
                       tell who's staff at a glance. */}
                   {isAdminRole(profile.profile.role) ? (
-                    <span className="ml-1 italic text-keep-action">· Admin</span>
+                    <span className="ml-1 italic text-keep-action">· {t("modal.role.admin")}</span>
                   ) : profile.profile.role === "mod" ? (
-                    <span className="ml-1 italic text-keep-action">· Global Moderator</span>
+                    <span className="ml-1 italic text-keep-action">· {t("modal.role.globalModerator")}</span>
                   ) : profile.profile.role === "trusted" ? (
-                    <span className="ml-1 italic text-keep-system" title="Trusted account - elevated rate limits earned through participation.">· Trusted</span>
+                    <span className="ml-1 italic text-keep-system" title={t("modal.role.trustedTitle")}>· {t("modal.role.trusted")}</span>
                   ) : null}
                   {/* Scriptorium passive author tier, surfaces alongside
                       the role chip. Counted from the master account's
@@ -879,9 +896,9 @@ function ProfileBody({
                   {profile.profile.scriptoriumAuthor ? (
                     <span
                       className={`ml-1 italic ${scriptoriumTierClass(profile.profile.scriptoriumAuthor.tier)}`}
-                      title={`${profile.profile.scriptoriumAuthor.publishedStories} ${profile.profile.scriptoriumAuthor.publishedStories === 1 ? "story" : "stories"} published in the Scriptorium`}
+                      title={t("modal.scriptorium.publishedTitle", { count: profile.profile.scriptoriumAuthor.publishedStories })}
                     >
-                      · {scriptoriumTierLabel(profile.profile.scriptoriumAuthor.tier)}
+                      · {t(`modal.scriptoriumTier.${profile.profile.scriptoriumAuthor.tier}`)}
                     </span>
                   ) : null}
                 </span>
@@ -889,7 +906,7 @@ function ProfileBody({
               {createdAt ? (
                 <>
                   <span aria-hidden>·</span>
-                  <span>joined {new Date(createdAt).toLocaleDateString()}</span>
+                  <span>{t("modal.meta.joined", { date: formatDate(createdAt) })}</span>
                 </>
               ) : null}
               <span aria-hidden>·</span>
@@ -909,6 +926,16 @@ function ProfileBody({
                 characterId={isChar ? profile.profile.id : null}
               />
             </div>
+            {/* Language tags — the languages this player knows and RPs in
+                (account-level; a character shows its owner's tags). Flag +
+                endonym chips on desktop, flag + compact code on mobile so
+                the row stays one tidy line. Hidden entirely when none are
+                set. */}
+            {profile.profile.languages.length > 0 ? (
+              <div className="mt-1.5">
+                <LanguageTagChips keys={profile.profile.languages} />
+              </div>
+            ) : null}
             {/* Mod-only attribution + id-copy chips. Two gates:
                   - `ownerUsername` is shipped server-side only to
                     mod+ viewers on character profiles, so its very
@@ -924,19 +951,19 @@ function ProfileBody({
               <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-keep-muted">
                 <span
                   className="rounded border border-keep-accent/40 bg-keep-accent/10 px-1 py-0 text-[9px] font-semibold uppercase tracking-widest text-keep-accent"
-                  title="Visible to moderators only."
+                  title={t("modal.mod.visibleToModsOnly")}
                 >
-                  Mod
+                  {t("modal.mod.badge")}
                 </span>
                 {profile.kind === "character" && profile.profile.ownerUsername ? (
                   <span className="inline-flex items-center gap-1">
-                    <span>Owned by</span>
+                    <span>{t("modal.mod.ownedBy")}</span>
                     {onOpenProfile ? (
                       <button
                         type="button"
                         onClick={() => onOpenProfile(profile.profile.ownerUsername!)}
                         className="font-semibold text-keep-action hover:underline"
-                        title={`Open ${profile.profile.ownerUsername}'s master profile`}
+                        title={t("modal.mod.openMasterProfile", { name: profile.profile.ownerUsername })}
                       >
                         {profile.profile.ownerUsername}
                       </button>
@@ -953,9 +980,9 @@ function ProfileBody({
                     can't grab the wrong one. */}
                 {isModViewer ? (
                   <>
-                    <CopyId label="user id" id={profile.profile.userId} />
+                    <CopyId label={t("modal.mod.userIdLabel")} id={profile.profile.userId} />
                     {profile.kind === "character" ? (
-                      <CopyId label="char id" id={profile.profile.id} />
+                      <CopyId label={t("modal.mod.charIdLabel")} id={profile.profile.id} />
                     ) : null}
                   </>
                 ) : null}
@@ -991,7 +1018,7 @@ function ProfileBody({
               <button
                 type="button"
                 onClick={activeCharacterAction.onClick}
-                title="Change your active identity - chat name and theme update immediately."
+                title={t("modal.actions.switchIdentityTitle")}
                 style={{ color: inkAction, borderColor: inkAction }}
                 className="keep-button rounded border px-2 py-1 hover:bg-keep-action/10"
               >
@@ -1002,8 +1029,8 @@ function ProfileBody({
               <button
                 type="button"
                 onClick={() => onMessage(profile.profile.userId, name, avatar)}
-                title="Open a direct message thread with this user."
-                aria-label="Message"
+                title={t("modal.actions.messageTitle")}
+                aria-label={t("modal.actions.message")}
                 style={{ color: inkAction, borderColor: inkAction }}
                 className={ACT_PILL_ACTION}
               >
@@ -1014,8 +1041,8 @@ function ProfileBody({
               <button
                 type="button"
                 onClick={() => onWhisper(name)}
-                title="Send a one-off private message in chat."
-                aria-label="Whisper"
+                title={t("modal.actions.whisperTitle")}
+                aria-label={t("modal.actions.whisper")}
                 style={{ color: inkNeutral, borderColor: inkNeutral }}
                 className={ACT_PILL_NEUTRAL}
               >
@@ -1026,12 +1053,12 @@ function ProfileBody({
               <button
                 type="button"
                 onClick={() => {
-                  if (window.confirm(`Ignore ${name}? You won't see their messages until you /unignore.`)) {
+                  if (window.confirm(t("modal.actions.ignoreConfirm", { name }))) {
                     onIgnore(name);
                   }
                 }}
-                title="Hide this user's messages from you (one-way, reversible)."
-                aria-label="Ignore"
+                title={t("modal.actions.ignoreTitle")}
+                aria-label={t("modal.actions.ignore")}
                 style={{ color: inkAccent, borderColor: inkAccent }}
                 className={ACT_PILL_ACCENT}
               >
@@ -1042,12 +1069,12 @@ function ProfileBody({
               <button
                 type="button"
                 onClick={() => {
-                  if (window.confirm(`Block ${name}? You won't see each other anywhere - chat, userlist, whispers, DMs, friends, or search. Undo later in Profile -> Privacy.`)) {
+                  if (window.confirm(t("modal.actions.blockConfirm", { name }))) {
                     onBlock(name);
                   }
                 }}
-                title="Block: you and this user become invisible to each other everywhere."
-                aria-label="Block"
+                title={t("modal.actions.blockTitle")}
+                aria-label={t("modal.actions.block")}
                 style={{ color: inkSystem, borderColor: inkSystem }}
                 className={ACT_PILL_SYSTEM}
               >
@@ -1060,8 +1087,8 @@ function ProfileBody({
               <button
                 type="button"
                 onClick={() => setReportOpen(true)}
-                title="Report this profile for moderator review"
-                aria-label="Report profile"
+                title={t("modal.actions.reportTitle")}
+                aria-label={t("modal.actions.report")}
                 className={ACT_PILL_ACCENT}
               >
                 <Flag className="h-4 w-4" aria-hidden="true" />
@@ -1131,24 +1158,24 @@ function ProfileBody({
           ) : (
             <>
               {titles.length > 0 ? (
-                <Section title="Bonds">
+                <Section title={t("modal.sections.bonds")}>
                   <ul className="flex flex-wrap gap-1.5 text-sm">
-                    {titles.map((t) => (
+                    {titles.map((title) => (
                       <li
-                        key={t.id}
+                        key={title.id}
                         className="rounded border border-keep-rule/60 bg-keep-panel/60 px-2 py-0.5"
                       >
                         {onOpenProfile ? (
                           <button
                             type="button"
-                            onClick={() => onOpenProfile(t.other.displayName)}
+                            onClick={() => onOpenProfile(title.other.displayName)}
                             className="font-medium hover:underline"
-                            title={`View ${t.other.displayName}'s profile`}
+                            title={t("modal.bonds.viewProfileTitle", { name: title.other.displayName })}
                           >
-                            {t.text}
+                            {title.text}
                           </button>
                         ) : (
-                          <span className="font-medium">{t.text}</span>
+                          <span className="font-medium">{title.text}</span>
                         )}
                       </li>
                     ))}
@@ -1157,7 +1184,7 @@ function ProfileBody({
               ) : null}
 
               {familiar ? (
-                <Section title="Familiar">
+                <Section title={t("modal.sections.familiar")}>
                   <div className="flex items-center gap-3 rounded border border-keep-rule/60 bg-keep-panel/50 px-3 py-2">
                     <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-keep-rule/50 bg-keep-bg/60 text-2xl">
                       {familiar.kind === "pet" && familiar.petIconUrl ? (
@@ -1168,15 +1195,15 @@ function ProfileBody({
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold">
-                        {familiar.variant ? <span className="text-keep-action" title="Prismatic">✦ </span> : null}
+                        {familiar.variant ? <span className="text-keep-action" title={t("modal.familiar.prismatic")}>✦ </span> : null}
                         {familiar.name}
                         {familiar.streakCount > 0 && !familiar.dead ? (
-                          <span className="ml-1.5 text-xs text-keep-muted" title={`${familiar.streakCount}-day care streak`}>🔥{familiar.streakCount}</span>
+                          <span className="ml-1.5 text-xs text-keep-muted" title={t("modal.familiar.careStreak", { count: familiar.streakCount })}>🔥{familiar.streakCount}</span>
                         ) : null}
                       </div>
                       <div className="text-xs text-keep-muted">
-                        Lv {familiar.level} · {familiar.dead ? "dormant" : familiar.moodLabel}
-                        {familiar.kind === "species" && familiar.speciesId ? ` · ${familiar.speciesId}` : familiar.kind === "pet" ? " · pet" : ""}
+                        {t("modal.familiar.level", { level: familiar.level })} · {familiar.dead ? t("modal.familiar.dormant") : familiar.moodLabel}
+                        {familiar.kind === "species" && familiar.speciesId ? ` · ${familiar.speciesId}` : familiar.kind === "pet" ? ` · ${t("modal.familiar.pet")}` : ""}
                       </div>
                     </div>
                     {canPatFamiliar && !familiar.dead ? (
@@ -1185,9 +1212,9 @@ function ProfileBody({
                         onClick={() => void doPat()}
                         disabled={patState !== "idle"}
                         className="ml-auto shrink-0 self-center rounded border border-keep-action/50 px-2.5 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
-                        title="Pat this familiar, a little joy, once a day"
+                        title={t("modal.familiar.patTitle")}
                       >
-                        {patState === "done" ? "Patted ♥" : patState === "cooldown" ? "Patted today" : patState === "busy" ? "…" : "Pat ♥"}
+                        {patState === "done" ? t("modal.familiar.patted") : patState === "cooldown" ? t("modal.familiar.pattedToday") : patState === "busy" ? "…" : t("modal.familiar.pat")}
                       </button>
                     ) : null}
                   </div>
@@ -1218,14 +1245,18 @@ function ProfileBody({
               <div className="mb-5 grid grid-cols-1 gap-x-5 lg:grid-cols-4">
                 <div className="lg:col-span-3">
                   {statEntries.length > 0 ? (
-                    <Section title="Stats">
+                    <Section title={t("modal.sections.stats")}>
                       <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-2">
                         {statEntries.map(([k, v]) => (
                           <div
                             key={k}
                             className="flex justify-between gap-3 border-b border-keep-rule/40 py-1"
                           >
-                            <dt className="text-sm uppercase tracking-widest text-keep-text/80">{k}</dt>
+                            {/* Canonical field names localize; custom row keys are
+                                the owner's own words and render verbatim. */}
+                            <dt className="text-sm uppercase tracking-widest text-keep-text/80">
+                              {(CANONICAL_STAT_ORDER as readonly string[]).includes(k) ? t(`modal.statKeys.${k}`) : k}
+                            </dt>
                             <dd className="truncate text-right text-sm">{v}</dd>
                           </div>
                         ))}
@@ -1250,12 +1281,12 @@ function ProfileBody({
                       ("I am opting out") is visible to viewers, silently
                       hiding the whole tile would read as "they never
                       posted any forum topics" which is a different claim. */}
-                  <Section title="Activity">
+                  <Section title={t("modal.sections.activity")}>
                     <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
                       {[
-                        { key: "chat", label: "Chat messages", value: profile.profile.metrics.chatMessages },
-                        { key: "topics", label: "Forum topics", value: profile.profile.metrics.forumTopics },
-                        { key: "replies", label: "Forum replies", value: profile.profile.metrics.forumReplies },
+                        { key: "chat", label: t("modal.activity.chatMessages"), value: profile.profile.metrics.chatMessages },
+                        { key: "topics", label: t("modal.activity.forumTopics"), value: profile.profile.metrics.forumTopics },
+                        { key: "replies", label: t("modal.activity.forumReplies"), value: profile.profile.metrics.forumReplies },
                       ].map((m) => {
                         const isPrivate = m.value === null;
                         return (
@@ -1269,9 +1300,9 @@ function ProfileBody({
                                   ? "text-sm uppercase tracking-widest text-keep-muted"
                                   : "font-action text-xl tabular-nums text-keep-text"
                               }
-                              title={isPrivate ? `${m.label} hidden by user` : undefined}
+                              title={isPrivate ? t("modal.activity.hiddenByUser", { label: m.label }) : undefined}
                             >
-                              {isPrivate ? "private" : m.value!.toLocaleString()}
+                              {isPrivate ? t("modal.activity.private") : formatNumber(m.value!)}
                             </dd>
                             <dt className="text-xs uppercase tracking-widest text-keep-text/80">
                               {m.label}
@@ -1298,7 +1329,7 @@ function ProfileBody({
                         header (the owner/admin is the only one who reaches here
                         when the section is hidden). */}
                     <Section
-                      title="Disposition"
+                      title={t("modal.sections.disposition")}
                       badge={bypassVisibility && stats.visibility?.vibe === false ? <HiddenFromOthersBadge /> : undefined}
                     >
                       <VibeSection
@@ -1312,7 +1343,7 @@ function ProfileBody({
               </div>
 
               {links.length > 0 ? (
-                <Section title="Links">
+                <Section title={t("modal.sections.links")}>
                   <ul className="flex flex-wrap gap-1.5 text-sm">
                     {links.map((l) => (
                       <li key={l.id}>
@@ -1352,7 +1383,7 @@ function ProfileBody({
                 <div className="mb-5 grid grid-cols-1 gap-x-5 lg:grid-cols-4">
                   <div className="lg:col-span-3">
                     {profile.profile.collection.length > 0 ? (
-                      <Section title="Collection">
+                      <Section title={t("modal.sections.collection")}>
                         {/* Grid (not flex-wrap) so the pinned tiles distribute
                             across the row. 3-up on phones, 5-up on small/medium,
                             8-up on lg+ (the column is 3/4 width here, so 8 keeps
@@ -1371,7 +1402,7 @@ function ProfileBody({
                         items with category='pet'. Same identity partitioning
                         as the item collection above. */}
                     {profile.profile.petCollection.length > 0 ? (
-                      <Section title="Pets">
+                      <Section title={t("modal.sections.pets")}>
                         <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
                           {profile.profile.petCollection.map((c) => (
                             <li key={c.slot} className="flex justify-center">
@@ -1389,7 +1420,7 @@ function ProfileBody({
                       cover opens the story in the reader. */}
                   {profile.profile.library.length > 0 ? (
                     <div className="lg:col-span-1">
-                      <Section title="Library">
+                      <Section title={t("modal.sections.library")}>
                         <ul className="grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-2">
                           {profile.profile.library.map((b) => (
                             <li key={b.slot} className="flex justify-center">
@@ -1403,7 +1434,7 @@ function ProfileBody({
                 </div>
               ) : null}
 
-              <Section title="Bio">
+              <Section title={t("modal.sections.bio")}>
                 {bio ? (
                   // `USER_HTML_SCOPE_CLASS` is the anchor the server's
                   // `<style>` selector prefix binds to. Without it,
@@ -1418,7 +1449,7 @@ function ProfileBody({
                   />
                 ) : (
                   <p className="text-sm italic text-keep-muted">
-                    {name} hasn't written a bio yet.
+                    {t("modal.bio.empty", { name })}
                   </p>
                 )}
               </Section>
@@ -1446,16 +1477,16 @@ function ProfileBody({
                   editor). Reads chronologically (oldest first) so a
                   character's diary works as a timeline. */}
               {journal.length > 0 ? (
-                <Section title="Journal">
+                <Section title={t("modal.sections.journal")}>
                   <ol className="space-y-3">
                     {journal.map((e) => (
                       <li key={e.id} className="rounded border border-keep-rule/50 bg-keep-panel/30 p-3">
                         <header className="mb-1 flex items-baseline justify-between gap-2">
                           <span className="font-semibold">
-                            {e.title || <span className="italic text-keep-muted">untitled</span>}
+                            {e.title || <span className="italic text-keep-muted">{t("modal.journal.untitled")}</span>}
                           </span>
-                          <time className="text-[10px] uppercase tracking-widest text-keep-muted" title={new Date(e.createdAt).toLocaleString()}>
-                            {new Date(e.createdAt).toLocaleDateString()}
+                          <time className="text-[10px] uppercase tracking-widest text-keep-muted" title={formatDateTime(e.createdAt)}>
+                            {formatDate(e.createdAt)}
                           </time>
                         </header>
                         <div
@@ -1503,14 +1534,18 @@ function NsfwGate({
   onAccept: () => void;
   onCancel: () => void;
 }) {
-  const subject = kind === "character" ? `${name}'s character profile` : `${name}'s profile`;
+  const { t } = useTranslation("profile");
   return (
     <div className="flex flex-col items-center justify-center gap-4 px-6 py-10 text-center">
       <div aria-hidden className="text-4xl text-keep-accent">⚠</div>
-      <h2 className="font-action text-xl">NSFW Profile</h2>
+      <h2 className="font-action text-xl">{t("modal.nsfwGate.heading")}</h2>
       <p className="max-w-prose text-sm text-keep-text/80">
-        {subject} contains content marked <b>NSFW</b>. Do you want to proceed?
-        Closing this modal and re-opening will prompt again.
+        <Trans
+          t={t}
+          i18nKey={kind === "character" ? "modal.nsfwGate.bodyCharacter" : "modal.nsfwGate.bodyMaster"}
+          values={{ name }}
+          components={{ b: <b /> }}
+        />
       </p>
       <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
         <button
@@ -1518,16 +1553,43 @@ function NsfwGate({
           onClick={onCancel}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
         >
-          Go back
+          {t("modal.nsfwGate.goBack")}
         </button>
         <button
           type="button"
           onClick={onAccept}
           className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-sm font-semibold text-keep-accent hover:bg-keep-accent/20"
         >
-          Proceed
+          {t("modal.nsfwGate.proceed")}
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Age-blocked stub for viewers under 18 (age plan Phase 1). Unlike
+ * NsfwGate there is deliberately NO proceed button and no sign-in
+ * prompt, the viewer is already signed in and their age is what gates
+ * the profile. The server withheld the actual content (bio, portraits,
+ * links) before it ever reached this client, so the notice is honest:
+ * there is nothing behind it to reveal.
+ */
+function AgeRestrictedNotice({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation("profile");
+  return (
+    <div className="flex flex-col items-center justify-center gap-4 px-6 py-10 text-center">
+      <div aria-hidden className="font-action text-4xl text-keep-accent">18+</div>
+      <p className="max-w-prose text-sm text-keep-text/80">
+        {t("modal.ageRestricted.body")}
+      </p>
+      <button
+        type="button"
+        onClick={onClose}
+        className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
+      >
+        {t("modal.nsfwGate.goBack")}
+      </button>
     </div>
   );
 }
@@ -1549,6 +1611,7 @@ function ReportProfileModal({
   targetName: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("profile");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1562,7 +1625,7 @@ function ReportProfileModal({
       await reportProfile(targetUserId, targetCharacterId, reason);
       setDone(true);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Report failed.");
+      setErr(e instanceof Error ? e.message : t("modal.report.failed"));
     } finally {
       setBusy(false);
     }
@@ -1575,13 +1638,13 @@ function ReportProfileModal({
         className="keep-frame w-[min(440px,96vw)] rounded bg-keep-parchment p-4"
       >
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-action text-lg">Report {targetName}</h3>
+          <h3 className="font-action text-lg">{t("modal.report.heading", { name: targetName })}</h3>
           <CloseButton onClick={onClose} />
         </div>
         {done ? (
           <>
             <p className="text-sm text-keep-text/80">
-              Thank you. This profile has been sent to the moderators for review.
+              {t("modal.report.thanks")}
             </p>
             <div className="mt-3 flex justify-end">
               <button
@@ -1589,22 +1652,21 @@ function ReportProfileModal({
                 onClick={onClose}
                 className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
               >
-                Close
+                {t("common:close")}
               </button>
             </div>
           </>
         ) : (
           <>
             <p className="mb-2 text-xs text-keep-muted">
-              Flag this profile for moderator review (e.g. explicit imagery or rule-breaking content).
-              Tell us what's wrong, optional but helpful.
+              {t("modal.report.hint")}
             </p>
             <textarea
               value={reason}
               maxLength={500}
               rows={4}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="What's wrong with this profile?"
+              placeholder={t("modal.report.placeholder")}
               className="w-full resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
               // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
@@ -1617,7 +1679,7 @@ function ReportProfileModal({
                 disabled={busy}
                 className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner disabled:opacity-50"
               >
-                Cancel
+                {t("common:cancel")}
               </button>
               <button
                 type="button"
@@ -1625,7 +1687,7 @@ function ReportProfileModal({
                 disabled={busy}
                 className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-sm font-semibold text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
               >
-                {busy ? "Reporting…" : "Submit report"}
+                {busy ? t("modal.report.reporting") : t("modal.report.submit")}
               </button>
             </div>
           </>
@@ -1636,19 +1698,13 @@ function ReportProfileModal({
 }
 
 /**
- * Display label + tint for the Scriptorium passive author tier. Three
- * tiers, three colors, same palette family as the role chips above
- * so the author badge feels native to the profile header. The full
+ * Tint for the Scriptorium passive author tier. Three tiers, three
+ * colors, same palette family as the role chips above so the author
+ * badge feels native to the profile header. The display label lives
+ * in the catalog (`modal.scriptoriumTier.<tier>`); the full
  * `(N stories)` count is in the title attribute (hover/tap), we
  * don't crowd the inline text with it.
  */
-function scriptoriumTierLabel(tier: "author" | "storyteller" | "loremaster"): string {
-  switch (tier) {
-    case "author":      return "Author";
-    case "storyteller": return "Storyteller";
-    case "loremaster":  return "Loremaster";
-  }
-}
 function scriptoriumTierClass(tier: "author" | "storyteller" | "loremaster"): string {
   switch (tier) {
     case "author":      return "text-sky-300";
@@ -1669,9 +1725,10 @@ function scriptoriumTierClass(tier: "author" | "storyteller" | "loremaster"): st
  * identity in slash-commands without retyping a name (which breaks on spaces).
  */
 function CopyIdentityToken({ token }: { token: string }) {
+  const { t } = useTranslation("profile");
   const { copied, copy: copyToClipboard } = useCopyToClipboard({
     resetMs: 1500,
-    onError: (t) => window.prompt("Copy this token:", t),
+    onError: (value) => window.prompt(t("modal.copy.tokenPrompt"), value),
   });
   function copy() {
     void copyToClipboard(token);
@@ -1681,18 +1738,19 @@ function CopyIdentityToken({ token }: { token: string }) {
     <button
       type="button"
       onClick={copy}
-      title={`Copy ${token}. Paste into /whisper, /currency send, /friend, /title, etc.`}
+      title={t("modal.copy.tokenTitle", { token })}
       className="rounded border border-keep-rule/60 px-1 font-mono text-[10px] hover:border-keep-action hover:text-keep-action"
     >
-      {copied ? "copied!" : preview}
+      {copied ? t("modal.copy.copied") : preview}
     </button>
   );
 }
 
 function CopyProfileLink({ name }: { name: string }) {
+  const { t } = useTranslation("profile");
   const { copied, copy: copyToClipboard } = useCopyToClipboard({
     resetMs: 1500,
-    onError: (url) => window.prompt("Copy this link:", url),
+    onError: (url) => window.prompt(t("modal.copy.linkPrompt"), url),
   });
   function copy() {
     void copyToClipboard(profileShareUrl(name));
@@ -1701,10 +1759,10 @@ function CopyProfileLink({ name }: { name: string }) {
     <button
       type="button"
       onClick={copy}
-      title={`Copy ${profileShareUrl(name)}`}
+      title={t("modal.copy.valueTitle", { value: profileShareUrl(name) })}
       className="rounded border border-keep-rule/60 px-1 font-mono text-[10px] hover:border-keep-action hover:text-keep-action"
     >
-      {copied ? "copied!" : `/p/${name}`}
+      {copied ? t("modal.copy.copied") : `/p/${name}`}
     </button>
   );
 }
@@ -1721,10 +1779,11 @@ function CopyProfileLink({ name }: { name: string }) {
  * bar or the admin panel.
  */
 function CopyId({ label, id }: { label: string; id: string }) {
+  const { t } = useTranslation("profile");
   // Same Safari pre-13.1 / sandboxed-iframe fallback CopyProfileLink uses.
   const { copied, copy: copyToClipboard } = useCopyToClipboard({
     resetMs: 1500,
-    onError: (i) => window.prompt("Copy this id:", i),
+    onError: (i) => window.prompt(t("modal.copy.idPrompt"), i),
   });
   function copy() {
     void copyToClipboard(id);
@@ -1740,16 +1799,17 @@ function CopyId({ label, id }: { label: string; id: string }) {
       <button
         type="button"
         onClick={copy}
-        title={`Copy ${id}`}
+        title={t("modal.copy.valueTitle", { value: id })}
         className="rounded border border-keep-rule/60 px-1 font-mono text-[10px] hover:border-keep-action hover:text-keep-action"
       >
-        {copied ? "copied!" : preview}
+        {copied ? t("modal.copy.copied") : preview}
       </button>
     </span>
   );
 }
 
 function Avatar({ url, name }: { url: string | null; name: string }) {
+  const { t } = useTranslation("profile");
   if (url) {
     return (
       <img
@@ -1775,7 +1835,7 @@ function Avatar({ url, name }: { url: string | null; name: string }) {
     <div
       className="flex h-24 w-24 shrink-0 items-center justify-center rounded-full border border-keep-border bg-keep-bg text-2xl font-semibold uppercase tracking-wide text-keep-muted sm:h-28 sm:w-28"
       aria-hidden
-      title={`${name} hasn't set a main profile image yet.`}
+      title={t("modal.avatar.noImageTitle", { name })}
     >
       {initials}
     </div>
@@ -1871,12 +1931,13 @@ function CollectionPin({
 /** A showcased book in the profile Library. A cover tile (or a glyph
  *  fallback) that opens the story in the reader via the store bridge. */
 function LibraryPin({ entry }: { entry: ProfileLibraryEntry }) {
+  const { t } = useTranslation("profile");
   const setOpenStoryReader = useChat((s) => s.setOpenStoryReader);
   return (
     <button
       type="button"
       onClick={() => setOpenStoryReader(entry.storyId)}
-      title={`${entry.title}, by ${entry.authorName}`}
+      title={t("modal.library.pinTitle", { title: entry.title, author: entry.authorName })}
       className="flex w-full flex-col items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg/40 p-2 text-center text-[11px] transition hover:border-keep-action hover:bg-keep-banner"
     >
       {entry.coverImageUrl ? (
@@ -1893,7 +1954,7 @@ function LibraryPin({ entry }: { entry: ProfileLibraryEntry }) {
         </div>
       )}
       <span className="line-clamp-1 break-all font-semibold text-keep-text">{entry.title}</span>
-      <span className="line-clamp-1 break-all text-[10px] italic text-keep-muted">by {entry.authorName}</span>
+      <span className="line-clamp-1 break-all text-[10px] italic text-keep-muted">{t("modal.library.byAuthor", { author: entry.authorName })}</span>
     </button>
   );
 }
@@ -1937,6 +1998,7 @@ function PortraitGallery({
   canModerate?: boolean;
   onToggleNsfw?: (portraitId: string, nextNsfw: boolean) => Promise<void> | void;
 }) {
+  const { t } = useTranslation("profile");
   // Pending state for the moderator NSFW toggle (per active image).
   const [flagBusy, setFlagBusy] = useState(false);
   const [flagErr, setFlagErr] = useState<string | null>(null);
@@ -2025,7 +2087,7 @@ function PortraitGallery({
           missing). */}
       {portraits.length === 0 ? (
         <p className="text-center text-sm italic text-keep-muted">
-          No additional portraits yet. Owners can add more via the profile editor's Gallery tab.
+          {t("modal.gallery.empty")}
         </p>
       ) : null}
       {active ? (
@@ -2043,20 +2105,22 @@ function PortraitGallery({
                   key={p.id}
                   type="button"
                   onClick={() => { if (tileCensored) { reveal(p.id); return; } setActiveId(p.id); }}
-                  title={tileCensored ? `${p.label ?? "Portrait"} (${p.nsfw ? "NSFW" : "hidden"}, click to reveal)` : p.label ?? "Portrait"}
+                  title={tileCensored
+                    ? t(p.nsfw ? "modal.gallery.censoredTitleNsfw" : "modal.gallery.censoredTitleHidden", { label: p.label ?? t("modal.gallery.portraitFallback") })
+                    : p.label ?? t("modal.gallery.portraitFallback")}
                   className={`relative aspect-square h-16 w-16 shrink-0 overflow-hidden rounded border transition lg:h-auto lg:w-full ${
                     activeId === p.id ? "border-keep-action ring-2 ring-keep-action" : "border-keep-rule hover:ring-2 hover:ring-keep-action/50"
                   }`}
                 >
                   <img
                     src={p.url}
-                    alt={p.label || `${alt} portrait`}
+                    alt={p.label || t("modal.gallery.portraitAlt", { name: alt })}
                     loading="lazy"
                     className={`h-full w-full object-cover transition ${tileCensored ? "blur-xl scale-110" : ""}`}
                   />
                   {tileCensored ? (
                     <span className="absolute inset-0 flex items-center justify-center bg-black/40 text-[10px] font-semibold uppercase tracking-widest text-white">
-                      {p.nsfw ? "NSFW" : "Hidden"}
+                      {p.nsfw ? t("modal.gallery.nsfw") : t("modal.gallery.hidden")}
                     </span>
                   ) : null}
                 </button>
@@ -2078,7 +2142,7 @@ function PortraitGallery({
             <div className="relative mx-auto w-fit max-w-full overflow-hidden rounded border border-keep-rule">
                 <img
                   src={active.url}
-                  alt={active.label || `${alt} portrait`}
+                  alt={active.label || t("modal.gallery.portraitAlt", { name: alt })}
                   onClick={() => { if (!activeIsCensored) setLightboxOpen(true); }}
                   // width:auto => native resolution. Only max-w-full constrains
                   // it (shrinks proportionally when wider than the pane); height
@@ -2092,8 +2156,8 @@ function PortraitGallery({
                     onClick={() => toggleViewerCensor(active)}
                     className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-black/40 text-xs uppercase tracking-widest text-white hover:bg-black/30"
                   >
-                    <span>{active.nsfw ? "NSFW" : "Hidden"}</span>
-                    <span className="rounded border border-white/60 bg-black/40 px-2 py-0.5 text-[10px]">click to reveal</span>
+                    <span>{active.nsfw ? t("modal.gallery.nsfw") : t("modal.gallery.hidden")}</span>
+                    <span className="rounded border border-white/60 bg-black/40 px-2 py-0.5 text-[10px]">{t("modal.gallery.clickToReveal")}</span>
                   </button>
                 ) : (
                   // Red-eye re-censor toggle on a visible image: hide it for YOU
@@ -2102,8 +2166,8 @@ function PortraitGallery({
                     type="button"
                     onClick={() => toggleViewerCensor(active)}
                     className="absolute right-1.5 top-1.5 flex h-7 w-7 items-center justify-center rounded-full border border-white/30 bg-black/55 text-keep-accent hover:bg-black/75"
-                    title="Censor this image for you (stays hidden when you view this profile again)"
-                    aria-label="Censor this image for you"
+                    title={t("modal.gallery.censorForYouTitle")}
+                    aria-label={t("modal.gallery.censorForYou")}
                   >
                     <EyeOff className="h-4 w-4" />
                   </button>
@@ -2122,15 +2186,15 @@ function PortraitGallery({
                     try {
                       await onToggleNsfw(active.id, !active.nsfw);
                     } catch (e) {
-                      setFlagErr(e instanceof Error ? e.message : "Failed to update.");
+                      setFlagErr(e instanceof Error ? e.message : t("errors.failedToUpdate"));
                     } finally {
                       setFlagBusy(false);
                     }
                   }}
                   className="rounded border border-keep-accent/50 bg-keep-accent/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wider text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
-                  title={active.nsfw ? "Clear the NSFW flag on this image" : "Mark this image NSFW (blurs it for viewers)"}
+                  title={active.nsfw ? t("modal.gallery.unmarkNsfwTitle") : t("modal.gallery.markNsfwTitle")}
                 >
-                  {flagBusy ? "Saving…" : active.nsfw ? "Unmark NSFW" : "Mark NSFW"}
+                  {flagBusy ? t("common:saving") : active.nsfw ? t("modal.gallery.unmarkNsfw") : t("modal.gallery.markNsfw")}
                 </button>
                 {flagErr ? <span className="text-[10px] text-[#e06070]">{flagErr}</span> : null}
               </div>
@@ -2144,7 +2208,7 @@ function PortraitGallery({
       {lightboxOpen && active && !activeIsCensored ? (
         <PortraitLightbox
           url={active.url}
-          alt={active.label || `${alt} portrait`}
+          alt={active.label || t("modal.gallery.portraitAlt", { name: alt })}
           onClose={() => setLightboxOpen(false)}
         />
       ) : null}
@@ -2169,6 +2233,7 @@ function PortraitLightbox({
   alt: string;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("profile");
   // Calm-mode ease: portaled full-screen overlay (not the shared Modal), so
   // fade the backdrop in under Reduce Motion to match the shared modals.
   const reduceMotion = useReducedMotion();
@@ -2194,7 +2259,7 @@ function PortraitLightbox({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`${alt}, full size`}
+      aria-label={t("modal.lightbox.fullSizeAria", { name: alt })}
       onClick={onClose}
       className={`fixed inset-0 z-[70] overflow-auto overscroll-contain bg-black/85 backdrop-blur-md${reduceMotion ? " tk-fade-in" : ""}`}
     >
@@ -2204,8 +2269,8 @@ function PortraitLightbox({
         type="button"
         onClick={onClose}
         className="fixed right-4 top-4 z-[71] flex h-10 w-10 items-center justify-center rounded-full border border-white/30 bg-black/60 text-white transition hover:bg-black/80"
-        title="Close (Esc)"
-        aria-label="Close full-size view"
+        title={t("modal.lightbox.closeTitle")}
+        aria-label={t("modal.lightbox.closeAria")}
       >
         <X className="h-5 w-5" />
       </button>
@@ -2251,6 +2316,7 @@ function ProfileModPanel({
   canBan: boolean;
   onModerated: (() => void) | undefined;
 }) {
+  const { t } = useTranslation("profile");
   const userId = profile.profile.userId;
   const targetName = profile.kind === "character" ? profile.profile.name : profile.profile.username;
   const [editOpen, setEditOpen] = useState(false);
@@ -2264,9 +2330,9 @@ function ProfileModPanel({
           type="button"
           onClick={() => setEditOpen(true)}
           className="rounded border border-keep-action/60 bg-keep-action/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-keep-action hover:bg-keep-action/20"
-          title={`Edit ${targetName}'s bio`}
+          title={t("modal.mod.editBioTitle", { name: targetName })}
         >
-          Edit Bio
+          {t("editBio.title")}
         </button>
       ) : null}
 
@@ -2276,7 +2342,7 @@ function ProfileModPanel({
       {editOpen ? (
         <EditBioModal
           initialBio={profile.profile.bioHtml}
-          targetLabel={isChar ? targetName : `${targetName} (OOC)`}
+          targetLabel={isChar ? targetName : t("common:identity.oocName", { name: targetName })}
           maxBioLength={50_000}
           onSave={async (html) => {
             await saveModBio(editTarget, html);
@@ -2317,13 +2383,14 @@ function Section({ title, badge, children }: { title: string; badge?: React.Reac
  * reach this code path — the section is dropped from their view entirely.
  */
 function HiddenFromOthersBadge() {
+  const { t } = useTranslation("profile");
   return (
     <span
       className="inline-flex items-center gap-1 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-keep-muted"
-      title="You can see this because it's your profile. It's hidden from everyone else."
+      title={t("modal.hiddenFromOthers.title")}
     >
       <EyeOff className="h-3 w-3" aria-hidden="true" />
-      Hidden from others
+      {t("modal.hiddenFromOthers.label")}
     </span>
   );
 }
@@ -2346,6 +2413,7 @@ function WorldsSection({
   identityFilter: string;
   onOpenWorld: ((slug: string) => void) | undefined;
 }) {
+  const { t } = useTranslation("profile");
   const [memberships, setMemberships] = useState<WorldMembership[] | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -2362,11 +2430,11 @@ function WorldsSection({
   if (memberships === null) return null;
   if (memberships.length === 0) return null;
   return (
-    <Section title="Worlds">
+    <Section title={t("modal.sections.worlds")}>
       <ul className="flex flex-wrap gap-1.5 text-sm">
         {memberships.map((m) => {
           const chipClass = "rounded border border-keep-rule/60 bg-keep-panel/60 px-2 py-0.5";
-          const title = `Open ${m.worldName} (by ${m.ownerUsername})`;
+          const title = t("modal.worlds.openTitle", { world: m.worldName, owner: m.ownerUsername });
           const inner = (
             <>
               <span className="font-medium">{m.worldName}</span>
@@ -2385,7 +2453,7 @@ function WorldsSection({
                   {inner}
                 </button>
               ) : (
-                <span className={chipClass} title={`by ${m.ownerUsername}`}>
+                <span className={chipClass} title={t("modal.worlds.byOwner", { owner: m.ownerUsername })}>
                   {inner}
                 </span>
               )}
@@ -2398,15 +2466,16 @@ function WorldsSection({
 }
 
 function EmptyProfile({ name, kind }: { name: string; kind: "master" | "character" }) {
+  const { t } = useTranslation("profile");
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-10 text-center text-sm">
       <div aria-hidden className="text-4xl text-keep-muted/60">📜</div>
       <div className="italic text-keep-muted">
-        {name} hasn't filled out their {kind === "character" ? "character" : "master"} profile yet.
+        {t(kind === "character" ? "modal.empty.character" : "modal.empty.master", { name })}
       </div>
       {kind === "character" ? (
         <div className="text-xs text-keep-muted/80">
-          They could add stats, a bio, and a main profile image to bring this character to life.
+          {t("modal.empty.characterHint")}
         </div>
       ) : null}
     </div>
@@ -2558,6 +2627,7 @@ function VibeSection({
    */
   variant?: "section" | "compact";
 }) {
+  const { t } = useTranslation("profile");
   if (!stats) return null;
   const axes = collectVibeAxes(stats, bypassVisibility);
   if (axes.length === 0) return null;
@@ -2578,8 +2648,8 @@ function VibeSection({
       {axes.map((axis) => (
         <li key={axis.key} className={variant === "compact" ? "text-[11px]" : "text-xs"}>
           <div className="mb-0.5 flex items-baseline justify-between gap-2">
-            <span className="font-semibold text-keep-text/85">{axis.lowLabel}</span>
-            <span className="font-semibold text-keep-text/85">{axis.highLabel}</span>
+            <span className="font-semibold text-keep-text/85">{t(`vibe.${axis.key}.low`)}</span>
+            <span className="font-semibold text-keep-text/85">{t(`vibe.${axis.key}.high`)}</span>
           </div>
           {/* The bar is a flat track plus an absolutely-positioned
               dot. -translate-x-1/2 centers the dot on its computed
@@ -2619,7 +2689,7 @@ function VibeSection({
             <span
               className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border border-keep-action/60 bg-keep-action shadow"
               style={{ left: `${axis.value}%` }}
-              aria-label={`${axis.value} between ${axis.lowLabel} and ${axis.highLabel}`}
+              aria-label={t("modal.vibe.dotAria", { value: axis.value, low: t(`vibe.${axis.key}.low`), high: t(`vibe.${axis.key}.high`) })}
             />
           </div>
         </li>
@@ -2628,7 +2698,7 @@ function VibeSection({
   );
   return variant === "compact"
     ? list
-    : <Section title="Disposition" badge={hiddenFromOthers ? <HiddenFromOthersBadge /> : undefined}>{list}</Section>;
+    : <Section title={t("modal.sections.disposition")} badge={hiddenFromOthers ? <HiddenFromOthersBadge /> : undefined}>{list}</Section>;
 }
 
 /**
@@ -2647,12 +2717,13 @@ function AttributesSection({
   stats: NonNullable<ReturnType<typeof statsFromProfile>> | null;
   bypassVisibility: boolean;
 }) {
+  const { t } = useTranslation("profile");
   if (!stats) return null;
   const rows = collectAttributes(stats, bypassVisibility);
   if (rows.length === 0) return null;
   const hiddenFromOthers = bypassVisibility && stats.visibility?.attributes === false;
   return (
-    <Section title="Attributes" badge={hiddenFromOthers ? <HiddenFromOthersBadge /> : undefined}>
+    <Section title={t("modal.sections.attributes")} badge={hiddenFromOthers ? <HiddenFromOthersBadge /> : undefined}>
       <ul className="space-y-2">
         {rows.map((row) => {
           // Defensive against a stored row whose min/max somehow ended

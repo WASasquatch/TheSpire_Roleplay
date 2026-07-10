@@ -13,6 +13,37 @@ export interface SessionUser {
   username: string;
   role: Role;
   activeCharacterId: string | null;
+  /**
+   * Age context (age-restriction plan Phase 0). `birthdate` is the stored
+   * ISO date (null = legacy adult); `isAdult` is DERIVED at session build
+   * (auth/ageGate.ts isAdultUser) so socket-path gates read a plain
+   * boolean; `hideNsfw` is the adult "Hide 18+ content" preference so
+   * canSeeNsfw(user) works on this shape directly. Long-lived sockets keep
+   * the value from connect time — acceptable staleness ("sign out and back
+   * in on your birthday"), and an admin DOB downgrade force-logs-out.
+   */
+  birthdate: string | null;
+  isAdult: boolean;
+  hideNsfw: boolean;
+  /**
+   * Minor isolation flag (age plan Phase 5, users.isolate_from_adults).
+   * With `role` + `birthdate` this makes the session satisfy
+   * `IsolationSubject`, so socket paths evaluate `isIsolatedBetween`
+   * in-memory. Refreshed with the rest of the snapshot on every
+   * chat:input (`Object.assign(user, fresh)`), and patched in place by
+   * the /me/profile toggle so a flip binds without a reconnect.
+   */
+  isolateFromAdults: boolean;
+  /**
+   * Recipient language (i18n plan Phase 3): the persisted `users.locale`
+   * preference, null = auto ("System default" → en for server-generated
+   * text). Rides the session so command notices / transient system
+   * messages can resolve the RECIPIENT's language via `localeForUser` /
+   * `tFor` (src/i18n.ts) without a per-message DB hit. Refreshed with
+   * the rest of the snapshot on every chat:input
+   * (`Object.assign(user, fresh)`), same as `isolateFromAdults`.
+   */
+  locale: string | null;
   /** display name resolved from active character or master username */
   displayName: string;
   /** hex color (e.g. "#990000") snapshotted into outgoing messages; null = default */

@@ -25,6 +25,15 @@ export interface RoomSummary {
    * rooms stay false and still park when the last occupant leaves.
    */
   persistent: boolean;
+  /**
+   * EFFECTIVE 18+ rating for this room (`server.is_nsfw OR room.is_nsfw`,
+   * age-restriction plan Phase 2). Drives the "18+" / "SFW" chips in the
+   * rail, Room Info bar, and expanded banner. Cosmetic mirror only — the
+   * server hides 18+ rooms from minors entirely, so a minor never receives
+   * a row with this set. Optional: absent (older bundle, or not yet
+   * populated) means all-ages.
+   */
+  isNsfw?: boolean;
   /** World linked to this room (one per room). Surfaced as a banner in chat. Null when no world is linked. */
   linkedWorld: LinkedWorldRef | null;
   /**
@@ -133,6 +142,8 @@ export interface RoomInfo {
   messageExpiryMinutes: number | null;
   difficultyClass: number | null;
   theaterMode: boolean;
+  /** Effective 18+ rating (same semantics as RoomSummary.isNsfw); absent = all-ages. */
+  isNsfw?: boolean;
   linkedWorld: LinkedWorldRef | null;
 }
 

@@ -1,4 +1,5 @@
 import { createElement, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   ANNOUNCEMENT_BANNER_BODY_MAX,
   COLOR_TOKEN_OR_HEX_RE,
@@ -15,6 +16,7 @@ import {
 } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
 import { hydrateDynamicUiRouteChips } from "../../lib/hydrateDynamicUiRouteChips.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { useActiveTheme } from "../../lib/theme.js";
 import { sanitizeUserHtml } from "../../lib/userHtml.js";
 import { useChat } from "../../state/store.js";
@@ -70,6 +72,7 @@ function ChipHtml({
  * tag is filtered out before storage.
  */
 export function AdminAnnouncementsTab() {
+  const { t } = useTranslation("admin");
   const permissions = useChat((s) => s.me?.permissions ?? []);
   const canManageBanners = permissions.includes("manage_banner_announcements");
   const canManageScheduled = permissions.includes("manage_scheduled_announcements");
@@ -77,36 +80,39 @@ export function AdminAnnouncementsTab() {
   return (
     <div className="space-y-6">
       <div className="rounded border border-keep-rule bg-keep-panel/20 px-3 py-2 text-xs text-keep-muted">
-        These are the <strong className="text-keep-text">System Announcements</strong> for the
-        default Spire server. Community servers manage their own announcements
-        separately, so anything you add here shows to everyone on the home
-        server (and site-wide chrome), not inside other communities.
+        <Trans t={t} i18nKey="announcements.scopeNote">
+          {"These are the "}
+          <strong className="text-keep-text">System Announcements</strong>
+          {" for the default Spire server. Community servers manage their own announcements separately, so anything you add here shows to everyone on the home server (and site-wide chrome), not inside other communities."}
+        </Trans>
       </div>
 
       <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
-          System banner marquee
+          {t("announcements.bannerTitle")}
         </h2>
         <p className="mb-3 text-xs text-keep-muted">
-          Rows shown here render in a rotating banner above the chat on the
-          default Spire server. The marquee fades
-          between entries every ~8 seconds when there are two or more enabled.
-          Viewers can dismiss the bar for themselves; the dismissal persists in
-          their browser until they clear site data.
+          {t("announcements.bannerDescription")}
         </p>
         <BannerSection canManage={canManageBanners} />
       </section>
 
       <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
-          Scheduled system <code>/announce</code> cronjobs
+          <Trans t={t} i18nKey="announcements.scheduledTitle">
+            {"Scheduled system "}
+            <code>/announce</code>
+            {" cronjobs"}
+          </Trans>
         </h2>
         <p className="mb-3 text-xs text-keep-muted">
-          Rows here fire as an every-room or single-room <code>/announce</code> on
-          the default Spire server at the configured time. One-shot rows
-          auto-disable after firing; recurring rows re-arm to <em>now +
-          interval</em> on each fire (a server restart mid-cycle won't
-          double-fire to catch up).
+          <Trans t={t} i18nKey="announcements.scheduledDescription">
+            {"Rows here fire as an every-room or single-room "}
+            <code>/announce</code>
+            {" on the default Spire server at the configured time. One-shot rows auto-disable after firing; recurring rows re-arm to "}
+            <em>now + interval</em>
+            {" on each fire (a server restart mid-cycle won't double-fire to catch up)."}
+          </Trans>
         </p>
         <ScheduledSection canManage={canManageScheduled} />
       </section>
@@ -119,6 +125,7 @@ export function AdminAnnouncementsTab() {
  * ============================================================ */
 
 function BannerSection({ canManage }: { canManage: boolean }) {
+  const { t } = useTranslation("admin");
   const [banners, setBanners] = useState<AnnouncementBanner[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<AnnouncementBanner | null>(null);
@@ -132,7 +139,7 @@ function BannerSection({ canManage }: { canManage: boolean }) {
       const j = (await r.json()) as { banners: AnnouncementBanner[] };
       setBanners(j.banners);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("loadFailed"));
     }
   }
   useEffect(() => { void load(); }, []);
@@ -148,12 +155,12 @@ function BannerSection({ canManage }: { canManage: boolean }) {
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "toggle failed");
+      setError(e instanceof Error ? e.message : t("toggleFailed"));
     }
   }
 
   async function remove(b: AnnouncementBanner) {
-    if (!window.confirm("Delete this banner? Viewers will lose it on next refresh.")) return;
+    if (!window.confirm(t("announcements.deleteBannerConfirm"))) return;
     try {
       const r = await fetch(`/admin/announcements/banners/${b.id}`, {
         method: "DELETE",
@@ -162,11 +169,11 @@ function BannerSection({ canManage }: { canManage: boolean }) {
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "delete failed");
+      setError(e instanceof Error ? e.message : t("deleteFailed"));
     }
   }
 
-  if (banners === null) return <p className="text-xs italic text-keep-muted">Loading…</p>;
+  if (banners === null) return <p className="text-xs italic text-keep-muted">{t("common:loading")}</p>;
   return (
     <div className="space-y-3">
       {error ? <p className="text-xs text-keep-accent">{error}</p> : null}
@@ -176,7 +183,7 @@ function BannerSection({ canManage }: { canManage: boolean }) {
           onClick={() => { setAdding(true); setEditing(null); }}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/25"
         >
-          + New banner
+          {t("announcements.newBanner")}
         </button>
       ) : null}
       {(adding || editing) && canManage ? (
@@ -187,14 +194,14 @@ function BannerSection({ canManage }: { canManage: boolean }) {
         />
       ) : null}
       {banners.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No banners yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("announcements.noBanners")}</p>
       ) : (
         <table className="w-full min-w-[560px] text-xs">
           <thead>
             <tr className="border-b border-keep-rule text-keep-muted">
-              <th className="px-2 py-1 text-left">Preview</th>
-              <th className="px-2 py-1">Order</th>
-              <th className="px-2 py-1">Enabled</th>
+              <th className="px-2 py-1 text-left">{t("common:preview")}</th>
+              <th className="px-2 py-1">{t("announcements.colOrder")}</th>
+              <th className="px-2 py-1">{t("enabled")}</th>
               <th className="px-2 py-1"></th>
             </tr>
           </thead>
@@ -216,7 +223,7 @@ function BannerSection({ canManage }: { canManage: boolean }) {
                       onChange={() => void toggleEnabled(b)}
                     />
                   ) : (
-                    <span>{b.enabled ? "yes" : "no"}</span>
+                    <span>{b.enabled ? t("yes") : t("no")}</span>
                   )}
                 </td>
                 <td className="px-2 py-2 text-right">
@@ -227,14 +234,14 @@ function BannerSection({ canManage }: { canManage: boolean }) {
                         onClick={() => { setEditing(b); setAdding(false); }}
                         className="mr-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
                       >
-                        Edit
+                        {t("edit")}
                       </button>
                       <button
                         type="button"
                         onClick={() => void remove(b)}
                         className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/20"
                       >
-                        Delete
+                        {t("common:delete")}
                       </button>
                     </>
                   ) : null}
@@ -257,6 +264,7 @@ function BannerForm({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const { t } = useTranslation("admin");
   // Round-trip note: existing rows store sanitized HTML, so the
   // editor seeds the textarea with that HTML directly. Admins who
   // originally typed markdown will see the converted HTML on edit
@@ -295,7 +303,7 @@ function BannerForm({
       if (!r.ok) throw new Error(await readError(r));
       await onSaved();
     } catch (e2) {
-      setError(e2 instanceof Error ? e2.message : "save failed");
+      setError(e2 instanceof Error ? e2.message : t("saveFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -308,19 +316,18 @@ function BannerForm({
     >
       <label className="block">
         <span className="mb-1 block uppercase tracking-widest text-keep-muted">
-          Body (HTML or Markdown)
+          {t("announcements.bodyLabel")}
         </span>
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={4}
           maxLength={ANNOUNCEMENT_BANNER_BODY_MAX}
-          placeholder="**Welcome** to the chat! Read the [house rules](/rules) before posting."
+          placeholder={t("announcements.bannerBodyPlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px]"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          {body.length} / {ANNOUNCEMENT_BANNER_BODY_MAX}. Both formats supported;
-          Markdown converts to HTML on save.
+          {t("announcements.bodyCounter", { length: body.length, max: ANNOUNCEMENT_BANNER_BODY_MAX })}
         </span>
       </label>
 
@@ -331,10 +338,10 @@ function BannerForm({
             checked={enabled}
             onChange={(e) => setEnabled(e.target.checked)}
           />
-          <span>Enabled</span>
+          <span>{t("enabled")}</span>
         </label>
         <label className="flex items-center gap-1">
-          <span>Order</span>
+          <span>{t("announcements.colOrder")}</span>
           <input
             type="number"
             value={sortOrder}
@@ -347,7 +354,7 @@ function BannerForm({
       {body.trim() ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-2">
           <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
-            Preview
+            {t("common:preview")}
           </div>
           <ChipHtml className="prose prose-sm max-w-none" html={previewHtml} />
         </div>
@@ -360,14 +367,14 @@ function BannerForm({
           onClick={onCancel}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           disabled={submitting}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          {submitting ? "Saving…" : initial ? "Save changes" : "Create banner"}
+          {submitting ? t("common:saving") : initial ? t("saveChanges") : t("announcements.createBanner")}
         </button>
       </div>
     </form>
@@ -379,6 +386,7 @@ function BannerForm({
  * ============================================================ */
 
 function ScheduledSection({ canManage }: { canManage: boolean }) {
+  const { t } = useTranslation("admin");
   const [rows, setRows] = useState<ScheduledAnnouncement[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ScheduledAnnouncement | null>(null);
@@ -423,7 +431,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
       const j = (await r.json()) as { scheduled: ScheduledAnnouncement[] };
       setRows(j.scheduled);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("loadFailed"));
     }
   }
   useEffect(() => { void load(); }, []);
@@ -439,12 +447,12 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "toggle failed");
+      setError(e instanceof Error ? e.message : t("toggleFailed"));
     }
   }
 
   async function remove(row: ScheduledAnnouncement) {
-    if (!window.confirm("Delete this scheduled announcement?")) return;
+    if (!window.confirm(t("announcements.deleteScheduledConfirm"))) return;
     try {
       const r = await fetch(`/admin/announcements/scheduled/${row.id}`, {
         method: "DELETE",
@@ -453,7 +461,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "delete failed");
+      setError(e instanceof Error ? e.message : t("deleteFailed"));
     }
   }
 
@@ -463,8 +471,8 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
   async function fireNow(row: ScheduledAnnouncement) {
     if (!window.confirm(
       row.targetRoomId
-        ? "Fire this announcement now in the target room? (Does not change the schedule.)"
-        : "Fire this announcement now in EVERY room? (Does not change the schedule.)",
+        ? t("announcements.fireRoomConfirm")
+        : t("announcements.fireAllConfirm"),
     )) return;
     try {
       const r = await fetch(`/admin/announcements/scheduled/${row.id}/fire`, {
@@ -473,11 +481,11 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
       });
       if (!r.ok) throw new Error(await readError(r));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "fire failed");
+      setError(e instanceof Error ? e.message : t("announcements.fireFailed"));
     }
   }
 
-  if (rows === null) return <p className="text-xs italic text-keep-muted">Loading…</p>;
+  if (rows === null) return <p className="text-xs italic text-keep-muted">{t("common:loading")}</p>;
   return (
     <div className="space-y-3">
       {error ? <p className="text-xs text-keep-accent">{error}</p> : null}
@@ -487,7 +495,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
           onClick={() => { setAdding(true); setEditing(null); }}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/25"
         >
-          + New scheduled announcement
+          {t("announcements.newScheduled")}
         </button>
       ) : null}
       {(adding || editing) && canManage ? (
@@ -499,15 +507,15 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
         />
       ) : null}
       {rows.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No scheduled announcements yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("announcements.noScheduled")}</p>
       ) : (
         <table className="w-full min-w-[680px] text-xs">
           <thead>
             <tr className="border-b border-keep-rule text-keep-muted">
-              <th className="px-2 py-1 text-left">Body</th>
-              <th className="px-2 py-1 text-left">Schedule</th>
-              <th className="px-2 py-1 text-left">Target</th>
-              <th className="px-2 py-1">Enabled</th>
+              <th className="px-2 py-1 text-left">{t("announcements.colBody")}</th>
+              <th className="px-2 py-1 text-left">{t("announcements.colSchedule")}</th>
+              <th className="px-2 py-1 text-left">{t("announcements.colTarget")}</th>
+              <th className="px-2 py-1">{t("enabled")}</th>
               <th className="px-2 py-1"></th>
             </tr>
           </thead>
@@ -535,7 +543,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
                 <td className="px-2 py-2">
                   {r.targetRoomId
                     ? (roomNameById.get(r.targetRoomId) ?? <code className="text-keep-muted">{r.targetRoomId}</code>)
-                    : <em className="text-keep-muted">all rooms</em>}
+                    : <em className="text-keep-muted">{t("announcements.allRooms")}</em>}
                 </td>
                 <td className="px-2 py-2 text-center">
                   {canManage ? (
@@ -545,7 +553,7 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
                       onChange={() => void toggleEnabled(r)}
                     />
                   ) : (
-                    <span>{r.enabled ? "yes" : "no"}</span>
+                    <span>{r.enabled ? t("yes") : t("no")}</span>
                   )}
                 </td>
                 <td className="px-2 py-2 text-right">
@@ -555,23 +563,23 @@ function ScheduledSection({ canManage }: { canManage: boolean }) {
                         type="button"
                         onClick={() => void fireNow(r)}
                         className="mr-1 rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-keep-action hover:bg-keep-action/20"
-                        title="Broadcast this announcement now. The schedule stays unchanged."
+                        title={t("announcements.fireNowTitle")}
                       >
-                        Fire now
+                        {t("announcements.fireNow")}
                       </button>
                       <button
                         type="button"
                         onClick={() => { setEditing(r); setAdding(false); }}
                         className="mr-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
                       >
-                        Edit
+                        {t("edit")}
                       </button>
                       <button
                         type="button"
                         onClick={() => void remove(r)}
                         className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/20"
                       >
-                        Delete
+                        {t("common:delete")}
                       </button>
                     </>
                   ) : null}
@@ -599,6 +607,7 @@ function ScheduledForm({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const { t } = useTranslation("admin");
   const [body, setBody] = useState(initial?.bodyMarkdown ?? "");
   const [scheduleSpec, setScheduleSpec] = useState(initial?.scheduleSpec ?? "");
   const [color, setColor] = useState<string | null>(initial?.color ?? null);
@@ -625,10 +634,10 @@ function ScheduledForm({
     setError(null);
     try {
       if (!parsed || !parsed.ok) {
-        throw new Error(parsed && !parsed.ok ? parsed.message : "Schedule is required.");
+        throw new Error(parsed && !parsed.ok ? parsed.message : t("announcements.scheduleRequired"));
       }
       if (color !== null && !COLOR_TOKEN_OR_HEX_RE.test(color)) {
-        throw new Error("Color must be `#rrggbb` or a `theme:<slot>` token.");
+        throw new Error(t("announcements.colorError"));
       }
       const payload = {
         scheduleSpec,
@@ -651,7 +660,7 @@ function ScheduledForm({
       if (!r.ok) throw new Error(await readError(r));
       await onSaved();
     } catch (e2) {
-      setError(e2 instanceof Error ? e2.message : "save failed");
+      setError(e2 instanceof Error ? e2.message : t("saveFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -664,23 +673,23 @@ function ScheduledForm({
     >
       <label className="block">
         <span className="mb-1 block uppercase tracking-widest text-keep-muted">
-          Body (HTML or Markdown)
+          {t("announcements.bodyLabel")}
         </span>
         <textarea
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={3}
           maxLength={SCHEDULED_ANNOUNCEMENT_BODY_MAX}
-          placeholder="**Daily reminder:** Check the [event board](/rules#events) for tonight's sessions."
+          placeholder={t("announcements.scheduledBodyPlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px]"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          {body.length} / {SCHEDULED_ANNOUNCEMENT_BODY_MAX}
+          {t("announcements.charCount", { length: body.length, max: SCHEDULED_ANNOUNCEMENT_BODY_MAX })}
         </span>
       </label>
 
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Schedule</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("announcements.scheduleLabel")}</span>
         <input
           type="text"
           value={scheduleSpec}
@@ -689,29 +698,32 @@ function ScheduledForm({
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px]"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          Interval (e.g. <code>1d8h</code>) for recurring, or an ISO datetime for
-          a one-shot. Minimum interval is 1 minute; maximum 30 days.
+          <Trans t={t} i18nKey="announcements.scheduleHelp">
+            {"Interval (e.g. "}
+            <code>1d8h</code>
+            {") for recurring, or an ISO datetime for a one-shot. Minimum interval is 1 minute; maximum 30 days."}
+          </Trans>
           {parsed && !parsed.ok ? (
             <span className="ml-2 text-keep-accent">{parsed.message}</span>
           ) : null}
           {parsed && parsed.ok ? (
             <span className="ml-2 text-keep-action">
               {parsed.parsed.kind === "interval"
-                ? `Recurring every ${formatIntervalMs(parsed.parsed.intervalMs)}.`
-                : `Fires once on ${new Date(parsed.parsed.runAt).toLocaleString()}.`}
+                ? t("announcements.recurringEvery", { interval: formatIntervalMs(parsed.parsed.intervalMs) })
+                : t("announcements.firesOnceOn", { date: formatDateTime(parsed.parsed.runAt) })}
             </span>
           ) : null}
         </span>
       </label>
 
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Target room</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("announcements.targetRoomLabel")}</span>
         <select
           value={targetRoomId ?? ""}
           onChange={(e) => setTargetRoomId(e.target.value || null)}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
         >
-          <option value="">Every room (default server)</option>
+          <option value="">{t("announcements.everyRoom")}</option>
           {rooms.map((r) => (
             <option key={r.id} value={r.id}>{r.name}</option>
           ))}
@@ -720,7 +732,7 @@ function ScheduledForm({
 
       <fieldset className="space-y-1">
         <legend className="mb-1 block uppercase tracking-widest text-keep-muted">
-          Color (optional)
+          {t("announcements.colorLegend")}
         </legend>
         <div className="flex flex-wrap gap-1">
           <button
@@ -732,7 +744,7 @@ function ScheduledForm({
                 : "border-keep-rule bg-keep-bg hover:bg-keep-banner"
             }`}
           >
-            none
+            {t("announcements.colorNone")}
           </button>
           {THEMEABLE_TEXT_SLOTS.map((slot: ThemeableTextSlot) => {
             const token = `theme:${slot}`;
@@ -760,13 +772,13 @@ function ScheduledForm({
             value={color && color.startsWith("#") ? color : "#990000"}
             onChange={(e) => setColor(e.target.value)}
             className="h-7 w-10 cursor-pointer rounded border border-keep-rule"
-            aria-label="Custom hex color"
+            aria-label={t("announcements.customHexAria")}
           />
           <input
             type="text"
             value={color && color.startsWith("#") ? color : ""}
             onChange={(e) => setColor(e.target.value || null)}
-            placeholder={color && color.startsWith("theme:") ? `(using ${color})` : "(no override)"}
+            placeholder={color && color.startsWith("theme:") ? t("announcements.usingColor", { color }) : t("announcements.noOverride")}
             maxLength={7}
             pattern="^#[0-9a-fA-F]{6}$"
             className="flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
@@ -780,13 +792,13 @@ function ScheduledForm({
           checked={enabled}
           onChange={(e) => setEnabled(e.target.checked)}
         />
-        <span>Enabled</span>
+        <span>{t("enabled")}</span>
       </label>
 
       {body.trim() ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-2">
           <div className="mb-1 flex items-center justify-between text-[10px] uppercase tracking-widest text-keep-muted">
-            <span>Preview (as it will render in chat)</span>
+            <span>{t("announcements.chatPreview")}</span>
             {previewColor ? (
               // Tiny swatch so the admin can confirm the resolved
               // color matches their pick even when the text body
@@ -826,14 +838,14 @@ function ScheduledForm({
           onClick={onCancel}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           disabled={submitting}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          {submitting ? "Saving…" : initial ? "Save changes" : "Schedule announcement"}
+          {submitting ? t("common:saving") : initial ? t("saveChanges") : t("announcements.scheduleButton")}
         </button>
       </div>
     </form>

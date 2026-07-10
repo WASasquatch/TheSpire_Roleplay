@@ -20,6 +20,7 @@ import {
   storyReadingPositions,
 } from "../../db/schema.js";
 import { sanitizeBio, stripMarginNotes } from "../../auth/html.js";
+import { tFor } from "../../i18n.js";
 import { getSessionUser } from "../auth.js";
 import type { Db } from "../../db/index.js";
 import type { Io } from "./shared.js";
@@ -41,7 +42,7 @@ export async function registerStoryChapterRoutes(app: FastifyInstance, db: Db, i
     const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
     if (!perm.addChapters) {
       reply.code(403);
-      return { error: "you need co_author or owner access to add chapters" };
+      return { error: tFor(me.locale, "errors:server.stories.needCoAuthorAdd") };
     }
 
     const countRow = (await db
@@ -50,7 +51,7 @@ export async function registerStoryChapterRoutes(app: FastifyInstance, db: Db, i
       .where(eq(storyChapters.storyId, s.id)))[0];
     if ((countRow?.n ?? 0) >= STORY_CHAPTER_CAP) {
       reply.code(409);
-      return { error: `chapter cap (${STORY_CHAPTER_CAP}) reached` };
+      return { error: tFor(me.locale, "errors:server.stories.chapterCap", { max: STORY_CHAPTER_CAP }) };
     }
 
     let body;
@@ -152,7 +153,7 @@ export async function registerStoryChapterRoutes(app: FastifyInstance, db: Db, i
       const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
       if (!perm.editChapters) {
         reply.code(403);
-        return { error: "you need editor or higher access to edit chapters" };
+        return { error: tFor(me.locale, "errors:server.stories.needEditorEdit") };
       }
 
       let body;
@@ -215,7 +216,7 @@ export async function registerStoryChapterRoutes(app: FastifyInstance, db: Db, i
           // save changes but only co_authors / owners can flip the
           // chapter live.
           if (publishingNow && !perm.publish) {
-            return { ok: false, status: 403, error: "you need co_author or owner access to publish a chapter" };
+            return { ok: false, status: 403, error: tFor(me.locale, "errors:server.stories.needCoAuthorPublish") };
           }
           update.status = body.status;
           if (publishingNow) {
@@ -300,7 +301,7 @@ export async function registerStoryChapterRoutes(app: FastifyInstance, db: Db, i
       const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
       if (!perm.addChapters) {
         reply.code(403);
-        return { error: "you need co_author or owner access to delete chapters" };
+        return { error: tFor(me.locale, "errors:server.stories.needCoAuthorDelete") };
       }
       const c = (await db
         .select()
@@ -325,7 +326,7 @@ export async function registerStoryChapterRoutes(app: FastifyInstance, db: Db, i
       const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
       if (!perm.editChapters) {
         reply.code(403);
-        return { error: "you need editor or higher access to reorder chapters" };
+        return { error: tFor(me.locale, "errors:server.stories.needEditorReorder") };
       }
       const order = Array.isArray(req.body?.order) ? req.body.order : null;
       if (!order) { reply.code(400); return { error: "order must be an array of chapter ids" }; }
@@ -359,7 +360,7 @@ export async function registerStoryChapterRoutes(app: FastifyInstance, db: Db, i
       const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
       if (!perm.editChapters) {
         reply.code(403);
-        return { error: "you need editor or higher access to view chapter history" };
+        return { error: tFor(me.locale, "errors:server.stories.needEditorHistory") };
       }
       const c = (await db
         .select()
@@ -511,7 +512,7 @@ export async function registerStoryChapterRoutes(app: FastifyInstance, db: Db, i
       const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
       if (!perm.editChapters) {
         reply.code(403);
-        return { error: "you need editor or higher access to acquire a chapter lock" };
+        return { error: tFor(me.locale, "errors:server.stories.needEditorLock") };
       }
       const c = (await db
         .select()

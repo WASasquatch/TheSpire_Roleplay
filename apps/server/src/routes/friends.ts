@@ -9,10 +9,23 @@ import type { Db } from "../db/index.js";
 import { characterIdFromQuery, eqIdentity, ownsCharacter, type Identity } from "../auth/identity.js";
 import { eqNameInsensitive } from "../lib/nameLookup.js";
 import { blockedUserIdsFor, isBlockedBetween } from "../auth/blocks.js";
+import { isIsolatedBetweenIds, isolationHiddenSetFor } from "../auth/ageIsolation.js";
 import { notify as notifyCenter } from "../notifications/engine.js";
 import { getSessionUser } from "./auth.js";
+import { tFor } from "../i18n.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
+
+/** The RECIPIENT's saved language for a persisted notification row / push
+ *  payload (i18n Phase 3): one indexed read of users.locale, null → en. */
+async function localeOfUser(db: Db, userId: string): Promise<string | null> {
+  const row = (await db
+    .select({ locale: users.locale })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1))[0];
+  return row?.locale ?? null;
+}
 
 /**
  * Result of `/me/friend-resolve?name=X`, every identity (master and
@@ -215,7 +228,11 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
 
     // Blocked accounts are invisible: drop any match for a user we're blocked
     // with (either direction) so they can't be found or friend-requested.
+    // Isolated-pair accounts (age plan, Phase 5) union in on the same rule.
     const blocked = await blockedUserIdsFor(db, me.id);
+    for (const hiddenId of await isolationHiddenSetFor(db, me, matches.map((m) => m.userId))) {
+      blocked.add(hiddenId);
+    }
     const visible = blocked.size ? matches.filter((m) => !blocked.has(m.userId)) : matches;
 
     return { matches: visible };
@@ -268,8 +285,14 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     });
     // Hide friends we're blocked with (either direction). Keep-but-hide: the
     // friendship row stays, it just doesn't surface while the block stands,
-    // and reappears once unblocked.
+    // and reappears once unblocked. Isolation (age plan, Phase 5) unions in
+    // with the identical contract: an adult friend disappears from an
+    // isolated minor's list (and vice versa) but the row survives, so the
+    // friendship returns when the mode ends.
     const blockedSet = await blockedUserIdsFor(db, me.id);
+    for (const hiddenId of await isolationHiddenSetFor(db, me, otherIdentitiesAll.map((o) => o.userId))) {
+      blockedSet.add(hiddenId);
+    }
     const otherIdentities = blockedSet.size
       ? otherIdentitiesAll.filter((o) => !blockedSet.has(o.userId))
       : otherIdentitiesAll;
@@ -473,6 +496,11 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
     if (await isBlockedBetween(db, me.id, targetIdentity.userId)) {
       reply.code(404); return { error: "no_user" };
     }
+    // Minor isolation (age plan, Phase 5): identical no-such-user posture
+    // for an isolated pair — neither side can find or friend the other.
+    if (await isIsolatedBetweenIds(db, me.id, targetIdentity.userId)) {
+      reply.code(404); return { error: "no_user" };
+    }
 
     // Idempotency over the identity pair, in either direction.
     const existing = (await db
@@ -504,21 +532,27 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
           frienderDisplayName: meUsername,
         });
       }
+      // Persisted row + push copy render in the RECIPIENT's language.
+      const targetLocale = await localeOfUser(db, targetUserId);
       await notifyCenter(db, io, {
         userId: targetUserId,
         category: "friend",
         kind,
         actor: { id: meId, name: meUsername },
         title: kind === "friend_accept"
-          ? `${meUsername} accepted your friend request`
-          : `${meUsername} sent you a friend request`,
-        snippet: kind === "friend_accept" ? "You're now friends." : "Open your friends list to respond.",
+          ? tFor(targetLocale, "notifications:friend.acceptTitle", { name: meUsername })
+          : tFor(targetLocale, "notifications:friend.requestTitle", { name: meUsername }),
+        snippet: kind === "friend_accept"
+          ? tFor(targetLocale, "notifications:friend.acceptSnippet")
+          : tFor(targetLocale, "notifications:friend.requestSnippet"),
         target: { kind: "profile", id: meId },
         push: {
-          title: kind === "friend_accept" ? "Friend request accepted" : "New friend request",
+          title: kind === "friend_accept"
+            ? tFor(targetLocale, "notifications:friend.acceptPushTitle")
+            : tFor(targetLocale, "notifications:friend.requestPushTitle"),
           body: kind === "friend_accept"
-            ? `${meUsername} accepted your request.`
-            : `${meUsername} sent you a friend request.`,
+            ? tFor(targetLocale, "notifications:friend.acceptPushBody", { name: meUsername })
+            : tFor(targetLocale, "notifications:friend.requestPushBody", { name: meUsername }),
         },
       });
     }
@@ -589,7 +623,13 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       ));
 
     // Hide pending requests from anyone we're blocked with (either direction).
+    // Isolated-pair senders (age plan, Phase 5) hide on the same rule — a
+    // request sent before isolation began waits, invisible, until the mode
+    // ends rather than surfacing an adult to an isolated minor.
     const blockedSenders = await blockedUserIdsFor(db, me.id);
+    for (const hiddenId of await isolationHiddenSetFor(db, me, rowsAll.map((r) => r.frienderUserId))) {
+      blockedSenders.add(hiddenId);
+    }
     const rows = blockedSenders.size ? rowsAll.filter((r) => !blockedSenders.has(r.frienderUserId)) : rowsAll;
 
     const otherUserIds = [...new Set(rows.map((r) => r.frienderUserId))];
@@ -707,17 +747,22 @@ export async function registerFriendsRoutes(app: FastifyInstance, db: Db, io: Io
       }
       // Durable "your request was accepted" row for the sender. Deduped on the
       // pair so a re-accept (other tab / already-resolved) can't double-notify.
+      // Copy renders in the SENDER-recipient's language (they get this row).
+      const senderLocale = await localeOfUser(db, frienderIdentity.userId);
       await notifyCenter(db, io, {
         userId: frienderIdentity.userId,
         category: "friend",
         kind: "friend_accept",
         actor: { id: me.id, name: me.username },
-        title: `${me.username} accepted your friend request`,
-        snippet: "You're now friends.",
+        title: tFor(senderLocale, "notifications:friend.acceptTitle", { name: me.username }),
+        snippet: tFor(senderLocale, "notifications:friend.acceptSnippet"),
         target: { kind: "profile", id: me.id },
         dedupeKey: `friend_accept:${me.id}:${frienderIdentity.userId}`,
         dedupeWindowMs: 24 * 60 * 60 * 1000,
-        push: { title: "Friend request accepted", body: `${me.username} accepted your request.` },
+        push: {
+          title: tFor(senderLocale, "notifications:friend.acceptPushTitle"),
+          body: tFor(senderLocale, "notifications:friend.acceptPushBody", { name: me.username }),
+        },
       });
       // Echo to the acceptor's own sockets too. The client's listener
       // bumps `friendsVersion` on every `friend:request` event, which

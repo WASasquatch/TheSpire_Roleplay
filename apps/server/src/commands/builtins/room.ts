@@ -8,6 +8,7 @@ import { getServerSettings } from "../../settings.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { deriveUniqueRoomSlug } from "../../lib/roomSlug.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 /**
@@ -27,7 +28,7 @@ async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
   if (maxRoomsPerOwner === 0) {
     ctx.socket.emit("error:notice", {
       code: "ROOM_DISABLED",
-      message: "User-created rooms are disabled by an administrator.",
+      message: tFor(ctx.user.locale, "commands:room.creationDisabled"),
     });
     return false;
   }
@@ -48,7 +49,7 @@ async function checkRoomCap(ctx: CommandContext): Promise<boolean> {
   if (count >= maxRoomsPerOwner) {
     ctx.socket.emit("error:notice", {
       code: "ROOM_LIMIT",
-      message: `You already own ${count} rooms - the per-user limit is ${maxRoomsPerOwner}.`,
+      message: tFor(ctx.user.locale, "commands:room.limit", { owned: count, max: maxRoomsPerOwner }),
     });
     return false;
   }
@@ -144,7 +145,7 @@ async function joinOrCreatePublic(ctx: CommandContext, name: string) {
   if (!NAME_RX.test(name)) {
     ctx.socket.emit("error:notice", {
       code: "BAD_ROOM_NAME",
-      message: "Room name must be 1-40 chars: letters, numbers, spaces, _ - '",
+      message: tFor(ctx.user.locale, "commands:room.badName"),
     });
     return;
   }
@@ -200,7 +201,7 @@ async function joinOrCreatePublic(ctx: CommandContext, name: string) {
  */
 async function createPrivateRoom(ctx: CommandContext, name: string, password: string) {
   if (!NAME_RX.test(name)) {
-    ctx.socket.emit("error:notice", { code: "BAD_ROOM_NAME", message: "Bad room name." });
+    ctx.socket.emit("error:notice", { code: "BAD_ROOM_NAME", message: tFor(ctx.user.locale, "commands:room.badNameShort") });
     return;
   }
   if (!(await checkRoomCap(ctx))) return;
@@ -252,7 +253,7 @@ async function joinExistingWithPassword(
   if (room.type === "public") {
     ctx.socket.emit("error:notice", {
       code: "PASSWORD_IGNORED",
-      message: `${room.name} is a public room - the password you supplied was ignored.`,
+      message: tFor(ctx.user.locale, "commands:room.passwordIgnored", { name: room.name }),
     });
     await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, room.id);
     return;
@@ -264,7 +265,7 @@ async function joinExistingWithPassword(
   }
   const ok = await argon2.verify(room.passwordHash, password).catch(() => false);
   if (!ok) {
-    ctx.socket.emit("error:notice", { code: "BAD_PASSWORD", message: "Incorrect password." });
+    ctx.socket.emit("error:notice", { code: "BAD_PASSWORD", message: tFor(ctx.user.locale, "commands:room.badPassword") });
     return;
   }
   await joinRoom(ctx.io, ctx.db, ctx.socket, ctx.user, room.id, { passwordOk: true });
@@ -311,7 +312,7 @@ export const goCommand: CommandHandler = {
   async run(ctx) {
     const argsText = ctx.argsText.trim();
     if (!argsText) {
-      ctx.socket.emit("error:notice", { code: "EMPTY", message: "Usage: /go <room> [password]" });
+      ctx.socket.emit("error:notice", { code: "EMPTY", message: tFor(ctx.user.locale, "commands:go.usage") });
       return;
     }
 
@@ -381,7 +382,7 @@ export const privateRoomCommand: CommandHandler = {
     if (!name || !password) {
       ctx.socket.emit("error:notice", {
         code: "EMPTY",
-        message: "Usage: /private <name> <password>",
+        message: tFor(ctx.user.locale, "commands:private.usage"),
       });
       return;
     }
@@ -391,7 +392,7 @@ export const privateRoomCommand: CommandHandler = {
       // rooms fall through to createPrivateRoom which resurrects.
       ctx.socket.emit("error:notice", {
         code: "DUP_ROOM",
-        message: `A room named "${name}" already exists.`,
+        message: tFor(ctx.user.locale, "commands:room.duplicate", { name }),
       });
       return;
     }
@@ -407,7 +408,7 @@ export const inviteCommand: CommandHandler = {
   async run(ctx) {
     const username = ctx.argsText.trim();
     if (!username) {
-      ctx.socket.emit("error:notice", { code: "EMPTY", message: "Usage: /invite <username>" });
+      ctx.socket.emit("error:notice", { code: "EMPTY", message: tFor(ctx.user.locale, "commands:invite.usage") });
       return;
     }
     const { invite } = await import("../../realtime/invites.js");
@@ -453,14 +454,14 @@ export const topicCommand: CommandHandler = {
     const txt = ctx.argsText.trim();
     if (!txt) {
       const r = await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1);
-      const topic = r[0]?.topic ?? "(no topic set)";
-      ctx.socket.emit("error:notice", { code: "TOPIC", message: `Topic: ${topic}` });
+      const topic = r[0]?.topic ?? tFor(ctx.user.locale, "commands:topic.noneSet");
+      ctx.socket.emit("error:notice", { code: "TOPIC", message: tFor(ctx.user.locale, "commands:topic.current", { topic }) });
       return;
     }
     if (!(await callerCanEditRoom(ctx))) {
       ctx.socket.emit("error:notice", {
         code: "PERM",
-        message: "Only the room owner or a mod can change the topic.",
+        message: tFor(ctx.user.locale, "commands:topic.permission"),
       });
       return;
     }
@@ -511,15 +512,15 @@ export const slugCommand: CommandHandler = {
       ctx.socket.emit("error:notice", {
         code: "SLUG",
         message: slug
-          ? `Room link handle: ${slug}. Paste {room:${slug}} into chat or an announcement to link here.`
-          : "This room has no link handle yet.",
+          ? tFor(ctx.user.locale, "commands:slug.current", { slug })
+          : tFor(ctx.user.locale, "commands:slug.none"),
       });
       return;
     }
     if (!(await callerCanEditRoom(ctx))) {
       ctx.socket.emit("error:notice", {
         code: "PERM",
-        message: "Only the room owner or a mod can change the room's link handle.",
+        message: tFor(ctx.user.locale, "commands:slug.permission"),
       });
       return;
     }
@@ -527,7 +528,7 @@ export const slugCommand: CommandHandler = {
     if (!ROOM_SLUG_RX.test(slug)) {
       ctx.socket.emit("error:notice", {
         code: "BAD_SLUG",
-        message: "Handle must be letters, numbers, and hyphens (e.g. the-tavern).",
+        message: tFor(ctx.user.locale, "commands:slug.invalid"),
       });
       return;
     }
@@ -539,7 +540,7 @@ export const slugCommand: CommandHandler = {
     if (taken) {
       ctx.socket.emit("error:notice", {
         code: "SLUG_TAKEN",
-        message: `The handle "${slug}" is already used by another room.`,
+        message: tFor(ctx.user.locale, "commands:slug.taken", { slug }),
       });
       return;
     }
@@ -587,8 +588,10 @@ export const describeCommand: CommandHandler = {
       const desc = r?.description ?? null;
       ctx.socket.emit("ui:hint", {
         kind: "open-info-modal",
-        title: `Room description - ${r?.name ?? "this room"}`,
-        body: desc ?? "(no description set)",
+        title: tFor(ctx.user.locale, "commands:describe.title", {
+          name: r?.name ?? tFor(ctx.user.locale, "commands:describe.thisRoom"),
+        }),
+        body: desc ?? tFor(ctx.user.locale, "commands:describe.noneSet"),
       });
       return;
     }
@@ -597,7 +600,7 @@ export const describeCommand: CommandHandler = {
     if (!(await callerCanEditRoom(ctx))) {
       ctx.socket.emit("error:notice", {
         code: "PERM",
-        message: "Only the room owner or a mod can change the description.",
+        message: tFor(ctx.user.locale, "commands:describe.permission"),
       });
       return;
     }
@@ -612,7 +615,7 @@ export const describeCommand: CommandHandler = {
     if (txt.length > DESCRIPTION_MAX) {
       ctx.socket.emit("error:notice", {
         code: "TOO_LONG",
-        message: `Description is capped at ${DESCRIPTION_MAX} chars.`,
+        message: tFor(ctx.user.locale, "commands:describe.tooLong", { max: DESCRIPTION_MAX }),
       });
       return;
     }

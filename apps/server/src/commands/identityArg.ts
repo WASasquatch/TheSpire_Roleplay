@@ -41,6 +41,7 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import { characters, users } from "../db/schema.js";
+import { tFor } from "../i18n.js";
 import type { CommandContext } from "./types.js";
 
 /** Token recognizer literals, the only two prefixes we accept. */
@@ -292,7 +293,12 @@ export function emitAmbiguousIdentityModal(
   });
   ctx.socket.emit("ui:hint", {
     kind: "open-info-modal",
-    title: `"${typedName}" matched ${matches.length} identities`,
-    body: `Re-run with one of:\n${lines.join("\n")}`,
+    title: tFor(ctx.user.locale, "commands:identity.ambiguousTitle", {
+      name: typedName,
+      total: matches.length,
+    }),
+    body: tFor(ctx.user.locale, "commands:identity.ambiguousBody", {
+      tokens: lines.join("\n"),
+    }),
   });
 }

@@ -18,6 +18,7 @@ import { eidolonState } from "../../db/schema.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { ownsPurchase } from "../../earning/purchases.js";
 import { catchUp } from "../../earning/eidolon.js";
+import { tFor } from "../../i18n.js";
 
 function notice(ctx: CommandContext, code: string, message: string): void {
   ctx.socket.emit("error:notice", { code, message });
@@ -32,11 +33,11 @@ export const eidolonCommand: CommandHandler = {
   permission: "use_eidolon_tamer",
   async run(ctx) {
     const sub = (ctx.args[0] ?? "emote").toLowerCase();
-    if (sub !== "emote") { notice(ctx, "USAGE", "Usage: /eidolon emote"); return; }
+    if (sub !== "emote") { notice(ctx, "USAGE", tFor(ctx.user.locale, "commands:eidolon.usage")); return; }
 
     // Section gate (the per-game `use_eidolon_tamer` is enforced by `permission`).
     if (!(await hasPermission(ctx.user, "use_arcade", ctx.db))) {
-      notice(ctx, "EIDOLON_LOCKED", "The Spire Arcade isn't available to you.");
+      notice(ctx, "EIDOLON_LOCKED", tFor(ctx.user.locale, "commands:eidolon.arcadeLocked"));
       return;
     }
 
@@ -46,11 +47,11 @@ export const eidolonCommand: CommandHandler = {
     // Purchase gate: the per-identity unlock ledger row, checked GLOBALLY (no
     // serverId filter — the intentional asymmetry vs the per-server arcade route).
     const owned = await ownsPurchase(ctx.db, { flairKey: FLAIR_EIDOLON_TAMER, scope, ownerId });
-    if (!owned) { notice(ctx, "EIDOLON_LOCKED", "You haven't unlocked the Eidolon Tamer on this identity."); return; }
+    if (!owned) { notice(ctx, "EIDOLON_LOCKED", tFor(ctx.user.locale, "commands:eidolon.notUnlocked")); return; }
 
     const row = (await ctx.db.select().from(eidolonState)
       .where(and(eq(eidolonState.ownerScope, scope), eq(eidolonState.ownerId, ownerId))).limit(1))[0];
-    if (!row) { notice(ctx, "NO_EIDOLON", "You don't have a familiar yet. Hatch one in the Spire Arcade."); return; }
+    if (!row) { notice(ctx, "NO_EIDOLON", tFor(ctx.user.locale, "commands:eidolon.noFamiliar")); return; }
 
     // Live mood from the caught-up stats (matches the in-game sprite).
     const prog = catchUp(row, Date.now());

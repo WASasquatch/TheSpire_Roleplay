@@ -42,6 +42,7 @@ import {
   userOwnedNameStyles,
   userEarning,
 } from "../../db/schema.js";
+import { tFor } from "../../i18n.js";
 import { getSessionUser } from "../auth.js";
 import { hasPermission } from "../../auth/permissions.js";
 import {
@@ -113,7 +114,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
             .limit(1))[0];
           if (!owned) {
             reply.code(403);
-            return { error: "this character doesn't own that border" };
+            return { error: tFor(me.locale, "errors:server.earning.characterDoesntOwnBorder") };
           }
           value = body.selectedBorderRankKey;
         }
@@ -140,7 +141,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
             .limit(1))[0];
           if (!owned) {
             reply.code(403);
-            return { error: "this character doesn't own that border" };
+            return { error: tFor(me.locale, "errors:server.earning.characterDoesntOwnBorder") };
           }
           value = body.selectedFreeformBorderKey;
         }
@@ -175,7 +176,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
           .limit(1))[0];
         if (!owned) {
           reply.code(403);
-          return { error: "you don't own that border" };
+          return { error: tFor(me.locale, "errors:server.earning.dontOwnBorder") };
         }
         update.selectedBorderRankKey = body.selectedBorderRankKey;
       }
@@ -195,7 +196,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
           .limit(1))[0];
         if (!owned) {
           reply.code(403);
-          return { error: "you don't own that border" };
+          return { error: tFor(me.locale, "errors:server.earning.dontOwnBorder") };
         }
         update.selectedFreeformBorderKey = body.selectedFreeformBorderKey;
       }
@@ -483,14 +484,14 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
             eq(characterOwnedNameStyles.styleKey, body.styleKey),
           ))
           .limit(1))[0];
-        if (!owned) { reply.code(403); return { error: "this character doesn't own that style" }; }
+        if (!owned) { reply.code(403); return { error: tFor(me.locale, "errors:server.earning.characterDoesntOwnStyle") }; }
       } else {
         const owned = (await db
           .select()
           .from(userOwnedNameStyles)
           .where(and(eq(userOwnedNameStyles.serverId, sid), eq(userOwnedNameStyles.userId, me.id), eq(userOwnedNameStyles.styleKey, body.styleKey)))
           .limit(1))[0];
-        if (!owned) { reply.code(403); return { error: "you don't own that style" }; }
+        if (!owned) { reply.code(403); return { error: tFor(me.locale, "errors:server.earning.dontOwnStyle") }; }
       }
       const style = (await db
         .select({ enabled: nameStyles.enabled })
@@ -858,7 +859,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
         }
         if (body.enabled && !(await hasPurchased("character", body.characterId, key, sid))) {
           reply.code(403);
-          return { error: "this character hasn't purchased it" };
+          return { error: tFor(me.locale, "errors:server.earning.characterHasntPurchased") };
         }
         await db
           .insert(characterEarning)
@@ -915,7 +916,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
       const me = await getSessionUser(req, db);
       if (!me) { reply.code(401); return { error: "auth" }; }
       if (!(await hasPermission(me, "use_room_transitions", db))) {
-        reply.code(403); return { error: "Room transitions aren't available to you." };
+        reply.code(403); return { error: tFor(me.locale, "errors:server.earning.transitionsUnavailable") };
       }
       const sid = await resolveActiveServerId(me, req.query.serverId);
       // Per-server subsystem toggle (migration 0293): room transitions can be
@@ -930,8 +931,8 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
       // or zero-cost transition isn't sellable on this server.
       const transition = await resolveTransitionForServer(db, sid, req.params.key);
       if (!transition) { reply.code(404); return { error: "unknown transition" }; }
-      if (!transition.enabled) { reply.code(409); return { error: "this transition isn't available" }; }
-      if (transition.cost <= 0) { reply.code(409); return { error: "this transition is free" }; }
+      if (!transition.enabled) { reply.code(409); return { error: tFor(me.locale, "errors:server.earning.transitionUnavailable") }; }
+      if (transition.cost <= 0) { reply.code(409); return { error: tFor(me.locale, "errors:server.earning.transitionFree") }; }
       let body: z.infer<typeof purchaseCosmeticBody> | undefined;
       try { body = purchaseCosmeticBody.parse(req.body ?? {}); }
       catch { reply.code(400); return { error: "invalid body" }; }
@@ -1001,7 +1002,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     if (!(await hasPermission(me, "use_room_transitions", db))) {
-      reply.code(403); return { error: "Room transitions aren't available to you." };
+      reply.code(403); return { error: tFor(me.locale, "errors:server.earning.transitionsUnavailable") };
     }
     const sid = await resolveActiveServerId(me, req.query.serverId);
     let body: z.infer<typeof equipTransitionBody>;
@@ -1017,7 +1018,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
       const scope: "user" | "character" = characterId ? "character" : "user";
       const ownerId = characterId ?? me.id;
       if (!(await hasPurchased(scope, ownerId, `transition_${key}`, sid))) {
-        reply.code(403); return { error: "you don't own that transition" };
+        reply.code(403); return { error: tFor(me.locale, "errors:server.earning.dontOwnTransition") };
       }
     }
     if (characterId) {
@@ -1103,7 +1104,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
       // rejected here so we don't hand them to the URL parser at all.
       if (!/^https?:\/\//i.test(final)) {
         reply.code(400);
-        return { error: "banner URL must start with http:// or https://" };
+        return { error: tFor(me.locale, "errors:server.earning.bannerUrlScheme") };
       }
       // Ownership gate is required only when SETTING (not clearing).
       // A user who lost the cosmetic via admin revoke can still clear
@@ -1112,7 +1113,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
       const ownerId = characterId ?? me.id;
       if (!(await hasPurchased(scope, ownerId, "flair_profile_banner", sid))) {
         reply.code(403);
-        return { error: "purchase 'Custom Profile Banner' to set a banner URL" };
+        return { error: tFor(me.locale, "errors:server.earning.purchaseBannerFirst") };
       }
       // Soft content-type sniff. Best-effort: failed fetch is treated
       // as "let it through" because many image hosts (S3, Cloudinary,
@@ -1129,7 +1130,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
         const ct = r.headers.get("content-type") ?? "";
         if (r.ok && ct && !ct.startsWith("image/")) {
           reply.code(400);
-          return { error: `URL doesn't appear to be an image (Content-Type: ${ct})` };
+          return { error: tFor(me.locale, "errors:server.earning.bannerNotImage", { contentType: ct }) };
         }
       } catch {
         // Network blip, CORS, abort, server hates HEAD, allow.
@@ -1227,7 +1228,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
     if (final !== null) {
       if (final.length > TYPING_PHRASE_MAX) {
         reply.code(400);
-        return { error: `phrase must be ${TYPING_PHRASE_MAX} characters or fewer` };
+        return { error: tFor(me.locale, "errors:server.earning.phraseTooLong", { max: TYPING_PHRASE_MAX }) };
       }
       // Ownership gate only when SETTING (clearing is always allowed
       //, a user whose flair was revoked can still drop their stale
@@ -1236,7 +1237,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
       const ownerId = characterId ?? me.id;
       if (!(await hasPurchased(scope, ownerId, "flair_typing_phrase", sid))) {
         reply.code(403);
-        return { error: "purchase 'Custom Typing Phrase' to set a custom phrase" };
+        return { error: tFor(me.locale, "errors:server.earning.purchaseTypingFirst") };
       }
     }
     if (characterId) {
@@ -1329,7 +1330,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
       const ownerId = characterId ?? me.id;
       if (!(await hasPurchased(scope, ownerId, "flair_room_presence", sid))) {
         reply.code(403);
-        return { error: "purchase 'Custom Room Entrance' to set custom presence templates" };
+        return { error: tFor(me.locale, "errors:server.earning.purchaseEntranceFirst") };
       }
     }
     const updates: Record<string, unknown> = { updatedAt: new Date() };
@@ -1522,7 +1523,7 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
             return {
               ok: false,
               status: 403,
-              error: "Reach Tier IV of this rank before purchasing its border.",
+              error: tFor(me.locale, "errors:server.earning.reachTierIvBorder"),
             };
           }
           // Already-owned check against the scope-appropriate table.
@@ -2165,11 +2166,11 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
       const msg = err instanceof Error ? err.message : "";
       if (msg.startsWith("__pin_not_owned__:")) {
         reply.code(403);
-        return { error: `you don't hold item "${msg.slice("__pin_not_owned__:".length)}" on this identity` };
+        return { error: tFor(me.locale, "errors:server.earning.dontHoldItem", { name: msg.slice("__pin_not_owned__:".length) }) };
       }
       if (msg.startsWith("__pin_wrong_collection__:")) {
         reply.code(403);
-        return { error: `"${msg.slice("__pin_wrong_collection__:".length)}" is a pet, pin it to your Pet Collection instead.` };
+        return { error: tFor(me.locale, "errors:server.earning.pinIsPet", { name: msg.slice("__pin_wrong_collection__:".length) }) };
       }
       throw err;
     }
@@ -2316,11 +2317,11 @@ export async function registerEarningMutationRoutes(deps: EarningRouteDeps): Pro
       const msg = err instanceof Error ? err.message : "";
       if (msg.startsWith("__pin_not_owned__:")) {
         reply.code(403);
-        return { error: `you don't hold item "${msg.slice("__pin_not_owned__:".length)}" on this identity` };
+        return { error: tFor(me.locale, "errors:server.earning.dontHoldItem", { name: msg.slice("__pin_not_owned__:".length) }) };
       }
       if (msg.startsWith("__pin_wrong_collection__:")) {
         reply.code(403);
-        return { error: `"${msg.slice("__pin_wrong_collection__:".length)}" isn't a pet, pin it to your Item Collection instead.` };
+        return { error: tFor(me.locale, "errors:server.earning.pinNotPet", { name: msg.slice("__pin_wrong_collection__:".length) }) };
       }
       throw err;
     }

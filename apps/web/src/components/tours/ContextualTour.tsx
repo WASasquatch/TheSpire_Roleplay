@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { TourId } from "@thekeep/shared";
 import { useChat } from "../../state/store.js";
 import { TOUR_REGISTRY } from "../../lib/tours/index.js";
@@ -22,18 +24,23 @@ import { CoachTour } from "./CoachTour.js";
  * is reused unchanged.
  */
 export function ContextualTour({ tourId, active }: { tourId: TourId; active: boolean }) {
+  const { t } = useTranslation("tours");
   const toursToShow = useChat((s) => s.toursToShow);
   const forcedTourId = useChat((s) => s.forcedTourId);
   const dismissTour = useChat((s) => s.dismissTour);
 
   const entry = TOUR_REGISTRY[tourId];
+  // Memoized so the step objects keep a stable identity across unrelated
+  // re-renders (CoachTour re-measures its spotlight when the current step's
+  // identity changes); `t` changes on a language flip, rebuilding the copy.
+  const steps = useMemo(() => entry.steps(t), [entry, t]);
   const due = toursToShow.includes(tourId) || forcedTourId === tourId;
 
-  if (!active || !due || entry.steps.length === 0) return null;
+  if (!active || !due || steps.length === 0) return null;
 
   return (
     <CoachTour
-      steps={entry.steps}
+      steps={steps}
       icon={entry.icon}
       onClose={() => dismissTour(tourId)}
     />

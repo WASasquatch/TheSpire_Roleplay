@@ -49,6 +49,7 @@ import { getSessionUser } from "../routes/auth.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import { notifyMany, type NotifyInput } from "../notifications/engine.js";
 import { serverAuthority, serverCan } from "./authority.js";
+import { tFor } from "../i18n.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -173,7 +174,7 @@ async function gate(
   db: Db,
   serverId: string,
   opts: { manage: boolean },
-): Promise<{ meId: string; serverId: string } | null> {
+): Promise<{ meId: string; serverId: string; locale: string | null } | null> {
   if (!areServersEnabled(await getSettings(db))) {
     reply.code(404);
     return null;
@@ -200,7 +201,7 @@ async function gate(
     reply.code(403);
     return null;
   }
-  return { meId: me.id, serverId: a.server.id };
+  return { meId: me.id, serverId: a.server.id, locale: me.locale };
 }
 
 /** A host character must belong to the caller (never trust a client id). */
@@ -322,23 +323,23 @@ export async function registerServerEventRoutes(
 
       if (body.endsAt != null && body.endsAt <= body.startsAt) {
         reply.code(400);
-        return { error: "The event's end time must be after its start time." };
+        return { error: tFor(g.locale, "errors:server.events.endAfterStart") };
       }
       if (body.reminderLeadMs != null && !REMINDER_LEADS_MS.has(body.reminderLeadMs)) {
         reply.code(400);
-        return { error: "Unsupported reminder lead time." };
+        return { error: tFor(g.locale, "errors:server.events.badReminderLead") };
       }
       if (body.hostCharacterId && !(await callerOwnsCharacter(db, g.meId, body.hostCharacterId))) {
         reply.code(400);
-        return { error: "That host character isn't yours." };
+        return { error: tFor(g.locale, "errors:server.events.hostCharacterNotYours") };
       }
       if (body.linkedRoomId && !(await roomInServer(db, g.serverId, body.linkedRoomId))) {
         reply.code(400);
-        return { error: "The linked room isn't in this server." };
+        return { error: tFor(g.locale, "errors:server.events.roomNotInServer") };
       }
       if (body.linkedForumId && !(await forumInServer(db, g.serverId, body.linkedForumId))) {
         reply.code(400);
-        return { error: "The linked forum isn't in this server." };
+        return { error: tFor(g.locale, "errors:server.events.forumNotInServer") };
       }
 
       const id = nanoid();
@@ -392,23 +393,23 @@ export async function registerServerEventRoutes(
       const nextEnd = body.endsAt !== undefined ? body.endsAt : (existing.endsAt != null ? +existing.endsAt : null);
       if (nextEnd != null && nextEnd <= nextStart) {
         reply.code(400);
-        return { error: "The event's end time must be after its start time." };
+        return { error: tFor(g.locale, "errors:server.events.endAfterStart") };
       }
       if (body.reminderLeadMs != null && !REMINDER_LEADS_MS.has(body.reminderLeadMs)) {
         reply.code(400);
-        return { error: "Unsupported reminder lead time." };
+        return { error: tFor(g.locale, "errors:server.events.badReminderLead") };
       }
       if (body.hostCharacterId && !(await callerOwnsCharacter(db, g.meId, body.hostCharacterId))) {
         reply.code(400);
-        return { error: "That host character isn't yours." };
+        return { error: tFor(g.locale, "errors:server.events.hostCharacterNotYours") };
       }
       if (body.linkedRoomId && !(await roomInServer(db, g.serverId, body.linkedRoomId))) {
         reply.code(400);
-        return { error: "The linked room isn't in this server." };
+        return { error: tFor(g.locale, "errors:server.events.roomNotInServer") };
       }
       if (body.linkedForumId && !(await forumInServer(db, g.serverId, body.linkedForumId))) {
         reply.code(400);
-        return { error: "The linked forum isn't in this server." };
+        return { error: tFor(g.locale, "errors:server.events.forumNotInServer") };
       }
 
       const patch: Record<string, unknown> = { updatedAt: new Date() };
@@ -493,12 +494,12 @@ export async function registerServerEventRoutes(
       }
       if (event.status === "cancelled" || event.status === "ended") {
         reply.code(409);
-        return { error: "This event is closed to RSVPs." };
+        return { error: tFor(g.locale, "errors:server.events.rsvpClosed") };
       }
       const characterId = body.characterId ?? null;
       if (characterId && !(await callerOwnsCharacter(db, g.meId, characterId))) {
         reply.code(400);
-        return { error: "That character isn't yours." };
+        return { error: tFor(g.locale, "errors:server.events.characterNotYours") };
       }
 
       // Upsert per identity. The DB unique (eventId,userId,characterId) treats a

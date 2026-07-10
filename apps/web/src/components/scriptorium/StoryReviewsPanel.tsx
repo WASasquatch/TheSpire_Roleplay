@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type {
   StoryReview,
   StoryReviewPage,
@@ -7,6 +8,7 @@ import type {
 import { STORY_REVIEW_BODY_MAX, STORY_REVIEW_REPLY_MAX } from "@thekeep/shared";
 import { useChat } from "../../state/store.js";
 import { readError } from "../../lib/http.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { ScriptoriumReportButton } from "../ScriptoriumReportButton.js";
 
 interface Props {
@@ -26,6 +28,7 @@ interface Props {
  * doesn't have to thread review props through every render.
  */
 export function StoryReviewsPanel({ storyId, authorUserId, allowReviews }: Props) {
+  const { t } = useTranslation("scriptorium");
   const me = useChat((s) => s.me);
   const [page, setPage] = useState<StoryReviewPage | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -39,7 +42,7 @@ export function StoryReviewsPanel({ storyId, authorUserId, allowReviews }: Props
       const j = (await r.json()) as StoryReviewPage;
       setPage(j);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     }
   }
 
@@ -55,9 +58,9 @@ export function StoryReviewsPanel({ storyId, authorUserId, allowReviews }: Props
   return (
     <section className="mx-auto mt-10 max-w-prose border-t border-current/20 pt-5">
       <header className="mb-3 flex items-baseline justify-between">
-        <h3 className="font-action text-lg">Reviews</h3>
+        <h3 className="font-action text-lg">{t("reviews.title")}</h3>
         <span className="text-xs opacity-70">
-          {page?.total ?? 0} {page?.total === 1 ? "review" : "reviews"}
+          {t("reviews.count", { count: page?.total ?? 0 })}
           {page?.avgRating != null ? <> · ★ {page.avgRating.toFixed(1)}</> : null}
         </span>
       </header>
@@ -68,25 +71,28 @@ export function StoryReviewsPanel({ storyId, authorUserId, allowReviews }: Props
 
       {!me ? (
         <p className="mb-3 rounded border border-keep-rule/40 bg-keep-panel/30 px-3 py-2 text-xs italic">
-          <a href="/login" className="text-keep-action underline-offset-4 hover:underline">Sign in</a>
-          {" "}to leave a review.
+          <Trans
+            t={t}
+            i18nKey="reviews.signInPrompt"
+            components={[<a key="0" href="/login" className="text-keep-action underline-offset-4 hover:underline" />]}
+          />
         </p>
       ) : isAuthor ? (
         <p className="mb-3 rounded border border-keep-rule/40 bg-keep-panel/30 px-3 py-2 text-xs italic">
-          You can't review your own story. You can pin or hide any review below.
+          {t("reviews.cantReviewOwn")}
         </p>
       ) : page?.viewerHasReviewed ? (
         <p className="mb-3 rounded border border-keep-rule/40 bg-keep-panel/30 px-3 py-2 text-xs italic">
-          You've already reviewed this story. (Within 60 seconds of posting, you could still edit it.)
+          {t("reviews.alreadyReviewed")}
         </p>
       ) : canPostReview ? (
         <ReviewComposer storyId={storyId} onPosted={() => void load()} />
       ) : null}
 
       {page === null ? (
-        <p className="italic opacity-60">Loading reviews…</p>
+        <p className="italic opacity-60">{t("reviews.loading")}</p>
       ) : page.reviews.length === 0 ? (
-        <p className="italic opacity-60">No reviews yet. Be the first to share what you think.</p>
+        <p className="italic opacity-60">{t("reviews.empty")}</p>
       ) : (
         <ul className="space-y-4">
           {page.reviews.map((rev) => (
@@ -117,6 +123,7 @@ function ReviewComposer({
   storyId: string;
   onPosted: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [rating, setRating] = useState<number>(5);
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
@@ -137,7 +144,7 @@ function ReviewComposer({
       setRating(5);
       onPosted();
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "post failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.postFailed"));
     } finally {
       setBusy(false);
     }
@@ -146,7 +153,7 @@ function ReviewComposer({
   return (
     <form onSubmit={submit} className="mb-4 rounded border border-keep-rule/40 bg-keep-panel/30 p-3">
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-xs uppercase tracking-widest opacity-70">Your rating</span>
+        <span className="text-xs uppercase tracking-widest opacity-70">{t("reviews.yourRating")}</span>
         <StarPicker value={rating} onChange={setRating} />
       </div>
       <textarea
@@ -154,18 +161,18 @@ function ReviewComposer({
         onChange={(e) => setBody(e.target.value)}
         maxLength={STORY_REVIEW_BODY_MAX}
         rows={4}
-        placeholder="Your thoughts on this story (optional)…"
+        placeholder={t("reviews.bodyPlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm"
       />
       {err ? <p className="mt-1 text-xs text-keep-accent">{err}</p> : null}
       <div className="mt-2 flex items-center justify-between text-[10px] opacity-60">
-        <span>You have 60 seconds to edit after posting.</span>
+        <span>{t("reviews.editWindowNote")}</span>
         <button
           type="submit"
           disabled={busy || rating < 1}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          {busy ? "Posting…" : "Post review"}
+          {busy ? t("reviews.posting") : t("reviews.postReview")}
         </button>
       </div>
     </form>
@@ -173,15 +180,16 @@ function ReviewComposer({
 }
 
 function StarPicker({ value, onChange }: { value: number; onChange: (n: number) => void }) {
+  const { t } = useTranslation("scriptorium");
   return (
-    <div className="flex items-center gap-0.5" role="radiogroup" aria-label="Star rating">
+    <div className="flex items-center gap-0.5" role="radiogroup" aria-label={t("reviews.starRatingAria")}>
       {[1, 2, 3, 4, 5].map((n) => (
         <button
           key={n}
           type="button"
           role="radio"
           aria-checked={value === n}
-          aria-label={`${n} star${n === 1 ? "" : "s"}`}
+          aria-label={t("reviews.stars", { count: n })}
           onClick={() => onChange(n)}
           className={`text-lg leading-none transition ${
             n <= value ? "text-amber-400" : "text-keep-muted hover:text-amber-300"
@@ -213,6 +221,7 @@ function ReviewCard({
   busy: boolean;
   setBusy: (b: boolean) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const me = useChat((s) => s.me);
   const [replying, setReplying] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -237,7 +246,7 @@ function ReviewCard({
       if (!r.ok) throw new Error(await readError(r));
       onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "moderate failed");
+      setErr(e instanceof Error ? e.message : t("errors.moderateFailed"));
     } finally {
       setBusy(false);
     }
@@ -256,14 +265,14 @@ function ReviewCard({
       if (!r.ok) throw new Error(await readError(r));
       onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "moderate failed");
+      setErr(e instanceof Error ? e.message : t("errors.moderateFailed"));
     } finally {
       setBusy(false);
     }
   }
 
   async function deleteSelf() {
-    if (!window.confirm("Delete your review?")) return;
+    if (!window.confirm(t("reviews.confirmDeleteReview"))) return;
     setBusy(true);
     setErr(null);
     try {
@@ -271,7 +280,7 @@ function ReviewCard({
       if (!r.ok) throw new Error(await readError(r));
       onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "delete failed");
+      setErr(e instanceof Error ? e.message : t("errors.deleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -303,14 +312,14 @@ function ReviewCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-sm">
             <span className="font-semibold">{authorName}</span>
-            {review.reviewer.characterId ? <span className="text-[10px] italic opacity-70">(as character)</span> : null}
+            {review.reviewer.characterId ? <span className="text-[10px] italic opacity-70">{t("asCharacter")}</span> : null}
             <Stars rating={review.rating} />
           </div>
           <div className="text-[10px] opacity-60">
-            {new Date(review.createdAt).toLocaleString()}
-            {review.updatedAt !== review.createdAt ? " · edited" : null}
-            {review.pinnedByAuthor ? <span className="ml-1 text-amber-400"> · pinned</span> : null}
-            {review.hiddenByAuthor ? <span className="ml-1 text-keep-accent"> · hidden by author</span> : null}
+            {formatDateTime(review.createdAt)}
+            {review.updatedAt !== review.createdAt ? ` · ${t("reviews.edited")}` : null}
+            {review.pinnedByAuthor ? <span className="ml-1 text-amber-400"> · {t("reviews.pinnedChip")}</span> : null}
+            {review.hiddenByAuthor ? <span className="ml-1 text-keep-accent"> · {t("reviews.hiddenChip")}</span> : null}
           </div>
         </div>
         <div className="flex shrink-0 gap-1 text-[10px]">
@@ -321,18 +330,18 @@ function ReviewCard({
                 onClick={togglePin}
                 disabled={busy}
                 className="rounded border border-keep-rule px-1.5 py-0.5 text-keep-muted hover:text-keep-text"
-                title={review.pinnedByAuthor ? "Unpin" : "Pin to top"}
+                title={review.pinnedByAuthor ? t("reviews.unpin") : t("reviews.pinToTop")}
               >
-                {review.pinnedByAuthor ? "Unpin" : "Pin"}
+                {review.pinnedByAuthor ? t("reviews.unpin") : t("reviews.pin")}
               </button>
               <button
                 type="button"
                 onClick={toggleHide}
                 disabled={busy}
                 className="rounded border border-keep-rule px-1.5 py-0.5 text-keep-muted hover:text-keep-text"
-                title={review.hiddenByAuthor ? "Unhide" : "Hide from public view"}
+                title={review.hiddenByAuthor ? t("reviews.unhide") : t("reviews.hideFromPublic")}
               >
-                {review.hiddenByAuthor ? "Unhide" : "Hide"}
+                {review.hiddenByAuthor ? t("reviews.unhide") : t("reviews.hide")}
               </button>
             </>
           ) : null}
@@ -343,9 +352,9 @@ function ReviewCard({
                   type="button"
                   onClick={() => setEditing((v) => !v)}
                   className="rounded border border-keep-rule px-1.5 py-0.5 text-keep-muted hover:text-keep-text"
-                  title="Edit (60s grace)"
+                  title={t("reviews.editGraceTitle")}
                 >
-                  Edit
+                  {t("edit")}
                 </button>
               ) : null}
               <button
@@ -353,9 +362,9 @@ function ReviewCard({
                 onClick={deleteSelf}
                 disabled={busy}
                 className="rounded border border-keep-accent/40 px-1.5 py-0.5 text-keep-accent"
-                title="Delete your review"
+                title={t("reviews.deleteReviewTitle")}
               >
-                Delete
+                {t("common:delete")}
               </button>
             </>
           ) : me && !isStoryAuthor ? (
@@ -367,7 +376,7 @@ function ReviewCard({
               storyId={storyId}
               targetKind="review"
               targetId={review.id}
-              label="Report this review"
+              label={t("reviews.reportReview")}
               compact
             />
           ) : null}
@@ -389,7 +398,7 @@ function ReviewCard({
           dangerouslySetInnerHTML={{ __html: review.bodyHtml }}
         />
       ) : (
-        <p className="text-xs italic opacity-60">(No prose, rating only.)</p>
+        <p className="text-xs italic opacity-60">{t("reviews.noProse")}</p>
       )}
 
       {review.replies.length > 0 ? (
@@ -421,7 +430,7 @@ function ReviewCard({
               onClick={() => setReplying(true)}
               className="text-[11px] text-keep-muted underline-offset-2 hover:text-keep-text hover:underline"
             >
-              Reply
+              {t("reviews.reply")}
             </button>
           )}
         </div>
@@ -431,8 +440,9 @@ function ReviewCard({
 }
 
 function Stars({ rating }: { rating: number }) {
+  const { t } = useTranslation("scriptorium");
   return (
-    <span aria-label={`${rating} of 5 stars`} className="text-[12px] text-amber-400">
+    <span aria-label={t("reviews.starsOf5", { rating })} className="text-[12px] text-amber-400">
       {"★".repeat(rating)}<span className="opacity-30">{"★".repeat(5 - rating)}</span>
     </span>
   );
@@ -449,6 +459,7 @@ function ReviewEditForm({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [rating, setRating] = useState<number>(review.rating);
   const [body, setBody] = useState(review.bodyHtml);
   const [busy, setBusy] = useState(false);
@@ -467,7 +478,7 @@ function ReviewEditForm({
       if (!r.ok) throw new Error(await readError(r));
       onSaved();
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "save failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -476,7 +487,7 @@ function ReviewEditForm({
   return (
     <form onSubmit={submit} className="rounded border border-keep-action/40 bg-keep-action/5 p-2">
       <div className="mb-2 flex items-center gap-2">
-        <span className="text-xs uppercase tracking-widest opacity-70">Rating</span>
+        <span className="text-xs uppercase tracking-widest opacity-70">{t("reviews.ratingLabel")}</span>
         <StarPicker value={rating} onChange={setRating} />
       </div>
       <textarea
@@ -493,14 +504,14 @@ function ReviewEditForm({
           onClick={onClose}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:text-keep-text"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           disabled={busy}
           className="rounded border border-keep-action bg-keep-action px-3 py-0.5 font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          {busy ? "Saving…" : "Save"}
+          {busy ? t("common:saving") : t("common:save")}
         </button>
       </div>
     </form>
@@ -518,6 +529,7 @@ function ReplyComposer({
   onClose: () => void;
   onPosted: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -536,7 +548,7 @@ function ReplyComposer({
       if (!r.ok) throw new Error(await readError(r));
       onPosted();
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "post failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.postFailed"));
     } finally {
       setBusy(false);
     }
@@ -550,7 +562,7 @@ function ReplyComposer({
         rows={2}
         maxLength={STORY_REVIEW_REPLY_MAX}
         autoFocus
-        placeholder="Reply…"
+        placeholder={t("reviews.replyPlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm"
       />
       {err ? <p className="mt-1 text-xs text-keep-accent">{err}</p> : null}
@@ -560,14 +572,14 @@ function ReplyComposer({
           onClick={onClose}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:text-keep-text"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           disabled={busy || !body.trim()}
           className="rounded border border-keep-action bg-keep-action px-3 py-0.5 font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          {busy ? "Posting…" : "Post reply"}
+          {busy ? t("reviews.posting") : t("reviews.postReply")}
         </button>
       </div>
     </form>
@@ -585,13 +597,14 @@ function ReplyRow({
   reply: StoryReviewReply;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const me = useChat((s) => s.me);
   const isOwn = !!me && me.id === reply.replyer.userId;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function deleteSelf() {
-    if (!window.confirm("Delete your reply?")) return;
+    if (!window.confirm(t("reviews.confirmDeleteReply"))) return;
     setBusy(true);
     setErr(null);
     try {
@@ -599,7 +612,7 @@ function ReplyRow({
       if (!r.ok) throw new Error(await readError(r));
       onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "delete failed");
+      setErr(e instanceof Error ? e.message : t("errors.deleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -620,14 +633,14 @@ function ReplyRow({
           <img src={avatar} alt="" className="h-4 w-4 rounded-full object-cover" referrerPolicy="no-referrer" />
         ) : null}
         <span className="font-semibold">{name}</span>
-        <span className="text-[10px] opacity-60">{new Date(reply.createdAt).toLocaleString()}</span>
+        <span className="text-[10px] opacity-60">{formatDateTime(reply.createdAt)}</span>
         {isOwn ? (
           <button
             type="button"
             onClick={deleteSelf}
             disabled={busy}
             className="ml-auto rounded border border-keep-accent/40 px-1 text-[10px] text-keep-accent"
-            title="Delete your reply"
+            title={t("reviews.deleteReplyTitle")}
           >
             ×
           </button>

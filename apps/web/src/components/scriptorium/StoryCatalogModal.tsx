@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type {
   StoryCard,
   StoryCatalogPage,
@@ -9,6 +11,7 @@ import type {
   StoryStatus,
 } from "@thekeep/shared";
 import {
+  SFW_RATINGS,
   STORY_CANONICAL_TAGS,
   STORY_CONTENT_WARNINGS,
   STORY_GENRES,
@@ -17,6 +20,7 @@ import {
 } from "@thekeep/shared";
 import { useChat } from "../../state/store.js";
 import { readError } from "../../lib/http.js";
+import { formatNumber } from "../../lib/intlFormat.js";
 import { buyStoryCopy } from "../../lib/storyCopies.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
@@ -40,6 +44,7 @@ interface Props {
  * Modeled after WorldCatalogModal but flat (no inline room-link button).
  */
 export function StoryCatalogModal({ initialTab = "find", onClose, onOpenStory, onOpenEditor }: Props) {
+  const { t } = useTranslation("scriptorium");
   const me = useChat((s) => s.me);
   const [tab, setTab] = useState<CatalogTab>(initialTab);
 
@@ -50,17 +55,17 @@ export function StoryCatalogModal({ initialTab = "find", onClose, onOpenStory, o
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">Scriptorium</h2>
+          <h2 className="font-action text-lg">{t("catalog.title")}</h2>
           <CloseButton onClick={onClose} />
         </header>
 
         <nav className="flex shrink-0 items-center gap-1 border-b border-keep-rule bg-keep-panel/30 px-3 py-1.5 text-sm">
-          <TabButton active={tab === "find"} onClick={() => setTab("find")}>Find Stories</TabButton>
+          <TabButton active={tab === "find"} onClick={() => setTab("find")}>{t("catalog.tabs.find")}</TabButton>
           {me ? (
             <>
-              <TabButton active={tab === "my"} onClick={() => setTab("my")}>My Stories</TabButton>
-              <TabButton active={tab === "reading"} onClick={() => setTab("reading")}>Reading</TabButton>
-              <TabButton active={tab === "following"} onClick={() => setTab("following")}>Following</TabButton>
+              <TabButton active={tab === "my"} onClick={() => setTab("my")}>{t("catalog.tabs.my")}</TabButton>
+              <TabButton active={tab === "reading"} onClick={() => setTab("reading")}>{t("catalog.tabs.reading")}</TabButton>
+              <TabButton active={tab === "following"} onClick={() => setTab("following")}>{t("catalog.tabs.following")}</TabButton>
             </>
           ) : null}
           <span className="flex-1" />
@@ -70,7 +75,7 @@ export function StoryCatalogModal({ initialTab = "find", onClose, onOpenStory, o
               onClick={() => onOpenEditor(null)}
               className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg hover:brightness-110"
             >
-              + New Story
+              {t("catalog.newStory")}
             </button>
           ) : null}
         </nav>
@@ -132,6 +137,7 @@ const DEFAULT_FIND_FILTERS: FindFilters = {
 };
 
 function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, card?: StoryCard) => void; authed: boolean }) {
+  const { t } = useTranslation("scriptorium");
   const [filters, setFilters] = useState<FindFilters>(DEFAULT_FIND_FILTERS);
   const [page, setPage] = useState(0);
   const [entries, setEntries] = useState<StoryCard[]>([]);
@@ -179,7 +185,7 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
       setCopyEnabled(j.copyEnabled);
       setOwnedIds(new Set(j.ownedStoryIds));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -209,7 +215,7 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
 
         {!loading && entries.length === 0 ? (
           <p className="p-4 italic text-keep-muted">
-            {total === 0 ? "No stories match your filters." : "Nothing on this page, try Reset."}
+            {total === 0 ? t("catalog.noMatches") : t("catalog.emptyPage")}
           </p>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -231,7 +237,9 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
             page nav at the foot where readers expect it. */}
         <div className="sticky bottom-0 -mx-3 -mb-3 mt-4 flex items-center justify-between border-t border-keep-rule bg-keep-bg/95 px-3 py-2 text-xs text-keep-muted backdrop-blur">
           <span>
-            {loading ? "Loading..." : `${total.toLocaleString()} ${total === 1 ? "story" : "stories"}`}
+            {loading
+              ? t("common:loadingDots")
+              : t("catalog.storyCount", { count: total, formatted: formatNumber(total) })}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -240,16 +248,16 @@ function FindStoriesTab({ onOpenStory, authed }: { onOpenStory: (id: string, car
               onClick={() => setPage(Math.max(0, page - 1))}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 disabled:opacity-40"
             >
-              Prev
+              {t("catalog.prev")}
             </button>
-            <span className="tabular-nums">Page {page + 1}</span>
+            <span className="tabular-nums">{t("catalog.pageN", { page: page + 1 })}</span>
             <button
               type="button"
               disabled={!hasMore || loading}
               onClick={() => setPage(page + 1)}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 disabled:opacity-40"
             >
-              Next
+              {t("catalog.next")}
             </button>
           </div>
         </div>
@@ -269,90 +277,98 @@ function FilterRail({
   onReset: () => void;
   authed: boolean;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [tagDraft, setTagDraft] = useState("");
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
+  // Mirror of the server catalog clamp (age plan Phase 4): under-18
+  // viewers only ever receive G / PG / PG-13 cards, so the adult
+  // rating filters would always come back empty — drop the options.
+  const ratingOptions = viewerIsAdult
+    ? STORY_RATINGS
+    : STORY_RATINGS.filter((r) => (SFW_RATINGS as readonly string[]).includes(r));
   return (
     <div className="space-y-3">
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Search</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("catalog.search")}</label>
         <input
           value={filters.q}
           onChange={(e) => onChange({ ...filters, q: e.target.value })}
-          placeholder="title, summary, tag..."
+          placeholder={t("catalog.searchPlaceholder")}
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         />
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Sort by</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("catalog.sortBy")}</label>
         <select
           value={filters.sort}
           onChange={(e) => onChange({ ...filters, sort: e.target.value as FindFilters["sort"] })}
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         >
-          <option value="updated">Recently updated</option>
-          <option value="published">Newly published</option>
-          <option value="most_read">Most read</option>
-          <option value="applause">Most applauded</option>
+          <option value="updated">{t("catalog.sort.updated")}</option>
+          <option value="published">{t("catalog.sort.published")}</option>
+          <option value="most_read">{t("catalog.sort.mostRead")}</option>
+          <option value="applause">{t("catalog.sort.applause")}</option>
         </select>
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Genre</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("genre")}</label>
         <select
           value={filters.genre}
           onChange={(e) => onChange({ ...filters, genre: e.target.value as StoryGenre | "" })}
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         >
-          <option value="">All genres</option>
+          <option value="">{t("catalog.allGenres")}</option>
           {STORY_GENRES.map((g) => (
-            <option key={g} value={g}>{labelForGenre(g)}</option>
+            <option key={g} value={g}>{labelForGenre(t, g)}</option>
           ))}
         </select>
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Rating</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("rating.legend")}</label>
         <select
           value={filters.rating}
           onChange={(e) => onChange({ ...filters, rating: e.target.value as StoryRating | "" })}
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         >
-          <option value="">All ratings</option>
-          {STORY_RATINGS.map((r) => (
+          <option value="">{t("catalog.allRatings")}</option>
+          {ratingOptions.map((r) => (
             <option key={r} value={r}>{r}</option>
           ))}
         </select>
         {!authed ? (
-          <p className="mt-1 text-[10px] italic text-keep-muted">Sign in to see NC-17 stories.</p>
+          <p className="mt-1 text-[10px] italic text-keep-muted">{t("catalog.signInNc17")}</p>
         ) : null}
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Status</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("statusLabel")}</label>
         <select
           value={filters.status}
           onChange={(e) => onChange({ ...filters, status: e.target.value as StoryStatus | "" })}
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         >
-          <option value="">Any</option>
+          <option value="">{t("catalog.anyStatus")}</option>
           {STORY_STATUSES.filter((s) => s !== "draft").map((s) => (
-            <option key={s} value={s}>{labelForStatus(s)}</option>
+            <option key={s} value={s}>{labelForStatus(t, s)}</option>
           ))}
         </select>
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Tags</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("catalog.tags")}</label>
         <div className="mt-1 flex flex-wrap gap-1">
-          {filters.tags.map((t) => (
+          {filters.tags.map((tag) => (
             <button
-              key={t}
+              key={tag}
               type="button"
-              onClick={() => onChange({ ...filters, tags: filters.tags.filter((x) => x !== t) })}
+              onClick={() => onChange({ ...filters, tags: filters.tags.filter((x) => x !== tag) })}
               className="rounded-full border border-keep-action bg-keep-action/15 px-2 py-0.5 text-[11px] text-keep-action"
-              title="Remove"
+              title={t("remove")}
             >
-              {t} ×
+              {tag} ×
             </button>
           ))}
         </div>
@@ -363,31 +379,31 @@ function FilterRail({
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.preventDefault();
-                const t = tagDraft.trim().toLowerCase();
-                if (t && !filters.tags.includes(t)) onChange({ ...filters, tags: [...filters.tags, t] });
+                const tag = tagDraft.trim().toLowerCase();
+                if (tag && !filters.tags.includes(tag)) onChange({ ...filters, tags: [...filters.tags, tag] });
                 setTagDraft("");
               }
             }}
-            placeholder="add tag + Enter"
+            placeholder={t("catalog.addTagPlaceholder")}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
           />
         </div>
         <div className="mt-1 flex flex-wrap gap-1">
-          {STORY_CANONICAL_TAGS.filter((t) => !filters.tags.includes(t)).slice(0, 8).map((t) => (
+          {STORY_CANONICAL_TAGS.filter((tag) => !filters.tags.includes(tag)).slice(0, 8).map((tag) => (
             <button
-              key={t}
+              key={tag}
               type="button"
-              onClick={() => onChange({ ...filters, tags: [...filters.tags, t] })}
+              onClick={() => onChange({ ...filters, tags: [...filters.tags, tag] })}
               className="rounded-full border border-keep-rule bg-keep-bg px-2 py-0.5 text-[10px] text-keep-muted hover:text-keep-text"
             >
-              {t}
+              {tag}
             </button>
           ))}
         </div>
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Hide stories tagged</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("catalog.hideTagged")}</label>
         <div className="mt-1 flex flex-wrap gap-1">
           {STORY_CONTENT_WARNINGS.map((c) => {
             const on = filters.exclude.includes(c);
@@ -417,7 +433,7 @@ function FilterRail({
         onClick={onReset}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs text-keep-muted hover:text-keep-text"
       >
-        Reset filters
+        {t("catalog.resetFilters")}
       </button>
     </div>
   );
@@ -434,6 +450,7 @@ function MyStoriesTab({
   onOpenStory: (id: string) => void;
   onOpenEditor: (id: string | null) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [stories, setStories] = useState<StoryCard[] | null>(null);
   const [invites, setInvites] = useState<StoryCollaboratorInvite[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -454,7 +471,7 @@ function MyStoriesTab({
         setInvites(j2.invites);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     }
   }
 
@@ -464,20 +481,20 @@ function MyStoriesTab({
     return <p className="p-3 text-xs text-keep-accent">{error}</p>;
   }
   if (stories === null) {
-    return <p className="p-3 italic text-keep-muted">Loading...</p>;
+    return <p className="p-3 italic text-keep-muted">{t("common:loadingDots")}</p>;
   }
   return (
     <div className="p-3">
       {invites.length > 0 ? <PendingInvites invites={invites} onChanged={load} /> : null}
       {stories.length === 0 && invites.length === 0 ? (
         <div className="p-6 text-center text-sm text-keep-muted">
-          You haven't started a story yet.{" "}
+          {t("catalog.noStoriesYet")}{" "}
           <button
             type="button"
             onClick={() => onOpenEditor(null)}
             className="ml-1 text-keep-action underline-offset-4 hover:underline"
           >
-            Write your first one.
+            {t("catalog.writeFirst")}
           </button>
         </div>
       ) : (
@@ -509,10 +526,11 @@ function PendingInvites({
   invites: StoryCollaboratorInvite[];
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   return (
     <section className="mb-4 rounded border border-keep-accent/40 bg-keep-accent/5 p-3">
       <h3 className="mb-2 font-action text-base text-keep-accent">
-        Pending invites ({invites.length})
+        {t("catalog.pendingInvites", { count: invites.length })}
       </h3>
       <ul className="space-y-2">
         {invites.map((inv) => (
@@ -530,6 +548,7 @@ function InviteRow({
   invite: StoryCollaboratorInvite;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -541,7 +560,7 @@ function InviteRow({
       if (!r.ok) throw new Error(await readError(r));
       onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : `${kind} failed`);
+      setErr(e instanceof Error ? e.message : (kind === "accept" ? t("errors.acceptFailed") : t("errors.declineFailed")));
     } finally {
       setBusy(false);
     }
@@ -553,13 +572,13 @@ function InviteRow({
         <div className="flex items-center gap-1.5">
           <b>{invite.storyTitle}</b>
           <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${inviteRoleClass(invite.role)}`}>
-            {inviteRoleLabel(invite.role)}
+            {t(`roles.${invite.role}`)}
           </span>
         </div>
         <div className="text-[11px] text-keep-muted">
-          by {invite.storyAuthorUsername}
+          {t("byAuthor", { name: invite.storyAuthorUsername })}
           {invite.invitedByUsername && invite.invitedByUsername !== invite.storyAuthorUsername ? (
-            <> · invited by {invite.invitedByUsername}</>
+            <> · {t("catalog.invitedByFrag", { name: invite.invitedByUsername })}</>
           ) : null}
         </div>
       </div>
@@ -570,7 +589,7 @@ function InviteRow({
           disabled={busy}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          Accept
+          {t("invites.accept")}
         </button>
         <button
           type="button"
@@ -578,7 +597,7 @@ function InviteRow({
           disabled={busy}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs text-keep-muted hover:text-keep-text"
         >
-          Decline
+          {t("invites.decline")}
         </button>
       </div>
       {err ? <p className="w-full text-xs text-keep-accent">{err}</p> : null}
@@ -586,9 +605,6 @@ function InviteRow({
   );
 }
 
-function inviteRoleLabel(r: StoryCollaboratorRole): string {
-  return r === "co_author" ? "Co-author" : r.charAt(0).toUpperCase() + r.slice(1);
-}
 function inviteRoleClass(r: StoryCollaboratorRole): string {
   switch (r) {
     case "reader":    return "bg-keep-muted/25 text-keep-muted";
@@ -602,20 +618,22 @@ function inviteRoleClass(r: StoryCollaboratorRole): string {
  * ============================================================= */
 
 function ReadingTab({ onOpenStory }: { onOpenStory: (id: string) => void }) {
+  const { t } = useTranslation("scriptorium");
   return (
     <SimpleStoryList
       endpoint="/me/stories/reading"
-      emptyMessage="Stories you start reading will show up here so you can pick them back up."
+      emptyMessage={t("catalog.readingEmpty")}
       onOpenStory={onOpenStory}
     />
   );
 }
 
 function FollowingTab({ onOpenStory }: { onOpenStory: (id: string) => void }) {
+  const { t } = useTranslation("scriptorium");
   return (
     <SimpleStoryList
       endpoint="/me/stories/following"
-      emptyMessage="Stories you follow will show up here. Open a story and tap Follow to get notified on new chapters."
+      emptyMessage={t("catalog.followingEmpty")}
       onOpenStory={onOpenStory}
     />
   );
@@ -635,6 +653,7 @@ function SimpleStoryList({
   emptyMessage: string;
   onOpenStory: (id: string) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [stories, setStories] = useState<StoryCard[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -647,12 +666,13 @@ function SimpleStoryList({
         return (await r.json()) as { stories: StoryCard[] };
       })
       .then((j) => { if (!cancelled) setStories(j.stories); })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : t("errors.loadFailed")); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endpoint]);
 
   if (error) return <p className="p-3 text-xs text-keep-accent">{error}</p>;
-  if (stories === null) return <p className="p-3 italic text-keep-muted">Loading...</p>;
+  if (stories === null) return <p className="p-3 italic text-keep-muted">{t("common:loadingDots")}</p>;
   if (stories.length === 0) {
     return <p className="p-6 text-center text-sm text-keep-muted">{emptyMessage}</p>;
   }
@@ -682,6 +702,7 @@ function StoryCardTile({
    *  "My Stories" tab (you can't buy your own book). */
   buy?: { price: number; enabled: boolean; owned: boolean };
 }) {
+  const { t } = useTranslation("scriptorium");
   const authorName = card.author.characterName ?? card.author.masterUsername;
   // OOC ↔ character partition: a story attributed to a character
   // voice never falls back to the master's avatar. Initials of the
@@ -720,7 +741,7 @@ function StoryCardTile({
         // modal and forced scrolling per card. 3:2 keeps the card
         // compact and the title visible.
         className="relative block aspect-[3/2] w-full overflow-hidden bg-keep-bg/60 text-left"
-        title={lockedForAnon ? "Rated NC-17, log in or register to read" : undefined}
+        title={lockedForAnon ? t("catalog.nc17CardTitle") : undefined}
       >
         {card.coverImageUrl ? (
           <img
@@ -748,10 +769,10 @@ function StoryCardTile({
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 bg-rose-950/60 px-4 text-center opacity-0 transition group-hover:opacity-100">
             <span className="text-2xl" aria-hidden>🔒</span>
             <span className="text-xs font-semibold uppercase tracking-widest text-rose-100">
-              NC-17, explicit content
+              {t("catalog.nc17Explicit")}
             </span>
             <span className="text-[11px] text-rose-100/85">
-              Log in or register to read
+              {t("loginToRead")}
             </span>
           </div>
         ) : null}
@@ -768,17 +789,17 @@ function StoryCardTile({
           {authorAvatar ? (
             <img src={authorAvatar} alt="" className="h-4 w-4 rounded-full object-cover" referrerPolicy="no-referrer" />
           ) : null}
-          <span>by {authorName}</span>
-          {card.author.characterId ? <span className="italic">(as character)</span> : null}
+          <span>{t("byAuthor", { name: authorName })}</span>
+          {card.author.characterId ? <span className="italic">{t("asCharacter")}</span> : null}
         </div>
 
         <div className="flex flex-wrap items-center gap-1 text-[10px] uppercase tracking-widest">
           <span className={`rounded border px-1.5 py-0.5 ${ratingBadgeClass(card.rating)}`}>{card.rating}</span>
           <span className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-keep-muted">
-            {labelForGenre(card.genre)}
+            {labelForGenre(t, card.genre)}
           </span>
           <span className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-keep-muted">
-            {labelForStatus(card.status)}
+            {labelForStatus(t, card.status)}
           </span>
           {card.visibility !== "public" ? (
             <span className="rounded border border-keep-accent/40 bg-keep-accent/10 px-1.5 py-0.5 text-keep-accent">
@@ -786,8 +807,8 @@ function StoryCardTile({
             </span>
           ) : null}
           {card.buyToRead ? (
-            <span className="rounded border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 text-amber-300" title="Buy a copy to read past a sample">
-              🔒 Buy to read
+            <span className="rounded border border-amber-500/50 bg-amber-500/10 px-1.5 py-0.5 text-amber-300" title={t("catalog.buyToReadChipTitle")}>
+              {t("catalog.buyToReadChip")}
             </span>
           ) : null}
         </div>
@@ -797,9 +818,9 @@ function StoryCardTile({
         ) : null}
 
         <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-keep-muted">
-          <span><b className="text-keep-text">{card.totalChapters}</b> ch</span>
-          <span><b className="text-keep-text">{card.totalWords.toLocaleString()}</b> w</span>
-          {card.readerCount > 0 ? <span><b className="text-keep-text">{card.readerCount}</b> readers</span> : null}
+          <span><b className="text-keep-text">{card.totalChapters}</b> {t("catalog.chAbbrev")}</span>
+          <span><b className="text-keep-text">{formatNumber(card.totalWords)}</b> {t("catalog.wAbbrev")}</span>
+          {card.readerCount > 0 ? <span><b className="text-keep-text">{card.readerCount}</b> {t("catalog.readersLabel")}</span> : null}
           {card.applauseCount > 0 ? <span>👏 {card.applauseCount}</span> : null}
           {card.avgRating != null ? <span>★ {card.avgRating.toFixed(1)}</span> : null}
         </div>
@@ -810,7 +831,7 @@ function StoryCardTile({
             onClick={edit.onClick}
             className="mt-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px] text-keep-muted hover:text-keep-text"
           >
-            Edit
+            {t("edit")}
           </button>
         ) : null}
 
@@ -845,6 +866,7 @@ function CatalogBuyButton({
   enabled: boolean;
   initialOwned: boolean;
 }) {
+  const { t } = useTranslation("scriptorium");
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const setNotice = useChat((s) => s.setNotice);
   const [owned, setOwned] = useState(initialOwned);
@@ -853,7 +875,7 @@ function CatalogBuyButton({
   if (owned) {
     return (
       <span className="mt-1 inline-flex items-center justify-center gap-1 self-start rounded border border-keep-action/40 bg-keep-action/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action">
-        <span aria-hidden>📚</span> In your Library
+        <span aria-hidden>📚</span> {t("buy.inLibrary")}
       </span>
     );
   }
@@ -868,10 +890,10 @@ function CatalogBuyButton({
       setOwned(true);
       setNotice({
         code: "scriptorium_copy",
-        message: `Copy added to your Library (−${res.price}). Open it to show it on your profile.`,
+        message: t("buy.copyAddedProfile", { price: res.price }),
       });
     } catch (err) {
-      setNotice({ code: "scriptorium_copy_err", message: err instanceof Error ? err.message : "Purchase failed." });
+      setNotice({ code: "scriptorium_copy_err", message: err instanceof Error ? err.message : t("errors.purchaseFailed") });
     } finally {
       setBusy(false);
     }
@@ -882,30 +904,20 @@ function CatalogBuyButton({
       type="button"
       onClick={buy}
       disabled={busy}
-      title={`Buy a copy for ${price}, adds it to your profile Library`}
+      title={t("buy.buyTitle", { price })}
       className="mt-1 inline-flex items-center justify-center gap-1 self-start rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action transition hover:bg-keep-action/25 disabled:opacity-50"
     >
-      <span aria-hidden>📖</span> Buy · {price}
+      <span aria-hidden>📖</span> {t("buy.buyLabel", { price })}
     </button>
   );
 }
 
-function labelForGenre(g: StoryGenre): string {
-  switch (g) {
-    case "scifi": return "Sci-fi";
-    case "slice-of-life": return "Slice of life";
-    default: return g.charAt(0).toUpperCase() + g.slice(1).replace(/-/g, " ");
-  }
+function labelForGenre(t: TFunction<"scriptorium">, g: StoryGenre): string {
+  return t(`genres.${g}`);
 }
 
-function labelForStatus(s: StoryStatus): string {
-  switch (s) {
-    case "in_progress": return "In progress";
-    case "complete": return "Complete";
-    case "hiatus": return "Hiatus";
-    case "abandoned": return "Abandoned";
-    case "draft": return "Draft";
-  }
+function labelForStatus(t: TFunction<"scriptorium">, s: StoryStatus): string {
+  return t(`statuses.${s}`);
 }
 
 function ratingBadgeClass(r: StoryRating): string {

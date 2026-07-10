@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { fetchPublicAffiliates, type PublicAffiliateCard } from "../../lib/affiliates.js";
 import { SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 import { AffiliateCard } from "./AffiliateCard.js";
@@ -17,6 +18,7 @@ import { SubmitAffiliateButton } from "./AffiliateSubmitPortal.js";
  * section only bails on a hard fetch failure.
  */
 export function RoleplayCommunities({ onNavigate: _onNavigate }: { onNavigate?: (path: string) => void } = {}) {
+  const { t } = useTranslation("marketing");
   const [cards, setCards] = useState<PublicAffiliateCard[] | null>(null);
   const [failed, setFailed] = useState(false);
 
@@ -42,20 +44,20 @@ export function RoleplayCommunities({ onNavigate: _onNavigate }: { onNavigate?: 
     .slice(0, 6);
 
   return (
-    <section aria-label="Top Communities" className={`w-full p-4 sm:p-5 ${SPLASH_PANEL} ${SPLASH_PANEL_HOVER}`}>
+    <section aria-label={t("topCommunitiesTitle")} className={`w-full p-4 sm:p-5 ${SPLASH_PANEL} ${SPLASH_PANEL_HOVER}`}>
       <header className="mb-3 text-center">
-        <h3 className="font-action text-lg text-keep-text">Top Communities</h3>
+        <h3 className="font-action text-lg text-keep-text">{t("topCommunitiesTitle")}</h3>
         <p className="mt-0.5 text-xs text-keep-muted">
-          The most active communities in our network. Take a look, and list your own.
+          {t("communities.sub")}
         </p>
       </header>
 
       {loading ? (
-        <p className="py-4 text-center text-xs italic text-keep-muted">Gathering communities…</p>
+        <p className="py-4 text-center text-xs italic text-keep-muted">{t("gathering")}</p>
       ) : isEmpty ? (
         <div className="rounded border border-dashed border-keep-rule bg-keep-panel/30 px-4 py-6 text-center">
           <p className="text-xs text-keep-muted">
-            No communities listed yet. Be the first to list yours.
+            {t("communities.emptyRail")}
           </p>
         </div>
       ) : (
@@ -72,7 +74,7 @@ export function RoleplayCommunities({ onNavigate: _onNavigate }: { onNavigate?: 
           href="/top-communities"
           className="text-xs text-keep-muted underline underline-offset-4 hover:text-keep-action"
         >
-          Browse all communities →
+          {t("communities.browseAll")}
         </a>
       </div>
     </section>

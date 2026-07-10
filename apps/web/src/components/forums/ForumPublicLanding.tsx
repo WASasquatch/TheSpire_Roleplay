@@ -18,10 +18,12 @@
  * link promised. The forum's own theme applies to this card only.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Landmark, Lock, LogIn, MessagesSquare, UserPlus, Users } from "lucide-react";
 import { normalizeTheme } from "@thekeep/shared";
 import type { ChatMessage, ForumDetail, ThreadCategory } from "@thekeep/shared";
 import { fetchForumDetail, fetchRoomCategories, locateForumTopic, relTime } from "../../lib/forums.js";
+import { formatDate, formatNumber } from "../../lib/intlFormat.js";
 import { DEFAULT_STYLE_KEY } from "../../lib/ornaments/index.js";
 import { forumBannerInk, inkClass, isDarkSurface, themeStyle, useActiveTheme, useImageAverageColor, useScopedRootDesign } from "../../lib/theme.js";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
@@ -71,6 +73,7 @@ function PublicBoardReader({ detail, slug, initialTopicId, initialPostId, onRequ
   initialPostId: string | null;
   onRequireLogin: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const [boardId, setBoardId] = useState<string>(detail.boards[0]?.roomId ?? "");
   const [cats, setCats] = useState<ThreadCategory[] | null>(null);
   const [buckets, setBuckets] = useState<Record<string, AnonBucket>>({});
@@ -188,7 +191,7 @@ function PublicBoardReader({ detail, slug, initialTopicId, initialPostId, onRequ
   }, [messages]);
 
   if (detail.boards.length === 0) {
-    return <p className="px-3 text-sm italic text-keep-muted">No boards raised yet.</p>;
+    return <p className="px-3 text-sm italic text-keep-muted">{t("landing.noBoards")}</p>;
   }
   const active = detail.boards.find((b) => b.roomId === boardId) ?? detail.boards[0]!;
 
@@ -201,14 +204,14 @@ function PublicBoardReader({ detail, slug, initialTopicId, initialPostId, onRequ
               key={b.roomId}
               type="button"
               onClick={() => setBoardId(b.roomId)}
-              title={b.locked ? `${b.name} (members only)` : b.name}
+              title={b.locked ? t("shared.boardMembersOnlyTitle", { name: b.name }) : b.name}
               className={`inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs ${
                 b.roomId === active.roomId
                   ? "border-keep-action text-keep-action"
                   : "border-keep-rule text-keep-muted hover:text-keep-text"
               }`}
             >
-              {b.locked ? <Lock className="h-3 w-3 shrink-0" aria-label="Members only" /> : null}
+              {b.locked ? <Lock className="h-3 w-3 shrink-0" aria-label={t("shared.membersOnly")} /> : null}
               {b.name}
               <span className="ml-0.5 text-[10px] text-keep-rule">{b.topicCount}</span>
             </button>
@@ -220,9 +223,9 @@ function PublicBoardReader({ detail, slug, initialTopicId, initialPostId, onRequ
           <div aria-hidden className="flex h-14 w-14 items-center justify-center rounded-full border border-keep-accent/40 bg-keep-accent/10">
             <Lock className="h-6 w-6 text-keep-accent" aria-hidden="true" />
           </div>
-          <p className="text-sm font-semibold text-keep-text">This board is for members only</p>
+          <p className="text-sm font-semibold text-keep-text">{t("landing.lockedBoardTitle")}</p>
           <p className="max-w-sm text-xs text-keep-muted">
-            Sign in to read it, and if the forum takes applications, apply to join from this page.
+            {t("landing.lockedBoardHint")}
           </p>
           <button
             type="button"
@@ -230,7 +233,7 @@ function PublicBoardReader({ detail, slug, initialTopicId, initialPostId, onRequ
             className="inline-flex items-center gap-1.5 rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
           >
             <LogIn className="h-3.5 w-3.5" aria-hidden="true" />
-            Sign in
+            {t("landing.signIn")}
           </button>
         </div>
       ) : (
@@ -277,8 +280,9 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
   initialPostId?: string | null;
   onNavigate: (path: string) => void;
 }) {
+  const { t } = useTranslation("forums");
   const branding = useChat((s) => s.branding);
-  const siteName = branding.siteName || "The Spire";
+  const siteName = branding.siteName || t("common:appName");
   const [detail, setDetail] = useState<ForumDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -286,8 +290,9 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
     let alive = true;
     fetchForumDetail(slug)
       .then((d) => { if (alive) setDetail(d); })
-      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : t("shared.loadFailed")); });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   const forumTheme = useMemo(() => {
@@ -328,7 +333,7 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
         <Landmark className="h-8 w-8 text-keep-muted" aria-hidden="true" />
         <p className="text-sm text-keep-text">{err}</p>
         <a href="/" className="text-xs uppercase tracking-widest text-keep-action hover:underline">
-          To {siteName}
+          {t("landing.toSite", { siteName })}
         </a>
       </div>
     );
@@ -336,14 +341,14 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
   if (!detail) {
     return (
       <div className="relative z-10 flex min-h-screen items-center justify-center">
-        <p className="text-sm italic text-keep-muted">Opening the forum…</p>
+        <p className="text-sm italic text-keep-muted">{t("landing.opening")}</p>
       </div>
     );
   }
 
   const gateCopy = detail.postingMode === "application"
-    ? `This forum accepts new members by application. Create a free ${siteName} account, then send the keeper a short application for posting access.`
-    : `Create a free ${siteName} account to read the boards, post, and join the conversation.`;
+    ? t("landing.gateApplication", { siteName })
+    : t("landing.gateOpen", { siteName });
 
   const stats = detail.stats;
   const onlineTotal = stats ? stats.online.publicNames.length + stats.online.hiddenCount : 0;
@@ -408,13 +413,13 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
                 className={`mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] md:text-xs ${bannerInk ? "" : inkClass.meta(heroDark)}`}
                 style={bannerInk?.meta}
               >
-                <span>kept by <span className={bannerInk ? "" : inkClass.strong(heroDark)} style={bannerInk?.strong}>{detail.ownerUsername}</span></span>
+                <span><Trans t={t} i18nKey="shared.keptBy" values={{ name: detail.ownerUsername }} components={{ v: <span className={bannerInk ? "" : inkClass.strong(heroDark)} style={bannerInk?.strong} /> }} /></span>
                 <span className="inline-flex items-center gap-1">
                   <Users className="h-3 w-3" aria-hidden="true" />
-                  {detail.memberCount > 0 ? `${detail.memberCount} member${detail.memberCount === 1 ? "" : "s"}` : "open to all"}
+                  {detail.memberCount > 0 ? t("shared.memberCount", { count: detail.memberCount }) : t("shared.openToAll")}
                 </span>
-                {detail.lastActivityAt ? <span>active {relTime(detail.lastActivityAt)}</span> : null}
-                <span>founded {new Date(detail.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</span>
+                {detail.lastActivityAt ? <span>{t("landing.activeAgo", { time: relTime(detail.lastActivityAt) })}</span> : null}
+                <span>{t("shared.foundedDate", { date: formatDate(detail.createdAt, { year: "numeric", month: "long", day: "numeric" }) })}</span>
               </p>
             </div>
           </div>
@@ -425,7 +430,7 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
               <p className="font-action text-lg text-keep-text md:text-xl">
-                {detail.postingMode === "application" ? "Apply for a seat at this table" : "Join the conversation"}
+                {detail.postingMode === "application" ? t("landing.applyHeadline") : t("landing.joinHeadline")}
               </p>
               <p className="mt-1 max-w-2xl text-xs leading-relaxed text-keep-muted md:text-sm">{gateCopy}</p>
             </div>
@@ -436,7 +441,7 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
                 className="flex items-center gap-2 rounded border border-keep-action bg-keep-action px-5 py-2.5 text-sm font-semibold uppercase tracking-widest text-keep-bg shadow-lg transition-transform hover:scale-[1.03]"
               >
                 <UserPlus className="h-4 w-4" aria-hidden="true" />
-                {detail.postingMode === "application" ? "Register to apply" : "Create your account"}
+                {detail.postingMode === "application" ? t("landing.registerToApply") : t("landing.createAccount")}
               </button>
               <button
                 type="button"
@@ -444,7 +449,7 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
                 className="flex items-center gap-2 rounded border border-keep-action bg-keep-action/15 px-4 py-2.5 text-sm font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/25"
               >
                 <LogIn className="h-4 w-4" aria-hidden="true" />
-                Log in
+                {t("landing.logIn")}
               </button>
             </div>
           </div>
@@ -474,24 +479,23 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
                   onRequireLogin={() => go("/login")}
                 />
                 <p className="mt-3 px-3 text-[11px] italic text-keep-muted">
-                  Reading as a guest.{" "}
-                  <button type="button" onClick={() => go("/login")} className="text-keep-action underline hover:text-keep-action/80">
-                    Log in
-                  </button>{" "}
-                  or{" "}
-                  <button type="button" onClick={() => go("/register")} className="text-keep-action underline hover:text-keep-action/80">
-                    create an account
-                  </button>{" "}
-                  to post{detail.postingMode === "application" ? " - posting also needs the keeper's approval" : ""}.
+                  <Trans
+                    t={t}
+                    i18nKey={detail.postingMode === "application" ? "landing.guestStripApplication" : "landing.guestStripOpen"}
+                    components={{
+                      login: <button type="button" onClick={() => go("/login")} className="text-keep-action underline hover:text-keep-action/80" />,
+                      register: <button type="button" onClick={() => go("/register")} className="text-keep-action underline hover:text-keep-action/80" />,
+                    }}
+                  />
                 </p>
               </section>
             ) : (
               /* Boards index (teaser). Reading needs an account, which
                  keeps the landing light AND gives registration a reason. */
               <section className="px-5 py-5 md:px-8">
-                <h2 className="mb-3 text-xs uppercase tracking-widest text-keep-muted">Boards</h2>
+                <h2 className="mb-3 text-xs uppercase tracking-widest text-keep-muted">{t("landing.boardsHeading")}</h2>
                 {detail.boards.length === 0 ? (
-                  <p className="text-sm italic text-keep-muted">No boards raised yet.</p>
+                  <p className="text-sm italic text-keep-muted">{t("landing.noBoards")}</p>
                 ) : (
                   <ul className="space-y-2">
                     {detail.boards.map((b) => (
@@ -506,16 +510,16 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
                         <span className="shrink-0 text-right text-[11px] tabular-nums text-keep-muted">
                           <span className="flex items-center justify-end gap-1">
                             <Lock className="h-3 w-3" aria-hidden="true" />
-                            {b.topicCount} topic{b.topicCount === 1 ? "" : "s"}
+                            {t("landing.topicCount", { count: b.topicCount })}
                           </span>
-                          {b.lastActivityAt ? <span className="block">active {relTime(b.lastActivityAt)}</span> : null}
+                          {b.lastActivityAt ? <span className="block">{t("landing.activeAgo", { time: relTime(b.lastActivityAt) })}</span> : null}
                         </span>
                       </li>
                     ))}
                   </ul>
                 )}
                 <p className="mt-4 text-[11px] italic text-keep-muted">
-                  Sign in to read the boards{detail.postingMode === "application" ? " - posting needs the keeper's approval" : " and join the conversation"}.
+                  {detail.postingMode === "application" ? t("landing.teaserApplication") : t("landing.teaserOpen")}
                 </p>
               </section>
             )}
@@ -530,45 +534,49 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
           <div className="border-b border-keep-rule/50 pb-2">
             <h2 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest">
               <Users className="h-3.5 w-3.5" aria-hidden="true" />
-              Who's online
+              {t("footer.whosOnline")}
             </h2>
             {!stats || onlineTotal === 0 ? (
-              <p className="italic">The halls are quiet right now - be the spark.</p>
+              <p className="italic">{t("footer.quietSpark")}</p>
             ) : (
               <p>
                 {stats.online.publicNames.length > 0 ? (
                   <span className="text-keep-text">{stats.online.publicNames.join(", ")}</span>
                 ) : null}
                 {stats.online.hiddenCount > 0
-                  ? `${stats.online.publicNames.length > 0 ? " and " : ""}${stats.online.hiddenCount} keeping to the shadows`
+                  ? t(stats.online.publicNames.length > 0 ? "footer.hiddenAfterNames" : "footer.hidden", { count: stats.online.hiddenCount })
                   : ""}
                 {stats.online.browsingRecently > 0
-                  ? ` · ${stats.online.browsingRecently} browsing this forum right now`
+                  ? t("footer.browsing", { count: stats.online.browsingRecently })
                   : ""}
               </p>
             )}
           </div>
           {stats ? (
             <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-b border-keep-rule/50 py-2">
-              <span className="font-semibold uppercase tracking-widest">Board statistics</span>
-              <span><b className="tabular-nums text-keep-text">{stats.topics.toLocaleString()}</b> topics</span>
-              <span><b className="tabular-nums text-keep-text">{stats.replies.toLocaleString()}</b> replies</span>
-              <span><b className="tabular-nums text-keep-text">{stats.writers.toLocaleString()}</b> writers</span>
+              <span className="font-semibold uppercase tracking-widest">{t("footer.boardStatistics")}</span>
+              <span><Trans t={t} i18nKey="footer.statTopics" values={{ value: formatNumber(stats.topics) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
+              <span><Trans t={t} i18nKey="footer.statReplies" values={{ value: formatNumber(stats.replies) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
+              <span><Trans t={t} i18nKey="footer.statWriters" values={{ value: formatNumber(stats.writers) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
               <span>
-                <b className="tabular-nums text-keep-text">{detail.memberCount > 0 ? detail.memberCount.toLocaleString() : "-"}</b>{" "}
-                {detail.memberCount > 0 ? "members" : "open to all"}
+                <Trans
+                  t={t}
+                  i18nKey={detail.memberCount > 0 ? "footer.statMembers" : "footer.statOpenToAll"}
+                  values={{ value: detail.memberCount > 0 ? formatNumber(detail.memberCount) : "-" }}
+                  components={{ n: <b className="tabular-nums text-keep-text" /> }}
+                />
               </span>
-              <span><b className="tabular-nums text-keep-text">{onlineTotal.toLocaleString()}</b> online now</span>
+              <span><Trans t={t} i18nKey="footer.statOnline" values={{ value: formatNumber(onlineTotal) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
             </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 pt-2">
-            <span>Posting: <span className="text-keep-text">{detail.postingMode === "application" ? "by application" : "open to all"}</span></span>
-            <span>Keeper: <span className="text-keep-text">{detail.ownerUsername}</span></span>
+            <span>{t("footer.posting")} <span className="text-keep-text">{detail.postingMode === "application" ? t("footer.byApplication") : t("shared.openToAll")}</span></span>
+            <span>{t("footer.keeperLabel")} <span className="text-keep-text">{detail.ownerUsername}</span></span>
             {detail.linkedWorld ? (
-              <span>World: <span className="text-keep-text">{detail.linkedWorld.name}</span></span>
+              <span>{t("footer.worldLabel")} <span className="text-keep-text">{detail.linkedWorld.name}</span></span>
             ) : null}
-            <span>Founded: <span className="text-keep-text">{new Date(detail.createdAt).toLocaleDateString()}</span></span>
-            <span className="ml-auto">Hosted by <span className="text-keep-text">{siteName}</span></span>
+            <span>{t("footer.foundedLabel")} <span className="text-keep-text">{formatDate(detail.createdAt)}</span></span>
+            <span className="ml-auto"><Trans t={t} i18nKey="footer.hostedBy" values={{ siteName }} components={{ v: <span className="text-keep-text" /> }} /></span>
           </div>
         </footer>
       </article>

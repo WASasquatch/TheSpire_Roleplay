@@ -34,6 +34,7 @@ import { notifyUser, emitServersChanged } from "../servers/notifications.js";
 import {
   findServerLanding,
 } from "../realtime/broadcast.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 import {
   auditServer,
@@ -111,11 +112,11 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     if (!(await hasPermission(me, "apply_create_server", db))) {
-      reply.code(403); return { error: "Server creation applications aren't available to you." };
+      reply.code(403); return { error: tFor(me.locale, "errors:server.servers.applicationsNotAvailable") };
     }
     let body: z.infer<typeof submitBody>;
     try { body = submitBody.parse(req.body); }
-    catch { reply.code(400); return { error: `Check the fields: name ${SERVER_NAME_MIN}-${SERVER_NAME_MAX} chars, purpose ${SERVER_PURPOSE_MIN}-${SERVER_PURPOSE_MAX} chars.` }; }
+    catch { reply.code(400); return { error: tFor(me.locale, "errors:server.applications.checkFields", { nameMin: SERVER_NAME_MIN, nameMax: SERVER_NAME_MAX, purposeMin: SERVER_PURPOSE_MIN, purposeMax: SERVER_PURPOSE_MAX }) }; }
 
     // Registration-rules agreement gate (migration 0301). When the admin has
     // authored non-empty serverRegistrationRulesHtml, the applicant must tick
@@ -127,13 +128,13 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
       .from(siteSettings).where(eq(siteSettings.id, "singleton")).limit(1))[0]?.html ?? "";
     const rulesInForce = rulesHtml.trim().length > 0;
     if (rulesInForce && body.agreedToRules !== true) {
-      reply.code(400); return { error: "Please read and agree to the server registration rules before applying." };
+      reply.code(400); return { error: tFor(me.locale, "errors:server.servers.agreeRules") };
     }
 
     const slug = normalizeServerSlug(body.requestedSlug);
-    if (!slug) { reply.code(400); return { error: "That slug isn't usable - lowercase letters, numbers, and _ only (3-40), and not a reserved word." }; }
+    if (!slug) { reply.code(400); return { error: tFor(me.locale, "errors:server.applications.slugUnusable") }; }
     const used = await slugInUse(slug);
-    if (used) { reply.code(409); return { error: used === "taken" ? "That slug already belongs to a server." : "Another pending application already claims that slug." }; }
+    if (used) { reply.code(409); return { error: used === "taken" ? tFor(me.locale, "errors:server.servers.slugTaken") : tFor(me.locale, "errors:server.servers.slugPendingClaim") }; }
 
     const pendingMine = (await db.select({ id: serverCreationApplications.id })
       .from(serverCreationApplications)
@@ -141,7 +142,7 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
         eq(serverCreationApplications.applicantUserId, me.id),
         eq(serverCreationApplications.status, "pending"),
       )).limit(1))[0];
-    if (pendingMine) { reply.code(409); return { error: "You already have an application pending review." }; }
+    if (pendingMine) { reply.code(409); return { error: tFor(me.locale, "errors:server.applications.pendingReview") }; }
 
     const lastRejected = (await db.select()
       .from(serverCreationApplications)
@@ -157,7 +158,7 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
       if (elapsed < cooldownMs) {
         const daysLeft = Math.ceil((cooldownMs - elapsed) / 86_400_000);
         reply.code(429);
-        return { error: `Your last application was declined recently - you can re-apply in ${daysLeft} day${daysLeft === 1 ? "" : "s"}.` };
+        return { error: tFor(me.locale, "errors:server.applications.declinedRecently", { count: daysLeft }) };
       }
     }
 
@@ -165,7 +166,7 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
       .where(and(eq(servers.ownerUserId, me.id), sql`${servers.status} != 'archived'`, eq(servers.isSystem, false))))[0]?.n ?? 0;
     if (owned >= SERVER_MAX_OWNED_DEFAULT) {
       reply.code(409);
-      return { error: `You already keep ${owned} servers - the limit is ${SERVER_MAX_OWNED_DEFAULT}.` };
+      return { error: tFor(me.locale, "errors:server.servers.ownedLimit", { owned, limit: SERVER_MAX_OWNED_DEFAULT }) };
     }
 
     const id = nanoid();
@@ -181,7 +182,7 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
         agreedAt: rulesInForce ? new Date() : null,
       });
     } catch {
-      reply.code(409); return { error: "You already have an application pending review." };
+      reply.code(409); return { error: tFor(me.locale, "errors:server.applications.pendingReview") };
     }
     const rows = await db.select().from(serverCreationApplications)
       .where(eq(serverCreationApplications.id, id)).limit(1);
@@ -215,35 +216,41 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
     if (!me) { reply.code(401); return { error: "auth" }; }
     const a = await serverAuthority(db, me, req.params.id);
     if (!a.server) { reply.code(404); return { error: "no server" }; }
-    if (a.ban) { reply.code(403); return { error: "You are banned from this server." }; }
+    if (a.ban) { reply.code(403); return { error: tFor(me.locale, "errors:server.servers.banned") }; }
+    // HARD age gate (age plan, Phase 2): an 18+ community accepts no minor
+    // members. A clear refusal (not a 404) so a shared join link fails
+    // comprehensibly — decision #3.
+    if (a.server.isNsfw && !me.isAdult) {
+      reply.code(403); return { error: tFor(me.locale, "errors:server.servers.adultsOnly"), code: "AGE_RESTRICTED" };
+    }
     // A suspended/banned server accepts no new members (only owner/staff may
     // touch it while it's under moderation). Blocks the "membership accrues on
     // a frozen server" gap; expired bans read as inactive so this no-ops.
     if (isServerModerationActive(a.server) && !a.isMod) {
       const notice = serverModerationNotice(a.server);
-      reply.code(403); return { error: notice?.message ?? "This server is unavailable.", code: notice?.code ?? null };
+      reply.code(403); return { error: notice?.message ?? tFor(me.locale, "errors:server.servers.unavailable"), code: notice?.code ?? null };
     }
     if (a.server.joinMode === "application") {
-      reply.code(409); return { error: "This server reviews applications. Apply to join instead." };
+      reply.code(409); return { error: tFor(me.locale, "errors:server.servers.reviewsApplications") };
     }
     if (a.server.joinMode === "invite") {
       if (a.role) return { ok: true }; // already enrolled (idempotent)
       let body: z.infer<typeof joinInviteBody>;
       try { body = joinInviteBody.parse(req.body ?? {}); }
-      catch { reply.code(400); return { error: "An invite code is required to join this server." }; }
+      catch { reply.code(400); return { error: tFor(me.locale, "errors:server.servers.inviteRequired") }; }
       const code = body.code.trim();
       // Validate: matches THIS server, live (not revoked/expired), under cap.
       // Claim the use inside a transaction so concurrent redemptions can't blow
       // past max_uses (the conditional UPDATE is the atomic gate).
       const invite = (await db.select().from(serverInvites)
         .where(and(eq(serverInvites.serverId, a.server.id), eq(serverInvites.code, code))).limit(1))[0];
-      if (!invite) { reply.code(404); return { error: "That invite code isn't valid for this server." }; }
-      if (invite.revokedAt) { reply.code(409); return { error: "That invite has been revoked." }; }
+      if (!invite) { reply.code(404); return { error: tFor(me.locale, "errors:server.servers.inviteInvalid") }; }
+      if (invite.revokedAt) { reply.code(409); return { error: tFor(me.locale, "errors:server.servers.inviteRevoked") }; }
       if (invite.expiresAt && +invite.expiresAt <= Date.now()) {
-        reply.code(409); return { error: "That invite has expired." };
+        reply.code(409); return { error: tFor(me.locale, "errors:server.servers.inviteExpired") };
       }
       if (invite.maxUses != null && invite.usedCount >= invite.maxUses) {
-        reply.code(409); return { error: "That invite has reached its use limit." };
+        reply.code(409); return { error: tFor(me.locale, "errors:server.servers.inviteUseLimit") };
       }
       let claimed = false;
       db.transaction((tx) => {
@@ -264,7 +271,7 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
           .onConflictDoNothing()
           .run();
       });
-      if (!claimed) { reply.code(409); return { error: "That invite is no longer usable." }; }
+      if (!claimed) { reply.code(409); return { error: tFor(me.locale, "errors:server.servers.inviteUnusable") }; }
       return { ok: true };
     }
     if (a.role) return { ok: true }; // already enrolled (idempotent)
@@ -281,12 +288,12 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
     const a = await serverAuthority(db, me, req.params.id);
     if (!a.server) { reply.code(404); return { error: "no server" }; }
     if (a.server.ownerUserId === me.id) {
-      reply.code(409); return { error: "The owner can't leave their own server. Transfer it first." };
+      reply.code(409); return { error: tFor(me.locale, "errors:server.servers.ownerCantLeave") };
     }
     if (a.server.isSystem) {
-      reply.code(409); return { error: "You can't leave the home server." };
+      reply.code(409); return { error: tFor(me.locale, "errors:server.servers.cantLeaveHome") };
     }
-    if (!a.role) { reply.code(409); return { error: "You're not a member here." }; }
+    if (!a.role) { reply.code(409); return { error: tFor(me.locale, "errors:server.membership.notMember") }; }
     await db.delete(serverMembers)
       .where(and(eq(serverMembers.serverId, a.server.id), eq(serverMembers.userId, me.id)));
     return { ok: true };
@@ -315,7 +322,7 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
     // Only a server you belong to can be your default — otherwise the profile
     // would anchor to a server you have no identity on. isMember folds in the
     // owner short-circuit + the system server's implicit membership.
-    if (!a.isMember) { reply.code(403); return { error: "You can only set a server you belong to as your default." }; }
+    if (!a.isMember) { reply.code(403); return { error: tFor(me.locale, "errors:server.servers.defaultMustBelong") }; }
     await db.update(users).set({ defaultServerId: a.server.id }).where(eq(users.id, me.id));
     await auditServer(db, {
       serverId: a.server.id, actorUserId: me.id, action: "server_favorite_set",
@@ -354,7 +361,13 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
     if (a.server && isServerModerationActive(a.server) && !a.isMod) {
       const notice = serverModerationNotice(a.server);
       reply.code(403);
-      return { error: notice?.message ?? "This server is unavailable.", code: notice?.code ?? null };
+      return { error: notice?.message ?? tFor(me.locale, "errors:server.servers.unavailable"), code: notice?.code ?? null };
+    }
+    // HARD age gate: minors can't even "visit" an 18+ community (the visit
+    // stamp + landing handoff is how the rail enters it).
+    if (a.server?.isNsfw && !me.isAdult) {
+      reply.code(403);
+      return { error: tFor(me.locale, "errors:server.servers.adultsOnly"), code: "AGE_RESTRICTED" };
     }
     const now = new Date();
     await db.insert(serverVisits)
@@ -422,6 +435,8 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
         themeJson: servers.themeJson,
         themeStyleKey: servers.themeStyleKey,
         createdAt: servers.createdAt,
+        isNsfw: servers.isNsfw,
+        sfwBannerUrl: servers.sfwBannerUrl,
       })
       .from(servers)
       .where(eq(servers.slug, slug))
@@ -447,7 +462,13 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
       name: s.name,
       tagline: s.tagline,
       descriptionHtml: s.descriptionHtml,
-      bannerImageUrl: s.bannerImageUrl,
+      // Public-safe branding (age plan, decision #10): this landing is
+      // ANONYMOUS, and anonymous can never see NSFW — an 18+ community's
+      // share page shows its public-safe banner, or no banner art at all
+      // (the client falls back to name + colors). Name/tagline stay: the
+      // page exists so shared links fail comprehensibly, with a join CTA
+      // the join route will still age-gate.
+      bannerImageUrl: s.isNsfw ? (s.sfwBannerUrl ?? null) : s.bannerImageUrl,
       bannerFocusY: s.bannerFocusY ?? 50,
       logoUrl: s.logoUrl,
       iconColor: s.iconColor,
@@ -455,6 +476,9 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
       memberCount,
       joinMode: s.joinMode,
       isSystem: !!s.isSystem,
+      // Surfaced so the public page can say "18+ community" plainly instead
+      // of showing minors a dead join button.
+      isNsfw: !!s.isNsfw,
       createdAt: +s.createdAt,
       themeJson: s.themeJson,
       themeStyleKey: s.themeStyleKey,
@@ -477,17 +501,21 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
       if (!me) { reply.code(401); return { error: "auth" }; }
       const a = await serverAuthority(db, me, req.params.id);
       if (!a.server) { reply.code(404); return { error: "no server" }; }
+      // HARD age gate: no minor applications to an 18+ community either.
+      if (a.server.isNsfw && !me.isAdult) {
+        reply.code(403); return { error: tFor(me.locale, "errors:server.servers.adultsOnly"), code: "AGE_RESTRICTED" };
+      }
       // No new applications to a suspended/banned server (only owner/staff may
       // touch it while under moderation). Expired bans read as inactive.
       if (isServerModerationActive(a.server) && !a.isMod) {
         const notice = serverModerationNotice(a.server);
-        reply.code(403); return { error: notice?.message ?? "This server is unavailable.", code: notice?.code ?? null };
+        reply.code(403); return { error: notice?.message ?? tFor(me.locale, "errors:server.servers.unavailable"), code: notice?.code ?? null };
       }
       if (a.server.joinMode !== "application") {
-        reply.code(409); return { error: "This server isn't application-gated." };
+        reply.code(409); return { error: tFor(me.locale, "errors:server.servers.notApplicationGated") };
       }
-      if (a.ban) { reply.code(403); return { error: "You are banned from this server." }; }
-      if (a.isMember) { reply.code(409); return { error: "You're already a member here." }; }
+      if (a.ban) { reply.code(403); return { error: tFor(me.locale, "errors:server.servers.banned") }; }
+      if (a.isMember) { reply.code(409); return { error: tFor(me.locale, "errors:server.membership.alreadyMember") }; }
       let body: z.infer<typeof applyBody>;
       try { body = applyBody.parse(req.body ?? {}); }
       catch { reply.code(400); return { error: "invalid body" }; }
@@ -499,7 +527,7 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
           eq(serverMembershipApplications.applicantUserId, me.id),
           eq(serverMembershipApplications.status, "pending"),
         )).limit(1))[0];
-      if (pending) { reply.code(409); return { error: "Your application is already pending." }; }
+      if (pending) { reply.code(409); return { error: tFor(me.locale, "errors:server.applications.alreadyPending") }; }
 
       try {
         await db.insert(serverMembershipApplications).values({
@@ -509,7 +537,7 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
           answer: body.answer?.trim() ? body.answer.trim() : null,
         });
       } catch {
-        reply.code(409); return { error: "Your application is already pending." };
+        reply.code(409); return { error: tFor(me.locale, "errors:server.applications.alreadyPending") };
       }
       return { ok: true };
     },

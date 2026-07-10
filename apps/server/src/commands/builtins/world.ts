@@ -2,6 +2,7 @@ import { and, eq, or, sql } from "drizzle-orm";
 import { roomMembers, roomWorldLinks, rooms, worldMembers, worlds } from "../../db/schema.js";
 import { broadcastRoomState, rebroadcastPresenceForUser } from "../../realtime/broadcast.js";
 import { hasPermission } from "../../auth/permissions.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -124,7 +125,7 @@ export const worldCommand: CommandHandler = {
         .where(eq(roomWorldLinks.roomId, ctx.roomId))
         .limit(1))[0];
       if (!link) {
-        return notice(ctx, "NO_WORLD", "No world is linked to this room. Use /world link <slug> to attach one.");
+        return notice(ctx, "NO_WORLD", tFor(ctx.user.locale, "commands:world.noneLinkedAttach"));
       }
       ctx.socket.emit("ui:hint", { kind: "open-world", worldId: link.worldId });
       return;
@@ -135,9 +136,9 @@ export const worldCommand: CommandHandler = {
       // users who don't want to risk the implicit `/world <slug>` shortcut
       // shadowing a slug that collides with a future verb.
       const slug = rest.join(" ").trim();
-      if (!slug) return notice(ctx, "VIEW_USAGE", "Usage: /world view <slug>");
+      if (!slug) return notice(ctx, "VIEW_USAGE", tFor(ctx.user.locale, "commands:world.viewUsage"));
       const w = await findVisibleWorldBySlug(ctx, slug);
-      if (!w) return notice(ctx, "NO_WORLD", `No visible world with slug "${slug}".`);
+      if (!w) return notice(ctx, "NO_WORLD", tFor(ctx.user.locale, "commands:world.notVisible", { slug }));
       ctx.socket.emit("ui:hint", { kind: "open-world", worldId: w.id });
       return;
     }
@@ -149,13 +150,13 @@ export const worldCommand: CommandHandler = {
 
     if (subLower === "link" || subLower === "attach") {
       if (!(await callerCanModerateRoom(ctx))) {
-        return notice(ctx, "PERM", "Only the room owner / mod / admin can link a world.");
+        return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:world.linkPermission"));
       }
       const slug = rest.join(" ").trim();
-      if (!slug) return notice(ctx, "LINK_USAGE", "Usage: /world link <slug>");
+      if (!slug) return notice(ctx, "LINK_USAGE", tFor(ctx.user.locale, "commands:world.linkUsage"));
       const w = await findOwnWorld(ctx, slug);
       if (!w) {
-        return notice(ctx, "NO_WORLD", `You don't own a world with slug "${slug}". Browse the catalog with /world catalog to use someone else's open world.`);
+        return notice(ctx, "NO_WORLD", tFor(ctx.user.locale, "commands:world.notOwned", { slug }));
       }
       await ctx.db
         .insert(roomWorldLinks)
@@ -170,11 +171,11 @@ export const worldCommand: CommandHandler = {
 
     if (subLower === "unlink" || subLower === "detach" || subLower === "remove") {
       if (!(await callerCanModerateRoom(ctx))) {
-        return notice(ctx, "PERM", "Only the room owner / mod / admin can unlink the world.");
+        return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:world.unlinkPermission"));
       }
       const r = await ctx.db.delete(roomWorldLinks).where(eq(roomWorldLinks.roomId, ctx.roomId));
       if (r.changes === 0) {
-        return notice(ctx, "NO_WORLD", "No world is linked to this room.");
+        return notice(ctx, "NO_WORLD", tFor(ctx.user.locale, "commands:world.noneLinked"));
       }
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
       return;
@@ -185,8 +186,8 @@ export const worldCommand: CommandHandler = {
       const w = await resolveWorldForMembership(ctx, slug);
       if (!w) {
         return notice(ctx, "NO_WORLD", slug
-          ? `No visible world with slug "${slug}".`
-          : "No world is linked to this room. Pass a slug, e.g. /world join darkrealm.");
+          ? tFor(ctx.user.locale, "commands:world.notVisible", { slug })
+          : tFor(ctx.user.locale, "commands:world.joinNoneLinked"));
       }
       const isOwner = w.ownerUserId === ctx.user.id;
       const isAdmin = !isOwner && (await hasPermission(ctx.user, "edit_others_world", ctx.db));
@@ -196,7 +197,7 @@ export const worldCommand: CommandHandler = {
         // `visibility = "open"` worlds, so the rest of the gating logic
         // below assumes the world is at least open.
         if (w.visibility !== "open") {
-          return notice(ctx, "NOT_OPEN", `"${w.name}" isn't open for community membership.`);
+          return notice(ctx, "NOT_OPEN", tFor(ctx.user.locale, "commands:world.notOpen", { name: w.name }));
         }
         // joinMode gate. Pre-0186 worlds default to "open" so the
         // missing-column fallback below behaves the same as the
@@ -208,7 +209,7 @@ export const worldCommand: CommandHandler = {
           return notice(
             ctx,
             "INVITE_ONLY",
-            `"${w.name}" is invite-only. The author adds members directly, ask them if you'd like in.`,
+            tFor(ctx.user.locale, "commands:world.inviteOnly", { name: w.name }),
           );
         }
         if (joinMode === "application") {
@@ -226,7 +227,7 @@ export const worldCommand: CommandHandler = {
           return notice(
             ctx,
             "APPLICATION_REQUIRED",
-            `"${w.name}" accepts new members by application. Opened the form for you.`,
+            tFor(ctx.user.locale, "commands:world.applicationRequired", { name: w.name }),
           );
         }
       }
@@ -246,7 +247,7 @@ export const worldCommand: CommandHandler = {
         ))
         .limit(1))[0];
       if (existing) {
-        return notice(ctx, "ALREADY_MEMBER", `You're already a member of "${w.name}" (as this identity).`);
+        return notice(ctx, "ALREADY_MEMBER", tFor(ctx.user.locale, "commands:world.alreadyMember", { name: w.name }));
       }
       await ctx.db.insert(worldMembers).values({
         worldId: w.id,
@@ -254,7 +255,7 @@ export const worldCommand: CommandHandler = {
         characterId: charId,
       });
       await rebroadcastSelfOccupancy(ctx);
-      return notice(ctx, "JOINED", `Joined "${w.name}".`);
+      return notice(ctx, "JOINED", tFor(ctx.user.locale, "commands:world.joined", { name: w.name }));
     }
 
     if (subLower === "leave") {
@@ -262,8 +263,8 @@ export const worldCommand: CommandHandler = {
       const w = await resolveWorldForMembership(ctx, slug);
       if (!w) {
         return notice(ctx, "NO_WORLD", slug
-          ? `No visible world with slug "${slug}".`
-          : "No world is linked to this room. Pass a slug, e.g. /world leave darkrealm.");
+          ? tFor(ctx.user.locale, "commands:world.notVisible", { slug })
+          : tFor(ctx.user.locale, "commands:world.leaveNoneLinked"));
       }
       const charId = ctx.user.activeCharacterId;
       const identityMatch = charId === null
@@ -277,10 +278,10 @@ export const worldCommand: CommandHandler = {
           identityMatch,
         ));
       if (r.changes === 0) {
-        return notice(ctx, "NOT_MEMBER", `You're not a member of "${w.name}" (as this identity).`);
+        return notice(ctx, "NOT_MEMBER", tFor(ctx.user.locale, "commands:world.notMember", { name: w.name }));
       }
       await rebroadcastSelfOccupancy(ctx);
-      return notice(ctx, "LEFT", `Left "${w.name}".`);
+      return notice(ctx, "LEFT", tFor(ctx.user.locale, "commands:world.left", { name: w.name }));
     }
 
     // `/world primary` was retired in migration 0187, primary world
@@ -305,11 +306,11 @@ export const worldCommand: CommandHandler = {
       return notice(
         ctx,
         "BAD_SUBCMD",
-        `"${sub}" isn't a /world subcommand or a visible world slug. Try /world, /world view <slug>, /world catalog, etc.`,
+        tFor(ctx.user.locale, "commands:world.badSubcommand", { arg: sub }),
       );
     }
 
-    return notice(ctx, "BAD_SUBCMD", "Try /world, /world <slug>, /world view <slug>, /world link <slug>, /world unlink, /world catalog, /world join, /world leave, or /world primary.");
+    return notice(ctx, "BAD_SUBCMD", tFor(ctx.user.locale, "commands:world.usage"));
   },
 };
 

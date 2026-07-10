@@ -1,5 +1,6 @@
 import { and, eq, sql } from "drizzle-orm";
 import { stories } from "../../db/schema.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -61,7 +62,7 @@ export const writeCommand: CommandHandler = {
         .where(and(eq(stories.authorUserId, ctx.user.id), sql`lower(${stories.slug}) = ${slug.toLowerCase()}`))
         .limit(1))[0];
       if (!s) {
-        return notice(ctx, "NO_STORY", `You don't have a story with slug "${slug}". /write new to start one.`);
+        return notice(ctx, "NO_STORY", tFor(ctx.user.locale, "commands:write.noStory", { slug }));
       }
       ctx.socket.emit("ui:hint", { kind: "open-story-editor", storyId: s.id });
       return;
@@ -91,7 +92,7 @@ export const storyCommand: CommandHandler = {
   ],
   async run(ctx) {
     const first = ctx.args[0];
-    if (!first) return notice(ctx, "USAGE", "Usage: /story <slug> [chapter <N>]");
+    if (!first) return notice(ctx, "USAGE", tFor(ctx.user.locale, "commands:story.usage"));
 
     let slugTokens = ctx.args.slice();
     let chapterIndex: number | undefined;
@@ -99,16 +100,16 @@ export const storyCommand: CommandHandler = {
     if (idx >= 0 && slugTokens[idx + 1]) {
       const n = parseInt(slugTokens[idx + 1]!, 10);
       if (!Number.isFinite(n) || n < 1) {
-        return notice(ctx, "CH_USAGE", "Chapter index must be a positive integer.");
+        return notice(ctx, "CH_USAGE", tFor(ctx.user.locale, "commands:story.chapterUsage"));
       }
       chapterIndex = n - 1;
       slugTokens = slugTokens.slice(0, idx);
     }
     const slug = slugTokens.join(" ").trim();
-    if (!slug) return notice(ctx, "USAGE", "Usage: /story <slug>");
+    if (!slug) return notice(ctx, "USAGE", tFor(ctx.user.locale, "commands:story.usageShort"));
 
     const s = await resolveStorySlug(ctx, slug);
-    if (!s) return notice(ctx, "NO_STORY", `No story with slug "${slug}".`);
+    if (!s) return notice(ctx, "NO_STORY", tFor(ctx.user.locale, "commands:story.notFound", { slug }));
     ctx.socket.emit("ui:hint", {
       kind: "open-story",
       storyId: s.id,
@@ -137,7 +138,7 @@ export const scriptoriumCommand: CommandHandler = {
     const head = (ctx.args[0] ?? "").toLowerCase();
     const tab = head === "my" || head === "reading" || head === "find" || head === "following" ? head : undefined;
     if (head && !tab) {
-      return notice(ctx, "USAGE", `Unknown tab "${head}". Try /scriptorium find | my | reading | following.`);
+      return notice(ctx, "USAGE", tFor(ctx.user.locale, "commands:scriptorium.unknownTab", { tab: head }));
     }
     ctx.socket.emit("ui:hint", tab ? { kind: "open-scriptorium", tab } : { kind: "open-scriptorium" });
   },

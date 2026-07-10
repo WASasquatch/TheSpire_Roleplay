@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { Trans, useTranslation } from "react-i18next";
 import type { ChatMessage, PermissionKey, PinnedMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, TourId, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
 import { arcadeGameByKey, DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
 // Heavy, authenticated-only surfaces are code-split (B1, plan.md §3) so
@@ -87,6 +88,13 @@ import { ActiveThemeContext, applyFontPrefs, applyTheme, useActiveTheme, type Ui
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, permission as notifPermission, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
+// `i18n` (the raw instance) is for strings built at EVENT time inside
+// long-lived socket/effect closures: it always reads the CURRENT language
+// without forcing `t` into effect deps (re-running the big socket effect
+// on a language flip would `socket.off(<event>)` listeners other
+// components registered). Render-path strings use `useTranslation` so a
+// language switch re-renders them live.
+import { applyServerLocale, i18n } from "./lib/i18n.js";
 import { identityArgFor } from "./lib/commandText.js";
 import { playAlert, playPing, playTap, playWhisper } from "./lib/sound.js";
 import { loadCachedActiveStyleKey, loadCachedActiveTheme, saveCachedActiveStyleKey, saveCachedActiveTheme, useChat, type SiteBranding } from "./state/store.js";
@@ -99,6 +107,7 @@ import { BootSplash, PublicViewerShell, UnauthRouter } from "./lib/unauthRouter.
 import { useRoomBannerDismissal } from "./lib/roomBannerDismissal.js";
 
 export function App() {
+  const { t } = useTranslation("notifications");
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const authChecked = useChat((s) => s.authChecked);
@@ -289,7 +298,7 @@ export function App() {
           // Clear the token before disconnecting so an in-flight reconnect
           // attempt doesn't carry the dead sid back to the server.
           clearSessionToken();
-          setKickReason("Your session expired due to inactivity. Please log in again.");
+          setKickReason(i18n.t("notifications:session.expired"));
           disconnectSocket();
           setMe(null);
         }
@@ -517,6 +526,20 @@ export function App() {
         .then((j) => {
           if (!j) return;
           if ("private" in j) {
+            // Age-restricted verdict (age plan Phase 1): the viewer is
+            // signed in but under 18 and the profile is marked 18+.
+            // Signing in again won't change that, so instead of leaving
+            // the pending hint dangling forever we surface the refusal as
+            // a notice toast and fall through to the normal app shell.
+            if (j.ageRestricted) {
+              useChat.getState().setNotice({
+                code: "AGE_RESTRICTED",
+                message: i18n.t("notifications:toast.ageRestrictedProfile"),
+              });
+              setPendingProfile(null);
+              setArrivedViaDeepLink(false);
+              return;
+            }
             // Still private after login (e.g. NSFW stub for some flow we
             // don't yet have); leave the hint up so the user can dismiss.
             return;
@@ -703,7 +726,7 @@ export function App() {
         <div className="fixed inset-0 z-40 flex items-center justify-center">
           <div className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-keep-muted">
             <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-keep-action" />
-            loading...
+            {t("app.loading")}
           </div>
         </div>
       </PublicViewerShell>
@@ -808,6 +831,7 @@ function samePermissions(
 }
 
 function Chat() {
+  const { t } = useTranslation("notifications");
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   // Branding lives in the global store; AdminPanel saves push into it
@@ -1046,7 +1070,7 @@ function Chat() {
     void resolveServerSlug(slug)
       .then((s) => {
         if (s) void enterServerById(s.id, s.name);
-        else setNotice({ code: "SERVER_LINK", message: "That server link is private or no longer exists." });
+        else setNotice({ code: "SERVER_LINK", message: i18n.t("notifications:toast.serverLinkGone") });
       })
       .catch(() => { /* non-fatal */ })
       .finally(() => { window.history.replaceState(null, "", "/"); });
@@ -1136,7 +1160,7 @@ function Chat() {
         // character; a bare username resolves the master account.
         void fetchSpotlightMember(t.scope, t.pick).then((m) => {
           if (!m) {
-            setNotice({ code: "NO_MEMBER", message: "No member to show right now." });
+            setNotice({ code: "NO_MEMBER", message: i18n.t("notifications:toast.noMemberToShow") });
             return;
           }
           socket.emit("profile:fetch", { username: m.token }, (res) => {
@@ -1150,7 +1174,7 @@ function Chat() {
         // Read `me` fresh from the store — this effect's deps are
         // [openEditor], so a closure-captured `me` would be stale.
         if (!useChat.getState().me?.permissions.includes("use_arcade")) {
-          setNotice({ code: "NO_PERMISSION", message: "The Spire Arcade isn't available to you." });
+          setNotice({ code: "NO_PERMISSION", message: i18n.t("notifications:toast.arcadeUnavailable") });
           return;
         }
         setArcadeOpen(true);
@@ -1160,7 +1184,7 @@ function Chat() {
         const perms = useChat.getState().me?.permissions ?? [];
         const game = arcadeGameByKey(t.game);
         if (!game || !perms.includes("use_arcade") || !perms.includes(game.permission)) {
-          setNotice({ code: "NO_PERMISSION", message: "That game isn't available to you." });
+          setNotice({ code: "NO_PERMISSION", message: i18n.t("notifications:toast.gameUnavailable") });
           return;
         }
         // Open the game's window directly (the window/server enforce the
@@ -1191,7 +1215,7 @@ function Chat() {
         // we surface a gentle notice instead of a silent no-op.
         void fetchStoryBrief(t.ref).then((brief) => {
           if (!brief) {
-            setNotice({ code: "NO_STORY", message: "That story isn't available to you." });
+            setNotice({ code: "NO_STORY", message: i18n.t("notifications:toast.storyUnavailable") });
             return;
           }
           setStoryReader({ storyId: brief.id });
@@ -1207,7 +1231,7 @@ function Chat() {
         // silent no-op.
         void fetchRoomBrief(t.ref).then((brief) => {
           if (!brief) {
-            setNotice({ code: "NO_ROOM", message: "That room isn't available to you." });
+            setNotice({ code: "NO_ROOM", message: i18n.t("notifications:toast.roomUnavailable") });
             return;
           }
           onRoomClick(brief.id);
@@ -1534,22 +1558,22 @@ function Chat() {
    * default. The first match wins so the most specific context shows.
    */
   useEffect(() => {
-    const siteName = branding.siteName || "The Spire";
+    const siteName = branding.siteName || t("common:appName");
     let title: string;
     if (openProfile) {
       const name = openProfile.kind === "master"
         ? openProfile.profile.username
         : openProfile.profile.name;
-      title = `${name} - Roleplay Profile · ${siteName}`;
+      title = t("tabTitle.profile", { name, siteName });
     } else if (worldViewerId) {
-      title = `Roleplay World · ${siteName}`;
+      title = t("tabTitle.world", { siteName });
     } else if (storyReader) {
-      title = `Story · Scriptorium · ${siteName}`;
+      title = t("tabTitle.story", { siteName });
     } else {
-      title = `${siteName} - Roleplay Chat & Collaborative Writing`;
+      title = t("tabTitle.default", { siteName });
     }
     document.title = title;
-  }, [branding.siteName, openProfile, worldViewerId, storyReader]);
+  }, [branding.siteName, openProfile, worldViewerId, storyReader, t]);
 
   /**
    * Resolve and apply the caller's *active* theme: the active character's
@@ -1576,6 +1600,7 @@ function Chat() {
           styleKey?: string | null;
           uiFontFamily?: string | null;
           uiFontScale?: UiFontScale | null;
+          locale?: string | null;
           activeCharacterId: string | null;
           activeCharacterName?: string | null;
           notifyPref?: NotifyPref;
@@ -1589,6 +1614,10 @@ function Chat() {
           disableBorderStyles?: boolean;
           disableInlineAvatars?: boolean;
           defaultForumId?: string | null;
+          isAdult?: boolean;
+          hideNsfw?: boolean;
+          isolateFromAdults?: boolean;
+          birthdate?: string | null;
           publicProfileBgUrl?: string | null;
           publicProfileBgMode?: "cover" | "contain" | "tile" | "stretch";
           welcome?: { html: string; hash: string } | null;
@@ -1691,6 +1720,16 @@ function Chat() {
           // Default forum (the Forums catalog lands here when opened without
           // a deep-link). Synced across devices via /me/profile.
           useChat.getState().setDefaultForumId(u.defaultForumId ?? null);
+          // Viewer age context (age-restriction plan Phase 0). Cosmetic
+          // mirror only — the server enforces every gate; the client reads
+          // this to hide controls a minor can never use. Absent fields
+          // (older server bundle) fall back to the adult defaults.
+          useChat.getState().setViewerAge({
+            isAdult: u.isAdult ?? true,
+            hideNsfw: u.hideNsfw ?? false,
+            isolateFromAdults: u.isolateFromAdults ?? false,
+            birthdate: u.birthdate ?? null,
+          });
           // Admin-configured input caps. Composers (chat, DM, forum
           // topic title, bio editor) read these from the store so a
           // tuning change picks up on the next /me/profile load
@@ -1720,6 +1759,11 @@ function Chat() {
               ? u.uiFontScale
               : null,
           );
+          // Saved UI language (users.locale). Seeds the store's localePref
+          // and, when it differs from the active language, flips i18next
+          // live so the account's choice follows the user across devices.
+          // Null = "System default" - the boot-time detection stands.
+          applyServerLocale(u.locale ?? null);
           // Server-side gating: only present when there's an unseen
           // welcome to surface. Dismissal flips the user's stored hash
           // server-side, so re-fetches stop returning this field.
@@ -2091,7 +2135,7 @@ function Chat() {
         characterId: null,
         displayName: "system",
         kind: "system",
-        body: `${r.displayName} sent you a friend request. Open Messages to accept or decline.`,
+        body: i18n.t("notifications:system.friendRequest", { name: r.displayName }),
         color: null,
         createdAt: Date.now(),
       });
@@ -2365,7 +2409,11 @@ function Chat() {
         characterId: null,
         displayName: "system",
         kind: "system",
-        body: `✦ ${ev.authorDisplayName} published "${ev.chapterTitle}" of ${ev.storyTitle}.`,
+        body: i18n.t("notifications:system.chapterPublished", {
+          author: ev.authorDisplayName,
+          chapter: ev.chapterTitle,
+          story: ev.storyTitle,
+        }),
         color: null,
         createdAt: Date.now(),
       });
@@ -2478,7 +2526,7 @@ function Chat() {
       // contract that protects DMs / friends / userlists. The
       // notification tag still keys on the master username so
       // duplicate browser toasts collapse correctly.
-      const body = `${displayName} is online.`;
+      const body = i18n.t("notifications:system.watchOnline", { name: displayName });
       const id = `watch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const roomId = useChat.getState().currentRoomId;
       if (roomId) {
@@ -2489,13 +2537,13 @@ function Chat() {
           characterId: null,
           displayName: "system",
           kind: "system",
-          body: `☆ ${body}`,
+          body: i18n.t("notifications:system.watchOnlineLine", { name: displayName }),
           color: null,
           createdAt: Date.now(),
         });
       }
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        try { new Notification("Watching", { body, icon: "/favicon.ico", tag: `watch-${username}` }); }
+        try { new Notification(i18n.t("notifications:system.watchingTitle"), { body, icon: "/favicon.ico", tag: `watch-${username}` }); }
         catch { /* ignore */ }
       }
     });
@@ -2575,7 +2623,7 @@ function Chat() {
       // specific reason already landed via session:kicked (the server
       // sends both; the specific one must win the splash banner).
       if (useChat.getState().kickReason) return;
-      setKickReason("Your session expired due to inactivity. Please log in again.");
+      setKickReason(i18n.t("notifications:session.expired"));
       disconnectSocket();
       setMe(null);
     });
@@ -2677,7 +2725,7 @@ function Chat() {
             try {
               const r = await fetch(fullUrl, { credentials: "include" });
               if (!r.ok) {
-                setNotice({ code: "EXPORT_FAILED", message: "Couldn't generate the chat export. Try a shorter range." });
+                setNotice({ code: "EXPORT_FAILED", message: i18n.t("notifications:toast.exportFailed") });
                 return;
               }
               const blob = await r.blob();
@@ -2690,7 +2738,7 @@ function Chat() {
               a.remove();
               setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
             } catch {
-              setNotice({ code: "EXPORT_FAILED", message: "Couldn't generate the chat export. Try a shorter range." });
+              setNotice({ code: "EXPORT_FAILED", message: i18n.t("notifications:toast.exportFailed") });
             }
           })();
           break;
@@ -2710,14 +2758,14 @@ function Chat() {
           const meId = useChat.getState().me?.id ?? "system";
           const body = h.rooms.length
             ? [
-                `Your archived rooms (${h.rooms.length}). Tap one to load its /go command into your message box:`,
+                i18n.t("notifications:system.myRoomsHeader", { total: h.rooms.length }),
                 ...h.rooms.map((r) => {
                   const lock = r.type === "private" ? "🔒 " : "";
                   const topic = r.topic ? ` - ${r.topic}` : "";
                   return `${lock}[${r.name}](compose:/go ${r.name})${topic}`;
                 }),
               ].join("\n")
-            : "You have no archived rooms. A room you own is archived once everyone leaves it; it'll show up here so you can bring it back.";
+            : i18n.t("notifications:system.myRoomsEmpty");
           useChat.getState().appendMessage({
             id: `local-myrooms-${Date.now()}`,
             roomId: rid,
@@ -2906,7 +2954,7 @@ function Chat() {
           notifPermission() === "granted"
         ) {
           try {
-            const n = new Notification(`Direct message from ${message.displayName}`, {
+            const n = new Notification(i18n.t("notifications:dm.notificationTitle", { name: message.displayName }), {
               body: message.body.length > 140 ? `${message.body.slice(0, 140)}…` : message.body,
               icon: "/favicon.ico",
               // Tag groups by sender so a chatty DM partner doesn't
@@ -2982,7 +3030,7 @@ function Chat() {
           ...known,
           lastMessageAt: message.createdAt,
           lastMessagePreview: message.deletedAt
-            ? "[message removed]"
+            ? i18n.t("notifications:dm.messageRemoved")
             : message.body.slice(0, 120),
           unreadCount: isSelf || viewing ? known.unreadCount : known.unreadCount + 1,
         });
@@ -3066,7 +3114,7 @@ function Chat() {
       // accept/decline UI lives in the prompt cards.
       setNotice({
         code: "FRIEND_UPDATE",
-        message: `Friend update from ${payload.frienderDisplayName}.`,
+        message: i18n.t("notifications:toast.friendUpdate", { name: payload.frienderDisplayName }),
       });
     });
     // Admin edited a custom command. Bump the shared version so the
@@ -3400,7 +3448,7 @@ function Chat() {
       });
     } catch (err) {
       setForumTopicsLoading(currentRoomId, categoryKey, false);
-      setNotice({ code: "FORUM_PAGE_FAILED", message: err instanceof Error ? err.message : "Couldn't load that page." });
+      setNotice({ code: "FORUM_PAGE_FAILED", message: err instanceof Error ? err.message : i18n.t("notifications:toast.pageLoadFailed") });
     }
   }
 
@@ -3607,10 +3655,10 @@ function Chat() {
       if (landingRoomId) {
         onRoomClick(landingRoomId);
       } else {
-        setNotice({ code: "NO_LANDING", message: `${name} has no room to enter yet.` });
+        setNotice({ code: "NO_LANDING", message: i18n.t("notifications:toast.noLandingRoom", { name }) });
       }
     } catch (e) {
-      setNotice({ code: "SERVER_VISIT_FAILED", message: e instanceof Error ? e.message : "Couldn't open that server." });
+      setNotice({ code: "SERVER_VISIT_FAILED", message: e instanceof Error ? e.message : i18n.t("notifications:toast.serverOpenFailed") });
     }
   }
   async function onServerSelect(server: ServerSummary) {
@@ -3718,7 +3766,7 @@ function Chat() {
     if (!me) return;
     const url = new URL(window.location.href);
     if (url.searchParams.get("googleLinked") !== "1") return;
-    setNotice({ code: "GOOGLE_LINKED", message: "Google account linked." });
+    setNotice({ code: "GOOGLE_LINKED", message: i18n.t("notifications:toast.googleLinked") });
     url.searchParams.delete("googleLinked");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
   }, [me, setNotice]);
@@ -3734,10 +3782,10 @@ function Chat() {
     if (!gErr) return;
     const message =
       gErr === "already_linked"
-        ? "That Google account is already connected to a different account."
+        ? i18n.t("notifications:toast.googleAlreadyLinked")
         : gErr === "disabled"
-          ? "That account is disabled. Please contact an admin."
-          : "Google sign-in didn't complete. Please try again.";
+          ? i18n.t("notifications:toast.googleAccountDisabled")
+          : i18n.t("notifications:toast.googleSignInFailed");
     setNotice({ code: "GOOGLE_ERROR", message });
     url.searchParams.delete("googleError");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);
@@ -3758,6 +3806,10 @@ function Chat() {
             bannerFocusY: currentServer.bannerFocusY ?? null,
             bannerCrop: currentServer.bannerCrop ?? null,
             bannerHeight: currentServer.bannerHeight ?? null,
+            // Server-level 18+ flag (age-restriction plan, Phase 2) for the
+            // rating chip in the expanded banner band. Minors never receive
+            // an 18+ server row, so this is only ever true for adults.
+            isNsfw: !!currentServer.isNsfw,
           }
         : null,
     [currentServer],
@@ -3812,7 +3864,7 @@ function Chat() {
         // postId flashes the exact bookmarked/search-hit post.
         setForumsOpen({ key: boardForumId, topic: { boardId: roomId, topicId: j.topic.id, postId: messageId } });
       } catch {
-        setNotice({ code: "JUMP_FAILED", message: "Couldn't open that topic, it may have been removed." });
+        setNotice({ code: "JUMP_FAILED", message: i18n.t("notifications:toast.topicGone") });
       }
       return;
     }
@@ -3842,7 +3894,7 @@ function Chat() {
           { credentials: "include" },
         );
         if (!r.ok) {
-          setNotice({ code: "JUMP_FAILED", message: "Couldn't open that thread, it may have been removed." });
+          setNotice({ code: "JUMP_FAILED", message: i18n.t("notifications:toast.threadGone") });
           return;
         }
         const j = (await r.json()) as { topic: ChatMessage; replies: ChatMessage[] };
@@ -3866,7 +3918,7 @@ function Chat() {
         setPoppedTopicId(j.topic.id);
         setHighlightMessageId(messageId);
       } catch (err) {
-        setNotice({ code: "JUMP_FAILED", message: err instanceof Error ? err.message : "load failed" });
+        setNotice({ code: "JUMP_FAILED", message: err instanceof Error ? err.message : i18n.t("notifications:toast.loadFailed") });
       }
       return;
     }
@@ -3881,14 +3933,14 @@ function Chat() {
           { credentials: "include" },
         );
         if (!r.ok) {
-          setNotice({ code: "JUMP_FAILED", message: "Couldn't load that message, it may have been removed." });
+          setNotice({ code: "JUMP_FAILED", message: i18n.t("notifications:toast.messageGone") });
           return;
         }
         const j = (await r.json()) as { messages: ChatMessage[] };
         setMessages(roomId, j.messages);
         setViewingHistory(true);
       } catch (err) {
-        setNotice({ code: "JUMP_FAILED", message: err instanceof Error ? err.message : "load failed" });
+        setNotice({ code: "JUMP_FAILED", message: err instanceof Error ? err.message : i18n.t("notifications:toast.loadFailed") });
         return;
       }
     }
@@ -3902,6 +3954,19 @@ function Chat() {
     if (!currentRoomId) return;
     socket.emit("room:join", { roomId: currentRoomId }, () => {});
     setViewingHistory(false);
+  }
+
+  /** Display the per-room expiry window in the most natural unit. Lives
+   *  inside Chat so it closes over `t` (the plural keys re-resolve on a
+   *  live language switch along with the rest of the render). */
+  function formatExpiry(mins: number): string {
+    if (mins >= 1440 && mins % 1440 === 0) {
+      return t("expiry.days", { count: mins / 1440 });
+    }
+    if (mins >= 60 && mins % 60 === 0) {
+      return t("expiry.hours", { count: mins / 60 });
+    }
+    return t("expiry.minutes", { count: mins });
   }
 
   const room = currentRoomId ? rooms[currentRoomId] : undefined;
@@ -4138,7 +4203,7 @@ function Chat() {
             }}
             onOpenForums={() => {
               if (emailBlocked) {
-                setNotice({ code: "EMAIL_UNVERIFIED", message: "Forums are hidden while you verify your email." });
+                setNotice({ code: "EMAIL_UNVERIFIED", message: i18n.t("notifications:toast.forumsHiddenUnverified") });
                 return;
               }
               setForumsOpen({});
@@ -4205,17 +4270,17 @@ function Chat() {
                 type="button"
                 onClick={() => setWorldViewerId(room.linkedWorld!.id)}
                 className="flex flex-1 items-center justify-center gap-2 px-4 py-1 text-xs text-keep-action hover:brightness-110"
-                title="Open this room's linked world"
+                title={t("worldBanner.openTitle")}
               >
-                <span className="uppercase tracking-widest">World</span>
+                <span className="uppercase tracking-widest">{t("worldBanner.world")}</span>
                 <span className="font-semibold normal-case tracking-normal">{room.linkedWorld.name}</span>
-                <span className="text-[10px] text-keep-muted">by {room.linkedWorld.ownerUsername}</span>
+                <span className="text-[10px] text-keep-muted">{t("worldBanner.byOwner", { name: room.linkedWorld.ownerUsername })}</span>
               </button>
               <button
                 type="button"
                 onClick={(e) => { e.stopPropagation(); dismissWorldBanner(); }}
-                title="Hide this world banner. It'll come back if the room's linked world changes."
-                aria-label="Hide world banner"
+                title={t("worldBanner.hideTitle")}
+                aria-label={t("worldBanner.hideAria")}
                 className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded border border-keep-action/40 bg-keep-action/20 text-[11px] leading-none text-keep-action hover:border-keep-action hover:bg-keep-action/40"
               >
                 ×
@@ -4243,7 +4308,7 @@ function Chat() {
           ) : null}
           {room?.messageExpiryMinutes && room.messageExpiryMinutes > 0 ? (
             <div className="keep-notice px-4 py-0.5 text-center text-[10px] uppercase tracking-widest text-keep-muted">
-              Messages auto-expire after {formatExpiry(room.messageExpiryMinutes)}
+              {t("expiry.notice", { window: formatExpiry(room.messageExpiryMinutes) })}
             </div>
           ) : null}
           {/* Accent-color rail separating the header/banner zone from the chat.
@@ -4265,7 +4330,7 @@ function Chat() {
               label="theater"
               fallback={() => (
                 <div className="flex shrink-0 items-center justify-center bg-black px-4 py-3 text-center text-sm text-white/60">
-                  The theater player couldn't load. Reload the page to try again.
+                  {t("theater.playerFailed")}
                 </div>
               )}
             >
@@ -4290,10 +4355,10 @@ function Chat() {
               type="button"
               onClick={returnToLive}
               className="flex w-full items-center justify-center gap-2 border-b border-keep-action/40 bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25"
-              title="Reload the recent backlog and return to live chat"
+              title={t("history.returnToLiveTitle")}
             >
               <span aria-hidden>↓</span>
-              Viewing older history, click to return to live
+              {t("history.viewingOlder")}
             </button>
           ) : null}
           {/* Relative wrapper so the TypingIndicator inside can anchor
@@ -4306,7 +4371,7 @@ function Chat() {
           <div className="relative flex min-h-0 flex-1 flex-col">
           {emailBlocked ? (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center text-sm text-keep-muted">
-              Chat messages are hidden while you verify your email.
+              {t("emailGate.chatHidden")}
             </div>
           ) : (
           <MessageList
@@ -4505,7 +4570,7 @@ function Chat() {
           onOpenArcade={() => { setArcadeOpen(true); setRailOpen(false); }}
           onOpenForums={() => {
             if (emailBlocked) {
-              setNotice({ code: "EMAIL_UNVERIFIED", message: "Forums are hidden while you verify your email." });
+              setNotice({ code: "EMAIL_UNVERIFIED", message: i18n.t("notifications:toast.forumsHiddenUnverified") });
               setRailOpen(false);
               return;
             }
@@ -4646,13 +4711,13 @@ function Chat() {
             let label: string | null = null;
             let nextCharacterId: string | null | undefined = undefined;
             if (isMaster && activeCharacterId) {
-              label = "Switch to OOC";
+              label = t("profileAction.switchToOoc");
               nextCharacterId = null;
             } else if (isCharacterOpen && !isActiveOpen) {
-              label = `Switch to ${openProfile.profile.name}`;
+              label = t("profileAction.switchTo", { name: openProfile.profile.name });
               nextCharacterId = openCharId;
             } else if (isCharacterOpen && isActiveOpen) {
-              label = `Disable ${openProfile.profile.name}`;
+              label = t("profileAction.disable", { name: openProfile.profile.name });
               nextCharacterId = null;
             }
             if (!label || nextCharacterId === undefined) return {};
@@ -4671,7 +4736,7 @@ function Chat() {
                     if (res.ok) {
                       setOpenProfile(null);
                     } else {
-                      setNotice({ code: res.code ?? "SWITCH_FAILED", message: res.message ?? "switch failed" });
+                      setNotice({ code: res.code ?? "SWITCH_FAILED", message: res.message ?? i18n.t("notifications:toast.switchFailed") });
                     }
                   });
                 },
@@ -5079,19 +5144,6 @@ function Chat() {
   );
 }
 
-/** Display the per-room expiry window in the most natural unit. Pure helper. */
-function formatExpiry(mins: number): string {
-  if (mins >= 1440 && mins % 1440 === 0) {
-    const d = mins / 1440;
-    return `${d} ${d === 1 ? "day" : "days"}`;
-  }
-  if (mins >= 60 && mins % 60 === 0) {
-    const h = mins / 60;
-    return `${h} ${h === 1 ? "hour" : "hours"}`;
-  }
-  return `${mins} ${mins === 1 ? "minute" : "minutes"}`;
-}
-
 function Toast({ notice, onDismiss }: { notice: { code: string; message: string }; onDismiss: () => void }) {
   useEffect(() => {
     const t = setTimeout(onDismiss, 6000);
@@ -5127,18 +5179,23 @@ function Toast({ notice, onDismiss }: { notice: { code: string; message: string 
  * toggles the flag back off.
  */
 function IncognitoBanner() {
+  const { t } = useTranslation("notifications");
   const incognitoMode = useChat((s) => s.me?.incognitoMode);
   const incognitoCharacterId = useChat((s) => s.me?.incognitoCharacterId ?? null);
   const tabCharacterId = useChat((s) => s.activeCharacterId);
   const incognitoAlias = useChat((s) => s.me?.incognitoAlias);
   const currentRoomId = useChat((s) => s.currentRoomId);
   if (!incognitoMode || (tabCharacterId ?? null) !== (incognitoCharacterId ?? null)) return null;
+  // "System" is the server's default alias, an identity echo (it names what
+  // everyone else actually sees), so it stays untranslated on purpose.
   const alias = incognitoAlias ?? "System";
   return (
     <div className="keep-notice keep-notice-accent flex flex-wrap items-center justify-center gap-2 px-3 py-1 text-xs">
       <span aria-hidden>👻</span>
       <span>
-        You're incognito as <b>{alias}</b>. The userlist hides you and your messages render as system lines.
+        <Trans t={t} i18nKey="incognito.banner" values={{ alias }}>
+          You're incognito as <b>{alias}</b>. The userlist hides you and your messages render as system lines.
+        </Trans>
       </span>
       <button
         type="button"
@@ -5149,13 +5206,14 @@ function IncognitoBanner() {
         disabled={!currentRoomId}
         className="keep-button rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/30 disabled:opacity-50"
       >
-        Leave
+        {t("incognito.leave")}
       </button>
     </div>
   );
 }
 
 function StaleVersionBanner() {
+  const { t } = useTranslation("notifications");
   const staleVersion = useChat((s) => s.staleVersion);
   const staleUpdateMessage = useChat((s) => s.staleUpdateMessage);
   const siteName = useChat((s) => s.branding.siteName);
@@ -5181,7 +5239,9 @@ function StaleVersionBanner() {
   return (
     <div className="keep-notice keep-notice-accent flex flex-wrap items-center justify-center gap-2 px-3 py-1.5 text-xs">
       <span>
-        You're running <b>{siteName} {VERSION}</b>. The current version is <b>{staleVersion}</b>.
+        <Trans t={t} i18nKey="staleVersion.running" values={{ siteName, version: VERSION, staleVersion }}>
+          You're running <b>{siteName} {VERSION}</b>. The current version is <b>{staleVersion}</b>.
+        </Trans>
         {/* Admin-authored release note from `remote-deploy.sh
             --update-msg "..."`. Italicized + nudged against the
             panel slot so it reads as secondary context without
@@ -5190,14 +5250,14 @@ function StaleVersionBanner() {
         {staleUpdateMessage ? (
           <> <em style={{ color: noteColor }}>{staleUpdateMessage}</em></>
         ) : null}
-        {" "}Please refresh to update.
+        {" "}{t("staleVersion.refreshPrompt")}
       </span>
       <button
         type="button"
         onClick={() => window.location.reload()}
         className="keep-button rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/30"
       >
-        Refresh
+        {t("staleVersion.refresh")}
       </button>
       {/* Persistent close, the version-keyed dismiss stays in effect
           until a newer stale version arrives, at which point the
@@ -5205,8 +5265,8 @@ function StaleVersionBanner() {
       <button
         type="button"
         onClick={() => dismissPersisted(dismissKey)}
-        title="Dismiss until a newer version is announced"
-        aria-label="Dismiss update banner"
+        title={t("staleVersion.dismissTitle")}
+        aria-label={t("staleVersion.dismissAria")}
         className="shrink-0 rounded px-1 text-base leading-none text-keep-muted opacity-60 hover:opacity-100 hover:text-keep-text"
       >
         ×

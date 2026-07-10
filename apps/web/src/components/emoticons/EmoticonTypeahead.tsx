@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type KeyboardEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { UNICODE_EMOJI_FLAT } from "@thekeep/shared";
 import { useEmoticons } from "../../state/emoticons.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
@@ -103,6 +104,7 @@ export function EmoticonTypeahead({
   value: string;
   onChange: (next: string) => void;
 }) {
+  const { t } = useTranslation("arcade");
   const sheets = useEmoticons((s) => s.sheets);
   const [active, setActive] = useState<ActiveTrigger | null>(null);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -361,7 +363,7 @@ export function EmoticonTypeahead({
   return (
     <ul
       role="listbox"
-      aria-label="Emoji suggestions"
+      aria-label={t("emoticons.typeahead.suggestionsAria")}
       // Plain `bg-keep-bg` (like the mention / synonym / history popups) —
       // NOT `keep-panel`. Several theme styles override `.keep-panel` with a
       // higher-specificity `[data-theme-style="…"] .keep-panel { position:
@@ -392,12 +394,12 @@ export function EmoticonTypeahead({
           </span>
           <span className="flex-1 truncate font-mono">:{s.name}:</span>
           <span className="text-[9px] uppercase tracking-widest text-keep-muted">
-            {s.kind === "unicode" ? "emoji" : "sheet"}
+            {s.kind === "unicode" ? t("emoticons.typeahead.kindEmoji") : t("emoticons.typeahead.kindSheet")}
           </span>
         </li>
       ))}
       <li className="border-t border-keep-rule/60 px-2 py-1 text-[10px] italic text-keep-muted">
-        ↑↓ navigate · enter / tab to insert · esc to dismiss
+        {t("emoticons.typeahead.footer")}
       </li>
     </ul>
   );

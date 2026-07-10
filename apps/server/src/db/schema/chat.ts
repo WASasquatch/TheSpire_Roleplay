@@ -80,6 +80,18 @@ export const rooms = sqliteTable(
      */
     persistent: integer("persistent", { mode: "boolean" }).notNull().default(false),
     /**
+     * Owner-set 18+ flag (migration 0331, age-restriction plan). When true,
+     * minors cannot list, join, read, export, or be notified from this room
+     * (HARD isAdult tier, server-enforced); adults always can, hide
+     * preference or not. The EFFECTIVE rating a gate consults is
+     * `server.is_nsfw OR room.is_nsfw`. Messages are stamped with the
+     * effective state at insert (see messages.isNsfw), so a later flip back
+     * to all-ages keeps the 18+-era history minor-hidden. Toggled via
+     * `/nsfw` (callerCanEditRoom), the servers console, and admin routes —
+     * all adult-only writes.
+     */
+    isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
+    /**
      * Admin-flagged default landing room. Exactly one row in the table is
      * expected to carry isDefault=true (enforced by partial unique index in
      * the migration). All "where should we put this user?" flows resolve
@@ -489,6 +501,20 @@ export const messages = sqliteTable(
      */
     deletedByDisplayName: text("deleted_by_display_name"),
     /**
+     * 18+ stamp (migration 0332, age-restriction plan). Two readers, one
+     * column:
+     *   * CHAT rows snapshot the room's EFFECTIVE 18+ state (server OR
+     *     room) at insert — same frozen-at-send posture as rankKey/color —
+     *     so 18+-era history stays hidden from minors after a room flips
+     *     back to all-ages.
+     *   * FORUM TOPIC rows (title set, nested rooms) use it as the mutable
+     *     NSFW tag; replies inherit the topic's value at insert and a
+     *     re-tag retro-updates the children.
+     * Read gates: `roomVisibilityWhere`'s viewer parameter + the search
+     * routes filter on it for viewers who can't see NSFW.
+     */
+    isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
+    /**
      * Set when the topic has been locked (author or moderator action).
      * Only meaningful for top-level topics in nested-mode rooms, the
      * server rejects new replies under a locked topic. Stored as a
@@ -709,6 +735,18 @@ export const bookmarks = sqliteTable(
     snapshotMsgCreatedAt: integer("snapshot_msg_created_at"),
     /** Author user id at save time (moderation trace after a delete). */
     snapshotAuthorUserId: text("snapshot_author_user_id"),
+    /**
+     * 18+ stamp of the source message (migration 0341, age-restriction
+     * plan). Written by the retention janitor at ARCHIVE time — not save
+     * time, so a forum topic's mutable NSFW re-tag lands at its final
+     * value — from the live row's `messages.isNsfw`. The GET route's
+     * archived-snapshot branch reads it so a frozen 18+-era body never
+     * serves to a minor viewer (an admin DOB correction can flip an
+     * account minor AFTER it bookmarked as an adult). Rows archived
+     * before 0341 with the source already expired stay 0 (unrecoverable;
+     * see the migration comment).
+     */
+    snapshotIsNsfw: integer("snapshot_is_nsfw", { mode: "boolean" }).notNull().default(false),
     /** When the user archived this bookmark (soft-hide from the main list). Null = active. */
     archivedAt: integer("archived_at"),
   },
@@ -756,6 +794,16 @@ export const pinnedMessages = sqliteTable(
     bodyHtml: text("body_html"),
     /** Original message createdAt (ms) at pin time. */
     origCreatedAt: integer("orig_created_at"),
+    /**
+     * 18+ stamp of the source message frozen at pin time (migration 0340,
+     * age-restriction plan). Live pins keep filtering for minors via the
+     * live `messages.isNsfw` join (which also catches a later forum
+     * re-tag); this frozen copy is what filters a SNAPSHOT-ONLY pin
+     * (source hard-deleted/retention-expired, messageId NULL) out of
+     * minor reads. Pins whose source expired before 0340 stay 0
+     * (unrecoverable; see the migration comment).
+     */
+    isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
   },
   (t) => ({
     roomMsgUq: uniqueIndex("pinned_messages_room_msg_uq").on(t.roomId, t.messageId),

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { ChatMessage, ForumTopicCard, ThreadCategory } from "@thekeep/shared";
 import { fetchBoardTopics, fetchRoomCategories, mergeTopicInto, moveTopicToBoard, setTopicCategory } from "../../lib/forums.js";
 import { type ForumTopicAdminBoard } from "../../lib/forumTopicAdminContext.js";
@@ -20,6 +21,7 @@ export function TopicManageModal({ topic, boards, onClose, onChanged }: {
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const [cats, setCats] = useState<ThreadCategory[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -48,7 +50,7 @@ export function TopicManageModal({ topic, boards, onClose, onChanged }: {
   function guard(p: Promise<void>) {
     setBusy(true); setErr(null);
     p.then(() => { onChanged(); onClose(); })
-     .catch((e) => { setErr(e instanceof Error ? e.message : "Action failed."); setBusy(false); });
+     .catch((e) => { setErr(e instanceof Error ? e.message : t("topicManage.actionFailed")); setBusy(false); });
   }
   function recategorize(next: string) {
     const categoryId = next === "" ? null : next;
@@ -57,27 +59,27 @@ export function TopicManageModal({ topic, boards, onClose, onChanged }: {
   }
   function toBoard(roomId: string) { guard(moveTopicToBoard(topic.id, roomId, null)); }
   function doMerge(targetId: string, targetTitle: string) {
-    if (!window.confirm(`Merge "${topic.title ?? "this topic"}" into "${targetTitle}"? Its posts become replies there. This can't be auto-undone.`)) return;
+    if (!window.confirm(t("topicManage.mergeConfirm", { source: topic.title ?? t("topicManage.thisTopic"), target: targetTitle }))) return;
     guard(mergeTopicInto(topic.id, targetId));
   }
 
   return (
     <Modal onClose={onClose} zIndex={60}>
       <div onClick={(e) => e.stopPropagation()} className="keep-frame w-full rounded bg-keep-bg p-5 text-keep-text md:w-[min(480px,86vw)]">
-        <h2 className="font-action text-lg">Move topic</h2>
-        <p className="mt-1 truncate text-sm text-keep-muted">"{topic.title ?? "this topic"}"</p>
+        <h2 className="font-action text-lg">{t("topicManage.title")}</h2>
+        <p className="mt-1 truncate text-sm text-keep-muted">"{topic.title ?? t("topicManage.thisTopic")}"</p>
 
         {/* Recategorize within the current board (only when it has categories). */}
         {cats && cats.length > 0 ? (
           <div className="mt-3">
-            <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Category</div>
+            <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("topicManage.category")}</div>
             <select
               value={currentCat}
               disabled={busy}
               onChange={(e) => recategorize(e.target.value)}
               className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm disabled:opacity-50"
             >
-              <option value="">Uncategorized</option>
+              <option value="">{t("topicManage.uncategorized")}</option>
               {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
@@ -86,7 +88,7 @@ export function TopicManageModal({ topic, boards, onClose, onChanged }: {
         {/* Move the whole topic to a different board. */}
         {otherBoards.length > 0 ? (
           <div className="mt-3">
-            <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Move to another board</div>
+            <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("topicManage.moveToBoard")}</div>
             <ul className="space-y-1">
               {otherBoards.map((b) => (
                 <li key={b.roomId}>
@@ -95,7 +97,7 @@ export function TopicManageModal({ topic, boards, onClose, onChanged }: {
                     className="flex w-full items-center justify-between rounded border border-keep-rule px-2 py-1.5 text-left text-sm hover:border-keep-action hover:bg-keep-banner/40 disabled:opacity-50"
                   >
                     <span className="truncate">{b.name}</span>
-                    <span className="ml-2 shrink-0 text-[10px] text-keep-muted">{b.topicCount} topics</span>
+                    <span className="ml-2 shrink-0 text-[10px] text-keep-muted">{t("topicManage.topicsCount", { count: b.topicCount })}</span>
                   </button>
                 </li>
               ))}
@@ -108,7 +110,7 @@ export function TopicManageModal({ topic, boards, onClose, onChanged }: {
           <button
             type="button" disabled={busy} onClick={() => setMergeOpen((o) => !o)}
             className="text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-          >{mergeOpen ? "▾" : "▸"} Merge into another topic</button>
+          >{mergeOpen ? "▾" : "▸"} {t("topicManage.mergeInto")}</button>
           {mergeOpen ? (
             <div className="mt-2 space-y-2">
               {boards.length > 1 ? (
@@ -117,19 +119,19 @@ export function TopicManageModal({ topic, boards, onClose, onChanged }: {
                 </select>
               ) : null}
               {!mergeTopics ? (
-                <p className="text-xs italic text-keep-muted">Loading topics…</p>
+                <p className="text-xs italic text-keep-muted">{t("topicManage.loadingTopics")}</p>
               ) : (
                 <ul className="max-h-60 space-y-1 overflow-y-auto">
-                  {mergeTopics.filter((t) => t.id !== topic.id).map((t) => (
-                    <li key={t.id}>
+                  {mergeTopics.filter((row) => row.id !== topic.id).map((row) => (
+                    <li key={row.id}>
                       <button
-                        type="button" disabled={busy} onClick={() => doMerge(t.id, t.title)}
+                        type="button" disabled={busy} onClick={() => doMerge(row.id, row.title)}
                         className="w-full truncate rounded border border-keep-rule px-2 py-1.5 text-left text-sm hover:border-keep-action hover:bg-keep-banner/40 disabled:opacity-50"
-                      >{t.title}</button>
+                      >{row.title}</button>
                     </li>
                   ))}
-                  {mergeTopics.filter((t) => t.id !== topic.id).length === 0 ? (
-                    <li className="text-xs italic text-keep-muted">No other topics on this board.</li>
+                  {mergeTopics.filter((row) => row.id !== topic.id).length === 0 ? (
+                    <li className="text-xs italic text-keep-muted">{t("topicManage.noOtherTopics")}</li>
                   ) : null}
                 </ul>
               )}
@@ -139,7 +141,7 @@ export function TopicManageModal({ topic, boards, onClose, onChanged }: {
 
         {err ? <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">{err}</div> : null}
         <div className="mt-4 flex justify-end">
-          <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">Close</button>
+          <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">{t("common:close")}</button>
         </div>
       </div>
     </Modal>

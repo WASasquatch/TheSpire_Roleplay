@@ -1,4 +1,5 @@
 import { useRef, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Bold,
   Code,
@@ -49,6 +50,7 @@ export function FormattingToolbar({
   disabled?: boolean;
   maxLength?: number;
 }) {
+  const { t } = useTranslation("common");
   /**
    * Core mutation: wrap whatever's selected (or insert at the caret
    * when nothing is selected) with the given prefix + suffix.
@@ -113,7 +115,7 @@ export function FormattingToolbar({
     const before = value.slice(0, sel.start);
     const selected = value.slice(sel.start, sel.end);
     const after = value.slice(sel.end);
-    const inner = selected.length > 0 ? selected : "text";
+    const inner = selected.length > 0 ? selected : t("formatting.placeholderText");
     const open = `<font color="${hex}">`;
     const next = `${before}${open}${inner}</font>${after}`;
     onChange(next);
@@ -137,9 +139,9 @@ export function FormattingToolbar({
     const start = el.selectionStart ?? value.length;
     const end = el.selectionEnd ?? value.length;
     const selected = value.slice(start, end);
-    const url = window.prompt("Link URL (https://…)", "https://");
+    const url = window.prompt(t("formatting.linkUrlPrompt"), "https://");
     if (!url) return;
-    const text = selected.length > 0 ? selected : (window.prompt("Link text", "") ?? "");
+    const text = selected.length > 0 ? selected : (window.prompt(t("formatting.linkTextPrompt"), "") ?? "");
     if (!text) {
       // No text → just paste the bare URL. parseInline auto-links it.
       const next = value.slice(0, start) + url + value.slice(end);
@@ -160,9 +162,9 @@ export function FormattingToolbar({
     const el = inputRef.current;
     if (!el) return;
     const start = el.selectionStart ?? value.length;
-    const url = window.prompt("Image URL (https://… ending in .png/.jpg/.webp/etc.)", "https://");
+    const url = window.prompt(t("formatting.imageUrlPrompt"), "https://");
     if (!url) return;
-    const alt = window.prompt("Alt text (optional)", "") ?? "";
+    const alt = window.prompt(t("formatting.imageAltPrompt"), "") ?? "";
     const md = `![${alt}](${url})`;
     const next = value.slice(0, start) + md + value.slice(start);
     onChange(next);
@@ -221,26 +223,26 @@ export function FormattingToolbar({
       {/* Lucide icons (uniform stroke set) replaced the old letter + emoji
           mix; FmtBtn supplies the title/aria-label so the icons stay
           self-describing on hover and to screen readers. */}
-      <FmtBtn label="Bold (**text**)" onClick={() => wrap("**", "**", "bold")} disabled={disabled}>
+      <FmtBtn label={t("formatting.bold")} onClick={() => wrap("**", "**", t("formatting.placeholderBold"))} disabled={disabled}>
         <Bold className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
-      <FmtBtn label="Italic (*text*)" onClick={() => wrap("*", "*", "italic")} disabled={disabled}>
+      <FmtBtn label={t("formatting.italic")} onClick={() => wrap("*", "*", t("formatting.placeholderItalic"))} disabled={disabled}>
         <Italic className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       {/* Underline has no CommonMark equivalent (markdown reserves `__`
           for bold-alternate) so we wrap with literal <u>…</u>; the
           inline parser recognises the tag as an alias. Stored body
           keeps the tag, same as the room-chat composer. */}
-      <FmtBtn label="Underline" onClick={() => wrap("<u>", "</u>", "underline")} disabled={disabled}>
+      <FmtBtn label={t("formatting.underline")} onClick={() => wrap("<u>", "</u>", t("formatting.placeholderUnderline"))} disabled={disabled}>
         <Underline className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
-      <FmtBtn label="Strikethrough (~~text~~)" onClick={() => wrap("~~", "~~", "strike")} disabled={disabled}>
+      <FmtBtn label={t("formatting.strike")} onClick={() => wrap("~~", "~~", t("formatting.placeholderStrike"))} disabled={disabled}>
         <Strikethrough className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       {/* Text color: opens the OS color picker, wraps the selection in
           <font color="#hex">. The input is visually hidden but focusable
           via openColorPicker()'s programmatic click. */}
-      <FmtBtn label="Color selected text" onClick={openColorPicker} disabled={disabled}>
+      <FmtBtn label={t("formatting.color")} onClick={openColorPicker} disabled={disabled}>
         <Palette className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <input
@@ -252,20 +254,20 @@ export function FormattingToolbar({
         className="pointer-events-none absolute h-0 w-0 opacity-0"
         onChange={(e) => applyColor(e.target.value)}
       />
-      <FmtBtn label="Inline code (`text`)" onClick={() => wrap("`", "`", "code")} disabled={disabled}>
+      <FmtBtn label={t("formatting.code")} onClick={() => wrap("`", "`", t("formatting.placeholderCode"))} disabled={disabled}>
         <Code className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
-      <FmtBtn label="Spoiler (||text||, click to reveal)" onClick={() => wrap("||", "||", "spoiler")} disabled={disabled}>
+      <FmtBtn label={t("formatting.spoiler")} onClick={() => wrap("||", "||", t("formatting.placeholderSpoiler"))} disabled={disabled}>
         <Eye className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
-      <FmtBtn label="Blockquote, prefixes selected lines with '> '" onClick={() => prefixLines("> ")} disabled={disabled}>
+      <FmtBtn label={t("formatting.blockquote")} onClick={() => prefixLines("> ")} disabled={disabled}>
         <Quote className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <span aria-hidden className="mx-1 h-3 w-px bg-keep-rule/60" />
-      <FmtBtn label="Link, [text](url)" onClick={insertLink} disabled={disabled}>
+      <FmtBtn label={t("formatting.link")} onClick={insertLink} disabled={disabled}>
         <LinkIcon className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
-      <FmtBtn label="Image, ![alt](url)" onClick={insertImage} disabled={disabled}>
+      <FmtBtn label={t("formatting.image")} onClick={insertImage} disabled={disabled}>
         <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
       </FmtBtn>
       <span aria-hidden className="mx-1 h-3 w-px bg-keep-rule/60" />
@@ -290,6 +292,7 @@ export function FormattingToolbar({
  *  + bold when over the cap. Presentational only, submit gating
  *  is the caller's responsibility. */
 function CharCount({ length, max }: { length: number; max: number }) {
+  const { t } = useTranslation("common");
   const over = length > max;
   const near = !over && length > max * 0.8;
   const tint = over
@@ -300,12 +303,12 @@ function CharCount({ length, max }: { length: number; max: number }) {
   return (
     <span
       aria-live="polite"
-      aria-label={`Character count: ${length} of ${max}`}
-      title={`${length} / ${max} characters`}
+      aria-label={t("formatting.charCountAria", { length, max })}
+      title={t("formatting.charCountTitle", { length, max })}
       className={`ml-auto select-none whitespace-nowrap text-[11px] tabular-nums ${tint}`}
     >
       {length} / {max}
-      <span className="ml-1 hidden lg:inline">Chars</span>
+      <span className="ml-1 hidden lg:inline">{t("formatting.chars")}</span>
     </span>
   );
 }

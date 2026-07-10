@@ -12,6 +12,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { extractFreeformBorderVarsWithDefaults, parseFreeformBorderConfig } from "@thekeep/shared";
 import { ROOM_TRANSITIONS, type RoomTransition } from "@thekeep/shared";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
@@ -83,6 +85,7 @@ import { CloseButton } from "../shared/CloseButton.js";
 import { previewRoomTransition } from "../../lib/transitions/orchestrator.js";
 import { getServer } from "../../lib/servers.js";
 import { identityEquals } from "../../lib/identity.js";
+import { formatDate, formatDateTime, formatNumber } from "../../lib/intlFormat.js";
 import { CoinAmount } from "./CoinAmount.js";
 
 type DashboardTab = "overview" | "ledger" | "settings" | "styles" | "borders" | "transitions" | "cosmetics" | "items" | "rankings";
@@ -110,6 +113,7 @@ interface Props {
 }
 
 export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initialBoard }: Props) {
+  const { t } = useTranslation("earning");
   const snapshot = useEarning((s) => s.snapshot);
   const loading = useEarning((s) => s.loading);
   const error = useEarning((s) => s.error);
@@ -176,7 +180,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
         className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
       >
         <div className="flex shrink-0 items-center gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="shrink-0 font-action text-lg">Your Earning</h2>
+          <h2 className="shrink-0 font-action text-lg">{t("header.title")}</h2>
           {/* Mobile: a single full-width dropdown for the active tab,
               with the X button flush to its right. The horizontal
               tab strip was hard to scan at <lg widths, even the
@@ -187,31 +191,31 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
             value={tab}
             onChange={(e) => setTab(e.target.value as typeof tab)}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs uppercase tracking-widest text-keep-text outline-none focus:border-keep-action lg:hidden"
-            aria-label="Earning section"
+            aria-label={t("header.sectionAria")}
           >
-            <option value="overview">Overview</option>
-            <option value="ledger">Activity</option>
-            <option value="rankings">Rankings</option>
-            <option value="styles">Name Styles</option>
-            <option value="borders">Borders</option>
-            <option value="transitions">Room Transitions</option>
-            <option value="cosmetics">Flair</option>
-            <option value="items">Items</option>
-            <option value="settings">Settings</option>
+            <option value="overview">{t("tabs.overview")}</option>
+            <option value="ledger">{t("tabs.activity")}</option>
+            <option value="rankings">{t("tabs.rankings")}</option>
+            <option value="styles">{t("tabs.nameStyles")}</option>
+            <option value="borders">{t("tabs.borders")}</option>
+            <option value="transitions">{t("tabs.roomTransitions")}</option>
+            <option value="cosmetics">{t("tabs.flair")}</option>
+            <option value="items">{t("tabs.items")}</option>
+            <option value="settings">{t("tabs.settings")}</option>
           </select>
           {/* Desktop: the horizontal tab strip stays as the primary
               affordance. Hidden on mobile (lg:flex pairs with the
               `lg:hidden` on the select above). */}
           <nav className="keep-scroll-strip hidden min-w-0 flex-1 gap-1 overflow-x-auto text-xs uppercase tracking-widest lg:flex">
-            <TabBtn includeShrink active={tab === "overview"} onClick={() => setTab("overview")}>Overview</TabBtn>
-            <TabBtn includeShrink active={tab === "ledger"} onClick={() => setTab("ledger")}>Activity</TabBtn>
-            <TabBtn includeShrink active={tab === "rankings"} onClick={() => setTab("rankings")}>Rankings</TabBtn>
-            <TabBtn includeShrink active={tab === "styles"} onClick={() => setTab("styles")}>Name Styles</TabBtn>
-            <TabBtn includeShrink active={tab === "borders"} onClick={() => setTab("borders")}>Borders</TabBtn>
-            <TabBtn includeShrink active={tab === "transitions"} onClick={() => setTab("transitions")}>Room Transitions</TabBtn>
-            <TabBtn includeShrink active={tab === "cosmetics"} onClick={() => setTab("cosmetics")}>Flair</TabBtn>
-            <TabBtn includeShrink active={tab === "items"} onClick={() => setTab("items")}>Items</TabBtn>
-            <TabBtn includeShrink active={tab === "settings"} onClick={() => setTab("settings")}>Settings</TabBtn>
+            <TabBtn includeShrink active={tab === "overview"} onClick={() => setTab("overview")}>{t("tabs.overview")}</TabBtn>
+            <TabBtn includeShrink active={tab === "ledger"} onClick={() => setTab("ledger")}>{t("tabs.activity")}</TabBtn>
+            <TabBtn includeShrink active={tab === "rankings"} onClick={() => setTab("rankings")}>{t("tabs.rankings")}</TabBtn>
+            <TabBtn includeShrink active={tab === "styles"} onClick={() => setTab("styles")}>{t("tabs.nameStyles")}</TabBtn>
+            <TabBtn includeShrink active={tab === "borders"} onClick={() => setTab("borders")}>{t("tabs.borders")}</TabBtn>
+            <TabBtn includeShrink active={tab === "transitions"} onClick={() => setTab("transitions")}>{t("tabs.roomTransitions")}</TabBtn>
+            <TabBtn includeShrink active={tab === "cosmetics"} onClick={() => setTab("cosmetics")}>{t("tabs.flair")}</TabBtn>
+            <TabBtn includeShrink active={tab === "items"} onClick={() => setTab("items")}>{t("tabs.items")}</TabBtn>
+            <TabBtn includeShrink active={tab === "settings"} onClick={() => setTab("settings")}>{t("tabs.settings")}</TabBtn>
           </nav>
           <CloseButton onClick={onClose} />
         </div>
@@ -237,10 +241,10 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
             </div>
           ) : null}
           {!snapshot && loading ? (
-            <p className="text-sm text-keep-muted">Loading your earning…</p>
+            <p className="text-sm text-keep-muted">{t("dashboard.loading")}</p>
           ) : null}
           {!snapshot && !loading && !error ? (
-            <p className="text-sm text-keep-muted">No earning record yet, earn XP from chat or forums to start.</p>
+            <p className="text-sm text-keep-muted">{t("dashboard.empty")}</p>
           ) : null}
 
           {snapshot && tab === "overview" ? <OverviewTab snapshot={snapshot} flashSale={flashSale} onNavigate={navigateTo} /> : null}
@@ -281,6 +285,7 @@ export function EarningDashboard({ onClose, initialTab, initialItemSubTab, initi
  * label is informational, not load-bearing.
  */
 function ActiveServerLabel({ serverId }: { serverId: string }) {
+  const { t } = useTranslation("earning");
   const [name, setName] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -293,7 +298,7 @@ function ActiveServerLabel({ serverId }: { serverId: string }) {
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-keep-rule bg-keep-bg/40 px-4 py-1.5 text-[11px] uppercase tracking-widest text-keep-muted">
       <span aria-hidden>🏰</span>
-      <span>Viewing {name ?? "this server"}&rsquo;s economy</span>
+      <span>{t("header.viewingEconomy", { name: name ?? t("header.thisServer") })}</span>
     </div>
   );
 }
@@ -352,6 +357,7 @@ function OverviewTab({ snapshot, flashSale, onNavigate }: {
    *  briefly highlights it. */
   onNavigate: (tab: DashboardTab, focusKey?: string | null) => void;
 }) {
+  const { t } = useTranslation("earning");
   const masterRank = lookupRankTier(snapshot, snapshot.master.rankKey, snapshot.master.tier);
   // Viewer's actual avatar URL, feeds the Flash Sale border preview
   // so the showcase shows what the border will look like on the
@@ -416,7 +422,7 @@ function OverviewTab({ snapshot, flashSale, onNavigate }: {
         <div className="min-w-0 flex-1">
           <div className="font-action text-2xl">{snapshot.master.displayName}</div>
           <div className="mt-1 text-sm uppercase tracking-widest text-keep-muted">
-            {masterRank.rank ? `${masterRank.rank.name} ${masterRank.tierRow?.label ?? ""}`.trim() : "No rank yet"}
+            {masterRank.rank ? `${masterRank.rank.name} ${masterRank.tierRow?.label ?? ""}`.trim() : t("overview.noRankYet")}
           </div>
         </div>
       </header>
@@ -431,15 +437,15 @@ function OverviewTab({ snapshot, flashSale, onNavigate }: {
       />
 
       <section>
-        <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">Wallets</h3>
+        <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">{t("overview.wallets")}</h3>
         <div className="grid gap-3">
-          <PoolCard pool={snapshot.master} snapshot={snapshot} label="Master (OOC)" />
+          <PoolCard pool={snapshot.master} snapshot={snapshot} label={t("overview.masterPool")} />
           {snapshot.characters.length > 0 ? (
             snapshot.characters.map((c) => (
               <PoolCard key={c.ownerId} pool={c} snapshot={snapshot} label={c.displayName} />
             ))
           ) : (
-            <p className="text-xs text-keep-muted">No character pools yet. Post as a character in chat to start one.</p>
+            <p className="text-xs text-keep-muted">{t("overview.noCharacterPools")}</p>
           )}
         </div>
       </section>
@@ -475,12 +481,13 @@ function FlashSaleSection({ flashSale, previewName, previewAvatarUrl, onNavigate
    *  on-sale row instead of the top of a long catalog. */
   onNavigate: (tab: DashboardTab, focusKey?: string | null) => void;
 }) {
+  const { t } = useTranslation("earning");
   type Pick = { kind: "nameStyle" | "item" | "cosmetic" | "freeformBorder"; label: string; pick: FlashSalePick };
   const picks: Pick[] = [];
-  if (flashSale?.nameStyle) picks.push({ kind: "nameStyle", label: "Name Style", pick: flashSale.nameStyle });
-  if (flashSale?.freeformBorder) picks.push({ kind: "freeformBorder", label: "Border", pick: flashSale.freeformBorder });
-  if (flashSale?.item) picks.push({ kind: "item", label: "Item", pick: flashSale.item });
-  if (flashSale?.cosmetic) picks.push({ kind: "cosmetic", label: "Cosmetic", pick: flashSale.cosmetic });
+  if (flashSale?.nameStyle) picks.push({ kind: "nameStyle", label: t("flashSale.kindNameStyle"), pick: flashSale.nameStyle });
+  if (flashSale?.freeformBorder) picks.push({ kind: "freeformBorder", label: t("flashSale.kindBorder"), pick: flashSale.freeformBorder });
+  if (flashSale?.item) picks.push({ kind: "item", label: t("flashSale.kindItem"), pick: flashSale.item });
+  if (flashSale?.cosmetic) picks.push({ kind: "cosmetic", label: t("flashSale.kindCosmetic"), pick: flashSale.cosmetic });
 
   // Hide until the parent fetch lands (avoids a layout pop) and
   // also hide when nothing's on sale.
@@ -523,16 +530,16 @@ function FlashSaleSection({ flashSale, previewName, previewAvatarUrl, onNavigate
           </span>
           <div>
             <h3 className="font-action text-xl uppercase tracking-widest text-keep-action sm:text-2xl">
-              Flash Sale
+              {t("flashSale.title")}
             </h3>
             <p className="text-[10px] uppercase tracking-widest text-keep-muted">
-              {prettyDate(flashSale.forDate)} · Resets at midnight UTC
+              {t("flashSale.resets", { date: prettyDate(flashSale.forDate) })}
             </p>
           </div>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-full bg-keep-action px-3 py-1 text-[11px] font-black uppercase tracking-widest text-keep-bg shadow-md animate-pulse">
           <span aria-hidden>🔥</span>
-          <span>Today Only</span>
+          <span>{t("flashSale.todayOnly")}</span>
         </span>
       </header>
       <div className={`relative grid gap-3 ${colsClass}`}>
@@ -566,14 +573,15 @@ function FlashSaleSection({ flashSale, previewName, previewAvatarUrl, onNavigate
  * unconditionally without scaffolding `{discount ? ... : null}`.
  */
 function SalePip({ discountPct }: { discountPct: number | null | undefined }) {
+  const { t } = useTranslation("earning");
   if (!discountPct || discountPct <= 0) return null;
   return (
     <span
-      title={`${discountPct}% off today only`}
+      title={t("flashSale.pctOffTitle", { pct: discountPct })}
       className="inline-flex items-center gap-0.5 rounded-full bg-keep-action px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-bg"
     >
       <span aria-hidden>🔥</span>
-      <span>SALE -{discountPct}%</span>
+      <span>{t("flashSale.salePct", { pct: discountPct })}</span>
     </span>
   );
 }
@@ -649,6 +657,7 @@ function FlashSaleCard({
   /** Card-level click handler, jumps to the matching shop tab. */
   onClick: () => void;
 }) {
+  const { t } = useTranslation("earning");
   // Per-kind preview affordance:
   //   - nameStyle    → render <StyledName> at the pick's key so the
   //                    user sees the actual font/glow rather than an
@@ -713,7 +722,7 @@ function FlashSaleCard({
     <button
       type="button"
       onClick={onClick}
-      title={`Open in the ${kindLabel} shop`}
+      title={t("flashSale.openInShop", { kind: kindLabel })}
       className="group relative flex flex-col overflow-hidden rounded-lg border border-keep-action/40 bg-gradient-to-b from-keep-bg/80 to-keep-bg/50 text-left transition-all hover:border-keep-action hover:shadow-[0_0_16px_-4px_rgba(255,128,0,0.45)] focus:outline-none focus-visible:ring-2 focus-visible:ring-keep-action"
     >
       {/* Big diagonal discount tag, top-right corner. Bold, high-
@@ -752,7 +761,9 @@ function FlashSaleCard({
         </div>
         {savings > 0 ? (
           <div className="text-[10px] uppercase tracking-widest text-keep-action/70">
-            You save <CoinAmount amount={savings} />
+            <Trans t={t} i18nKey="flashSale.youSave">
+              You save <CoinAmount amount={savings} />
+            </Trans>
           </div>
         ) : null}
       </div>
@@ -768,7 +779,7 @@ function prettyDate(yyyyMmDd: string): string {
   if (!y || !m || !d) return yyyyMmDd;
   const dt = new Date(Date.UTC(y, m - 1, d));
   try {
-    return dt.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+    return formatDate(dt.getTime(), { month: "short", day: "numeric", timeZone: "UTC" });
   } catch {
     return yyyyMmDd;
   }
@@ -784,29 +795,28 @@ function prettyDate(yyyyMmDd: string): string {
  * lives in /help → Guides → Earning for anyone who wants more.
  */
 function ZeroStateCard() {
+  const { t } = useTranslation("earning");
   return (
     <section className="rounded border border-keep-action/40 bg-keep-action/5 p-3 text-sm">
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h3 className="font-action text-base text-keep-action">Welcome to your Earning.</h3>
-        <span className="text-[10px] uppercase tracking-widest text-keep-muted">Auto-hides once you earn</span>
+        <h3 className="font-action text-base text-keep-action">{t("zeroState.title")}</h3>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("zeroState.autoHides")}</span>
       </div>
       <p className="text-keep-text">
-        Earning is the long-term reward layer for being part of the community. Two counters
-        grow side by side as you participate:
+        {t("zeroState.intro")}
       </p>
       <ul className="mt-2 list-disc space-y-0.5 pl-5 text-[12px] text-keep-text">
-        <li><b>XP</b> grows your <b>rank</b>, the sigil shown next to your name in chat and the userlist.</li>
-        <li><b>Currency</b> goes into your wallet, ready to spend on name styles, avatar borders, and other cosmetics here in the dashboard.</li>
+        <li><Trans t={t} i18nKey="zeroState.xpBullet"><b>XP</b> grows your <b>rank</b>, the sigil shown next to your name in chat and the userlist.</Trans></li>
+        <li><Trans t={t} i18nKey="zeroState.currencyBullet"><b>Currency</b> goes into your wallet, ready to spend on name styles, avatar borders, and other cosmetics here in the dashboard.</Trans></li>
       </ul>
-      <p className="mt-2 text-keep-text">You earn both at the same time from:</p>
+      <p className="mt-2 text-keep-text">{t("zeroState.earnFrom")}</p>
       <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[12px] text-keep-text">
-        <li>Chat messages (long enough to be meaningful, a single "ok" doesn't count)</li>
-        <li>Forum topics and replies</li>
-        <li>Being active in a room (we award a small amount every few minutes you're present)</li>
+        <li>{t("zeroState.sourceChat")}</li>
+        <li>{t("zeroState.sourceForums")}</li>
+        <li>{t("zeroState.sourcePresence")}</li>
       </ul>
       <p className="mt-2 text-[11px] text-keep-muted">
-        Just chat normally. You'll see your first rank within a session or two. The Help modal's
-        Earning guide has the full picture if you want more.
+        {t("zeroState.outro")}
       </p>
     </section>
   );
@@ -854,6 +864,7 @@ function SigilOrFallback({
 }
 
 function PoolCard({ pool, snapshot, label }: { pool: PoolView; snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {}; label: string }) {
+  const { t } = useTranslation("earning");
   const progress = useMemo(() => progressToNextTier(snapshot, pool), [snapshot, pool]);
   const { rank, tierRow } = lookupRankTier(snapshot, pool.rankKey, pool.tier);
   const hideCurrency = pool.scope === "user" && pool.hideCurrencyCount;
@@ -862,18 +873,18 @@ function PoolCard({ pool, snapshot, label }: { pool: PoolView; snapshot: ReturnT
       <div className="flex items-baseline justify-between gap-3">
         <span className="font-semibold">{label}</span>
         <span className="text-xs uppercase tracking-widest text-keep-muted">
-          {rank ? `${rank.name} ${tierRow?.label ?? ""}`.trim() : "Unranked"}
+          {rank ? `${rank.name} ${tierRow?.label ?? ""}`.trim() : t("unranked")}
         </span>
       </div>
       <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
         <span>
-          <span className="font-action text-lg">{pool.xp.toLocaleString()}</span>
-          <span className="ml-1 text-xs uppercase tracking-widest text-keep-muted">XP</span>
+          <span className="font-action text-lg">{formatNumber(pool.xp)}</span>
+          <span className="ml-1 text-xs uppercase tracking-widest text-keep-muted">{t("pool.xpLabel")}</span>
         </span>
         <span>
-          <span className="font-action text-lg">{pool.currency.toLocaleString()}</span>
+          <span className="font-action text-lg">{formatNumber(pool.currency)}</span>
           <span className="ml-1 text-xs uppercase tracking-widest text-keep-muted">
-            Currency{hideCurrency ? " · private" : ""}
+            {hideCurrency ? t("pool.currencyPrivate") : t("coin.currency")}
           </span>
         </span>
       </div>
@@ -886,13 +897,13 @@ function PoolCard({ pool, snapshot, label }: { pool: PoolView; snapshot: ReturnT
             />
           </div>
           <div className="mt-1 flex justify-between text-[10px] uppercase tracking-widest text-keep-muted">
-            <span>{progress.inTier.toLocaleString()} / {progress.tierSpan.toLocaleString()}</span>
-            <span>→ {progress.nextLabel ?? "Top of ladder"}</span>
+            <span>{formatNumber(progress.inTier)} / {formatNumber(progress.tierSpan)}</span>
+            <span>→ {progress.nextLabel ?? t("pool.topOfLadder")}</span>
           </div>
         </div>
       ) : (
         <div className="mt-2 text-[10px] uppercase tracking-widest text-keep-muted">
-          Top of the ladder.
+          {t("pool.topOfLadderDone")}
         </div>
       )}
     </div>
@@ -914,6 +925,7 @@ function PoolCard({ pool, snapshot, label }: { pool: PoolView; snapshot: ReturnT
  * ========================================================= */
 
 function RankingsTab({ initialBoard }: { initialBoard?: RankingBoardKey }) {
+  const { t } = useTranslation("earning");
   const [data, setData] = useState<RankingsResponse | null>(null);
   const [gameData, setGameData] = useState<GameRankingsResponse | null>(null);
   const [familiarData, setFamiliarData] = useState<FamiliarRankingsResponse | null>(null);
@@ -953,13 +965,14 @@ function RankingsTab({ initialBoard }: { initialBoard?: RankingBoardKey }) {
         setFamiliarData(f);
         setScriptoriumData(s);
       })
-      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load rankings"); })
+      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : t("errors.loadRankingsFailed")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  if (loading) return <p className="text-sm text-keep-muted">Loading rankings…</p>;
+  if (loading) return <p className="text-sm text-keep-muted">{t("rankings.loading")}</p>;
   if (err) return <p className="text-sm text-keep-accent">{err}</p>;
-  if (!data) return <p className="text-sm text-keep-muted">No rankings available.</p>;
+  if (!data) return <p className="text-sm text-keep-muted">{t("rankings.none")}</p>;
   return (
     <div className="space-y-6">
       <RankingsSpotlight champions={data.champions} />
@@ -991,13 +1004,14 @@ function RankingsTab({ initialBoard }: { initialBoard?: RankingBoardKey }) {
  * the reader. Auto-populates from published stories; no registration step.
  */
 function ScriptoriumRankingsSection({ data }: { data: ScriptoriumRankingsResponse }) {
+  const { t } = useTranslation("earning");
   const authorBoards = data.authorBoards.filter((b) => b.entries.length > 0);
   const bookBoards = data.bookBoards.filter((b) => b.entries.length > 0);
   return (
     <section className="space-y-3">
       <header className="flex items-baseline justify-between">
-        <h3 className="font-action text-base">Scriptorium Rankings</h3>
-        <span className="text-[10px] uppercase tracking-widest text-keep-muted">Books & Authors</span>
+        <h3 className="font-action text-base">{t("rankings.scriptoriumTitle")}</h3>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("rankings.booksAndAuthors")}</span>
       </header>
       <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
         {authorBoards.map((b) => (
@@ -1038,17 +1052,18 @@ function ScriptoriumRankingsSection({ data }: { data: ScriptoriumRankingsRespons
 /** A book-board row: rank pill + cover thumbnail + title/author + metric. The
  *  whole row opens the story in the reader (via the store bridge). */
 function BookRankingEntry({ rank, book, boardKey }: { rank: number; book: ScriptoriumBookRow; boardKey: "applause" | "rated" }) {
+  const { t } = useTranslation("earning");
   const setOpenStoryReader = useChat((s) => s.setOpenStoryReader);
   const byline = book.author.characterName ?? book.author.masterUsername;
   const primary = boardKey === "rated"
     ? (book.avgRating != null ? `${book.avgRating.toFixed(1)}★` : "-")
-    : book.applauseCount.toLocaleString();
-  const primaryLabel = boardKey === "rated" ? `${book.reviewCount} reviews` : "applause";
+    : formatNumber(book.applauseCount);
+  const primaryLabel = boardKey === "rated" ? t("rankings.reviewsCount", { count: book.reviewCount }) : t("rankings.applause");
   return (
     <button
       type="button"
       onClick={() => setOpenStoryReader(book.storyId)}
-      title={`Read "${book.title}"`}
+      title={t("rankings.readBook", { title: book.title })}
       className="flex w-full items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1.5 text-left hover:border-keep-action/40"
     >
       <div className={`w-6 shrink-0 text-center font-bold tabular-nums ${rank <= 3 ? "text-keep-action" : "text-keep-muted"}`}>{rank}</div>
@@ -1061,7 +1076,7 @@ function BookRankingEntry({ rank, book, boardKey }: { rank: number; book: Script
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-semibold">{book.title}</div>
-        <div className="truncate text-[10px] uppercase tracking-wide text-keep-muted">by {byline}</div>
+        <div className="truncate text-[10px] uppercase tracking-wide text-keep-muted">{t("rankings.byAuthor", { name: byline })}</div>
       </div>
       <div className="shrink-0 text-right">
         <div className="text-sm font-semibold tabular-nums">{primary}</div>
@@ -1077,19 +1092,20 @@ function BookRankingEntry({ rank, book, boardKey }: { rank: number; book: Script
  * rank above dormant ones (which carry a 💤 badge).
  */
 function FamiliarRankingsSection({ data }: { data: FamiliarRankingsResponse }) {
+  const { t } = useTranslation("earning");
   const allBoards: Array<{ key: string; label: string; rows: FamiliarRankingRow[]; metric: (r: FamiliarRankingRow) => number; unit: string }> = [
-    { key: "level", label: "Highest Level", rows: data.byLevel, metric: (r: FamiliarRankingRow) => r.level, unit: "level" },
-    { key: "age", label: "Eldest", rows: data.byAge, metric: (r: FamiliarRankingRow) => Math.floor(r.ageHours / 24), unit: "days" },
-    { key: "streak", label: "Longest Streak", rows: data.byStreak, metric: (r: FamiliarRankingRow) => r.bestStreak, unit: "day streak" },
-    { key: "health", label: "Best-Kept", rows: data.byHealth, metric: (r: FamiliarRankingRow) => Math.round(r.health), unit: "health" },
+    { key: "level", label: t("rankings.familiar.highestLevel"), rows: data.byLevel, metric: (r: FamiliarRankingRow) => r.level, unit: t("rankings.familiar.unitLevel") },
+    { key: "age", label: t("rankings.familiar.eldest"), rows: data.byAge, metric: (r: FamiliarRankingRow) => Math.floor(r.ageHours / 24), unit: t("rankings.familiar.unitDays") },
+    { key: "streak", label: t("rankings.familiar.longestStreak"), rows: data.byStreak, metric: (r: FamiliarRankingRow) => r.bestStreak, unit: t("rankings.familiar.unitDayStreak") },
+    { key: "health", label: t("rankings.familiar.bestKept"), rows: data.byHealth, metric: (r: FamiliarRankingRow) => Math.round(r.health), unit: t("rankings.familiar.unitHealth") },
   ];
   const boards = allBoards.filter((b) => b.rows.length > 0);
   if (boards.length === 0) return null;
   return (
     <section className="space-y-3">
       <header className="flex items-baseline justify-between">
-        <h3 className="font-action text-base">Familiar Rankings</h3>
-        <span className="text-[10px] uppercase tracking-widest text-keep-muted">Eidolon Tamer</span>
+        <h3 className="font-action text-base">{t("rankings.familiarTitle")}</h3>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("rankings.eidolonTamer")}</span>
       </header>
       <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
         {boards.map((b) => (
@@ -1113,6 +1129,7 @@ function FamiliarRankingsSection({ data }: { data: FamiliarRankingsResponse }) {
 }
 
 function FamiliarRankingEntry({ rank, entry, primary, primaryLabel }: { rank: number; entry: FamiliarRankingRow; primary: number; primaryLabel: string }) {
+  const { t } = useTranslation("earning");
   return (
     <div className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1.5 hover:border-keep-action/40">
       <div className={`w-6 shrink-0 text-center font-bold tabular-nums ${rank <= 3 ? "text-keep-action" : "text-keep-muted"}`}>{rank}</div>
@@ -1123,11 +1140,11 @@ function FamiliarRankingEntry({ rank, entry, primary, primaryLabel }: { rank: nu
         </div>
         <div className="truncate text-[10px] uppercase tracking-wide text-keep-muted">
           {entry.dead ? "💤 " : "🥚 "}{entry.familiarName}
-          {entry.kind === "pet" ? " · pet" : entry.speciesId ? ` · ${entry.speciesId}` : ""}
+          {entry.kind === "pet" ? t("rankings.petSuffix") : entry.speciesId ? ` · ${entry.speciesId}` : ""}
         </div>
       </div>
       <div className="shrink-0 text-right">
-        <div className="text-sm font-semibold tabular-nums">{primary.toLocaleString()}</div>
+        <div className="text-sm font-semibold tabular-nums">{formatNumber(primary)}</div>
         <div className="text-[10px] uppercase tracking-widest text-keep-muted">{primaryLabel}</div>
       </div>
     </div>
@@ -1144,12 +1161,13 @@ function FamiliarRankingEntry({ rank, entry, primary, primaryLabel }: { rank: nu
  * recorded; no UI registration step is needed.
  */
 function GameRankingsSection({ data }: { data: GameRankingsResponse }) {
+  const { t } = useTranslation("earning");
   return (
     <section className="space-y-3">
       <header className="flex items-baseline justify-between">
-        <h3 className="font-action text-base">Social Game Rankings</h3>
+        <h3 className="font-action text-base">{t("rankings.socialGamesTitle")}</h3>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          {data.games.length} {data.games.length === 1 ? "game" : "games"} tracked
+          {t("rankings.gamesTracked", { count: data.games.length })}
         </span>
       </header>
       <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
@@ -1163,16 +1181,17 @@ function GameRankingsSection({ data }: { data: GameRankingsResponse }) {
 }
 
 function OverallGameBoardCard({ rows }: { rows: OverallRankingRow[] }) {
+  const { t } = useTranslation("earning");
   return (
     <section className="rounded border border-keep-action/40 bg-gradient-to-br from-keep-action/10 to-keep-bg/40 p-3">
       <header className="mb-2 flex items-baseline justify-between">
-        <h4 className="font-action text-sm uppercase tracking-widest text-keep-action">All Games</h4>
-        <span className="text-[10px] uppercase tracking-widest text-keep-muted">total wins</span>
+        <h4 className="font-action text-sm uppercase tracking-widest text-keep-action">{t("rankings.allGames")}</h4>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("rankings.totalWins")}</span>
       </header>
       <ol className="space-y-1.5">
         {rows.map((r, i) => (
           <li key={`${r.ownerScope}::${r.ownerId}`}>
-            <GameRankingEntry rank={i + 1} entry={r} primary={r.totalWins} primaryLabel="wins" secondary={r.totalPoints > r.totalWins ? r.totalPoints : null} secondaryLabel="points" />
+            <GameRankingEntry rank={i + 1} entry={r} primary={r.totalWins} primaryLabel={t("rankings.wins")} secondary={r.totalPoints > r.totalWins ? r.totalPoints : null} secondaryLabel={t("rankings.points")} />
           </li>
         ))}
       </ol>
@@ -1181,6 +1200,7 @@ function OverallGameBoardCard({ rows }: { rows: OverallRankingRow[] }) {
 }
 
 function PerGameBoardCard({ gameKind, label, rows }: { gameKind: string; label: string; rows: GameRankingRow[] }) {
+  const { t } = useTranslation("earning");
   return (
     <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
       <header className="mb-2 flex items-baseline justify-between">
@@ -1194,9 +1214,9 @@ function PerGameBoardCard({ gameKind, label, rows }: { gameKind: string; label: 
               rank={i + 1}
               entry={r}
               primary={r.wins}
-              primaryLabel={r.wins === 1 ? "win" : "wins"}
+              primaryLabel={t("rankings.winLabel", { count: r.wins })}
               secondary={r.points > r.wins ? r.points : null}
-              secondaryLabel="points"
+              secondaryLabel={t("rankings.points")}
             />
           </li>
         ))}
@@ -1223,6 +1243,7 @@ function GameRankingEntry({
   secondary: number | null;
   secondaryLabel: string;
 }) {
+  const { t } = useTranslation("earning");
   return (
     <div className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1.5 hover:border-keep-action/40">
       <div className={`w-6 shrink-0 text-center font-bold tabular-nums ${rank <= 3 ? "text-keep-action" : "text-keep-muted"}`}>
@@ -1235,17 +1256,17 @@ function GameRankingEntry({
         </div>
         {entry.ownerScope === "character" || entry.rankName ? (
           <div className="truncate text-[10px] uppercase tracking-wide text-keep-muted">
-            {entry.ownerScope === "character" ? <span>character</span> : null}
+            {entry.ownerScope === "character" ? <span>{t("rankings.characterScope")}</span> : null}
             {entry.ownerScope === "character" && entry.rankName ? <span> · </span> : null}
             {entry.rankName ?? null}
           </div>
         ) : null}
       </div>
       <div className="shrink-0 text-right">
-        <div className="text-sm font-semibold tabular-nums">{primary.toLocaleString()}</div>
+        <div className="text-sm font-semibold tabular-nums">{formatNumber(primary)}</div>
         <div className="text-[10px] uppercase tracking-widest text-keep-muted">{primaryLabel}</div>
         {secondary !== null ? (
-          <div className="text-[10px] text-keep-muted">{secondary.toLocaleString()} {secondaryLabel}</div>
+          <div className="text-[10px] text-keep-muted">{formatNumber(secondary)} {secondaryLabel}</div>
         ) : null}
       </div>
     </div>
@@ -1261,6 +1282,7 @@ function GameRankingEntry({
  * the board label + metric prominent. Clicking opens the profile.
  */
 function RankingsSpotlight({ champions }: { champions: RankingChampion[] }) {
+  const { t } = useTranslation("earning");
   const [idx, setIdx] = useState(0);
   const [paused, setPaused] = useState(false);
   useEffect(() => {
@@ -1283,14 +1305,14 @@ function RankingsSpotlight({ champions }: { champions: RankingChampion[] }) {
       className="relative rounded border border-keep-action/40 bg-gradient-to-br from-keep-action/10 to-keep-bg/40 p-4"
     >
       <div className="mb-3 flex items-baseline justify-between">
-        <h3 className="font-action text-sm uppercase tracking-widest text-keep-action">Spotlight</h3>
+        <h3 className="font-action text-sm uppercase tracking-widest text-keep-action">{t("rankings.spotlight")}</h3>
         <div className="flex items-center gap-1.5">
           {champions.map((c, i) => (
             <button
               key={c.boardKey}
               type="button"
               onClick={() => setIdx(i)}
-              aria-label={`Show ${c.boardLabel} champion`}
+              aria-label={t("rankings.showChampion", { board: c.boardLabel })}
               className={`h-1.5 rounded-full transition-all ${i === idx ? "w-6 bg-keep-action" : "w-1.5 bg-keep-rule hover:bg-keep-muted"}`}
             />
           ))}
@@ -1313,7 +1335,7 @@ function RankingsSpotlight({ champions }: { champions: RankingChampion[] }) {
         />
         <div className="min-w-0 flex-1">
           <div className="text-xs uppercase tracking-widest text-keep-muted">
-            #1 · {cur.boardLabel}
+            {t("rankings.spotlightRank", { board: cur.boardLabel })}
           </div>
           <div className="mt-1 text-2xl font-bold leading-tight">
             <StyledEntryName entry={cur.entry} />
@@ -1322,11 +1344,11 @@ function RankingsSpotlight({ champions }: { champions: RankingChampion[] }) {
             <div className="mt-1 text-xs text-keep-muted">
               {cur.entry.rankName}
               {cur.entry.tierLabel ? <span> · {cur.entry.tierLabel}</span> : null}
-              {cur.entry.scope === "character" ? <span> · character</span> : null}
+              {cur.entry.scope === "character" ? <span> · {t("rankings.characterScope")}</span> : null}
             </div>
           ) : null}
           <div className="mt-2 text-base text-keep-text">
-            <span className="font-semibold tabular-nums">{cur.entry.value.toLocaleString()}</span>
+            <span className="font-semibold tabular-nums">{formatNumber(cur.entry.value)}</span>
             <span className="ml-1.5 text-xs uppercase tracking-widest text-keep-muted">{cur.boardMetric}</span>
           </div>
         </div>
@@ -1358,6 +1380,7 @@ function RankingBoardCard({ board }: { board: RankingBoard }) {
 /** Single ranking row, rank pill + avatar (with effects) + styled
  *  name + metric value. The whole row is a profile-open click target. */
 function RankingEntryCard({ rank, entry, metric }: { rank: number; entry: RankingPoolEntry; metric: string }) {
+  const { t } = useTranslation("earning");
   return (
     <div className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1.5 hover:border-keep-action/40">
       <div className={`w-6 shrink-0 text-center font-bold tabular-nums ${rank <= 3 ? "text-keep-action" : "text-keep-muted"}`}>
@@ -1376,14 +1399,14 @@ function RankingEntryCard({ rank, entry, metric }: { rank: number; entry: Rankin
         </div>
         {entry.scope === "character" || entry.rankName ? (
           <div className="truncate text-[10px] uppercase tracking-wide text-keep-muted">
-            {entry.scope === "character" ? <span>character</span> : null}
+            {entry.scope === "character" ? <span>{t("rankings.characterScope")}</span> : null}
             {entry.scope === "character" && entry.rankName ? <span> · </span> : null}
             {entry.rankName ?? null}
           </div>
         ) : null}
       </div>
       <div className="shrink-0 text-right">
-        <div className="text-sm font-semibold tabular-nums">{entry.value.toLocaleString()}</div>
+        <div className="text-sm font-semibold tabular-nums">{formatNumber(entry.value)}</div>
         <div className="text-[10px] uppercase tracking-widest text-keep-muted">{metric}</div>
       </div>
     </div>
@@ -1394,6 +1417,7 @@ function RankingEntryCard({ rank, entry, metric }: { rank: number; entry: Rankin
  *  opens the entry's profile on click. Mirrors the userlist's
  *  click-to-profile affordance using the chat store's setOpenProfile. */
 function ProfileLinkAvatar({ entry, size }: { entry: RankingDisplayEntry; size: "sm" | "xl" }) {
+  const { t } = useTranslation("earning");
   const setOpenProfile = useChat((s) => s.setOpenProfile);
   const freeformConfig = useMemo(() => {
     const json = entry.freeformBorderConfigJson;
@@ -1418,7 +1442,7 @@ function ProfileLinkAvatar({ entry, size }: { entry: RankingDisplayEntry; size: 
       freeformConfig={freeformConfig}
       size={size}
       onClick={() => void openProfile()}
-      title={`View ${entry.displayName}'s profile`}
+      title={t("rankings.viewProfile", { name: entry.displayName })}
     />
   );
 }
@@ -1458,6 +1482,7 @@ function LedgerTab({
    *  bare opaque reason code. */
   itemCatalog: ItemCatalogRow[];
 }) {
+  const { t } = useTranslation("earning");
   // Memoize the catalog index so formatLedgerEntry's per-row lookup
   // is O(1) instead of an array.find() per render.
   const itemByKey = useMemo(
@@ -1503,7 +1528,7 @@ function LedgerTab({
         setDone(page.nextCursor === null);
       })
       .catch((e) => {
-        if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load activity");
+        if (!cancelled) setErr(e instanceof Error ? e.message : t("errors.loadActivityFailed"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -1528,7 +1553,7 @@ function LedgerTab({
       setCursor(page.nextCursor);
       setDone(page.nextCursor === null);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to load more");
+      setErr(e instanceof Error ? e.message : t("errors.loadMoreFailed"));
     } finally {
       setLoading(false);
     }
@@ -1537,13 +1562,13 @@ function LedgerTab({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs uppercase tracking-widest text-keep-muted">Scope:</span>
+        <span className="text-xs uppercase tracking-widest text-keep-muted">{t("ledger.scope")}</span>
         <button
           type="button"
           onClick={() => setScope({ kind: "user" })}
           className={`rounded border border-keep-rule px-2 py-0.5 text-xs ${scope.kind === "user" ? "bg-keep-bg" : "bg-keep-banner/40 hover:bg-keep-banner"}`}
         >
-          Master
+          {t("ledger.master")}
         </button>
         {characters.map((c) => (
           <button
@@ -1562,7 +1587,7 @@ function LedgerTab({
       ) : null}
 
       {entries.length === 0 && !loading ? (
-        <p className="text-sm text-keep-muted">No activity yet.</p>
+        <p className="text-sm text-keep-muted">{t("ledger.empty")}</p>
       ) : null}
 
       <ul className="divide-y divide-keep-rule/40 rounded border border-keep-rule bg-keep-bg/30">
@@ -1571,18 +1596,18 @@ function LedgerTab({
             <div className="min-w-0 flex-1">
               <div>{formatLedgerEntry(e, itemByKey)}</div>
               <div className="text-[10px] uppercase tracking-widest text-keep-muted">
-                {new Date(e.createdAt).toLocaleString()}
+                {formatDateTime(e.createdAt)}
               </div>
             </div>
             <div className="shrink-0 text-right">
               {e.xpDelta !== 0 ? (
                 <div className={e.xpDelta > 0 ? "text-keep-system" : "text-keep-accent"}>
-                  {e.xpDelta > 0 ? "+" : ""}{e.xpDelta} XP
+                  {t("xpAmount", { amount: `${e.xpDelta > 0 ? "+" : ""}${e.xpDelta}` })}
                 </div>
               ) : null}
               {e.currencyDelta !== 0 ? (
                 <div className={e.currencyDelta > 0 ? "text-keep-system" : "text-keep-accent"}>
-                  {e.currencyDelta > 0 ? "+" : ""}{e.currencyDelta} Currency
+                  {t("currencyAmount", { amount: `${e.currencyDelta > 0 ? "+" : ""}${e.currencyDelta}` })}
                 </div>
               ) : null}
             </div>
@@ -1597,7 +1622,7 @@ function LedgerTab({
           disabled={loading || cursor === null}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm disabled:opacity-50 hover:bg-keep-banner"
         >
-          {loading ? "Loading…" : "Load more"}
+          {loading ? t("common:loading") : t("ledger.loadMore")}
         </button>
       ) : null}
     </div>
@@ -1609,6 +1634,7 @@ function LedgerTab({
  * ========================================================= */
 
 function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {}; myId: string | null }) {
+  const { t } = useTranslation("earning");
   // Both privacy flags share one save handler, patchEarningSettings
   // accepts either or both. We track them locally so the user can
   // toggle without each click round-tripping through the snapshot
@@ -1638,7 +1664,7 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
       void refresh(currentServerId);
       window.setTimeout(() => setSavedFlash(false), 1500);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to save");
+      setErr(e instanceof Error ? e.message : t("errors.settingsSaveFailed"));
       // Revert optimistic state on failure.
       if (kind === "currency") setHideCurrency(!next); else setHideXp(!next);
     } finally {
@@ -1649,10 +1675,9 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
   return (
     <div className="space-y-4 max-w-lg">
       <section>
-        <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">Privacy</h3>
+        <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">{t("settings.privacy")}</h3>
         <p className="mb-2 text-xs text-keep-muted">
-          Rank, tier, and sigil are always visible, rank is a public identity tag. XP and Currency
-          totals are hidden independently when their respective toggle is on.
+          {t("settings.privacyIntro")}
         </p>
         <label className="mb-2 flex items-start gap-2">
           <input
@@ -1663,10 +1688,15 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
             onChange={(e) => void save("currency", e.target.checked)}
           />
           <span>
-            <span className="font-semibold">Hide my Currency from other users</span>
+            <span className="font-semibold">{t("settings.hideCurrency")}</span>
             <br />
             <span className="text-xs text-keep-muted">
-              Other people see "private" instead of your Currency total in <code>/currency {snapshot.master.displayName}</code> and on your public profile.
+              <Trans
+                t={t}
+                i18nKey="settings.hideCurrencyDesc"
+                values={{ name: snapshot.master.displayName }}
+                components={[<code key="0" />]}
+              />
             </span>
           </span>
         </label>
@@ -1679,10 +1709,15 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
             onChange={(e) => void save("xp", e.target.checked)}
           />
           <span>
-            <span className="font-semibold">Hide my XP from other users</span>
+            <span className="font-semibold">{t("settings.hideXp")}</span>
             <br />
             <span className="text-xs text-keep-muted">
-              Other people see "private" instead of your XP total on your profile and in <code>/exp {snapshot.master.displayName}</code>.
+              <Trans
+                t={t}
+                i18nKey="settings.hideXpDesc"
+                values={{ name: snapshot.master.displayName }}
+                components={[<code key="0" />]}
+              />
             </span>
           </span>
         </label>
@@ -1690,7 +1725,7 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
           <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{err}</div>
         ) : null}
         {savedFlash ? (
-          <div className="mt-2 text-xs text-keep-system">Saved.</div>
+          <div className="mt-2 text-xs text-keep-system">{t("settings.saved")}</div>
         ) : null}
       </section>
 
@@ -1706,13 +1741,13 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
 
       {myId === snapshot.master.ownerId ? (
         <section>
-          <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">Slash commands</h3>
+          <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">{t("settings.slashCommands")}</h3>
           <ul className="space-y-1 text-sm">
-            <li><code>/currency</code>, show your wallets</li>
-            <li><code>/currency [user]</code>, look up another user's Currency (honors their privacy)</li>
-            <li><code>/currency send [target] [amount]</code>, transfer Currency to a user or character</li>
-            <li><code>/exp</code>, show your XP, rank, and any borders you can buy</li>
-            <li><code>/exp [user]</code>, look up another user's rank</li>
+            <li><Trans t={t} i18nKey="settings.cmdCurrency"><code>/currency</code>, show your wallets</Trans></li>
+            <li><Trans t={t} i18nKey="settings.cmdCurrencyUser"><code>/currency [user]</code>, look up another user's Currency (honors their privacy)</Trans></li>
+            <li><Trans t={t} i18nKey="settings.cmdCurrencySend"><code>/currency send [target] [amount]</code>, transfer Currency to a user or character</Trans></li>
+            <li><Trans t={t} i18nKey="settings.cmdExp"><code>/exp</code>, show your XP, rank, and any borders you can buy</Trans></li>
+            <li><Trans t={t} i18nKey="settings.cmdExpUser"><code>/exp [user]</code>, look up another user's rank</Trans></li>
           </ul>
         </section>
       ) : null}
@@ -1725,10 +1760,11 @@ function SettingsTab({ snapshot, myId }: { snapshot: ReturnType<typeof useEarnin
  * ========================================================= */
 
 function StubTab({ title, phase }: { title: string; phase: string }) {
+  const { t } = useTranslation("earning");
   return (
     <div className="rounded border border-keep-rule bg-keep-bg/40 p-4 text-sm text-keep-muted">
       <p className="font-semibold text-keep-text">{title}</p>
-      <p className="mt-1">Coming in {phase}. The data plumbing is already in place, only the buy / equip UI is pending.</p>
+      <p className="mt-1">{t("stub.coming", { phase })}</p>
     </div>
   );
 }
@@ -1751,6 +1787,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
   flashSale: FlashSaleResponse | null;
   focusKey: string | null;
 }) {
+  const { t } = useTranslation("earning");
   useShopRowFocus(focusKey);
   const me = useChat((s) => s.me);
   // The tab's equip / unequip writes scope to the user's CURRENTLY
@@ -1836,8 +1873,8 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
     : snapshot.master.currency;
 
   async function buy(key: string, cost: number) {
-    const who = activeCharacterId ? "this character" : "your master account";
-    if (!window.confirm(`Buy this style for ${cost} Currency from ${who}'s pool?`)) return;
+    const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
+    if (!window.confirm(t("styles.buyConfirm", { cost, who }))) return;
     setBusyKey(key);
     setErr(null);
     try {
@@ -1846,7 +1883,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
       await purchaseNameStyle(key, activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusyKey(null);
     }
@@ -1860,7 +1897,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
       await setActiveNameStyle(key, activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Equip failed");
+      setErr(e instanceof Error ? e.message : t("errors.equipFailed"));
     } finally {
       setBusyKey(null);
     }
@@ -1872,7 +1909,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
       await patchNameStyleConfig(key, config, activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Save failed");
+      setErr(e instanceof Error ? e.message : t("errors.saveFailed"));
     } finally {
       setBusyKey(null);
     }
@@ -1887,7 +1924,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
     if (!activeCharacterId) return null;
     return snapshot.characters.find((c) => c.ownerId === activeCharacterId)?.displayName ?? null;
   }, [activeCharacterId, snapshot.characters]);
-  const previewName = activeCharacterDisplayName || me?.username || "Username";
+  const previewName = activeCharacterDisplayName || me?.username || t("styles.previewFallback");
 
   return (
     <div className="space-y-3">
@@ -1897,14 +1934,14 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
           onClick={() => setTab("owned")}
           className={`rounded border border-keep-rule px-2 py-0.5 ${tab === "owned" ? "bg-keep-bg" : "bg-keep-banner/40 hover:bg-keep-banner"}`}
         >
-          Owned ({owned.length})
+          {t("ownedCount", { count: owned.length })}
         </button>
         <button
           type="button"
           onClick={() => setTab("available")}
           className={`rounded border border-keep-rule px-2 py-0.5 ${tab === "available" ? "bg-keep-bg" : "bg-keep-banner/40 hover:bg-keep-banner"}`}
         >
-          Available ({available.length})
+          {t("availableCount", { count: available.length })}
         </button>
       </div>
 
@@ -1921,11 +1958,11 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
               disabled={busyKey !== null}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
             >
-              Unequip
+              {t("unequip")}
             </button>
           ) : null}
           {owned.length === 0 ? (
-            <p className="text-sm text-keep-muted">You don't own any styles yet. Switch to "Available" to browse.</p>
+            <p className="text-sm text-keep-muted">{t("styles.noneOwned")}</p>
           ) : (
             // Two-column grid on md+ so the catalog stops being a
             // tall vertical scroll. Stays one column on mobile where
@@ -1956,7 +1993,7 @@ function NameStylesTab({ snapshot, flashSale, focusKey }: {
       {tab === "available" ? (
         <div className="space-y-3">
           {available.length === 0 ? (
-            <p className="text-sm text-keep-muted">You own every available style. Nice.</p>
+            <p className="text-sm text-keep-muted">{t("styles.allOwned")}</p>
           ) : (
             <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
               {available.map((s) => (
@@ -1998,6 +2035,7 @@ function OwnedStyleCard({
   onSaveConfig: (config: Record<string, unknown> | null) => void;
   flashSale: FlashSaleResponse | null;
 }) {
+  const { t } = useTranslation("earning");
   // Local draft so the color picker can stage changes without a
   // per-keystroke server roundtrip. Persisted via Save below.
   const [draft, setDraft] = useState<Record<string, unknown>>(config ?? {});
@@ -2009,9 +2047,9 @@ function OwnedStyleCard({
   // color input. Three named slots (color1, color2, glow) cover the
   // seeded styles' configs; unknown keys remain editable as text.
   const colorKeys: Array<{ key: string; label: string }> = [
-    { key: "color1", label: "Color 1" },
-    { key: "color2", label: "Color 2" },
-    { key: "glow", label: "Glow" },
+    { key: "color1", label: t("styles.color1") },
+    { key: "color2", label: t("styles.color2") },
+    { key: "glow", label: t("styles.glow") },
   ];
 
   const sale = flashSalePriceFor(flashSale, "nameStyle", style.key, style.cost);
@@ -2037,7 +2075,7 @@ function OwnedStyleCard({
           {style.description ? <div className="text-xs text-keep-muted">{style.description}</div> : null}
         </div>
         {isActive ? (
-          <span className="rounded bg-keep-action/15 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action">Equipped</span>
+          <span className="rounded bg-keep-action/15 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action">{t("equipped")}</span>
         ) : null}
         <button
           type="button"
@@ -2045,7 +2083,7 @@ function OwnedStyleCard({
           disabled={busy}
           className={`rounded border px-2 py-0.5 text-xs disabled:opacity-50 ${isActive ? "border-keep-rule bg-keep-bg text-keep-muted hover:bg-keep-banner" : "border-keep-action bg-keep-action/15 text-keep-action hover:bg-keep-action/25"}`}
         >
-          {isActive ? "Unequip" : "Equip"}
+          {isActive ? t("unequip") : t("equip")}
         </button>
       </div>
 
@@ -2083,7 +2121,7 @@ function OwnedStyleCard({
           disabled={busy}
           className="ml-auto rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          Save colors
+          {t("saveColors")}
         </button>
       </div>
     </div>
@@ -2105,6 +2143,7 @@ function AvailableStyleCard({
   onBuy: () => void;
   flashSale: FlashSaleResponse | null;
 }) {
+  const { t } = useTranslation("earning");
   const sale = flashSalePriceFor(flashSale, "nameStyle", style.key, style.cost);
   return (
     <div className="relative flex flex-col rounded border border-keep-rule bg-keep-bg/40 p-3">
@@ -2121,10 +2160,10 @@ function AvailableStyleCard({
           type="button"
           onClick={onBuy}
           disabled={busy || !affordable}
-          title={affordable ? "Buy this style" : "Not enough Currency"}
+          title={affordable ? t("styles.buyTitle") : t("notEnoughCurrency")}
           className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          {busy ? "Working…" : "Buy"}
+          {busy ? t("working") : t("buy")}
         </button>
       </div>
       <div className="name-style-preview mt-3 rounded border border-keep-rule/60 bg-keep-bg/60 px-3 py-2 text-2xl font-bold">
@@ -2177,6 +2216,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
   flashSale: FlashSaleResponse | null;
   focusKey: string | null;
 }) {
+  const { t } = useTranslation("earning");
   useShopRowFocus(focusKey);
   const refresh = useEarning((s) => s.refresh);
   // Per-identity scope: borders are partitioned the same way name
@@ -2287,15 +2327,15 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
   }, [activeCharacterId, activeCharacterView, snapshot.master, snapshot.catalog.ranks]);
 
   async function buy(rankKey: string) {
-    const who = activeCharacterId ? "this character" : "your master account";
-    if (!window.confirm(`Buy this rank's border from ${who}'s pool?`)) return;
+    const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
+    if (!window.confirm(t("borders.buyRankConfirm", { who }))) return;
     setBusyKey(rankKey);
     setErr(null);
     try {
       await purchaseBorder(rankKey, activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusyKey(null);
     }
@@ -2308,22 +2348,22 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
       await patchEarningSettings({ selectedBorderRankKey: rankKey, characterId: activeCharacterId }, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Equip failed");
+      setErr(e instanceof Error ? e.message : t("errors.equipFailed"));
     } finally {
       setBusyKey(null);
     }
   }
 
   async function buyFreeform(borderKey: string) {
-    const who = activeCharacterId ? "this character" : "your master account";
-    if (!window.confirm(`Buy this border from ${who}'s pool?`)) return;
+    const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
+    if (!window.confirm(t("borders.buyFreeformConfirm", { who }))) return;
     setBusyKey(`freeform:${borderKey}`);
     setErr(null);
     try {
       await purchaseFreeformBorder(borderKey, activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusyKey(null);
     }
@@ -2336,7 +2376,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
       await patchEarningSettings({ selectedFreeformBorderKey: borderKey, characterId: activeCharacterId }, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Equip failed");
+      setErr(e instanceof Error ? e.message : t("errors.equipFailed"));
     } finally {
       setBusyKey(null);
     }
@@ -2349,7 +2389,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
       await patchFreeformBorderConfig(borderKey, config, activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Save failed");
+      setErr(e instanceof Error ? e.message : t("errors.saveFailed"));
     } finally {
       setBusyKey(null);
     }
@@ -2394,7 +2434,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
 
       {selectedKey ? (
         <div className="flex items-center gap-2 text-xs text-keep-muted">
-          <span>Currently equipped:</span>
+          <span>{t("borders.currentlyEquipped")}</span>
           <strong className="text-keep-text">{snapshot.catalog.ranks.find((r) => r.key === selectedKey)?.name ?? selectedKey}</strong>
           <button
             type="button"
@@ -2402,17 +2442,17 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
             disabled={busyKey !== null}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:bg-keep-banner disabled:opacity-50"
           >
-            Unequip
+            {t("unequip")}
           </button>
         </div>
       ) : null}
 
       <section>
         <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
-          Owned ({owned.length})
+          {t("ownedCount", { count: owned.length })}
         </h3>
         {owned.length === 0 ? (
-          <p className="text-sm text-keep-muted">You don't own any borders yet.</p>
+          <p className="text-sm text-keep-muted">{t("borders.noneOwned")}</p>
         ) : (
           <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
             {owned.map(({ tier, rank }) => (
@@ -2433,10 +2473,10 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
 
       <section>
         <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
-          Available ({available.length})
+          {t("availableCount", { count: available.length })}
         </h3>
         {available.length === 0 ? (
-          <p className="text-sm text-keep-muted">No borders available to purchase right now. Climb the ladder to unlock more.</p>
+          <p className="text-sm text-keep-muted">{t("borders.noneAvailable")}</p>
         ) : (
           <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
             {available.map(({ tier, rank }) => (
@@ -2459,7 +2499,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
       {locked.length > 0 ? (
         <section>
           <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
-            Locked ({locked.length})
+            {t("lockedCount", { count: locked.length })}
           </h3>
           <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
             {locked.map(({ tier, rank }) => (
@@ -2486,11 +2526,11 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
               displayed at the top of this tab. */}
           <div className="border-t border-keep-rule pt-4">
             <h3 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
-              Free-form
+              {t("borders.freeform")}
             </h3>
             {selectedFreeformKey ? (
               <div className="mb-3 flex items-center gap-2 text-xs text-keep-muted">
-                <span>Currently equipped:</span>
+                <span>{t("borders.currentlyEquipped")}</span>
                 <strong className="text-keep-text">
                   {freeformCatalog.find((b) => b.key === selectedFreeformKey)?.name ?? selectedFreeformKey}
                 </strong>
@@ -2500,7 +2540,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
                   disabled={busyKey !== null}
                   className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:bg-keep-banner disabled:opacity-50"
                 >
-                  Unequip
+                  {t("unequip")}
                 </button>
               </div>
             ) : null}
@@ -2509,7 +2549,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
           {ownedFreeform.length > 0 ? (
             <section>
               <h4 className="mb-2 font-action text-xs uppercase tracking-widest text-keep-muted">
-                Owned ({ownedFreeform.length})
+                {t("ownedCount", { count: ownedFreeform.length })}
               </h4>
               <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
                 {ownedFreeform.map((b) => (
@@ -2533,7 +2573,7 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
           {availableFreeform.length > 0 ? (
             <section>
               <h4 className="mb-2 font-action text-xs uppercase tracking-widest text-keep-muted">
-                Available ({availableFreeform.length})
+                {t("availableCount", { count: availableFreeform.length })}
               </h4>
               <div className="grid auto-rows-fr gap-3 md:grid-cols-2">
                 {availableFreeform.map((b) => {
@@ -2564,17 +2604,18 @@ function BordersTab({ snapshot, flashSale, focusKey }: {
 }
 
 /** Pill color per rarity, open string in the catalog row, so
- *  unknown values fall back to the common-tier palette. */
-function rarityPalette(rarity: string): { ring: string; text: string; label: string } {
+ *  unknown values fall back to the common-tier palette. Takes the
+ *  caller's `t` so the label renders in the active locale. */
+function rarityPalette(rarity: string, t: TFunction): { ring: string; text: string; label: string } {
   switch (rarity.toLowerCase()) {
-    case "rare":      return { ring: "border-blue-400/60",   text: "text-blue-300",   label: "Rare" };
-    case "epic":      return { ring: "border-purple-400/60", text: "text-purple-300", label: "Epic" };
-    case "legendary": return { ring: "border-amber-400/60",  text: "text-amber-300",  label: "Legendary" };
-    case "mythic":    return { ring: "border-pink-400/60",   text: "text-pink-300",   label: "Mythic" };
-    case "exotic":    return { ring: "border-cyan-400/60",   text: "text-cyan-300",   label: "Exotic" };
+    case "rare":      return { ring: "border-blue-400/60",   text: "text-blue-300",   label: t("rarity.rare") };
+    case "epic":      return { ring: "border-purple-400/60", text: "text-purple-300", label: t("rarity.epic") };
+    case "legendary": return { ring: "border-amber-400/60",  text: "text-amber-300",  label: t("rarity.legendary") };
+    case "mythic":    return { ring: "border-pink-400/60",   text: "text-pink-300",   label: t("rarity.mythic") };
+    case "exotic":    return { ring: "border-cyan-400/60",   text: "text-cyan-300",   label: t("rarity.exotic") };
     case "atmospheric":
-    case "atmos":     return { ring: "border-slate-400/60",  text: "text-slate-300",  label: "Atmospheric" };
-    default:          return { ring: "border-keep-rule",     text: "text-keep-muted", label: rarity || "Common" };
+    case "atmos":     return { ring: "border-slate-400/60",  text: "text-slate-300",  label: t("rarity.atmospheric") };
+    default:          return { ring: "border-keep-rule",     text: "text-keep-muted", label: rarity || t("rarity.common") };
   }
 }
 
@@ -2613,7 +2654,8 @@ function FreeformBorderCard({
   /** Flash-sale discount % to display alongside the price chip. */
   discountPct?: number | null;
 }) {
-  const palette = rarityPalette(border.rarity);
+  const { t } = useTranslation("earning");
+  const palette = rarityPalette(border.rarity, t);
   const savedConfig = useMemo(() => {
     if (!configJson) return {} as Record<string, string>;
     return parseFreeformBorderConfig(configJson);
@@ -2691,7 +2733,7 @@ function FreeformBorderCard({
             disabled={busy}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
           >
-            Unequip
+            {t("unequip")}
           </button>
         ) : state === "owned" ? (
           <button
@@ -2700,17 +2742,17 @@ function FreeformBorderCard({
             disabled={busy}
             className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
           >
-            Equip
+            {t("equip")}
           </button>
         ) : (
           <button
             type="button"
             onClick={onAction}
             disabled={busy || !affordable}
-            title={affordable ? "Buy this border" : "Not enough Currency"}
+            title={affordable ? t("borders.buyTitle") : t("notEnoughCurrency")}
             className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
           >
-            {busy ? "Working…" : "Buy"}
+            {busy ? t("working") : t("buy")}
           </button>
         )}
       </div>
@@ -2730,10 +2772,10 @@ function FreeformBorderCard({
         <div className="border-t border-keep-rule/40 pt-3">
           <div className="mb-2 flex items-baseline justify-between">
             <h5 className="text-[10px] font-action uppercase tracking-widest text-keep-muted">
-              Customize colors
+              {t("borders.customizeColors")}
             </h5>
             <span className="text-[10px] text-keep-muted">
-              {slots.length} slot{slots.length === 1 ? "" : "s"}
+              {t("borders.slotCount", { count: slots.length })}
             </span>
           </div>
           <div className="grid gap-2 sm:grid-cols-[repeat(auto-fill,minmax(8rem,1fr))]">
@@ -2752,14 +2794,14 @@ function FreeformBorderCard({
               return (
                 <label
                   key={slot}
-                  title={defaultColor ? `${slot} (default: ${defaultColor})` : slot}
+                  title={defaultColor ? t("borders.slotDefaultTitle", { slot, color: defaultColor }) : slot}
                   className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1 text-[11px] hover:border-keep-rule"
                 >
                   <input
                     type="color"
                     value={normalizeHex(cur)}
                     onChange={(e) => setDraft((d) => ({ ...d, [slot]: e.target.value }))}
-                    aria-label={`Color for ${slot}`}
+                    aria-label={t("borders.colorForSlot", { slot })}
                     className="h-5 w-7 shrink-0 cursor-pointer rounded border border-keep-rule bg-keep-bg"
                   />
                   <span className="min-w-0 truncate text-keep-muted">{slot}</span>
@@ -2774,7 +2816,7 @@ function FreeformBorderCard({
               disabled={busy || (!isDirty && Object.keys(savedConfig).length === 0)}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-40"
             >
-              Reset
+              {t("borders.reset")}
             </button>
             <button
               type="button"
@@ -2782,7 +2824,7 @@ function FreeformBorderCard({
               disabled={busy || !isDirty}
               className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >
-              Save colors
+              {t("saveColors")}
             </button>
           </div>
         </div>
@@ -2813,6 +2855,7 @@ function BorderCard({
    *  initials chip. */
   userAvatarUrl?: string | null;
 }) {
+  const { t } = useTranslation("earning");
   const muted = state === "locked";
   return (
     <div className={`flex items-center gap-3 rounded border p-3 ${state === "equipped" ? "border-keep-action bg-keep-action/5" : "border-keep-rule bg-keep-bg/40"}`}>
@@ -2835,10 +2878,10 @@ function BorderCard({
         <div className="font-semibold">{rankName}</div>
         <div className="text-xs text-keep-muted">
           {state === "locked"
-            ? `Reach ${rankName} ${tier.label} to unlock.`
+            ? t("borders.reachToUnlock", { rank: rankName, tier: tier.label })
             : tier.borderCost != null
               ? <CoinAmount amount={tier.borderCost} />
-              : "Free"}
+              : t("borders.free")}
         </div>
       </div>
       {state === "equipped" ? (
@@ -2848,7 +2891,7 @@ function BorderCard({
           disabled={busy}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
         >
-          Unequip
+          {t("unequip")}
         </button>
       ) : state === "owned" ? (
         <button
@@ -2857,17 +2900,17 @@ function BorderCard({
           disabled={busy}
           className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          Equip
+          {t("equip")}
         </button>
       ) : state === "available" ? (
         <button
           type="button"
           onClick={onAction}
           disabled={busy || !affordable}
-          title={affordable ? "Buy this border" : "Not enough Currency"}
+          title={affordable ? t("borders.buyTitle") : t("notEnoughCurrency")}
           className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          {busy ? "Working…" : "Buy"}
+          {busy ? t("working") : t("buy")}
         </button>
       ) : null}
     </div>
@@ -2886,6 +2929,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
   flashSale: FlashSaleResponse | null;
   focusKey: string | null;
 }) {
+  const { t } = useTranslation("earning");
   useShopRowFocus(focusKey);
   const refresh = useEarning((s) => s.refresh);
   // Same per-identity story as the Name Styles tab: the toggle
@@ -2916,12 +2960,13 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     setLoading(true);
     fetchEarningCatalog(currentServerId)
       .then((r) => { if (!cancelled) setCatalog(r); })
-      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load catalog"); })
+      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : t("errors.loadCatalogFailed")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentServerId]);
 
-  if (loading) return <p className="text-sm text-keep-muted">Loading flair…</p>;
+  if (loading) return <p className="text-sm text-keep-muted">{t("cosmetics.loading")}</p>;
   const inlineAvatarRow = catalog?.cosmetics.find((c) => c.key === "inline_avatar");
   const profileBannerRow = catalog?.cosmetics.find((c) => c.key === "flair_profile_banner");
   const typingPhraseRow = catalog?.cosmetics.find((c) => c.key === "flair_typing_phrase");
@@ -2939,7 +2984,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
   if (!inlineAvatarRow && !profileBannerRow && !typingPhraseRow && !reactionSheetRow
       && !lurkingMasterRow && !roomPresenceRow && !sessionPresenceRow
       && !profileVisitorsRow && !profileMarqueeRow) {
-    return <p className="text-sm text-keep-muted">No flair available right now.</p>;
+    return <p className="text-sm text-keep-muted">{t("cosmetics.none")}</p>;
   }
 
   // Ownership is PER-IDENTITY: the server's purchase ledger writes a
@@ -2965,8 +3010,8 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     : snapshot.master.currency;
 
   async function doBuy() {
-    const who = activeCharacterId ? "this character" : "your master account";
-    if (!window.confirm(`Buy "${inlineAvatarRow!.name}" for ${inlineAvatarRow!.cost} Currency from ${who}'s pool?`)) return;
+    const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
+    if (!window.confirm(t("buyNamedConfirm", { name: inlineAvatarRow!.name, cost: inlineAvatarRow!.cost, who }))) return;
     setBusy(true);
     setErr(null);
     try {
@@ -2978,13 +3023,13 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
       // the equip on for them and re-sync. The server's equip
       // route enforces ownership, so a true never-purchased
       // identity still hits the proper rejection.
-      const msg = e instanceof Error ? e.message : "Purchase failed";
+      const msg = e instanceof Error ? e.message : t("errors.purchaseFailed");
       if (/already owned/i.test(msg)) {
         try {
           await equipCosmetic("inline_avatar", true, activeCharacterId, currentServerId);
           await refresh(currentServerId);
         } catch (eq) {
-          setErr(eq instanceof Error ? eq.message : "Equip failed");
+          setErr(eq instanceof Error ? eq.message : t("errors.equipFailed"));
         }
       } else {
         setErr(msg);
@@ -3002,7 +3047,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
       await equipCosmetic("inline_avatar", next, activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Toggle failed");
+      setErr(e instanceof Error ? e.message : t("errors.toggleFailed"));
     } finally {
       setBusy(false);
     }
@@ -3031,15 +3076,15 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
 
   async function doBuyBanner() {
     if (!profileBannerRow) return;
-    const who = activeCharacterId ? "this character" : "your master account";
-    if (!window.confirm(`Buy "${profileBannerRow.name}" for ${bannerSale!.effectivePrice} Currency from ${who}'s pool?`)) return;
+    const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
+    if (!window.confirm(t("buyNamedConfirm", { name: profileBannerRow.name, cost: bannerSale!.effectivePrice, who }))) return;
     setBusy(true);
     setErr(null);
     try {
       await purchaseCosmetic("flair_profile_banner", activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusy(false);
     }
@@ -3059,15 +3104,15 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
 
   async function doBuyTypingPhrase() {
     if (!typingPhraseRow || !typingPhraseSale) return;
-    const who = activeCharacterId ? "this character" : "your master account";
-    if (!window.confirm(`Buy "${typingPhraseRow.name}" for ${typingPhraseSale.effectivePrice} Currency from ${who}'s pool?`)) return;
+    const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
+    if (!window.confirm(t("buyNamedConfirm", { name: typingPhraseRow.name, cost: typingPhraseSale.effectivePrice, who }))) return;
     setBusy(true);
     setErr(null);
     try {
       await purchaseCosmetic("flair_typing_phrase", activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusy(false);
     }
@@ -3086,15 +3131,15 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
 
   async function doBuyLurkingMaster() {
     if (!lurkingMasterRow || !lurkingMasterSale) return;
-    const who = activeCharacterId ? "this character" : "your master account";
-    if (!window.confirm(`Buy "${lurkingMasterRow.name}" for ${lurkingMasterSale.effectivePrice} Currency from ${who}'s pool?`)) return;
+    const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
+    if (!window.confirm(t("buyNamedConfirm", { name: lurkingMasterRow.name, cost: lurkingMasterSale.effectivePrice, who }))) return;
     setBusy(true);
     setErr(null);
     try {
       await purchaseCosmetic("flair_lurking_master", activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusy(false);
     }
@@ -3106,7 +3151,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
       await equipCosmetic("flair_lurking_master", next, activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Toggle failed");
+      setErr(e instanceof Error ? e.message : t("errors.toggleFailed"));
     } finally {
       setBusy(false);
     }
@@ -3130,15 +3175,15 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     : null;
   async function doBuyRoomPresence() {
     if (!roomPresenceRow || !roomPresenceSale) return;
-    const who = activeCharacterId ? "this character" : "your master account";
-    if (!window.confirm(`Buy "${roomPresenceRow.name}" for ${roomPresenceSale.effectivePrice} Currency from ${who}'s pool?`)) return;
+    const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
+    if (!window.confirm(t("buyNamedConfirm", { name: roomPresenceRow.name, cost: roomPresenceSale.effectivePrice, who }))) return;
     setBusy(true);
     setErr(null);
     try {
       await purchaseCosmetic("flair_room_presence", activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusy(false);
     }
@@ -3156,14 +3201,14 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     if (!sessionPresenceRow || !sessionPresenceSale) return;
     // Always charges the master pool, session presence is account-
     // level, not per-character. Pass `null` to scope to master.
-    if (!window.confirm(`Buy "${sessionPresenceRow.name}" for ${sessionPresenceSale.effectivePrice} Currency from your master account's pool?`)) return;
+    if (!window.confirm(t("buyNamedConfirm", { name: sessionPresenceRow.name, cost: sessionPresenceSale.effectivePrice, who: t("identity.masterAccount") }))) return;
     setBusy(true);
     setErr(null);
     try {
       await purchaseCosmetic("flair_session_presence", null, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusy(false);
     }
@@ -3182,15 +3227,15 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     : null;
   async function doBuyProfileVisitors() {
     if (!profileVisitorsRow || !profileVisitorsSale) return;
-    const who = activeCharacterId ? "this character" : "your master account";
-    if (!window.confirm(`Buy "${profileVisitorsRow.name}" for ${profileVisitorsSale.effectivePrice} Currency from ${who}'s pool?`)) return;
+    const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
+    if (!window.confirm(t("buyNamedConfirm", { name: profileVisitorsRow.name, cost: profileVisitorsSale.effectivePrice, who }))) return;
     setBusy(true);
     setErr(null);
     try {
       await purchaseCosmetic("flair_profile_visitors", activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusy(false);
     }
@@ -3204,15 +3249,15 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
     : null;
   async function doBuyProfileMarquee() {
     if (!profileMarqueeRow || !profileMarqueeSale) return;
-    const who = activeCharacterId ? "this character" : "your master account";
-    if (!window.confirm(`Buy "${profileMarqueeRow.name}" for ${profileMarqueeSale.effectivePrice} Currency from ${who}'s pool?`)) return;
+    const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
+    if (!window.confirm(t("buyNamedConfirm", { name: profileMarqueeRow.name, cost: profileMarqueeSale.effectivePrice, who }))) return;
     setBusy(true);
     setErr(null);
     try {
       await purchaseCosmetic("flair_profile_marquee", activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusy(false);
     }
@@ -3250,10 +3295,10 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
                     type="button"
                     onClick={() => void doBuy()}
                     disabled={busy || activeWallet < inlineAvatarSale.effectivePrice}
-                    title={activeWallet >= inlineAvatarSale.effectivePrice ? "Buy + auto-equip" : "Not enough Currency"}
+                    title={activeWallet >= inlineAvatarSale.effectivePrice ? t("cosmetics.buyAutoEquipTitle") : t("notEnoughCurrency")}
                     className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
                   >
-                    {busy ? "Working…" : "Buy"}
+                    {busy ? t("working") : t("buy")}
                   </button>
                 </>
               ) : (
@@ -3264,7 +3309,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
                     onChange={(e) => void doToggle(e.target.checked)}
                     disabled={busy}
                   />
-                  <span>{equipped ? "Equipped" : "Owned (off)"}</span>
+                  <span>{equipped ? t("equipped") : t("cosmetics.ownedOff")}</span>
                 </label>
               )}
             </header>
@@ -3323,14 +3368,14 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
               row={roomPresenceRow}
             sale={roomPresenceSale}
             owned={roomPresenceOwned}
-            firstLabel="Join"
+            firstLabel={t("cosmetics.presence.join")}
             firstTemplate={roomJoinTemplate}
-            firstDefault="{name} has entered the room."
-            firstPlaceholder="{name} strolls into {room}."
-            secondLabel="Leave"
+            firstDefault={t("cosmetics.presence.joinDefault")}
+            firstPlaceholder={t("cosmetics.presence.joinPlaceholder")}
+            secondLabel={t("cosmetics.presence.leave")}
             secondTemplate={roomLeaveTemplate}
-            secondDefault="{name} has left the room."
-            secondPlaceholder="{name} fades out of {room}."
+            secondDefault={t("cosmetics.presence.leaveDefault")}
+            secondPlaceholder={t("cosmetics.presence.leavePlaceholder")}
             supportsRoomPlaceholder
             activeCharacterId={activeCharacterId}
             activeWallet={activeWallet}
@@ -3355,14 +3400,14 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
               row={sessionPresenceRow}
               sale={sessionPresenceSale}
               owned={sessionPresenceOwned}
-              firstLabel="Connect"
+              firstLabel={t("cosmetics.presence.connect")}
               firstTemplate={sessionConnectTemplate}
-              firstDefault="{name} has connected."
-              firstPlaceholder="{name} arrives at the Keep."
-              secondLabel="Exit"
+              firstDefault={t("cosmetics.presence.connectDefault")}
+              firstPlaceholder={t("cosmetics.presence.connectPlaceholder")}
+              secondLabel={t("cosmetics.presence.exit")}
               secondTemplate={sessionExitTemplate}
-              secondDefault="{name} has disconnected."
-              secondPlaceholder="{name} fades into the night."
+              secondDefault={t("cosmetics.presence.exitDefault")}
+              secondPlaceholder={t("cosmetics.presence.exitPlaceholder")}
               supportsRoomPlaceholder={false}
               /* Session presence is master-only, pass null so the card
                  doesn't show a "this character" badge. */
@@ -3405,27 +3450,27 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
                     type="button"
                     onClick={() => void doBuyLurkingMaster()}
                     disabled={busy || activeWallet < lurkingMasterSale.effectivePrice}
-                    title={activeWallet >= lurkingMasterSale.effectivePrice ? "Buy the Lurking Master cosmetic" : "Not enough Currency"}
+                    title={activeWallet >= lurkingMasterSale.effectivePrice ? t("cosmetics.buyLurkingTitle") : t("notEnoughCurrency")}
                     className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
                   >
-                    {busy ? "Working…" : "Buy"}
+                    {busy ? t("working") : t("buy")}
                   </button>
                 </>
               ) : (
-                <label className="flex items-center gap-2 text-xs" title="Hide your typing status from peers (admins still see it)">
+                <label className="flex items-center gap-2 text-xs" title={t("cosmetics.lurkingToggleTitle")}>
                   <input
                     type="checkbox"
                     checked={lurkingMasterEnabled}
                     onChange={(e) => void doToggleLurking(e.target.checked)}
                     disabled={busy}
                   />
-                  <span>{lurkingMasterEnabled ? "Lurking" : "Owned (off)"}</span>
+                  <span>{lurkingMasterEnabled ? t("cosmetics.lurking") : t("cosmetics.ownedOff")}</span>
                 </label>
               )}
             </header>
             {lurkingMasterOwned && lurkingMasterEnabled ? (
               <p className="mt-2 text-[10px] italic text-keep-muted">
-                You're hidden from peers' "is typing…" indicators. Admins still see you for moderation.
+                {t("cosmetics.lurkingActive")}
               </p>
             ) : null}
           </section>
@@ -3436,7 +3481,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
             row={profileVisitorsRow}
             sale={profileVisitorsSale}
             owned={profileVisitorsOwned}
-            ownedCopy="Show your visitor count on your profile and read the member / external breakdown."
+            ownedCopy={t("cosmetics.visitorsOwnedCopy")}
             buyDisabled={busy || activeWallet < profileVisitorsSale.effectivePrice}
             onBuy={() => void doBuyProfileVisitors()}
             onOpenConfig={() => openEditor({
@@ -3452,7 +3497,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
             row={profileMarqueeRow}
             sale={profileMarqueeSale}
             owned={profileMarqueeOwned}
-            ownedCopy="Configure your rotating quotes. Up to 10 lines, Markdown supported."
+            ownedCopy={t("cosmetics.marqueeOwnedCopy")}
             buyDisabled={busy || activeWallet < profileMarqueeSale.effectivePrice}
             onBuy={() => void doBuyProfileMarquee()}
             onOpenConfig={() => openEditor({
@@ -3476,6 +3521,7 @@ function CosmeticsTab({ snapshot, flashSale, focusKey }: {
 function RoomTransitionsTab({ snapshot }: {
   snapshot: ReturnType<typeof useEarning.getState>["snapshot"] & {};
 }) {
+  const { t } = useTranslation("earning");
   const me = useChat((s) => s.me);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   // Multi-Server Lift: active server this tab buys/equips against, same
@@ -3490,7 +3536,7 @@ function RoomTransitionsTab({ snapshot }: {
   const [err, setErr] = useState<string | null>(null);
 
   if (!me?.permissions?.includes("use_room_transitions")) {
-    return <p className="text-sm text-keep-muted">Room transitions have been disabled for your role by an admin.</p>;
+    return <p className="text-sm text-keep-muted">{t("transitions.disabled")}</p>;
   }
 
   const identity = activeCharacterId
@@ -3501,13 +3547,13 @@ function RoomTransitionsTab({ snapshot }: {
   const wallet = activeCharacterId
     ? (snapshot.characters.find((c) => c.ownerId === activeCharacterId)?.currency ?? 0)
     : snapshot.master.currency;
-  const who = activeCharacterId ? "this character" : "your master account";
+  const who = activeCharacterId ? t("identity.thisCharacter") : t("identity.masterAccount");
 
-  async function buy(t: RoomTransition) {
-    if (!window.confirm(`Buy "${t.label}" for ${t.cost.toLocaleString()} Currency from ${who}'s pool?`)) return;
-    setBusyKey(t.key); setErr(null);
-    try { await purchaseTransition(t.key, activeCharacterId, currentServerId); await refresh(currentServerId); }
-    catch (e) { setErr(e instanceof Error ? e.message : "Purchase failed"); }
+  async function buy(transition: RoomTransition) {
+    if (!window.confirm(t("buyNamedConfirm", { name: transition.label, cost: formatNumber(transition.cost), who }))) return;
+    setBusyKey(transition.key); setErr(null);
+    try { await purchaseTransition(transition.key, activeCharacterId, currentServerId); await refresh(currentServerId); }
+    catch (e) { setErr(e instanceof Error ? e.message : t("errors.purchaseFailed")); }
     finally { setBusyKey(null); }
   }
   async function equip(key: string | null) {
@@ -3516,17 +3562,15 @@ function RoomTransitionsTab({ snapshot }: {
       await setActiveRoomTransition(key, activeCharacterId, currentServerId);
       setMyActiveTransitionKey(key);
       await refresh(currentServerId);
-    } catch (e) { setErr(e instanceof Error ? e.message : "Equip failed"); }
+    } catch (e) { setErr(e instanceof Error ? e.message : t("errors.equipFailed")); }
     finally { setBusyKey(null); }
   }
 
   return (
     <section>
-      <h3 className="font-action text-lg text-keep-text">Room Transitions</h3>
+      <h3 className="font-action text-lg text-keep-text">{t("tabs.roomTransitions")}</h3>
       <p className="mt-1 text-xs text-keep-muted">
-        A flourish that plays for YOU when you switch rooms, only you see it. Equipped per identity
-        ({activeCharacterId ? "this character" : "your OOC / master account"}). Off = instant.
-        Hit Preview on any rite to watch it play right on its card.
+        {t("transitions.intro", { identity: activeCharacterId ? t("identity.thisCharacter") : t("transitions.oocMasterAccount") })}
       </p>
       {err ? <p className="mt-2 text-xs text-keep-accent">{err}</p> : null}
       <div className="mt-3">
@@ -3536,53 +3580,53 @@ function RoomTransitionsTab({ snapshot }: {
           disabled={busyKey !== null}
           className={`rounded border px-3 py-1 text-xs ${equippedKey === null ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"} disabled:opacity-50`}
         >
-          {equippedKey === null ? "Off · instant ✓" : "Turn off (instant)"}
+          {equippedKey === null ? t("transitions.offActive") : t("transitions.turnOff")}
         </button>
       </div>
       <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {ROOM_TRANSITIONS.map((t) => {
-          const isOwned = owned.has(t.key);
-          const isEquipped = equippedKey === t.key;
-          const rowBusy = busyKey === t.key;
+        {ROOM_TRANSITIONS.map((transition) => {
+          const isOwned = owned.has(transition.key);
+          const isEquipped = equippedKey === transition.key;
+          const rowBusy = busyKey === transition.key;
           return (
             <li
-              key={t.key}
+              key={transition.key}
               ref={(el) => {
-                if (el) cardRefs.current.set(t.key, el);
-                else cardRefs.current.delete(t.key);
+                if (el) cardRefs.current.set(transition.key, el);
+                else cardRefs.current.delete(transition.key);
               }}
               className="flex flex-col gap-1.5 overflow-hidden rounded-lg border border-keep-rule bg-keep-panel/30 p-3"
             >
-              <div className="font-semibold text-keep-text">{t.label}</div>
-              <p className="line-clamp-3 text-[11px] leading-snug text-keep-muted">{t.description}</p>
+              <div className="font-semibold text-keep-text">{transition.label}</div>
+              <p className="line-clamp-3 text-[11px] leading-snug text-keep-muted">{transition.description}</p>
               <div className="mt-auto flex items-center gap-1.5 pt-1">
                 <button
                   type="button"
-                  onClick={() => void previewRoomTransition(t.key, cardRefs.current.get(t.key) ?? null)}
+                  onClick={() => void previewRoomTransition(transition.key, cardRefs.current.get(transition.key) ?? null)}
                   className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-[11px] text-keep-muted hover:text-keep-text"
                 >
-                  Preview
+                  {t("common:preview")}
                 </button>
                 {isEquipped ? (
-                  <span className="ml-auto text-[11px] font-semibold uppercase tracking-widest text-keep-action">Equipped ✓</span>
+                  <span className="ml-auto text-[11px] font-semibold uppercase tracking-widest text-keep-action">{t("transitions.equippedCheck")}</span>
                 ) : isOwned ? (
                   <button
                     type="button"
-                    onClick={() => void equip(t.key)}
+                    onClick={() => void equip(transition.key)}
                     disabled={busyKey !== null}
                     className="ml-auto rounded border border-keep-action bg-keep-action/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50"
                   >
-                    {rowBusy ? "…" : "Equip"}
+                    {rowBusy ? "…" : t("equip")}
                   </button>
                 ) : (
                   <button
                     type="button"
-                    onClick={() => void buy(t)}
-                    disabled={busyKey !== null || wallet < t.cost}
-                    title={wallet < t.cost ? "Not enough currency" : undefined}
+                    onClick={() => void buy(transition)}
+                    disabled={busyKey !== null || wallet < transition.cost}
+                    title={wallet < transition.cost ? t("transitions.notEnoughCurrency") : undefined}
                     className="ml-auto rounded border border-keep-action bg-keep-action px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
                   >
-                    {rowBusy ? "…" : `Buy · ${t.cost.toLocaleString()}`}
+                    {rowBusy ? "…" : t("transitions.buyCost", { cost: formatNumber(transition.cost) })}
                   </button>
                 )}
               </div>
@@ -3626,6 +3670,7 @@ function ProfileFlairBuyCard({
    */
   onOpenConfig?: () => void;
 }) {
+  const { t } = useTranslation("earning");
   return (
     <section data-shop-row={row.key} className="flex flex-col rounded border border-keep-rule bg-keep-bg/40 p-3">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
@@ -3649,14 +3694,14 @@ function ProfileFlairBuyCard({
               type="button"
               onClick={onBuy}
               disabled={buyDisabled}
-              title={buyDisabled ? "Not enough Currency, or a purchase is already in flight" : `Buy ${row.name}`}
+              title={buyDisabled ? t("cosmetics.buyDisabledTitle") : t("cosmetics.buyNamed", { name: row.name })}
               className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >
-              Buy
+              {t("buy")}
             </button>
           </>
         ) : (
-          <span className="text-[11px] uppercase tracking-widest text-keep-system">Owned</span>
+          <span className="text-[11px] uppercase tracking-widest text-keep-system">{t("cosmetics.owned")}</span>
         )}
       </header>
       {owned ? (
@@ -3666,10 +3711,10 @@ function ProfileFlairBuyCard({
             <button
               type="button"
               onClick={onOpenConfig}
-              title="Open Edit Profile and jump to the Flair tab where this is configured."
+              title={t("cosmetics.configureTitle")}
               className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/25"
             >
-              Configure in Edit Profile → Flair
+              {t("cosmetics.configureCta")}
             </button>
           ) : null}
         </div>
@@ -3716,6 +3761,7 @@ function ProfileBannerFlairCard({
   onSaved: () => void;
   onError: (message: string) => void;
 }) {
+  const { t } = useTranslation("earning");
   const [draft, setDraft] = useState<string>(currentUrl ?? "");
   const [saving, setSaving] = useState(false);
   // Sync local draft when the prop changes (e.g. another tab edited
@@ -3729,7 +3775,7 @@ function ProfileBannerFlairCard({
       await patchProfileBannerUrl(next, activeCharacterId, serverId);
       onSaved();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Save failed");
+      onError(e instanceof Error ? e.message : t("errors.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -3761,10 +3807,10 @@ function ProfileBannerFlairCard({
               type="button"
               onClick={onBuy}
               disabled={busy || activeWallet < sale.effectivePrice}
-              title={activeWallet >= sale.effectivePrice ? "Buy the banner slot" : "Not enough Currency"}
+              title={activeWallet >= sale.effectivePrice ? t("cosmetics.buyBannerTitle") : t("notEnoughCurrency")}
               className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >
-              {busy ? "Working…" : "Buy"}
+              {busy ? t("working") : t("buy")}
             </button>
           </>
         ) : null}
@@ -3780,13 +3826,13 @@ function ProfileBannerFlairCard({
               with the rest of the cosmetic cards. */}
           <div className="flex items-end gap-2">
             <label className="min-w-0 flex-1 block text-xs text-keep-muted">
-              Image link
+              {t("cosmetics.imageLink")}
               <input
                 type="url"
                 inputMode="url"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="https://example.com/banner.png"
+                placeholder={t("cosmetics.bannerPlaceholder")}
                 className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm text-keep-text"
               />
             </label>
@@ -3803,7 +3849,7 @@ function ProfileBannerFlairCard({
             ) : null}
           </div>
           <p className="text-[10px] text-keep-muted">
-            Manage from Profile » Appearance to see a full-size preview.
+            {t("cosmetics.bannerManageHint")}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {currentUrl ? (
@@ -3813,7 +3859,7 @@ function ProfileBannerFlairCard({
                 disabled={saving}
                 className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
               >
-                Clear
+                {t("common:clear")}
               </button>
             ) : null}
             <button
@@ -3822,7 +3868,7 @@ function ProfileBannerFlairCard({
               disabled={saving || !dirty}
               className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("common:saving") : t("common:save")}
             </button>
           </div>
         </>
@@ -3874,6 +3920,7 @@ function TypingPhraseFlairCard({
   onSaved: () => void;
   onError: (message: string) => void;
 }) {
+  const { t } = useTranslation("earning");
   const [draft, setDraft] = useState<string>(currentPhrase ?? "");
   const [saving, setSaving] = useState(false);
   useEffect(() => { setDraft(currentPhrase ?? ""); }, [currentPhrase]);
@@ -3882,7 +3929,7 @@ function TypingPhraseFlairCard({
   // the user sees the same "Name <phrase>" shape peers will see.
   const meName = useChat((s) => {
     const me = s.me;
-    if (!me) return "You";
+    if (!me) return t("you");
     if (activeCharacterId) {
       for (const list of Object.values(s.occupants)) {
         const row = list.find((o) => identityEquals(o.userId, o.characterId, me.id, activeCharacterId));
@@ -3898,7 +3945,7 @@ function TypingPhraseFlairCard({
       await patchTypingPhrase(next, activeCharacterId, serverId);
       onSaved();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Save failed");
+      onError(e instanceof Error ? e.message : t("errors.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -3931,10 +3978,10 @@ function TypingPhraseFlairCard({
               type="button"
               onClick={onBuy}
               disabled={busy || activeWallet < sale.effectivePrice}
-              title={activeWallet >= sale.effectivePrice ? "Buy the typing-phrase slot" : "Not enough Currency"}
+              title={activeWallet >= sale.effectivePrice ? t("cosmetics.buyTypingTitle") : t("notEnoughCurrency")}
               className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >
-              {busy ? "Working…" : "Buy"}
+              {busy ? t("working") : t("buy")}
             </button>
           </>
         ) : null}
@@ -3944,7 +3991,7 @@ function TypingPhraseFlairCard({
         <>
           <label className="block text-xs text-keep-muted">
             <div className="flex items-center justify-between">
-              <span>Phrase</span>
+              <span>{t("cosmetics.phrase")}</span>
               <span className={tooLong ? "text-keep-accent" : ""}>
                 {trimmed.length}/{TYPING_PHRASE_MAX_CLIENT}
               </span>
@@ -3954,7 +4001,7 @@ function TypingPhraseFlairCard({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               maxLength={TYPING_PHRASE_MAX_CLIENT * 2 /* allow over-paste so the user sees the count flag */}
-              placeholder="is scheming…"
+              placeholder={t("cosmetics.typingPlaceholder")}
               className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm text-keep-text"
             />
           </label>
@@ -3965,10 +4012,10 @@ function TypingPhraseFlairCard({
           <div className="rounded border border-keep-rule bg-keep-banner/40 px-2 py-1 text-xs italic text-keep-muted">
             {trimmed
               ? `${meName} ${trimmed}`
-              : `${meName} is typing… (default)`}
+              : t("cosmetics.typingDefaultPreview", { name: meName })}
           </div>
           <p className="text-[10px] text-keep-muted">
-            Up to {TYPING_PHRASE_MAX_CLIENT} characters. Replaces the default "is typing…" suffix when you're the only person typing. Admins can clear abusive phrases.
+            {t("cosmetics.typingHelp", { max: TYPING_PHRASE_MAX_CLIENT })}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {currentPhrase ? (
@@ -3978,7 +4025,7 @@ function TypingPhraseFlairCard({
                 disabled={saving}
                 className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
               >
-                Clear
+                {t("common:clear")}
               </button>
             ) : null}
             <button
@@ -3987,7 +4034,7 @@ function TypingPhraseFlairCard({
               disabled={saving || !dirty || tooLong}
               className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("common:saving") : t("common:save")}
             </button>
           </div>
         </>
@@ -4065,6 +4112,7 @@ function PresenceTemplatesFlairCard({
   onSaved: () => void;
   onError: (message: string) => void;
 }) {
+  const { t } = useTranslation("earning");
   const [firstDraft, setFirstDraft] = useState<string>(firstTemplate ?? "");
   const [secondDraft, setSecondDraft] = useState<string>(secondTemplate ?? "");
   const [saving, setSaving] = useState(false);
@@ -4075,7 +4123,7 @@ function PresenceTemplatesFlairCard({
   // sees the same `{name}` substitution peers will see.
   const meName = useChat((s) => {
     const me = s.me;
-    if (!me) return "You";
+    if (!me) return t("you");
     if (activeCharacterId) {
       for (const list of Object.values(s.occupants)) {
         const r = list.find((o) => identityEquals(o.userId, o.characterId, me.id, activeCharacterId));
@@ -4090,8 +4138,8 @@ function PresenceTemplatesFlairCard({
   const previewRoom = useChat((s) => {
     if (!supportsRoomPlaceholder) return "";
     const cur = s.currentRoomId;
-    if (!cur) return "the Keep";
-    return s.rooms[cur]?.name ?? "the Keep";
+    if (!cur) return t("cosmetics.theKeep");
+    return s.rooms[cur]?.name ?? t("cosmetics.theKeep");
   });
 
   function render(template: string, fallback: string): string {
@@ -4121,7 +4169,7 @@ function PresenceTemplatesFlairCard({
       }
       onSaved();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Save failed");
+      onError(e instanceof Error ? e.message : t("errors.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -4150,10 +4198,10 @@ function PresenceTemplatesFlairCard({
               type="button"
               onClick={onBuy}
               disabled={busy || activeWallet < sale.effectivePrice}
-              title={activeWallet >= sale.effectivePrice ? `Buy ${row.name}` : "Not enough Currency"}
+              title={activeWallet >= sale.effectivePrice ? t("cosmetics.buyNamed", { name: row.name }) : t("notEnoughCurrency")}
               className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >
-              {busy ? "Working…" : "Buy"}
+              {busy ? t("working") : t("buy")}
             </button>
           </>
         ) : null}
@@ -4190,15 +4238,30 @@ function PresenceTemplatesFlairCard({
                 </label>
                 <div className="mt-1 rounded border border-keep-rule bg-keep-banner/40 px-2 py-1 text-xs italic text-keep-muted">
                   {render(value, fallback)}
-                  {value.trim().length === 0 ? <span className="not-italic text-[10px]"> (default)</span> : null}
+                  {value.trim().length === 0 ? <span className="not-italic text-[10px]">{t("cosmetics.defaultSuffix")}</span> : null}
                 </div>
               </div>
             );
           })}
           <p className="text-[10px] text-keep-muted">
-            Use <code className="rounded bg-keep-banner px-1">{"{name}"}</code> for your name
-            {supportsRoomPlaceholder ? <> and <code className="rounded bg-keep-banner px-1">{"{room}"}</code> for the room name</> : null}.
-            Up to {PRESENCE_TEMPLATE_MAX_CLIENT} characters each. Admins can clear abusive templates.
+            {supportsRoomPlaceholder ? (
+              <Trans
+                t={t}
+                i18nKey="cosmetics.presenceHelpRoom"
+                values={{ max: PRESENCE_TEMPLATE_MAX_CLIENT }}
+                components={[
+                  <code key="0" className="rounded bg-keep-banner px-1" />,
+                  <code key="1" className="rounded bg-keep-banner px-1" />,
+                ]}
+              />
+            ) : (
+              <Trans
+                t={t}
+                i18nKey="cosmetics.presenceHelp"
+                values={{ max: PRESENCE_TEMPLATE_MAX_CLIENT }}
+                components={[<code key="0" className="rounded bg-keep-banner px-1" />]}
+              />
+            )}
           </p>
           <div className="flex flex-wrap items-center justify-end gap-2">
             {(firstTemplate || secondTemplate) ? (
@@ -4208,7 +4271,7 @@ function PresenceTemplatesFlairCard({
                 disabled={saving}
                 className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
               >
-                Clear both
+                {t("cosmetics.clearBoth")}
               </button>
             ) : null}
             <button
@@ -4217,7 +4280,7 @@ function PresenceTemplatesFlairCard({
               disabled={saving || !dirty || tooLong}
               className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("common:saving") : t("common:save")}
             </button>
           </div>
         </>
@@ -4243,6 +4306,7 @@ function ReactionSheetFlairCard({
   activeWallet: number;
   onRefreshEarning: () => void;
 }) {
+  const { t } = useTranslation("earning");
   // The modal pulls the active character from the chat store
   // directly, so the card doesn't need to thread the id through,
   // matches how the picker and chat composer scope their identity.
@@ -4259,7 +4323,9 @@ function ReactionSheetFlairCard({
           ) : null}
         </div>
         <div className="text-xs text-keep-muted">
-          <CoinAmount amount={row.cost} /> per submission
+          <Trans t={t} i18nKey="cosmetics.perSubmission">
+            <CoinAmount amount={row.cost} /> per submission
+          </Trans>
         </div>
       </header>
       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -4268,7 +4334,7 @@ function ReactionSheetFlairCard({
           onClick={() => setOpen(true)}
           className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25"
         >
-          Submit / Manage…
+          {t("cosmetics.submitManage")}
         </button>
       </div>
       {open ? (
@@ -4317,6 +4383,7 @@ function ItemsTab({
   flashSale: FlashSaleResponse | null;
   focusKey: string | null;
 }) {
+  const { t } = useTranslation("earning");
   useShopRowFocus(focusKey);
   const me = useChat((s) => s.me);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
@@ -4364,7 +4431,7 @@ function ItemsTab({
     if (activeCharacterId) {
       const c = snapshot.characters.find((x) => x.ownerId === activeCharacterId);
       return {
-        label: c?.displayName ?? "Character",
+        label: c?.displayName ?? t("items.characterFallback"),
         scope: "character" as const,
         currency: c?.currency ?? 0,
       };
@@ -4374,7 +4441,7 @@ function ItemsTab({
       scope: "user" as const,
       currency: snapshot.master.currency,
     };
-  }, [activeCharacterId, snapshot.characters, snapshot.master]);
+  }, [activeCharacterId, snapshot.characters, snapshot.master, t]);
 
   const inventory: InventoryEntry[] = useMemo(() => {
     if (activeCharacterId) {
@@ -4424,7 +4491,7 @@ function ItemsTab({
       await buyItem(itemKey, quantity, activeCharacterId, currentServerId);
       await refresh(currentServerId);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed");
+      setErr(e instanceof Error ? e.message : t("errors.purchaseFailed"));
     } finally {
       setBusyKey(null);
     }
@@ -4438,10 +4505,15 @@ function ItemsTab({
           subtext. */}
       <div className="rounded border border-keep-rule bg-keep-banner/40 px-3 py-2 text-xs">
         <div className="text-keep-muted">
-          Showing <span className="font-semibold text-keep-text">{activeIdentity.label}</span>'s inventory.
+          <Trans
+            t={t}
+            i18nKey="items.showingInventory"
+            values={{ name: activeIdentity.label }}
+            components={[<span key="0" className="font-semibold text-keep-text" />]}
+          />
           {activeCharacterId
-            ? " Switch identity via /char to view another character's inventory."
-            : " Switch to a character via /char to view that character's inventory."}
+            ? t("items.switchOtherCharacter")
+            : t("items.switchToCharacter")}
         </div>
       </div>
 
@@ -4453,13 +4525,13 @@ function ItemsTab({
         <select
           value={tab}
           onChange={(e) => setTab(e.target.value as typeof tab)}
-          aria-label="Items section"
+          aria-label={t("items.sectionAria")}
           className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         >
-          <option value="inventory">Inventory ({inventory.length})</option>
-          <option value="shop">▸ Shop ({shopItems.length})</option>
-          <option value="collection">Collection ({collection.length}/10)</option>
-          <option value="pets">Pets ({petCollection.length}/5)</option>
+          <option value="inventory">{t("items.inventoryTab", { count: inventory.length })}</option>
+          <option value="shop">{t("items.shopOption", { count: shopItems.length })}</option>
+          <option value="collection">{t("items.collectionTab", { count: collection.length })}</option>
+          <option value="pets">{t("items.petsTab", { count: petCollection.length })}</option>
         </select>
         <span className="shrink-0 text-xs text-keep-muted">
           <CoinAmount amount={activeIdentity.currency} className="text-xs" />
@@ -4479,7 +4551,7 @@ function ItemsTab({
           onClick={() => setTab("inventory")}
           className={`rounded border border-keep-rule px-2 py-0.5 ${tab === "inventory" ? "bg-keep-bg" : "bg-keep-banner/40 hover:bg-keep-banner"}`}
         >
-          Inventory ({inventory.length})
+          {t("items.inventoryTab", { count: inventory.length })}
         </button>
         <button
           type="button"
@@ -4489,26 +4561,26 @@ function ItemsTab({
               ? "border-keep-action bg-keep-action/30 text-keep-action"
               : "border-keep-action bg-keep-action/10 text-keep-action hover:bg-keep-action/20"
           }`}
-          title="Browse the shop"
+          title={t("items.browseShopTitle")}
         >
-          🛒 Shop ({shopItems.length})
+          {t("items.shopTab", { count: shopItems.length })}
         </button>
         <button
           type="button"
           onClick={() => setTab("collection")}
           className={`rounded border border-keep-rule px-2 py-0.5 ${tab === "collection" ? "bg-keep-bg" : "bg-keep-banner/40 hover:bg-keep-banner"}`}
         >
-          Collection ({collection.length}/10)
+          {t("items.collectionTab", { count: collection.length })}
         </button>
         <button
           type="button"
           onClick={() => setTab("pets")}
           className={`rounded border border-keep-rule px-2 py-0.5 ${tab === "pets" ? "bg-keep-bg" : "bg-keep-banner/40 hover:bg-keep-banner"}`}
         >
-          Pets ({petCollection.length}/5)
+          {t("items.petsTab", { count: petCollection.length })}
         </button>
         <span className="ml-auto self-center text-keep-muted">
-          Wallet: <CoinAmount amount={activeIdentity.currency} className="text-xs" />
+          {t("items.wallet")} <CoinAmount amount={activeIdentity.currency} className="text-xs" />
         </span>
       </div>
 
@@ -4520,7 +4592,7 @@ function ItemsTab({
         <div className="space-y-2">
           {inventory.length === 0 ? (
             <p className="text-sm text-keep-muted">
-              {activeIdentity.label} doesn't hold any items yet. Switch to "Shop" to browse or wait for someone to /give you one.
+              {t("items.emptyInventory", { name: activeIdentity.label })}
             </p>
           ) : (() => {
             // Inventory filter row, category select + free-text
@@ -4556,15 +4628,15 @@ function ItemsTab({
                   <select
                     value={inventoryCategory}
                     onChange={(e) => setInventoryCategory(e.target.value as ItemCategory | "all")}
-                    aria-label="Filter inventory by category"
+                    aria-label={t("items.filterInventoryAria")}
                     className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
                   >
-                    <option value="all">All categories ({inventory.length})</option>
+                    <option value="all">{t("items.allCategories", { count: inventory.length })}</option>
                     {orderedPresent.map((c) => {
                       const count = inventory.filter((e) => catalogByKey.get(e.itemKey)?.category === c).length;
                       return (
                         <option key={c} value={c}>
-                          {ITEM_CATEGORY_LABELS[c]} ({count})
+                          {t(`items.category.${c}`, { defaultValue: ITEM_CATEGORY_LABELS[c] })} ({count})
                         </option>
                       );
                     })}
@@ -4573,18 +4645,18 @@ function ItemsTab({
                     type="search"
                     value={inventoryQuery}
                     onChange={(e) => setInventoryQuery(e.target.value)}
-                    placeholder="Search inventory…"
+                    placeholder={t("items.searchInventory")}
                     className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
                   />
                   <span className="text-xs text-keep-muted">
-                    Showing {filtered.length} of {inventory.length}
+                    {t("items.showingOf", { shown: filtered.length, total: inventory.length })}
                   </span>
                 </div>
                 {filtered.length === 0 ? (
                   <p className="text-sm text-keep-muted">
                     {q.length > 0
-                      ? `No items match "${inventoryQuery.trim()}" in this category.`
-                      : "No items in this category."}
+                      ? t("items.noMatchCategory", { query: inventoryQuery.trim() })
+                      : t("items.noneInCategory")}
                   </p>
                 ) : (
                   // Same grid scaffold the Shop tab uses so identity-
@@ -4604,7 +4676,12 @@ function ItemsTab({
                             key={entry.itemKey}
                             className="rounded border border-keep-rule bg-keep-bg/40 p-2 text-xs text-keep-muted"
                           >
-                            Unknown item <code>{entry.itemKey}</code> × {entry.quantity.toLocaleString()}
+                            <Trans
+                              t={t}
+                              i18nKey="items.unknownItem"
+                              values={{ key: entry.itemKey, qty: formatNumber(entry.quantity) }}
+                              components={[<code key="0" />]}
+                            />
                           </article>
                         );
                       }
@@ -4631,7 +4708,7 @@ function ItemsTab({
             const countFor = (c: ItemCategory | "all") => c === "all"
               ? shopItems.length
               : shopItems.filter((it) => it.category === c).length;
-            const labelFor = (c: ItemCategory | "all") => c === "all" ? "All" : ITEM_CATEGORY_LABELS[c];
+            const labelFor = (c: ItemCategory | "all") => c === "all" ? t("items.all") : t(`items.category.${c}`, { defaultValue: ITEM_CATEGORY_LABELS[c] });
             return (
               <>
                 {/* Mobile dropdown */}
@@ -4639,7 +4716,7 @@ function ItemsTab({
                   <select
                     value={shopCategory}
                     onChange={(e) => setShopCategory(e.target.value as ItemCategory | "all")}
-                    aria-label="Shop category"
+                    aria-label={t("items.shopCategoryAria")}
                     className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
                   >
                     {cats.map((c) => (
@@ -4683,7 +4760,7 @@ function ItemsTab({
             type="search"
             value={shopQuery}
             onChange={(e) => setShopQuery(e.target.value)}
-            placeholder="Search the shop…"
+            placeholder={t("items.searchShop")}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
           />
           {(() => {
@@ -4700,8 +4777,8 @@ function ItemsTab({
               return (
                 <p className="text-sm text-keep-muted">
                   {q.length > 0
-                    ? `No items match "${shopQuery.trim()}" in this category.`
-                    : "No items in this category right now."}
+                    ? t("items.noMatchCategory", { query: shopQuery.trim() })
+                    : t("items.noneInCategoryNow")}
                 </p>
               );
             }
@@ -4745,12 +4822,15 @@ function ItemsTab({
           commitFn={setCollectionSlots}
           copy={{
             header: (
-              <>
-                Pin up to 10 items from <span className="font-semibold text-keep-text">{activeIdentity.label}</span>'s inventory to feature on their profile. Pets pin to the separate Pet Collection (5 slots), switch to the Pets tab to manage those.
-              </>
+              <Trans
+                t={t}
+                i18nKey="items.collectionHeader"
+                values={{ name: activeIdentity.label }}
+                components={[<span key="0" className="font-semibold text-keep-text" />]}
+              />
             ),
-            emptyInventory: "No items in this identity's inventory to pin. Visit the Shop tab or wait for someone to /give you one.",
-            pickerEmpty: "No non-pet items in this inventory. Pets pin to the Pets tab instead.",
+            emptyInventory: t("items.collectionEmptyInventory"),
+            pickerEmpty: t("items.collectionPickerEmpty"),
           }}
           onError={setErr}
           onSaved={() => void refresh(currentServerId)}
@@ -4770,12 +4850,15 @@ function ItemsTab({
           renameFn={setPetNickname}
           copy={{
             header: (
-              <>
-                Pin up to 5 pets from <span className="font-semibold text-keep-text">{activeIdentity.label}</span>'s inventory to feature on their profile. Non-pet items live in the Collection tab. Give each pet a nickname after pinning to show "Whiskers (Maine Coon)" on the profile.
-              </>
+              <Trans
+                t={t}
+                i18nKey="items.petsHeader"
+                values={{ name: activeIdentity.label }}
+                components={[<span key="0" className="font-semibold text-keep-text" />]}
+              />
             ),
-            emptyInventory: "No items in this identity's inventory yet. Visit the Shop tab and look for the Pets category.",
-            pickerEmpty: "No pets in this inventory. Buy one from the Shop's Pets category to pin it here.",
+            emptyInventory: t("items.petsEmptyInventory"),
+            pickerEmpty: t("items.petsPickerEmpty"),
           }}
           onError={setErr}
           onSaved={() => void refresh(currentServerId)}
@@ -4784,7 +4867,9 @@ function ItemsTab({
 
       {!me ? null : (
         <p className="text-[10px] text-keep-muted">
-          Tip: items move between identities only via the <code>/give</code> command. <code>/throw</code> and <code>/drop</code> consume the item for flavor, nothing transfers.
+          <Trans t={t} i18nKey="items.tip">
+            Tip: items move between identities only via the <code>/give</code> command. <code>/throw</code> and <code>/drop</code> consume the item for flavor, nothing transfers.
+          </Trans>
         </p>
       )}
     </div>
@@ -4846,6 +4931,7 @@ function CollectionEditor({
   onError: (msg: string) => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("earning");
   // Multi-Server Lift: active server the collection writes scope to,
   // same source the dashboard reads `/earning/me` with. Null → unscoped.
   const currentServerId = useChat((s) => s.currentServerId);
@@ -4912,7 +4998,7 @@ function CollectionEditor({
       await renameFn(editingSlot, next, characterId, currentServerId);
       onSaved();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Rename failed");
+      onError(e instanceof Error ? e.message : t("errors.renameFailed"));
     } finally {
       setRenaming(false);
     }
@@ -4949,7 +5035,7 @@ function CollectionEditor({
       setEditingSlot(null);
       onSaved();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Save failed");
+      onError(e instanceof Error ? e.message : t("errors.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -4978,7 +5064,7 @@ function CollectionEditor({
                     ? "border-keep-rule bg-keep-bg/40 hover:bg-keep-banner"
                     : "border-keep-rule/60 bg-keep-banner/20 hover:bg-keep-banner/40 text-keep-muted"
               }`}
-              title={pinned ? `${pinned.name}, click to change` : `Slot ${slot + 1} (empty)`}
+              title={pinned ? t("collection.changeTitle", { name: pinned.name }) : t("collection.emptySlotTitle", { n: slot + 1 })}
             >
               {pinned ? (
                 <>
@@ -5022,7 +5108,7 @@ function CollectionEditor({
               ) : (
                 <>
                   <span className="text-2xl text-keep-muted">+</span>
-                  <span>Slot {slot + 1}</span>
+                  <span>{t("collection.slotLabel", { n: slot + 1 })}</span>
                 </>
               )}
             </button>
@@ -5034,7 +5120,7 @@ function CollectionEditor({
         <div className="rounded border border-keep-action/40 bg-keep-action/5 p-3 space-y-2">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-xs uppercase tracking-widest text-keep-muted">
-              Pinning slot {editingSlot + 1}
+              {t("collection.pinningSlot", { n: editingSlot + 1 })}
             </span>
             <div className="flex gap-2">
               {slotMap.has(editingSlot) ? (
@@ -5044,7 +5130,7 @@ function CollectionEditor({
                   disabled={saving}
                   className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:text-keep-accent disabled:opacity-50"
                 >
-                  Clear slot
+                  {t("collection.clearSlot")}
                 </button>
               ) : null}
               <button
@@ -5052,7 +5138,7 @@ function CollectionEditor({
                 onClick={() => setEditingSlot(null)}
                 className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner"
               >
-                Cancel
+                {t("common:cancel")}
               </button>
             </div>
           </div>
@@ -5063,7 +5149,7 @@ function CollectionEditor({
           {renameFn && slotMap.has(editingSlot) ? (
             <div className="flex flex-wrap items-end gap-2 rounded border border-keep-rule bg-keep-bg/30 p-2">
               <label className="min-w-0 flex-1 text-[10px] uppercase tracking-widest text-keep-muted">
-                Pet name (optional)
+                {t("collection.petNameLabel")}
                 <input
                   type="text"
                   value={renameDraft}
@@ -5072,7 +5158,7 @@ function CollectionEditor({
                     if (e.key === "Enter") { e.preventDefault(); void commitRename(); }
                   }}
                   maxLength={40}
-                  placeholder={slotMap.get(editingSlot)?.name ?? "Name your pet"}
+                  placeholder={slotMap.get(editingSlot)?.name ?? t("collection.petNamePlaceholder")}
                   className="mt-1 block w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm normal-case tracking-normal text-keep-text"
                 />
               </label>
@@ -5082,7 +5168,7 @@ function CollectionEditor({
                 disabled={renaming || renameDraft.replace(/\s+/g, " ").trim() === (slotNicknames.get(editingSlot) ?? "")}
                 className="rounded border border-keep-action bg-keep-action/15 px-2 py-1 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
               >
-                {renaming ? "…" : "Save name"}
+                {renaming ? "…" : t("collection.saveName")}
               </button>
               {slotNicknames.has(editingSlot) ? (
                 <button
@@ -5091,7 +5177,7 @@ function CollectionEditor({
                   disabled={renaming}
                   className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs text-keep-muted hover:text-keep-accent disabled:opacity-50"
                 >
-                  Clear
+                  {t("common:clear")}
                 </button>
               ) : null}
             </div>
@@ -5131,15 +5217,15 @@ function CollectionEditor({
                     <select
                       value={pickerCategory}
                       onChange={(e) => setPickerCategory(e.target.value as ItemCategory | "all")}
-                      aria-label="Filter pinnable items by category"
+                      aria-label={t("collection.filterPickerAria")}
                       className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
                     >
-                      <option value="all">All ({pickerCandidates.length})</option>
+                      <option value="all">{t("items.all")} ({pickerCandidates.length})</option>
                       {orderedPresent.map((c) => {
                         const count = pickerCandidates.filter((x) => x.row.category === c).length;
                         return (
                           <option key={c} value={c}>
-                            {ITEM_CATEGORY_LABELS[c]} ({count})
+                            {t(`items.category.${c}`, { defaultValue: ITEM_CATEGORY_LABELS[c] })} ({count})
                           </option>
                         );
                       })}
@@ -5149,15 +5235,15 @@ function CollectionEditor({
                     type="search"
                     value={pickerQuery}
                     onChange={(e) => setPickerQuery(e.target.value)}
-                    placeholder="Search…"
+                    placeholder={t("collection.searchPlaceholder")}
                     className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
                   />
                 </div>
                 {filtered.length === 0 ? (
                   <p className="text-xs text-keep-muted">
                     {q.length > 0
-                      ? `No items match "${pickerQuery.trim()}".`
-                      : "No items in this category."}
+                      ? t("collection.noMatch", { query: pickerQuery.trim() })
+                      : t("items.noneInCategory")}
                   </p>
                 ) : (
                   <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
@@ -5169,7 +5255,7 @@ function CollectionEditor({
                           type="button"
                           onClick={() => void commit(editingSlot, entry.itemKey)}
                           disabled={saving || alreadyPinnedElsewhere}
-                          title={alreadyPinnedElsewhere ? "Already pinned to another slot." : `Pin ${row.name} here.`}
+                          title={alreadyPinnedElsewhere ? t("collection.alreadyPinned") : t("collection.pinHere", { name: row.name })}
                           className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg/40 px-2 py-1 text-left hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           <ItemIcon iconUrl={row.iconUrl} name={row.name} size="sm" />
@@ -5196,6 +5282,7 @@ function CollectionEditor({
  *  Disabled items render with a "no longer available" chip so the
  *  user knows why /buy is gone but they still hold the stack. */
 function InventoryRow({ item, quantity }: { item: ItemCatalogRow; quantity: number }) {
+  const { t } = useTranslation("earning");
   const commandList = [
     item.availableCommands.give ? "/give" : null,
     item.availableCommands.throw ? "/throw" : null,
@@ -5230,9 +5317,9 @@ function InventoryRow({ item, quantity }: { item: ItemCatalogRow; quantity: numb
           )}
           <span
             className="absolute -bottom-1 -right-1 rounded-full border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[11px] font-semibold tabular-nums shadow"
-            title={`You have ${quantity.toLocaleString()}`}
+            title={t("items.youHave", { qty: formatNumber(quantity) })}
           >
-            ×{quantity.toLocaleString()}
+            ×{formatNumber(quantity)}
           </span>
         </div>
       </div>
@@ -5241,7 +5328,7 @@ function InventoryRow({ item, quantity }: { item: ItemCatalogRow; quantity: numb
           <span className="truncate font-semibold">{formatItemName(item, quantity)}</span>
           {!item.enabled ? (
             <span className="rounded border border-keep-accent/40 bg-keep-accent/10 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent">
-              no longer available
+              {t("items.noLongerAvailable")}
             </span>
           ) : null}
         </div>
@@ -5282,6 +5369,7 @@ function ShopRow({
   onBuy: (quantity: number) => void;
   flashSale: FlashSaleResponse | null;
 }) {
+  const { t } = useTranslation("earning");
   const sale = flashSalePriceFor(flashSale, "item", item.key, item.price);
   const effectiveUnitPrice = sale.effectivePrice;
   const [qty, setQty] = useState(1);
@@ -5294,16 +5382,16 @@ function ShopRow({
   const clampedQty = Math.min(Math.max(1, qty), Math.max(1, maxBuyable));
   const total = effectiveUnitPrice * clampedQty;
   const blockedReason = useMemo(() => {
-    if (!item.enabled) return "Not available.";
-    if (!item.forSale) return "Not currently for sale.";
+    if (!item.enabled) return t("shop.notAvailable");
+    if (!item.forSale) return t("shop.notForSale");
     const now = Date.now();
     if (item.saleStartsAt && now < item.saleStartsAt) {
-      return `Sale opens ${new Date(item.saleStartsAt).toLocaleString()}.`;
+      return t("shop.saleOpens", { date: formatDateTime(item.saleStartsAt) });
     }
-    if (item.saleEndsAt && now >= item.saleEndsAt) return "Sale ended.";
-    if (wallet < effectiveUnitPrice) return "Not enough Currency.";
+    if (item.saleEndsAt && now >= item.saleEndsAt) return t("shop.saleEnded");
+    if (wallet < effectiveUnitPrice) return t("shop.notEnoughCurrencyDot");
     return null;
-  }, [item, wallet, effectiveUnitPrice]);
+  }, [item, wallet, effectiveUnitPrice, t]);
 
   return (
     <article className="flex flex-col gap-2 rounded border border-keep-rule bg-keep-bg/40 p-3">
@@ -5337,13 +5425,13 @@ function ShopRow({
           <PriceBlock basePrice={item.price} effectivePrice={effectiveUnitPrice} onSale={sale.discountPct != null} />
           {owned > 0 ? (
             <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-              you own {owned.toLocaleString()}
+              {t("shop.youOwn", { qty: formatNumber(owned) })}
             </span>
           ) : null}
         </div>
         {item.saleEndsAt && item.purchasable ? (
           <p className="text-[10px] uppercase tracking-widest text-keep-action">
-            on sale until {new Date(item.saleEndsAt).toLocaleString()}
+            {t("shop.onSaleUntil", { date: formatDateTime(item.saleEndsAt) })}
           </p>
         ) : null}
       </div>
@@ -5363,10 +5451,10 @@ function ShopRow({
           type="button"
           onClick={() => onBuy(clampedQty)}
           disabled={!item.purchasable || maxBuyable < 1 || busy || blockedReason !== null}
-          title={blockedReason ?? `Buy ${clampedQty} for ${total.toLocaleString()} Currency`}
+          title={blockedReason ?? t("shop.buyTitle", { count: clampedQty, total: formatNumber(total) })}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          {busy ? "Working…" : `Buy${clampedQty > 1 ? ` × ${clampedQty}` : ""}`}
+          {busy ? t("working") : clampedQty > 1 ? t("shop.buyQty", { count: clampedQty }) : t("buy")}
         </button>
       </div>
       {blockedReason && !busy ? (

@@ -17,6 +17,8 @@
  */
 
 import { useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { COMMUNITY_EMOTICON_USE_COST, slugRx } from "@thekeep/shared";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
@@ -67,6 +69,7 @@ export function EmoticonSubmissionModal({
   activeWallet,
   onRefreshEarning,
 }: Props) {
+  const { t } = useTranslation("arcade");
   const activeCharacterId = useChat((s) => s.activeCharacterId);
 
   // Form state
@@ -90,7 +93,7 @@ export function EmoticonSubmissionModal({
       const r = await fetchMyEmoticonSubmissions();
       setHistory(r.submissions);
     } catch (e) {
-      setHistoryError(e instanceof Error ? e.message : "Failed to load history");
+      setHistoryError(e instanceof Error ? e.message : t("emoticons.submission.history.loadFailed"));
     } finally {
       setHistoryLoading(false);
     }
@@ -105,14 +108,14 @@ export function EmoticonSubmissionModal({
     // reports them as `image/apng`. Accept both so animated PNG
     // uploads don't bounce off the type check on Safari.
     if (!/^image\/(png|apng|jpeg|webp|gif)$/.test(file.type)) {
-      setImagePreviewWarning("Unsupported image type, use PNG, APNG, JPEG, WebP, or GIF.");
+      setImagePreviewWarning(t("emoticons.submission.form.unsupportedType"));
       return;
     }
     // 6 MB soft cap on the client. The server's hard cap (8MB base64,
     // ~6MB actual bytes) will reject anything bigger anyway, but
     // surfacing it here saves the round-trip.
     if (file.size > 6 * 1024 * 1024) {
-      setImagePreviewWarning("File is larger than 6 MB, please compress or resize.");
+      setImagePreviewWarning(t("emoticons.submission.form.tooLarge"));
       return;
     }
     const reader = new FileReader();
@@ -120,7 +123,7 @@ export function EmoticonSubmissionModal({
       const result = typeof reader.result === "string" ? reader.result : null;
       setImageDataUrl(result);
     };
-    reader.onerror = () => setImagePreviewWarning("Failed to read file.");
+    reader.onerror = () => setImagePreviewWarning(t("emoticons.submission.form.readFailed"));
     reader.readAsDataURL(file);
   }
 
@@ -160,7 +163,7 @@ export function EmoticonSubmissionModal({
       onRefreshEarning();
       await refreshHistory();
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : "Submission failed");
+      setFormError(e instanceof Error ? e.message : t("emoticons.submission.form.submitFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -178,7 +181,7 @@ export function EmoticonSubmissionModal({
       <div onClick={(e) => e.stopPropagation()} className={`${MODAL_CARD_CONTENT} bg-keep-bg`}>
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule px-4 py-3">
           <h2 className="font-action text-lg uppercase tracking-widest text-keep-text">
-            Custom Reaction Sheet
+            {t("emoticons.submission.title")}
           </h2>
           <CloseButton onClick={onClose} />
         </header>
@@ -192,18 +195,17 @@ export function EmoticonSubmissionModal({
           {/* ---------- Helper assets ---------- */}
           <section className="space-y-2 rounded border border-keep-action/30 bg-keep-action/5 p-3">
             <h3 className="font-action text-sm uppercase tracking-widest text-keep-action">
-              Build your sheet
+              {t("emoticons.submission.build.header")}
             </h3>
             <p className="text-xs text-keep-muted">
-              Sheets are <strong className="text-keep-text">4x4 grid, square cells</strong>, submitted at{" "}
-              <strong className="text-keep-text">600x600px</strong> (so each cell is 150x150px) as{" "}
-              <strong className="text-keep-text">PNG, WebP, or APNG with a transparent background</strong> so
-              reactions composite cleanly over any chat theme. JPEG / GIF also accepted but transparency is lost.
+              <Trans t={t} i18nKey="emoticons.submission.build.spec">
+                Sheets are <strong className="text-keep-text">4x4 grid, square cells</strong>, submitted at <strong className="text-keep-text">600x600px</strong> (so each cell is 150x150px) as <strong className="text-keep-text">PNG, WebP, or APNG with a transparent background</strong> so reactions composite cleanly over any chat theme. JPEG / GIF also accepted but transparency is lost.
+              </Trans>
             </p>
             <p className="text-xs text-keep-muted">
-              <strong className="text-keep-text">WebP and APNG can be animated</strong>. Looping idle frames,
-              blinks, shimmer, etc. all carry through to the picker. You can work at a larger canvas while
-              drawing for clarity, but downscale to 600x600px before submitting so file size stays reasonable.
+              <Trans t={t} i18nKey="emoticons.submission.build.animated">
+                <strong className="text-keep-text">WebP and APNG can be animated</strong>. Looping idle frames, blinks, shimmer, etc. all carry through to the picker. You can work at a larger canvas while drawing for clarity, but downscale to 600x600px before submitting so file size stays reasonable.
+              </Trans>
             </p>
             <div className="flex flex-wrap gap-2 pt-1">
               <a
@@ -212,7 +214,7 @@ export function EmoticonSubmissionModal({
                 className="inline-flex items-center gap-1.5 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs text-keep-text hover:bg-keep-banner"
               >
                 <span aria-hidden>📥</span>
-                <span>Demo sheet (PNG)</span>
+                <span>{t("emoticons.submission.build.demoSheet")}</span>
               </a>
               <a
                 href="/assets/emoticons/alignment_aid_grid.png"
@@ -220,52 +222,57 @@ export function EmoticonSubmissionModal({
                 className="inline-flex items-center gap-1.5 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs text-keep-text hover:bg-keep-banner"
               >
                 <span aria-hidden>📐</span>
-                <span>Alignment grid (PNG)</span>
+                <span>{t("emoticons.submission.build.alignmentGrid")}</span>
               </a>
             </div>
             <p className="text-[10px] italic text-keep-muted">
-              The alignment grid's borders are visual guides only. Strip them out of your final sheet so peers don't see grid lines around every reaction.
+              {t("emoticons.submission.build.gridNote")}
             </p>
           </section>
 
           {/* ---------- Submission form ---------- */}
           <section className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
             <h3 className="font-action text-sm uppercase tracking-widest text-keep-muted">
-              Submit a new sheet
+              {t("emoticons.submission.form.header")}
             </h3>
 
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
               <div>
-                Paid from{" "}
-                <strong className="text-keep-text">
-                  {activeCharacterId ? "this character" : "your master pool"}
-                </strong>
-                {": "}
-                <CoinAmount amount={costAtSubmission} /> per submission
+                {activeCharacterId ? (
+                  <Trans t={t} i18nKey="emoticons.submission.form.paidFromCharacter">
+                    Paid from <strong className="text-keep-text">this character</strong>: <CoinAmount amount={costAtSubmission} /> per submission
+                  </Trans>
+                ) : (
+                  <Trans t={t} i18nKey="emoticons.submission.form.paidFromMaster">
+                    Paid from <strong className="text-keep-text">your master pool</strong>: <CoinAmount amount={costAtSubmission} /> per submission
+                  </Trans>
+                )}
               </div>
               <div className="text-keep-muted">
-                Wallet: <CoinAmount amount={activeWallet} />
+                <Trans t={t} i18nKey="emoticons.submission.form.wallet">
+                  Wallet: <CoinAmount amount={activeWallet} />
+                </Trans>
               </div>
             </div>
 
             <div className="grid gap-2 md:grid-cols-2">
               <label className="text-xs">
-                <span className="text-keep-muted">Slug (lowercase, a-z 0-9 -)</span>
+                <span className="text-keep-muted">{t("emoticons.submission.form.slugLabel")}</span>
                 <input
                   type="text"
                   value={slug}
                   onChange={(e) => setSlug(e.target.value.toLowerCase())}
-                  placeholder="my-emotes"
+                  placeholder={t("emoticons.submission.form.slugPlaceholder")}
                   className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
                 />
                 {slug && !slugValid ? (
                   <span className="text-[10px] text-keep-accent">
-                    Slug must be 1-40 chars, lowercase letters/digits/hyphens, no leading/trailing dash.
+                    {t("emoticons.submission.form.slugError")}
                   </span>
                 ) : null}
               </label>
               <label className="text-xs">
-                <span className="text-keep-muted">Sheet name (visible in picker)</span>
+                <span className="text-keep-muted">{t("emoticons.submission.form.nameLabel")}</span>
                 <input
                   type="text"
                   value={name}
@@ -279,9 +286,9 @@ export function EmoticonSubmissionModal({
             {/* Image upload + preview */}
             <label className="block text-xs">
               <span className="text-keep-muted">
-                Sheet image. 4x4 grid at <strong className="text-keep-text">600x600px</strong> (150px cells).{" "}
-                <strong className="text-keep-text">Transparent PNG, WebP, or APNG recommended</strong> (WebP / APNG
-                can be animated); JPEG / GIF accepted but lose transparency. ≤6 MB.
+                <Trans t={t} i18nKey="emoticons.submission.form.imageLabel">
+                  Sheet image. 4x4 grid at <strong className="text-keep-text">600x600px</strong> (150px cells). <strong className="text-keep-text">Transparent PNG, WebP, or APNG recommended</strong> (WebP / APNG can be animated); JPEG / GIF accepted but lose transparency. ≤6 MB.
+                </Trans>
               </span>
               <input
                 type="file"
@@ -302,7 +309,7 @@ export function EmoticonSubmissionModal({
                     cell alignment before submitting. */}
                 <img
                   src={imageDataUrl}
-                  alt="Preview"
+                  alt={t("emoticons.submission.form.previewAlt")}
                   className="block max-h-[256px] w-auto"
                 />
               </div>
@@ -311,10 +318,10 @@ export function EmoticonSubmissionModal({
             {/* 16 cell labels */}
             <details className="rounded border border-keep-rule bg-keep-bg/60 p-2 text-xs">
               <summary className="cursor-pointer font-semibold text-keep-text">
-                Cell labels ({labeledCellCount}/{CELL_COUNT})
+                {t("emoticons.submission.form.cellLabels", { filled: labeledCellCount, total: CELL_COUNT })}
               </summary>
               <p className="mb-2 mt-1 text-[10px] text-keep-muted">
-                Pre-filled to match the demo sheet's mood order. Edit any cell whose reaction differs, or blank it out to hide that slot from the picker. Order matches the 4x4 grid left-to-right, top-to-bottom.
+                {t("emoticons.submission.form.cellLabelsNote")}
               </p>
               <div className="grid grid-cols-4 gap-1">
                 {cells.map((c, i) => (
@@ -343,23 +350,23 @@ export function EmoticonSubmissionModal({
 
             <div className="flex flex-wrap items-center justify-end gap-2">
               <span className="text-[10px] text-keep-muted">
-                Reviewed by a moderator. Rejected submissions are refunded.
+                {t("emoticons.submission.form.reviewNote")}
               </span>
               <button
                 type="button"
                 onClick={() => void submit()}
                 disabled={!canSubmit}
                 title={
-                  !imageDataUrl ? "Choose an image"
-                  : !slugValid ? "Fix the slug"
-                  : name.trim().length === 0 ? "Add a sheet name"
-                  : labeledCellCount === 0 ? "Label at least one cell"
-                  : activeWallet < costAtSubmission ? "Not enough Currency"
-                  : "Submit for review"
+                  !imageDataUrl ? t("emoticons.submission.form.chooseImage")
+                  : !slugValid ? t("emoticons.submission.form.fixSlug")
+                  : name.trim().length === 0 ? t("emoticons.submission.form.addName")
+                  : labeledCellCount === 0 ? t("emoticons.submission.form.labelOneCell")
+                  : activeWallet < costAtSubmission ? t("emoticons.submission.form.notEnoughCurrency")
+                  : t("emoticons.submission.form.submit")
                 }
                 className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
               >
-                {submitting ? "Submitting…" : "Submit for review"}
+                {submitting ? t("emoticons.submission.form.submitting") : t("emoticons.submission.form.submit")}
               </button>
             </div>
           </section>
@@ -367,7 +374,7 @@ export function EmoticonSubmissionModal({
           {/* ---------- My uploads history ---------- */}
           <section className="space-y-2">
             <h3 className="font-action text-sm uppercase tracking-widest text-keep-muted">
-              My uploads
+              {t("emoticons.submission.history.header")}
             </h3>
             {historyError ? (
               <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
@@ -375,9 +382,9 @@ export function EmoticonSubmissionModal({
               </div>
             ) : null}
             {historyLoading ? (
-              <p className="text-xs text-keep-muted">Loading…</p>
+              <p className="text-xs text-keep-muted">{t("common:loading")}</p>
             ) : history.length === 0 ? (
-              <p className="text-xs text-keep-muted">No submissions yet.</p>
+              <p className="text-xs text-keep-muted">{t("emoticons.submission.history.empty")}</p>
             ) : (
               <ul className="space-y-1">
                 {history.map((row) => (
@@ -399,7 +406,7 @@ export function EmoticonSubmissionModal({
                       />
                     ) : (
                       <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-banner/40 text-[10px] uppercase text-keep-muted">
-                        Rejected
+                        {t("emoticons.submission.history.statusRejected")}
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
@@ -407,11 +414,11 @@ export function EmoticonSubmissionModal({
                         {row.name} <span className="text-keep-muted">· {row.slug}</span>
                       </div>
                       <div className="text-[10px] text-keep-muted">
-                        {statusLabel(row)}
+                        {statusLabel(row, t)}
                       </div>
                       {row.rejectionReason ? (
                         <div className="text-[10px] italic text-keep-accent">
-                          Reason: {row.rejectionReason}
+                          {t("emoticons.submission.history.reason", { reason: row.rejectionReason })}
                         </div>
                       ) : null}
                       {/* Commerce toggle + usage tally, only meaningful
@@ -450,6 +457,7 @@ function ApprovedRowControls({
   row: MyEmoticonSubmission;
   onChanged: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation("arcade");
   const [enabled, setEnabled] = useState(row.commerceEnabled);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -467,7 +475,7 @@ function ApprovedRowControls({
       await onChanged();
     } catch (e) {
       setEnabled(!next);
-      setErr(e instanceof Error ? e.message : "could not save");
+      setErr(e instanceof Error ? e.message : t("emoticons.submission.history.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -475,7 +483,7 @@ function ApprovedRowControls({
   return (
     <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px]">
       <span className="text-keep-muted">
-        {row.useCount} {row.useCount === 1 ? "use" : "uses"}
+        {t("emoticons.submission.history.useCount", { count: row.useCount })}
       </span>
       <span aria-hidden className="text-keep-muted/70">·</span>
       <label className="inline-flex cursor-pointer items-center gap-1 text-keep-muted">
@@ -487,7 +495,7 @@ function ApprovedRowControls({
           className="h-3 w-3 accent-keep-action"
         />
         <span>
-          Charge {COMMUNITY_EMOTICON_USE_COST} Currency per use
+          {t("emoticons.submission.history.chargeToggle", { cost: COMMUNITY_EMOTICON_USE_COST })}
         </span>
       </label>
       {err ? (
@@ -497,16 +505,16 @@ function ApprovedRowControls({
   );
 }
 
-function statusLabel(row: MyEmoticonSubmission): string {
+function statusLabel(row: MyEmoticonSubmission, t: TFunction): string {
   switch (row.status) {
     case "pending":
-      return "Awaiting moderator review";
+      return t("emoticons.submission.history.statusPending");
     case "approved":
-      return "Approved, live in the picker";
+      return t("emoticons.submission.history.statusApproved");
     case "rejected":
       return row.costPaid != null
-        ? `Rejected, ${row.costPaid} Currency refunded`
-        : "Rejected";
+        ? t("emoticons.submission.history.statusRejectedRefunded", { amount: row.costPaid })
+        : t("emoticons.submission.history.statusRejected");
     default:
       return row.status;
   }

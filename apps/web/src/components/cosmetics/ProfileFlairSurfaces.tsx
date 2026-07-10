@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { markdownToHtml, type ProfileVisitorStats } from "@thekeep/shared";
 import { sanitizeUserHtml } from "../../lib/userHtml.js";
 import { withIdentityQuery } from "../../lib/http.js";
+import { formatNumber } from "../../lib/intlFormat.js";
 
 /**
  * Profile-side render surfaces for the two flairs added in
@@ -38,6 +40,7 @@ interface ProfileNameProps {
 }
 
 export function ProfileMarquee({ profileName, characterId }: ProfileNameProps) {
+  const { t } = useTranslation("common");
   const [quotes, setQuotes] = useState<string[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
   const [fading, setFading] = useState(false);
@@ -90,7 +93,7 @@ export function ProfileMarquee({ profileName, characterId }: ProfileNameProps) {
       // rather than a sitewide bar. Same fade behavior as the
       // chat-top announcement marquee for cross-surface consistency.
       role="region"
-      aria-label="Profile quotes"
+      aria-label={t("flair.quotesRegion")}
       className="w-full border-y border-keep-action/30 bg-keep-action/5 px-4 py-2"
     >
       <div
@@ -121,8 +124,8 @@ export function ProfileMarquee({ profileName, characterId }: ProfileNameProps) {
                   ? "bg-keep-action"
                   : "bg-keep-action/40"
               }`}
-              aria-label={`Show quote ${i + 1} of ${quotes.length}`}
-              title={`Show quote ${i + 1} of ${quotes.length}`}
+              aria-label={t("flair.showQuote", { index: i + 1, total: quotes.length })}
+              title={t("flair.showQuote", { index: i + 1, total: quotes.length })}
             />
           ))}
         </div>
@@ -132,6 +135,7 @@ export function ProfileMarquee({ profileName, characterId }: ProfileNameProps) {
 }
 
 export function ProfileVisitorsChip({ profileName, characterId }: ProfileNameProps) {
+  const { t } = useTranslation("common");
   const [stats, setStats] = useState<ProfileVisitorStats | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -159,11 +163,11 @@ export function ProfileVisitorsChip({ profileName, characterId }: ProfileNamePro
   return (
     <span
       className="inline-flex items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg/40 px-1.5 py-0.5 text-[11px] text-keep-muted"
-      title={`${stats.members} members + ${stats.external} external`}
+      title={t("flair.visitorsChip.title", { members: stats.members, external: stats.external })}
     >
       <span aria-hidden>👀</span>
-      <span className="tabular-nums">{stats.total.toLocaleString()}</span>
-      <span>{stats.total === 1 ? "visitor" : "visitors"}</span>
+      <span className="tabular-nums">{formatNumber(stats.total)}</span>
+      <span>{t("flair.visitorsChip.visitors", { count: stats.total })}</span>
     </span>
   );
 }

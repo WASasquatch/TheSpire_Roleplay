@@ -1,6 +1,7 @@
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import { messages, rooms } from "../../db/schema.js";
 import { formatDuration, parseDuration } from "../duration.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -50,19 +51,19 @@ export const trashCommand: CommandHandler = {
   async run(ctx) {
     const arg = ctx.argsText.trim();
     if (!arg) {
-      return notice(ctx, "USAGE", "Usage: /trash <duration> - e.g. /trash 30m to delete the last 30 minutes.");
+      return notice(ctx, "USAGE", tFor(ctx.user.locale, "commands:trash.usage"));
     }
     // Permission is enforced by the dispatcher via `permission` above
     // (delete_others_message). No inline role check needed here.
     const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
-    if (!room) return notice(ctx, "NO_ROOM", "Room not found.");
+    if (!room) return notice(ctx, "NO_ROOM", tFor(ctx.user.locale, "commands:shared.roomNotFound"));
     if (room.replyMode === "nested") {
-      return notice(ctx, "FORUM", "/trash isn't available in forum rooms - delete topics individually instead.");
+      return notice(ctx, "FORUM", tFor(ctx.user.locale, "commands:trash.forum"));
     }
 
     const ms = parseDuration(arg);
     if (ms == null) {
-      return notice(ctx, "BAD_DURATION", "Bad duration. Use forms like 5m, 30m, 1h, 1h30m, 1d.");
+      return notice(ctx, "BAD_DURATION", tFor(ctx.user.locale, "commands:trash.badDuration"));
     }
     const cutoff = new Date(Date.now() - ms);
 
@@ -79,7 +80,7 @@ export const trashCommand: CommandHandler = {
       ));
     const ids = doomed.map((r) => r.id);
     if (ids.length === 0) {
-      return notice(ctx, "TRASH", `No messages in the last ${formatDuration(ms)} to delete.`);
+      return notice(ctx, "TRASH", tFor(ctx.user.locale, "commands:trash.none", { duration: formatDuration(ms) }));
     }
 
     for (let i = 0; i < ids.length; i += CHUNK) {

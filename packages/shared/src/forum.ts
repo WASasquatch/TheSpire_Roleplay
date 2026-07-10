@@ -298,6 +298,14 @@ export interface ForumSummary {
    *  Always present (empty array when none) so the discover UI can render +
    *  filter without a null check. */
   tags: string[];
+  /**
+   * Whole-forum 18+ flag (age-restriction plan Phase 3). The server
+   * excludes 18+ forums from the catalog/discover for viewers who can't
+   * see NSFW, so this reaches only viewers allowed to see the row — the
+   * client renders it as an "18+" chip. Optional: absent (older bundle,
+   * or not yet populated) means all-ages.
+   */
+  isNsfw?: boolean;
   /** Most recent topic/reply activity across the forum's boards (ms), null
    *  for a freshly-created forum with no posts yet. */
   lastActivityAt: number | null;
@@ -339,6 +347,14 @@ export interface ForumBoardSummary {
 export interface ForumDetail extends ForumSummary {
   descriptionHtml: string | null;
   bannerImageUrl: string | null;
+  /**
+   * Optional public-safe banner variant for 18+ forums (decision #10 of
+   * the age-restriction plan). Public/discovery surfaces render THIS
+   * instead of `bannerImageUrl` for viewers who can't see NSFW; null =
+   * art-less name/colors fallback. Owner-set beside the 18+ toggle.
+   * Optional: absent on older bundles.
+   */
+  sfwBannerUrl?: string | null;
   /** Vertical banner focus (0 top … 100 bottom, 50 center): which band
    *  of the banner image survives the header's cover-crop. */
   bannerFocusY: number;
@@ -730,6 +746,15 @@ export interface ForumTopicCard {
   prefixId: string | null;
   isSticky: boolean;
   locked: boolean;
+  /**
+   * NSFW topic tag (age-restriction plan Phase 3; `messages.is_nsfw` on
+   * the topic row). Renders as the built-in "NSFW" chip, distinct from
+   * owner prefixes. NSFW topics are server-filtered out of lists for
+   * minors, anonymous visitors, and hide-pref adults, so a card carrying
+   * `true` only ever reaches viewers allowed to open it. Optional: absent
+   * (older bundle, or not yet populated) means untagged.
+   */
+  isNsfw?: boolean;
   /** Direct replies to the topic (deeper chains aren't counted). */
   replyCount: number;
   createdAt: number;
@@ -805,6 +830,11 @@ export interface ForumNotificationWire {
   actorName: string;
   topicTitle: string;
   snippet: string;
+  /** Live forum/board names for the "in <forum> · <board>" context line.
+   *  Optional + nullable: older servers omit them, and a since-deleted
+   *  forum/board nulls them (the snapshot title still renders). */
+  forumName?: string | null;
+  boardName?: string | null;
   createdAt: number;
   read: boolean;
 }

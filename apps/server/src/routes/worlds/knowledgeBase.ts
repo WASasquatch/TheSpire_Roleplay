@@ -15,6 +15,7 @@ import {
   parseTagList,
   serializeTagList,
 } from "@thekeep/shared";
+import { tFor } from "../../i18n.js";
 import { getSessionUser } from "../auth.js";
 import {
   worldArcs,
@@ -136,12 +137,12 @@ export async function registerWorldKnowledgeBaseRoutes(app: FastifyInstance, db:
     if (body.arcId && !(await arcInWorld(w.id, body.arcId))) { reply.code(400); return { error: "unknown arc" }; }
     const countRow = (await db.select({ n: sql<number>`count(*)` }).from(worldEntities)
       .where(and(eq(worldEntities.worldId, w.id), eq(worldEntities.kind, body.kind))))[0];
-    if ((countRow?.n ?? 0) >= WORLD_ENTITY_PER_KIND_CAP) { reply.code(409); return { error: "too many entries of this kind" }; }
+    if ((countRow?.n ?? 0) >= WORLD_ENTITY_PER_KIND_CAP) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.tooManyOfKind") }; }
     const slug = (body.slug?.trim() || deriveSlug(body.name)).toLowerCase();
     if (!SLUG_RX.test(slug)) { reply.code(400); return { error: "invalid slug" }; }
     const dup = (await db.select({ id: worldEntities.id }).from(worldEntities)
       .where(and(eq(worldEntities.worldId, w.id), eq(worldEntities.kind, body.kind), sql`lower(${worldEntities.slug}) = ${slug}`)).limit(1))[0];
-    if (dup) { reply.code(409); return { error: "an entry with that slug already exists" }; }
+    if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.entrySlugExists") }; }
     const maxRow = (await db.select({ m: sql<number>`COALESCE(MAX(${worldEntities.sortOrder}), -1)` }).from(worldEntities)
       .where(and(eq(worldEntities.worldId, w.id), eq(worldEntities.kind, body.kind))))[0];
     const now = new Date();
@@ -188,7 +189,7 @@ export async function registerWorldKnowledgeBaseRoutes(app: FastifyInstance, db:
       if (!SLUG_RX.test(slug)) { reply.code(400); return { error: "invalid slug" }; }
       const dup = (await db.select({ id: worldEntities.id }).from(worldEntities)
         .where(and(eq(worldEntities.worldId, w.id), eq(worldEntities.kind, existing.kind), sql`lower(${worldEntities.slug}) = ${slug}`, ne(worldEntities.id, existing.id))).limit(1))[0];
-      if (dup) { reply.code(409); return { error: "an entry with that slug already exists" }; }
+      if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.entrySlugExists") }; }
       update.slug = slug;
     }
     await db.update(worldEntities).set(update).where(eq(worldEntities.id, existing.id));
@@ -246,12 +247,12 @@ export async function registerWorldKnowledgeBaseRoutes(app: FastifyInstance, db:
     let body; try { body = createKindBody.parse(req.body); } catch { reply.code(400); return { error: "invalid body" }; }
     const key = body.key.trim().toLowerCase();
     if (!SLUG_RX.test(key)) { reply.code(400); return { error: "invalid kind key" }; }
-    if (RESERVED_KIND_KEYS.has(key)) { reply.code(409); return { error: "that kind key is reserved" }; }
+    if (RESERVED_KIND_KEYS.has(key)) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.kindReserved") }; }
     const countRow = (await db.select({ n: sql<number>`count(*)` }).from(worldEntityKinds).where(eq(worldEntityKinds.worldId, w.id)))[0];
-    if ((countRow?.n ?? 0) >= WORLD_ENTITY_KINDS_CAP) { reply.code(409); return { error: "too many custom kinds" }; }
+    if ((countRow?.n ?? 0) >= WORLD_ENTITY_KINDS_CAP) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.tooManyKinds") }; }
     const dup = (await db.select({ key: worldEntityKinds.key }).from(worldEntityKinds)
       .where(and(eq(worldEntityKinds.worldId, w.id), sql`lower(${worldEntityKinds.key}) = ${key}`)).limit(1))[0];
-    if (dup) { reply.code(409); return { error: "that kind already exists" }; }
+    if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.kindExists") }; }
     const maxRow = (await db.select({ m: sql<number>`COALESCE(MAX(${worldEntityKinds.sortOrder}), -1)` }).from(worldEntityKinds).where(eq(worldEntityKinds.worldId, w.id)))[0];
     await db.insert(worldEntityKinds).values({
       worldId: w.id, key, label: body.label, description: body.description ?? "",
@@ -297,7 +298,7 @@ export async function registerWorldKnowledgeBaseRoutes(app: FastifyInstance, db:
     // Refuse to delete a kind that still has entries (avoids orphaning them).
     const inUse = (await db.select({ id: worldEntities.id }).from(worldEntities)
       .where(and(eq(worldEntities.worldId, w.id), eq(worldEntities.kind, key))).limit(1))[0];
-    if (inUse) { reply.code(409); return { error: "kind still has entries; delete or reassign them first" }; }
+    if (inUse) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.kindHasEntries") }; }
     await db.delete(worldEntityKinds).where(and(eq(worldEntityKinds.worldId, w.id), sql`lower(${worldEntityKinds.key}) = ${key}`));
     return { ok: true };
   });
@@ -340,12 +341,12 @@ export async function registerWorldKnowledgeBaseRoutes(app: FastifyInstance, db:
     if (!(await canEditWorld(db, w, me.id, me.role))) { reply.code(403); return { error: "not yours" }; }
     let body; try { body = createArcBody.parse(req.body); } catch { reply.code(400); return { error: "invalid body" }; }
     const countRow = (await db.select({ n: sql<number>`count(*)` }).from(worldArcs).where(eq(worldArcs.worldId, w.id)))[0];
-    if ((countRow?.n ?? 0) >= WORLD_ARCS_CAP) { reply.code(409); return { error: "too many arcs" }; }
+    if ((countRow?.n ?? 0) >= WORLD_ARCS_CAP) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.tooManyArcs") }; }
     const slug = (body.slug?.trim() || deriveSlug(body.title)).toLowerCase();
     if (!SLUG_RX.test(slug)) { reply.code(400); return { error: "invalid slug" }; }
     const dup = (await db.select({ id: worldArcs.id }).from(worldArcs)
       .where(and(eq(worldArcs.worldId, w.id), sql`lower(${worldArcs.slug}) = ${slug}`)).limit(1))[0];
-    if (dup) { reply.code(409); return { error: "an arc with that slug already exists" }; }
+    if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.arcSlugExists") }; }
     const maxRow = (await db.select({ m: sql<number>`COALESCE(MAX(${worldArcs.sortOrder}), -1)` }).from(worldArcs).where(eq(worldArcs.worldId, w.id)))[0];
     const now = new Date();
     const aid = nanoid();
@@ -380,7 +381,7 @@ export async function registerWorldKnowledgeBaseRoutes(app: FastifyInstance, db:
       if (!SLUG_RX.test(slug)) { reply.code(400); return { error: "invalid slug" }; }
       const dup = (await db.select({ id: worldArcs.id }).from(worldArcs)
         .where(and(eq(worldArcs.worldId, w.id), sql`lower(${worldArcs.slug}) = ${slug}`, ne(worldArcs.id, existing.id))).limit(1))[0];
-      if (dup) { reply.code(409); return { error: "an arc with that slug already exists" }; }
+      if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.arcSlugExists") }; }
       update.slug = slug;
     }
     await db.update(worldArcs).set(update).where(eq(worldArcs.id, existing.id));
@@ -448,12 +449,12 @@ export async function registerWorldKnowledgeBaseRoutes(app: FastifyInstance, db:
     let body; try { body = createSessionBody.parse(req.body); } catch { reply.code(400); return { error: "invalid body" }; }
     if (body.arcId && !(await arcInWorld(w.id, body.arcId))) { reply.code(400); return { error: "unknown arc" }; }
     const countRow = (await db.select({ n: sql<number>`count(*)` }).from(worldSessions).where(eq(worldSessions.worldId, w.id)))[0];
-    if ((countRow?.n ?? 0) >= WORLD_SESSIONS_CAP) { reply.code(409); return { error: "too many sessions" }; }
+    if ((countRow?.n ?? 0) >= WORLD_SESSIONS_CAP) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.tooManySessions") }; }
     const slug = (body.slug?.trim() || deriveSlug(body.title)).toLowerCase();
     if (!SLUG_RX.test(slug)) { reply.code(400); return { error: "invalid slug" }; }
     const dup = (await db.select({ id: worldSessions.id }).from(worldSessions)
       .where(and(eq(worldSessions.worldId, w.id), sql`lower(${worldSessions.slug}) = ${slug}`)).limit(1))[0];
-    if (dup) { reply.code(409); return { error: "a session with that slug already exists" }; }
+    if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.sessionSlugExists") }; }
     const maxRow = (await db.select({ m: sql<number>`COALESCE(MAX(${worldSessions.sortOrder}), -1)` }).from(worldSessions).where(eq(worldSessions.worldId, w.id)))[0];
     const now = new Date();
     const sid = nanoid();
@@ -493,7 +494,7 @@ export async function registerWorldKnowledgeBaseRoutes(app: FastifyInstance, db:
       if (!SLUG_RX.test(slug)) { reply.code(400); return { error: "invalid slug" }; }
       const dup = (await db.select({ id: worldSessions.id }).from(worldSessions)
         .where(and(eq(worldSessions.worldId, w.id), sql`lower(${worldSessions.slug}) = ${slug}`, ne(worldSessions.id, existing.id))).limit(1))[0];
-      if (dup) { reply.code(409); return { error: "a session with that slug already exists" }; }
+      if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.sessionSlugExists") }; }
       update.slug = slug;
     }
     await db.update(worldSessions).set(update).where(eq(worldSessions.id, existing.id));

@@ -3,6 +3,7 @@ import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { characters, sessions, users } from "../db/schema.js";
 import type { Db } from "../db/index.js";
+import { isAdultUser } from "./ageGate.js";
 import type { SessionUser } from "../commands/types.js";
 import { getSettings } from "../settings.js";
 import { socketsForUser } from "../realtime/presence.js";
@@ -87,6 +88,17 @@ export async function loadSessionUser(db: Db, userId: string): Promise<SessionUs
     username: u.username,
     role: u.role,
     activeCharacterId: u.activeCharacterId,
+    // Age context: isAdult derived per load (never stored), so a fresh
+    // session on/after the 18th birthday graduates automatically.
+    birthdate: u.birthdate,
+    isAdult: isAdultUser(u),
+    hideNsfw: u.hideNsfw,
+    isolateFromAdults: u.isolateFromAdults,
+    // Recipient language (i18n plan Phase 3): users.locale rides the
+    // session so notices / transient system messages can localize via
+    // localeForUser/tFor (src/i18n.ts) without a per-message DB hit.
+    // Null = auto ("System default") → en for server-generated text.
+    locale: u.locale,
     displayName,
     chatColor: u.chatColor,
     awayMessage: u.awayMessage,

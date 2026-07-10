@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "../cosmetics/Modal.js";
 
 /**
@@ -15,18 +16,19 @@ import { Modal } from "../cosmetics/Modal.js";
 export type PurgeChoice = number | "all" | null;
 
 export interface BanDuration {
-  label: string;
+  /** `moderation`-namespace catalog key for the preset's button label. */
+  labelKey: string;
   /** Ban length in ms; `null` = permanent. */
   ms: number | null;
 }
 
 /** Default ban-length presets, shared so every ban surface offers the same set. */
 export const BAN_DURATIONS: ReadonlyArray<BanDuration> = [
-  { label: "1 day", ms: 1 * 24 * 60 * 60 * 1000 },
-  { label: "3 days", ms: 3 * 24 * 60 * 60 * 1000 },
-  { label: "7 days", ms: 7 * 24 * 60 * 60 * 1000 },
-  { label: "30 days", ms: 30 * 24 * 60 * 60 * 1000 },
-  { label: "Permanent", ms: null },
+  { labelKey: "banModal.durations.day1", ms: 1 * 24 * 60 * 60 * 1000 },
+  { labelKey: "banModal.durations.days3", ms: 3 * 24 * 60 * 60 * 1000 },
+  { labelKey: "banModal.durations.days7", ms: 7 * 24 * 60 * 60 * 1000 },
+  { labelKey: "banModal.durations.days30", ms: 30 * 24 * 60 * 60 * 1000 },
+  { labelKey: "banModal.durations.permanent", ms: null },
 ];
 
 const HOUR = 60 * 60 * 1000;
@@ -37,26 +39,26 @@ const DAY = 24 * HOUR;
  * banning a regular offender leaves their history intact; the later options
  * are for clearing a spammer. Range runs 1 hour … 7 days, plus All time.
  */
-const PURGE_WINDOWS: ReadonlyArray<{ label: string; value: PurgeChoice }> = [
-  { label: "Don't remove", value: null },
-  { label: "1 hour", value: 1 * HOUR },
-  { label: "6 hours", value: 6 * HOUR },
-  { label: "24 hours", value: 24 * HOUR },
-  { label: "3 days", value: 3 * DAY },
-  { label: "7 days", value: 7 * DAY },
-  { label: "All time", value: "all" },
+const PURGE_WINDOWS: ReadonlyArray<{ labelKey: string; value: PurgeChoice }> = [
+  { labelKey: "banModal.durations.dontRemove", value: null },
+  { labelKey: "banModal.durations.hour1", value: 1 * HOUR },
+  { labelKey: "banModal.durations.hours6", value: 6 * HOUR },
+  { labelKey: "banModal.durations.hours24", value: 24 * HOUR },
+  { labelKey: "banModal.durations.days3", value: 3 * DAY },
+  { labelKey: "banModal.durations.days7", value: 7 * DAY },
+  { labelKey: "banModal.durations.allTime", value: "all" },
 ];
 
 export function BanModal({
   targetName,
   description,
   reasonRequired = true,
-  reasonPlaceholder = "Visible to other moderators in the ban history.",
+  reasonPlaceholder,
   reasonMaxLength = 1000,
   showPurge = true,
-  purgeScopeLabel = "posts",
-  confirmLabel = "Ban account",
-  busyLabel = "Banning…",
+  purgeScopeLabel,
+  confirmLabel,
+  busyLabel,
   onConfirm,
   onClose,
 }: {
@@ -75,12 +77,15 @@ export function BanModal({
   onConfirm: (durationMs: number | null, reason: string, purge: PurgeChoice) => Promise<void>;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("moderation");
   const [durIdx, setDurIdx] = useState(0);
   const [reason, setReason] = useState("");
   const [purgeIdx, setPurgeIdx] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const trimmed = reason.trim();
   const reasonOk = reasonRequired ? trimmed.length > 0 : true;
+  // Localized defaults for the caller-overridable copy slots.
+  const scopeLabel = purgeScopeLabel ?? t("banModal.purgeScopePosts");
 
   async function confirm() {
     if (submitting || !reasonOk) return;
@@ -101,17 +106,17 @@ export function BanModal({
         className="w-[min(440px,94vw)] rounded-lg border border-keep-rule bg-keep-bg p-4 text-keep-text shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="mb-1 text-base font-semibold">Ban {targetName}</h3>
+        <h3 className="mb-1 text-base font-semibold">{t("banModal.title", { name: targetName })}</h3>
         <p className="mb-3 text-xs text-keep-muted">
-          {description ?? "Blocks login and chat. A timed ban lifts itself when it expires."}
+          {description ?? t("banModal.description")}
         </p>
 
         <div className="mb-3">
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">Duration</div>
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">{t("banModal.duration")}</div>
           <div className="flex flex-wrap gap-1.5">
             {BAN_DURATIONS.map((d, i) => (
               <button
-                key={d.label}
+                key={d.labelKey}
                 type="button"
                 onClick={() => setDurIdx(i)}
                 aria-pressed={durIdx === i}
@@ -121,7 +126,7 @@ export function BanModal({
                     : "border-keep-rule bg-keep-panel text-keep-text hover:bg-keep-banner"
                 }`}
               >
-                {d.label}
+                {t(d.labelKey)}
               </button>
             ))}
           </div>
@@ -129,17 +134,17 @@ export function BanModal({
 
         <label className="mb-3 block">
           <span className="mb-1 block text-[11px] font-semibold uppercase tracking-widest text-keep-muted">
-            Reason{" "}
+            {t("banModal.reason")}{" "}
             {reasonRequired
-              ? <span className="text-[#e06070]">(required)</span>
-              : <span className="text-keep-muted/70">(optional)</span>}
+              ? <span className="text-[#e06070]">{t("banModal.reasonRequired")}</span>
+              : <span className="text-keep-muted/70">{t("banModal.reasonOptional")}</span>}
           </span>
           <textarea
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={3}
             maxLength={reasonMaxLength}
-            placeholder={reasonPlaceholder}
+            placeholder={reasonPlaceholder ?? t("banModal.reasonPlaceholder")}
             className="w-full resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
           />
         </label>
@@ -147,12 +152,12 @@ export function BanModal({
         {showPurge ? (
           <div className="mb-3">
             <div className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">
-              Remove recent {purgeScopeLabel}
+              {t("banModal.removeRecent", { scope: scopeLabel })}
             </div>
             <div className="flex flex-wrap gap-1.5">
               {PURGE_WINDOWS.map((p, i) => (
                 <button
-                  key={p.label}
+                  key={p.labelKey}
                   type="button"
                   onClick={() => setPurgeIdx(i)}
                   aria-pressed={purgeIdx === i}
@@ -164,13 +169,13 @@ export function BanModal({
                       : "border-keep-rule bg-keep-panel text-keep-text hover:bg-keep-banner"
                   }`}
                 >
-                  {p.label}
+                  {t(p.labelKey)}
                 </button>
               ))}
             </div>
             {purgeIdx > 0 ? (
               <p className="mt-1 text-[10px] text-keep-muted">
-                Their {purgeScopeLabel} are hidden, not deleted: admins keep them for audit.
+                {t("banModal.purgeNote", { scope: scopeLabel })}
               </p>
             ) : null}
           </div>
@@ -182,7 +187,7 @@ export function BanModal({
             onClick={onClose}
             className="rounded border border-keep-rule bg-keep-panel px-3 py-1.5 text-xs text-keep-text hover:bg-keep-banner"
           >
-            Cancel
+            {t("common:cancel")}
           </button>
           <button
             type="button"
@@ -190,7 +195,9 @@ export function BanModal({
             disabled={submitting || !reasonOk}
             className="rounded border border-[#e06070]/80 bg-[#e06070] px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {submitting ? busyLabel : confirmLabel}
+            {submitting
+              ? busyLabel ?? t("banModal.banning")
+              : confirmLabel ?? t("banModal.confirmBan")}
           </button>
         </div>
       </div>

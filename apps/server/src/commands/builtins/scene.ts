@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { roomMembers, rooms } from "../../db/schema.js";
 import { addMessage, broadcastRoomState } from "../../realtime/broadcast.js";
 import { hasPermission } from "../../auth/permissions.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -75,12 +76,12 @@ export const sceneCommand: CommandHandler = {
   ],
   async run(ctx) {
     if (!(await canMarkScene(ctx))) {
-      notice(ctx, "PERM", "Only the room owner or a mod can mark scenes.");
+      notice(ctx, "PERM", tFor(ctx.user.locale, "commands:scene.permission"));
       return;
     }
     const raw = ctx.argsText.trim();
     if (!raw) {
-      notice(ctx, "SCENE_USAGE", "Usage: /scene <title> or /scene end.");
+      notice(ctx, "SCENE_USAGE", tFor(ctx.user.locale, "commands:scene.usage"));
       return;
     }
     // Pipe is the title|image separator. Splitting on the FIRST pipe
@@ -92,7 +93,7 @@ export const sceneCommand: CommandHandler = {
     const titlePart = (pipeIdx >= 0 ? raw.slice(0, pipeIdx) : raw).trim();
     const imagePart = pipeIdx >= 0 ? raw.slice(pipeIdx + 1).trim() : "";
     if (!titlePart) {
-      notice(ctx, "SCENE_USAGE", "Usage: /scene <title> or /scene end.");
+      notice(ctx, "SCENE_USAGE", tFor(ctx.user.locale, "commands:scene.usage"));
       return;
     }
     const isEnd = /^(end|close|stop)$/i.test(titlePart);
@@ -100,7 +101,7 @@ export const sceneCommand: CommandHandler = {
     if (!isEnd && imagePart) {
       const ok = validateSceneImageUrl(imagePart);
       if (!ok) {
-        notice(ctx, "SCENE_IMAGE_URL_INVALID", "Scene image URL must be http(s) and 500 chars or fewer.");
+        notice(ctx, "SCENE_IMAGE_URL_INVALID", tFor(ctx.user.locale, "commands:scene.imageUrlInvalid"));
         return;
       }
       sceneImageUrl = ok;

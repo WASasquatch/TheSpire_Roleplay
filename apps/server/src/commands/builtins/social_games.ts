@@ -88,6 +88,7 @@ import { addMessage, addMessageDirect, addSystemMessage } from "../../realtime/b
 import { rooms, users } from "../../db/schema.js";
 import { creditPool } from "../../earning/award.js";
 import { readPool, resolveRoomServerId } from "../../earning/pool.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 import { findItem } from "./items.js";
 
@@ -152,7 +153,7 @@ export const rpsCommand: CommandHandler = {
       return notice(
         ctx,
         "RPS_INCOGNITO",
-        "You can't host or join rock-paper-scissors while in /incognito, the result line would print your name. Run /incognito to drop back to visible first.",
+        tFor(ctx.user.locale, "commands:rps.incognito"),
       );
     }
 
@@ -164,7 +165,7 @@ export const rpsCommand: CommandHandler = {
         return notice(
           ctx,
           "RPS_ACTIVE",
-          `A round is already running in this room (${secondsLeft(active.expiresAt)}s left). Run /rps <throw> to enter.`,
+          tFor(ctx.user.locale, "commands:rps.active", { seconds: secondsLeft(active.expiresAt) }),
         );
       }
       // Resolve admin overrides + snapshot rewards into the session.
@@ -198,7 +199,7 @@ export const rpsCommand: CommandHandler = {
     // also opens one with the host's throw as the seed entry.
     const choice = parseRpsThrow(arg);
     if (!choice) {
-      return notice(ctx, "RPS_USAGE", "Usage: /rps <rock|paper|scissors>. Short forms work too (r/p/s).");
+      return notice(ctx, "RPS_USAGE", tFor(ctx.user.locale, "commands:rps.usage"));
     }
     const key = identityKeyFor(ctx.user.id, ctx.user.activeCharacterId);
     if (active && active.kind === RPS_KIND) {
@@ -211,15 +212,15 @@ export const rpsCommand: CommandHandler = {
         ctx,
         replacing ? "RPS_UPDATED" : "RPS_ENTERED",
         replacing
-          ? `Updated your throw to ${choice}. (${secondsLeft(active.expiresAt)}s left.)`
-          : `You entered ${choice}. (${secondsLeft(active.expiresAt)}s left.)`,
+          ? tFor(ctx.user.locale, "commands:rps.updated", { choice, seconds: secondsLeft(active.expiresAt) })
+          : tFor(ctx.user.locale, "commands:rps.entered", { choice, seconds: secondsLeft(active.expiresAt) }),
       );
     }
     if (active && active.kind !== RPS_KIND) {
       return notice(
         ctx,
         "GAME_CONFLICT",
-        `Can't /rps here, a ${active.kind} session is already running.`,
+        tFor(ctx.user.locale, "commands:rps.gameConflict", { kind: active.kind }),
       );
     }
     // No active session: start one and seed the host's throw.
@@ -319,7 +320,7 @@ async function runRaffleStart(
     return notice(
       ctx,
       "RAFFLE_INCOGNITO",
-      "You can't host a raffle while in /incognito, the start announce and result line would print your name. Run /incognito to drop back to visible first.",
+      tFor(ctx.user.locale, "commands:raffle.incognito"),
     );
   }
 
@@ -327,7 +328,7 @@ async function runRaffleStart(
     return notice(
       ctx,
       "RAFFLE_USAGE",
-      "Usage: /raffle item <name> [count]  |  /raffle currency <amount>  |  /raffle cancel  |  /raffle status",
+      tFor(ctx.user.locale, "commands:raffle.usage"),
     );
   }
 
@@ -349,14 +350,20 @@ async function runRaffleStart(
       }
     }
     if (!active || (active.kind !== ROOM_RAFFLE_KIND && active.kind !== SITEWIDE_RAFFLE_KIND)) {
-      return notice(ctx, "RAFFLE_NONE", "No raffle is running here right now.");
+      return notice(ctx, "RAFFLE_NONE", tFor(ctx.user.locale, "commands:raffle.noneRunning"));
     }
     const state = active.state as RaffleState;
-    const scopeNote = scopeNoteFor === "sitewide" ? " (sitewide)" : "";
+    const scopeNote = scopeNoteFor === "sitewide" ? tFor(ctx.user.locale, "commands:raffle.sitewideNote") : "";
     return notice(
       ctx,
       "RAFFLE_STATUS",
-      `${active.host.displayName}'s raffle${scopeNote} for ${prizeLabel(state.prize)}, ${state.claimants.size} claimant(s), ${secondsLeft(active.expiresAt)}s left.`,
+      tFor(ctx.user.locale, "commands:raffle.status", {
+        name: active.host.displayName,
+        scopeNote,
+        prize: prizeLabel(state.prize),
+        claimants: state.claimants.size,
+        seconds: secondsLeft(active.expiresAt),
+      }),
     );
   }
 
@@ -365,10 +372,10 @@ async function runRaffleStart(
       ? findRoomSession(ctx.roomId)
       : findSitewideSession();
     if (!active || (active.kind !== ROOM_RAFFLE_KIND && active.kind !== SITEWIDE_RAFFLE_KIND)) {
-      return notice(ctx, "RAFFLE_NONE", "No raffle to cancel.");
+      return notice(ctx, "RAFFLE_NONE", tFor(ctx.user.locale, "commands:raffle.noneToCancel"));
     }
     if (active.host.userId !== ctx.user.id) {
-      return notice(ctx, "RAFFLE_PERM", "Only the host can cancel a raffle.");
+      return notice(ctx, "RAFFLE_PERM", tFor(ctx.user.locale, "commands:raffle.cancelPermission"));
     }
     await cancel(active, { db: ctx.db, io: ctx.io });
     return;
@@ -384,7 +391,10 @@ async function runRaffleStart(
       return notice(
         ctx,
         "RAFFLE_CONFLICT",
-        `A ${existing.kind === RPS_KIND ? "rock-paper-scissors round" : "raffle"} is already running in this room. Wait for it to finish.`,
+        tFor(
+          ctx.user.locale,
+          existing.kind === RPS_KIND ? "commands:raffle.conflictRps" : "commands:raffle.conflictRaffle",
+        ),
       );
     }
   } else {
@@ -393,7 +403,7 @@ async function runRaffleStart(
       return notice(
         ctx,
         "RAFFLE_CONFLICT",
-        "A sitewide raffle is already running. Wait for it to finish.",
+        tFor(ctx.user.locale, "commands:raffle.conflictSitewide"),
       );
     }
   }
@@ -407,35 +417,35 @@ async function runRaffleStart(
   if (subLower === "item") {
     const parsed = parseItemPrizeArgs(rest);
     if (!parsed) {
-      return notice(ctx, "RAFFLE_USAGE", "Usage: /raffle item <name> [count]");
+      return notice(ctx, "RAFFLE_USAGE", tFor(ctx.user.locale, "commands:raffle.itemUsage"));
     }
     const item = await findItem(ctx.db, parsed.itemQuery, hostServerId);
     if (!item) {
-      return notice(ctx, "RAFFLE_ITEM_NOT_FOUND", `No item called "${parsed.itemQuery}".`);
+      return notice(ctx, "RAFFLE_ITEM_NOT_FOUND", tFor(ctx.user.locale, "commands:shared.itemNotFound", { name: parsed.itemQuery }));
     }
     if (!item.enabled) {
-      return notice(ctx, "RAFFLE_ITEM_DISABLED", `${item.name} isn't usable right now.`);
+      return notice(ctx, "RAFFLE_ITEM_DISABLED", tFor(ctx.user.locale, "commands:shared.itemNotUsable", { name: item.name }));
     }
     const debit = debitItemFromInventory(ctx.db, scope, ownerId, item.key, parsed.count, hostServerId);
     if (!debit.ok) {
       return notice(
         ctx,
         "RAFFLE_NOT_ENOUGH",
-        `You only have ${debit.have} ${item.name}. (Tried to raffle ${parsed.count}.)`,
+        tFor(ctx.user.locale, "commands:raffle.notEnoughItems", { have: debit.have, item: item.name, tried: parsed.count }),
       );
     }
     prize = { kind: "item", itemKey: item.key, itemName: item.name, count: parsed.count };
   } else if (subLower === "currency" || subLower === "coin" || subLower === "coins") {
     const amt = parseInt(rest.join(" ").trim(), 10);
     if (!Number.isFinite(amt) || amt <= 0) {
-      return notice(ctx, "RAFFLE_USAGE", "Usage: /raffle currency <amount>");
+      return notice(ctx, "RAFFLE_USAGE", tFor(ctx.user.locale, "commands:raffle.currencyUsage"));
     }
     const balance = await readWalletBalance(ctx, scope, ownerId);
     if (balance < amt) {
       return notice(
         ctx,
         "RAFFLE_NOT_ENOUGH",
-        `Your active wallet only has ${balance} Currency. (Tried to raffle ${amt}.)`,
+        tFor(ctx.user.locale, "commands:raffle.notEnoughCurrency", { balance, amount: amt }),
       );
     }
     // Debit. creditPool clips at zero so a concurrent spend can't
@@ -452,7 +462,7 @@ async function runRaffleStart(
     });
     prize = { kind: "currency", amount: amt };
   } else {
-    return notice(ctx, "RAFFLE_USAGE", "First arg must be 'item', 'currency', 'cancel', or 'status'.");
+    return notice(ctx, "RAFFLE_USAGE", tFor(ctx.user.locale, "commands:raffle.firstArg"));
   }
 
   const state: RaffleState = {
@@ -526,19 +536,19 @@ export const claimCommand: CommandHandler = {
       return notice(
         ctx,
         "CLAIM_INCOGNITO",
-        "You can't /claim while in /incognito, winners and the entrant list are printed by name. Run /incognito to drop back to visible first.",
+        tFor(ctx.user.locale, "commands:claim.incognito"),
       );
     }
     // Room first; fall back to sitewide.
     const active = findActiveForRoom(ctx.roomId);
     if (!active) {
-      return notice(ctx, "CLAIM_NONE", "No raffle is running here right now.");
+      return notice(ctx, "CLAIM_NONE", tFor(ctx.user.locale, "commands:raffle.noneRunning"));
     }
     if (active.kind !== ROOM_RAFFLE_KIND && active.kind !== SITEWIDE_RAFFLE_KIND) {
       return notice(
         ctx,
         "CLAIM_NONE",
-        `The active game (${active.kind}) isn't a raffle. There's nothing to claim.`,
+        tFor(ctx.user.locale, "commands:claim.notRaffle", { kind: active.kind }),
       );
     }
     const key = identityKeyFor(ctx.user.id, ctx.user.activeCharacterId);
@@ -548,13 +558,13 @@ export const claimCommand: CommandHandler = {
       return notice(
         ctx,
         "CLAIM_OK",
-        `Entered. Drawing in ${left}s.`,
+        tFor(ctx.user.locale, "commands:claim.entered", { seconds: left }),
       );
     }
     return notice(
       ctx,
       "CLAIM_ALREADY",
-      `Already entered. Drawing in ${left}s.`,
+      tFor(ctx.user.locale, "commands:claim.already", { seconds: left }),
     );
   },
 };
@@ -633,22 +643,22 @@ export const triviaCommand: CommandHandler = {
   ],
   async run(ctx) {
     if (ctx.user.incognitoMode) {
-      return notice(ctx, "TRIVIA_INCOGNITO", "You can't host trivia while in /incognito, the start line names you.");
+      return notice(ctx, "TRIVIA_INCOGNITO", tFor(ctx.user.locale, "commands:trivia.incognito"));
     }
     const argsText = ctx.argsText.trim();
     if (!argsText) {
-      return notice(ctx, "TRIVIA_USAGE", "Usage: /trivia <question> | <answer>");
+      return notice(ctx, "TRIVIA_USAGE", tFor(ctx.user.locale, "commands:trivia.usage"));
     }
     const parsed = parseTriviaArgs(argsText);
     if (!parsed) {
-      return notice(ctx, "TRIVIA_USAGE", "Usage: /trivia <question> | <answer> (use a pipe `|` between question and answer).");
+      return notice(ctx, "TRIVIA_USAGE", tFor(ctx.user.locale, "commands:trivia.usagePipe"));
     }
     const existing = findRoomSession(ctx.roomId);
     if (existing) {
       return notice(
         ctx,
         "TRIVIA_CONFLICT",
-        `A ${existing.kind} session is already running in this room. Wait for it to finish.`,
+        tFor(ctx.user.locale, "commands:shared.sessionConflict", { kind: existing.kind }),
       );
     }
     const { windowMs, reward } = await readTriviaConfig(ctx.db, (ctx.socket.data as { serverId?: string }).serverId);
@@ -684,20 +694,20 @@ export const answerCommand: CommandHandler = {
     "Submit a guess for the active trivia round. The first correct match wins the round, the answer is revealed, and the timer ends early. Wrong guesses are kept private (only you see the 'miss' notice); the result line at round-end lists every guess so spectators see who tried what.",
   async run(ctx) {
     if (ctx.user.incognitoMode) {
-      return notice(ctx, "ANSWER_INCOGNITO", "You can't /answer while in /incognito, the result line names guessers.");
+      return notice(ctx, "ANSWER_INCOGNITO", tFor(ctx.user.locale, "commands:answer.incognito"));
     }
     const text = ctx.argsText.trim();
-    if (!text) return notice(ctx, "ANSWER_USAGE", "Usage: /answer <your guess>");
+    if (!text) return notice(ctx, "ANSWER_USAGE", tFor(ctx.user.locale, "commands:answer.usage"));
     const active = findRoomSession(ctx.roomId);
     if (!active || active.kind !== TRIVIA_KIND) {
-      return notice(ctx, "ANSWER_NONE", "No trivia round is running here right now.");
+      return notice(ctx, "ANSWER_NONE", tFor(ctx.user.locale, "commands:answer.none"));
     }
     // The host knows the hidden answer, letting them /answer their
     // own trivia and pocket the configured reward is a clean self-
     // deal. Block on master-userId match (not per-identity) so a
     // character the host owns can't sneak the answer in either.
     if (active.host.userId === ctx.user.id) {
-      return notice(ctx, "ANSWER_HOST", "You can't /answer your own trivia. Wait for someone else to guess (or for the timer to run out).");
+      return notice(ctx, "ANSWER_HOST", tFor(ctx.user.locale, "commands:answer.host"));
     }
     const result = recordTriviaGuess(active, {
       participant: participantFor(ctx),
@@ -712,9 +722,9 @@ export const answerCommand: CommandHandler = {
       return;
     }
     if (result.kind === "miss") {
-      return notice(ctx, "ANSWER_MISS", "Not it, keep trying.");
+      return notice(ctx, "ANSWER_MISS", tFor(ctx.user.locale, "commands:answer.miss"));
     }
-    return notice(ctx, "ANSWER_OVER", "That round just ended.");
+    return notice(ctx, "ANSWER_OVER", tFor(ctx.user.locale, "commands:answer.over"));
   },
 };
 
@@ -734,7 +744,7 @@ export const storyDiceCommand: CommandHandler = {
   ],
   async run(ctx) {
     if (ctx.user.incognitoMode) {
-      return notice(ctx, "STORYDICE_INCOGNITO", "You can't host or play Story Dice while in /incognito, start + result lines name participants, and your submission posts as a chat line attributed to you.");
+      return notice(ctx, "STORYDICE_INCOGNITO", tFor(ctx.user.locale, "commands:storydice.incognito"));
     }
     const argsText = ctx.argsText.trim();
 
@@ -745,7 +755,7 @@ export const storyDiceCommand: CommandHandler = {
         return notice(
           ctx,
           "STORYDICE_CONFLICT",
-          `A ${existing.kind} session is already running in this room. Wait for it to finish.`,
+          tFor(ctx.user.locale, "commands:shared.sessionConflict", { kind: existing.kind }),
         );
       }
       const { windowMs, reward } = await readStoryDiceConfig(ctx.db, (ctx.socket.data as { serverId?: string }).serverId);
@@ -778,11 +788,11 @@ export const storyDiceCommand: CommandHandler = {
     // Submission path, must have an active round.
     const active = findRoomSession(ctx.roomId);
     if (!active || active.kind !== STORYDICE_KIND) {
-      return notice(ctx, "STORYDICE_NONE", "No Story Dice round is running here. Use /storydice with no args to open one.");
+      return notice(ctx, "STORYDICE_NONE", tFor(ctx.user.locale, "commands:storydice.none"));
     }
     const key = identityKeyFor(ctx.user.id, ctx.user.activeCharacterId);
     if ((active.state as StoryDiceState).submissions.has(key)) {
-      return notice(ctx, "STORYDICE_ONCE", "You already submitted this round. One submission per identity, the room is voting on your post now.");
+      return notice(ctx, "STORYDICE_ONCE", tFor(ctx.user.locale, "commands:storydice.once"));
     }
     // Post the submission as a stylized chat line attributed to the
     // player. We still use `addMessage` so the line flows through
@@ -840,7 +850,7 @@ export const scrambleCommand: CommandHandler = {
       return notice(
         ctx,
         "SCRAMBLE_INCOGNITO",
-        "You can't host or play Word Scramble while in /incognito, the round + result lines name participants by display name.",
+        tFor(ctx.user.locale, "commands:scramble.incognito"),
       );
     }
     const argsText = ctx.argsText.trim();
@@ -855,24 +865,30 @@ export const scrambleCommand: CommandHandler = {
     // Exact match only; "status now" or similar falls through.
     if (lowered === "status") {
       if (!isScrambleActive) {
-        return notice(ctx, "SCRAMBLE_NONE", "No Word Scramble round is running here.");
+        return notice(ctx, "SCRAMBLE_NONE", tFor(ctx.user.locale, "commands:scramble.none"));
       }
       const state = active.state as ScrambleState;
       const secs = Math.max(0, Math.ceil((state.currentRoundEndsAt - Date.now()) / 1000));
       return notice(
         ctx,
         "SCRAMBLE_STATUS",
-        `Round ${state.currentRound}/${state.totalRounds}, letters ${state.currentLetters} (${state.currentSourceWord.length} long). ${secs}s left.`,
+        tFor(ctx.user.locale, "commands:scramble.status", {
+          round: state.currentRound,
+          total: state.totalRounds,
+          letters: state.currentLetters,
+          length: state.currentSourceWord.length,
+          seconds: secs,
+        }),
       );
     }
 
     // `/scramble cancel`, host-only early termination.
     if (lowered === "cancel") {
       if (!isScrambleActive) {
-        return notice(ctx, "SCRAMBLE_NONE", "No Word Scramble round is running here.");
+        return notice(ctx, "SCRAMBLE_NONE", tFor(ctx.user.locale, "commands:scramble.none"));
       }
       if (!hostingThis) {
-        return notice(ctx, "SCRAMBLE_NOT_HOST", "Only the host of the current game can cancel it.");
+        return notice(ctx, "SCRAMBLE_NOT_HOST", tFor(ctx.user.locale, "commands:scramble.notHost"));
       }
       await cancel(active, { db: ctx.db, io: ctx.io });
       return;
@@ -885,32 +901,39 @@ export const scrambleCommand: CommandHandler = {
         return notice(
           ctx,
           "SCRAMBLE_ACTIVE",
-          `Scramble round ${state.currentRound}/${state.totalRounds} is live (letters ${state.currentLetters}). Type \`/scramble <word>\` to guess.`,
+          tFor(ctx.user.locale, "commands:scramble.active", {
+            round: state.currentRound,
+            total: state.totalRounds,
+            letters: state.currentLetters,
+          }),
         );
       }
       if (ctx.args.length > 1) {
         return notice(
           ctx,
           "SCRAMBLE_ONE_WORD",
-          "Guess one word at a time: /scramble <word>.",
+          tFor(ctx.user.locale, "commands:scramble.oneWord"),
         );
       }
       const outcome = recordScrambleGuess(active, participantFor(ctx), argsText);
       switch (outcome.kind) {
         case "tooshort":
-          return notice(ctx, "SCRAMBLE_SHORT", "Words must be at least 3 letters.");
+          return notice(ctx, "SCRAMBLE_SHORT", tFor(ctx.user.locale, "commands:scramble.tooShort"));
         case "letters":
-          return notice(ctx, "SCRAMBLE_LETTERS", "That word doesn't fit the available letters.");
+          return notice(ctx, "SCRAMBLE_LETTERS", tFor(ctx.user.locale, "commands:scramble.letters"));
         case "notword":
-          return notice(ctx, "SCRAMBLE_NOTWORD", "Not in the dictionary.");
+          return notice(ctx, "SCRAMBLE_NOTWORD", tFor(ctx.user.locale, "commands:scramble.notWord"));
         case "duplicate":
-          return notice(ctx, "SCRAMBLE_DUPLICATE", `You already scored "${outcome.word}" this round.`);
+          return notice(ctx, "SCRAMBLE_DUPLICATE", tFor(ctx.user.locale, "commands:scramble.duplicate", { word: outcome.word }));
         case "ok": {
-          const bonus = outcome.exactMatch ? " (exact match, 2× bonus!)" : "";
           return notice(
             ctx,
             "SCRAMBLE_SCORE",
-            `+${outcome.points} for "${outcome.word}"${bonus}. Total: ${outcome.total}.`,
+            tFor(
+              ctx.user.locale,
+              outcome.exactMatch ? "commands:scramble.scoreExact" : "commands:scramble.score",
+              { points: outcome.points, word: outcome.word, total: outcome.total },
+            ),
           );
         }
       }
@@ -922,14 +945,14 @@ export const scrambleCommand: CommandHandler = {
       return notice(
         ctx,
         "GAME_CONFLICT",
-        `Can't /scramble here, a ${active.kind} session is already running.`,
+        tFor(ctx.user.locale, "commands:scramble.gameConflict", { kind: active.kind }),
       );
     }
 
     // No active session. Parse the start args (rounds + optional
     // host-picked source words). A malformed call surfaces a
     // specific notice; on success we start a game.
-    const parsed = parseScrambleStartArgs(ctx.args);
+    const parsed = parseScrambleStartArgs(ctx.args, ctx.user.locale);
     if ("error" in parsed) {
       return notice(ctx, "SCRAMBLE_USAGE", parsed.error);
     }
@@ -1020,14 +1043,14 @@ export const gamesCommand: CommandHandler = {
     "Private quick reference of every social game and how to start one. Handy when you can't remember the cue word.",
   async run(ctx) {
     const lines: string[] = [];
-    lines.push("🎮 Social games:");
-    lines.push("• /rps: Rock-paper-scissors. Open a quick round, throw rock, paper, or scissors.");
-    lines.push("• /trivia <question> | <answer>: Ask a trivia question; the room races to /answer.");
-    lines.push("• /storydice: You get four prompt words. Write a short IC post weaving them in. The room votes the winner with 📖.");
-    lines.push("• /scramble [rounds] [words...]: Letters from a word are shuffled; find as many words as you can. You can also supply your own words for each round.");
-    lines.push("• /duel <opponent>: One-on-one duel. Pick a class and trade attacks, defends, parries, and rests until someone falls.");
-    lines.push("• /raffle item <name> or /raffle currency <amount>: Put up a prize from your stuff. Others run /claim. One winner is drawn at random.");
-    lines.push("Winners may earn XP, Currency, or shop items as a bonus.");
+    lines.push(tFor(ctx.user.locale, "commands:games.header"));
+    lines.push(tFor(ctx.user.locale, "commands:games.rps"));
+    lines.push(tFor(ctx.user.locale, "commands:games.trivia"));
+    lines.push(tFor(ctx.user.locale, "commands:games.storydice"));
+    lines.push(tFor(ctx.user.locale, "commands:games.scramble"));
+    lines.push(tFor(ctx.user.locale, "commands:games.duel"));
+    lines.push(tFor(ctx.user.locale, "commands:games.raffle"));
+    lines.push(tFor(ctx.user.locale, "commands:games.footer"));
     whisperGamesList(ctx, lines.join("\n"));
   },
 };

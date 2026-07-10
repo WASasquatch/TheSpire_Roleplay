@@ -6,11 +6,12 @@
  * each tick is bounded so a big campaign never hogs the event loop.
  */
 import { and, eq, gte, sql } from "drizzle-orm";
-import { emailCategoryLabel } from "@thekeep/shared";
-import { emailCampaigns, emailOutbox, emailUnsubscribes } from "../db/schema.js";
+import { emailCategoryLabel, isEmailCategory } from "@thekeep/shared";
+import { emailCampaigns, emailOutbox, emailUnsubscribes, users } from "../db/schema.js";
 import { getSettings } from "../settings.js";
 import { sendEmail } from "../lib/mailer.js";
 import type { Db } from "../db/index.js";
+import { tFor } from "../i18n.js";
 import { renderBrandedEmail, publicBaseUrl } from "./layout.js";
 import { unsubscribeUrl } from "./unsubscribe.js";
 
@@ -65,9 +66,14 @@ export async function drainEmailQueue(db: Db): Promise<number> {
       subject: emailCampaigns.subject,
       bodyHtml: emailCampaigns.bodyHtml,
       category: emailCampaigns.category,
+      // Recipient language for the unsubscribe-footer chrome (i18n plan
+      // Phase 3). The campaign subject/body are admin-authored content and
+      // send as written; only the layout's own line localizes.
+      locale: users.locale,
     })
     .from(emailOutbox)
     .innerJoin(emailCampaigns, eq(emailOutbox.campaignId, emailCampaigns.id))
+    .leftJoin(users, eq(users.id, emailOutbox.userId))
     // Only drain campaigns that are actively sending — excludes not-yet-due
     // scheduled campaigns and canceled ones.
     .where(and(eq(emailOutbox.status, "pending"), eq(emailCampaigns.status, "sending")))
@@ -91,11 +97,17 @@ export async function drainEmailQueue(db: Db): Promise<number> {
         continue;
       }
     }
+    // Category label in the recipient's language; en values mirror the
+    // shared EMAIL_CATEGORY_LABELS exactly (emailCategoryLabel stays the
+    // fallback for any unknown/legacy category value).
+    const categoryLabel = isEmailCategory(row.category)
+      ? tFor(row.locale, `email:category.${row.category}`)
+      : emailCategoryLabel(row.category);
     const html = renderBrandedEmail(settings, {
       heading: row.subject,
       bodyHtml: row.bodyHtml,
       ...(row.userId
-        ? { unsubscribeUrl: unsubscribeUrl(base, row.userId, row.category), unsubscribeLabel: emailCategoryLabel(row.category) }
+        ? { unsubscribeUrl: unsubscribeUrl(base, row.userId, row.category), unsubscribeLabel: categoryLabel, locale: row.locale }
         : {}),
     });
     const res = await sendEmail({ to: row.email, subject: row.subject, html });

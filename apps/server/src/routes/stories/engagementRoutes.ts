@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, desc, eq, isNull, isNotNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, isNotNull, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type {
@@ -8,6 +8,7 @@ import type {
   StoryReviewPage,
   StorySubscriptionState } from "@thekeep/shared";
 import {
+  SFW_RATINGS,
   STORY_REVIEW_EDIT_GRACE_MS,
   startOfUtcDayMs,
 } from "@thekeep/shared";
@@ -25,6 +26,7 @@ import {
   storySubscriptions,
 } from "../../db/schema.js";
 import { sanitizeBio } from "../../auth/html.js";
+import { tFor } from "../../i18n.js";
 import { getSessionUser } from "../auth.js";
 import { creditPool } from "../../earning/award.js";
 import { earnedTodayForCap } from "../../earning/dailyCap.js";
@@ -57,13 +59,13 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
     if (!s) { reply.code(404); return { error: "not found" }; }
     if (!s.allowApplause) {
       reply.code(409);
-      return { error: "author has applause disabled for this story" };
+      return { error: tFor(me.locale, "errors:server.stories.applauseDisabled") };
     }
     // Authors can't applaud their own work, mirrors the self-review
     // block and stops the rollup from being inflated by the creator.
     if (s.authorUserId === me.id) {
       reply.code(403);
-      return { error: "you can't applaud your own story" };
+      return { error: tFor(me.locale, "errors:server.stories.applaudOwn") };
     }
     const access = await viewerMayRead(s, me.id, me.role, db);
     if (!access.ok) { reply.code(403); return { error: "forbidden" }; }
@@ -260,10 +262,10 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
     if (!s) { reply.code(404); return { error: "not found" }; }
     const access = await viewerMayRead(s, me.id, me.role, db);
     if (!access.ok) { reply.code(403); return { error: "forbidden" }; }
-    if (s.visibility !== "public" || s.status === "draft") { reply.code(409); return { error: "this story isn't published yet" }; }
-    if (s.authorUserId === me.id) { reply.code(400); return { error: "you can't buy a copy of your own book" }; }
+    if (s.visibility !== "public" || s.status === "draft") { reply.code(409); return { error: tFor(me.locale, "errors:server.stories.notPublished") }; }
+    if (s.authorUserId === me.id) { reply.code(400); return { error: tFor(me.locale, "errors:server.stories.buyOwn") }; }
     const cfg = (await getSettings(db)).earningConfig.scriptorium;
-    if (!cfg.enabled) { reply.code(409); return { error: "the Scriptorium shop is closed" }; }
+    if (!cfg.enabled) { reply.code(409); return { error: tFor(me.locale, "errors:server.stories.shopClosed") }; }
     const price = s.copyPrice ?? cfg.copyPrice;
 
     const buyer = await resolveBuyerIdentity(me, body.characterId ?? null);
@@ -271,10 +273,10 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
 
     const already = (await db.select({ id: storyCopies.id }).from(storyCopies)
       .where(and(eq(storyCopies.ownerScope, buyer.scope), eq(storyCopies.ownerId, buyer.ownerId), eq(storyCopies.storyId, s.id))).limit(1))[0];
-    if (already) { reply.code(409); return { error: "you already own a copy of this book" }; }
+    if (already) { reply.code(409); return { error: tFor(me.locale, "errors:server.stories.alreadyOwnCopy") }; }
 
     const balance = await poolCurrency(buyer.scope, buyer.ownerId);
-    if (balance < price) { reply.code(402); return { error: "not enough currency", required: price, balance }; }
+    if (balance < price) { reply.code(402); return { error: tFor(me.locale, "errors:server.common.notEnoughCurrency"), required: price, balance }; }
 
     const now = new Date();
     try {
@@ -282,7 +284,7 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
         id: nanoid(), storyId: s.id, ownerScope: buyer.scope, ownerId: buyer.ownerId,
         ownerUserId: me.id, pricePaid: price, showcaseSlot: null, purchasedAt: now,
       });
-    } catch { reply.code(409); return { error: "you already own a copy of this book" }; }
+    } catch { reply.code(409); return { error: tFor(me.locale, "errors:server.stories.alreadyOwnCopy") }; }
 
     if (price > 0) {
       await creditPool(db, io, {
@@ -335,7 +337,7 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
     if (!buyer) { reply.code(403); return { error: "not your character" }; }
     const copy = (await db.select().from(storyCopies)
       .where(and(eq(storyCopies.ownerScope, buyer.scope), eq(storyCopies.ownerId, buyer.ownerId), eq(storyCopies.storyId, req.params.id))).limit(1))[0];
-    if (!copy) { reply.code(404); return { error: "you don't own a copy of this book" }; }
+    if (!copy) { reply.code(404); return { error: tFor(me.locale, "errors:server.stories.dontOwnCopy") }; }
     let slot: number | null;
     if (!body.shown) {
       slot = null;
@@ -454,11 +456,11 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
     if (!s) { reply.code(404); return { error: "not found" }; }
     if (!s.allowReviews) {
       reply.code(409);
-      return { error: "author has reviews disabled for this story" };
+      return { error: tFor(me.locale, "errors:server.stories.reviewsDisabled") };
     }
     if (s.authorUserId === me.id) {
       reply.code(403);
-      return { error: "you can't review your own story" };
+      return { error: tFor(me.locale, "errors:server.stories.reviewOwn") };
     }
     const access = await viewerMayRead(s, me.id, me.role, db);
     if (!access.ok) { reply.code(403); return { error: "forbidden" }; }
@@ -485,7 +487,7 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
           : sql`${storyReviews.reviewerCharacterId} IS NULL`,
       ))
       .limit(1))[0];
-    if (dup) { reply.code(409); return { error: "you've already reviewed this story under this identity" }; }
+    if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.stories.alreadyReviewed") }; }
 
     const id = nanoid();
     const bodyHtml = body.bodyHtml ? sanitizeBio(body.bodyHtml) : "";
@@ -597,7 +599,7 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
       if (!s) { reply.code(404); return { error: "not found" }; }
       if (s.authorUserId !== me.id && !(await hasPermission(me, "edit_others_scriptorium_content", db))) {
         reply.code(403);
-        return { error: "only the story author or an admin can moderate reviews" };
+        return { error: tFor(me.locale, "errors:server.stories.moderateReviewsAuthorOnly") };
       }
       const r = (await db
         .select()
@@ -643,7 +645,7 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
       if (!s) { reply.code(404); return { error: "not found" }; }
       if (!s.allowReviews) {
         reply.code(409);
-        return { error: "author has reviews disabled for this story" };
+        return { error: tFor(me.locale, "errors:server.stories.reviewsDisabled") };
       }
       const r = (await db
         .select()
@@ -725,14 +727,22 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
       if (!me) { reply.code(401); return { error: "auth" }; }
       const s = (await db.select().from(stories).where(eq(stories.id, req.params.id)).limit(1))[0];
       if (!s) { reply.code(404); return { error: "not found" }; }
-      const access = await viewerMayRead(s, me.id, me.role, db);
-      if (!access.ok) { reply.code(403); return { error: "forbidden" }; }
 
       const existing = (await db
         .select()
         .from(storySubscriptions)
         .where(and(eq(storySubscriptions.storyId, s.id), eq(storySubscriptions.userId, me.id)))
         .limit(1))[0];
+
+      // FOLLOWING requires read access; UNFOLLOWING never does. Deleting
+      // your own subscription row must stay possible after the story moves
+      // out of your reach (re-rated adult while you're a minor, visibility
+      // flipped) — otherwise the stale entry is stuck in your Following
+      // list with no way to clear it until the gate would let you back in.
+      if (!existing) {
+        const access = await viewerMayRead(s, me.id, me.role, db);
+        if (!access.ok) { reply.code(403); return { error: "forbidden" }; }
+      }
 
       let subscribed: boolean;
       let pushEnabled: boolean;
@@ -853,10 +863,20 @@ export async function registerStoryEngagementRoutes(app: FastifyInstance, db: Db
       .select({ story: stories, sub: storySubscriptions })
       .from(storySubscriptions)
       .innerJoin(stories, eq(stories.id, storySubscriptions.storyId))
-      .where(eq(storySubscriptions.userId, me.id))
+      .where(and(
+        eq(storySubscriptions.userId, me.id),
+        // HARD age clamp (age plan, Phase 4): a subscription whose story was
+        // re-rated adult AFTER the follow must not keep serving its card
+        // (title, summary, cover, rating) to a minor — the same staleness
+        // case notifyPublish filters on the publish fan-out. The row itself
+        // is kept (keep-but-hide; it reappears at 18), and the unfollow
+        // branch of POST /stories/:id/follow works without read access so
+        // the minor can still clear it by id.
+        ...(me.isAdult ? [] : [inArray(stories.rating, [...SFW_RATINGS])]),
+      ))
       .orderBy(desc(storySubscriptions.subscribedAt))
       .limit(100);
-    const cards = await Promise.all(rows.map((r) => toCard(db, r.story)));
+    const cards = await Promise.all(rows.map((r) => toCard(db, r.story, me)));
     return { stories: cards };
   });
 }

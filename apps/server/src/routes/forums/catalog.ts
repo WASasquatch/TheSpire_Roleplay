@@ -48,7 +48,9 @@ import {
 import type { Db } from "../../db/index.js";
 import { getSessionUser } from "../auth.js";
 import { hasPermission } from "../../auth/permissions.js";
+import { canSeeNsfw, type NsfwViewer } from "../../auth/ageGate.js";
 import { forumAuthority } from "../../forums/authority.js";
+import { tFor } from "../../i18n.js";
 import { catalogRank, type Io } from "./shared.js";
 
 export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
@@ -76,11 +78,19 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
         ownerUserId: forums.ownerUserId,
         ownerUsername: users.username,
         tagsJson: forums.tagsJson,
+        isNsfw: forums.isNsfw,
         createdAt: forums.createdAt,
       })
       .from(forums)
       .leftJoin(users, eq(users.id, forums.ownerUserId))
-      .where(sql`${forums.status} != 'archived'`);
+      .where(and(
+        sql`${forums.status} != 'archived'`,
+        // Whole-forum 18+ exclusion (age plan, Phase 3 — SOFT tier): 18+
+        // forums leave the catalog for minors, anonymous viewers, and
+        // adults with "Hide 18+ content" on. The /f teaser and the detail
+        // route stay reachable by direct link for adults.
+        ...(canSeeNsfw(me) ? [] : [eq(forums.isNsfw, false)]),
+      ));
 
     // Aggregates in three grouped queries (cheap at catalog scale) rather
     // than N+1 per forum.
@@ -143,6 +153,9 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
       boardCount: boardsBy.get(f.id) ?? 0,
       memberCount: membersBy.get(f.id) ?? 0,
       tags: parseTagsJson(f.tagsJson),
+      // Reaches only viewers who can see NSFW (the WHERE clause above), so
+      // the client just renders it as the "18+" chip.
+      isNsfw: !!f.isNsfw,
       lastActivityAt: activityBy.get(f.id) ?? null,
       createdAt: +f.createdAt,
       ...(visitsBy
@@ -184,8 +197,11 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
 
   /** Build full ForumSummary[] for every browsable forum, with the same
    *  board/member/activity aggregates the catalog computes. Shared by the
-   *  discover rails, search, and tag facets so they stay consistent. */
-  async function browsableForumSummaries(): Promise<ForumSummary[]> {
+   *  discover rails, search, and tag facets so they stay consistent. The
+   *  viewer scopes the 18+ exclusion (SOFT tier): 18+ forums leave every
+   *  discover surface — including the tag facets — for minors, anonymous
+   *  visitors, and hide-pref adults. */
+  async function browsableForumSummaries(viewer: NsfwViewer | null): Promise<ForumSummary[]> {
     const rows = await db
       .select({
         id: forums.id,
@@ -199,11 +215,16 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
         ownerUserId: forums.ownerUserId,
         ownerUsername: users.username,
         tagsJson: forums.tagsJson,
+        isNsfw: forums.isNsfw,
         createdAt: forums.createdAt,
       })
       .from(forums)
       .leftJoin(users, eq(users.id, forums.ownerUserId))
-      .where(and(sql`${forums.status} != 'archived'`, eq(forums.visibility, "public")));
+      .where(and(
+        sql`${forums.status} != 'archived'`,
+        eq(forums.visibility, "public"),
+        ...(canSeeNsfw(viewer) ? [] : [eq(forums.isNsfw, false)]),
+      ));
 
     const boardCounts = await db
       .select({ forumId: rooms.forumId, n: sql<number>`count(*)` })
@@ -242,13 +263,15 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
       boardCount: boardsBy.get(f.id) ?? 0,
       memberCount: membersBy.get(f.id) ?? 0,
       tags: parseTagsJson(f.tagsJson),
+      isNsfw: !!f.isNsfw,
       lastActivityAt: activityBy.get(f.id) ?? null,
       createdAt: +f.createdAt,
     }));
   }
 
-  app.get("/forums/discover", browseLimit, async () => {
-    const all = await browsableForumSummaries();
+  app.get("/forums/discover", browseLimit, async (req) => {
+    const me = await getSessionUser(req, db).catch(() => null);
+    const all = await browsableForumSummaries(me);
     // popular: most members first, then most-recent activity (nulls last).
     const popular = [...all]
       .sort((a, b) =>
@@ -266,9 +289,10 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
     "/forums/discover/search",
     browseLimit,
     async (req) => {
+      const me = await getSessionUser(req, db).catch(() => null);
       const q = (req.query.q ?? "").trim().toLowerCase();
       const tag = (req.query.tag ?? "").trim();
-      const all = await browsableForumSummaries();
+      const all = await browsableForumSummaries(me);
       const items = all.filter((f) => {
         const matchesQ =
           !q ||
@@ -281,8 +305,9 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
     },
   );
 
-  app.get("/forums/tags", browseLimit, async () => {
-    const all = await browsableForumSummaries();
+  app.get("/forums/tags", browseLimit, async (req) => {
+    const me = await getSessionUser(req, db).catch(() => null);
+    const all = await browsableForumSummaries(me);
     const counts = new Map<string, number>();
     for (const f of all) {
       for (const t of f.tags) counts.set(t, (counts.get(t) ?? 0) + 1);
@@ -308,10 +333,22 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
     const owner = (await db.select({ username: users.username }).from(users)
       .where(eq(users.id, forum.ownerUserId)).limit(1))[0];
 
-    const boardRows = await db
+    let boardRows = await db
       .select()
       .from(rooms)
       .where(and(eq(rooms.forumId, forum.id), isNull(rooms.archivedAt)));
+    // 18+ BOARDS (age plan, Phase 3 — SOFT tier): a board room flagged 18+
+    // (or 18+ by server inheritance) leaves the board list for viewers who
+    // can't see NSFW — minors, anonymous visitors, hide-pref adults. Its
+    // topic/thread/category routes are HARD-gated separately, so an adult
+    // with the hide preference can still open a direct link. Filtering
+    // BEFORE the aggregates below also keeps the hidden boards' category
+    // names out of the prefix-scope picker.
+    if (!canSeeNsfw(me)) {
+      const { nsfwServerIds, effectiveRoomNsfwWith } = await import("../../lib/nsfwRooms.js");
+      const nsfwServers = await nsfwServerIds(db);
+      boardRows = boardRows.filter((b) => !effectiveRoomNsfwWith(b, nsfwServers));
+    }
     const boardIds = boardRows.map((b) => b.id);
 
     // Per-board topic counts + last activity, two grouped queries.
@@ -362,6 +399,10 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
       // contents from non-members (and all anonymous viewers).
       membersOnly: !!b.forumMembersOnly,
       locked: !!b.forumMembersOnly && !viewerIsMember,
+      // Board-level "18+" chip (age plan, Phase 3). Rows carrying it only
+      // ever reach viewers who can see NSFW (the filter above); not in the
+      // frozen shared ForumBoardSummary yet, so it rides as a spread.
+      ...(b.isNsfw ? { isNsfw: true } : {}),
     }));
 
     // Landing-page statistics (traditional forum index numbers). Topics
@@ -518,10 +559,15 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
       boardCount,
       memberCount,
       tags: parseTagsJson(forum.tagsJson),
+      isNsfw: !!forum.isNsfw,
       lastActivityAt,
       createdAt: +forum.createdAt,
       descriptionHtml: forum.descriptionHtml ?? null,
       bannerImageUrl: forum.bannerImageUrl ?? null,
+      // The public-safe banner variant (decision #10) ships to everyone —
+      // it is safe art by definition, and the owner console needs the
+      // current value to manage the slot.
+      sfwBannerUrl: forum.sfwBannerUrl ?? null,
       bannerFocusY: forum.bannerFocusY ?? 50,
       themeJson: forum.themeJson ?? null,
       themeStyleKey: forum.themeStyleKey ?? null,
@@ -536,6 +582,35 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
       viewer,
       stats,
     };
+    // Whole-forum 18+ gate (age plan, Phase 3 — HARD tier): minors and
+    // anonymous viewers get a TEASER, the exact shape a non-publicBrowsing
+    // forum presents to logged-out visitors — name + safe branding + counts
+    // (numbers, not content), with `publicBrowsing: false` so the /f page
+    // renders its login-wall/teaser state instead of boards. The owner-set
+    // description, board list, prefixes, categories, and world/server ties
+    // are withheld: any of them can carry adult naming/art. `isNsfw: true`
+    // stays on the payload so the client can say plainly that the forum is
+    // for adults rather than show a dead login prompt to a minor. Adults
+    // always get the full detail, hide preference or not (the preference
+    // only un-lists the forum from the catalog/discover).
+    if (detail.isNsfw && !me?.isAdult) {
+      detail.boards = [];
+      detail.prefixes = [];
+      detail.categories = [];
+      detail.descriptionHtml = null;
+      detail.bannerImageUrl = forum.sfwBannerUrl ?? null;
+      detail.publicBrowsing = false;
+      detail.linkedWorld = null;
+      detail.affiliatedServer = null;
+      // Owner-WRITTEN text and owner-UPLOADED art are withheld with the
+      // description: the tagline and logo are adult-side branding too
+      // (decision #10 — public-safe banner else art-less name/colors),
+      // matching the seo.ts forum branch, which swaps the same forum's
+      // tagline for generic copy and drops the logo from OG cards. The
+      // client renders name + colors when both are absent.
+      detail.tagline = null;
+      detail.logoUrl = null;
+    }
     return detail;
   });
 
@@ -636,7 +711,7 @@ export async function registerForumCatalogRoutes(app: FastifyInstance, db: Db, i
     const forum = (await db.select().from(forums).where(eq(forums.id, req.params.id)).limit(1))[0];
     if (!forum) { reply.code(404); return { error: "no forum" }; }
     if (forum.isSystem && body.status === "archived") {
-      reply.code(409); return { error: "The system forum anchors the catalog and can't be archived." };
+      reply.code(409); return { error: tFor(me.locale, "errors:server.forums.systemForumArchive") };
     }
     await db.update(forums).set({ status: body.status, updatedAt: new Date() })
       .where(eq(forums.id, forum.id));

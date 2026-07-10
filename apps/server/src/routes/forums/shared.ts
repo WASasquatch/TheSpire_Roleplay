@@ -33,6 +33,7 @@ import type { Db } from "../../db/index.js";
 import { getSessionUser } from "../auth.js";
 import { forumAuthority, forumCan } from "../../forums/authority.js";
 import { resolveIdentityArg } from "../../commands/identityArg.js";
+import { tFor } from "../../i18n.js";
 
 export type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -60,14 +61,14 @@ const FORUM_IMAGE_TYPES: Array<{ mime: string; ext: string; magic: number[] }> =
   { mime: "image/gif", ext: "gif", magic: [0x47, 0x49, 0x46, 0x38] },
 ];
 
-function decodeForumDataUrl(dataUrl: string, maxBytes: number): Buffer | { error: string } {
+function decodeForumDataUrl(dataUrl: string, maxBytes: number, locale?: string | null): Buffer | { error: string } {
   const m = /^data:image\/[a-z+]+;base64,(.+)$/i.exec(dataUrl.trim());
-  if (!m) return { error: "expected a base64 image data URL" };
+  if (!m) return { error: tFor(locale ?? null, "errors:server.upload.expectedImageDataUrl") };
   let bytes: Buffer;
   try { bytes = Buffer.from(m[1]!, "base64"); }
-  catch { return { error: "bad base64 payload" }; }
-  if (bytes.length === 0) return { error: "empty image" };
-  if (bytes.length > maxBytes) return { error: `image too large (max ${Math.round(maxBytes / 1024)}KB)` };
+  catch { return { error: tFor(locale ?? null, "errors:server.upload.badBase64") }; }
+  if (bytes.length === 0) return { error: tFor(locale ?? null, "errors:server.upload.emptyImage") };
+  if (bytes.length > maxBytes) return { error: tFor(locale ?? null, "errors:server.upload.tooLarge", { kb: Math.round(maxBytes / 1024) }) };
   return bytes;
 }
 
@@ -84,11 +85,12 @@ export async function writeForumImage(
   prefix: string,
   dataUrl: string,
   maxBytes: number,
+  locale?: string | null,
 ): Promise<{ url: string } | { error: string; status: number }> {
-  const decoded = decodeForumDataUrl(dataUrl, maxBytes);
+  const decoded = decodeForumDataUrl(dataUrl, maxBytes, locale);
   if ("error" in decoded) return { error: decoded.error, status: 400 };
   const detected = sniffForumImage(decoded);
-  if (!detected) return { error: "unsupported image type (png, jpg, webp, gif only)", status: 415 };
+  if (!detected) return { error: tFor(locale ?? null, "errors:server.upload.unsupportedType"), status: 415 };
   const hash = createHash("sha256").update(decoded).digest("hex").slice(0, 16);
   const filename = `${prefix}-${hash}.${detected.ext}`;
   await mkdir(forumsDir, { recursive: true });
@@ -349,16 +351,16 @@ export async function requireForumPermission(
 /** Resolve a mod/ban target to a user account. Accepts `@id:`/`@cid:`
  *  tokens and bare names (the same resolver every command uses);
  *  ambiguous names get a "paste the token" message. */
-export async function resolveForumTarget(db: Db, raw: string): Promise<
+export async function resolveForumTarget(db: Db, raw: string, locale?: string | null): Promise<
   | { ok: true; userId: string; username: string }
   | { ok: false; error: string }
 > {
   const trimmed = raw.trim();
-  if (!trimmed) return { ok: false, error: "Name or @id:/@cid: token required." };
+  if (!trimmed) return { ok: false, error: tFor(locale ?? null, "errors:server.identity.targetRequired") };
   const res = await resolveIdentityArg(db, trimmed);
-  if (res.kind === "none") return { ok: false, error: `No one matches "${trimmed}".` };
+  if (res.kind === "none") return { ok: false, error: tFor(locale ?? null, "errors:server.identity.noMatch", { name: trimmed }) };
   if (res.kind === "ambiguous") {
-    return { ok: false, error: `"${trimmed}" matches several identities - paste their @id: token from the profile.` };
+    return { ok: false, error: tFor(locale ?? null, "errors:server.identity.ambiguous", { name: trimmed }) };
   }
   return { ok: true, userId: res.target.userId, username: res.target.masterUsername };
 }

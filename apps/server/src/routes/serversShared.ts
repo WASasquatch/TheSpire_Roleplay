@@ -77,6 +77,12 @@ export const SERVER_SUMMARY_COLUMNS = {
   moderationState: servers.moderationState,
   moderationUntil: servers.moderationUntil,
   moderationNote: servers.moderationNote,
+  // "18+ community" flag + public-safe banner (age plan, Phase 2). The flag
+  // rides so the rail/catalog filters can drop 18+ servers for viewers who
+  // can't see NSFW and chip them "18+" for adults; the sfw banner is what
+  // public/discovery surfaces show in place of the real banner art.
+  isNsfw: servers.isNsfw,
+  sfwBannerUrl: servers.sfwBannerUrl,
 } as const;
 
 export type ServerSummaryRow = {
@@ -152,6 +158,12 @@ export function buildServerSummary(s: ServerSummaryRow, ctx: SummaryViewerCtx) {
     moderationState: s.moderationState,
     moderationUntil: s.moderationUntil ? +s.moderationUntil : null,
     moderationNote: s.moderationNote ?? null,
+    // 18+ community flag (age plan, Phase 2). Cards carrying `true` only ever
+    // reach adult viewers — the catalog/discover routes filter first — so the
+    // client just renders the "18+" chip. sfwBannerUrl rides for the owner
+    // console; PUBLIC surfaces (share page, OG) swap banners server-side.
+    isNsfw: !!s.isNsfw,
+    sfwBannerUrl: s.sfwBannerUrl ?? null,
     // The viewer's chosen favorite/default server (users.default_server_id)
     // — the rail/discover surface marks it + offers the set/clear toggle.
     // Only meaningful for signed-in viewers.
@@ -237,7 +249,7 @@ export interface ServerRoutesCtx {
   serversLive: (reply: { code: (c: number) => unknown }) => Promise<boolean>;
   requireServerOwner: (req: FastifyRequest, serverId: string) => Promise<ServerGateResult>;
   requireServerPermission: (req: FastifyRequest, serverId: string, key: ServerPermission) => Promise<ServerGateResult>;
-  resolveServerTarget: (raw: string) => Promise<ResolveTargetResult>;
-  writeServerImage: (prefix: string, dataUrl: string, maxBytes: number) => Promise<{ url: string } | { error: string; status: number }>;
+  resolveServerTarget: (raw: string, locale?: string | null) => Promise<ResolveTargetResult>;
+  writeServerImage: (prefix: string, dataUrl: string, maxBytes: number, locale?: string | null) => Promise<{ url: string } | { error: string; status: number }>;
   unlinkServerImage: (url: string | null | undefined) => void;
 }

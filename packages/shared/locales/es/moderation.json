@@ -1,0 +1,79 @@
+{
+  "accountBan": {
+    "banned": "⛔ Baneado",
+    "bannedUntil": "hasta {{time}}",
+    "bannedPermanently": "permanentemente",
+    "reasonSuffix": ", “{{reason}}”",
+    "bannedBy": "(por {{name}})",
+    "working": "Procesando…",
+    "unban": "Desbanear",
+    "ban": "Banear",
+    "unbanFailed": "No se pudo desbanear.",
+    "banFailed": "No se pudo banear.",
+    "historySummary": "Historial de baneos ({{count}})",
+    "historyBanUntil": "baneo (hasta {{time}})",
+    "historyBanPermanent": "baneo (permanente)",
+    "historyUnban": "desbaneo",
+    "historyBy": "por {{name}}"
+  },
+  "banModal": {
+    "title": "Banear a {{name}}",
+    "description": "Bloquea el inicio de sesión y el chat. Un baneo temporal se levanta solo cuando vence.",
+    "reasonPlaceholder": "Visible para otros moderadores en el historial de baneos.",
+    "purgeScopePosts": "publicaciones",
+    "confirmBan": "Banear cuenta",
+    "banning": "Baneando…",
+    "duration": "Duración",
+    "reason": "Motivo",
+    "reasonRequired": "(obligatorio)",
+    "reasonOptional": "(opcional)",
+    "removeRecent": "Quitar {{scope}} recientes",
+    "purgeNote": "Sus {{scope}} se ocultan, no se eliminan: los admins las conservan para auditoría.",
+    "durations": {
+      "hour1": "1 hora",
+      "hours6": "6 horas",
+      "hours24": "24 horas",
+      "day1": "1 día",
+      "days3": "3 días",
+      "days7": "7 días",
+      "days30": "30 días",
+      "permanent": "Permanente",
+      "allTime": "Todo",
+      "dontRemove": "No quitar"
+    }
+  },
+  "staffIcons": {
+    "owner": "Propietario",
+    "admin": "Admin",
+    "moderator": "Moderador",
+    "inCharacter": "En personaje"
+  },
+  "userLookup": {
+    "searchPlaceholder": "Buscar por nombre…",
+    "searching": "Buscando…",
+    "noMatches": "Sin coincidencias.",
+    "annotationOwner": "propietario",
+    "annotationAlreadyMod": "ya es mod",
+    "annotationBanned": "baneado"
+  },
+  "staff": {
+    "title": "Equipo de la app {{siteName}}",
+    "description": "Este directorio muestra a todos los miembros del equipo de {{siteName}} y sus roles. Acude a ellos si necesitas ayuda con {{siteName}} en sí. Si tu problema es con un servidor de chat o un foro de una comunidad en particular, contacta primero al equipo de esa comunidad y luego acude al equipo de {{siteName}} si aún necesita atención.",
+    "loadFailed": "error al cargar",
+    "saveFailed": "error al guardar",
+    "noStaff": "No hay equipo para mostrar.",
+    "roles": {
+      "masteradmin": "Propietario de {{siteName}}",
+      "admin": "Admin de {{siteName}}",
+      "mod": "Moderador de {{siteName}}"
+    },
+    "addIntroHint": "Agrega una introducción con “Editar tarjeta”.",
+    "editCard": "Editar tarjeta",
+    "messageTitle": "Enviar mensaje a {{name}}",
+    "message": "💬 Mensaje",
+    "tagline": "Lema",
+    "taglinePlaceholder": "Una línea sobre ti",
+    "introduction": "Introducción",
+    "introductionPlaceholder": "Una introducción breve que se muestra en tu tarjeta"
+  }
+}

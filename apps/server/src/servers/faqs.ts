@@ -50,6 +50,7 @@ import { auditLog, faqs } from "../db/schema.js";
 import { getSessionUser } from "../routes/auth.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import { sanitizeBio } from "../auth/html.js";
+import { tFor } from "../i18n.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -176,8 +177,8 @@ export async function registerServerFaqRoutes(
     try { body = createSchema.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
     const slug = normalizeFaqSlug(body.slug);
-    if (!slug) { reply.code(400); return { error: "Slug must be 3-40 chars: lowercase letters, numbers, underscore (and not reserved)." }; }
-    if (await slugTaken(req.params.id, slug)) { reply.code(409); return { error: "That slug is already taken." }; }
+    if (!slug) { reply.code(400); return { error: tFor(me.locale, "errors:server.faqs.slugRule") }; }
+    if (await slugTaken(req.params.id, slug)) { reply.code(409); return { error: tFor(me.locale, "errors:server.faqs.slugTaken") }; }
 
     const id = nanoid();
     try {
@@ -196,7 +197,7 @@ export async function registerServerFaqRoutes(
     } catch {
       // The slug UNIQUE index is GLOBAL; a collision with another server's (or
       // the platform's) entry lands here even though the per-server check passed.
-      reply.code(409); return { error: "That slug is already taken." };
+      reply.code(409); return { error: tFor(me.locale, "errors:server.faqs.slugTaken") };
     }
     await audit(req.params.id, me.id, "server_faq_create", { id, slug });
     return { id, slug };
@@ -229,8 +230,8 @@ export async function registerServerFaqRoutes(
       const patch: Record<string, unknown> = { updatedAt: new Date() };
       if (body.slug !== undefined) {
         const slug = normalizeFaqSlug(body.slug);
-        if (!slug) { reply.code(400); return { error: "Invalid slug." }; }
-        if (await slugTaken(req.params.id, slug, req.params.faqId)) { reply.code(409); return { error: "That slug is already taken." }; }
+        if (!slug) { reply.code(400); return { error: tFor(me.locale, "errors:server.faqs.invalidSlug") }; }
+        if (await slugTaken(req.params.id, slug, req.params.faqId)) { reply.code(409); return { error: tFor(me.locale, "errors:server.faqs.slugTaken") }; }
         patch.slug = slug;
       }
       if (body.question !== undefined) patch.question = body.question;
@@ -247,7 +248,7 @@ export async function registerServerFaqRoutes(
           .set(patch)
           .where(and(eq(faqs.id, req.params.faqId), eq(faqs.serverId, req.params.id)));
       } catch {
-        reply.code(409); return { error: "That slug is already taken." };
+        reply.code(409); return { error: tFor(me.locale, "errors:server.faqs.slugTaken") };
       }
       await audit(req.params.id, me.id, "server_faq_update", { id: req.params.faqId, keys: Object.keys(body) });
       return { ok: true };

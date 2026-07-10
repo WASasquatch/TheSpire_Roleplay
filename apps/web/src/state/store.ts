@@ -10,6 +10,7 @@ import type {
   Role,
   RoomOccupant,
   RoomSummary,
+  SupportedLocale,
   TheaterSync,
   Theme,
   TourId,
@@ -86,6 +87,14 @@ export interface SiteBranding {
   logoUrl: string;
   /** Master switch for /auth/register; surfaced so AuthGate can hide the tab. */
   registrationOpen: boolean;
+  /**
+   * Current signup age floor (18, or 13 when the admin allows minor
+   * signups). Drives the register form's date-of-birth helper copy and
+   * the date input's `max` — cosmetic only, the server re-validates.
+   * Optional so cached branding from an older build hydrates to the
+   * default (18).
+   */
+  minimumSignupAge?: number;
   /** Sanitized welcome HTML rendered above the splash login form. */
   welcomeHtml: string;
   /** Sanitized disclaimer HTML rendered above the register form. */
@@ -196,6 +205,9 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // via /site on first paint. Empty string would mean the admin cleared it.
   logoUrl: "/thespire-logo.png",
   registrationOpen: true,
+  // The historical 18+ floor; /site lowers it to 13 when the admin allows
+  // minor signups.
+  minimumSignupAge: 18,
   welcomeHtml: "",
   registerDisclaimerHtml: "",
   // Mirrors the schema defaults: retention disabled (0 = forever), session
@@ -271,6 +283,9 @@ export function loadCachedBranding(): SiteBranding {
       registrationOpen: typeof parsed.registrationOpen === "boolean"
         ? parsed.registrationOpen
         : DEFAULT_BRANDING.registrationOpen,
+      minimumSignupAge: typeof parsed.minimumSignupAge === "number" && parsed.minimumSignupAge > 0
+        ? parsed.minimumSignupAge
+        : DEFAULT_BRANDING.minimumSignupAge ?? 18,
       welcomeHtml: typeof parsed.welcomeHtml === "string"
         ? parsed.welcomeHtml
         : DEFAULT_BRANDING.welcomeHtml,
@@ -975,6 +990,32 @@ interface ChatState {
    */
   defaultForumId: string | null;
   setDefaultForumId: (id: string | null) => void;
+  /**
+   * The viewer's saved UI language (mirrors `users.locale`, migration 0338).
+   * Null = "System default" (auto-detect from the browser). Seeded from
+   * /me/profile and kept in sync by `changeLocale` (lib/i18n.ts); the
+   * language selects in the Menu + profile editor render from this.
+   */
+  localePref: SupportedLocale | null;
+  setLocalePref: (locale: SupportedLocale | null) => void;
+  /**
+   * The viewer's age context (age-restriction plan Phase 0), seeded from
+   * `/me/profile`. Purely a COSMETIC mirror — every real gate is enforced
+   * server-side; the client reads this only to hide controls a minor could
+   * never use (NSFW toggles, 18+ chips' tag buttons, etc.) so minors never
+   * see dead buttons. `isAdult` defaults true so adult accounts don't get
+   * a flash of minor-gated UI before the profile fetch lands (a minor
+   * briefly seeing an adult-only BUTTON is harmless — the server refuses
+   * the action). `birthdate` is the viewer's OWN date (read-only settings
+   * row); null = legacy account with none stored.
+   */
+  viewerAge: {
+    isAdult: boolean;
+    hideNsfw: boolean;
+    isolateFromAdults: boolean;
+    birthdate: string | null;
+  };
+  setViewerAge: (a: { isAdult: boolean; hideNsfw: boolean; isolateFromAdults: boolean; birthdate: string | null }) => void;
   /**
    * Counter bumped each time the socket (re)connects. Any open
    * ThreadPane watches this and re-runs its history seed when it
@@ -1795,6 +1836,10 @@ export const useChat = create<ChatState>((set, get) => ({
   setFlairPrefs: (p) => set({ flairPrefs: p }),
   defaultForumId: null,
   setDefaultForumId: (id) => set({ defaultForumId: id }),
+  localePref: null,
+  setLocalePref: (locale) => set({ localePref: locale }),
+  viewerAge: { isAdult: true, hideNsfw: false, isolateFromAdults: false, birthdate: null },
+  setViewerAge: (a) => set({ viewerAge: a }),
   dmReseedTick: 0,
 
   setDmConversations: (list) => set(() => {

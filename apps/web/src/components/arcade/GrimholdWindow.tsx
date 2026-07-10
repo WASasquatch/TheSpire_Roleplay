@@ -18,6 +18,7 @@
  *   - closing the window calls /arcade/grimhold/end.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "../cosmetics/Modal";
 import { ensureInjectedStyle } from "../../lib/injectStyle";
 import { endGrimholdRun, reportGrimholdScore, startGrimholdRun } from "../../lib/grimhold";
@@ -75,6 +76,7 @@ function loadPos(): Pos {
 }
 
 export function GrimholdWindow({ characterId, onClose }: { characterId: string | null; onClose: () => void }): React.JSX.Element {
+  const { t } = useTranslation("arcade");
   // Inject the window chrome with the CSP nonce stamped (a plain <style> is
   // blocked by the strict prod CSP, same gotcha EidolonWindow documents).
   useEffect(() => { ensureInjectedStyle("grimhold-window-css", WINDOW_CSS); }, []);
@@ -196,7 +198,7 @@ export function GrimholdWindow({ characterId, onClose }: { characterId: string |
   const frame = (
     <iframe
       ref={iframeRef}
-      title="Grimhold"
+      title={t("arcade.games.grimhold")}
       src={GAME_SRC}
       onLoad={onFrameLoad}
       sandbox="allow-scripts allow-same-origin"
@@ -204,7 +206,7 @@ export function GrimholdWindow({ characterId, onClose }: { characterId: string |
     />
   );
   const awardChip = lastAward ? (
-    <span className="gh-window-award">+{lastAward.currency}c · +{lastAward.xp} xp</span>
+    <span className="gh-window-award">{t("arcade.grimhold.award", { currency: lastAward.currency, xp: lastAward.xp })}</span>
   ) : null;
 
   // Mobile: fullscreen modal (a tiny draggable window is unusable).
@@ -213,9 +215,9 @@ export function GrimholdWindow({ characterId, onClose }: { characterId: string |
       <Modal onClose={onClose} variant="mobile-fullscreen" zIndex={50}>
         <div className="gh-window-m" onClick={(e) => e.stopPropagation()}>
           <div className="gh-window-bar gh-window-bar--static">
-            <span className="gh-window-title">🕹 Grimhold</span>
+            <span className="gh-window-title">{t("arcade.grimhold.windowTitle")}</span>
             {awardChip}
-            <button className="gh-window-x" onClick={onClose} aria-label="Close">✕</button>
+            <button className="gh-window-x" onClick={onClose} aria-label={t("common:close")}>✕</button>
           </div>
           <div className="gh-window-body">{frame}</div>
         </div>
@@ -227,9 +229,9 @@ export function GrimholdWindow({ characterId, onClose }: { characterId: string |
   return (
     <div ref={winRef} className="gh-window" style={{ left: pos.x, top: pos.y }}>
       <div className="gh-window-bar" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
-        <span className="gh-window-title">🕹 Grimhold</span>
+        <span className="gh-window-title">{t("arcade.grimhold.windowTitle")}</span>
         {awardChip}
-        <button className="gh-window-x" onClick={onClose} aria-label="Close" onPointerDown={(e) => e.stopPropagation()}>✕</button>
+        <button className="gh-window-x" onClick={onClose} aria-label={t("common:close")} onPointerDown={(e) => e.stopPropagation()}>✕</button>
       </div>
       <div className="gh-window-body" style={{ height: bodyH }}>{frame}</div>
     </div>

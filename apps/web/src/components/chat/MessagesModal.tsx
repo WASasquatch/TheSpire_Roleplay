@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Check, X } from "lucide-react";
 import type {
   AvatarCrop,
@@ -20,6 +21,7 @@ import { SynonymPopup } from "../SynonymPopup.js";
 import { UsernameAutocomplete } from "../UsernameAutocomplete.js";
 import { CloseButton } from "../shared/CloseButton.js";
 import { handlePlainTextCopy } from "../../lib/chatCopy.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { createPersistedDimension } from "../../lib/persistedDimension.js";
 import { ReactionBar, ReactionAddButton } from "./ReactionBar.js";
@@ -171,6 +173,7 @@ const listWidthDim = createPersistedDimension({
 });
 
 export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialOtherCharacterId, onOpenProfile }: Props) {
+  const { t } = useTranslation("chat");
   const me = useChat((s) => s.me);
   const dmConversations = useChat((s) => s.dmConversations);
   const setDmConversations = useChat((s) => s.setDmConversations);
@@ -390,11 +393,11 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       setDmConversations(dmJson.conversations);
       setConvsLoadedForCharId(startedForCharId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("messages.loadFailed"));
     } finally {
       setLoadingList(false);
     }
-  }, [setDmConversations, setPendingFriendRequests, inboxFilterCharId]);
+  }, [setDmConversations, setPendingFriendRequests, inboxFilterCharId, t]);
 
   // `friendsVersion` from the store is the cross-tab/cross-user
   // refresh signal, the App-level `friend:request` socket listener
@@ -715,7 +718,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
     window.setTimeout(() => setRefreshKey((v) => v + 1), 200);
   }
   function removeFriend(f: FriendListEntry) {
-    if (!window.confirm(`Remove ${f.displayName} from your friends list?`)) return;
+    if (!window.confirm(t("messages.removeFriendConfirm", { name: f.displayName }))) return;
     // Token form so a same-named character belonging to another
     // account can't intercept the unfriend. /unfriend is per-identity
     // server-side, so the character-id token preserves "remove THIS
@@ -756,7 +759,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
   const [resolveMatches, setResolveMatches] = useState<FriendResolveMatch[] | null>(null);
 
   async function commitFriendRequest(match: FriendResolveMatch) {
-    setAddStatus({ kind: "info", text: "Sending…" });
+    setAddStatus({ kind: "info", text: t("messages.sending") });
     setResolveMatches(null);
     try {
       const r = await fetch("/me/friend-requests", {
@@ -775,23 +778,23 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       const j = await r.json().catch(() => ({} as { error?: string; status?: string; username?: string }));
       if (!r.ok) {
         const msg =
-          j.error === "no_user" ? `No user named "${match.displayName}".`
-          : j.error === "self" ? "You can't friend yourself."
-          : j.error ?? "Friend request failed.";
+          j.error === "no_user" ? t("messages.noUserNamed", { name: match.displayName })
+          : j.error === "self" ? t("messages.cantFriendSelf")
+          : j.error ?? t("messages.friendRequestFailed");
         setAddStatus({ kind: "error", text: msg });
         return;
       }
       const target = match.displayName;
       const ok =
-        j.status === "accepted" ? `You and ${target} are now friends.`
-        : j.status === "already_pending" ? `Friend request to ${target} is still pending.`
-        : j.status === "already_friends" ? `You and ${target} are already friends.`
-        : `Friend request sent to ${target}.`;
+        j.status === "accepted" ? t("messages.nowFriends", { name: target })
+        : j.status === "already_pending" ? t("messages.requestPending", { name: target })
+        : j.status === "already_friends" ? t("messages.alreadyFriends", { name: target })
+        : t("messages.requestSent", { name: target });
       setAddStatus({ kind: "ok", text: ok });
       setAddDraft("");
       setRefreshKey((v) => v + 1);
     } catch {
-      setAddStatus({ kind: "error", text: "Network error, try again." });
+      setAddStatus({ kind: "error", text: t("messages.networkError") });
     }
   }
 
@@ -799,20 +802,20 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
     e.preventDefault();
     const name = addDraft.trim();
     if (!name) return;
-    setAddStatus({ kind: "info", text: "Looking up…" });
+    setAddStatus({ kind: "info", text: t("messages.lookingUp") });
     setResolveMatches(null);
     try {
       const r = await fetch(`/me/friend-resolve?name=${encodeURIComponent(name)}`, {
         credentials: "include",
       });
       if (!r.ok) {
-        setAddStatus({ kind: "error", text: "Lookup failed." });
+        setAddStatus({ kind: "error", text: t("messages.lookupFailed") });
         return;
       }
       const j = (await r.json()) as { matches?: FriendResolveMatch[] };
       const matches = j.matches ?? [];
       if (matches.length === 0) {
-        setAddStatus({ kind: "error", text: `No user named "${name}".` });
+        setAddStatus({ kind: "error", text: t("messages.noUserNamed", { name }) });
         return;
       }
       if (matches.length === 1) {
@@ -822,10 +825,10 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       }
       // Ambiguous, surface the picker. Status text becomes a hint;
       // the actual UI is rendered inline in the add-friend form.
-      setAddStatus({ kind: "info", text: `Pick the identity you meant:` });
+      setAddStatus({ kind: "info", text: t("messages.pickIdentity") });
       setResolveMatches(matches);
     } catch {
-      setAddStatus({ kind: "error", text: "Network error, try again." });
+      setAddStatus({ kind: "error", text: t("messages.networkError") });
     }
   }
 
@@ -839,14 +842,14 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
     e.preventDefault();
     const name = composeDraft.trim();
     if (!name) return;
-    setComposeStatus({ kind: "info", text: "Looking up…" });
+    setComposeStatus({ kind: "info", text: t("messages.lookingUp") });
     fetch(`/profiles/${encodeURIComponent(name)}`, { credentials: "include" })
       .then(async (r) => {
-        if (!r.ok) throw new Error(`No user named "${name}".`);
+        if (!r.ok) throw new Error(t("messages.noUserNamed", { name }));
         const j = await r.json();
-        if ("private" in j) throw new Error("That profile is private.");
+        if ("private" in j) throw new Error(t("messages.profilePrivate"));
         const userId = j.profile?.userId;
-        if (!userId) throw new Error("Couldn't resolve user.");
+        if (!userId) throw new Error(t("messages.couldntResolveUser"));
         // Seed the right-pane header so it shows the resolved name and
         // avatar immediately. Without this the pane sits on "…" until
         // the first message creates the conversation row. For a master
@@ -866,7 +869,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
       })
       .catch((err) => setComposeStatus({
         kind: "error",
-        text: err instanceof Error ? err.message : "Lookup failed.",
+        text: err instanceof Error ? err.message : t("messages.lookupFailed"),
       }));
   }
 
@@ -884,7 +887,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg lg:rounded`}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">Messages</h2>
+          <h2 className="font-action text-lg">{t("messages.title")}</h2>
           <CloseButton onClick={onClose} />
         </header>
 
@@ -907,7 +910,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                 : "text-keep-muted hover:text-keep-text"
             }`}
           >
-            Inbox
+            {t("messages.inboxTab")}
             {pendingFriendRequests.length > 0 ? (
               <span className="ml-1 inline-block rounded-full bg-keep-action px-1.5 text-[10px] font-semibold text-keep-bg">
                 {pendingFriendRequests.length}
@@ -926,7 +929,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                 : "text-keep-muted hover:text-keep-text"
             }`}
           >
-            Chat
+            {t("messages.chatTab")}
           </button>
         </div>
 
@@ -967,7 +970,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
               {pendingFriendRequests.length > 0 ? (
                 <div className="mb-2">
                   <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
-                    Friend requests ({pendingFriendRequests.length})
+                    {t("messages.friendRequests", { count: pendingFriendRequests.length })}
                   </div>
                   <ul className="space-y-1">
                     {pendingFriendRequests.map((r) => (
@@ -986,14 +989,14 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                           <Avatar url={r.avatarUrl} name={r.displayName} size={32} />
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-semibold text-keep-text">{r.displayName}</span>
-                            <span className="block truncate text-[10px] text-keep-muted">wants to be friends</span>
+                            <span className="block truncate text-[10px] text-keep-muted">{t("messages.wantsToBeFriends")}</span>
                           </span>
                         </button>
                         <button
                           type="button"
                           onClick={() => acceptRequest(r)}
-                          title="Accept friend request"
-                          aria-label="Accept friend request"
+                          title={t("messages.acceptRequest")}
+                          aria-label={t("messages.acceptRequest")}
                           className="rounded border border-keep-action bg-keep-action/10 px-1.5 py-0.5 text-keep-action hover:bg-keep-action/20"
                         >
                           <Check className="h-3 w-3" aria-hidden="true" />
@@ -1001,8 +1004,8 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                         <button
                           type="button"
                           onClick={() => declineRequest(r)}
-                          title="Decline friend request"
-                          aria-label="Decline friend request"
+                          title={t("messages.declineRequest")}
+                          aria-label={t("messages.declineRequest")}
                           className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-keep-muted hover:border-keep-accent hover:text-keep-accent"
                         >
                           <X className="h-3 w-3" aria-hidden="true" />
@@ -1016,12 +1019,12 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
               {/* Friends */}
               <div className="mb-2">
                 <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
-                  Friends ({friendRows.length})
+                  {t("messages.friends", { count: friendRows.length })}
                 </div>
                 {loadingList && friendRows.length === 0 ? (
-                  <div className="italic text-keep-muted">Loading...</div>
+                  <div className="italic text-keep-muted">{t("common:loadingDots")}</div>
                 ) : friendRows.length === 0 ? (
-                  <div className="italic text-keep-muted">No friends yet.</div>
+                  <div className="italic text-keep-muted">{t("messages.noFriends")}</div>
                 ) : (
                   <ul className="space-y-1">
                     {friendRows.map((row) => (
@@ -1052,7 +1055,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
               {nonFriendConvRows.length > 0 ? (
                 <div className="mb-2">
                   <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
-                    Recent ({nonFriendConvRows.length})
+                    {t("messages.recent", { count: nonFriendConvRows.length })}
                   </div>
                   <ul className="space-y-1">
                     {nonFriendConvRows.map((row) => (
@@ -1096,14 +1099,14 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                       avatarUrl: s.avatarUrl,
                     });
                   }}
-                  placeholder="add friend..."
+                  placeholder={t("messages.addFriendPlaceholder")}
                 />
                 <button
                   type="submit"
                   disabled={!addDraft.trim()}
                   className="rounded border border-keep-action bg-keep-action/10 px-2 py-1 text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
                 >
-                  + Friend
+                  {t("messages.addFriendButton")}
                 </button>
               </form>
               {addStatus ? (
@@ -1137,8 +1140,8 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                           className="flex w-full items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-left text-[11px] hover:border-keep-action hover:bg-keep-action/10"
                           title={
                             m.kind === "character"
-                              ? `Send to ${m.displayName} (character of ${m.masterUsername})`
-                              : `Send to ${m.displayName} (master account)`
+                              ? t("messages.sendToCharacter", { name: m.displayName, master: m.masterUsername })
+                              : t("messages.sendToMaster", { name: m.displayName })
                           }
                         >
                           {m.avatarUrl ? (
@@ -1157,8 +1160,8 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                             <span className="truncate font-semibold text-keep-text">{m.displayName}</span>
                             <span className="truncate text-[10px] text-keep-muted">
                               {m.kind === "character"
-                                ? `character of ${m.masterUsername}`
-                                : "master account"}
+                                ? t("identity.characterOf", { name: m.masterUsername })
+                                : t("messages.masterAccount")}
                             </span>
                           </span>
                         </button>
@@ -1170,7 +1173,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                     onClick={() => { setResolveMatches(null); setAddStatus(null); }}
                     className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[10px] text-keep-muted hover:text-keep-text"
                   >
-                    Cancel
+                    {t("common:cancel")}
                   </button>
                 </div>
               ) : null}
@@ -1196,7 +1199,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
                     setComposeStatus(null);
                     selectUser(s.userId, charId);
                   }}
-                  placeholder="message someone..."
+                  placeholder={t("messages.composePlaceholder")}
                 />
                 <button
                   type="submit"
@@ -1236,8 +1239,8 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
             onDoubleClick={() => setListWidth(LIST_WIDTH_DEFAULT)}
             role="separator"
             aria-orientation="vertical"
-            aria-label="Resize conversation list"
-            title="Drag to resize · double-click to reset"
+            aria-label={t("messages.resizeAria")}
+            title={t("messages.resizeTitle")}
             className="hidden w-1 shrink-0 cursor-col-resize touch-none bg-keep-rule/40 hover:bg-keep-action/40 md:block"
           />
 
@@ -1294,7 +1297,7 @@ export function MessagesModal({ onClose, onCommand, initialOtherUserId, initialO
               );
             })() : (
               <div className="flex min-h-0 flex-1 items-center justify-center p-8 text-center text-sm italic text-keep-muted">
-                Pick a friend or recent conversation to start chatting.
+                {t("messages.emptyState")}
               </div>
             )}
           </section>
@@ -1339,6 +1342,7 @@ function UserRow({
   onSelect: () => void;
   onRemove?: () => void;
 }) {
+  const { t } = useTranslation("chat");
   const dmAvailable = row.recipientDmEnabled !== false;
   const unread = (row.conv?.unreadCount ?? 0) > 0;
   // Three visual states, applied in priority order: selection wins
@@ -1387,7 +1391,7 @@ function UserRow({
               // send is gated server-side. Italic-muted contrast
               // matches other "informational, not actionable" rail
               // copy in the modal.
-              <span className="italic text-keep-muted">@{row.handle} · DM unavailable</span>
+              <span className="italic text-keep-muted">{t("messages.dmUnavailable", { handle: row.handle })}</span>
             )}
           </span>
         </span>
@@ -1396,7 +1400,7 @@ function UserRow({
         <button
           type="button"
           onClick={onRemove}
-          title="Remove friend"
+          title={t("messages.removeFriend")}
           className="shrink-0 text-[10px] text-keep-muted hover:text-keep-accent"
         >
           ×
@@ -1512,6 +1516,7 @@ function CharacterSwitcher({
   selectedId: string | null;
   onSelect: (id: string | null) => void;
 }) {
+  const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   // Calm-mode ease: the dropdown opens BELOW the chip (top-full), pure CSS
@@ -1555,7 +1560,7 @@ function CharacterSwitcher({
   // chip when the dropdown is closed so the user sees "there's traffic
   // somewhere else" at a glance without opening the menu.
   const selectedChar = selectedId ? characters.find((c) => c.id === selectedId) : null;
-  const selectedLabel = selectedChar ? selectedChar.name : "OOC";
+  const selectedLabel = selectedChar ? selectedChar.name : t("common:identity.ooc");
   const selectedAvatar = selectedChar ? selectedChar.avatarUrl : null;
   let otherUnread = 0;
   for (const c of characters) if (c.id !== selectedId) otherUnread += badgeFor(c.id);
@@ -1572,7 +1577,7 @@ function CharacterSwitcher({
   const jumpHints: JumpHint[] = [];
   if (selectedId !== null) {
     const oocCount = badgeFor(null);
-    if (oocCount > 0) jumpHints.push({ id: null, label: "OOC", avatarUrl: null, count: oocCount });
+    if (oocCount > 0) jumpHints.push({ id: null, label: t("common:identity.ooc"), avatarUrl: null, count: oocCount });
   }
   for (const c of characters) {
     if (c.id === selectedId) continue;
@@ -1621,7 +1626,7 @@ function CharacterSwitcher({
         <span className="min-w-0 flex-1 truncate text-left">{selectedLabel}</span>
         {otherUnread > 0 ? (
           <span
-            title={`${otherUnread} unread on other ${otherUnread === 1 ? "identity" : "identities"}`}
+            title={t("messages.unreadOnOther", { count: otherUnread })}
             className="rounded-full bg-keep-accent px-1.5 py-px text-[10px] font-semibold leading-none text-keep-bg"
           >
             {otherUnread > 99 ? "99+" : otherUnread}
@@ -1642,7 +1647,7 @@ function CharacterSwitcher({
               key={h.id ?? "master"}
               type="button"
               onClick={() => onSelect(h.id)}
-              title={`Switch to ${h.label}, ${h.count} waiting`}
+              title={t("messages.switchToWaiting", { name: h.label, count: h.count })}
               className="flex items-center gap-1 rounded-full border border-keep-action/40 bg-keep-action/10 px-1.5 py-0.5 text-[10px] text-keep-action hover:bg-keep-action/20"
             >
               <Avatar url={h.avatarUrl} name={h.label} size={14} />
@@ -1659,7 +1664,7 @@ function CharacterSwitcher({
           role="listbox"
           className={`absolute left-3 right-3 top-full z-10 mt-1 max-h-72 overflow-y-auto rounded border border-keep-rule bg-keep-parchment shadow-lg${reduceMotion ? " tk-slide-down-in" : ""}`}
         >
-          {row(null, "OOC", null)}
+          {row(null, t("common:identity.ooc"), null)}
           {characters.map((c) => row(c.id, c.name, c.avatarUrl))}
         </div>
       ) : null}
@@ -1705,6 +1710,7 @@ function ThreadPane({
    *  no click affordance (no point in a click that does nothing). */
   onOpenProfile?: (displayName: string) => void;
 }) {
+  const { t } = useTranslation("chat");
   // Resolve conversation reactively, server creates the row on first
   // send, so it may be absent until then. Matching on BOTH userId AND
   // the pinned character id is what keeps a master's OOC thread, their
@@ -1898,7 +1904,7 @@ function ThreadPane({
       .catch((e: unknown) => {
         // AbortError is the cleanup path firing, not a real error.
         if (e instanceof DOMException && e.name === "AbortError") return;
-        setError(e instanceof Error ? e.message : "load failed");
+        setError(e instanceof Error ? e.message : t("messages.loadFailed"));
       });
     fetch(`/me/dms/${convId}/read`, {
       method: "POST",
@@ -2011,7 +2017,7 @@ function ThreadPane({
     // it on server-side rejection), but bailing here keeps the
     // toolbar counter and this error message in lockstep.
     if (text.length > maxDmLength) {
-      setError(`Message is ${text.length} chars; limit is ${maxDmLength}. Trim it and try again.`);
+      setError(t("composer.tooLongMessage", { length: text.length, max: maxDmLength }));
       return;
     }
     setBusy(true);
@@ -2045,11 +2051,11 @@ function ThreadPane({
       // before focus() is called.
       setTimeout(() => dmInputRef.current?.focus(), 0);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "send failed");
+      setError(err instanceof Error ? err.message : t("messages.sendFailed"));
     } finally {
       setBusy(false);
     }
-  }, [draft, busy, otherUserId, appendDmMessage, activeCharacterId, targetCharacterId, maxDmLength]);
+  }, [draft, busy, otherUserId, appendDmMessage, activeCharacterId, targetCharacterId, maxDmLength, t]);
 
   const send = useCallback((e: FormEvent) => {
     e.preventDefault();
@@ -2063,7 +2069,7 @@ function ThreadPane({
           type="button"
           onClick={onBack}
           className="rounded px-1 text-keep-muted hover:text-keep-text md:hidden"
-          aria-label="Back to list"
+          aria-label={t("messages.backToList")}
         >
           ←
         </button>
@@ -2075,7 +2081,7 @@ function ThreadPane({
             type="button"
             onClick={() => onOpenProfile(header.displayName)}
             className="shrink-0 rounded hover:opacity-90"
-            title={`View ${header.displayName}'s profile`}
+            title={t("actions.viewProfile", { name: header.displayName })}
           >
             <Avatar url={header.avatarUrl} name={header.displayName} size={32} online={header.online} crop={header.avatarCrop} />
           </button>
@@ -2087,7 +2093,7 @@ function ThreadPane({
             type="button"
             onClick={() => onOpenProfile(header.displayName)}
             className="min-w-0 flex-1 truncate rounded text-left text-sm font-semibold text-keep-text hover:text-keep-action"
-            title={`View ${header.displayName}'s profile`}
+            title={t("actions.viewProfile", { name: header.displayName })}
           >
             {header.displayName}
           </button>
@@ -2108,14 +2114,14 @@ function ThreadPane({
         onCopy={handlePlainTextCopy}
       >
         {hasMore ? (
-          <div className="mb-1 text-center text-[10px] italic text-keep-muted">Older history available.</div>
+          <div className="mb-1 text-center text-[10px] italic text-keep-muted">{t("messages.olderHistory")}</div>
         ) : null}
         {!conversation ? (
           <div className="py-6 text-center italic text-keep-muted">
-            Send a message to start the conversation.
+            {t("messages.startConversation")}
           </div>
         ) : messages.length === 0 ? (
-          <div className="py-6 text-center italic text-keep-muted">Say hello.</div>
+          <div className="py-6 text-center italic text-keep-muted">{t("messages.sayHello")}</div>
         ) : (
           <ul className="flex flex-col gap-1">
             {messages.map((m) => (
@@ -2144,8 +2150,12 @@ function ThreadPane({
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-keep-action/50 bg-keep-action/10 px-3 py-2 text-sm">
           <span aria-hidden className="text-base text-keep-action">+</span>
           <span className="min-w-[120px] flex-1 leading-snug">
-            <span className="font-semibold text-keep-text">{pendingFromThisUser.displayName}</span>
-            <span className="text-keep-muted"> sent you a friend request.</span>
+            <Trans
+              t={t}
+              i18nKey="messages.friendRequestBanner"
+              values={{ name: pendingFromThisUser.displayName }}
+              components={{ 1: <span className="font-semibold text-keep-text" />, 2: <span className="text-keep-muted" /> }}
+            />
           </span>
           <span className="flex shrink-0 gap-1.5">
             <button
@@ -2169,7 +2179,7 @@ function ThreadPane({
               }}
               className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg hover:bg-keep-action/90"
             >
-              Accept
+              {t("messages.accept")}
             </button>
             <button
               type="button"
@@ -2188,7 +2198,7 @@ function ThreadPane({
               }}
               className="rounded border border-keep-border bg-keep-bg px-3 py-1 text-xs uppercase tracking-widest text-keep-muted hover:bg-keep-panel hover:text-keep-text"
             >
-              Decline
+              {t("messages.decline")}
             </button>
           </span>
         </div>
@@ -2249,7 +2259,7 @@ function ThreadPane({
                 e.preventDefault();
                 void submitDraft();
               }}
-              placeholder={`Message ${header.displayName}...`}
+              placeholder={t("messages.messagePlaceholder", { name: header.displayName })}
               maxLength={maxDmLength}
               rows={1}
               className="block w-full resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
@@ -2275,7 +2285,7 @@ function ThreadPane({
             disabled={busy || !draft.trim()}
             className="rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
           >
-            {busy ? "..." : "Send"}
+            {busy ? "..." : t("composer.send")}
           </button>
         </div>
       </form>
@@ -2322,11 +2332,12 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
   // to keep threads visually clean; tapping a bubble surfaces the full
   // date+time underneath. Toggling again hides it. Clicks on inline
   // links/buttons inside the body don't toggle, they navigate normally.
+  const { t } = useTranslation("chat");
   const [showTime, setShowTime] = useState(false);
   if (msg.deletedAt) {
     return (
       <li className={"flex " + (isMine ? "justify-end" : "justify-start")}>
-        <span className="text-[11px] italic text-keep-muted/70">[message removed]</span>
+        <span className="text-[11px] italic text-keep-muted/70">{t("row.messageRemoved")}</span>
       </li>
     );
   }
@@ -2399,7 +2410,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
             type="button"
             onClick={(e) => { e.stopPropagation(); onOpenProfile(msg.displayName); }}
             className="shrink-0 rounded-full hover:opacity-90"
-            title={`View ${msg.displayName}'s profile`}
+            title={t("actions.viewProfile", { name: msg.displayName })}
           >
             <Avatar url={renderUrl} name={msg.displayName} size={28} crop={renderCrop} />
           </button>
@@ -2419,7 +2430,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
                 type="button"
                 onClick={(e) => { e.stopPropagation(); onOpenProfile(msg.displayName); }}
                 className="mb-0.5 rounded text-[10px] font-semibold text-keep-muted hover:text-keep-action"
-                title={`View ${msg.displayName}'s profile`}
+                title={t("actions.viewProfile", { name: msg.displayName })}
               >
                 {msg.displayName}
               </button>
@@ -2430,7 +2441,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
           <div className="whitespace-pre-wrap break-words text-sm leading-snug">
             {parseInline(msg.body)}
           </div>
-          {msg.editedAt ? <span className="text-[9px] italic text-keep-muted">(edited)</span> : null}
+          {msg.editedAt ? <span className="text-[9px] italic text-keep-muted">{t("row.edited")}</span> : null}
         </div>
         {/* Floating react trigger, sibling of the bubble (not a
             descendant), so a click on it doesn't bubble through the
@@ -2439,7 +2450,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
           targetKind="dm"
           targetId={msg.id}
           className={reactBtnClass}
-          title="React"
+          title={t("reactions.reactTitle")}
           label={<span aria-hidden>😊</span>}
         />
       </div>
@@ -2465,7 +2476,7 @@ function DmRow({ msg, isMine, otherUrl, otherCrop, myUrl, myCrop, onOpenProfile 
  *  line. `dateStyle: "medium"` + `timeStyle: "short"` lands on e.g.
  *  "May 17, 2026, 6:34 PM" in en-US without runaway length. */
 function formatDmTime(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, {
+  return formatDateTime(ms, {
     dateStyle: "medium",
     timeStyle: "short",
   });

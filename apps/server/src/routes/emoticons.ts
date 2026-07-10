@@ -42,6 +42,7 @@ import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import { recordAudit } from "../audit.js";
 import { loadReactionsForTargets, parseSheetCells } from "../reactions.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -247,11 +248,11 @@ export async function registerEmoticonRoutes(
 ): Promise<void> {
   const emoticonsDir = join(uploadsRoot, "emoticons");
 
-  async function writeSheetImage(sheetId: string, dataUrl: string): Promise<{ url: string; mime: string; bytes: number } | { error: string; status: number }> {
+  async function writeSheetImage(sheetId: string, dataUrl: string, locale?: string | null): Promise<{ url: string; mime: string; bytes: number } | { error: string; status: number }> {
     const bytes = decodeDataUrl(dataUrl);
-    if (!bytes) return { error: "expected a base64 data URL", status: 400 };
+    if (!bytes) return { error: tFor(locale ?? null, "errors:server.upload.expectedDataUrl"), status: 400 };
     const detected = detectImage(bytes);
-    if (!detected) return { error: "unsupported image type (png, jpg, webp, gif only)", status: 415 };
+    if (!detected) return { error: tFor(locale ?? null, "errors:server.upload.unsupportedType"), status: 415 };
     // Content-hash so a re-upload of the same bytes is a no-op file
     // write, AND a re-upload of NEW bytes produces a fresh URL that
     // busts any picker / sprite-image cache that held the previous one.
@@ -403,7 +404,7 @@ export async function registerEmoticonRoutes(
     if (dup) { reply.code(409); return { error: "slug already in use" }; }
 
     const id = nanoid();
-    const imageResult = await writeSheetImage(id, body.imageDataUrl);
+    const imageResult = await writeSheetImage(id, body.imageDataUrl, me.locale);
     if ("error" in imageResult) { reply.code(imageResult.status); return { error: imageResult.error }; }
 
     const tail = (await db
@@ -458,7 +459,7 @@ export async function registerEmoticonRoutes(
     if (body.cells !== undefined) update.cells = JSON.stringify(body.cells);
     if (body.sortOrder !== undefined) update.sortOrder = body.sortOrder;
     if (body.imageDataUrl !== undefined) {
-      const imageResult = await writeSheetImage(current.id, body.imageDataUrl);
+      const imageResult = await writeSheetImage(current.id, body.imageDataUrl, me.locale);
       if ("error" in imageResult) { reply.code(imageResult.status); return { error: imageResult.error }; }
       update.imageUrl = imageResult.url;
       // Best-effort cleanup of the previous file IF it lived under
@@ -577,7 +578,7 @@ export async function registerEmoticonRoutes(
       label = cells[body.cellIndex!] ?? "";
       if (isEmoticonCellEmpty(label)) {
         reply.code(400);
-        return { error: "cell is empty and cannot be reacted with" };
+        return { error: tFor(me.locale, "errors:server.emoticons.emptyCell") };
       }
       ref = { kind: "sheet", sheetSlug: sheet.slug, cellIndex: body.cellIndex! };
     }
@@ -800,7 +801,7 @@ export async function registerEmoticonRoutes(
       ));
     if (pending.length >= MAX_PENDING_PER_USER) {
       reply.code(429);
-      return { error: `you already have ${pending.length} pending submission${pending.length === 1 ? "" : "s"}; wait for review before submitting more` };
+      return { error: tFor(me.locale, "errors:server.emoticons.pendingSubmissions", { count: pending.length }) };
     }
 
     // Look up the current submission cost. The `flair_reaction_sheet`
@@ -817,7 +818,7 @@ export async function registerEmoticonRoutes(
       .limit(1))[0];
     if (!costRow || !costRow.enabled) {
       reply.code(503);
-      return { error: "reaction sheet submissions are currently disabled" };
+      return { error: tFor(me.locale, "errors:server.emoticons.submissionsDisabled") };
     }
     const cost = costRow.cost;
 
@@ -826,7 +827,7 @@ export async function registerEmoticonRoutes(
     // submission; if the txn fails (race on funds, slug uniqueness)
     // we clean up the orphan file in the catch below.
     const submissionId = nanoid();
-    const imageResult = await writeSheetImage(submissionId, body.imageDataUrl);
+    const imageResult = await writeSheetImage(submissionId, body.imageDataUrl, me.locale);
     if ("error" in imageResult) { reply.code(imageResult.status); return { error: imageResult.error }; }
 
     // Resolve the refund-target pool id. For master scope this is
@@ -958,14 +959,14 @@ export async function registerEmoticonRoutes(
       if (!sheet.createdByUserId) {
         // System sheets are free; the client shouldn't call this for them.
         reply.code(400);
-        return { error: "system sheets do not require payment" };
+        return { error: tFor(me.locale, "errors:server.emoticons.systemSheetsFree") };
       }
       if (sheet.createdByUserId === me.id) {
         // Self-purchase blocked. The picker should disable the buy
         // path on the creator's own community sheets; this is the
         // belt-and-braces server gate.
         reply.code(403);
-        return { error: "you cannot buy use of your own sheet" };
+        return { error: tFor(me.locale, "errors:server.emoticons.buyOwnSheet") };
       }
 
       // Validate cell isn't empty so a typoed index can't waste coin.
@@ -1170,7 +1171,7 @@ export async function registerEmoticonRoutes(
       if (!sheet) { reply.code(404); return { error: "sheet not found" }; }
       if (!sheet.createdByUserId) {
         reply.code(400);
-        return { error: "system sheets do not support commerce" };
+        return { error: tFor(me.locale, "errors:server.emoticons.systemSheetsNoCommerce") };
       }
       const isOwner = sheet.createdByUserId === me.id;
       const canAdmin = await hasPermission(me, "manage_emoticon_catalog", db);

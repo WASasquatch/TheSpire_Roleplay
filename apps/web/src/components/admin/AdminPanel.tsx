@@ -1,9 +1,11 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { HelpCircle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { HelpCircle, Search } from "lucide-react";
 import type { PermissionKey } from "@thekeep/shared";
 import { isMasterAdminRole } from "@thekeep/shared";
 import { recordNav } from "../../lib/nav-metrics.js";
 import { TabBtn } from "../shared/TabBtn.js";
+import { groupVisibleTabs, withGroupSeparators } from "../shared/tabGroups.js";
 import { ContextualTour } from "../tours/ContextualTour.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { useChat } from "../../state/store.js";
@@ -29,6 +31,8 @@ import { UsersTab } from "./AdminUsersTab.js";
 import { ReportsTab } from "./AdminReportsTab.js";
 import { AuditTab } from "./AdminAuditTab.js";
 import { AffiliatesTab } from "./AdminAffiliatesTab.js";
+import { FindSetting, flashAnchor } from "./FindSetting.js";
+import { ADMIN_SEARCH_ENTRIES, ADMIN_SEARCH_REDIRECTS, type AdminSearchEntry, type SettingsSubtab } from "./adminSearchIndex.js";
 
 // Re-export the shared admin-shell primitives + the style picker on their
 // original import path so existing importers of "./AdminPanel.js" keep working
@@ -46,21 +50,30 @@ interface Props {
   onEnterServer?: (serverId: string, name: string) => void;
 }
 
-type Tab = "overview" | "analytics" | "settings" | "branding" | "rules" | "links" | "affiliates" | "users" | "reports" | "mod-cases" | "verify-logs" | "scriptorium" | "forums" | "servers" | "audit" | "system" | "backups" | "permissions" | "email";
+/** The panel's tab ids. Exported (as a type only) for the find-a-setting
+ *  index (adminSearchIndex.ts), which maps catalog keys onto tabs. The id
+ *  VALUES are load-bearing (permission gates, `recordNav` keys, tours) and
+ *  never change. */
+export type AdminTab = "overview" | "analytics" | "settings" | "branding" | "rules" | "links" | "affiliates" | "users" | "reports" | "mod-cases" | "verify-logs" | "scriptorium" | "forums" | "servers" | "audit" | "system" | "backups" | "permissions" | "email";
+type Tab = AdminTab;
 
 /** Tab grouping for the strip's section dividers. Each tab carries
  *  the id of the group it belongs to; the render walks the list
  *  inserting visual separators wherever the group changes. Groups
  *  also drive the mobile dropdown's `<optgroup>` labels so the
- *  same mental model surfaces on both layouts. */
-type TabGroup = "monitor" | "people" | "content" | "siteconfig" | "system";
+ *  same mental model surfaces on both layouts. Group ids are
+ *  display-only (never persisted, never sent on the wire). */
+type TabGroup = "monitor" | "people" | "content" | "siteconfig" | "growth" | "system";
 
-const TAB_GROUP_LABEL: Record<TabGroup, string> = {
-  monitor: "Monitor",
-  people: "People & access",
-  content: "Content & community",
-  siteconfig: "Site configuration",
-  system: "System",
+/** i18n keys for the group labels (admin ns). The English values live in
+ *  `packages/shared/locales/en/admin.json` under `panel.group.*`. */
+const TAB_GROUP_LABEL_KEY: Record<TabGroup, string> = {
+  monitor: "panel.group.monitor",
+  people: "panel.group.people",
+  content: "panel.group.content",
+  siteconfig: "panel.group.siteconfig",
+  growth: "panel.group.growth",
+  system: "panel.group.system",
 };
 
 /** Single source of truth for tabs. Order here = order in both the
@@ -79,25 +92,26 @@ const TAB_GROUP_LABEL: Record<TabGroup, string> = {
  *    prefer this form over `masterOnly`. */
 const TAB_ITEMS: ReadonlyArray<{
   id: Tab;
-  label: string;
   group: TabGroup;
   masterOnly?: boolean;
   permission?: PermissionKey;
 }> = [
   // ----- Monitor: surfaces for the moderation-queue workflow -----
-  { id: "overview", label: "Overview", group: "monitor" },
-  { id: "analytics", label: "Analytics", group: "monitor", permission: "view_admin_analytics" },
-  { id: "audit", label: "Audit", group: "monitor" },
-  { id: "reports", label: "Reports", group: "monitor" },
-  { id: "mod-cases", label: "Mod Log", group: "monitor", permission: "view_admin_mod_cases" },
-  { id: "verify-logs", label: "Verify Log", group: "monitor", permission: "verify_export_logs" },
+  // Tab display labels come from the admin catalog (`panel.tab.<id>`),
+  // rendered via t() at the two picker call sites below.
+  { id: "overview", group: "monitor" },
+  { id: "analytics", group: "monitor", permission: "view_admin_analytics" },
+  { id: "audit", group: "monitor" },
+  { id: "reports", group: "monitor" },
+  { id: "mod-cases", group: "monitor", permission: "view_admin_mod_cases" },
+  { id: "verify-logs", group: "monitor", permission: "verify_export_logs" },
 
   // ----- People & access: who can do what -----
   // Permissions ships first because the workflow is "set policy then
   // apply it", admins typically pick a role's grant set before
   // touching individual user rows.
-  { id: "permissions", label: "Permissions", group: "people", permission: "view_admin_permissions" },
-  { id: "users", label: "Users", group: "people" },
+  { id: "permissions", group: "people", permission: "view_admin_permissions" },
+  { id: "users", group: "people" },
 
   // ----- Content & community: catalogs the community engages with -----
   // Rooms, Commands, Titles, Emoticons, Announcements, FAQs, AND EARNING are now
@@ -106,17 +120,19 @@ const TAB_ITEMS: ReadonlyArray<{
   // Server Admin → Earning tab. Global staff reach any server's via the Servers
   // tab → "Open admin". Reports keeps the DM/profile queue here (message reports
   // are per-server). Scriptorium stays (a platform writing feature, not chat).
-  { id: "scriptorium", label: "Scriptorium", group: "content" },
-  { id: "forums", label: "Forums", group: "content", permission: "view_admin_forums" },
-  { id: "servers", label: "Servers", group: "content", permission: "view_admin_servers" },
-  { id: "email", label: "Email", group: "siteconfig", permission: "view_admin_email" },
+  { id: "scriptorium", group: "content" },
+  { id: "forums", group: "content", permission: "view_admin_forums" },
+  { id: "servers", group: "content", permission: "view_admin_servers" },
 
   // ----- Site configuration: install-level chrome -----
-  { id: "settings", label: "Settings", group: "siteconfig", permission: "view_admin_settings" },
-  { id: "branding", label: "Branding", group: "siteconfig", permission: "view_admin_branding" },
-  { id: "rules", label: "Rules", group: "siteconfig", permission: "view_admin_rules" },
-  { id: "links", label: "Nav Links", group: "siteconfig" },
-  { id: "affiliates", label: "Top Communities", group: "siteconfig" },
+  { id: "settings", group: "siteconfig", permission: "view_admin_settings" },
+  { id: "branding", group: "siteconfig", permission: "view_admin_branding" },
+  { id: "rules", group: "siteconfig", permission: "view_admin_rules" },
+  { id: "links", group: "siteconfig" },
+
+  // ----- Growth & email: reaching members and bringing new ones in -----
+  { id: "email", group: "growth", permission: "view_admin_email" },
+  { id: "affiliates", group: "growth" },
 
   // ----- System: destructive paths land last so a misclick on the
   //       strip can't take you here by accident. -----
@@ -128,8 +144,8 @@ const TAB_ITEMS: ReadonlyArray<{
   // System tab: live server metrics + masteradmin-only maintenance tools
   // (restart, purge messages). Sits left of Backups; both are the
   // destructive "system" group that lands last on the strip.
-  { id: "system", label: "System", group: "system", permission: "view_system_metrics" },
-  { id: "backups", label: "Backups", group: "system", permission: "view_admin_backups" },
+  { id: "system", group: "system", permission: "view_system_metrics" },
+  { id: "backups", group: "system", permission: "view_admin_backups" },
 ];
 
 /** Site-admin contextual-tour anchors. Maps a tab id to the
@@ -145,6 +161,24 @@ const TAB_TOUR_ANCHOR: Partial<Record<Tab, string>> = {
   forums: "admin-tab-forums",
   settings: "admin-tab-settings",
 };
+
+/** Tab id → group id, for the search hits' breadcrumb line. Derived from
+ *  TAB_ITEMS so it can never drift from the registry. */
+const TAB_GROUP_BY_ID = Object.fromEntries(
+  TAB_ITEMS.map((item) => [item.id, item.group]),
+) as Record<Tab, TabGroup>;
+
+/** The full find-a-setting index: one tab-level entry per registered tab
+ *  (derived, never hand-listed — docs/ADMIN_IA.md §5.4) plus the curated
+ *  row-level entries from adminSearchIndex.ts. */
+const ALL_SEARCH_ENTRIES: readonly AdminSearchEntry[] = [
+  ...TAB_ITEMS.map((item) => ({
+    key: `panel.tab.${item.id}`,
+    tab: item.id,
+    also: [`panel.tabDesc.${item.id}`],
+  })),
+  ...ADMIN_SEARCH_ENTRIES,
+];
 
 /** Tab-visibility predicate. Masteradmin sees every tab unconditionally
  *  (matches the server-side bypass). Otherwise:
@@ -169,58 +203,25 @@ function tabVisible(
   return true;
 }
 
-/** Bucket a list of (already-filtered-for-visibility) tabs by their
- *  `group` field. Returns the buckets in TAB_ITEMS order so the
- *  mobile dropdown preserves the same vertical sequence as the
- *  desktop strip. Empty groups drop out entirely, a viewer whose
- *  permission set hides every tab in a category doesn't see that
- *  category's optgroup label. */
-function groupVisibleTabs<T extends { group: TabGroup }>(
-  tabs: readonly T[],
-): Array<[TabGroup, T[]]> {
-  const buckets = new Map<TabGroup, T[]>();
-  for (const t of tabs) {
-    const arr = buckets.get(t.group) ?? [];
-    arr.push(t);
-    buckets.set(t.group, arr);
-  }
-  return Array.from(buckets.entries());
-}
-
-/** Walk the visible-tab list and yield a flat sequence of tab buttons
- *  interspersed with separator markers whenever the group changes.
- *  Returns a discriminated union so the renderer can pattern-match
- *  on `kind` and pick the right element type. The separator carries
- *  the group it's transitioning AWAY from so the title hover shows
- *  which section just ended. */
-type StripEntry<T> =
-  | { kind: "tab"; tab: T }
-  | { kind: "separator"; afterGroup: TabGroup };
-
-function withGroupSeparators<T extends { group: TabGroup }>(
-  tabs: readonly T[],
-): StripEntry<T>[] {
-  const out: StripEntry<T>[] = [];
-  let prevGroup: TabGroup | null = null;
-  for (const t of tabs) {
-    if (prevGroup !== null && t.group !== prevGroup) {
-      out.push({ kind: "separator", afterGroup: prevGroup });
-    }
-    out.push({ kind: "tab", tab: t });
-    prevGroup = t.group;
-  }
-  return out;
-}
+// groupVisibleTabs / withGroupSeparators moved to ../shared/tabGroups.ts
+// (docs/ADMIN_IA.md §6) so the Server Admin console shares the same
+// grouped-strip + optgroup helpers. Pure move; behaviour unchanged.
 
 export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnterServer }: Props) {
+  const { t } = useTranslation("admin");
   const [tab, setTab] = useState<Tab>("overview");
   // Analytics choke point 4 (plan_ext.md §3): sub-tab switches. Route both the
   // desktop tab strip and the mobile <select> through one helper so the "which
   // admin section do people actually use" signal is captured in a single place
   // (the tab id is a stable enum, never free text).
-  const changeTab = (t: Tab) => {
-    if (t !== tab) recordNav("tab", `admin:${t}`);
-    setTab(t);
+  const changeTab = (next: Tab) => {
+    if (next !== tab) recordNav("tab", `admin:${next}`);
+    // A plain tab hop abandons any armed find-a-setting jump so a stale
+    // anchor can't scroll/flash the next time that tab renders. pickFind
+    // re-arms AFTER calling this (same batch), so search jumps still land.
+    setPendingFind(null);
+    setSettingsFind(null);
+    setTab(next);
   };
   // Calm mode: ease each tab's body in with a soft opacity fade instead of an
   // instant snap. Only when Reduce Motion is on do we add the class + `key`
@@ -285,10 +286,89 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
     [onClose],
   );
 
+  // ----- Find-a-setting search (docs/ADMIN_IA.md §5) -----
+  // The visible-tab list is computed once per render and shared by the two
+  // pickers below and the search filter, so a viewer never sees a hit for
+  // a tab they cannot open (same `tabVisible` predicate everywhere).
+  const visibleTabs = TAB_ITEMS.filter((item) => tabVisible(item, isMaster, mePermissions));
+  const visibleTabIds = useMemo(
+    () => new Set<string>(TAB_ITEMS.filter((item) => tabVisible(item, isMaster, mePermissions)).map((item) => item.id)),
+    [isMaster, mePermissions],
+  );
+  // Mobile: the header swaps to a full-width search row while open.
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  // Armed jump for non-settings tabs: after the picked tab's body mounts,
+  // scroll to its data-admin-anchor and flash it, then disarm. Settings
+  // jumps ride a prop into SettingsTab instead (it owns the subtab state).
+  const [pendingFind, setPendingFind] = useState<{ tab: Tab; anchor: string } | null>(null);
+  const [settingsFind, setSettingsFind] = useState<{ subtab: SettingsSubtab; anchor: string } | null>(null);
+  const desktopSearchRef = useRef<HTMLInputElement>(null);
+  // Breadcrumb pieces for a search hit: group › tab (› settings subtab).
+  // All already-translated; FindSetting adds the aria-hidden separators.
+  const searchBreadcrumb = useCallback(
+    (entry: AdminSearchEntry): readonly string[] => {
+      const pieces = [t(TAB_GROUP_LABEL_KEY[TAB_GROUP_BY_ID[entry.tab]]), t(`panel.tab.${entry.tab}`)];
+      if (entry.subtab) pieces.push(t(`settings.subtab.${entry.subtab}`));
+      return pieces;
+    },
+    [t],
+  );
+  // Picking a hit reuses the existing changeTab choke point (same
+  // recordNav key, same silent-drop of unsaved edits as a plain tab
+  // click). Tab-level hits stop at the switch; row hits arm the jump.
+  const pickFind = (entry: AdminSearchEntry) => {
+    changeTab(entry.tab);
+    if (entry.key.startsWith("panel.tab.")) return;
+    if (entry.tab === "settings") {
+      setSettingsFind({ subtab: entry.subtab ?? "accounts", anchor: entry.key });
+    } else {
+      setPendingFind({ tab: entry.tab, anchor: entry.key });
+    }
+  };
+  // Generic (non-settings) jump: most tab bodies render a loading
+  // placeholder until their first fetch resolves, so the anchor usually
+  // does NOT exist two frames after the switch — a one-shot flash missed
+  // under real latency and the pick degraded to a bare tab change. Poll
+  // once per frame until flashAnchor lands (returns true) or the deadline
+  // passes, then disarm. Navigating away mid-poll disarms too (the
+  // mismatch branch), so a stale anchor can never flash on a later visit.
+  // A permanently missing anchor is still silently fine — the user lands
+  // on the right tab, just without the flash.
+  useEffect(() => {
+    if (!pendingFind) return;
+    if (pendingFind.tab !== tab) {
+      setPendingFind(null);
+      return;
+    }
+    const deadline = Date.now() + 2500;
+    let raf = 0;
+    const tick = () => {
+      if (flashAnchor(pendingFind.anchor, reduceMotion) || Date.now() > deadline) {
+        setPendingFind(null);
+        return;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [pendingFind, tab, reduceMotion]);
+  const onSettingsFindHandled = useCallback(() => setSettingsFind(null), []);
+  // Keyboard path: Ctrl/Cmd+K anywhere inside the panel focuses the
+  // search (desktop) or opens the mobile search row, which autofocuses.
+  const onShellKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      const el = desktopSearchRef.current;
+      if (el && el.offsetParent !== null) el.focus();
+      else setMobileSearchOpen(true);
+    }
+  };
+
   return (
     <Modal onClose={onClose} zIndex={50} variant="mobile-fullscreen">
       <div
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={onShellKeyDown}
         className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-parchment`}
       >
         {/* Header. On mobile (< md) we collapse the tab strip to a
@@ -301,29 +381,57 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
             from the shared TAB_ITEMS array so they can't drift apart. */}
         <div className="shrink-0 border-b border-keep-rule bg-keep-banner">
           {/* Mobile: title + dropdown + close, single row, no scroll.
-              The dropdown groups visible tabs into `<optgroup>`s
-              keyed on the tab's `group` field so the same five-bucket
-              mental model (Monitor / People & access / Content & community
-              / Site configuration / System) surfaces on both layouts. */}
+              The dropdown groups visible tabs into `<optgroup>`s keyed
+              on the tab's `group` field so the same six-group mental
+              model (docs/ADMIN_IA.md §2: Keeping watch / Members & roles
+              / Communities & content / Site setup / Growth & email /
+              Backups & maintenance) surfaces on both layouts. */}
           <div className="flex items-center gap-2 px-2 py-2 md:hidden">
-            <h2 className="shrink-0 font-action text-base">Admin</h2>
-            <select
-              value={tab}
-              onChange={(e) => changeTab(e.target.value as Tab)}
-              aria-label="Admin section"
-              className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
-            >
-              {groupVisibleTabs(TAB_ITEMS.filter((t) => tabVisible(t, isMaster, mePermissions))).map(
-                ([group, items]) => (
-                  <optgroup key={group} label={TAB_GROUP_LABEL[group]}>
-                    {items.map((t) => (
-                      <option key={t.id} value={t.id}>{t.label}</option>
-                    ))}
-                  </optgroup>
-                ),
-              )}
-            </select>
-            <CloseButton onClick={onClose} />
+            {mobileSearchOpen ? (
+              /* Find-a-setting, mobile: the search row swaps in over the
+                 normal title + dropdown row; picking a hit or tapping the
+                 X swaps the normal row back. The input autofocuses. */
+              <FindSetting
+                layout="mobile"
+                entries={ALL_SEARCH_ENTRIES}
+                redirects={ADMIN_SEARCH_REDIRECTS}
+                resolve={t}
+                breadcrumb={searchBreadcrumb}
+                visibleTabIds={visibleTabIds}
+                onPick={pickFind}
+                onClose={() => setMobileSearchOpen(false)}
+              />
+            ) : (
+              <>
+                <h2 className="shrink-0 font-action text-base">{t("panel.title")}</h2>
+                <select
+                  value={tab}
+                  onChange={(e) => changeTab(e.target.value as Tab)}
+                  aria-label={t("panel.sectionAria")}
+                  className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
+                >
+                  {groupVisibleTabs(visibleTabs).map(
+                    ([group, items]) => (
+                      <optgroup key={group} label={t(TAB_GROUP_LABEL_KEY[group])}>
+                        {items.map((item) => (
+                          <option key={item.id} value={item.id}>{t(`panel.tab.${item.id}`)}</option>
+                        ))}
+                      </optgroup>
+                    ),
+                  )}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setMobileSearchOpen(true)}
+                  title={t("panel.search.open")}
+                  aria-label={t("panel.search.open")}
+                  className="keep-button shrink-0 rounded border border-keep-rule bg-keep-banner/40 p-1 text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+                >
+                  <Search className="h-4 w-4" aria-hidden />
+                </button>
+                <CloseButton onClick={onClose} />
+              </>
+            )}
           </div>
 
           {/* Desktop: title + horizontally-scrollable tab strip + close.
@@ -333,19 +441,19 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
               `withGroupSeparators` so a hidden tab (gated out by a
               missing permission) doesn't leave an orphaned divider. */}
           <div className="hidden items-center gap-2 px-4 py-2 md:flex">
-            <h2 className="shrink-0 font-action text-lg">Admin</h2>
+            <h2 className="shrink-0 font-action text-lg">{t("panel.title")}</h2>
             {/* `keep-scroll-strip` hides the scrollbar on touch and
                 swaps in a thin themed scrollbar on md+ so it never
                 underlines the tab labels. */}
             <nav data-tour="admin-tab-strip" className="keep-scroll-strip flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-xs uppercase tracking-widest">
-              {withGroupSeparators(TAB_ITEMS.filter((t) => tabVisible(t, isMaster, mePermissions))).map(
+              {withGroupSeparators(visibleTabs).map(
                 (entry) =>
                   entry.kind === "separator" ? (
                     <span
                       key={`sep:${entry.afterGroup}`}
                       aria-hidden
                       className="mx-1 h-4 w-px shrink-0 self-center bg-keep-rule/60"
-                      title={TAB_GROUP_LABEL[entry.afterGroup]}
+                      title={t(TAB_GROUP_LABEL_KEY[entry.afterGroup])}
                     />
                   ) : (
                     <TabBtn
@@ -355,18 +463,32 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
                       onClick={() => changeTab(entry.tab.id)}
                       {...(TAB_TOUR_ANCHOR[entry.tab.id] ? { tourAnchor: TAB_TOUR_ANCHOR[entry.tab.id] } : {})}
                     >
-                      {entry.tab.label}
+                      {t(`panel.tab.${entry.tab.id}`)}
                     </TabBtn>
                   ),
               )}
             </nav>
+            {/* Find-a-setting, desktop: type what you're looking for and
+                jump straight to the tab (and row) that owns it. Results
+                pop over the body, anchored under the input. Ctrl/Cmd+K
+                focuses it from anywhere in the panel. */}
+            <FindSetting
+              layout="desktop"
+              entries={ALL_SEARCH_ENTRIES}
+              redirects={ADMIN_SEARCH_REDIRECTS}
+              resolve={t}
+              breadcrumb={searchBreadcrumb}
+              visibleTabIds={visibleTabIds}
+              onPick={pickFind}
+              inputRef={desktopSearchRef}
+            />
             {/* Replay the first-run walkthrough. Sits between the strip and
                 the close button so a keeper can re-run the tour any time. */}
             <button
               type="button"
               onClick={() => setForcedTourId("site-admin")}
-              title="Replay the admin tour"
-              aria-label="Replay the admin tour"
+              title={t("panel.replayTour")}
+              aria-label={t("panel.replayTour")}
               className="keep-button shrink-0 rounded border border-keep-rule bg-keep-banner/40 p-1 text-keep-muted hover:bg-keep-banner hover:text-keep-text"
             >
               <HelpCircle className="h-4 w-4" aria-hidden />
@@ -389,6 +511,10 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
             {...(reduceMotion ? { key: tab } : {})}
             className={`min-h-0 flex-1 overflow-y-auto overflow-x-auto p-3 sm:p-4${reduceMotion ? " tk-fade-in" : ""}`}
           >
+            {/* One-line "what you do here" for the active tab, rendered by
+                the shell for every tab (one code path, no per-tab edits).
+                Scrolls with the body; same treatment on mobile + desktop. */}
+            <p className="mb-3 text-[11px] text-keep-muted">{t(`panel.tabDesc.${tab}`)}</p>
             {/* Home-server scope note. With multi-server ON these tabs manage
                 the HOME server only — their per-server twins live in each
                 server's own console — so flag a clear scope rather than let
@@ -396,7 +522,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
                 feature is off (there's only one server then). */}
             {serversEnabled && HOME_SERVER_SCOPED_TABS.has(tab) ? (
               <p className="mb-3 rounded border border-keep-rule bg-keep-panel/40 px-3 py-1.5 text-[11px] text-keep-muted">
-                Manages the home server. Each community server keeps its own in its server console.
+                {t("panel.homeServerScope")}
               </p>
             ) : null}
             {/* Body render gates mirror the tab-strip visibility
@@ -404,7 +530,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
                 can't render a panel they don't have access to. */}
             {tab === "overview" ? <OverviewTab /> : null}
             {tab === "analytics" && canSeeTab("view_admin_analytics") ? <AnalyticsTab /> : null}
-            {tab === "settings" && canSeeTab("view_admin_settings") ? <SettingsTab /> : null}
+            {tab === "settings" && canSeeTab("view_admin_settings") ? <SettingsTab findRequest={settingsFind} onFindHandled={onSettingsFindHandled} /> : null}
             {tab === "branding" && canSeeTab("view_admin_branding") ? <BrandingTab /> : null}
             {tab === "rules" && canSeeTab("view_admin_rules") ? <RulesTab /> : null}
             {tab === "links" ? <LinksTab onLinksChanged={onLinksChanged} /> : null}
@@ -444,7 +570,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
                 onClick={onClose}
                 className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs hover:bg-keep-banner/60"
               >
-                Close
+                {t("common:close")}
               </button>
             </>
           )}

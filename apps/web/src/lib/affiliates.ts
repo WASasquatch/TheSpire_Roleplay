@@ -20,6 +20,7 @@ import type {
   PublicAffiliatesResult,
 } from "@thekeep/shared";
 import { affiliateLinkBackUrl } from "@thekeep/shared";
+import { i18n } from "./i18n.js";
 
 // Re-export the shared contract so callers can `import { PublicAffiliateCard,
 // fetchPublicAffiliates } from "../lib/affiliates.js"` without a second import.
@@ -39,7 +40,7 @@ export { AFFILIATE_LIMITS, isValidAffiliateUrl } from "@thekeep/shared";
 /** Pull `{ error }` out of a non-OK response, falling back to the status. */
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   const j = (await r.json().catch(() => null)) as ({ error?: string } & T) | null;
-  if (!r.ok) throw new Error(j?.error ?? `Request failed (${r.status}).`);
+  if (!r.ok) throw new Error(j?.error ?? i18n.t("errors:requestFailed", { status: r.status }));
   return j as T;
 }
 

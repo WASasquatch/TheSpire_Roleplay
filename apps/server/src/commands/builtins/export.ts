@@ -7,6 +7,7 @@ import {
 } from "@thekeep/shared";
 import { rooms } from "../../db/schema.js";
 import { getSettings } from "../../settings.js";
+import { tFor } from "../../i18n.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -42,7 +43,7 @@ export const exportCommand: CommandHandler = {
     if (requestedMs === null) {
       ctx.socket.emit("error:notice", {
         code: "EXPORT_BAD_DURATION",
-        message: "Couldn't read that duration. Try /export 5h, /export 90m, or /export 2d (add 'light' for a light page).",
+        message: tFor(ctx.user.locale, "commands:export.badDuration"),
       });
       return;
     }
@@ -73,7 +74,9 @@ export const exportCommand: CommandHandler = {
     if (windowMs < requestedMs) {
       ctx.socket.emit("error:notice", {
         code: "EXPORT_CLAMPED",
-        message: `That's longer than chat is kept here, so exporting the last ${formatDurationShort(windowMs)} instead.`,
+        message: tFor(ctx.user.locale, "commands:export.clamped", {
+          duration: formatDurationShort(windowMs),
+        }),
       });
     }
   },

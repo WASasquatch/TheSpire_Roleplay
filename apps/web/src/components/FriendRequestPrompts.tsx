@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import { useChat } from "../state/store.js";
 
 /**
@@ -28,6 +29,7 @@ import { useChat } from "../state/store.js";
  * server echo. The next live event resyncs canonical state.
  */
 export function FriendRequestPrompts() {
+  const { t } = useTranslation("notifications");
   const pending = useChat((s) => s.pendingFriendRequests);
   const removePendingFriendRequest = useChat((s) => s.removePendingFriendRequest);
 
@@ -56,8 +58,10 @@ export function FriendRequestPrompts() {
         >
           <span aria-hidden className="text-base text-keep-action">+</span>
           <span className="min-w-[180px] flex-1 leading-snug">
-            <span className="font-semibold text-keep-text">{r.displayName}</span>
-            <span className="text-keep-muted"> wants to be friends.</span>
+            <Trans t={t} i18nKey="friendRequest.wantsToBeFriends" values={{ name: r.displayName }}>
+              <span className="font-semibold text-keep-text">{r.displayName}</span>
+              <span className="text-keep-muted"> wants to be friends.</span>
+            </Trans>
           </span>
           <span className="flex shrink-0 gap-1.5">
             <button
@@ -65,14 +69,14 @@ export function FriendRequestPrompts() {
               onClick={() => decide(r, true)}
               className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg shadow-sm hover:bg-keep-action/90"
             >
-              Accept
+              {t("friendRequest.accept")}
             </button>
             <button
               type="button"
               onClick={() => decide(r, false)}
               className="rounded border border-keep-border bg-keep-bg px-3 py-1 text-xs uppercase tracking-widest text-keep-muted hover:bg-keep-panel hover:text-keep-text"
             >
-              Decline
+              {t("friendRequest.decline")}
             </button>
           </span>
         </div>

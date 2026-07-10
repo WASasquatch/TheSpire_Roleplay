@@ -1,5 +1,7 @@
+import { useTranslation } from "react-i18next";
 import type { StoryRating } from "@thekeep/shared";
-import { STORY_RATING_INFO, STORY_RATINGS } from "@thekeep/shared";
+import { SFW_RATINGS, STORY_RATING_INFO, STORY_RATINGS } from "@thekeep/shared";
+import { useChat } from "../../state/store.js";
 
 interface Props {
   value: StoryRating;
@@ -25,11 +27,21 @@ interface Props {
  * cards stay scannable without the wizard ballooning vertically.
  */
 export function RatingPicker({ value, onChange, name = "story-rating", compact }: Props) {
+  const { t } = useTranslation("scriptorium");
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
+  // Cosmetic mirror of the server-side authoring clamp (age plan
+  // Phase 4): accounts under 18 publish G / PG / PG-13 only, so the
+  // adult tiers don't render at all — no dead cards. If a mod set an
+  // adult rating on a minor's story it still shows (selected) so the
+  // picker never lies about the current state.
+  const ratings = viewerIsAdult
+    ? STORY_RATINGS
+    : STORY_RATINGS.filter((r) => (SFW_RATINGS as readonly string[]).includes(r) || r === value);
   return (
     <fieldset className="space-y-2">
-      <legend className="sr-only">Rating</legend>
+      <legend className="sr-only">{t("rating.legend")}</legend>
       <div className={`grid gap-2 ${compact ? "grid-cols-1" : "grid-cols-1 md:grid-cols-2"}`}>
-        {STORY_RATINGS.map((r) => (
+        {ratings.map((r) => (
           <RatingCard
             key={r}
             rating={r}
@@ -60,6 +72,7 @@ function RatingCard({
   inputName: string;
   compact: boolean;
 }) {
+  const { t } = useTranslation("scriptorium");
   const info = STORY_RATING_INFO[rating];
   // Per-tier accent so a selected card visually matches its severity
   // (green for family-friendly, amber for teen, red for adult,
@@ -92,17 +105,17 @@ function RatingCard({
               {info.label}
             </span>
             <span className={`text-sm font-semibold ${selected ? accent.text : "text-keep-text"}`}>
-              {info.short}
+              {t(`rating.info.${rating}.short`)}
             </span>
             {!info.publicReadable ? (
               <span className="ml-auto rounded-full border border-keep-accent/50 bg-keep-accent/10 px-1.5 py-0 text-[10px] uppercase tracking-widest text-keep-accent">
-                Login required to read
+                {t("rating.loginRequired")}
               </span>
             ) : null}
           </div>
           {!compact ? (
             <p className={`mt-1 text-xs leading-relaxed ${selected ? "text-keep-text" : "text-keep-muted"}`}>
-              {info.description}
+              {t(`rating.info.${rating}.description`)}
             </p>
           ) : null}
         </div>

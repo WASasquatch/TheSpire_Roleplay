@@ -29,6 +29,7 @@ import type { CommandContext, CommandHandler } from "../types.js";
 import { transferCurrency } from "../../earning/transfer.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
 import { resolveIdentityArg, emitAmbiguousIdentityModal } from "../identityArg.js";
+import { tFor } from "../../i18n.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
   ctx.socket.emit("error:notice", { code, message });
@@ -112,9 +113,14 @@ async function resolveRankLabels(
   return { rankName: rankRow?.name ?? null, tierLabel: tierRow?.label ?? null };
 }
 
-function formatPool(p: PoolSummary): string {
+function formatPool(locale: string | null, p: PoolSummary): string {
   const rankBit = p.rankName ? ` · ${p.rankName} ${p.tierLabel ?? ""}`.trimEnd() : "";
-  return `${p.scopeLabel}: ${p.currency} Currency · ${p.xp} XP${rankBit}`;
+  return tFor(locale, "commands:earning.poolLine", {
+    scope: p.scopeLabel,
+    currency: p.currency,
+    xp: p.xp,
+    rankBit,
+  });
 }
 
 /**
@@ -252,7 +258,7 @@ export const currencyCommand: CommandHandler = {
     if (!args) {
       const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
       const master = await readUserPool(ctx.db, ctx.user.id, sid);
-      const lines = [formatPool({ ...master, scopeLabel: "Your master OOC" })];
+      const lines = [formatPool(ctx.user.locale, { ...master, scopeLabel: tFor(ctx.user.locale, "commands:earning.masterScope") })];
       if (ctx.user.activeCharacterId) {
         const cRow = (await ctx.db
           .select({ name: characters.name })
@@ -261,7 +267,7 @@ export const currencyCommand: CommandHandler = {
           .limit(1))[0];
         if (cRow) {
           const charPool = await readCharacterPool(ctx.db, ctx.user.activeCharacterId, cRow.name, sid);
-          lines.push(formatPool({ ...charPool, scopeLabel: cRow.name }));
+          lines.push(formatPool(ctx.user.locale, { ...charPool, scopeLabel: cRow.name }));
         }
       }
       notice(ctx, "CURRENCY", lines.join("  |  "));
@@ -274,12 +280,12 @@ export const currencyCommand: CommandHandler = {
       const targetName = tokens[1];
       const amountText = tokens[2];
       if (!targetName || !amountText) {
-        notice(ctx, "CURRENCY_HELP", "Usage: /currency send <target> <amount>");
+        notice(ctx, "CURRENCY_HELP", tFor(ctx.user.locale, "commands:earning.sendUsage"));
         return;
       }
       const amount = Number.parseInt(amountText, 10);
       if (!Number.isFinite(amount)) {
-        notice(ctx, "BAD_AMOUNT", "Amount must be a whole number.");
+        notice(ctx, "BAD_AMOUNT", tFor(ctx.user.locale, "commands:earning.badAmount"));
         return;
       }
       const result = await transferCurrency({
@@ -289,14 +295,22 @@ export const currencyCommand: CommandHandler = {
         senderCharacterId: ctx.user.activeCharacterId,
         rawTarget: targetName,
         amount,
+        locale: ctx.user.locale,
       });
       if (!result.ok) {
         // `did_you_mean` carries a suggestion list we render inline.
         if (result.error.code === "did_you_mean") {
           const suggestions = result.error.suggestions
-            .map((s) => `${s.kind === "character" ? "[char]" : "[user]"} ${s.displayName}`)
+            .map((s) => tFor(
+              ctx.user.locale,
+              s.kind === "character" ? "commands:earning.suggestionCharacter" : "commands:earning.suggestionUser",
+              { name: s.displayName },
+            ))
             .join(", ");
-          notice(ctx, "DID_YOU_MEAN", `${result.error.message} Try: ${suggestions}`);
+          notice(ctx, "DID_YOU_MEAN", tFor(ctx.user.locale, "commands:earning.didYouMean", {
+            message: result.error.message,
+            suggestions,
+          }));
           return;
         }
         notice(ctx, result.error.code.toUpperCase(), result.error.message);
@@ -306,7 +320,13 @@ export const currencyCommand: CommandHandler = {
       notice(
         ctx,
         "CURRENCY_SENT",
-        `Sent ${r.amount} Currency from ${r.source.kind === "character" ? r.source.displayName : "your master"} to ${r.target.kind === "character" ? r.target.displayName + " (character)" : r.target.displayName}.`,
+        tFor(ctx.user.locale, "commands:earning.sent", {
+          amount: r.amount,
+          from: r.source.kind === "character" ? r.source.displayName : tFor(ctx.user.locale, "commands:earning.yourMaster"),
+          to: r.target.kind === "character"
+            ? tFor(ctx.user.locale, "commands:earning.characterTarget", { name: r.target.displayName })
+            : r.target.displayName,
+        }),
       );
       return;
     }
@@ -316,7 +336,7 @@ export const currencyCommand: CommandHandler = {
     const target = args;
     const resolution = await resolveIdentityArg(ctx.db, target);
     if (resolution.kind === "none") {
-      notice(ctx, "NO_USER", `No user or character named "${target}".`);
+      notice(ctx, "NO_USER", tFor(ctx.user.locale, "commands:shared.noUserOrCharacter", { name: target }));
       return;
     }
     if (resolution.kind === "ambiguous") {
@@ -332,7 +352,7 @@ export const currencyCommand: CommandHandler = {
       .where(and(eq(userEarning.serverId, sid), eq(userEarning.userId, t.userId)))
       .limit(1))[0];
     if (ownerEarning?.hideCurrencyCount && t.userId !== ctx.user.id) {
-      notice(ctx, "CURRENCY_PRIVATE", `${t.displayName} keeps their Currency private.`);
+      notice(ctx, "CURRENCY_PRIVATE", tFor(ctx.user.locale, "commands:earning.currencyPrivate", { name: t.displayName }));
       return;
     }
     let currency: number | undefined;
@@ -347,10 +367,10 @@ export const currencyCommand: CommandHandler = {
       currency = ownerEarning?.currency;
     }
     if (currency === undefined) {
-      notice(ctx, "CURRENCY_VIEW", `${t.displayName} has no Earning record yet.`);
+      notice(ctx, "CURRENCY_VIEW", tFor(ctx.user.locale, "commands:earning.noRecord", { name: t.displayName }));
       return;
     }
-    notice(ctx, "CURRENCY_VIEW", `${t.displayName}: ${currency} Currency.`);
+    notice(ctx, "CURRENCY_VIEW", tFor(ctx.user.locale, "commands:earning.currencyView", { name: t.displayName, currency }));
   },
 };
 
@@ -377,7 +397,7 @@ export const expCommand: CommandHandler = {
     if (!args) {
       const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
       const master = await readUserPool(ctx.db, ctx.user.id, sid);
-      const lines = [formatPool({ ...master, scopeLabel: "Your master OOC" })];
+      const lines = [formatPool(ctx.user.locale, { ...master, scopeLabel: tFor(ctx.user.locale, "commands:earning.masterScope") })];
       if (ctx.user.activeCharacterId) {
         const cRow = (await ctx.db
           .select({ name: characters.name })
@@ -386,15 +406,17 @@ export const expCommand: CommandHandler = {
           .limit(1))[0];
         if (cRow) {
           const charPool = await readCharacterPool(ctx.db, ctx.user.activeCharacterId, cRow.name, sid);
-          lines.push(formatPool({ ...charPool, scopeLabel: cRow.name }));
+          lines.push(formatPool(ctx.user.locale, { ...charPool, scopeLabel: cRow.name }));
         }
       }
       const eligible = await unpurchasedEligibleBorders(ctx.db, ctx.user.id, sid);
       if (eligible.length > 0) {
         const borderList = eligible
-          .map((b) => `${b.rankName}${b.cost != null ? ` (${b.cost} Currency)` : ""}`)
+          .map((b) => b.cost != null
+            ? tFor(ctx.user.locale, "commands:earning.borderWithCost", { name: b.rankName, cost: b.cost })
+            : b.rankName)
           .join(", ");
-        lines.push(`Available borders to purchase: ${borderList}. Open Earning to buy.`);
+        lines.push(tFor(ctx.user.locale, "commands:earning.borders", { borders: borderList }));
       }
       notice(ctx, "EXP", lines.join("  |  "));
       return;
@@ -404,7 +426,7 @@ export const expCommand: CommandHandler = {
     const target = args;
     const resolution = await resolveIdentityArg(ctx.db, target);
     if (resolution.kind === "none") {
-      notice(ctx, "NO_USER", `No user or character named "${target}".`);
+      notice(ctx, "NO_USER", tFor(ctx.user.locale, "commands:shared.noUserOrCharacter", { name: target }));
       return;
     }
     if (resolution.kind === "ambiguous") {
@@ -417,6 +439,6 @@ export const expCommand: CommandHandler = {
       ? await readCharacterPool(ctx.db, t.characterId, t.displayName, sid)
       : await readUserPool(ctx.db, t.userId, sid);
     const rankBit = pool.rankName ? ` · ${pool.rankName} ${pool.tierLabel ?? ""}`.trimEnd() : "";
-    notice(ctx, "EXP_VIEW", `${t.displayName}: ${pool.xp} XP${rankBit}.`);
+    notice(ctx, "EXP_VIEW", tFor(ctx.user.locale, "commands:earning.expView", { name: t.displayName, xp: pool.xp, rankBit }));
   },
 };

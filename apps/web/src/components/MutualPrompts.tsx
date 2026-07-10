@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { Socket } from "socket.io-client";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 
@@ -39,6 +40,7 @@ interface Props {
  * across reloads would require a fetch endpoint and is left for later.
  */
 export function MutualPrompts({ socket, onError }: Props) {
+  const { t } = useTranslation("notifications");
   const [prompts, setPrompts] = useState<Prompt[]>([]);
 
   useEffect(() => {
@@ -102,21 +104,31 @@ export function MutualPrompts({ socket, onError }: Props) {
             {p.action === "request" ? "♥" : "✕"}
           </span>
           <span className="flex-1 min-w-[180px] leading-snug">
-            <span className="font-semibold text-keep-text">{p.fromDisplayName}</span>
             {p.action === "request" ? (
-              <>
+              <Trans
+                t={t}
+                i18nKey="mutual.request"
+                values={{ name: p.fromDisplayName, kind: p.kindLabel, preview: p.previewText }}
+              >
+                <span className="font-semibold text-keep-text">{p.fromDisplayName}</span>
                 <span className="text-keep-muted"> wants to share the title </span>
                 <span className="font-medium italic text-keep-action">{p.kindLabel}</span>
                 <span className="text-keep-muted"> with you. Your profile would show: </span>
-              </>
+                <span className="font-medium text-keep-text">&ldquo;{p.previewText}&rdquo;</span>
+              </Trans>
             ) : (
-              <>
+              <Trans
+                t={t}
+                i18nKey="mutual.dissolve"
+                values={{ name: p.fromDisplayName, kind: p.kindLabel, preview: p.previewText }}
+              >
+                <span className="font-semibold text-keep-text">{p.fromDisplayName}</span>
                 <span className="text-keep-muted"> wants to remove your shared </span>
                 <span className="font-medium italic text-keep-action">{p.kindLabel}</span>
                 <span className="text-keep-muted"> title. Currently shows: </span>
-              </>
+                <span className="font-medium text-keep-text">&ldquo;{p.previewText}&rdquo;</span>
+              </Trans>
             )}
-            <span className="font-medium text-keep-text">&ldquo;{p.previewText}&rdquo;</span>
           </span>
           <span className="flex shrink-0 gap-1.5">
             <button
@@ -124,14 +136,14 @@ export function MutualPrompts({ socket, onError }: Props) {
               onClick={() => respond(p.id, true)}
               className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg shadow-sm hover:bg-keep-action/90"
             >
-              Accept
+              {t("friendRequest.accept")}
             </button>
             <button
               type="button"
               onClick={() => respond(p.id, false)}
               className="rounded border border-keep-border bg-keep-bg px-3 py-1 text-xs uppercase tracking-widest text-keep-muted hover:bg-keep-panel hover:text-keep-text"
             >
-              Decline
+              {t("friendRequest.decline")}
             </button>
           </span>
         </div>

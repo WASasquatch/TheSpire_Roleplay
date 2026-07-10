@@ -10,6 +10,7 @@ import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import { parseLimit } from "../lib/pagination.js";
 import type { Db } from "../db/index.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 /**
@@ -98,11 +99,11 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
       // Privacy gate: never accept reports for whispers (private 1:1) or
       // for messages from non-public rooms. The client doesn't expose the
       // button for those, but the server must independently enforce.
-      if (m.kind === "whisper") { reply.code(403); return { error: "whispers cannot be reported" }; }
+      if (m.kind === "whisper") { reply.code(403); return { error: tFor(me.locale, "errors:server.reports.whispersNotReportable") }; }
       const room = (await db.select().from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
       if (!room) { reply.code(404); return { error: "room not found" }; }
-      if (room.type !== "public") { reply.code(403); return { error: "only public-room messages can be reported" }; }
-      if (m.userId === me.id) { reply.code(400); return { error: "you can't report your own message" }; }
+      if (room.type !== "public") { reply.code(403); return { error: tFor(me.locale, "errors:server.reports.publicOnly") }; }
+      if (m.userId === me.id) { reply.code(400); return { error: tFor(me.locale, "errors:server.reports.ownMessage") }; }
 
       // Scope a message/room report to the room's owning server so it lands in
       // that server's Reports panel (there is NO server_reports table — this
@@ -126,7 +127,7 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
         const msg = err instanceof Error ? err.message : "";
         if (/UNIQUE/i.test(msg)) {
           reply.code(409);
-          return { error: "you already reported this message" };
+          return { error: tFor(me.locale, "errors:server.reports.alreadyReportedMessage") };
         }
         throw err;
       }
@@ -137,7 +138,7 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
     if (parsed.kind === "profile") {
       const target = (await db.select().from(users).where(eq(users.id, parsed.targetUserId)).limit(1))[0];
       if (!target) { reply.code(404); return { error: "user not found" }; }
-      if (target.id === me.id) { reply.code(400); return { error: "you can't report your own profile" }; }
+      if (target.id === me.id) { reply.code(400); return { error: tFor(me.locale, "errors:server.reports.ownProfile") }; }
       let snapName = target.username;
       if (parsed.targetCharacterId) {
         const c = (await db.select({ name: characters.name, userId: characters.userId })
@@ -154,7 +155,7 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
         isNull(reports.directMessageId),
         eq(reports.status, "open"),
       )).limit(1))[0];
-      if (existing) { reply.code(409); return { error: "you already reported this profile" }; }
+      if (existing) { reply.code(409); return { error: tFor(me.locale, "errors:server.reports.alreadyReportedProfile") }; }
       await db.insert(reports).values({
         id: nanoid(),
         reporterUserId: me.id,
@@ -170,7 +171,7 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
     // DM branch.
     const dm = (await db.select().from(directMessages).where(eq(directMessages.id, parsed.directMessageId)).limit(1))[0];
     if (!dm) { reply.code(404); return { error: "message not found" }; }
-    if (dm.senderUserId === me.id) { reply.code(400); return { error: "you can't report your own message" }; }
+    if (dm.senderUserId === me.id) { reply.code(400); return { error: tFor(me.locale, "errors:server.reports.ownMessage") }; }
     // Participant check, reporter must be one of the two parties on
     // the conversation. Non-participants don't see DMs at all (the
     // history endpoint also 404s for them), so a request here from

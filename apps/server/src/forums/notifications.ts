@@ -18,14 +18,43 @@
  * takes its notifications with it. Each recipient's sockets get a
  * `forum:notifications` pulse with their fresh unread total.
  */
-import { and, count, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
-import { forumNotifications, forumTopicWatches, messages } from "../db/schema.js";
+import { forumNotifications, forumTopicWatches, forums, messages, rooms, servers, users } from "../db/schema.js";
+import { isAdultUser } from "../auth/ageGate.js";
+import { isIsolatedBetween, isolationVisibleSql, type IsolationSubject } from "../auth/ageIsolation.js";
+import { maskForMinors } from "../realtime/minorLanguageFilter.js";
+import { effectiveBoardNsfw } from "./nsfw.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
+
+/**
+ * Minor-viewer re-filter (age plan, Phase 3): rows don't exist for a minor
+ * viewer when the TOPIC is CURRENTLY NSFW-tagged OR the BOARD is currently
+ * effectively 18+ (its room flag, its server's, or its parent forum's) —
+ * this is what covers "watched it, then it was tagged/flipped": the durable
+ * row snapshots title+snippet, so hiding must key on live flags, not on
+ * write-time state (a pre-flip topic row is unstamped). Adults are never
+ * filtered (HARD tier — hide-pref adults chose to watch or author the
+ * thread, so they keep their rows). Returns undefined (no-op clause) for
+ * adult viewers.
+ */
+function nsfwTopicRowFilter(viewer: { isAdult: boolean }): SQL | undefined {
+  if (viewer.isAdult) return undefined;
+  return sql`NOT EXISTS (
+    SELECT 1 FROM ${messages} t
+    WHERE t.id = ${forumNotifications.topicId} AND t.is_nsfw = 1
+  ) AND NOT EXISTS (
+    SELECT 1 FROM ${rooms} r
+    LEFT JOIN ${servers} s ON s.id = r.server_id
+    LEFT JOIN ${forums} f ON f.id = r.forum_id
+    WHERE r.id = ${forumNotifications.boardRoomId}
+      AND (r.is_nsfw = 1 OR COALESCE(s.is_nsfw, 0) = 1 OR COALESCE(f.is_nsfw, 0) = 1)
+  )`;
+}
 
 /** Keep at most this many inbox rows per user (oldest pruned on write). */
 const MAX_INBOX_ROWS = 300;
@@ -108,6 +137,67 @@ export async function notifyForumReply(db: Db, io: Io, args: {
 
   if (kinds.size === 0) return;
 
+  // Age gate on the WRITE (age plan, Phase 3): NSFW content notifies
+  // adults only. Two live flags feed it: the topic's CURRENT tag (re-read
+  // rather than trusting the caller's snapshot, so a topic re-tagged while
+  // this reply was in flight still write-skips) and the BOARD's effective
+  // 18+ rating (its room flag, its server's, or its parent forum's) — a
+  // minor who watched a topic while the board was all-ages must stop
+  // getting rows the moment the space flips 18+, because the pre-flip
+  // topic row is unstamped. The row would otherwise persist the title +
+  // a 140-char body snippet, exactly the leak the skip exists to prevent.
+  // The recipients' adult-ness is resolved once here and reused by the
+  // badge pulse below.
+  const topicFlagRow = (await db
+    .select({ isNsfw: messages.isNsfw })
+    .from(messages)
+    .where(eq(messages.id, topic.id))
+    .limit(1))[0];
+  const boardRow = (await db
+    .select({ isNsfw: rooms.isNsfw, serverId: rooms.serverId, forumId: rooms.forumId })
+    .from(rooms)
+    .where(eq(rooms.id, boardRoomId))
+    .limit(1))[0];
+  const boardNsfw = boardRow ? await effectiveBoardNsfw(db, boardRow) : false;
+  const recipientRows = await db
+    .select({
+      id: users.id,
+      birthdate: users.birthdate,
+      role: users.role,
+      isolateFromAdults: users.isolateFromAdults,
+    })
+    .from(users)
+    .where(inArray(users.id, [...kinds.keys()]));
+  const recipientById = new Map(recipientRows.map((u) => [u.id, u]));
+  const adultById = new Map(recipientRows.map((u) => [u.id, isAdultUser(u)]));
+  if (topicFlagRow?.isNsfw || boardNsfw) {
+    for (const userId of [...kinds.keys()]) {
+      if (!adultById.get(userId)) kinds.delete(userId);
+    }
+    if (kinds.size === 0) return;
+  }
+
+  // Isolation write-skip (age plan, Phase 5): an actively-isolated minor
+  // and an adult non-staff account are mutually invisible, so neither may
+  // land in the other's inbox — the row would persist the actor's display
+  // name plus a 140-char body snippet across the fence, and its deep-link
+  // dead-ends (the thread route filters isolated-pair content). Mirrors
+  // the adult-only skip above and the notification-center engine's gate
+  // (notifications/engine.ts). isIsolatedBetween exempts site staff on
+  // either side, so staff replies still notify isolated minors and vice
+  // versa.
+  const actorRow = (await db
+    .select({ role: users.role, birthdate: users.birthdate, isolateFromAdults: users.isolateFromAdults })
+    .from(users)
+    .where(eq(users.id, actor.id))
+    .limit(1))[0];
+  if (actorRow) {
+    for (const r of recipientRows) {
+      if (kinds.has(r.id) && isIsolatedBetween(actorRow, r)) kinds.delete(r.id);
+    }
+    if (kinds.size === 0) return;
+  }
+
   // Snippet = the reply's OWN words: quoted (`> `) lines drop so the
   // inbox shows what the actor said, not what they were quoting (and the
   // quote-reference markup never leaks into notification text).
@@ -117,8 +207,24 @@ export async function notifyForumReply(db: Db, io: Io, args: {
     .join(" ")
     .replace(/\s+/g, " ")
     .trim();
-  const snippet = (ownWords || body.replace(/\s+/g, " ").trim()).slice(0, 140);
+  const snippetSource = ownWords || body.replace(/\s+/g, " ").trim();
+  const snippet = snippetSource.slice(0, 140);
   const topicTitle = topic.title ?? "a topic";
+  // Minor language filter (age plan Phase 7, plan_ext.md §J): rows are
+  // per-recipient and persist the title + snippet, so a minor RECIPIENT'S
+  // row is written masked while adult recipients' rows stay byte-identical.
+  // Masked ONCE and shared across every minor recipient; the snippet is
+  // masked on the FULL source before the 140 cut so a term split at the
+  // boundary can't leak its unmasked head (masking is length-preserving).
+  // A recipient whose users row vanished mid-flight has no adultById entry
+  // and fails closed (masked), matching the badge pulse below.
+  const anyMinorRecipient = [...kinds.keys()].some((id) => !adultById.get(id));
+  const minorSnippet = anyMinorRecipient
+    ? (maskForMinors(snippetSource) ?? snippetSource).slice(0, 140)
+    : snippet;
+  const minorTopicTitle = anyMinorRecipient
+    ? (maskForMinors(topicTitle) ?? topicTitle)
+    : topicTitle;
   const now = new Date();
   await db.insert(forumNotifications).values(
     [...kinds.entries()].map(([userId, kind]) => ({
@@ -131,8 +237,8 @@ export async function notifyForumReply(db: Db, io: Io, args: {
       messageId,
       actorUserId: actor.id,
       actorName: actor.displayName,
-      topicTitle,
-      snippet,
+      topicTitle: adultById.get(userId) ? topicTitle : minorTopicTitle,
+      snippet: adultById.get(userId) ? snippet : minorSnippet,
       createdAt: now,
     })),
   );
@@ -151,14 +257,24 @@ export async function notifyForumReply(db: Db, io: Io, args: {
   }
 
   // Live badge pulse: each recipient's sockets get their fresh unread
-  // total. One fetchSockets() pass, grouped by userId.
+  // total. One fetchSockets() pass, grouped by userId. Viewer-aware (a
+  // minor recipient's total must not count rows for since-tagged topics);
+  // fail closed for a recipient whose users row vanished mid-flight.
   const unreadByUser = new Map<string, number>();
   for (const userId of kinds.keys()) {
-    const row = (await db
-      .select({ n: count() })
-      .from(forumNotifications)
-      .where(and(eq(forumNotifications.userId, userId), isNull(forumNotifications.readAt))))[0];
-    unreadByUser.set(userId, row?.n ?? 0);
+    const r = recipientById.get(userId);
+    unreadByUser.set(
+      userId,
+      await unreadForumNotifications(
+        db,
+        userId,
+        r
+          ? { isAdult: adultById.get(userId) ?? false, role: r.role, birthdate: r.birthdate, isolateFromAdults: r.isolateFromAdults }
+          // Recipient row vanished mid-flight: fail closed (minor-shaped,
+          // no isolation class), matching the old `?? false` posture.
+          : { isAdult: false, role: "user", birthdate: "9999-01-01", isolateFromAdults: false },
+      ),
+    );
   }
   const socks = await io.fetchSockets();
   for (const s of socks) {
@@ -177,21 +293,78 @@ export async function ensureTopicWatch(db: Db, userId: string, topicId: string):
     .onConflictDoNothing();
 }
 
-/** Unread total for one user (boot fetch + after mark-read). */
-export async function unreadForumNotifications(db: Db, userId: string): Promise<number> {
+/** The inbox-owner viewer both read functions key their re-filters on:
+ *  the HARD age tier (`isAdult`) plus the isolation fields (`IsolationSubject`)
+ *  so rows from isolated-pair actors drop at read time too — covering rows
+ *  written BEFORE isolation was toggled on (the write-skip only guards new
+ *  rows). Route callers pass their session user, which satisfies this
+ *  structurally. */
+type InboxViewer = { isAdult: boolean } & IsolationSubject;
+
+/** Unread total for one user (boot fetch + after mark-read). `viewer` is
+ *  the OWNER of the inbox (routes pass their session user); minors don't
+ *  count rows whose topic is currently NSFW-tagged (see nsfwTopicRowFilter),
+ *  and isolated-pair actors' rows don't count in either direction. */
+export async function unreadForumNotifications(
+  db: Db,
+  userId: string,
+  viewer: InboxViewer,
+): Promise<number> {
   const row = (await db
     .select({ n: count() })
     .from(forumNotifications)
-    .where(and(eq(forumNotifications.userId, userId), isNull(forumNotifications.readAt))))[0];
+    .where(and(
+      eq(forumNotifications.userId, userId),
+      isNull(forumNotifications.readAt),
+      nsfwTopicRowFilter(viewer),
+      // Isolation (Phase 5): rows whose ACTOR is across the isolation fence
+      // from the inbox owner don't exist for them (covers rows written
+      // before the mode was toggled on; the write side skips new ones).
+      isolationVisibleSql(viewer, forumNotifications.actorUserId),
+    )))[0];
   return row?.n ?? 0;
 }
 
-/** Newest-first inbox page. */
-export async function listForumNotifications(db: Db, userId: string, limit: number) {
+/** Newest-first inbox page, re-filtered at read for minor viewers (the
+ *  "watched it, then it was tagged" case — see nsfwTopicRowFilter) and for
+ *  isolated pairs (rows predating an isolation toggle — see InboxViewer). */
+export async function listForumNotifications(
+  db: Db,
+  userId: string,
+  limit: number,
+  viewer: InboxViewer,
+) {
   return db
-    .select()
+    .select({
+      id: forumNotifications.id,
+      userId: forumNotifications.userId,
+      kind: forumNotifications.kind,
+      forumId: forumNotifications.forumId,
+      boardRoomId: forumNotifications.boardRoomId,
+      topicId: forumNotifications.topicId,
+      messageId: forumNotifications.messageId,
+      actorUserId: forumNotifications.actorUserId,
+      actorName: forumNotifications.actorName,
+      topicTitle: forumNotifications.topicTitle,
+      snippet: forumNotifications.snippet,
+      createdAt: forumNotifications.createdAt,
+      readAt: forumNotifications.readAt,
+      // Live context labels so the inbox can say WHERE each notice lives
+      // ("in <forum> · <board>") — without them the row is just a title
+      // and the reader has no idea which forum it came from. LEFT JOINs:
+      // a since-deleted forum/board simply drops the context line while
+      // the snapshot title keeps the row readable.
+      forumName: forums.name,
+      boardName: rooms.name,
+    })
     .from(forumNotifications)
-    .where(eq(forumNotifications.userId, userId))
+    .leftJoin(forums, eq(forums.id, forumNotifications.forumId))
+    .leftJoin(rooms, eq(rooms.id, forumNotifications.boardRoomId))
+    .where(and(
+      eq(forumNotifications.userId, userId),
+      nsfwTopicRowFilter(viewer),
+      isolationVisibleSql(viewer, forumNotifications.actorUserId),
+    ))
     .orderBy(desc(forumNotifications.createdAt))
     .limit(limit);
 }

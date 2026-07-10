@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { Trans, useTranslation } from "react-i18next";
 import { VERSION , isDarkPalette } from "@thekeep/shared";
 import {
   Check,
@@ -18,6 +19,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useChat } from "../../state/store.js";
+import { formatNumber } from "../../lib/intlFormat.js";
 import { resolveSplashTheme, splashBgClass, themeStyle } from "../../lib/theme.js";
 import { SPLASH_GLOW, SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 import { BookshelfStrip } from "../scriptorium/BookshelfStrip.js";
@@ -81,6 +83,7 @@ function GoogleGlyph() {
 }
 
 export function SplashLanding({ onNavigate }: Props) {
+  const { t } = useTranslation("marketing");
   const branding = useChat((s) => s.branding);
   const [stats, setStats] = useState<SiteStats | null>(null);
 
@@ -98,7 +101,16 @@ export function SplashLanding({ onNavigate }: Props) {
     function load() {
       fetch("/stats")
         .then((r) => (r.ok ? (r.json() as Promise<SiteStats>) : null))
-        .then((j) => { if (!cancelled && j) setStats(j); })
+        .then((j) => {
+          // Shape-check before trusting the payload (mirrors SplashShell's
+          // guard in AuthGate.tsx): during a dev boot or a proxy hiccup this
+          // fetch can win a race against the API and resolve with a 200
+          // whose JSON isn't the stats shape — dereferencing `rooms.public`
+          // off that crashed the whole anonymous splash through the error
+          // boundary. Treat a malformed payload like no payload: keep the
+          // placeholder and let the 30s poll heal once the API answers.
+          if (!cancelled && j && j.rooms && typeof j.rooms.public === "number") setStats(j);
+        })
         .catch(() => {});
     }
     load();
@@ -128,8 +140,8 @@ export function SplashLanding({ onNavigate }: Props) {
     tiles.push({
       key: "messages",
       icon: MessagesSquare,
-      value: stats.messages24h.toLocaleString(),
-      label: stats.messages24h === 1 ? "message in the last 24h" : "messages in the last 24h",
+      value: formatNumber(stats.messages24h),
+      label: t("stats.messages24hLabel", { count: stats.messages24h }),
     });
   }
   if (branding.activityFeedsEnabled && stats) {
@@ -137,21 +149,24 @@ export function SplashLanding({ onNavigate }: Props) {
       tiles.push({
         key: "writers",
         icon: Users,
-        value: stats.totalRegistered.toLocaleString(),
-        label: stats.totalRegistered === 1 ? "writer has stepped in" : "writers have stepped in",
+        value: formatNumber(stats.totalRegistered),
+        label: t("landing.writersSteppedIn", { count: stats.totalRegistered }),
       });
     }
+    // Render-time belt to the fetch-time shape check above: a malformed
+    // payload must degrade to zeros, never throw on the anonymous splash.
     tiles.push({
       key: "online",
       icon: Radio,
-      value: stats.online.toLocaleString(),
-      label: "online right now",
+      value: formatNumber(stats.online ?? 0),
+      label: t("landing.onlineRightNow"),
     });
+    const publicRooms = stats.rooms?.public ?? 0;
     tiles.push({
       key: "rooms",
       icon: DoorOpen,
-      value: stats.rooms.public.toLocaleString(),
-      label: stats.rooms.public === 1 ? "public room open" : "public rooms open",
+      value: formatNumber(publicRooms),
+      label: t("landing.publicRoomsOpen", { count: publicRooms }),
     });
   }
 
@@ -165,10 +180,10 @@ export function SplashLanding({ onNavigate }: Props) {
   // Evergreen credibility strip (B4): ALWAYS-shown, non-numeric trust points
   // so a cold-start install still reads as credible without any live activity.
   const credibilityPoints: Array<{ key: string; icon: LucideIcon; label: string }> = [
-    { key: "free", icon: Feather, label: "Free and open source" },
-    { key: "rules", icon: ShieldCheck, label: "Your community, your rules" },
-    { key: "longform", icon: MessagesSquare, label: "Built for long-lived roleplay groups" },
-    { key: "browser", icon: Globe, label: "Play right in your browser" },
+    { key: "free", icon: Feather, label: t("landing.credFree") },
+    { key: "rules", icon: ShieldCheck, label: t("landing.credRules") },
+    { key: "longform", icon: MessagesSquare, label: t("landing.credLongform") },
+    { key: "browser", icon: Globe, label: t("landing.credBrowser") },
   ];
 
   // "Features at a glance" band: the evergreen trust points plus any live-stat
@@ -198,16 +213,16 @@ export function SplashLanding({ onNavigate }: Props) {
   // (and flash them); routes hand off to other pages. "Communities" only appears
   // when servers are on (the Popular section it targets is server-gated).
   const splashTabs: SplashTab[] = [
-    { label: "Join", kind: "anchor", id: "join" },
-    { label: "Host", kind: "anchor", id: "host" },
+    { label: t("landing.tabJoin"), kind: "anchor", id: "join" },
+    { label: t("landing.tabHost"), kind: "anchor", id: "host" },
     ...(branding.serversEnabled
-      ? [{ label: "Communities", kind: "anchor", id: "popular" } as SplashTab]
+      ? [{ label: t("landing.tabCommunities"), kind: "anchor", id: "popular" } as SplashTab]
       : []),
-    { label: "Features", kind: "anchor", id: "features" },
-    { label: "FAQ", kind: "anchor", id: "faq" },
-    { label: "Rules", kind: "route", href: "/rules" },
-    { label: "Forums", kind: "route", href: "/f/spire" },
-    { label: "Top Communities", kind: "route", href: "/top-communities" },
+    { label: t("landing.tabFeatures"), kind: "anchor", id: "features" },
+    { label: t("landing.tabFaq"), kind: "anchor", id: "faq" },
+    { label: t("landing.tabRules"), kind: "route", href: "/rules" },
+    { label: t("landing.tabForums"), kind: "route", href: "/f/spire" },
+    { label: t("topCommunitiesTitle"), kind: "route", href: "/top-communities" },
   ];
   return (
     <div
@@ -299,7 +314,7 @@ export function SplashLanding({ onNavigate }: Props) {
                 "0 2px 8px rgba(0, 0, 0, 0.85), 0 0 4px rgba(0, 0, 0, 0.6)",
             }}
           >
-            Where stories and communities live.
+            {t("landing.tagline")}
           </p>
         </header>
 
@@ -356,11 +371,10 @@ export function SplashLanding({ onNavigate }: Props) {
                       >
                         <VenetianMask className="h-5 w-5 text-keep-action" aria-hidden />
                       </div>
-                      <h2 className="font-action text-xl text-keep-text">Join the story</h2>
+                      <h2 className="font-action text-xl text-keep-text">{t("landing.joinTitle")}</h2>
                     </div>
                     <p className="flex-1 text-sm leading-relaxed text-keep-text/85 lg:text-base">
-                      Step into live roleplay rooms, build a cast of characters, explore
-                      shared worlds, and write alongside a whole community.
+                      {t("landing.joinBody")}
                     </p>
                     <div className="mt-4 flex flex-col gap-2">
                       {branding.registrationOpen ? (
@@ -375,13 +389,12 @@ export function SplashLanding({ onNavigate }: Props) {
                             className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-keep-action bg-keep-action px-6 py-3 text-sm font-semibold uppercase tracking-widest text-keep-bg shadow-[0_4px_14px_-4px_rgba(0,0,0,0.45)] transition hover:brightness-110 active:brightness-95"
                           >
                             <UserPlus className="h-5 w-5" aria-hidden />
-                            Create my free account
+                            {t("landing.createAccount")}
                           </a>
                           {/* Reassurance microcopy (Q5): honest, no fake
                               urgency, directly under the primary CTA. */}
                           <p className="text-center text-xs leading-relaxed text-keep-text/70">
-                            Free forever. No download, no card. Jump into a room
-                            in under a minute.
+                            {t("landing.reassurance")}
                           </p>
                           {/* Live proof (B4): honest "N online now" beside the
                               primary CTA. Cold-start posture — only shown when
@@ -391,10 +404,15 @@ export function SplashLanding({ onNavigate }: Props) {
                             <p className="flex items-center justify-center gap-1.5 text-center text-xs font-medium text-keep-action">
                               <Radio className="h-3.5 w-3.5" aria-hidden />
                               <span>
-                                <span className="tabular-nums font-semibold">
-                                  {liveOnline.toLocaleString()}
-                                </span>{" "}
-                                {liveOnline === 1 ? "roleplayer" : "roleplayers"} online now
+                                <Trans
+                                  t={t}
+                                  i18nKey="landing.onlineNow"
+                                  count={liveOnline}
+                                  values={{ formatted: formatNumber(liveOnline) }}
+                                >
+                                  <span className="tabular-nums font-semibold">{"{{formatted}}"}</span>
+                                  {" roleplayers online now"}
+                                </Trans>
                               </span>
                             </p>
                           ) : null}
@@ -408,11 +426,11 @@ export function SplashLanding({ onNavigate }: Props) {
                               <button
                                 type="button"
                                 onClick={() => { window.location.href = "/auth/google/start?mode=login"; }}
-                                aria-label="Sign in with Google"
+                                aria-label={t("landing.signInWithGoogle")}
                                 className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-keep-rule/70 bg-keep-bg/40 px-4 py-3 text-sm font-semibold uppercase tracking-widest text-keep-text transition hover:border-keep-action hover:text-keep-action"
                               >
                                 <GoogleGlyph />
-                                Google
+                                {t("landing.google")}
                               </button>
                               <a
                                 href="/login"
@@ -420,7 +438,7 @@ export function SplashLanding({ onNavigate }: Props) {
                                 className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-keep-rule/70 bg-keep-bg/40 px-4 py-3 text-sm font-semibold uppercase tracking-widest text-keep-text transition hover:border-keep-action hover:text-keep-action"
                               >
                                 <LogIn className="h-5 w-5" aria-hidden />
-                                Log in
+                                {t("auth.logIn")}
                               </a>
                             </div>
                           ) : (
@@ -430,13 +448,13 @@ export function SplashLanding({ onNavigate }: Props) {
                               className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-keep-rule/70 bg-keep-bg/40 px-6 py-3 text-sm font-semibold uppercase tracking-widest text-keep-text transition hover:border-keep-action hover:text-keep-action"
                             >
                               <LogIn className="h-5 w-5" aria-hidden />
-                              Log in
+                              {t("auth.logIn")}
                             </a>
                           )}
                         </>
                       ) : (
                         <div className="rounded border border-keep-rule/50 bg-keep-bg/40 px-4 py-2 text-center text-xs text-keep-muted">
-                          Registration is currently closed.
+                          {t("auth.registrationClosed")}
                         </div>
                       )}
                     </div>
@@ -457,11 +475,10 @@ export function SplashLanding({ onNavigate }: Props) {
                       >
                         <Server className="h-5 w-5 text-keep-accent" aria-hidden />
                       </div>
-                      <h2 className="font-action text-xl text-keep-text">Host your own community</h2>
+                      <h2 className="font-action text-xl text-keep-text">{t("landing.hostTitle")}</h2>
                     </div>
                     <p className="flex-1 text-sm leading-relaxed text-keep-text/85 lg:text-base">
-                      Run your own chat community and forums, with your own rooms, members,
-                      roles, and moderation. Free to start, right in your browser.
+                      {t("landing.hostBody")}
                     </p>
                     <div className="mt-4 flex flex-col gap-2">
                       {branding.registrationOpen ? (
@@ -471,7 +488,7 @@ export function SplashLanding({ onNavigate }: Props) {
                           className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-keep-accent/60 bg-keep-bg/40 px-6 py-3 text-sm font-semibold uppercase tracking-widest text-keep-text transition hover:border-keep-accent hover:text-keep-action"
                         >
                           <Server className="h-5 w-5" aria-hidden />
-                          Start a community
+                          {t("landing.startCommunity")}
                         </a>
                       ) : null}
                       <a
@@ -479,7 +496,7 @@ export function SplashLanding({ onNavigate }: Props) {
                         onClick={(e) => go(e, "/f/spire")}
                         className="text-center text-sm text-keep-text/75 underline-offset-4 hover:text-keep-action hover:underline"
                       >
-                        See a live forum →
+                        {t("landing.seeLiveForum")}
                       </a>
                     </div>
                   </div>
@@ -508,7 +525,7 @@ export function SplashLanding({ onNavigate }: Props) {
                     a live forum to look at before committing. Reinforces the
                     hero's Host card with specifics. */}
                 <section
-                  aria-label="Host your own community"
+                  aria-label={t("landing.hostTitle")}
                   className={`rounded-md border border-keep-accent/40 p-5 sm:p-6 ${SPLASH_GLOW}`}
                   style={{
                     background:
@@ -516,35 +533,34 @@ export function SplashLanding({ onNavigate }: Props) {
                   }}
                 >
                   <h2 className="font-action text-xl text-keep-text sm:text-2xl">
-                    Bring your community to {siteName}
+                    {t("landing.bringCommunity", { siteName })}
                   </h2>
                   <p className="mt-1.5 text-base leading-relaxed text-keep-text/85 lg:text-lg">
-                    Give your game, guild, or fandom a real home, free, with the tools
-                    to run it your way.
+                    {t("landing.bringBody")}
                   </p>
                   <div className="mt-4 grid gap-4 sm:grid-cols-2">
                     <div className="rounded-md border border-keep-border/50 bg-keep-bg/40 p-4">
                       <div className="flex items-center gap-2">
                         <Server className="h-5 w-5 shrink-0 text-keep-accent" aria-hidden />
-                        <h3 className="font-action text-lg text-keep-text">Your own chat community</h3>
+                        <h3 className="font-action text-lg text-keep-text">{t("landing.ownChatTitle")}</h3>
                       </div>
                       <ul className="mt-2 space-y-1 text-sm text-keep-text/85">
-                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Live rooms for real-time roleplay</span></li>
-                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Members, roles, and invites</span></li>
-                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Its own economy and cosmetics</span></li>
-                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Moderation tools you control</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>{t("landing.ownChat.0")}</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>{t("landing.ownChat.1")}</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>{t("landing.ownChat.2")}</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>{t("landing.ownChat.3")}</span></li>
                       </ul>
                     </div>
                     <div className="rounded-md border border-keep-border/50 bg-keep-bg/40 p-4">
                       <div className="flex items-center gap-2">
                         <Landmark className="h-5 w-5 shrink-0 text-keep-accent" aria-hidden />
-                        <h3 className="font-action text-lg text-keep-text">Your own forums</h3>
+                        <h3 className="font-action text-lg text-keep-text">{t("landing.ownForumsTitle")}</h3>
                       </div>
                       <ul className="mt-2 space-y-1 text-sm text-keep-text/85">
-                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Boards for play-by-post and discussion</span></li>
-                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>A moderator team and membership rules</span></li>
-                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>A public page you can share anywhere</span></li>
-                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>Threaded topics that last for weeks</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>{t("landing.ownForums.0")}</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>{t("landing.ownForums.1")}</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>{t("landing.ownForums.2")}</span></li>
+                        <li className="flex items-start gap-2"><Check className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden /><span>{t("landing.ownForums.3")}</span></li>
                       </ul>
                     </div>
                   </div>
@@ -555,7 +571,7 @@ export function SplashLanding({ onNavigate }: Props) {
                       className="inline-flex items-center justify-center gap-2 rounded-md border border-keep-accent/60 bg-keep-bg/40 px-5 py-2.5 text-sm font-semibold uppercase tracking-widest text-keep-text transition hover:border-keep-accent hover:text-keep-action"
                     >
                       <MessagesSquare className="h-4 w-4" aria-hidden />
-                      Visit {siteName} Forums
+                      {t("landing.visitForums", { siteName })}
                     </a>
                     {branding.registrationOpen ? (
                       <a
@@ -563,7 +579,7 @@ export function SplashLanding({ onNavigate }: Props) {
                         onClick={(e) => go(e, "/register")}
                         className="text-center text-sm text-keep-text/75 underline-offset-4 hover:text-keep-action hover:underline sm:text-left"
                       >
-                        Start your own community →
+                        {t("landing.startYourOwn")}
                       </a>
                     ) : null}
                   </div>
@@ -583,15 +599,14 @@ export function SplashLanding({ onNavigate }: Props) {
                     balances the main column's height against the
                     taller meta rail. */}
                 <section
-                  aria-label="Join"
+                  aria-label={t("landing.tabJoin")}
                   className={`rounded-md border border-keep-border/50 bg-keep-panel/30 p-6 text-center sm:p-10 ${SPLASH_PANEL_HOVER}`}
                 >
                   <h3 className="font-action text-2xl text-keep-text sm:text-3xl">
-                    Your first scene is waiting
+                    {t("landing.closingTitle")}
                   </h3>
                   <p className="mx-auto mt-3 max-w-2xl text-base leading-relaxed text-keep-text/85 sm:text-lg">
-                    Registration takes a minute. Build a character, step into a
-                    public room, and start writing tonight.
+                    {t("landing.closingBody")}
                   </p>
                   <div className="mt-5">
                     {branding.registrationOpen ? (
@@ -601,7 +616,7 @@ export function SplashLanding({ onNavigate }: Props) {
                         className="inline-flex items-center justify-center gap-2 rounded-md border border-keep-action bg-keep-action px-8 py-3 text-sm font-semibold uppercase tracking-widest text-keep-bg shadow-[0_4px_14px_-4px_rgba(0,0,0,0.45)] transition hover:brightness-110 active:brightness-95 sm:text-base"
                       >
                         <UserPlus className="h-5 w-5" aria-hidden />
-                        Create my free account
+                        {t("landing.createAccount")}
                       </a>
                     ) : (
                       branding.googleAuthEnabled ? (
@@ -609,11 +624,11 @@ export function SplashLanding({ onNavigate }: Props) {
                           <button
                             type="button"
                             onClick={() => { window.location.href = "/auth/google/start?mode=login"; }}
-                            aria-label="Sign in with Google"
+                            aria-label={t("landing.signInWithGoogle")}
                             className="inline-flex items-center justify-center gap-2 rounded-md border border-keep-accent/60 bg-keep-bg/40 px-6 py-3 text-sm font-semibold uppercase tracking-widest text-keep-text transition hover:border-keep-accent hover:text-keep-action sm:text-base"
                           >
                             <GoogleGlyph />
-                            Google
+                            {t("landing.google")}
                           </button>
                           <a
                             href="/login"
@@ -621,7 +636,7 @@ export function SplashLanding({ onNavigate }: Props) {
                             className="inline-flex items-center justify-center gap-2 rounded-md border border-keep-accent/60 bg-keep-bg/40 px-6 py-3 text-sm font-semibold uppercase tracking-widest text-keep-text transition hover:border-keep-accent hover:text-keep-action sm:text-base"
                           >
                             <LogIn className="h-5 w-5" aria-hidden />
-                            Log in
+                            {t("auth.logIn")}
                           </a>
                         </div>
                       ) : (
@@ -631,21 +646,23 @@ export function SplashLanding({ onNavigate }: Props) {
                           className="inline-flex items-center justify-center gap-2 rounded-md border border-keep-accent/60 bg-keep-bg/40 px-8 py-3 text-sm font-semibold uppercase tracking-widest text-keep-text transition hover:border-keep-accent hover:text-keep-action sm:text-base"
                         >
                           <LogIn className="h-5 w-5" aria-hidden />
-                          Log in
+                          {t("auth.logIn")}
                         </a>
                       )
                     )}
                   </div>
                   <p className="mt-4 text-sm text-keep-muted lg:text-base">
-                    Just browsing?{" "}
-                    <a
-                      href="/scriptorium"
-                      onClick={(e) => go(e, "/scriptorium")}
-                      className="text-keep-text/80 underline underline-offset-4 hover:text-keep-action"
-                    >
-                      Read stories in the Scriptorium
-                    </a>
-                    , no account needed.
+                    <Trans t={t} i18nKey="landing.justBrowsing">
+                      {"Just browsing? "}
+                      <a
+                        href="/scriptorium"
+                        onClick={(e) => go(e, "/scriptorium")}
+                        className="text-keep-text/80 underline underline-offset-4 hover:text-keep-action"
+                      >
+                        Read stories in the Scriptorium
+                      </a>
+                      {", no account needed."}
+                    </Trans>
                   </p>
                 </section>
               </div>
@@ -705,7 +722,7 @@ export function SplashLanding({ onNavigate }: Props) {
               rel="noopener noreferrer"
               className="hover:text-keep-action"
             >
-              The Spire Roleplay Chat v{VERSION}
+              {t("shell.projectCredit", { version: VERSION })}
             </a>
           </div>
         </div>
@@ -723,7 +740,7 @@ export function SplashLanding({ onNavigate }: Props) {
               stretch to equal widths. On phones only the first row shows until
               the toggle below is opened. */}
           <ul
-            aria-label="What you get here"
+            aria-label={t("landing.whatYouGet")}
             className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4"
           >
             {featureChips.map((c, i) => {
@@ -753,7 +770,9 @@ export function SplashLanding({ onNavigate }: Props) {
               aria-expanded={featuresExpanded}
               className="mt-2.5 w-full rounded-md border border-keep-rule/60 bg-keep-panel/40 px-3 py-1.5 text-xs font-medium text-keep-muted transition hover:text-keep-text sm:hidden"
             >
-              {featuresExpanded ? "Show less" : `Show ${featureChips.length - FEATURES_MOBILE_ROW} more`}
+              {featuresExpanded
+                ? t("landing.showLess")
+                : t("landing.showMore", { n: featureChips.length - FEATURES_MOBILE_ROW })}
             </button>
           ) : null}
         </div>

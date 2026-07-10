@@ -22,6 +22,7 @@ import {
   users,
 } from "../db/schema.js";
 import { hasPermission } from "../auth/permissions.js";
+import { canSeeNsfw } from "../auth/ageGate.js";
 import { serverAuthority } from "../servers/authority.js";
 import { isServerModerationActive } from "../servers/moderation.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
@@ -125,6 +126,12 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
       return role === "owner" || role === "admin" || role === "mod";
     };
     const visible = rows.filter((s) => {
+      // HARD age gate (age plan, Phase 2): an 18+ community is invisible to
+      // minors and logged-out viewers everywhere, the rail included — no
+      // owner/staff escape for minor accounts. Adults keep it in the rail
+      // regardless of the hide preference (the rail is navigation, not
+      // discovery); the client chips it "18+".
+      if (s.isNsfw && !me?.isAdult) return false;
       // moderation active? (mirrors isServerModerationActive on the row subset)
       const active = s.moderationState === "suspended"
         || (s.moderationState === "banned"
@@ -166,7 +173,11 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
     if (!(await serversLive(reply))) return { error: "not found" };
     const me = await getSessionUser(req, db).catch(() => null);
 
-    const rows = await db.select(SERVER_SUMMARY_COLUMNS).from(servers).where(discoverableWhere);
+    // SOFT tier (age plan, Phase 2): discovery drops 18+ communities for
+    // minors, anonymous viewers, AND adults with "Hide 18+ content" on.
+    // (The rail keeps them for all adults — that's navigation.)
+    const rows = (await db.select(SERVER_SUMMARY_COLUMNS).from(servers).where(discoverableWhere))
+      .filter((s) => !s.isNsfw || canSeeNsfw(me));
     const activityBy = await loadActivityBy();
     const ctx = await loadSummaryViewerCtx(me, activityBy, rows);
 
@@ -233,7 +244,9 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
         isSystem: servers.isSystem,
       })
       .from(servers)
-      .where(discoverableWhere);
+      // This list is anonymous (the public homepage), and anonymous can never
+      // see NSFW — 18+ communities are excluded outright (age plan, Phase 2).
+      .where(and(discoverableWhere, eq(servers.isNsfw, false)));
     if (!rows.length) return { servers: [] };
 
     const ids = rows.map((r) => r.id);
@@ -339,7 +352,9 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
 
     const q = (req.query.q ?? "").trim().toLowerCase();
     const tag = (req.query.tag ?? "").trim();
-    const rows = await db.select(SERVER_SUMMARY_COLUMNS).from(servers).where(discoverableWhere);
+    // SOFT tier: same discovery exclusion as /servers/discover.
+    const rows = (await db.select(SERVER_SUMMARY_COLUMNS).from(servers).where(discoverableWhere))
+      .filter((s) => !s.isNsfw || canSeeNsfw(me));
     const activityBy = await loadActivityBy();
     const ctx = await loadSummaryViewerCtx(me, activityBy, rows);
 
@@ -362,7 +377,11 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
    *  tag asc. Tallied in JS from each server's parsed tags_json. */
   app.get("/servers/tags", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
-    const rows = await db.select({ tagsJson: servers.tagsJson }).from(servers).where(discoverableWhere);
+    // SOFT tier: 18+ communities' tags stay out of the cloud for viewers who
+    // can't see NSFW, matching the discover surfaces the cloud filters.
+    const me = await getSessionUser(req, db).catch(() => null);
+    const rows = (await db.select({ tagsJson: servers.tagsJson, isNsfw: servers.isNsfw }).from(servers).where(discoverableWhere))
+      .filter((s) => !s.isNsfw || canSeeNsfw(me));
     const tally = new Map<string, number>();
     for (const r of rows) {
       for (const t of parseTagsJson(r.tagsJson)) tally.set(t, (tally.get(t) ?? 0) + 1);
@@ -405,6 +424,12 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
     // metadata stay hidden — the "users can't see it" contract. Expired bans
     // read as inactive, so this no-ops there.
     if (isServerModerationActive(server) && !a.isMod) {
+      reply.code(404); return { error: "no server" };
+    }
+    // HARD age gate (age plan, Phase 2): an 18+ community's detail (name,
+    // banner art, description) 404s for minors and anonymous viewers — no
+    // staff escape for minor accounts. Adults pass, hide preference or not.
+    if (server.isNsfw && !me?.isAdult) {
       reply.code(404); return { error: "no server" };
     }
     let viewer: ServerViewerState | null = null;
@@ -453,6 +478,12 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
         status: server.status,
         visibility: server.visibility,
         joinMode: server.joinMode,
+        // 18+ community flag + public-safe banner (age plan, Phase 2). Only
+        // adults ever receive this payload (the gate above), so the real
+        // banner art is safe to include; the owner console reads these two
+        // to render the toggle + the public-banner slot's current state.
+        isNsfw: !!server.isNsfw,
+        sfwBannerUrl: server.sfwBannerUrl ?? null,
         publicBrowsing: !!server.publicBrowsing,
         applicationPrompt: server.applicationPrompt ?? null,
         ownerUserId: server.ownerUserId,

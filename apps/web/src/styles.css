@@ -36,6 +36,25 @@
 }
 .tk-slide-down-in { animation: tk-slide-down-in 160ms ease-out both; transform-origin: top; }
 .tk-slide-up-in   { animation: tk-slide-up-in 160ms ease-out both; transform-origin: bottom; }
+/* Find-a-setting jump highlight (admin panels). JS adds the class to the
+ * `data-admin-anchor` element after scrolling it into view and removes it
+ * ~1.6s later. Static class on purpose — runtime <style> injection is
+ * CSP-blocked in prod. Under Reduce Motion (OS media query OR the in-app
+ * toggle's html.reduce-motion class) the pulse is dropped and the plain
+ * outline simply holds until JS removes the class. */
+@keyframes tk-find-flash {
+  0%, 100% { outline-color: rgb(var(--keep-action) / 0.9); }
+  50%      { outline-color: rgb(var(--keep-action) / 0.15); }
+}
+.tk-find-flash {
+  outline: 2px solid rgb(var(--keep-action) / 0.9);
+  outline-offset: 3px;
+  animation: tk-find-flash 750ms ease-in-out 2;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tk-find-flash { animation: none; }
+}
+html.reduce-motion .tk-find-flash { animation: none; }
 html.reduce-motion .bookshelf-book:hover .float-wrap,
 html.reduce-motion .bookshelf-book:focus-visible .float-wrap,
 html.reduce-motion .bookshelf-book[data-pulled="true"] .float-wrap {

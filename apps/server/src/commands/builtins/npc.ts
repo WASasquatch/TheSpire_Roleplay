@@ -3,6 +3,7 @@ import { roomMembers, rooms } from "../../db/schema.js";
 import { addMessage, addSystemMessage, broadcastRoomState } from "../../realtime/broadcast.js";
 import { recordRoomNpc } from "../../lib/roomStats.js";
 import { hasPermission } from "../../auth/permissions.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const NPC_NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
@@ -32,7 +33,7 @@ export const npcCommand: CommandHandler = {
   ],
   async run(ctx) {
     if (ctx.args.length < 2) {
-      notice(ctx, "NPC_USAGE", "Usage: /npc <Name> <text>  (or /npc <Name> /me <action>)");
+      notice(ctx, "NPC_USAGE", tFor(ctx.user.locale, "commands:npc.usage"));
       return;
     }
 
@@ -40,13 +41,13 @@ export const npcCommand: CommandHandler = {
     // games where everyone must voice their own character only.
     const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
     if (room?.npcDisabled) {
-      notice(ctx, "NPC_DISABLED", "/npc is disabled in this room.");
+      notice(ctx, "NPC_DISABLED", tFor(ctx.user.locale, "commands:npc.disabled"));
       return;
     }
 
     const npcName = ctx.args[0]!;
     if (!NPC_NAME_RX.test(npcName)) {
-      notice(ctx, "NPC_BAD_NAME", "NPC name must be 1-40 chars: letters, numbers, spaces, _ - '");
+      notice(ctx, "NPC_BAD_NAME", tFor(ctx.user.locale, "commands:npc.badName"));
       return;
     }
 
@@ -60,7 +61,7 @@ export const npcCommand: CommandHandler = {
       body = rest.trim();
     }
     if (!body) {
-      notice(ctx, "NPC_EMPTY", "NPC line is empty.");
+      notice(ctx, "NPC_EMPTY", tFor(ctx.user.locale, "commands:npc.empty"));
       return;
     }
 
@@ -110,7 +111,7 @@ export const npcModeCommand: CommandHandler = {
     } else if (arg === "off" || arg === "disable" || arg === "block") {
       nextDisabled = true;
     } else {
-      notice(ctx, "NPCMODE_USAGE", "Usage: /npcmode on  (or)  /npcmode off");
+      notice(ctx, "NPCMODE_USAGE", tFor(ctx.user.locale, "commands:npcMode.usage"));
       return;
     }
 
@@ -125,7 +126,7 @@ export const npcModeCommand: CommandHandler = {
       allowed = member?.role === "owner" || member?.role === "mod";
     }
     if (!allowed) {
-      notice(ctx, "PERM", "Only the room owner or a mod can change NPC mode.");
+      notice(ctx, "PERM", tFor(ctx.user.locale, "commands:npcMode.permission"));
       return;
     }
 

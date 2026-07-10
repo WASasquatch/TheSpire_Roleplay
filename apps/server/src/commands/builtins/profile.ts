@@ -1,12 +1,15 @@
 import { and, asc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import type { CharacterJournalEntry, CharacterPortrait, CharacterStats, ProfileCollectionEntry, ProfileLibraryEntry, ProfileLink, ProfileMetrics, ProfileView, StoryRating, Theme } from "@thekeep/shared";
-import { isModeratorRole, matchThemePreset, resolveScriptoriumAuthorTier } from "@thekeep/shared";
+import { isModeratorRole, matchThemePreset, parseTagList, resolveScriptoriumAuthorTier } from "@thekeep/shared";
 import { characterEarning, characterJournalEntries, characterOwnedNameStyles, characterPortraits, characters, identityCollection, identityPetCollection, items, profileLinks, stories, storyCopies, userActiveCosmetics, userOwnedNameStyles, userPortraits, users } from "../../db/schema.js";
 import { getSettings, parseUserThemeJson } from "../../settings.js";
 import { listTitlesForIdentity } from "../../titles/service.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
 import { isBlockedBetween } from "../../auth/blocks.js";
+import { isIsolatedBetweenIds } from "../../auth/ageIsolation.js";
+import { isMinor } from "../../auth/ageGate.js";
 import { resolveProfileServerId } from "../../earning/pool.js";
+import { tFor } from "../../i18n.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -566,9 +569,10 @@ async function buildMasterProfileView(
       },
       portraits,
       gender: u.gender,
+      languages: parseTagList(u.languages),
       theme,
       styleKey,
-      titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
+      titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }, viewerId),
       links: await listLinks(db, u.id, null),
       role: u.role,
       isPublic: u.isPublic,
@@ -628,10 +632,11 @@ async function buildCharacterProfileView(
       },
       portraits: charPortraits,
       links: await listLinks(db, c.userId, c.id),
+      languages: parseTagList(owner.languages),
       journalEntries: await listPublicJournal(db, c.id),
       theme,
       styleKey,
-      titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
+      titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }, viewerId),
       isPublic: c.isPublic,
       isNsfw: c.isNsfw,
       createdAt: +c.createdAt,
@@ -652,13 +657,125 @@ async function buildCharacterProfileView(
 }
 
 /**
- * lookupProfile + global-block gate. A blocked user's profile is invisible
- * (mutual), so any viewer who is blocked with the resolved profile's owner
- * gets `null` (not found), exactly as if the name didn't resolve. Centralizing
- * the gate here covers every caller, the HTTP /profiles/:name route, the
- * userlist click-to-view handler, and the /whois command, so none can leak a
- * blocked identity. Anonymous viewers (no `viewerId`) can't have blocks, so
- * they skip the check.
+ * Is the authenticated viewer under 18? (Age-restriction plan Phase 1.)
+ * Anonymous viewers (no id) return false, NOT because they may see NSFW,
+ * but because their gating already lives in the HTTP route (NSFW profiles
+ * resolve to the requires-auth "private" stub for them) and their payloads
+ * for public SFW profiles must stay byte-identical to before the age
+ * feature. A viewerId that doesn't resolve to a users row can't belong to
+ * a live session, so it also falls through to "not a minor".
+ */
+async function viewerIsMinor(
+  db: import("../../db/index.js").Db,
+  viewerId?: string,
+): Promise<boolean> {
+  if (!viewerId) return false;
+  const row = (await db
+    .select({ birthdate: users.birthdate })
+    .from(users)
+    .where(eq(users.id, viewerId))
+    .limit(1))[0];
+  return row ? isMinor(row) : false;
+}
+
+/**
+ * Server-side age withholding for a resolved view (Phase 1). Applied to
+ * EVERY view the resolver hands a minor viewer, so all consumers inherit
+ * it (HTTP /profiles/:name, /whois, socket profile:fetch, userlist click):
+ *
+ *   - 18+ profile → a hollow shell: identity chrome survives (name, kind,
+ *     theme, `isNsfw: true` as the discriminator) but every content field
+ *     is emptied so no NSFW bytes (bio HTML, portrait URLs, links, journal,
+ *     collection, banner/backdrop URLs) reach an under-18 account. The
+ *     socket ack + ui:hint wire types are frozen to ProfileView, so this
+ *     shell IS the stub on those transports; the HTTP route additionally
+ *     converts it to the friendly `{ private: true, ageRestricted: true }`
+ *     stub shape, and ProfileModal renders the age-blocked copy for both.
+ *     No owner or staff exception on purpose: there is no bypass for
+ *     minor accounts, and a mod-flagged minor still edits via /me/profile.
+ *
+ *   - SFW profile → nsfw-flagged gallery portraits are dropped from the
+ *     payload (absent, not censored placeholders).
+ *
+ * Adults and anonymous viewers never come through here, their payloads
+ * stay byte-identical to before the age feature.
+ */
+function withholdProfileFromMinor(view: ProfileView): ProfileView {
+  if (!view.profile.isNsfw) {
+    // SFW profile: only nsfw-flagged gallery tiles are withheld. The
+    // synthetic include-avatar-in-gallery tile inherits the profile-level
+    // flag (false here), so it survives, same as today.
+    if (view.kind === "master") {
+      return {
+        kind: "master",
+        profile: { ...view.profile, portraits: view.profile.portraits.filter((p) => !p.nsfw) },
+      };
+    }
+    return {
+      kind: "character",
+      profile: { ...view.profile, portraits: view.profile.portraits.filter((p) => !p.nsfw) },
+    };
+  }
+  const emptyMetrics: ProfileMetrics = { chatMessages: null, forumTopics: null, forumReplies: null };
+  if (view.kind === "master") {
+    return {
+      kind: "master",
+      profile: {
+        ...view.profile,
+        bioHtml: "",
+        avatarUrl: null,
+        portraits: [],
+        titles: [],
+        links: [],
+        metrics: emptyMetrics,
+        scriptoriumAuthor: null,
+        collection: [],
+        petCollection: [],
+        library: [],
+        nameStyleKey: null,
+        nameStyleConfig: null,
+        profileBannerUrl: null,
+        publicProfileBgUrl: null,
+      },
+    };
+  }
+  return {
+    kind: "character",
+    profile: {
+      ...view.profile,
+      bioHtml: "",
+      stats: {},
+      avatarUrl: null,
+      portraits: [],
+      links: [],
+      journalEntries: [],
+      titles: [],
+      metrics: emptyMetrics,
+      scriptoriumAuthor: null,
+      collection: [],
+      petCollection: [],
+      library: [],
+      nameStyleKey: null,
+      nameStyleConfig: null,
+      profileBannerUrl: null,
+      publicProfileBgUrl: null,
+    },
+  };
+}
+
+/**
+ * lookupProfile + global-block gate + isolation gate + minor age gate. A
+ * blocked user's profile is invisible (mutual), so any viewer who is
+ * blocked with the resolved profile's owner gets `null` (not found),
+ * exactly as if the name didn't resolve; an isolated pair (age plan,
+ * Phase 5 — opted-in minor × adult non-staff) resolves the same way in
+ * both directions; a minor viewer gets the age-withheld shape (see
+ * `withholdProfileFromMinor`). Centralizing the gates here covers every
+ * caller, the HTTP /profiles/:name route, the userlist click-to-view
+ * handler, and the /whois command, so none can leak a blocked or isolated
+ * identity or NSFW bytes to an under-18 account. Anonymous viewers (no
+ * `viewerId`) can't have blocks or isolation pairs and are gated by the
+ * HTTP route's own stub logic, so they skip all three checks.
  */
 export async function lookupProfile(
   db: import("../../db/index.js").Db,
@@ -666,10 +783,18 @@ export async function lookupProfile(
   viewerId?: string,
 ): Promise<ProfileView | null> {
   const view = await resolveProfileView(db, name, viewerId);
-  if (view && viewerId && view.profile.userId !== viewerId
+  if (!view) return null;
+  if (viewerId && view.profile.userId !== viewerId
       && await isBlockedBetween(db, viewerId, view.profile.userId)) {
     return null;
   }
+  // Minor isolation (age plan, Phase 5): an isolated pair resolves exactly
+  // like a blocked one — null, "no such profile" — in both directions.
+  if (viewerId && view.profile.userId !== viewerId
+      && await isIsolatedBetweenIds(db, viewerId, view.profile.userId)) {
+    return null;
+  }
+  if (await viewerIsMinor(db, viewerId)) return withholdProfileFromMinor(view);
   return view;
 }
 
@@ -793,9 +918,10 @@ async function resolveProfileView(
         },
         portraits,
         gender: u.gender,
+        languages: parseTagList(u.languages),
         theme,
         styleKey,
-        titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
+        titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }, viewerId),
         links: await listLinks(db, u.id, null),
         role: u.role,
         isPublic: u.isPublic,
@@ -863,10 +989,11 @@ async function resolveProfileView(
       },
       portraits: charPortraits,
       links: await listLinks(db, c.userId, c.id),
+      languages: parseTagList(owner.languages),
       journalEntries: await listPublicJournal(db, c.id),
       theme,
       styleKey,
-      titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
+      titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }, viewerId),
       isPublic: c.isPublic,
       isNsfw: c.isNsfw,
       createdAt: +c.createdAt,
@@ -956,9 +1083,10 @@ async function lookupRandomProfile(
         },
         portraits,
         gender: u.gender,
+        languages: parseTagList(u.languages),
         theme,
         styleKey,
-        titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }),
+        titles: await listTitlesForIdentity(db, { userId: u.id, characterId: null, displayName: u.username }, viewerId),
         links: await listLinks(db, u.id, null),
         role: u.role,
         isPublic: u.isPublic,
@@ -979,7 +1107,7 @@ async function lookupRandomProfile(
   }
 
   const row = (await db
-    .select({ char: characters, ownerThemeJson: users.themeJson, ownerStyleKey: users.styleKey, ownerUsername: users.username })
+    .select({ char: characters, ownerThemeJson: users.themeJson, ownerStyleKey: users.styleKey, ownerUsername: users.username, ownerLanguages: users.languages })
     .from(characters)
     .innerJoin(users, eq(users.id, characters.userId))
     .where(and(
@@ -1020,10 +1148,11 @@ async function lookupRandomProfile(
       },
       portraits,
       links: await listLinks(db, c.userId, c.id),
+      languages: parseTagList(row.ownerLanguages),
       journalEntries: await listPublicJournal(db, c.id),
       theme,
       styleKey,
-      titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }),
+      titles: await listTitlesForIdentity(db, { userId: c.userId, characterId: c.id, displayName: c.name }, viewerId),
       isPublic: c.isPublic,
       isNsfw: c.isNsfw,
       createdAt: +c.createdAt,
@@ -1067,7 +1196,7 @@ export const profileCommand: CommandHandler = {
     if (ctx.argsText.trim()) {
       ctx.socket.emit("error:notice", {
         code: "NO_ARGS",
-        message: "/profile takes no arguments. Use /whois <name> to view someone else.",
+        message: tFor(ctx.user.locale, "commands:profile.noArgs"),
       });
       return;
     }
@@ -1114,15 +1243,37 @@ export const whoisCommand: CommandHandler = {
   async run(ctx) {
     const target = ctx.argsText.trim();
     if (!target) {
-      const view = await lookupRandomProfile(ctx.db);
+      // Isolation (age plan, Phase 5): a random draw can land on an account
+      // the viewer is isolated with (opted-in minor × adult non-staff), and
+      // this path doesn't go through lookupProfile's pair gate. Re-roll a
+      // few times rather than surfacing "No profiles found" on the first
+      // isolated draw; isolated accounts are rare, so one draw is the
+      // overwhelming common case and the loop exits immediately.
+      let view: Awaited<ReturnType<typeof lookupRandomProfile>> = null;
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const candidate = await lookupRandomProfile(ctx.db, ctx.user.id);
+        if (!candidate) break;
+        if (candidate.profile.userId !== ctx.user.id
+            && await isIsolatedBetweenIds(ctx.db, ctx.user.id, candidate.profile.userId)) {
+          continue;
+        }
+        view = candidate;
+        break;
+      }
       if (!view) {
         ctx.socket.emit("error:notice", {
           code: "NO_PROFILES",
-          message: "No profiles found.",
+          message: tFor(ctx.user.locale, "commands:whois.noProfiles"),
         });
         return;
       }
-      ctx.socket.emit("ui:hint", { kind: "open-profile", profile: view });
+      // Random discovery already excludes NSFW profiles for everyone, but a
+      // SFW profile can still carry nsfw-flagged gallery portraits. Strip
+      // those for under-18 viewers, same rule every named lookup applies in
+      // lookupProfile. `ctx.user.isAdult` is the session-derived age, so no
+      // extra query here (and no behavior change for adults).
+      const profile = ctx.user.isAdult ? view : withholdProfileFromMinor(view);
+      ctx.socket.emit("ui:hint", { kind: "open-profile", profile });
       return;
     }
     // Token shortcut. Pass directly to lookupProfile so the response
@@ -1134,7 +1285,7 @@ export const whoisCommand: CommandHandler = {
       if (!view) {
         ctx.socket.emit("error:notice", {
           code: "NO_USER",
-          message: `No identity matches "${target}".`,
+          message: tFor(ctx.user.locale, "commands:whois.noIdentityMatch", { name: target }),
         });
         return;
       }
@@ -1148,7 +1299,7 @@ export const whoisCommand: CommandHandler = {
     if (resolution.kind === "none") {
       ctx.socket.emit("error:notice", {
         code: "NO_USER",
-        message: `No user or character named "${target}".`,
+        message: tFor(ctx.user.locale, "commands:shared.noUserOrCharacter", { name: target }),
       });
       return;
     }
@@ -1166,7 +1317,7 @@ export const whoisCommand: CommandHandler = {
     if (!view) {
       ctx.socket.emit("error:notice", {
         code: "NO_USER",
-        message: `No user or active character named "${target}".`,
+        message: tFor(ctx.user.locale, "commands:whois.noActiveMatch", { name: target }),
       });
       return;
     }

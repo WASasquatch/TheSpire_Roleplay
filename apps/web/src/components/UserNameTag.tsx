@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { resolveMessageColor, type AvatarCrop } from "@thekeep/shared";
 import type { Gender } from "../lib/gender.js";
 import { genderGlyph } from "../lib/gender.js";
@@ -157,6 +158,7 @@ export function UserNameTag({
   truncate = false,
   railAlign = false,
 }: Props) {
+  const { t } = useTranslation("common");
   const g = genderGlyph(gender);
   // Viewer opt-out: when on, the inline avatar thumbnail is suppressed and
   // the icon slot falls back to the rank sigil / gender glyph. Border +
@@ -248,7 +250,7 @@ export function UserNameTag({
               avatarCrop={avatarCrop ?? null}
               size="sm"
               onClick={onIconClick}
-              title={`view profile (${g.title})`}
+              title={t("nameTag.viewProfile", { who: g.title })}
               className="shrink-0"
             />
           );
@@ -267,7 +269,7 @@ export function UserNameTag({
             <button
               type="button"
               onClick={onIconClick}
-              title={`view profile (${displayName})`}
+              title={t("nameTag.viewProfile", { who: displayName })}
               className="shrink-0 rounded px-0.5 py-0.5 leading-none hover:bg-keep-panel"
             >
               <RankSigil rankKey={rankKey} tier={tier ?? null} size={rankSigilSize ?? "md"} variant={rankIconVariant} />
@@ -278,7 +280,7 @@ export function UserNameTag({
           <button
             type="button"
             onClick={onIconClick}
-            title={`view profile (${g.title})`}
+            title={t("nameTag.viewProfile", { who: g.title })}
             // px-1 py-0.5 + rounded background on hover gives a real tap
             // target on mobile without changing visual density.
             // `shrink-0` keeps the gender icon at its natural size when
@@ -331,8 +333,13 @@ export function UserNameTag({
         type="button"
         onClick={onNameClick}
         title={
-          (italic ? `${displayName} - admin` : `whisper ${displayName}`) +
-          (away && awayMessage ? ` (away: ${awayMessage})` : "")
+          away && awayMessage
+            ? italic
+              ? t("nameTag.adminAway", { name: displayName, message: awayMessage })
+              : t("nameTag.whisperAway", { name: displayName, message: awayMessage })
+            : italic
+              ? t("nameTag.admin", { name: displayName })
+              : t("nameTag.whisper", { name: displayName })
         }
         // Two render modes, gated by the `truncate` prop:
         //
@@ -390,7 +397,7 @@ export function UserNameTag({
           // button: punctuation around the chip ("[", ":") sits
           // adjacent enough that horizontal padding read as a gap.
           className="shrink-0 rounded bg-keep-action/15 text-[10px] uppercase tracking-wide text-keep-action"
-          title={`mood: ${mood}`}
+          title={t("nameTag.moodTitle", { mood })}
         >
           {mood}
         </span>
@@ -402,13 +409,13 @@ export function UserNameTag({
       {ooc && !railAlign ? (
         <span
           className="ml-1 shrink-0 text-[10px] text-keep-muted"
-          title="Speaking from their master / OOC account, not as a character"
+          title={t("nameTag.oocTitle")}
         >
-          (ooc)
+          {t("nameTag.ooc")}
         </span>
       ) : null}
       {away && !railAlign ? (
-        <span className="ml-1 shrink-0 text-[10px] text-keep-muted">[away]</span>
+        <span className="ml-1 shrink-0 text-[10px] text-keep-muted">{t("nameTag.away")}</span>
       ) : null}
     </span>
   );

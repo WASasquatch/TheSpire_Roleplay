@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Bookmark, BookmarkCheck, Flag, Pencil, Pin, PinOff, Reply, SmilePlus, Trash2 } from "lucide-react";
 import { canonicalizeNameForLookup, customCmdCssToStyle, extractMentions, renderUiRouteChipsInHtml, resolveMessageColor, type AvatarCrop, type ChatMessage, type MentionRef } from "@thekeep/shared";
 import { useActiveTheme } from "../../lib/theme.js";
@@ -16,6 +18,7 @@ import { useChat } from "../../state/store.js";
 import { LinkPreviewCard } from "../LinkPreviewCard.js";
 import { useMentionsCache, requestMentionResolve } from "../../state/mentions.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
+import { formatTime } from "../../lib/intlFormat.js";
 import { fmtTime } from "../messageTime.js";
 import { ReactionAddButton, ReactionBar } from "./ReactionBar.js";
 import { PollCard } from "./PollCard.js";
@@ -48,6 +51,7 @@ function SceneBanner({
   renderedBody: ReactNode;
   imageUrl: string | null;
 }) {
+  const { t } = useTranslation("chat");
   const [collapsed, setCollapsed] = useState(false);
   const hasImage = !!imageUrl;
   return (
@@ -69,7 +73,7 @@ function SceneBanner({
               }
             },
             "aria-expanded": !collapsed,
-            title: collapsed ? "Click to expand the scene image" : "Click to collapse the scene image",
+            title: collapsed ? t("row.expandScene") : t("row.collapseScene"),
           }
         : {})}
       className={`my-1 rounded border-y border-keep-action/40 bg-keep-action/10 px-3 py-2 text-center font-action italic text-keep-action${
@@ -145,6 +149,7 @@ function AnnounceHtmlBody({ html }: { html: string }) {
  * remain XSS-safe.
  */
 function renderParts(
+  t: TFunction<"chat">,
   parts: ReturnType<typeof splitMentions>,
   onMentionClick: (name: string) => void,
   onWorldClick: (slug: string) => void,
@@ -195,7 +200,7 @@ function renderParts(
           type="button"
           onClick={() => onWorldClick(p.slug)}
           className="rounded border border-keep-action/40 bg-keep-action/10 px-1 text-[0.95em] font-semibold text-keep-action hover:bg-keep-action/20 focus:outline-none focus:ring-1 focus:ring-keep-action"
-          title={`Open the ${p.slug} world`}
+          title={t("row.openWorld", { slug: p.slug })}
         >
           @world:{p.slug}
         </button>,
@@ -227,7 +232,7 @@ function renderParts(
           type="button"
           onClick={() => onMentionClick(clickTarget)}
           className={className}
-          title={isSelf ? `You were mentioned (${p.raw})` : `View ${p.raw}'s profile`}
+          title={isSelf ? t("row.youWereMentioned", { name: p.raw }) : t("actions.viewProfile", { name: p.raw })}
         >
           @{p.raw}
         </button>,
@@ -297,6 +302,7 @@ export function Line({
   /** Viewer identity names (master + active char). Drives self-mention highlight in body. */
   selfNames: ReadonlyArray<string>;
 }) {
+  const { t } = useTranslation("chat");
   const canReply = REPLYABLE_KINDS.has(msg.kind);
   const timeText = fmtTime(msg.createdAt);
   // Timestamp is the click target for "reply to this message" - turning the
@@ -307,7 +313,7 @@ export function Line({
     <button
       type="button"
       onClick={() => onTimeClick(msg.id)}
-      title="Reply to this message"
+      title={t("row.replyToMessage")}
       // `data-copy-skip` drops the timestamp from copied chat text
       // (the copy walker reads this attribute, not `user-select: none`,
       // since `textContent` doesn't honor the CSS). The `select-none`
@@ -366,7 +372,7 @@ export function Line({
           avatarCrop={inlineAvatarCrop}
           size="xs"
           onClick={() => onIconClick(msg.userId, msg.displayName, msg.characterId ?? null)}
-          title={`view ${msg.displayName}'s profile`}
+          title={t("row.viewProfileLower", { name: msg.displayName })}
           className="mr-1 select-none align-middle"
         />
       </span>
@@ -408,7 +414,7 @@ export function Line({
             <button
               type="button"
               onClick={() => onJumpToReply(msg.replyToId!)}
-              title={`Jump to ${msg.replyToDisplayName}'s message`}
+              title={t("row.jumpToUsersMessage", { name: msg.replyToDisplayName })}
               className="flex w-full items-baseline gap-1 rounded text-left text-sm leading-tight text-keep-muted hover:text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action"
             >
               {quoteInner}
@@ -470,13 +476,13 @@ export function Line({
     const isSelfDelete = !!msg.deletedByUserId && msg.deletedByUserId === msg.userId;
     const actorBlurb = msg.deletedByUserId
       ? (isSelfDelete
-          ? "self-deleted"
-          : `deleted by ${msg.deletedByDisplayName ?? "unknown"}`)
+          ? t("row.selfDeleted")
+          : t("row.deletedBy", { name: msg.deletedByDisplayName ?? t("row.unknown") }))
       : null;
     return (
       <div className="text-keep-muted/70">
         <span data-copy-skip className="mr-2 select-none text-xs tabular-nums">{timeText}</span>
-        <span className="italic">[message removed]</span>
+        <span className="italic">{t("row.messageRemoved")}</span>
         {/* Admin-only audit reveal: when the server attached the
             pre-delete body on `originalBody` (it only does so for
             isAdminRole viewers), surface it underneath as a greyed,
@@ -487,9 +493,9 @@ export function Line({
           <blockquote className="ml-6 mt-0.5 border-l-2 border-keep-accent/30 bg-keep-panel/20 px-2 py-0.5 text-[11px] italic text-keep-muted/60">
             <span
               className="mr-1 select-none text-[9px] uppercase not-italic tracking-widest text-keep-accent/70"
-              title="Original body, visible to site admins only for audit"
+              title={t("row.adminAuditTitle")}
             >
-              admin audit
+              {t("row.adminAudit")}
               {/* Surface the author snapshotted on the row + the actor
                   who performed the delete so admins don't have to
                   cross-reference timestamps to figure out who hid what.
@@ -526,7 +532,7 @@ export function Line({
     const names = extractMentions(msg.body);
     if (names.length > 0) requestMentionResolve(names);
   }, [msg.body]);
-  const renderedBody = renderParts(bodyParts, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? []);
+  const renderedBody = renderParts(t, bodyParts, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? []);
   // Resolve the user's stored color once and feed both kind-shaped
   // body styles below. `themeBg` lets resolveMessageColor swap in a
   // legible variant of literal hex colors when the chosen shade would
@@ -592,9 +598,9 @@ export function Line({
   const editedBadge = msg.editedAt ? (
     <span
       className="ml-1 text-[10px] italic text-keep-muted"
-      title={`edited ${new Date(msg.editedAt).toLocaleTimeString()}`}
+      title={t("row.editedAt", { time: formatTime(msg.editedAt) })}
     >
-      (edited)
+      {t("row.edited")}
     </span>
   ) : null;
 
@@ -654,8 +660,8 @@ export function Line({
       targetKind="chat_message"
       targetId={msg.id}
       asCharacterId={viewerActiveCharacterId}
-      title="Add reaction"
-      label={<span className="inline-flex items-center gap-1"><SmilePlus className="h-3 w-3" aria-hidden />react</span>}
+      title={t("reactions.add")}
+      label={<span className="inline-flex items-center gap-1"><SmilePlus className="h-3 w-3" aria-hidden />{t("row.react")}</span>}
       className="flex h-5 items-center rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action md:invisible md:group-hover:visible md:group-focus-within:visible"
     />
   ) : null;
@@ -707,7 +713,7 @@ export function Line({
               <PollCard message={msg} poll={msg.poll} isAuthor={isOwn} canModerate={canModerate} compact />
             </div>
           ) : (
-            <span className="whitespace-pre-wrap text-keep-muted italic">poll unavailable</span>
+            <span className="whitespace-pre-wrap text-keep-muted italic">{t("row.pollUnavailable")}</span>
           )}
         </div>
       );
@@ -808,9 +814,9 @@ export function Line({
               type="button"
               onClick={() => onMentionClick(msg.npcVoicedBy!)}
               className="ml-1 rounded text-[10px] uppercase tracking-wide text-keep-muted hover:text-keep-action hover:underline"
-              title={`voiced by ${msg.npcVoicedBy}, click to view profile`}
+              title={t("row.voicedByTitle", { name: msg.npcVoicedBy })}
             >
-              (voiced by {msg.npcVoicedBy})
+              {t("row.voicedByParen", { name: msg.npcVoicedBy })}
             </button>
           ) : null}
           <span className="ml-1 whitespace-pre-wrap">{renderedBody}</span>
@@ -844,7 +850,7 @@ export function Line({
             hideIcon
           />
         ) : (
-          <span className="text-keep-muted">someone</span>
+          <span className="text-keep-muted">{t("row.someone")}</span>
         );
       // Whisper line uses the theme's "action" slot - distinct from say/me
       // (white-ish text) and from system (muted), and themes cleanly: forest
@@ -868,7 +874,7 @@ export function Line({
       lineEl = (
         <div className="flex flex-wrap items-baseline gap-x-1 text-keep-action">
           {time}{inlineAvatar}{tag}
-          <span className="text-keep-muted">whispers</span>
+          <span className="text-keep-muted">{t("row.whispers")}</span>
           {recipientTag}
           <span className="-ml-1 text-keep-muted">:</span>
           <span className="min-w-0 whitespace-pre-wrap break-words">{renderedBody}</span>
@@ -1014,11 +1020,11 @@ export function Line({
         <button
           type="button"
           onClick={() => onTimeClick(msg.id)}
-          title="Reply to this message"
-          aria-label="Reply to this message"
+          title={t("row.replyToMessage")}
+          aria-label={t("row.replyToMessage")}
           className="flex h-5 items-center gap-1 rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action md:invisible md:group-hover:visible md:group-focus-within:visible"
         >
-          <Reply className="h-3 w-3" aria-hidden />reply
+          <Reply className="h-3 w-3" aria-hidden />{t("row.reply")}
         </button>
       ) : null}
       {/* React sits beside Reply so the two engagement actions read as a
@@ -1131,13 +1137,14 @@ export function Line({
  * any 4xx surfaces verbatim via window.alert.
  */
 function ReportButton({ msg }: { msg: ChatMessage }) {
+  const { t } = useTranslation("chat");
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function file() {
     if (done || busy) return;
     const reason = window.prompt(
-      `Report this message from ${msg.displayName}? Optional reason (admins see it):`,
+      t("report.messagePrompt", { name: msg.displayName }),
       "",
     );
     // window.prompt returns null on cancel, "" on empty submit. Treat null
@@ -1153,12 +1160,12 @@ function ReportButton({ msg }: { msg: ChatMessage }) {
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({} as { error?: string }));
-        window.alert(j.error ?? `Couldn't file report (HTTP ${res.status}).`);
+        window.alert(j.error ?? t("report.fileFailed", { status: res.status }));
         return;
       }
       setDone(true);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "report failed");
+      window.alert(err instanceof Error ? err.message : t("report.failed"));
     } finally {
       setBusy(false);
     }
@@ -1170,10 +1177,10 @@ function ReportButton({ msg }: { msg: ChatMessage }) {
         type="button"
         onClick={file}
         disabled={busy || done}
-        title={done ? "Reported - admins will review." : "Report this message to admins"}
+        title={done ? t("report.reportedDashTitle") : t("report.reportMessageTitle")}
         className="flex h-5 items-center gap-1 rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-accent/60 hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
       >
-        {done ? "reported" : <><Flag className="h-3 w-3" aria-hidden />report</>}
+        {done ? t("row.reported") : <><Flag className="h-3 w-3" aria-hidden />{t("row.report")}</>}
       </button>
     </span>
   );
@@ -1186,6 +1193,7 @@ function ReportButton({ msg }: { msg: ChatMessage }) {
  * surface the server's error verbatim rather than failing silently.
  */
 function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () => void }) {
+  const { t } = useTranslation("chat");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Same admin-configurable grace window the visibility gate above
@@ -1195,7 +1203,7 @@ function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () =
   const graceMs = useChat((s) => s.branding.editGraceMs);
 
   async function doDelete() {
-    if (!window.confirm("Delete this message? You can only do this within 60 seconds of sending.")) return;
+    if (!window.confirm(t("row.deleteOwnConfirm"))) return;
     setBusy(true);
     setError(null);
     try {
@@ -1208,7 +1216,7 @@ function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () =
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "delete failed");
+      setError(err instanceof Error ? err.message : t("row.deleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -1248,19 +1256,19 @@ function OwnControls({ msg, onStartEdit }: { msg: ChatMessage; onStartEdit: () =
       <button
         type="button"
         onClick={onStartEdit}
-        title={`Edit (within ${formatGraceWindow(graceMs)} of sending)`}
+        title={t("row.editWithin", { window: formatGraceWindow(t, graceMs) })}
         className="flex h-5 items-center gap-1 rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action"
       >
-        <Pencil className="h-3 w-3" aria-hidden />edit
+        <Pencil className="h-3 w-3" aria-hidden />{t("row.edit")}
       </button>
       <button
         type="button"
         onClick={doDelete}
-        title={`Delete (within ${formatGraceWindow(graceMs)} of sending)`}
+        title={t("row.deleteWithin", { window: formatGraceWindow(t, graceMs) })}
         disabled={busy}
         className="flex h-5 items-center gap-1 rounded border border-keep-accent/60 bg-keep-accent/10 px-1.5 text-[10px] font-semibold leading-none text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
       >
-        <Trash2 className="h-3 w-3" aria-hidden />delete
+        <Trash2 className="h-3 w-3" aria-hidden />{t("row.delete")}
       </button>
       {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}
     </span>
@@ -1285,6 +1293,7 @@ function InlineEditForm({
   variant: "own" | "mod";
   onClose: () => void;
 }) {
+  const { t } = useTranslation("chat");
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState(msg.body);
   const [error, setError] = useState<string | null>(null);
@@ -1311,7 +1320,7 @@ function InlineEditForm({
       // the line re-renders with the new body. We just close the editor.
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "edit failed");
+      setError(err instanceof Error ? err.message : t("row.editFailed"));
     } finally {
       setBusy(false);
     }
@@ -1357,7 +1366,7 @@ function InlineEditForm({
           }
         }}
         className={textareaClass}
-        {...(isAdmin ? { "aria-label": `Admin edit of ${msg.displayName}'s message` } : {})}
+        {...(isAdmin ? { "aria-label": t("row.adminEditAria", { name: msg.displayName }) } : {})}
       />
       <div className="flex items-center justify-end gap-1">
         {error ? <span className="mr-auto text-[10px] text-keep-accent">{error}</span> : null}
@@ -1366,10 +1375,10 @@ function InlineEditForm({
           onClick={onClose}
           className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button type="submit" disabled={busy} className={saveButtonClass}>
-          {busy ? "..." : "Save"}
+          {busy ? "..." : t("common:save")}
         </button>
       </div>
     </form>
@@ -1399,12 +1408,13 @@ function ModControls({
   canDelete: boolean;
   onStartEdit: () => void;
 }) {
+  const { t } = useTranslation("chat");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function doDelete() {
     const ok = window.confirm(
-      `Delete this message from ${msg.displayName}? It will be hidden from users; admins can still review the original body in the audit view.`,
+      t("row.modDeleteConfirm", { name: msg.displayName }),
     );
     if (!ok) return;
     setBusy(true);
@@ -1419,7 +1429,7 @@ function ModControls({
         throw new Error(j.error ?? `HTTP ${res.status}`);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "delete failed");
+      setError(err instanceof Error ? err.message : t("row.deleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -1448,26 +1458,26 @@ function ModControls({
           type="button"
           onClick={() => {
             const ok = window.confirm(
-              `Edit this message from ${msg.displayName} as an admin? The (edited) badge will appear to all viewers; the original body is preserved server-side for audit.`,
+              t("row.adminEditConfirm", { name: msg.displayName }),
             );
             if (!ok) return;
             onStartEdit();
           }}
-          title={`Admin: edit ${msg.displayName}'s message`}
+          title={t("row.adminEditTitle", { name: msg.displayName })}
           className="flex h-5 items-center gap-1 rounded border border-keep-accent/40 bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-accent/80 hover:bg-keep-accent/10 hover:text-keep-accent"
         >
-          <Pencil className="h-3 w-3" aria-hidden />edit
+          <Pencil className="h-3 w-3" aria-hidden />{t("row.edit")}
         </button>
       ) : null}
       {canDelete ? (
         <button
           type="button"
           onClick={doDelete}
-          title={`Hide ${msg.displayName}'s message`}
+          title={t("row.hideMessage", { name: msg.displayName })}
           disabled={busy}
           className="flex h-5 items-center gap-1 rounded border border-keep-accent/60 bg-keep-accent/10 px-1.5 text-[10px] font-semibold leading-none text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
         >
-          <Trash2 className="h-3 w-3" aria-hidden />delete
+          <Trash2 className="h-3 w-3" aria-hidden />{t("row.delete")}
         </button>
       ) : null}
       {error ? <span className="text-[10px] text-keep-accent">{error}</span> : null}
@@ -1479,11 +1489,11 @@ function ModControls({
  * Human-friendly format for the edit grace window. Picks the most
  * natural unit so a 300_000ms setting reads "5m" rather than "300s".
  */
-function formatGraceWindow(ms: number): string {
-  if (ms <= 0) return "no edits";
-  if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
-  if (ms % 60_000 === 0) return `${ms / 60_000}m`;
-  return `${Math.round(ms / 1000)}s`;
+function formatGraceWindow(t: TFunction<"chat">, ms: number): string {
+  if (ms <= 0) return t("row.noEdits");
+  if (ms % 3_600_000 === 0) return t("row.hoursShort", { value: ms / 3_600_000 });
+  if (ms % 60_000 === 0) return t("row.minutesShort", { value: ms / 60_000 });
+  return t("row.secondsShort", { value: Math.round(ms / 1000) });
 }
 
 /**
@@ -1495,6 +1505,7 @@ function formatGraceWindow(ms: number): string {
  * the bookmark / edit / delete buttons so the row reads as one set.
  */
 function PinToggleButton({ msg, isPinned }: { msg: ChatMessage; isPinned: boolean }) {
+  const { t } = useTranslation("chat");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -1514,7 +1525,7 @@ function PinToggleButton({ msg, isPinned }: { msg: ChatMessage; isPinned: boolea
       }
       // Success: the room:pins broadcast updates isPinned; nothing else to do.
     } catch (err) {
-      setError(err instanceof Error ? err.message : "pin failed");
+      setError(err instanceof Error ? err.message : t("row.pinFailed"));
     } finally {
       setBusy(false);
     }
@@ -1525,8 +1536,8 @@ function PinToggleButton({ msg, isPinned }: { msg: ChatMessage; isPinned: boolea
       type="button"
       onClick={toggle}
       disabled={busy}
-      title={error ?? (isPinned ? "Unpin this message" : "Pin this message to the top of the room")}
-      aria-label={isPinned ? "Unpin this message" : "Pin this message"}
+      title={error ?? (isPinned ? t("roomInfo.unpin") : t("row.pinMessageTitle"))}
+      aria-label={isPinned ? t("roomInfo.unpin") : t("row.pinMessage")}
       aria-pressed={isPinned}
       className={
         "flex h-5 items-center gap-1 rounded border px-1.5 text-[10px] leading-none disabled:opacity-50 " +
@@ -1554,6 +1565,7 @@ function PinToggleButton({ msg, isPinned }: { msg: ChatMessage; isPinned: boolea
  * index, so re-bookmarking is idempotent and updates the category.
  */
 function BookmarkButton({ msg }: { msg: ChatMessage }) {
+  const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState("");
   const [note, setNote] = useState("");
@@ -1614,7 +1626,7 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
       // cleared after 1.2s.
       window.setTimeout(() => setDone(false), 1200);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("bookmarks.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -1625,8 +1637,8 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
       <button
         type="button"
         onClick={openPopover}
-        title={done ? "Saved" : "Bookmark this message"}
-        aria-label={done ? "Saved" : "Bookmark this message"}
+        title={done ? t("bookmarks.saved") : t("bookmarks.bookmarkMessage")}
+        aria-label={done ? t("bookmarks.saved") : t("bookmarks.bookmarkMessage")}
         // Matches the h-5 / rounded / 10px shape of the edit + delete
         // buttons in OwnControls so the row reads as one consistent set.
         className="flex h-5 items-center gap-1 rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action"
@@ -1647,16 +1659,16 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
           // the natural anchor for md+).
           className={`fixed inset-x-2 bottom-2 z-30 max-h-[80vh] overflow-y-auto rounded border border-keep-rule bg-keep-bg p-2 text-xs normal-case tracking-normal shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:right-0 md:top-5 md:max-h-none md:min-w-[16rem] md:normal-case md:tracking-normal${reduceMotion ? " tk-fade-in" : ""}`}
         >
-          <div className="mb-1 font-semibold text-keep-text">Bookmark</div>
+          <div className="mb-1 font-semibold text-keep-text">{t("bookmarks.header")}</div>
           <label className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">
-            Category
+            {t("bookmarks.category")}
             <input
               type="text"
               list={`bookmark-cats-${msg.id}`}
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               maxLength={60}
-              placeholder="leave empty for Uncategorized"
+              placeholder={t("bookmarks.categoryEmptyPlaceholder")}
               className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 normal-case tracking-normal text-keep-text"
               // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
@@ -1682,7 +1694,7 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
                         ? "border-keep-action bg-keep-action/15 text-keep-action"
                         : "border-keep-rule/60 bg-keep-bg/60 text-keep-muted hover:border-keep-action/40 hover:bg-keep-action/10 hover:text-keep-action")
                     }
-                    title={`Use category "${c}"`}
+                    title={t("bookmarks.useCategory", { name: c })}
                   >
                     {c}
                   </button>
@@ -1691,13 +1703,13 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
             </div>
           ) : null}
           <label className="mb-2 block text-[10px] uppercase tracking-widest text-keep-muted">
-            Note (optional)
+            {t("bookmarks.noteOptional")}
             <input
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               maxLength={500}
-              placeholder="why you're saving this"
+              placeholder={t("bookmarks.whySaving")}
               className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 normal-case tracking-normal text-keep-text"
             />
           </label>
@@ -1708,7 +1720,7 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
               onClick={() => { setOpen(false); setError(null); }}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[10px] hover:bg-keep-banner"
             >
-              Cancel
+              {t("common:cancel")}
             </button>
             <button
               type="button"
@@ -1716,7 +1728,7 @@ function BookmarkButton({ msg }: { msg: ChatMessage }) {
               disabled={busy}
               className="rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
             >
-              {busy ? "saving…" : "Save"}
+              {busy ? t("bookmarks.saving") : t("common:save")}
             </button>
           </div>
         </div>

@@ -5,7 +5,9 @@
  * unchanged; this is a pure relocation.
  */
 import { createContext, useContext, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { Theme } from "@thekeep/shared";
+import { formatDateTime } from "../../lib/intlFormat.js";
 
 /**
  * Per-tab access to the AdminPanel modal shell. Tabs use `setFooter`
@@ -51,6 +53,7 @@ export function AdminSaveFooter({
   formId,
   saving,
   savedFlash,
+  dirty = false,
   lastUpdatedAt,
   error,
   saveLabel,
@@ -60,6 +63,12 @@ export function AdminSaveFooter({
   formId: string;
   saving: boolean;
   savedFlash: boolean;
+  /** True when the form has edits that haven't been saved yet. Shows an
+   *  "Unsaved changes" status and emphasises the Save button, so a toggled
+   *  switch can't be mistaken for a committed setting (a ticked-but-unsaved
+   *  Sign-up age box cost the owner a debugging session). Optional so tabs
+   *  that haven't threaded a dirty flag through yet are unchanged. */
+  dirty?: boolean;
   lastUpdatedAt: number | null;
   error: string | null;
   /** e.g. "Save settings". The button shows "Saving..." while saving. */
@@ -73,6 +82,7 @@ export function AdminSaveFooter({
   /** Short hint shown in the footer when `canEdit` is false. */
   readOnlyHint?: string;
 }): JSX.Element {
+  const { t } = useTranslation("admin");
   const shell = useAdminShell();
   return (
     <>
@@ -84,18 +94,22 @@ export function AdminSaveFooter({
               ? "text-keep-accent"
               : savedFlash
                 ? "text-keep-system"
-                : "text-keep-muted"
+                : dirty
+                  ? "text-keep-action"
+                  : "text-keep-muted"
         }`}
       >
         {!canEdit
-          ? (readOnlyHint ?? "Read-only, you don't have permission to save changes here.")
+          ? (readOnlyHint ?? t("shell.readOnly"))
           : error
             ? error
             : savedFlash
-              ? "Saved."
-              : lastUpdatedAt
-                ? `Last updated ${new Date(lastUpdatedAt).toLocaleString()}`
-                : ""}
+              ? t("shell.saved")
+              : dirty
+                ? t("shell.unsaved")
+                : lastUpdatedAt
+                  ? t("shell.lastUpdated", { time: formatDateTime(lastUpdatedAt) })
+                  : ""}
       </span>
       <div className="flex shrink-0 items-center gap-2">
         <button
@@ -103,16 +117,18 @@ export function AdminSaveFooter({
           onClick={() => shell?.close()}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs hover:bg-keep-banner/60"
         >
-          {canEdit ? "Cancel" : "Close"}
+          {canEdit ? t("common:cancel") : t("common:close")}
         </button>
         {canEdit ? (
           <button
             form={formId}
             type="submit"
             disabled={saving}
-            className="keep-button rounded border border-keep-rule bg-keep-banner px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80"
+            className={`keep-button rounded border px-4 py-1 text-xs disabled:opacity-50 hover:bg-keep-banner/80 ${
+              dirty ? "border-keep-action bg-keep-banner" : "border-keep-rule bg-keep-banner"
+            }`}
           >
-            {saving ? "Saving..." : saveLabel}
+            {saving ? t("common:savingDots") : saveLabel}
           </button>
         ) : null}
       </div>
@@ -181,6 +197,14 @@ export interface SettingsRow {
   antiSpamEnabled: boolean;
   /** Content auto-moderation master switch. */
   automodEnabled: boolean;
+  /** Registration minimum-age switch (age plan): true = 13+ signups, false = 18+. */
+  allowMinorSignups: boolean;
+  /** Minor language filter master switch: mask strong language for under-18 viewers. Default on. */
+  minorFilterEnabled: boolean;
+  /** Admin-added words the minor filter also masks. */
+  minorFilterTerms: string[];
+  /** Words the minor filter must never mask. */
+  minorFilterAllow: string[];
   /** Sanitized HTML for the post-login welcome modal. "" = no welcome shown. */
   newUserWelcomeHtml: string;
   /** Site-wide default theme style key. Users without an override inherit this. */

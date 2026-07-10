@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Compass, Radio } from "lucide-react";
 import { fetchPopularServers, type PopularServer } from "../../lib/servers.js";
 import { relTime } from "../../lib/forums.js";
+import { formatNumber } from "../../lib/intlFormat.js";
 import { SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 import { useChat } from "../../state/store.js";
 
@@ -16,6 +18,7 @@ import { useChat } from "../../state/store.js";
  * the honest path for a logged-out visitor is to sign up and step inside.
  */
 export function PopularCommunities({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const { t } = useTranslation("marketing");
   const activityFeedsEnabled = useChat((s) => s.branding.activityFeedsEnabled);
   const siteName = useChat((s) => s.branding.siteName?.trim() || "The Spire");
   const [servers, setServers] = useState<PopularServer[] | null>(null);
@@ -40,15 +43,15 @@ export function PopularCommunities({ onNavigate }: { onNavigate: (path: string) 
 
   return (
     <section
-      aria-label={`Popular ${siteName} chat servers`}
+      aria-label={t("popular.sectionAria", { siteName })}
       className={`rounded-md border border-keep-border/50 bg-keep-panel/30 p-5 sm:p-6 ${SPLASH_PANEL_HOVER}`}
     >
       <div className="mb-1 flex items-center gap-2">
         <Compass className="h-5 w-5 shrink-0 text-keep-accent" aria-hidden />
-        <h2 className="font-action text-xl text-keep-text sm:text-2xl">Popular {siteName} Chat Servers</h2>
+        <h2 className="font-action text-xl text-keep-text sm:text-2xl">{t("popular.heading", { siteName })}</h2>
       </div>
       <p className="mb-4 text-sm text-keep-text/85 lg:text-base">
-        Places people are already gathering. Take a look inside.
+        {t("popular.sub")}
       </p>
       <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {servers.map((s) => {
@@ -66,7 +69,7 @@ export function PopularCommunities({ onNavigate }: { onNavigate: (path: string) 
               <a
                 href={`/s/${s.slug}`}
                 onClick={(e) => go(e, `/s/${s.slug}`)}
-                title={`Visit ${s.name}`}
+                title={t("popular.visitTitle", { name: s.name })}
                 className="flex h-full items-center gap-3 rounded-md border border-keep-border/50 bg-keep-bg/40 p-3 transition hover:border-keep-accent/60 hover:bg-keep-bg/60"
               >
                 {s.logoUrl ? (
@@ -90,7 +93,7 @@ export function PopularCommunities({ onNavigate }: { onNavigate: (path: string) 
                     <span className="truncate font-semibold text-keep-text">{s.name}</span>
                     {s.isSystem ? (
                       <span className="shrink-0 rounded border border-keep-accent/40 px-1 text-[9px] font-semibold uppercase tracking-widest text-keep-accent">
-                        Home
+                        {t("popular.homeBadge")}
                       </span>
                     ) : null}
                   </span>
@@ -99,17 +102,17 @@ export function PopularCommunities({ onNavigate }: { onNavigate: (path: string) 
                   ) : null}
                   <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] uppercase tracking-widest text-keep-muted">
                     <span>
-                      {s.memberCount.toLocaleString()} {s.memberCount === 1 ? "member" : "members"}
+                      {t("popular.members", { count: s.memberCount, formatted: formatNumber(s.memberCount) })}
                     </span>
                     {liveOnline !== null ? (
                       <span className="inline-flex items-center gap-1 text-keep-action">
                         <Radio className="h-3 w-3" aria-hidden />
-                        {liveOnline.toLocaleString()} online
+                        {t("popular.online", { formatted: formatNumber(liveOnline) })}
                       </span>
                     ) : null}
                     {lastPost ? (
                       <span className="normal-case tracking-normal text-keep-muted/90">
-                        Last post {lastPost}
+                        {t("popular.lastPost", { time: lastPost })}
                       </span>
                     ) : null}
                   </span>

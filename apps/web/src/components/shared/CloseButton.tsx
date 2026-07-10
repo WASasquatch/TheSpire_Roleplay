@@ -17,11 +17,12 @@
  */
 
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 interface Props {
   onClick: () => void;
-  /** Defaults to "Close". Pass a more specific label when the
-   *  surface needs one (e.g. "Close admin panel"). */
+  /** Defaults to the localized "Close". Pass a more specific label
+   *  when the surface needs one (e.g. "Close admin panel"). */
   label?: string;
   /** Optional extra classes for positioning/alignment in tight
    *  headers (e.g. `self-start` to keep this in the top-right of
@@ -29,13 +30,15 @@ interface Props {
   className?: string;
 }
 
-export function CloseButton({ onClick, label = "Close", className }: Props) {
+export function CloseButton({ onClick, label, className }: Props) {
+  const { t } = useTranslation("common");
+  const effectiveLabel = label ?? t("close");
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={label}
-      title={label}
+      aria-label={effectiveLabel}
+      title={effectiveLabel}
       className={
         "shrink-0 inline-flex h-7 w-7 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/40 text-lg leading-none text-keep-muted hover:border-keep-rule hover:bg-keep-banner/60 hover:text-keep-text focus:outline-none focus:ring-1 focus:ring-keep-action " +
         (className ?? "")
@@ -48,7 +51,7 @@ export function CloseButton({ onClick, label = "Close", className }: Props) {
 
 interface IconCloseButtonProps {
   onClick: () => void;
-  /** Defaults to "Close". */
+  /** Defaults to the localized "Close". */
   label?: string;
   /** Prepend `shrink-0` so the button doesn't collapse inside a flex
    *  header. Kept opt-in because some headers historically omit it. */
@@ -66,13 +69,15 @@ interface IconCloseButtonProps {
  * class set, icon size, and ARIA/title text are reproduced exactly; the
  * only per-caller knob is whether `shrink-0` leads the class list.
  */
-export function IconCloseButton({ onClick, label = "Close", shrink = false, className }: IconCloseButtonProps) {
+export function IconCloseButton({ onClick, label, shrink = false, className }: IconCloseButtonProps) {
+  const { t } = useTranslation("common");
+  const effectiveLabel = label ?? t("close");
   return (
     <button
       type="button"
       onClick={onClick}
-      title={label}
-      aria-label={label}
+      title={effectiveLabel}
+      aria-label={effectiveLabel}
       className={
         (shrink ? "shrink-0 " : "") +
         "rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text" +

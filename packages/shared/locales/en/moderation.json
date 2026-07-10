@@ -1,0 +1,79 @@
+{
+  "accountBan": {
+    "banned": "⛔ Banned",
+    "bannedUntil": "until {{time}}",
+    "bannedPermanently": "permanently",
+    "reasonSuffix": ", “{{reason}}”",
+    "bannedBy": "(by {{name}})",
+    "working": "Working…",
+    "unban": "Unban",
+    "ban": "Ban",
+    "unbanFailed": "Unban failed.",
+    "banFailed": "Ban failed.",
+    "historySummary": "Ban history ({{count}})",
+    "historyBanUntil": "ban (until {{time}})",
+    "historyBanPermanent": "ban (permanent)",
+    "historyUnban": "unban",
+    "historyBy": "by {{name}}"
+  },
+  "banModal": {
+    "title": "Ban {{name}}",
+    "description": "Blocks login and chat. A timed ban lifts itself when it expires.",
+    "reasonPlaceholder": "Visible to other moderators in the ban history.",
+    "purgeScopePosts": "posts",
+    "confirmBan": "Ban account",
+    "banning": "Banning…",
+    "duration": "Duration",
+    "reason": "Reason",
+    "reasonRequired": "(required)",
+    "reasonOptional": "(optional)",
+    "removeRecent": "Remove recent {{scope}}",
+    "purgeNote": "Their {{scope}} are hidden, not deleted: admins keep them for audit.",
+    "durations": {
+      "hour1": "1 hour",
+      "hours6": "6 hours",
+      "hours24": "24 hours",
+      "day1": "1 day",
+      "days3": "3 days",
+      "days7": "7 days",
+      "days30": "30 days",
+      "permanent": "Permanent",
+      "allTime": "All time",
+      "dontRemove": "Don't remove"
+    }
+  },
+  "staffIcons": {
+    "owner": "Owner",
+    "admin": "Admin",
+    "moderator": "Moderator",
+    "inCharacter": "In character"
+  },
+  "userLookup": {
+    "searchPlaceholder": "Search by name…",
+    "searching": "Searching…",
+    "noMatches": "No matches.",
+    "annotationOwner": "owner",
+    "annotationAlreadyMod": "already a mod",
+    "annotationBanned": "banned"
+  },
+  "staff": {
+    "title": "{{siteName}} App Staff",
+    "description": "This directory lists all of {{siteName}}'s staff members and their roles. Reach out to them for help with {{siteName}} itself. If your issue is with a specific community Chat Server or Forum, please contact that community's own staff first, then come to {{siteName}} staff if it still needs attention.",
+    "loadFailed": "load failed",
+    "saveFailed": "save failed",
+    "noStaff": "No staff to show.",
+    "roles": {
+      "masteradmin": "{{siteName}} Owner",
+      "admin": "{{siteName}} Admin",
+      "mod": "{{siteName}} Moderator"
+    },
+    "addIntroHint": "Add an introduction with “Edit card”.",
+    "editCard": "Edit card",
+    "messageTitle": "Message {{name}}",
+    "message": "💬 Message",
+    "tagline": "Tagline",
+    "taglinePlaceholder": "One line about you",
+    "introduction": "Introduction",
+    "introductionPlaceholder": "A short introduction shown on your card"
+  }
+}

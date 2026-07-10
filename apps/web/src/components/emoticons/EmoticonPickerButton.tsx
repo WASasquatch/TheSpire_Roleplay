@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Smile } from "lucide-react";
 import { recordEmoticonPick } from "../../lib/recentEmoticons.js";
 import { EmoticonPicker } from "./EmoticonPicker.js";
@@ -17,7 +18,7 @@ export function EmoticonPickerButton({
   onPickUnicode,
   disabled,
   className = "inline-flex h-6 min-w-[1.5rem] items-center justify-center rounded border border-transparent px-1 text-xs leading-none hover:border-keep-rule hover:bg-keep-banner/40 disabled:opacity-40",
-  title = "Insert emoticon",
+  title,
 }: {
   onPick: (sheetSlug: string, cellIndex: number) => void;
   /** Optional, when provided the picker surfaces a Unicode tab and
@@ -33,8 +34,11 @@ export function EmoticonPickerButton({
    *  the surrounding formatting buttons use so the row reads as one
    *  cohesive toolbar regardless of where it's mounted. */
   className?: string;
+  /** Defaults to the localized "Insert emoticon". */
   title?: string;
 }) {
+  const { t } = useTranslation("arcade");
+  const effectiveTitle = title ?? t("emoticons.pickerButton.insert");
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   return (
@@ -42,8 +46,8 @@ export function EmoticonPickerButton({
       <button
         ref={buttonRef}
         type="button"
-        title={title}
-        aria-label={title}
+        title={effectiveTitle}
+        aria-label={effectiveTitle}
         // `onMouseDown preventDefault` so the click doesn't steal focus
         // from the input, the picker's onPick callback can then act on
         // the input's current selection without the browser refocusing

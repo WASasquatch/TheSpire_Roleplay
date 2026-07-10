@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { AvatarCrop } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
@@ -9,6 +10,7 @@ import { useStoryInviteCount } from "../lib/storyInvites.js";
 import { navigateToFaqIndex } from "../lib/faqUrl.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";
 import { ConnectionOrb } from "./chat/ConnectionOrb.js";
+import { RatingChip } from "./shared/RatingChip.js";
 
 /** True at Tailwind's `lg` breakpoint (>=1024px). Drives desktop-vs-mobile
  *  banner behavior: desktop always shows the server banner; mobile defaults to
@@ -76,6 +78,9 @@ interface Props {
     bannerCrop: AvatarCrop | null;
     /** Owner-set banner band height in px. Null ⇒ the default responsive height. */
     bannerHeight: number | null;
+    /** Server-level 18+ flag (age-restriction plan, Phase 2). Feeds the rating
+     *  chip shown in the EXPANDED banner band only. */
+    isNsfw: boolean;
   } | null;
   /** Open the CURRENT server's owner/mod console (the per-server admin). Passed
    *  ONLY when the viewer can manage the server they're in, so the nav shows a
@@ -100,6 +105,7 @@ interface Props {
  * overridden, so a fresh install still looks coherent.
  */
 export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds, onOpenArcade, onOpenStaff, onOpenAffiliates, serverBrand, onOpenServerAdmin, notificationBell }: Props) {
+  const { t } = useTranslation("common");
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const branding = useChat((s) => s.branding);
@@ -262,6 +268,17 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
   // the bar open. Drives the tall layout, the art, and the logo scaling.
   const bannerShown = hasServerBanner && bannerOpen;
 
+  // Effective content rating of where the viewer stands (age-restriction plan,
+  // Phase 2): the server's own 18+ flag OR the current room's. RoomSummary's
+  // isNsfw already carries the effective server-or-room value, but OR-ing the
+  // server flag in keeps the chip right in the moment between entering an 18+
+  // server and its room row landing in the store. Rendered ONLY in the
+  // expanded banner band below; the collapsed bar stays clean.
+  const currentRoomNsfw = useChat((s) =>
+    s.currentRoomId ? !!s.rooms[s.currentRoomId]?.isNsfw : false,
+  );
+  const effectiveNsfw = !!serverBrand?.isNsfw || currentRoomNsfw;
+
   const headerStyle: CSSProperties = {};
   let hasBg = false;
   if (serverBrand) {
@@ -384,21 +401,23 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
       {hasServerBanner ? (
         <button
           type="button"
-          aria-label={bannerShown ? "Collapse banner" : "Show banner"}
+          aria-label={bannerShown ? t("banner.collapseBanner") : t("banner.showBanner")}
           onClick={toggleBanner}
           className="absolute inset-0 z-[5] cursor-pointer"
         />
       ) : null}
       {/* Visible collapse/expand handle, centered on the bottom edge so the
           toggle is discoverable on desktop (the full-area tap is invisible).
-          z-20 floats it above the nav; the chevron points down to expand a
+          z-20 floats it above the logo/tap layers but BELOW the desktop nav
+          (z-30), so the nav's More popover paints over it instead of the pip
+          punching through an open menu. The chevron points down to expand a
           collapsed bar, up to collapse an open one. */}
       {hasServerBanner ? (
         <button
           type="button"
           onClick={toggleBanner}
-          aria-label={bannerShown ? "Collapse banner" : "Show banner"}
-          title={bannerShown ? "Collapse banner" : "Show banner"}
+          aria-label={bannerShown ? t("banner.collapseBanner") : t("banner.showBanner")}
+          title={bannerShown ? t("banner.collapseBanner") : t("banner.showBanner")}
           className="absolute bottom-0 left-1/2 z-20 -translate-x-1/2 translate-y-1/2 rounded-full border border-keep-rule bg-keep-bg/85 px-2.5 py-0.5 text-[11px] leading-none text-keep-muted shadow hover:text-keep-text"
         >
           <span aria-hidden>{bannerShown ? "▴" : "▾"}</span>
@@ -451,6 +470,12 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
         ) : (
           <LogoInner branding={effectiveLogo} {...(bannerShown ? { imgMaxHeight: `${logoMaxHeightRem}rem` } : {})} />
         )}
+        {/* Rating chip (age-restriction plan, Phase 2) — EXPANDED band only,
+            so the collapsed slim bar stays clean. Lives inside the h1's z-10
+            logo column, which keeps it below the collapse pip (z-20) and the
+            nav (z-30) without touching that layering. Fixed 10px type, so the
+            banner-scaled h1 font-size doesn't inflate it. */}
+        {bannerShown ? <RatingChip nsfw={effectiveNsfw} className="ml-3" /> : null}
       </h1>
 
       {/* Desktop nav. Hidden below md+; the hamburger button + dropdown
@@ -469,13 +494,20 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
           padding) is dropped and the nav falls back to a plain horizontal list:
           the slim bar itself is the container at that point. */}
       <nav className={`hidden items-center gap-3 text-sm uppercase tracking-widest text-keep-muted lg:flex ${
-        // `relative z-10` must apply whenever there's a server banner — NOT only
+        // `relative z-30` must apply whenever there's a server banner — NOT only
         // when expanded — so the nav stays ABOVE the full-area `toggleBanner` tap
         // layer (absolute z-[5]). When collapsed the nav was a static, unpositioned
         // element, so the z-[5] tap layer painted over it and swallowed every link
         // click (the banner just expanded instead). Mirrors the mobile hamburger,
         // which already lifts on `hasServerBanner` alone.
-        hasServerBanner ? "relative z-10" : ""
+        //
+        // z-30, not z-10: the positioned nav is a stacking context, so the More
+        // popover's z-40 is LOCAL to it — against siblings the whole subtree
+        // competes at the nav's own z. The banner collapse pip is a z-20 sibling,
+        // and at z-10 it painted straight over the open popover. The pip
+        // (bottom-center) and the nav row (top-right) never overlap spatially,
+        // so lifting the nav past it costs nothing.
+        hasServerBanner ? "relative z-30" : ""
       } ${
         // The decorative pill (border/bg/shadow/padding/text-shadow) is only for
         // sitting over banner ART, so it stays gated to the EXPANDED state — the
@@ -495,9 +527,9 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               aria-expanded={moreOpen}
               aria-haspopup="menu"
               className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Site links"
+              title={t("banner.siteLinks")}
             >
-              More
+              {t("banner.more")}
               <span aria-hidden className="ml-1 text-[0.7em]">
                 {moreOpen ? "▴" : "▾"}
               </span>
@@ -533,9 +565,9 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               type="button"
               onClick={onOpenEarning}
               className="relative uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Your Earning, XP, Currency, ranks, and cosmetics"
+              title={t("banner.earningTitle")}
             >
-              Earning
+              {t("banner.earning")}
               {/* Tiny dot when there's an unacknowledged rank-up. Sits
                   to the top-right of the label so it's discoverable
                   without competing with the link text. */}
@@ -553,11 +585,11 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               className="relative uppercase tracking-widest text-keep-muted hover:text-keep-text"
               title={
                 storyInviteCount > 0
-                  ? `${storyInviteCount} pending collaboration ${storyInviteCount === 1 ? "invite" : "invites"}. Open the Scriptorium to act on ${storyInviteCount === 1 ? "it" : "them"}`
-                  : "The Scriptorium. Long-form fiction by the people who live here"
+                  ? t("banner.scriptoriumInvites", { count: storyInviteCount })
+                  : t("banner.scriptoriumTitle")
               }
             >
-              Scriptorium
+              {t("banner.scriptorium")}
               {storyInviteCount > 0 ? (
                 <span
                   aria-hidden
@@ -570,27 +602,27 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               type="button"
               onClick={onOpenWorlds}
               className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Worlds catalog. Browse open roleplay worlds, lore, and wikis"
+              title={t("banner.worldsTitle")}
             >
-              Worlds
+              {t("banner.worlds")}
             </button>
             <span className="text-keep-rule">|</span>
             <button
               type="button"
               onClick={onOpenStaff}
               className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Meet the staff, the mods and admins who run the Spire"
+              title={t("banner.staffTitle")}
             >
-              Staff
+              {t("banner.staff")}
             </button>
             <span className="text-keep-rule">|</span>
             <button
               type="button"
               onClick={onOpenAffiliates}
               className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Top RP Communities. List your own and copy your link-back"
+              title={t("banner.topCommunitiesTitle")}
             >
-              Top Communities
+              {t("banner.topCommunities")}
             </button>
             {canArcade ? (
               <>
@@ -599,9 +631,9 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                   type="button"
                   onClick={onOpenArcade}
                   className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-                  title="The Spire Arcade. Play the cabinet's games, like the Eidolon Tamer"
+                  title={t("banner.arcadeTitle")}
                 >
-                  Arcade
+                  {t("banner.arcade")}
                 </button>
               </>
             ) : null}
@@ -612,9 +644,9 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
           type="button"
           onClick={onOpenRules}
           className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-          title="The app rules and this server's own rules"
+          title={t("banner.rulesTitle")}
         >
-          Rules
+          {t("banner.rules")}
         </button>
         <span className="text-keep-rule">|</span>
         {/* Server FAQ: the per-server FAQ page (/faqs), mounted pre-auth like
@@ -623,9 +655,9 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
           type="button"
           onClick={navigateToFaqIndex}
           className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-          title="Frequently asked questions for this server"
+          title={t("banner.faqTitle")}
         >
-          FAQ
+          {t("banner.faq")}
         </button>
         {/* The two admin doors sit on the RIGHT, just left of Exit: Server Admin
             (the current server's console, owners/mods only) then Global Admin
@@ -638,9 +670,9 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               type="button"
               onClick={onOpenServerAdmin}
               className="uppercase tracking-widest text-keep-action hover:text-keep-text"
-              title="Manage this server: settings, rooms, members, moderation"
+              title={t("banner.serverAdminTitle")}
             >
-              Server Admin
+              {t("banner.serverAdmin")}
             </button>
           </>
         ) : null}
@@ -651,9 +683,9 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               type="button"
               onClick={onOpenAdmin}
               className="uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Global Admin: platform settings and cross-community oversight"
+              title={t("banner.globalAdminTitle")}
             >
-              Global Admin
+              {t("banner.globalAdmin")}
             </button>
           </>
         ) : null}
@@ -662,9 +694,9 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
           type="button"
           onClick={logout}
           className="uppercase tracking-widest text-keep-accent hover:underline"
-          title="Log out and return to the login screen"
+          title={t("banner.exitTitle")}
         >
-          Exit
+          {t("banner.exit")}
         </button>
         {notificationBell}
         <ConnectionOrb />
@@ -681,8 +713,8 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
           type="button"
           onClick={() => setMenuOpen((o) => !o)}
           aria-expanded={menuOpen}
-          aria-label={menuOpen ? "Close menu" : "Open menu"}
-          title="Menu"
+          aria-label={menuOpen ? t("banner.closeMenu") : t("banner.openMenu")}
+          title={t("menu")}
           className="flex h-9 w-9 items-center justify-center rounded border border-keep-rule bg-keep-bg/60 text-lg text-keep-text hover:bg-keep-banner"
         >
           {menuOpen ? "✕" : "☰"}
@@ -704,7 +736,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
         <>
           <button
             type="button"
-            aria-label="Close menu"
+            aria-label={t("banner.closeMenu")}
             onClick={() => setMenuOpen(false)}
             className="fixed inset-0 z-30 cursor-default bg-transparent lg:hidden"
           />
@@ -723,7 +755,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                   aria-expanded={mobileMoreOpen}
                   className="flex items-center justify-between border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
                 >
-                  <span>More</span>
+                  <span>{t("banner.more")}</span>
                   <span aria-hidden className="text-xs text-keep-muted">
                     {mobileMoreOpen ? "▴" : "▾"}
                   </span>
@@ -756,7 +788,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                   onClick={fireEarning}
                   className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
                 >
-                  <span>Earning</span>
+                  <span>{t("banner.earning")}</span>
                   {earningHasNew ? (
                     <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-keep-action" />
                   ) : null}
@@ -766,7 +798,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                   onClick={fireScriptorium}
                   className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
                 >
-                  <span>Scriptorium</span>
+                  <span>{t("banner.scriptorium")}</span>
                   {storyInviteCount > 0 ? (
                     <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-keep-action" />
                   ) : null}
@@ -776,21 +808,21 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                   onClick={fireWorlds}
                   className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
                 >
-                  <span>Worlds</span>
+                  <span>{t("banner.worlds")}</span>
                 </button>
                 <button
                   type="button"
                   onClick={fireStaff}
                   className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
                 >
-                  <span>Staff</span>
+                  <span>{t("banner.staff")}</span>
                 </button>
                 <button
                   type="button"
                   onClick={fireAffiliates}
                   className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
                 >
-                  <span>Top Communities</span>
+                  <span>{t("banner.topCommunities")}</span>
                 </button>
                 {canArcade ? (
                   <button
@@ -798,7 +830,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                     onClick={fireArcade}
                     className="flex items-center gap-2 border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
                   >
-                    <span>Arcade</span>
+                    <span>{t("banner.arcade")}</span>
                   </button>
                 ) : null}
               </>
@@ -808,14 +840,14 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               onClick={fireRules}
               className="border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
             >
-              Rules
+              {t("banner.rules")}
             </button>
             <button
               type="button"
               onClick={() => { navigateToFaqIndex(); setMenuOpen(false); }}
               className="border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
             >
-              FAQ
+              {t("banner.faq")}
             </button>
             {/* Server Admin then Global Admin, grouped just above Exit (mirrors
                 the desktop nav's right-side ordering). */}
@@ -825,7 +857,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                 onClick={() => { onOpenServerAdmin(); setMenuOpen(false); }}
                 className="border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-action hover:bg-keep-banner"
               >
-                Server Admin
+                {t("banner.serverAdmin")}
               </button>
             ) : null}
             {onOpenAdmin ? (
@@ -834,7 +866,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
                 onClick={fireAdmin}
                 className="border-b border-keep-rule/40 bg-transparent px-3 py-2 text-left text-keep-text hover:bg-keep-banner"
               >
-                Global Admin
+                {t("banner.globalAdmin")}
               </button>
             ) : null}
             <button
@@ -842,7 +874,7 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
               onClick={fireLogout}
               className="bg-transparent px-3 py-2 text-left font-semibold text-keep-accent hover:bg-keep-accent/10"
             >
-              Exit
+              {t("banner.exit")}
             </button>
           </nav>
         </>

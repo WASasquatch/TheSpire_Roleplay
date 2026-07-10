@@ -1,4 +1,5 @@
 import type { ChatMessage } from "@thekeep/shared";
+import { i18n } from "./i18n.js";
 import { isMentioned } from "./mentions.js";
 
 export type NotifyPref = "off" | "mentions" | "all";
@@ -74,29 +75,35 @@ export function formatNotification(
   switch (msg.kind) {
     case "whisper":
       return {
-        title: `${msg.displayName} whispers`,
+        title: i18n.t("common:notify.whispers", { name: msg.displayName }),
         body: msg.body,
       };
     case "announce":
       return {
-        title: mentioned ? `Announcement (mentions you)` : "Announcement",
+        title: mentioned
+          ? i18n.t("common:notify.announcementMention")
+          : i18n.t("common:notify.announcement"),
         body: msg.body,
       };
     case "me":
       return {
-        title: mentioned ? `${msg.displayName} (mentions you)` : "The Spire",
+        title: mentioned
+          ? i18n.t("common:notify.nameMention", { name: msg.displayName })
+          : i18n.t("common:appName"),
         body: `${msg.displayName} ${msg.body}`,
       };
     case "roll":
       return {
-        title: "The Spire",
-        body: `${msg.displayName} rolls ${msg.body}`,
+        title: i18n.t("common:appName"),
+        body: i18n.t("common:notify.rolls", { name: msg.displayName, body: msg.body }),
       };
     case "say":
     case "ooc":
     default:
       return {
-        title: mentioned ? `${msg.displayName} mentions you` : msg.displayName,
+        title: mentioned
+          ? i18n.t("common:notify.mentionsYou", { name: msg.displayName })
+          : msg.displayName,
         body: msg.body,
       };
   }

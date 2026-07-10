@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { AuditEntry } from "@thekeep/shared";
 import { AUDIT_ACTION_GROUPS } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 
 /* =========================================================
  *  Audit tab, append-only feed of admin/mod actions
  * ========================================================= */
 export function AuditTab() {
+  const { t } = useTranslation("admin");
   const [actionFilter, setActionFilter] = useState("");
   // Category preset bundles multiple action strings into a single
   // ?actions= query so the feed can render e.g. "all permission
@@ -32,19 +35,19 @@ export function AuditTab() {
         return r.json() as Promise<{ entries: AuditEntry[] }>;
       })
       .then((j) => { if (!cancelled) setEntries(j.entries); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : t("loadFailed")); });
     return () => { cancelled = true; };
-  }, [actionFilter, groupFilter, refreshKey]);
+  }, [actionFilter, groupFilter, refreshKey, t]);
 
   return (
     <section className="space-y-2 text-sm">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h3 className="font-action text-base">Audit log</h3>
+        <h3 className="font-action text-base">{t("audit.title")}</h3>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <select
             value={groupFilter}
             onChange={(e) => setGroupFilter(e.target.value)}
-            aria-label="Audit category"
+            aria-label={t("audit.categoryAria")}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5"
           >
             {Object.entries(AUDIT_ACTION_GROUPS).map(([key, group]) => (
@@ -55,7 +58,7 @@ export function AuditTab() {
             type="text"
             value={actionFilter}
             onChange={(e) => setActionFilter(e.target.value.trim())}
-            placeholder="Filter by action (e.g. ban)"
+            placeholder={t("audit.filterPlaceholder")}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 sm:flex-none"
           />
           <button
@@ -63,15 +66,15 @@ export function AuditTab() {
             onClick={() => setRefreshKey((k) => k + 1)}
             className="shrink-0 rounded border border-keep-rule bg-keep-banner/40 px-2 py-0.5 hover:bg-keep-banner"
           >
-            Refresh
+            {t("refresh")}
           </button>
         </div>
       </header>
       {error ? <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div> : null}
       {entries === null ? (
-        <p className="italic text-keep-muted">Loading audit entries...</p>
+        <p className="italic text-keep-muted">{t("audit.loading")}</p>
       ) : entries.length === 0 ? (
-        <p className="italic text-keep-muted">No matching entries.</p>
+        <p className="italic text-keep-muted">{t("audit.noMatches")}</p>
       ) : (
         <ul className="space-y-1">
           {entries.map((e) => (
@@ -88,14 +91,14 @@ export function AuditTab() {
                     </>
                   ) : null}
                   {e.targetRoomName ? (
-                    <>
+                    <Trans t={t} i18nKey="audit.inRoom" values={{ room: e.targetRoomName }}>
                       {" in "}
-                      <span className="italic">{e.targetRoomName}</span>
-                    </>
+                      <span className="italic">{"{{room}}"}</span>
+                    </Trans>
                   ) : null}
                 </span>
-                <span className="text-keep-muted" title={new Date(e.createdAt).toLocaleString()}>
-                  {new Date(e.createdAt).toLocaleString()}
+                <span className="text-keep-muted" title={formatDateTime(e.createdAt)}>
+                  {formatDateTime(e.createdAt)}
                 </span>
               </div>
               {e.reason ? <div className="mt-1 italic">"{e.reason}"</div> : null}

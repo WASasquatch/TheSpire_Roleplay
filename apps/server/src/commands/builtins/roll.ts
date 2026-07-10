@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { roomMembers, rooms } from "../../db/schema.js";
 import { addMessage, addSystemMessage } from "../../realtime/broadcast.js";
 import { hasPermission } from "../../auth/permissions.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 // `NdM` with an optional `±X` flat modifier, e.g. 1d20+3, 3d6-1, 2d10+0.
@@ -26,22 +27,29 @@ interface ParsedDice {
   modifier: number;
 }
 
-function parseDice(input: string): ParsedDice | string {
+/** i18n key + params for a dice-parse failure. The caller renders it in
+ *  the RECIPIENT's language via tFor; the inline form just bails. */
+interface DiceError {
+  key: string;
+  params?: Record<string, unknown>;
+}
+
+function parseDice(input: string): ParsedDice | DiceError {
   const m = DICE_RX.exec(input.trim());
-  if (!m) return `Bad dice format. Try /roll 1d20, /roll 3d6, or /roll 1d20+3.`;
+  if (!m) return { key: "commands:roll.badFormat" };
   const count = m[1] ? parseInt(m[1], 10) : 1;
   const sides = parseInt(m[2] ?? "0", 10);
   // m[3] is the signed modifier ("+3" / "-1") or undefined when no
   // modifier was supplied. parseInt parses the leading sign too.
   const modifier = m[3] ? parseInt(m[3], 10) : 0;
   if (!Number.isFinite(count) || count < 1 || count > MAX_DICE) {
-    return `Dice count must be 1-${MAX_DICE}.`;
+    return { key: "commands:roll.badCount", params: { max: MAX_DICE } };
   }
   if (!Number.isFinite(sides) || sides < 2 || sides > MAX_SIDES) {
-    return `Sides must be 2-${MAX_SIDES}.`;
+    return { key: "commands:roll.badSides", params: { max: MAX_SIDES } };
   }
   if (!Number.isFinite(modifier) || modifier < -MAX_MODIFIER || modifier > MAX_MODIFIER) {
-    return `Modifier must be between -${MAX_MODIFIER} and +${MAX_MODIFIER}.`;
+    return { key: "commands:roll.badModifier", params: { max: MAX_MODIFIER } };
   }
   return { count, sides, modifier };
 }
@@ -130,13 +138,13 @@ async function handleDcSubcommand(ctx: CommandContext): Promise<void> {
       ctx,
       "ROLL_DC",
       dc != null
-        ? `Room difficulty is ${dc}. Rolls meet or beat it to pass.`
-        : "No difficulty set for this room. Owners/mods can set one with /roll dc <n>.",
+        ? tFor(ctx.user.locale, "commands:roll.dcCurrent", { dc })
+        : tFor(ctx.user.locale, "commands:roll.dcNone"),
     );
     return;
   }
   if (!(await callerCanSetDc(ctx))) {
-    notice(ctx, "PERM", "Only the room owner, a mod, or an admin can set the difficulty.");
+    notice(ctx, "PERM", tFor(ctx.user.locale, "commands:roll.dcPermission"));
     return;
   }
   const first = (rest[0] ?? "").toLowerCase();
@@ -147,7 +155,7 @@ async function handleDcSubcommand(ctx: CommandContext): Promise<void> {
   }
   const n = Number(first);
   if (!Number.isInteger(n) || n < 1 || n > MAX_DC) {
-    notice(ctx, "BAD_DC", `Difficulty must be a whole number from 1 to ${MAX_DC}. Try /roll dc 15.`);
+    notice(ctx, "BAD_DC", tFor(ctx.user.locale, "commands:roll.dcInvalid", { max: MAX_DC }));
     return;
   }
   await ctx.db.update(rooms).set({ difficultyClass: n }).where(eq(rooms.id, ctx.roomId));
@@ -210,7 +218,7 @@ export const rollCommand: CommandHandler = {
   async run(ctx) {
     const arg = ctx.argsText.trim();
     if (!arg) {
-      notice(ctx, "ROLL_HELP", "Usage: /roll <NdM[±X]>. Try /roll 1d20, /roll 3d6, /roll 1d20+3.");
+      notice(ctx, "ROLL_HELP", tFor(ctx.user.locale, "commands:roll.usage"));
       return;
     }
     // `/roll dc [...]` manages the room's Difficulty Class instead of
@@ -221,8 +229,8 @@ export const rollCommand: CommandHandler = {
       return;
     }
     const parsed = parseDice(arg);
-    if (typeof parsed === "string") {
-      notice(ctx, "BAD_DICE", parsed);
+    if ("key" in parsed) {
+      notice(ctx, "BAD_DICE", tFor(ctx.user.locale, parsed.key, parsed.params));
       return;
     }
     const rolls: number[] = [];
@@ -263,7 +271,7 @@ export const rollCommand: CommandHandler = {
   inline(args) {
     const spec = (args || "1d20").trim();
     const parsed = parseDice(spec);
-    if (typeof parsed === "string") return null;
+    if ("key" in parsed) return null;
     const rolls: number[] = [];
     for (let i = 0; i < parsed.count; i++) {
       rolls.push(randomInt(1, parsed.sides + 1));
@@ -299,12 +307,12 @@ export const initiativeCommand: CommandHandler = {
     if (arg) {
       const m = INIT_MOD_RX.exec(arg);
       if (!m) {
-        notice(ctx, "BAD_INIT", "Initiative takes an optional flat modifier, e.g. /init +3.");
+        notice(ctx, "BAD_INIT", tFor(ctx.user.locale, "commands:roll.initUsage"));
         return;
       }
       mod = parseInt(m[1] ?? "0", 10);
       if (!Number.isFinite(mod) || mod < -MAX_INIT_MOD || mod > MAX_INIT_MOD) {
-        notice(ctx, "BAD_INIT", `Initiative modifier must be between -${MAX_INIT_MOD} and +${MAX_INIT_MOD}.`);
+        notice(ctx, "BAD_INIT", tFor(ctx.user.locale, "commands:roll.initModifierRange", { max: MAX_INIT_MOD }));
         return;
       }
     }

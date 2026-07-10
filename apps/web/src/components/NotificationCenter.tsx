@@ -12,6 +12,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import {
   AtSign,
   Award,
@@ -56,24 +57,25 @@ function useIsLgUp(): boolean {
   return lg;
 }
 
-/** Categories shown in the mute preferences (skip the internal "system" kind). */
-const MUTABLE_CATEGORIES: { key: NotificationCategory; label: string }[] = [
-  { key: "mention", label: "Mentions" },
-  { key: "dm", label: "Direct messages" },
-  { key: "friend", label: "Friend requests" },
-  { key: "server", label: "Server events" },
-  { key: "forum", label: "Forum activity" },
-  { key: "earning", label: "Earning milestones" },
-  { key: "announcement", label: "Announcements" },
-  { key: "report", label: "Report outcomes" },
+/** Categories shown in the mute preferences (skip the internal "system"
+ *  kind). Labels resolve at render via the `category.<key>` catalog keys. */
+const MUTABLE_CATEGORIES: NotificationCategory[] = [
+  "mention",
+  "dm",
+  "friend",
+  "server",
+  "forum",
+  "earning",
+  "announcement",
+  "report",
 ];
 
 /** Coarse filter chips. "All" plus the categories worth isolating. */
-const FILTERS: { key: NotificationCategory | "all"; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "mention", label: "Mentions" },
-  { key: "server", label: "Servers" },
-  { key: "dm", label: "DMs" },
+const FILTERS: { key: NotificationCategory | "all"; labelKey: string }[] = [
+  { key: "all", labelKey: "filter.all" },
+  { key: "mention", labelKey: "category.mention" },
+  { key: "server", labelKey: "filter.servers" },
+  { key: "dm", labelKey: "filter.dms" },
 ];
 
 function categoryIcon(n: NotificationWire) {
@@ -88,24 +90,6 @@ function categoryIcon(n: NotificationWire) {
     case "announcement": return <Megaphone className={cls} aria-hidden />;
     case "report": return <Flag className={cls} aria-hidden />;
     default: return <Bell className={cls} aria-hidden />;
-  }
-}
-
-/** Compact "3m" / "5h" / "2d" relative time. */
-function ago(ms: number): string {
-  const p = relTimeParts(Date.now() - ms, {
-    justNowSec: 60,
-    hourCutoffHrs: 24,
-    roundMode: "floor",
-    clampNegative: true,
-    addWeeks: true,
-  });
-  switch (p.tier) {
-    case "justNow": return "now";
-    case "minutes": return `${p.value}m`;
-    case "hours": return `${p.value}h`;
-    case "days": return `${p.value}d`;
-    default: return `${p.value}w`;
   }
 }
 
@@ -127,6 +111,7 @@ export function NotificationCenter({
   /** Open the (separate) forum inbox; shown only when there's forum activity. */
   onOpenForums?: () => void;
 }) {
+  const { t } = useTranslation("notifications");
   const notifUnread = useChat((s) => s.notifUnread);
   const forumUnread = useChat((s) => s.forumNotifUnread);
   const items = useChat((s) => s.notifItems);
@@ -241,14 +226,32 @@ export function NotificationCenter({
 
   const shown = filter === "all" ? items : items.filter((n) => n.category === filter);
 
+  /** Compact "3m" / "5h" / "2d" relative time. */
+  function ago(ms: number): string {
+    const p = relTimeParts(Date.now() - ms, {
+      justNowSec: 60,
+      hourCutoffHrs: 24,
+      roundMode: "floor",
+      clampNegative: true,
+      addWeeks: true,
+    });
+    switch (p.tier) {
+      case "justNow": return t("ago.now");
+      case "minutes": return t("ago.minutes", { value: p.value });
+      case "hours": return t("ago.hours", { value: p.value });
+      case "days": return t("ago.days", { value: p.value });
+      default: return t("ago.weeks", { value: p.value });
+    }
+  }
+
   return (
     <>
       <button
         ref={bellRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title="Notifications"
-        aria-label={total > 0 ? `Notifications (${total} unread)` : "Notifications"}
+        title={t("bell.title")}
+        aria-label={total > 0 ? t("bell.unreadAria", { total }) : t("bell.title")}
         aria-expanded={open}
         className="relative flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-keep-muted hover:text-keep-text"
       >
@@ -271,22 +274,22 @@ export function NotificationCenter({
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="Notifications"
+            aria-label={t("bell.title")}
             style={isLgUp && anchor ? { top: anchor.top, right: anchor.right } : undefined}
             className={`fixed inset-0 z-[60] flex flex-col overflow-hidden bg-keep-bg text-keep-text shadow-2xl lg:inset-auto lg:h-auto lg:max-h-[min(70vh,40rem)] lg:w-[22rem] lg:rounded-lg lg:border lg:border-keep-rule${reduceMotion ? " tk-fade-in" : ""}`}
           >
             <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule px-3 py-2.5">
               <Bell className="h-4 w-4 text-keep-action" aria-hidden="true" />
-              <span className="flex-1 text-sm font-semibold text-keep-text">{prefsOpen ? "Notification settings" : "Notifications"}</span>
+              <span className="flex-1 text-sm font-semibold text-keep-text">{prefsOpen ? t("bell.settings") : t("bell.title")}</span>
               {!prefsOpen ? (
                 <button type="button" onClick={markAllRead} disabled={total === 0}
                   className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-40">
-                  Mark all read
+                  {t("bell.markAllRead")}
                 </button>
               ) : null}
               <button type="button" onClick={() => setPrefsOpen((p) => !p)}
-                title={prefsOpen ? "Back to notifications" : "Notification settings"}
-                aria-label={prefsOpen ? "Back to notifications" : "Notification settings"}
+                title={prefsOpen ? t("bell.back") : t("bell.settings")}
+                aria-label={prefsOpen ? t("bell.back") : t("bell.settings")}
                 className={`rounded border p-1 ${prefsOpen ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}>
                 <SettingsIcon className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -295,32 +298,32 @@ export function NotificationCenter({
 
             {prefsOpen ? (
               <div className="min-h-0 flex-1 overflow-y-auto p-3">
-                <p className="mb-2 text-xs text-keep-muted">Choose what lands in your bell. A muted type makes no alert at all: no row, badge, or push.</p>
+                <p className="mb-2 text-xs text-keep-muted">{t("prefs.description")}</p>
                 <ul className="space-y-1">
                   {MUTABLE_CATEGORIES.map((c) => {
-                    const on = !muted.has(c.key);
+                    const on = !muted.has(c);
                     return (
-                      <li key={c.key}>
+                      <li key={c}>
                         <label className="flex cursor-pointer items-center justify-between gap-2 rounded border border-keep-rule/60 px-2.5 py-2 text-sm">
-                          <span className="text-keep-text">{c.label}</span>
-                          <input type="checkbox" checked={on} onChange={(e) => setCategoryEnabled(c.key, e.target.checked)} />
+                          <span className="text-keep-text">{t(`category.${c}`)}</span>
+                          <input type="checkbox" checked={on} onChange={(e) => setCategoryEnabled(c, e.target.checked)} />
                         </label>
                       </li>
                     );
                   })}
                 </ul>
                 <div className="mt-4 rounded border border-keep-rule/60 p-2.5">
-                  <p className="text-sm text-keep-text">Browser notifications</p>
+                  <p className="text-sm text-keep-text">{t("push.title")}</p>
                   <p className="mt-0.5 text-[11px] text-keep-muted">
-                    {pushState === "subscribed" ? "On: you'll be pinged even when the app is closed."
-                      : pushState === "denied" ? "Blocked in your browser settings. Allow notifications for this site to enable."
-                      : pushState === "unsupported" ? "Your browser doesn't support push notifications."
-                      : "Off: turn on to be pinged when the app is closed."}
+                    {pushState === "subscribed" ? t("push.on")
+                      : pushState === "denied" ? t("push.denied")
+                      : pushState === "unsupported" ? t("push.unsupported")
+                      : t("push.off")}
                   </p>
                   {pushState !== "unsupported" && pushState !== "denied" ? (
                     <button type="button" onClick={togglePush} disabled={pushBusy}
                       className="mt-2 rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
-                      {pushBusy ? "…" : pushState === "subscribed" ? "Turn off" : "Turn on"}
+                      {pushBusy ? "…" : pushState === "subscribed" ? t("push.turnOff") : t("push.turnOn")}
                     </button>
                   ) : null}
                 </div>
@@ -331,7 +334,7 @@ export function NotificationCenter({
               {FILTERS.map((f) => (
                 <button key={f.key} type="button" onClick={() => setFilter(f.key)}
                   className={`rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wider ${filter === f.key ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}>
-                  {f.label}
+                  {t(f.labelKey)}
                 </button>
               ))}
             </div>
@@ -341,18 +344,18 @@ export function NotificationCenter({
                 <button type="button" onClick={() => { setOpen(false); onOpenForums(); }}
                   className="flex w-full items-center gap-2 border-b border-keep-rule bg-keep-panel/30 px-3 py-2 text-left hover:bg-keep-banner">
                   <Landmark className="h-4 w-4 shrink-0 text-keep-action" aria-hidden="true" />
-                  <span className="flex-1 text-sm text-keep-text">Forum activity</span>
+                  <span className="flex-1 text-sm text-keep-text">{t("category.forum")}</span>
                   <span className="rounded-full bg-keep-accent px-1.5 text-[10px] font-bold text-keep-bg">{forumUnread}</span>
                 </button>
               ) : null}
 
               {loading && shown.length === 0 ? (
                 <div className="flex min-h-[10rem] flex-1 items-center justify-center px-6 py-10">
-                  <p className="text-center text-sm italic text-keep-muted">Loading…</p>
+                  <p className="text-center text-sm italic text-keep-muted">{t("common:loading")}</p>
                 </div>
               ) : shown.length === 0 ? (
                 <div className="flex min-h-[10rem] flex-1 items-center justify-center px-6 py-10">
-                  <p className="text-center text-sm italic text-keep-muted">You have no notifications yet</p>
+                  <p className="text-center text-sm italic text-keep-muted">{t("bell.empty")}</p>
                 </div>
               ) : (
                 <ul>

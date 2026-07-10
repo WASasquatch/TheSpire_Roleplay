@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { BookText, PenLine } from "lucide-react";
 import type { StoryCard } from "@thekeep/shared";
-import { ratingRequiresAuth, STORY_RATING_INFO } from "@thekeep/shared";
+import { ratingRequiresAuth } from "@thekeep/shared";
 import { useChat } from "../../state/store.js";
 
 interface Props {
@@ -128,6 +129,7 @@ interface Slot {
 }
 
 export function BookshelfStrip({ onNavigate }: Props) {
+  const { t } = useTranslation("scriptorium");
   const [items, setItems] = useState<StoryCard[] | null>(null);
   // Touch-device pull-out state. On desktop (hover-capable pointer)
   // the CSS `:hover` rules handle the cover-reveal and a click goes
@@ -229,7 +231,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
   // the splash doesn't pop after the fetch resolves.
   if (items === null) {
     return (
-      <section aria-label="Featured stories" className="bookshelf bookshelf-loading">
+      <section aria-label={t("bookshelf.featuredAria")} className="bookshelf bookshelf-loading">
         <BookshelfHeader onBrowse={() => onNavigate("/scriptorium")} />
         <div className="bookshelf-stage hidden md:block" aria-hidden>
           <div className="bookshelf-shelf">
@@ -241,7 +243,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
   }
 
   return (
-    <section aria-label="Featured stories" className="bookshelf">
+    <section aria-label={t("bookshelf.featuredAria")} className="bookshelf">
       <BookshelfHeader onBrowse={() => onNavigate("/scriptorium")} />
 
       <div className="bookshelf-stage hidden md:block">
@@ -294,7 +296,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
                 <BookText className="h-4 w-4 shrink-0 text-keep-accent" aria-hidden />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-keep-text">{card.title}</span>
-                  <span className="block truncate text-xs text-keep-muted">{author} · {card.rating}</span>
+                  <span className="block truncate text-xs text-keep-muted">{t("bookshelf.authorRating", { author, rating: card.rating })}</span>
                 </span>
               </button>
             </li>
@@ -307,7 +309,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
             className="flex w-full items-center gap-2.5 rounded-md border border-dashed border-keep-rule/50 bg-keep-bg/30 px-3 py-2 text-left text-keep-muted transition hover:border-keep-action hover:text-keep-text"
           >
             <PenLine className="h-4 w-4 shrink-0 text-keep-accent" aria-hidden />
-            <span className="text-sm">Write your story</span>
+            <span className="text-sm">{t("bookshelf.writeYourStoryCta")}</span>
           </button>
         </li>
       </ul>
@@ -316,6 +318,7 @@ export function BookshelfStrip({ onNavigate }: Props) {
 }
 
 function BookshelfHeader({ onBrowse }: { onBrowse: () => void }) {
+  const { t } = useTranslation("scriptorium");
   return (
     <header className="bookshelf-header">
       <div className="bookshelf-rule" aria-hidden>
@@ -323,10 +326,10 @@ function BookshelfHeader({ onBrowse }: { onBrowse: () => void }) {
         <span className="diamond" />
         <span className="line" />
       </div>
-      <h3 className="bookshelf-title font-action">From the Scriptorium</h3>
-      <p className="bookshelf-subtitle">hover or tap a volume to draw it from the shelf</p>
+      <h3 className="bookshelf-title font-action">{t("bookshelf.title")}</h3>
+      <p className="bookshelf-subtitle">{t("bookshelf.subtitle")}</p>
       <button type="button" onClick={onBrowse} className="bookshelf-browse">
-        Browse the catalog →
+        {t("bookshelf.browse")}
       </button>
     </header>
   );
@@ -344,10 +347,11 @@ function StoryBook({
   isPulled,
   onTap,
 }: BookProps & { card: StoryCard; isPulled: boolean; onTap: () => void }) {
+  const { t } = useTranslation("scriptorium");
   const palette = SPINE_PALETTE[strHash(card.id) % SPINE_PALETTE.length]!;
   const driftDur = 5 + ((strHash(card.id + ":d") % 30) / 10); // 5.0 .. 7.9s
   const driftDelay = -((strHash(card.id + ":x") % 30) / 10); // -0.0 .. -2.9s
-  const ratingInfo = STORY_RATING_INFO[card.rating];
+  const ratingShort = t(`rating.info.${card.rating}.short`);
   // Anonymous viewers see NC-17 books in the bookshelf (the splash
   // endpoint surfaces every rating now), but tapping one reroutes
   // through the login prompt because the body is gated. Paint a
@@ -378,7 +382,9 @@ function StoryBook({
       className={`bookshelf-book ${lean}`}
       style={styleVars}
       tabIndex={0}
-      aria-label={`${card.title} by ${author}, ${ratingInfo.short}${isPulled ? " (tap again to open)" : ""}`}
+      aria-label={isPulled
+        ? t("bookshelf.bookAriaPulled", { title: card.title, author, rating: ratingShort })
+        : t("bookshelf.bookAria", { title: card.title, author, rating: ratingShort })}
     >
       <span className="float-wrap">
         <span className="book-3d">
@@ -401,13 +407,13 @@ function StoryBook({
               <span className="cover-meta">
                 <span className="cover-title font-action">{card.title}</span>
                 <span className="cover-author">{author}</span>
-                <span className="cover-rating" title={ratingInfo.short}>{card.rating}</span>
+                <span className="cover-rating" title={ratingShort}>{card.rating}</span>
               </span>
               {lockedForAnon ? (
                 <span
                   className="cover-lock"
                   aria-hidden
-                  title="Log in or register to read"
+                  title={t("loginToRead")}
                 >
                   🔒
                 </span>
@@ -432,6 +438,7 @@ function PlaceholderBook({
   isPulled,
   onTap,
 }: BookProps & { isPulled: boolean; onTap: () => void }) {
+  const { t } = useTranslation("scriptorium");
   // Mirrors StoryBook's structure exactly, same markup, same classes,
   // same chip slot. Only the text + click handler differ. Title is
   // intentionally short ("Your Story") so it lays out like a real
@@ -466,7 +473,7 @@ function PlaceholderBook({
       className={`bookshelf-book ${lean}`}
       style={styleVars}
       tabIndex={0}
-      aria-label={`Write your story, sign in or register${isPulled ? " (tap again to register)" : ""}`}
+      aria-label={isPulled ? t("bookshelf.placeholderAriaPulled") : t("bookshelf.placeholderAria")}
     >
       <span className="float-wrap">
         <span className="book-3d">
@@ -477,16 +484,16 @@ function PlaceholderBook({
                 <GlyphArt seed={`placeholder-${index}`} />
               </span>
               <span className="cover-meta">
-                <span className="cover-title font-action">Your Story</span>
-                <span className="cover-author">register</span>
-                <span className="cover-rating" title="Register or sign in to write">NEW</span>
+                <span className="cover-title font-action">{t("bookshelf.placeholderCoverTitle")}</span>
+                <span className="cover-author">{t("bookshelf.placeholderCoverAuthor")}</span>
+                <span className="cover-rating" title={t("bookshelf.placeholderChipTitle")}>{t("bookshelf.placeholderChip")}</span>
               </span>
             </span>
           </span>
           <span className="face pages" />
           <span className="face top-edge" />
           <span className="face spine">
-            <span className="spine-title font-action">Write Your Story</span>
+            <span className="spine-title font-action">{t("bookshelf.placeholderSpine")}</span>
           </span>
         </span>
       </span>

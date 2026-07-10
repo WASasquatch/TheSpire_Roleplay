@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
 import { useRulesHashHighlight } from "../../lib/rulesHashHighlight.js";
 import { useChat } from "../../state/store.js";
@@ -47,6 +48,7 @@ interface Props {
  * historical inserts.
  */
 export function RulesPage({ onBack }: Props) {
+  const { t } = useTranslation("servers");
   const [data, setData] = useState<RulesPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Apply the site's splash palette so this standalone public page matches the
@@ -61,12 +63,13 @@ export function RulesPage({ onBack }: Props) {
     let cancelled = false;
     fetch("/api/rules", { credentials: "include" })
       .then(async (r) => {
-        if (!r.ok) throw new Error(`status ${r.status}`);
+        if (!r.ok) throw new Error(t("shared.httpStatus", { status: r.status }));
         return r.json() as Promise<RulesPayload>;
       })
       .then((j) => { if (!cancelled) setData(j); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : t("shared.loadFailed")); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Set a sensible document title so a tab landed on the rules
@@ -74,9 +77,9 @@ export function RulesPage({ onBack }: Props) {
   // instead of inheriting whatever the previous SPA route set.
   useEffect(() => {
     const previous = document.title;
-    document.title = "Rules";
+    document.title = t("rules.title");
     return () => { document.title = previous; };
-  }, []);
+  }, [t]);
 
   // Sweep orphaned scoped <style> blocks on unmount (parity with bios).
   useEffect(() => () => sweepOrphanedUserBioStyles(), []);
@@ -97,13 +100,13 @@ export function RulesPage({ onBack }: Props) {
     >
       <div className="mx-auto flex max-w-3xl flex-col gap-4">
         <header className="flex items-baseline justify-between gap-2 border-b border-keep-border pb-3">
-          <h1 className="font-action text-2xl">Rules</h1>
+          <h1 className="font-action text-2xl">{t("rules.title")}</h1>
           <a
             href="/"
             onClick={handleBackClick}
             className="text-sm text-keep-muted hover:text-keep-action"
           >
-            ← Back
+            {t("rules.back")}
           </a>
         </header>
 
@@ -113,7 +116,7 @@ export function RulesPage({ onBack }: Props) {
               {error}
             </div>
           ) : !data ? (
-            <p className="italic text-keep-muted">Loading…</p>
+            <p className="italic text-keep-muted">{t("shared.loading")}</p>
           ) : (
             <div className="space-y-4">
               {data.securityNoticeHtml.trim() ? (
@@ -129,7 +132,7 @@ export function RulesPage({ onBack }: Props) {
                   dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(data.appRules) }}
                 />
               ) : (
-                <p className="italic text-keep-muted">No rules have been posted yet.</p>
+                <p className="italic text-keep-muted">{t("rules.none")}</p>
               )}
             </div>
           )}

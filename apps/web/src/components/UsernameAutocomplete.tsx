@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { AvatarCrop } from "@thekeep/shared";
 import { cropStyleFor } from "../lib/avatarCrop.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";
@@ -63,6 +64,7 @@ export function UsernameAutocomplete({
   placeholder?: string;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("common");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [highlightedIdx, setHighlightedIdx] = useState(0);
   const [open, setOpen] = useState(false);
@@ -200,7 +202,7 @@ export function UsernameAutocomplete({
                   {s.displayName}
                 </span>
                 {s.online ? (
-                  <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" title="online" />
+                  <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-emerald-500" title={t("presence.online")} />
                 ) : null}
               </button>
             </li>

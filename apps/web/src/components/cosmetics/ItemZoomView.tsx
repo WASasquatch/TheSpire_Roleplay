@@ -22,6 +22,7 @@
  * the look is consistent regardless of how the user got there.
  */
 import { useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 
 export interface ItemZoomEntry {
@@ -42,6 +43,7 @@ export function ItemZoomView({
   entry: ItemZoomEntry;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("common");
   // Calm-mode ease: this is a modal-like full-screen overlay (not the shared
   // Modal), so fade the backdrop in under Reduce Motion to match the modals.
   const reduceMotion = useReducedMotion();
@@ -57,7 +59,7 @@ export function ItemZoomView({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label={`${entry.name}, full view`}
+      aria-label={t("itemZoom.fullViewAria", { name: entry.name })}
       onClick={onClose}
       className={`fixed inset-0 z-[60] flex flex-col items-center justify-center gap-4 bg-black/85 p-6 backdrop-blur-sm${reduceMotion ? " tk-fade-in" : ""}`}
     >
@@ -90,7 +92,7 @@ export function ItemZoomView({
           <p className="mt-2 text-sm text-white/80">{entry.description}</p>
         ) : null}
         <p className="mt-3 text-[10px] uppercase tracking-widest text-white/50">
-          Tap anywhere or press Esc to close
+          {t("itemZoom.closeHint")}
         </p>
       </div>
     </div>

@@ -8,6 +8,7 @@
  */
 
 import { jsonOrThrow, readError, withIdentityQuery } from "./http.js";
+import { i18n } from "./i18n.js";
 
 export interface PoolView {
   scope: "user" | "character";
@@ -1933,39 +1934,39 @@ export function formatItemName(item: { name: string; namePlural: string | null }
  */
 export function formatLedgerReason(reason: string): string {
   switch (reason) {
-    case "message_say": return "Chat message";
-    case "message_action": return "Action / scene / NPC";
-    case "message_whisper": return "Whisper";
-    case "forum_topic": return "Forum topic";
-    case "forum_reply": return "Forum reply";
-    case "presence_ic": return "Presence (in-character)";
-    case "presence_ooc": return "Presence (OOC)";
-    case "currency_send_out": return "Sent Currency";
-    case "currency_send_in": return "Received Currency";
-    case "backfill_message_xp": return "Historical backfill";
-    case "admin_grant": return "Admin grant";
-    case "admin_revoke": return "Admin revoke";
-    case "character_deleted_currency_rollover": return "Rolled over from deleted character";
+    case "message_say": return i18n.t("common:ledger.reason.messageSay");
+    case "message_action": return i18n.t("common:ledger.reason.messageAction");
+    case "message_whisper": return i18n.t("common:ledger.reason.messageWhisper");
+    case "forum_topic": return i18n.t("common:ledger.reason.forumTopic");
+    case "forum_reply": return i18n.t("common:ledger.reason.forumReply");
+    case "presence_ic": return i18n.t("common:ledger.reason.presenceIc");
+    case "presence_ooc": return i18n.t("common:ledger.reason.presenceOoc");
+    case "currency_send_out": return i18n.t("common:ledger.reason.currencySendOut");
+    case "currency_send_in": return i18n.t("common:ledger.reason.currencySendIn");
+    case "backfill_message_xp": return i18n.t("common:ledger.reason.backfill");
+    case "admin_grant": return i18n.t("common:ledger.reason.adminGrant");
+    case "admin_revoke": return i18n.t("common:ledger.reason.adminRevoke");
+    case "character_deleted_currency_rollover": return i18n.t("common:ledger.reason.rollover");
     default:
       // Friendlier labels for the Flair purchase keys before the
       // generic `purchase_` fallback catches them. Flair keys ship
       // with `flair_` prefixes that read poorly in raw form
       // ("Purchase: flair_typing_phrase").
-      if (reason === "purchase_flair_profile_banner") return "Purchase: Custom Profile Banner";
-      if (reason === "purchase_flair_typing_phrase") return "Purchase: Custom Typing Phrase";
-      if (reason === "purchase_flair_profile_visitors") return "Purchase: Profile Visitor Counter";
-      if (reason === "purchase_flair_profile_marquee") return "Purchase: Profile Quote Marquee";
-      if (reason === "purchase_flair_reaction_sheet") return "Reaction sheet submission";
+      if (reason === "purchase_flair_profile_banner") return i18n.t("common:ledger.reason.flairProfileBanner");
+      if (reason === "purchase_flair_typing_phrase") return i18n.t("common:ledger.reason.flairTypingPhrase");
+      if (reason === "purchase_flair_profile_visitors") return i18n.t("common:ledger.reason.flairProfileVisitors");
+      if (reason === "purchase_flair_profile_marquee") return i18n.t("common:ledger.reason.flairProfileMarquee");
+      if (reason === "purchase_flair_reaction_sheet") return i18n.t("common:ledger.reason.reactionSheetSubmission");
       // Reaction submission refund (Phase 3). Two parallel reasons:
       // the debit at submission time, the credit-back on rejection.
       // The submission id is part of the suffix but not interesting
       // to the user, surface a clean label.
-      if (reason.startsWith("emoticon_submission_refund_")) return "Reaction sheet refund";
-      if (reason.startsWith("emoticon_submission_")) return "Reaction sheet submission";
-      if (reason.startsWith("purchase_")) return `Purchase: ${reason.slice("purchase_".length)}`;
-      if (reason.startsWith("freeform_border_purchase_")) return `Border purchase: ${reason.slice("freeform_border_purchase_".length)}`;
-      if (reason.startsWith("border_purchase_")) return `Border purchase: ${reason.slice("border_purchase_".length)}`;
-      if (reason.startsWith("item_purchase_")) return `Item purchase: ${reason.slice("item_purchase_".length)}`;
+      if (reason.startsWith("emoticon_submission_refund_")) return i18n.t("common:ledger.reason.reactionSheetRefund");
+      if (reason.startsWith("emoticon_submission_")) return i18n.t("common:ledger.reason.reactionSheetSubmission");
+      if (reason.startsWith("purchase_")) return i18n.t("common:ledger.reason.purchase", { item: reason.slice("purchase_".length) });
+      if (reason.startsWith("freeform_border_purchase_")) return i18n.t("common:ledger.reason.borderPurchase", { item: reason.slice("freeform_border_purchase_".length) });
+      if (reason.startsWith("border_purchase_")) return i18n.t("common:ledger.reason.borderPurchase", { item: reason.slice("border_purchase_".length) });
+      if (reason.startsWith("item_purchase_")) return i18n.t("common:ledger.reason.itemPurchase", { item: reason.slice("item_purchase_".length) });
       return reason;
   }
 }
@@ -1996,26 +1997,27 @@ export function formatLedgerEntry(entry: LedgerEntry, itemCatalog?: ReadonlyMap<
   // else "<name>s".
   const itemLabel = catRow
     ? (qty === 1 ? catRow.name : (catRow.namePlural ?? `${catRow.name}s`))
-    : meta.itemKey ?? "(unknown item)";
+    : meta.itemKey ?? i18n.t("common:ledger.unknownItem");
   const qtyPrefix = qty != null ? `${qty} × ` : "";
+  const item = `${qtyPrefix}${itemLabel}`;
 
   switch (entry.reason) {
     case "command_give":
       return meta.targetDisplayName
-        ? `Gave ${qtyPrefix}${itemLabel} to ${meta.targetDisplayName}`
-        : `Gave ${qtyPrefix}${itemLabel}`;
+        ? i18n.t("common:ledger.gaveTo", { item, name: meta.targetDisplayName })
+        : i18n.t("common:ledger.gave", { item });
     case "command_give_received":
       return meta.fromDisplayName
-        ? `Received ${qtyPrefix}${itemLabel} from ${meta.fromDisplayName}`
-        : `Received ${qtyPrefix}${itemLabel}`;
+        ? i18n.t("common:ledger.receivedFrom", { item, name: meta.fromDisplayName })
+        : i18n.t("common:ledger.received", { item });
     case "command_throw":
       return meta.targetDisplayName
-        ? `Threw ${qtyPrefix}${itemLabel} at ${meta.targetDisplayName}`
-        : `Threw ${qtyPrefix}${itemLabel}`;
+        ? i18n.t("common:ledger.threwAt", { item, name: meta.targetDisplayName })
+        : i18n.t("common:ledger.threw", { item });
     case "command_drop":
       return meta.targetDisplayName
-        ? `Dropped ${qtyPrefix}${itemLabel} on ${meta.targetDisplayName}`
-        : `Dropped ${qtyPrefix}${itemLabel}`;
+        ? i18n.t("common:ledger.droppedOn", { item, name: meta.targetDisplayName })
+        : i18n.t("common:ledger.dropped", { item });
     default:
       return formatLedgerReason(entry.reason);
   }

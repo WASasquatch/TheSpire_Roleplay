@@ -3,6 +3,8 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle
 import type { Server as IoServer } from "socket.io";
 import { roleRank, type ClientToServerEvents, type ServerToClientEvents } from "@thekeep/shared";
 import { hasPermission } from "../auth/permissions.js";
+import { ageUtc, isAdultUser, MAX_PLAUSIBLE_AGE } from "../auth/ageGate.js";
+import { isIsolatedBetween, isolationHiddenSetFor, isolationVisibleSql } from "../auth/ageIsolation.js";
 import { auditLog, characters, messages, sessions, userEarning, userIpLog, users } from "../db/schema.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import { recordAudit } from "../audit.js";
@@ -68,6 +70,12 @@ export async function registerUsersRoutes(
           eq(users.isPublic, true),
           eq(users.isNsfw, false),
           sql`${users.username} != 'system'`,
+          // Isolation (age plan, Phase 5): an isolated minor never draws an
+          // adult non-staff chip, and their name never lands on an adult's
+          // chip — the profile the chip opens is hidden for both anyway
+          // ("Not found"), so serving the name would be a leak plus a
+          // dead-end. No-op (undefined) for viewers isolation doesn't touch.
+          isolationVisibleSql(me, users.id),
         ))
         .orderBy(pick === "random" ? sql`RANDOM()` : desc(users.createdAt))
         .limit(1))[0];
@@ -83,6 +91,8 @@ export async function registerUsersRoutes(
         isNull(users.disabledAt),
         eq(characters.isPublic, true),
         eq(characters.isNsfw, false),
+        // Isolation: same rule keyed on the character's OWNER account.
+        isolationVisibleSql(me, characters.userId),
       ))
       .orderBy(pick === "random" ? sql`RANDOM()` : desc(characters.createdAt))
       .limit(1))[0];
@@ -305,6 +315,13 @@ export async function registerUsersRoutes(
         hideChatMessageCount: users.hideChatMessageCount,
         hideForumTopicCount: users.hideForumTopicCount,
         hideForumReplyCount: users.hideForumReplyCount,
+        // Age columns (age plan, Phase 5): make each row an
+        // IsolationSubject so the isolated-pair drop below runs
+        // in-memory against this one existing read. NEVER echoed into
+        // the response payload.
+        role: users.role,
+        birthdate: users.birthdate,
+        isolateFromAdults: users.isolateFromAdults,
       })
       .from(users)
       .where(sql`${users.id} IN (${sql.join(matchedUserIds.map((u) => sql`${u}`), sql`, `)})`);
@@ -401,9 +418,12 @@ export async function registerUsersRoutes(
     // directory + add-friend autocomplete. Blocks are rare, so post-filtering
     // the page (rather than threading NOT IN through both pagination regimes)
     // is acceptable; at worst a page returns slightly fewer than `limit`.
+    // Isolated pairs (age plan, Phase 5) drop on the same rule — the page
+    // rows are full users rows, so the pair predicate runs in-memory
+    // against data already in hand (no extra query).
     const blockedSet = await blockedUserIdsFor(db, me.id);
     const pageRowsRaw = sqlPaginated ? sorted : sorted.slice(offset, offset + limit);
-    const pageRows = blockedSet.size ? pageRowsRaw.filter((u) => !blockedSet.has(u.id)) : pageRowsRaw;
+    const pageRows = pageRowsRaw.filter((u) => !blockedSet.has(u.id) && !isIsolatedBetween(me, u));
     const page = pageRows.map((u) => {
       const rank = rankByUser.get(u.id) ?? null;
       return {
@@ -458,7 +478,8 @@ export async function registerUsersRoutes(
     // filtering it here is what makes ALL disabled accounts surface — not
     // just the ones that happened to land in the first page (the bug:
     // client-side filtering a username-ordered page missed disabled users
-    // past row `limit`).
+    // past row `limit`). `state=minor` (age plan Phase 4) is DB-backed the
+    // same way, so it also filters here.
     const stateFilter = (req.query.state ?? "").trim();
     const offset = Math.max(0, parseInt(req.query.offset ?? "0", 10) || 0);
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit ?? "100", 10) || 100));
@@ -519,6 +540,15 @@ export async function registerUsersRoutes(
           : undefined,
       // Server-side disabled-state filter (see note above).
       stateFilter === "disabled" ? isNotNull(users.disabledAt) : undefined,
+      // Server-side minor filter (age plan Phase 4). Text comparison is
+      // safe: birthdate is ISO YYYY-MM-DD, which sorts lexicographically
+      // as a date, and SQLite's date('now') is UTC — same date-only UTC
+      // rule ageGate.ts uses, so the boundary (adult ON the 18th
+      // birthday) matches the derived bracket exactly. NULL birthdates
+      // (legacy = adult) never match.
+      stateFilter === "minor"
+        ? sql`${users.birthdate} IS NOT NULL AND ${users.birthdate} > date('now', '-18 years')`
+        : undefined,
     );
 
     // Total count + page in two queries, was: SELECT all, sort in
@@ -545,6 +575,8 @@ export async function registerUsersRoutes(
         createdAt: users.createdAt,
         lastLoginAt: users.lastLoginAt,
         disabledAt: users.disabledAt,
+        birthdate: users.birthdate,
+        isolateFromAdults: users.isolateFromAdults,
       })
       .from(users)
       .where(whereExpr)
@@ -672,6 +704,19 @@ export async function registerUsersRoutes(
       lastLoginAt: u.lastLoginAt ? +u.lastLoginAt : null,
       disabled: u.disabledAt != null,
       disabledAt: u.disabledAt ? +u.disabledAt : null,
+      // Age context (age plan Phase 4). This directory — already gated
+      // `view_user_directory_secure` and already carrying email + IPs —
+      // is the ONE payload allowed to expose another user's birthdate.
+      // The bracket is derived here (never stored) so it's always in
+      // sync with the date: `legacy` = no date on record (pre-feature
+      // account, attested 18+ at signup, counts as adult everywhere).
+      birthdate: u.birthdate,
+      ageBracket: (u.birthdate == null
+        ? "legacy"
+        : isAdultUser(u) ? "adult" : "minor") as "adult" | "minor" | "legacy",
+      // Minor isolation flag, surfaced so support can see/clear it from
+      // the same editor (the flag is inert once the account is adult).
+      isolateFromAdults: u.isolateFromAdults,
       characters: (charsByUser.get(u.id) ?? []).map((c) => ({
         id: c.id,
         name: c.name,
@@ -696,6 +741,12 @@ export async function registerUsersRoutes(
    *     either.
    *   * `email` and `disabled` mutations are master-only, both are
    *     "damage" levers (account lockout, identity reassignment).
+   *   * `dob` + `isolateFromAdults` (age plan Phase 4) sit behind
+   *     `edit_user_dob`: birthdate corrections are audited
+   *     (`user_dob_update`) and an adult→minor correction force-logs the
+   *     target out so their sessions rebuild with the age gates; the
+   *     isolation flag is the support-side set/clear of the minor's own
+   *     toggle (audited `user_isolation_update`).
    *   * Promoting TO masteradmin or demoting FROM masteradmin is
    *     master-only by definition; a plain admin attempting either
    *     gets 403 so they can't escalate themselves through a chained
@@ -714,6 +765,13 @@ export async function registerUsersRoutes(
     const canEditEmail = await hasPermission(me, "edit_user_email", db);
     const canDisableEnable = (await hasPermission(me, "disable_user", db))
       && (await hasPermission(me, "enable_user", db));
+    // Age settings (age plan Phase 4). `edit_user_dob` covers BOTH the
+    // birthdate correction and the isolation set/clear: they are the two
+    // age-safety support levers, and splitting them across keys would
+    // let a basic-edit admin flip a minor's isolation without holding
+    // the age-corrections grant. There is deliberately no self-service
+    // path for either (decision #7).
+    const canEditDob = await hasPermission(me, "edit_user_dob", db);
     // Masteradmin promotion / demotion is hardcoded masteradmin-only
     // (per the plan's hardcoded-exceptions list), there is NO
     // catalog key for it, so a misclick on the matrix can't grant
@@ -743,6 +801,16 @@ export async function registerUsersRoutes(
       email: z.string().email().max(200).optional(),
       role: z.enum(["user", "trusted", "mod", "admin", "masteradmin"]).optional(),
       disabled: z.boolean().optional(),
+      // Date-of-birth correction (age plan Phase 4). Shape only here;
+      // calendar validity + bounds are checked below with `ageUtc`.
+      // Deliberately NOT nullable: legacy NULL means "pre-feature
+      // account, adult by attestation" and nothing may write NULL back.
+      dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      // Minor isolation set/clear for support cases ("only see members
+      // under 18 and staff"). Setting it ON requires the target to be a
+      // minor; clearing is always allowed (housekeeping on accounts that
+      // aged out with the flag still set).
+      isolateFromAdults: z.boolean().optional(),
     }).parse(req.body);
 
     // Per-field gates. Reject EARLY (before any write) so a half-
@@ -755,6 +823,32 @@ export async function registerUsersRoutes(
     }
     if (body.disabled !== undefined && !canDisableEnable) {
       reply.code(403); return { error: "missing permission: disable_user / enable_user" };
+    }
+    if ((body.dob !== undefined || body.isolateFromAdults !== undefined) && !canEditDob) {
+      reply.code(403); return { error: "missing permission: edit_user_dob" };
+    }
+    if (body.dob !== undefined) {
+      // Real-calendar + bounds check. `ageUtc` returns null for an
+      // impossible date (Feb 31), negative for a future one; the shared
+      // MAX_PLAUSIBLE_AGE ceiling (also enforced at both signup paths)
+      // catches century typos (1825 for 1985). No minimum-age floor on
+      // purpose: this is a CORRECTION path — the true date must always be
+      // storable, even under 13 (what happens to the account then is a
+      // policy call, not a validation one).
+      const age = ageUtc(body.dob);
+      if (age === null || age < 0 || age > MAX_PLAUSIBLE_AGE) {
+        reply.code(400); return { error: `dob must be a real past date (YYYY-MM-DD), at most ${MAX_PLAUSIBLE_AGE} years ago` };
+      }
+    }
+    if (body.isolateFromAdults === true) {
+      // Isolation is minor-only, judged against the EFFECTIVE birthdate
+      // (a dob correction and the isolation flag may arrive in the same
+      // patch — the support case "wrong date fixed, parent asked for
+      // isolation" — so validate against the date being written).
+      const effectiveBirthdate = body.dob !== undefined ? body.dob : target.birthdate;
+      if (isAdultUser({ birthdate: effectiveBirthdate })) {
+        reply.code(400); return { error: "isolation is only available for accounts under 18" };
+      }
     }
     // Role transitions that touch the masteradmin tier are
     // hardcoded masteradmin-only (per plan.md's hardcoded exceptions).
@@ -787,11 +881,23 @@ export async function registerUsersRoutes(
     if (body.email !== undefined) update.email = body.email;
     if (body.role !== undefined) update.role = body.role;
     if (body.disabled !== undefined) update.disabledAt = body.disabled ? new Date() : null;
+    if (body.dob !== undefined) update.birthdate = body.dob;
+    if (body.isolateFromAdults !== undefined) update.isolateFromAdults = body.isolateFromAdults;
     await db.update(users).set(update).where(eq(users.id, id));
 
     const justDisabled = body.disabled === true && target.disabledAt == null;
     const justEnabled = body.disabled === false && target.disabledAt != null;
     const roleChanged = body.role !== undefined && body.role !== target.role;
+    const dobChanged = body.dob !== undefined && body.dob !== target.birthdate;
+    // The downgrade rule (age plan Phase 4): a correction that turns an
+    // adult into a minor must force the target out, because `isAdult`
+    // rides the session/socket context from build time — a live adult
+    // session would otherwise keep passing every age gate until it
+    // happened to reconnect. The reverse (minor → adult) needs nothing:
+    // staying gated until the next login only fails closed.
+    const downgradedToMinor = dobChanged
+      && isAdultUser(target)
+      && !isAdultUser({ birthdate: body.dob! });
     if (justDisabled) {
       // Authoritative logout: revoke every session row AND drop live
       // sockets with the reason shown on the splash. The old emit-then-
@@ -801,6 +907,11 @@ export async function registerUsersRoutes(
       // users aren't logged out" bug.
       const { forceLogoutUser } = await import("../auth/session.js");
       await forceLogoutUser(io, db, id, "Your account has been disabled by an administrator.");
+    } else if (downgradedToMinor) {
+      // Same authoritative path the ban/disable flows use, so the stale
+      // adult sockets can't linger in 18+ rooms.
+      const { forceLogoutUser } = await import("../auth/session.js");
+      await forceLogoutUser(io, db, id, "Your date of birth was corrected by staff. Please sign in again.");
     } else if (roleChanged) {
       // Role changes keep their sessions (they should log straight back
       // in with refreshed permissions); just bounce the sockets. The
@@ -847,6 +958,47 @@ export async function registerUsersRoutes(
         targetUserId: id,
         metadata: { priorRole: target.role, nextRole: body.role },
       });
+    }
+    if (dobChanged) {
+      // Prior/next dates ride the metadata so a disputed correction can
+      // be reconstructed. The audit feed is admin-gated (same tier that
+      // holds `edit_user_dob`), so this stays within the §H PII circle.
+      await recordAudit(db, {
+        actorUserId: me.id,
+        action: "user_dob_update",
+        targetUserId: id,
+        metadata: {
+          priorBirthdate: target.birthdate,
+          nextBirthdate: body.dob,
+          forcedLogout: downgradedToMinor,
+        },
+      });
+    }
+    if (body.isolateFromAdults !== undefined && body.isolateFromAdults !== target.isolateFromAdults) {
+      await recordAudit(db, {
+        actorUserId: me.id,
+        action: "user_isolation_update",
+        targetUserId: id,
+        metadata: { enabled: body.isolateFromAdults },
+      });
+      // Make the admin-driven flip bind LIVE, mirroring the self-service
+      // toggle in PUT /me/profile (age plan Phase 5): patch the flag into
+      // the target's socket snapshots in place (emitFiltered's per-recipient
+      // check reads them) and repaint the userlists of every room the
+      // target is in. DB-read paths (backlog, lists, searches) see the new
+      // state immediately without this.
+      const sockets = await io.fetchSockets();
+      const targetRooms = new Set<string>();
+      for (const s of sockets) {
+        if ((s.data as { userId?: string }).userId !== id) continue;
+        const snapshot = (s.data as { user?: { isolateFromAdults?: boolean } }).user;
+        if (snapshot) snapshot.isolateFromAdults = body.isolateFromAdults;
+        for (const r of s.rooms) if (r.startsWith("room:")) targetRooms.add(r.slice(5));
+      }
+      if (targetRooms.size > 0) {
+        const { broadcastPresence } = await import("../realtime/broadcast.js");
+        for (const roomId of targetRooms) await broadcastPresence(io, db, roomId);
+      }
     }
 
     return { ok: true };
@@ -1182,8 +1334,14 @@ export async function registerUsersRoutes(
           sql`${loweredSpaceCanonical(users.username)} IN (${sql.join(canonicals.map((n) => sql`${n}`), sql`, `)})`,
         ),
       );
+    // Isolated-pair accounts (age plan, Phase 5): their mentions must not
+    // light up either, same invisibility rule as blocks. One bounded
+    // lookup over the match candidates; empty for non-isolating viewers.
+    const isolationHidden = await isolationHiddenSetFor(db, me, userMatches.map((u) => u.id));
     const valid = new Set(
-      userMatches.filter((u) => !blocked.has(u.id)).map((u) => canonicalizeNameForLookup(u.username)),
+      userMatches
+        .filter((u) => !blocked.has(u.id) && !isolationHidden.has(u.id))
+        .map((u) => canonicalizeNameForLookup(u.username)),
     );
 
     // Character names, match against any non-deleted character of
@@ -1206,7 +1364,10 @@ export async function registerUsersRoutes(
             sql`${loweredSpaceCanonical(characters.name)} IN (${sql.join(remaining.map((n) => sql`${n}`), sql`, `)})`,
           ),
         );
-      for (const c of charMatches) if (!blocked.has(c.ownerId)) valid.add(canonicalizeNameForLookup(c.name));
+      const charOwnerHidden = await isolationHiddenSetFor(db, me, charMatches.map((c) => c.ownerId));
+      for (const c of charMatches) {
+        if (!blocked.has(c.ownerId) && !charOwnerHidden.has(c.ownerId)) valid.add(canonicalizeNameForLookup(c.name));
+      }
     }
 
     return { valid: Array.from(valid) };
@@ -1260,7 +1421,9 @@ export async function registerUsersRoutes(
           isNull(users.disabledAt),
           sql`${users.username} != 'system'`,
         ));
-      for (const u of rows) if (!blocked.has(u.id)) resolved.push({ kind: "id", id: u.id, name: u.username });
+      // Isolated pairs (age plan, Phase 5): same no-name-leak rule as blocks.
+      const hidden = await isolationHiddenSetFor(db, me, rows.map((u) => u.id));
+      for (const u of rows) if (!blocked.has(u.id) && !hidden.has(u.id)) resolved.push({ kind: "id", id: u.id, name: u.username });
     }
 
     if (cidIds.length > 0) {
@@ -1273,7 +1436,8 @@ export async function registerUsersRoutes(
           isNull(characters.deletedAt),
           isNull(users.disabledAt),
         ));
-      for (const c of rows) if (!blocked.has(c.ownerId)) resolved.push({ kind: "cid", id: c.id, name: c.name });
+      const hidden = await isolationHiddenSetFor(db, me, rows.map((c) => c.ownerId));
+      for (const c of rows) if (!blocked.has(c.ownerId) && !hidden.has(c.ownerId)) resolved.push({ kind: "cid", id: c.id, name: c.name });
     }
 
     return { resolved };
@@ -1372,8 +1536,16 @@ export async function registerUsersRoutes(
     }
 
     // Blocked accounts (either direction) are invisible to the viewer, so
-    // they can't surface as DM / add-friend suggestions.
+    // they can't surface as DM / add-friend suggestions. Isolated pairs
+    // (age plan, Phase 5) hide on the same rule — one bounded lookup over
+    // both candidate lists.
     const blocked = await blockedUserIdsFor(db, me.id);
+    for (const hiddenId of await isolationHiddenSetFor(db, me, [
+      ...masterRows.map((u) => u.userId),
+      ...charRows.map((c) => c.userId),
+    ])) {
+      blocked.add(hiddenId);
+    }
 
     const identities: IdentityRow[] = [];
 

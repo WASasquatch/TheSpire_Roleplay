@@ -5,6 +5,7 @@ import type { CommandRegistry } from "../commands/registry.js";
 import { customCommandAliases, customCommands, titleKinds } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { hasPermission } from "../auth/permissions.js";
+import { parseAcceptLanguage, tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 /**
@@ -37,6 +38,13 @@ export async function registerCommandsRoutes(
 ): Promise<void> {
   app.get("/commands", async (req) => {
     const me = await getSessionUser(req, db);
+    // Recipient language for the doc PROSE (descriptions): the account pref
+    // when signed in, else Accept-Language (the Help modal is reachable
+    // pre-auth). Names / aliases / usage signatures are protocol and stay
+    // English (i18n plan §9); catalog misses fall back to the handler's
+    // own constant via defaultValue, so en output is byte-identical.
+    const locale = me?.locale ?? parseAcceptLanguage(req.headers["accept-language"]);
+    const docKey = (s: string): string => s.replace(/[.:]/g, "_");
     const builtins = registry.listCanonical();
     // Filter out commands the caller can't run. Anonymous viewers
     // (no session) drop every permission-gated command.
@@ -51,11 +59,15 @@ export async function registerCommandsRoutes(
       name: c.name,
       aliases: [...(c.aliases ?? [])],
       usage: c.usage ?? `/${c.name}`,
-      description: c.description ?? "",
+      description: c.description
+        ? tFor(locale, `commands:docs.${c.name}.description`, { defaultValue: c.description })
+        : "",
       subcommands: (c.subcommands ?? []).map((s) => ({
         verb: s.verb,
         usage: s.usage,
-        description: s.description,
+        description: tFor(locale, `commands:docs.${c.name}.sub.${docKey(s.verb)}`, {
+          defaultValue: s.description,
+        }),
         aliases: [...(s.aliases ?? [])],
       })),
       isCustom: false,
@@ -83,9 +95,11 @@ export async function registerCommandsRoutes(
       .orderBy(asc(titleKinds.slug));
     const kindSubsFor = (cmd: "request" | "dissolve"): SubcommandDocWire[] =>
       kinds.map((k) => {
+        // Kind labels are admin-authored catalog content (sent as written);
+        // only OUR flag words localize.
         const flags: string[] = [];
-        if (!k.symmetric) flags.push("asymmetric");
-        if (k.exclusive) flags.push("exclusive, one accepted at a time");
+        if (!k.symmetric) flags.push(tFor(locale, "commands:docs._flags.asymmetric"));
+        if (k.exclusive) flags.push(tFor(locale, "commands:docs._flags.exclusive"));
         const flagText = flags.length > 0 ? ` (${flags.join("; ")})` : "";
         return {
           verb: k.slug,
@@ -118,7 +132,9 @@ export async function registerCommandsRoutes(
       name: c.name,
       aliases: aliasesByCmd.get(c.id) ?? [],
       usage: `/${c.name} [args]`,
-      description: c.description ?? `(custom - ${c.kind})`,
+      // Admin-authored description passes through as written; only OUR
+      // placeholder fallback localizes.
+      description: c.description ?? tFor(locale, "commands:docs._custom", { kind: c.kind }),
       subcommands: [],
       isCustom: true,
       // Surfaced so the composer's `!name` palette can filter to just

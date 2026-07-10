@@ -6,9 +6,11 @@ import {
   CHARACTER_ATTRIBUTE_VALUE_MIN,
   STAT_FIELD_MAX,
   SITE_TOUR_VERSION,
+  SUPPORTED_LOCALES,
   TOURS,
   TOUR_IDS,
   parseTagList,
+  sanitizeLanguageTags,
   serializeTagList,
   CHAR_NAME_RX,
   normalizeCharName,
@@ -18,6 +20,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
+import { isAdultUser } from "../auth/ageGate.js";
 import { hasPermission } from "../auth/permissions.js";
 import { characterPortraits, characters, tourSeen, userPortraits, users } from "../db/schema.js";
 import { bioHtmlForEdit, sanitizeBio } from "../auth/html.js";
@@ -27,6 +30,7 @@ import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { broadcastPresence } from "../realtime/broadcast.js";
 import { eqNameInsensitive } from "../lib/nameLookup.js";
 import type { Db } from "../db/index.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -236,6 +240,13 @@ const masterUpdateBody = z.object({
   /** OOC-side counterpart of the character flag; same semantics. */
   includeAvatarInGallery: z.boolean().optional(),
   gender: z.enum(["male", "female", "nonbinary", "other", "undisclosed"]).optional(),
+  /**
+   * Profile language tags (migration 0342). Loosely-typed strings here;
+   * the route runs `sanitizeLanguageTags` (shared catalog whitelist +
+   * dedupe + LANGUAGE_TAG_MAX cap), so unknown keys are dropped rather
+   * than rejected. The z-side cap just bounds a pathological payload.
+   */
+  languages: z.array(z.string().max(16)).max(50).optional(),
   /** null = revert to system default */
   theme: themeSchema.nullable().optional(),
   /**
@@ -258,6 +269,13 @@ const masterUpdateBody = z.object({
    * the enum string so future tiers can be added without schema churn.
    */
   uiFontScale: z.enum(["small", "medium", "large", "xl"]).nullable().optional(),
+  /**
+   * UI language (migration 0338). Whitelisted against SUPPORTED_LOCALES so
+   * the column only ever holds a locale the catalog ships; null clears the
+   * preference back to "System default" (client auto-detect). Written by
+   * the language switcher, not the profile editor's save body.
+   */
+  locale: z.enum(SUPPORTED_LOCALES).nullable().optional(),
   notifyPref: z.enum(["off", "mentions", "all"]).optional(),
   /**
    * Per-event sound toggles (account-level, not per-character). Each
@@ -334,6 +352,19 @@ const masterUpdateBody = z.object({
   chatColor: hexColor.nullable().optional(),
   isPublic: z.boolean().optional(),
   isNsfw: z.boolean().optional(),
+  /**
+   * Adult soft preference "Hide 18+ content" (age plan Phase 0). Feeds the
+   * SOFT canSeeNsfw tier (listings/search/discovery). Anyone may set it —
+   * for minors it changes nothing (they can never see NSFW), so there's no
+   * reason to reject the write.
+   */
+  hideNsfw: z.boolean().optional(),
+  /**
+   * Minor isolation mode, "only see members under 18 and staff" (age plan
+   * Phase 5 groundwork). Accepted here so the settings toggle has a home;
+   * the HANDLER rejects it for adult accounts — the mode is minor-only.
+   */
+  isolateFromAdults: z.boolean().optional(),
   /** Master-profile public backdrop. Same shape as the character-level field. */
   publicProfileBgUrl: httpUrl.nullable().optional(),
   publicProfileBgMode: z.enum(["cover", "contain", "tile", "stretch"]).optional(),
@@ -359,12 +390,13 @@ async function checkBioCap(
   db: Db,
   reply: FastifyReply,
   bioHtml: string | undefined,
+  locale?: string | null,
 ): Promise<boolean> {
   if (bioHtml === undefined) return true;
   const { maxBioLength } = await getSettings(db);
   if (bioHtml.length > maxBioLength) {
     reply.code(413);
-    reply.send({ error: `bio is longer than the configured ${maxBioLength}-char limit` });
+    reply.send({ error: tFor(locale ?? null, "errors:server.characters.bioTooLong", { max: maxBioLength }) });
     return false;
   }
   return true;
@@ -386,7 +418,18 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       }
 
       const body = updateBody.parse(req.body);
-      if (!(await checkBioCap(db, reply, body.bioHtml))) return;
+      if (!(await checkBioCap(db, reply, body.bioHtml, me.locale))) return;
+      // FLAGGING content 18+ is an adult-only write (age plan Phase 1): an
+      // under-18 caller can neither see NSFW content nor produce it, and
+      // this also covers a minor holding edit_others_character. Only the
+      // false→true FLIP is rejected: the editor's save body always echoes
+      // the current flag back, so a minor whose profile a mod marked 18+
+      // must still be able to save (a true→true no-op), and clearing the
+      // flag only makes the profile more broadly safe.
+      if (body.isNsfw === true && !c.isNsfw && !me.isAdult) {
+        reply.code(400);
+        return { error: tFor(me.locale, "errors:server.characters.profileNsfwAdultsOnly") };
+      }
       // NSFW implies non-public to anonymous viewers (server enforces this in
       // the /profiles/:name route too, but normalizing on write keeps the row
       // self-consistent so admin queries don't need to special-case the
@@ -517,7 +560,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     const name = normalizeCharName(body.name);
     if (!CHAR_NAME_RX.test(name)) {
       reply.code(400);
-      return { error: "Character name must be 1-40 chars: letters, numbers, spaces, _ - '" };
+      return { error: tFor(me.locale, "errors:server.characters.nameRule") };
     }
 
     // Space-insensitive dup check, uses the same helper the friend /
@@ -538,7 +581,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       .limit(1))[0];
     if (existing) {
       reply.code(409);
-      return { error: `You already have a character named "${name}".` };
+      return { error: tFor(me.locale, "errors:server.characters.duplicateName", { name }) };
     }
 
     const countRows = await db
@@ -549,7 +592,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     const { maxCharactersPerUser } = await getSettings(db);
     if (count >= maxCharactersPerUser) {
       reply.code(429);
-      return { error: `Limit of ${maxCharactersPerUser} characters per account.` };
+      return { error: tFor(me.locale, "errors:server.characters.characterLimit", { max: maxCharactersPerUser }) };
     }
 
     const id = nanoid();
@@ -568,7 +611,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       // collision did.
       if (err instanceof Error && /unique/i.test(err.message)) {
         reply.code(409);
-        return { error: `You already have a character named "${name}".` };
+        return { error: tFor(me.locale, "errors:server.characters.duplicateName", { name }) };
       }
       throw err;
     }
@@ -696,6 +739,9 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       },
       includeAvatarInGallery: u.includeAvatarInGallery,
       gender: u.gender,
+      // Profile language tags (migration 0342), catalog keys in the
+      // owner's display order. Seeds the editor's picker.
+      languages: parseTagList(u.languages),
       chatColor: u.chatColor,
       awayMessage: u.awayMessage,
       activeCharacterId: u.activeCharacterId,
@@ -717,6 +763,10 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       // independently and applies them via CSS variables on <html>.
       uiFontFamily: u.uiFontFamily,
       uiFontScale: u.uiFontScale,
+      // Saved UI language (migration 0338). Null = "System default"; the
+      // client keeps its own detection in that case. Seeds the store +
+      // i18next on load so the account preference follows across devices.
+      locale: u.locale,
       notifyPref: u.notifyPref,
       soundDmEnabled: u.soundDmEnabled,
       soundChatEnabled: u.soundChatEnabled,
@@ -744,6 +794,17 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       role: u.role,
       isPublic: u.isPublic,
       isNsfw: u.isNsfw,
+      // Age context (age-restriction plan Phase 0). `isAdult` is derived
+      // fresh on every fetch (18th birthday graduates with no write) and
+      // is what all cosmetic client gating reads; `birthdate` is the
+      // owner's OWN date for the read-only settings row (never in anyone
+      // else's payload); `hideNsfw` is the adult "Hide 18+ content"
+      // preference; `isolateFromAdults` is the minor-only isolation
+      // toggle (inert for adults).
+      isAdult: isAdultUser(u),
+      birthdate: u.birthdate,
+      hideNsfw: u.hideNsfw,
+      isolateFromAdults: u.isolateFromAdults,
       // Public-profile backdrop image + display mode. Editor reads
       // these to seed its BG controls; viewer surfaces (the modal)
       // read them from `/profiles/:name` instead. Null URL = no
@@ -878,6 +939,11 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     let body;
     try { body = createPortraitBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
+    // Adult-only write (age plan Phase 1), same rule as the profile flag.
+    if (body.nsfw === true && !me.isAdult) {
+      reply.code(400);
+      return { error: tFor(me.locale, "errors:server.characters.imageNsfwAdultsOnly") };
+    }
 
     const countRows = await db
       .select({ n: sql<number>`count(*)` })
@@ -886,7 +952,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     const count = countRows[0]?.n ?? 0;
     if (count >= PORTRAIT_CAP_PER_CHARACTER) {
       reply.code(429);
-      return { error: `Limit of ${PORTRAIT_CAP_PER_CHARACTER} extra portraits per character.` };
+      return { error: tFor(me.locale, "errors:server.characters.portraitLimitCharacter", { max: PORTRAIT_CAP_PER_CHARACTER }) };
     }
 
     const id = nanoid();
@@ -932,6 +998,14 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         .where(eq(characterPortraits.id, req.params.portraitId))
         .limit(1))[0];
       if (!p || p.characterId !== c.id) { reply.code(404); return { error: "not found" }; }
+      // FLAGGING an image 18+ is an adult-only write (age plan Phase 1).
+      // Only the false→true flip is rejected so a client echoing the
+      // current flag alongside a label edit still saves for a minor whose
+      // portrait a mod marked (same posture as the profile-level flag).
+      if (body.nsfw === true && !p.nsfw && !me.isAdult) {
+        reply.code(400);
+        return { error: tFor(me.locale, "errors:server.characters.imageNsfwAdultsOnly") };
+      }
 
       await db
         .update(characterPortraits)
@@ -1001,6 +1075,11 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     let body;
     try { body = createPortraitBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
+    // Adult-only write (age plan Phase 1), same rule as the profile flag.
+    if (body.nsfw === true && !me.isAdult) {
+      reply.code(400);
+      return { error: tFor(me.locale, "errors:server.characters.imageNsfwAdultsOnly") };
+    }
 
     const countRows = await db
       .select({ n: sql<number>`count(*)` })
@@ -1009,7 +1088,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     const count = countRows[0]?.n ?? 0;
     if (count >= PORTRAIT_CAP_PER_CHARACTER) {
       reply.code(429);
-      return { error: `Limit of ${PORTRAIT_CAP_PER_CHARACTER} extra portraits per profile.` };
+      return { error: tFor(me.locale, "errors:server.characters.portraitLimitProfile", { max: PORTRAIT_CAP_PER_CHARACTER }) };
     }
 
     const id = nanoid();
@@ -1048,6 +1127,14 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         .where(eq(userPortraits.id, req.params.portraitId))
         .limit(1))[0];
       if (!p) { reply.code(404); return { error: "not found" }; }
+      // FLAGGING an image 18+ is an adult-only write (age plan Phase 1).
+      // Only the false→true flip is rejected so a client echoing the
+      // current flag alongside a label edit still saves for a minor whose
+      // portrait a mod marked (same posture as the profile-level flag).
+      if (body.nsfw === true && !p.nsfw && !me.isAdult) {
+        reply.code(400);
+        return { error: tFor(me.locale, "errors:server.characters.imageNsfwAdultsOnly") };
+      }
       // Owner edits freely; a moderator holding `edit_others_user` can also
       // patch someone else's master portrait (the use case is flagging a
       // gallery image NSFW from the profile modal). Mirrors how the
@@ -1139,6 +1226,23 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
     // need the current row to compute the resulting state when only one of
     // the two flags is in the patch.
     const current = (await db.select().from(users).where(eq(users.id, me.id)).limit(1))[0];
+    // Isolation mode is minor-only: reject the field outright for adult
+    // accounts (it would be a silent no-op — the enforcement predicate
+    // checks isMinor — but accepting it would let the UI imply a state
+    // that can't exist). Minors may set it either way.
+    if (body.isolateFromAdults !== undefined && current && isAdultUser(current)) {
+      reply.code(400);
+      return { error: tFor(me.locale, "errors:server.characters.minorOnlySetting") };
+    }
+    // FLAGGING the profile 18+ is an adult-only write (age plan Phase 1).
+    // Only the false→true flip is rejected: the editor's save body always
+    // echoes the current flag back, so a minor whose profile a mod marked
+    // 18+ must still be able to save (true→true no-op), and clearing the
+    // flag only makes the profile more broadly safe.
+    if (body.isNsfw === true && !(current?.isNsfw ?? false) && !me.isAdult) {
+      reply.code(400);
+      return { error: tFor(me.locale, "errors:server.characters.profileNsfwAdultsOnly") };
+    }
     const isNsfw = body.isNsfw ?? current?.isNsfw ?? false;
     const isPublic = isNsfw ? false : (body.isPublic ?? current?.isPublic ?? true);
     await db
@@ -1157,12 +1261,16 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
           ? { includeAvatarInGallery: body.includeAvatarInGallery }
           : {}),
         ...(body.gender !== undefined ? { gender: body.gender } : {}),
+        ...(body.languages !== undefined
+          ? { languages: serializeTagList(sanitizeLanguageTags(body.languages)) }
+          : {}),
         ...(body.theme !== undefined
           ? { themeJson: body.theme === null ? null : JSON.stringify(body.theme) }
           : {}),
         ...(body.styleKey !== undefined ? { styleKey: body.styleKey } : {}),
         ...(body.uiFontFamily !== undefined ? { uiFontFamily: body.uiFontFamily } : {}),
         ...(body.uiFontScale !== undefined ? { uiFontScale: body.uiFontScale } : {}),
+        ...(body.locale !== undefined ? { locale: body.locale } : {}),
         ...(body.notifyPref !== undefined ? { notifyPref: body.notifyPref } : {}),
         ...(body.soundDmEnabled !== undefined ? { soundDmEnabled: body.soundDmEnabled } : {}),
         ...(body.soundChatEnabled !== undefined ? { soundChatEnabled: body.soundChatEnabled } : {}),
@@ -1191,6 +1299,8 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         // absent leaves alone).
         ...(body.chatColor !== undefined ? { chatColor: body.chatColor } : {}),
         ...(body.isPublic !== undefined || body.isNsfw !== undefined ? { isPublic, isNsfw } : {}),
+        ...(body.hideNsfw !== undefined ? { hideNsfw: body.hideNsfw } : {}),
+        ...(body.isolateFromAdults !== undefined ? { isolateFromAdults: body.isolateFromAdults } : {}),
         ...(body.publicProfileBgUrl !== undefined
           ? { publicProfileBgUrl: body.publicProfileBgUrl }
           : {}),
@@ -1199,10 +1309,30 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
           : {}),
       })
       .where(eq(users.id, me.id));
+    // Isolation toggle flip (age plan, Phase 5): make it bind LIVE, the way
+    // notifyBlockChange does for a fresh block. Two halves:
+    //   1. Patch the flag into this user's live socket snapshots in place
+    //      (the incognito command's precedent) so the next emitFiltered /
+    //      isolationAmong evaluation sees the new state without waiting for
+    //      a reconnect or the next chat:input session refresh.
+    //   2. Fall through into the presence re-broadcast below so every
+    //      affected room's userlist repaints — the user and their hidden
+    //      counterparts vanish from (or return to) each other's lists.
+    const isolationFlipped = body.isolateFromAdults !== undefined
+      && !!current && body.isolateFromAdults !== current.isolateFromAdults;
+    if (isolationFlipped) {
+      const sockets = await io.fetchSockets();
+      for (const s of sockets) {
+        if ((s.data as { userId?: string }).userId !== me.id) continue;
+        const snapshot = (s.data as { user?: { isolateFromAdults?: boolean } }).user;
+        if (snapshot) snapshot.isolateFromAdults = body.isolateFromAdults!;
+      }
+    }
     if (
       body.chatColor !== undefined ||
       body.useRankAsUserlistIcon !== undefined ||
-      body.showRankInUserlist !== undefined
+      body.showRankInUserlist !== undefined ||
+      isolationFlipped
     ) {
       // Same userlist re-broadcast as the character PUT does, keeps
       // every viewer's occupant row in sync with the new metadata.

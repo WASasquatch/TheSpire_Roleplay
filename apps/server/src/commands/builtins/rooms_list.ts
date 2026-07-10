@@ -1,10 +1,13 @@
 import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
 import { messages, roomMembers, rooms } from "../../db/schema.js";
 import { listArchivedOwnedRooms } from "../../lib/archivedRooms.js";
+import { effectiveRoomNsfwWith, nsfwServerIds } from "../../lib/nsfwRooms.js";
+import { nsfwForumIds } from "../../forums/nsfw.js";
 import { setRoomCleared } from "../../lib/roomClears.js";
 import { formatDuration, parseDuration } from "../duration.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { areServersEnabled, getSettings } from "../../settings.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const CLEAR_CHUNK = 400; // keep each UPDATE under SQLite's bound-variable cap
@@ -44,12 +47,15 @@ export const listCommand: CommandHandler = {
   usage: "/list",
   description: "Show every public room (name + topic + member count).",
   async run(ctx) {
-    const allRooms = await ctx.db
+    let allRooms = await ctx.db
       .select({
         id: rooms.id,
         name: rooms.name,
         topic: rooms.topic,
         type: rooms.type,
+        isNsfw: rooms.isNsfw,
+        serverId: rooms.serverId,
+        forumId: rooms.forumId,
       })
       .from(rooms)
       // Archived rows hold a name reservation but no users; hide them
@@ -58,11 +64,24 @@ export const listCommand: CommandHandler = {
       .where(and(eq(rooms.type, "public"), isNull(rooms.archivedAt)))
       .orderBy(asc(rooms.name));
 
+    // HARD age gate (age plan, Phase 2): effectively-18+ rooms are hidden
+    // from minors entirely, matching the /rooms rail. Boards of an 18+
+    // FORUM count too: a board room isn't individually flagged when only
+    // its parent forum is, so the row-level flags alone can't see it
+    // (same reasoning as the /rooms route).
+    if (!ctx.user.isAdult) {
+      const nsfwServers = await nsfwServerIds(ctx.db);
+      const nsfwForums = await nsfwForumIds(ctx.db);
+      allRooms = allRooms.filter((r) =>
+        !effectiveRoomNsfwWith(r, nsfwServers)
+        && !(r.forumId && nsfwForums.has(r.forumId)));
+    }
+
     if (allRooms.length === 0) {
       ctx.socket.emit("ui:hint", {
         kind: "open-info-modal",
-        title: "Public rooms",
-        body: "No public rooms exist yet.",
+        title: tFor(ctx.user.locale, "commands:list.title"),
+        body: tFor(ctx.user.locale, "commands:list.empty"),
       });
       return;
     }
@@ -79,7 +98,7 @@ export const listCommand: CommandHandler = {
     });
     ctx.socket.emit("ui:hint", {
       kind: "open-info-modal",
-      title: `Public rooms (${allRooms.length})`,
+      title: tFor(ctx.user.locale, "commands:list.titleCount", { total: allRooms.length }),
       body: lines.join("\n"),
     });
   },
@@ -154,21 +173,21 @@ export const clearCommand: CommandHandler = {
     if (ms == null) {
       ctx.socket.emit("error:notice", {
         code: "BAD_DURATION",
-        message: "Bad duration. Use forms like 5m, 30m, 1h, 1h30m, 1d, or just /clear to clear your own view.",
+        message: tFor(ctx.user.locale, "commands:clear.badDuration"),
       });
       return;
     }
     if (!(await canModerateClear(ctx))) {
       ctx.socket.emit("error:notice", {
         code: "NO_PERMISSION",
-        message: "Only moderators can clear messages for everyone. Plain /clear hides earlier messages from your own view.",
+        message: tFor(ctx.user.locale, "commands:clear.noPermission"),
       });
       return;
     }
     const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
-    if (!room) { ctx.socket.emit("error:notice", { code: "NO_ROOM", message: "Room not found." }); return; }
+    if (!room) { ctx.socket.emit("error:notice", { code: "NO_ROOM", message: tFor(ctx.user.locale, "commands:shared.roomNotFound") }); return; }
     if (room.replyMode === "nested") {
-      ctx.socket.emit("error:notice", { code: "FORUM", message: "/clear <duration> isn't available in forum rooms. Remove topics individually there." });
+      ctx.socket.emit("error:notice", { code: "FORUM", message: tFor(ctx.user.locale, "commands:clear.forum") });
       return;
     }
 
@@ -188,7 +207,7 @@ export const clearCommand: CommandHandler = {
       ));
     const ids = doomed.map((r) => r.id);
     if (ids.length === 0) {
-      ctx.socket.emit("error:notice", { code: "CLEAR", message: `No messages in the last ${formatDuration(ms)} to hide.` });
+      ctx.socket.emit("error:notice", { code: "CLEAR", message: tFor(ctx.user.locale, "commands:clear.none", { duration: formatDuration(ms) }) });
       return;
     }
 
@@ -249,29 +268,44 @@ export const findCommand: CommandHandler = {
       // Usage hint is a single line, transient feedback, toast fits.
       ctx.socket.emit("error:notice", {
         code: "ROOM_FIND",
-        message: "Usage: /find <name> - search rooms by partial name.",
+        message: tFor(ctx.user.locale, "commands:find.usage"),
       });
       return;
     }
     const RESULT_CAP = 25;
-    const matches = await ctx.db
+    let matches = await ctx.db
       .select({
         id: rooms.id,
         name: rooms.name,
         topic: rooms.topic,
         type: rooms.type,
         archivedAt: rooms.archivedAt,
+        isNsfw: rooms.isNsfw,
+        serverId: rooms.serverId,
+        forumId: rooms.forumId,
       })
       .from(rooms)
       .where(sql`lower(${rooms.name}) LIKE ${"%" + needle.toLowerCase() + "%"}`)
       .orderBy(asc(rooms.name))
       .limit(RESULT_CAP + 1);
 
+    // HARD age gate: 18+ room names don't surface to minors even here
+    // (private names are fine to list, 18+ ones are not — decision #3
+    // hides the spaces entirely). Includes boards whose parent FORUM is
+    // 18+, which carry no room-level flag of their own.
+    if (!ctx.user.isAdult) {
+      const nsfwServers = await nsfwServerIds(ctx.db);
+      const nsfwForums = await nsfwForumIds(ctx.db);
+      matches = matches.filter((r) =>
+        !effectiveRoomNsfwWith(r, nsfwServers)
+        && !(r.forumId && nsfwForums.has(r.forumId)));
+    }
+
     if (matches.length === 0) {
       ctx.socket.emit("ui:hint", {
         kind: "open-info-modal",
-        title: `Rooms matching "${needle}"`,
-        body: `No rooms match "${needle}".`,
+        title: tFor(ctx.user.locale, "commands:find.title", { query: needle }),
+        body: tFor(ctx.user.locale, "commands:find.noMatch", { query: needle }),
       });
       return;
     }
@@ -290,8 +324,8 @@ export const findCommand: CommandHandler = {
 
     const lines = shown.map((r) => {
       const tags: string[] = [];
-      if (r.type === "private") tags.push("private");
-      if (r.archivedAt) tags.push("archived");
+      if (r.type === "private") tags.push(tFor(ctx.user.locale, "commands:find.tagPrivate"));
+      if (r.archivedAt) tags.push(tFor(ctx.user.locale, "commands:find.tagArchived"));
       const tagSuffix = tags.length > 0 ? ` · ${tags.join(" · ")}` : "";
       const topicPart = r.topic ? ` - ${r.topic}` : "";
       // Hide the "(0)" occupant count on archived rooms since it's
@@ -301,8 +335,8 @@ export const findCommand: CommandHandler = {
     });
 
     const title = truncated
-      ? `Rooms matching "${needle}" (first ${RESULT_CAP} of ${matches.length}+)`
-      : `Rooms matching "${needle}" (${shown.length})`;
+      ? tFor(ctx.user.locale, "commands:find.titleTruncated", { query: needle, cap: RESULT_CAP, total: matches.length })
+      : tFor(ctx.user.locale, "commands:find.titleCount", { query: needle, total: shown.length });
     ctx.socket.emit("ui:hint", {
       kind: "open-info-modal",
       title,

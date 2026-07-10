@@ -10,6 +10,7 @@
  * admin emailer sanitizes tiptap output before it reaches here).
  */
 import { escapeHtml } from "@thekeep/shared";
+import { tFor } from "../i18n.js";
 import type { SiteSettings } from "../settings.js";
 
 const ACCENT = "#7c5cff"; // Spire accent for buttons/links in email
@@ -46,6 +47,12 @@ export interface BrandedEmailOpts {
   unsubscribeUrl?: string;
   /** Category label for the unsubscribe line (e.g. "Newsletter"). */
   unsubscribeLabel?: string;
+  /**
+   * Recipient language for the layout's OWN chrome (the unsubscribe
+   * line). Heading/body/CTA/footnote arrive pre-localized by the caller;
+   * null/omitted renders English (i18n plan Phase 3).
+   */
+  locale?: string | null;
 }
 
 export function renderBrandedEmail(settings: SiteSettings, opts: BrandedEmailOpts): string {
@@ -68,9 +75,19 @@ export function renderBrandedEmail(settings: SiteSettings, opts: BrandedEmailOpt
     ? `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:#6b6678;">${esc(opts.footnote)}</p>`
     : "";
 
+  // The unsubscribe sentence is catalog-driven with the link as a single
+  // {{link}} interpolation (never concatenated fragments). Values are
+  // esc'd before t() — the server i18n interpolates with
+  // escapeValue:false — so en output is byte-identical to the former
+  // inline literal.
+  const unsubLink = opts.unsubscribeUrl
+    ? `<a href="${esc(opts.unsubscribeUrl)}" style="color:#9a96a6;">${tFor(opts.locale, "email:layout.unsubscribeAction")}</a>`
+    : "";
   const unsubBlock = opts.unsubscribeUrl
     ? `<p style="margin:8px 0 0;font-size:12px;line-height:1.5;color:#9a96a6;">
-         Don't want ${opts.unsubscribeLabel ? esc(opts.unsubscribeLabel) + " emails" : "these emails"}? <a href="${esc(opts.unsubscribeUrl)}" style="color:#9a96a6;">Unsubscribe</a>. This won't affect your other emails.
+         ${opts.unsubscribeLabel
+           ? tFor(opts.locale, "email:layout.unsubscribeLabeled", { label: esc(opts.unsubscribeLabel), link: unsubLink })
+           : tFor(opts.locale, "email:layout.unsubscribeGeneric", { link: unsubLink })}
        </p>`
     : "";
 

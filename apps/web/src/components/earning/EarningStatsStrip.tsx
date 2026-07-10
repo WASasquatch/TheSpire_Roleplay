@@ -28,8 +28,10 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useEarning, lookupRankTier, progressToNextTier } from "../../state/earning.js";
 import { useChat } from "../../state/store.js";
+import { formatNumber } from "../../lib/intlFormat.js";
 
 interface Props {
   /**
@@ -50,6 +52,7 @@ interface Burst {
 }
 
 export function EarningStatsStrip({ onOpenEarning, className }: Props) {
+  const { t } = useTranslation("earning");
   const snapshot = useEarning((s) => s.snapshot);
   const loading = useEarning((s) => s.loading);
   const error = useEarning((s) => s.error);
@@ -133,7 +136,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
   const pct = progress ? Math.round(progress.pct * 100) : 0;
   const rankLabel = rank
     ? `${rank.name}${tierRow ? ` ${tierRow.label}` : ""}`
-    : "Unranked";
+    : t("unranked");
   const xp = pool?.xp ?? 0;
   const currency = pool?.currency ?? 0;
 
@@ -142,10 +145,10 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
   // 401 or 500 used to silently render the same all-zeros UI as a
   // genuinely fresh account, with no signal which case you were in.
   const title = error
-    ? `Earning fetch failed: ${error}`
+    ? t("strip.fetchFailedTitle", { error })
     : loading && !snapshot
-      ? "Loading your Earning…"
-      : "Open your Earning, XP, Currency, ranks, cosmetics";
+      ? t("strip.loadingTitle")
+      : t("strip.openTitle");
 
   // Interactive only when a handler is supplied (desktop). Mobile renders a
   // plain read-out so the bar isn't a giant link.
@@ -192,12 +195,12 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
                 key={b.id}
                 className="earn-burst pointer-events-none absolute left-1/2 -top-5 -translate-x-1/2 whitespace-nowrap font-semibold text-keep-action"
               >
-                +{b.coinDelta.toLocaleString()}
+                +{formatNumber(b.coinDelta)}
               </span>
             ))}
         </span>
         <span className="font-semibold tabular-nums text-keep-text">
-          {currency.toLocaleString()}
+          {formatNumber(currency)}
         </span>
       </span>
       {/* Faint vertical divider between currency and XP bar. */}
@@ -215,7 +218,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
             burst can anchor directly over it, matching the
             coin-pouch placement on the left side. */}
         <span className="relative shrink-0 text-[10px] tabular-nums">
-          {xp.toLocaleString()} XP
+          {t("xpAmount", { amount: formatNumber(xp) })}
           {bursts
             .filter((b) => b.xpDelta > 0)
             .map((b) => (
@@ -223,7 +226,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
                 key={b.id}
                 className="earn-burst pointer-events-none absolute left-1/2 -top-5 -translate-x-1/2 whitespace-nowrap font-semibold text-keep-accent"
               >
-                +{b.xpDelta.toLocaleString()} XP
+                {t("xpAmount", { amount: `+${formatNumber(b.xpDelta)}` })}
               </span>
             ))}
         </span>
@@ -233,7 +236,7 @@ export function EarningStatsStrip({ onOpenEarning, className }: Props) {
           strip to see the underlying error message in the title. */}
       {error ? (
         <span
-          aria-label="Earning data failed to load"
+          aria-label={t("strip.errorDot")}
           className="ml-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-keep-accent"
         />
       ) : null}

@@ -8,6 +8,8 @@
  * from the click handler.
  */
 
+import { i18n } from "./i18n.js";
+
 const SW_URL = "/sw.js";
 
 export type PushState =
@@ -86,7 +88,7 @@ export async function enablePush(): Promise<PushState> {
   if (perm !== "granted") return "default";
 
   const reg = await ensureRegistered();
-  if (!reg) throw new Error("service worker registration failed");
+  if (!reg) throw new Error(i18n.t("errors:push.swRegistrationFailed"));
 
   // Reuse existing subscription if it already exists.
   let sub = await reg.pushManager.getSubscription();
@@ -94,7 +96,7 @@ export async function enablePush(): Promise<PushState> {
     const keyRes = await fetch("/push/vapid-key", { credentials: "include" });
     if (!keyRes.ok) {
       const j = await keyRes.json().catch(() => ({} as { error?: string }));
-      throw new Error(j.error ?? `vapid-key HTTP ${keyRes.status}`);
+      throw new Error(j.error ?? i18n.t("errors:push.vapidKeyHttp", { status: keyRes.status }));
     }
     const { publicKey } = (await keyRes.json()) as { publicKey: string };
     // applicationServerKey expects a BufferSource. Newer TS lib.dom narrows
@@ -120,7 +122,7 @@ export async function enablePush(): Promise<PushState> {
   });
   if (!subRes.ok) {
     const j = await subRes.json().catch(() => ({} as { error?: string }));
-    throw new Error(j.error ?? `subscribe HTTP ${subRes.status}`);
+    throw new Error(j.error ?? i18n.t("errors:push.subscribeHttp", { status: subRes.status }));
   }
   return "subscribed";
 }

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { StoryReportTargetKind } from "@thekeep/shared";
 
 /**
@@ -26,12 +27,13 @@ export function ScriptoriumReportButton({
   /** Smaller chip variant for inline use inside review cards. */
   compact?: boolean;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
 
   async function report() {
     if (busy || done) return;
-    const reason = window.prompt(`Why are you reporting this ${targetKind.replace("_", " ")}? (optional)`);
+    const reason = window.prompt(t("report.promptReason", { target: targetKind.replace("_", " ") }));
     // Cancel returns null; we still allow empty-string submissions.
     if (reason === null) return;
     setBusy(true);
@@ -68,7 +70,7 @@ export function ScriptoriumReportButton({
       className={`${baseClasses} ${sizeClasses} ${stateClasses}`}
     >
       <span aria-hidden>🚩</span>
-      <span className="ml-1">{done ? "Reported" : "Report"}</span>
+      <span className="ml-1">{done ? t("report.reported") : t("report.report")}</span>
     </button>
   );
 }

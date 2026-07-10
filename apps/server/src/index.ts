@@ -21,6 +21,11 @@ import { type FastifyReply, type FastifyRequest } from "fastify";
 import { and, eq, isNotNull, isNull, lte } from "drizzle-orm";
 import pino from "pino";
 import { db } from "./db/index.js";
+// i18n catalog (plan Phase 0): loads the shared locale files from disk at
+// boot so `tFor` is ready before any request lands. `parseAcceptLanguage`
+// resolves the splash-page language for logged-out visitors (plan §7).
+import { parseAcceptLanguage } from "./i18n.js";
+import { matchSupportedLocale } from "@thekeep/shared";
 import { createApp, createIo } from "./bootstrap.js";
 import { installHandshake } from "./handshake.js";
 import { wireSocketHandlers } from "./socketHandlers.js";
@@ -64,6 +69,7 @@ import { registerNavLinkRoutes } from "./routes/nav-links.js";
 import { startAnalyticsRollupScheduler } from "./analytics/rollup.js";
 import { ensureSystemSeeds, startJanitor } from "./seed.js";
 import { getSettings, areServersEnabled } from "./settings.js";
+import { minimumSignupAge } from "./auth/ageGate.js";
 import { googleConfigured } from "./auth/googleOauth.js";
 
 // In dev: server runs on 3001, Vite dev-server on 5173 with a proxy to 3001.
@@ -209,6 +215,22 @@ async function main() {
         requiresAuth: true,
       };
     }
+    // Age gate (age-restriction plan Phase 1): a signed-in viewer under 18
+    // never sees an 18+ profile. lookupProfile already withheld the payload
+    // (this `profile` is the hollow shell), so this branch is about handing
+    // the deep-link path the friendly stub verdict, not about hiding bytes.
+    // `ageRestricted` tells the client there is NO proceed path and no
+    // sign-in prompt, the viewer's age is what gates it, hence
+    // `requiresAuth: false`. Adults (hide preference or not) never hit this.
+    if (profile.profile.isNsfw && me && !me.isAdult) {
+      return {
+        private: true as const,
+        name: profile.kind === "master" ? profile.profile.username : profile.profile.name,
+        kind: profile.kind,
+        requiresAuth: false,
+        ageRestricted: true as const,
+      };
+    }
     return profile;
   });
 
@@ -319,6 +341,10 @@ async function main() {
       defaultThemeJson: s.defaultThemeJson,
       // Surface so the unauthenticated AuthGate can hide the Register tab.
       registrationOpen: s.registrationOpen,
+      // Current signup age floor (18, or 13 when allowMinorSignups is on).
+      // Cosmetic only — the register form's helper copy and the date
+      // input's `max` read it; the server re-validates on POST.
+      minimumSignupAge: minimumSignupAge(s),
       // Sanitized welcome message rendered above the splash login form. When an
       // active server is in context, its own welcome copy takes precedence;
       // otherwise (no active server, or the server set none) the global copy.
@@ -506,10 +532,13 @@ async function main() {
   // every client that was in a user-created room when the server
   // restarted has had a chance to reconnect and re-occupy it, but
   // not so long that the rooms tree drags around a dead room for
-  // half a session. Any non-system, non-archived room with zero
-  // live sockets at sweep time gets archived (its config row
-  // survives for resurrection on a fresh /create with the same
-  // name). Without this, a user-created room whose owner closed
+  // half a session. Any non-system, non-persistent, non-forum,
+  // non-archived room with zero live sockets at sweep time gets
+  // archived (its config row survives for resurrection on a fresh
+  // /create with the same name). Forum boards are exempt: chat joins
+  // into boards are refused for everyone, so a board can NEVER hold
+  // sockets — sweeping them archived every board 60s after each boot
+  // and stranded its topics. Without this, a user-created room whose owner closed
   // the tab AND never came back inside the idle-grace window, or
   // a room that was active when the server last shut down and
   // nobody returned to, would linger in the tree forever as a
@@ -531,7 +560,7 @@ async function main() {
         const candidates = await db
           .select({ id: rooms.id })
           .from(rooms)
-          .where(and(eq(rooms.isSystem, false), eq(rooms.persistent, false), isNull(rooms.archivedAt)));
+          .where(and(eq(rooms.isSystem, false), eq(rooms.persistent, false), isNull(rooms.forumId), isNull(rooms.archivedAt)));
         for (const r of candidates) {
           try { await expireIfEmpty(io, db, r.id); }
           catch { /* swallow, one bad row shouldn't stop the sweep */ }
@@ -701,15 +730,27 @@ async function main() {
       // (or anyone) parses it.
       const serveSplash = async (req: FastifyRequest, reply: FastifyReply) => {
         const nonce = generateCspNonce();
+        // Splash-page language (i18n plan §7): an explicit `?lang=` — the
+        // URL shape the hreflang alternates advertise — beats the
+        // Accept-Language pick; anything unknown/absent renders English,
+        // byte-identical to the pre-i18n output.
+        const langParam = (req.query as Record<string, unknown> | undefined)?.["lang"];
+        const locale =
+          matchSupportedLocale(typeof langParam === "string" ? langParam : null) ??
+          parseAcceptLanguage(req.headers["accept-language"]);
         const html = await renderSplashHtml(
           db,
           originFromRequest(req),
           req.url.split("?")[0] ?? "/",
           await getIndexHtml(),
           nonce,
+          locale,
         );
         reply.header("content-security-policy", buildCsp(nonce));
         reply.type("text/html; charset=utf-8");
+        // The rendered <title>/meta now vary on the negotiated language;
+        // tell shared caches so a revalidated copy can't cross languages.
+        reply.header("vary", "accept-language");
         // The SPA shell references content-hashed asset filenames that
         // change on every build. If we let browsers (or any intermediary
         // cache: ISP, corporate proxy, Fly's edge) hold onto an old copy

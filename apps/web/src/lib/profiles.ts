@@ -16,6 +16,8 @@
  * links and bookmarks all converge on a single form.
  */
 
+import { i18n } from "./i18n.js";
+
 /**
  * Master usernames allow NBSP (Alt+0160) as a "fake space" inside the
  * name. To keep the shareable URL readable, and to avoid the ugly
@@ -58,6 +60,14 @@ export interface PrivateProfileStub {
   kind: "master" | "character";
   /** True iff the viewer is anonymous and signing in would unlock access. */
   requiresAuth: boolean;
+  /**
+   * Set when the profile was withheld because it is marked 18+ and the
+   * viewer's account is under 18 (age-restriction plan Phase 1). Unlike a
+   * plain private stub, there is NO proceed path — the modal renders the
+   * "marked 18+" copy and no sign-in prompt (the viewer is already
+   * signed in; their age is what gates it).
+   */
+  ageRestricted?: true;
 }
 
 /** Returns the username slice of /p/<username>, or null if the URL isn't a profile link. */
@@ -130,7 +140,7 @@ export async function reportProfile(
     }),
   });
   if (!r.ok) {
-    let msg = `Report failed (${r.status})`;
+    let msg = i18n.t("errors:reportFailed", { status: r.status });
     try { const j = (await r.json()) as { error?: string }; if (j?.error) msg = j.error; } catch { /* non-JSON */ }
     throw new Error(msg);
   }

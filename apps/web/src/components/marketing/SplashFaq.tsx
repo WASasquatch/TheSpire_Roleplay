@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import { ChevronDown, HelpCircle } from "lucide-react";
 import { DEFAULT_FAQS } from "@thekeep/shared";
 import { SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
@@ -14,6 +15,7 @@ import { SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
  * voice) so they read cleanly and stay in sync with the seeded Markdown source.
  */
 export function SplashFaq({ onNavigate }: { onNavigate: (path: string) => void }) {
+  const { t } = useTranslation("marketing");
   function go(e: React.MouseEvent, path: string) {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
     e.preventDefault();
@@ -27,12 +29,12 @@ export function SplashFaq({ onNavigate }: { onNavigate: (path: string) => void }
   const faqColumns = [DEFAULT_FAQS.slice(0, mid), DEFAULT_FAQS.slice(mid)];
   return (
     <section
-      aria-label="Frequently asked questions"
+      aria-label={t("splashFaq.title")}
       className={`rounded-md border border-keep-border/50 bg-keep-panel/30 p-5 sm:p-6 ${SPLASH_PANEL_HOVER}`}
     >
       <div className="mb-4 flex items-center gap-2">
         <HelpCircle className="h-5 w-5 shrink-0 text-keep-accent" aria-hidden />
-        <h2 className="font-action text-xl text-keep-text sm:text-2xl">Frequently asked questions</h2>
+        <h2 className="font-action text-xl text-keep-text sm:text-2xl">{t("splashFaq.title")}</h2>
       </div>
       <div className="grid items-start gap-2.5 sm:grid-cols-2">
         {faqColumns.map((col, ci) => (
@@ -56,15 +58,17 @@ export function SplashFaq({ onNavigate }: { onNavigate: (path: string) => void }
         ))}
       </div>
       <p className="mt-4 text-sm text-keep-muted lg:text-base">
-        Have another question?{" "}
-        <a
-          href="/faqs"
-          onClick={(e) => go(e, "/faqs")}
-          className="text-keep-text/80 underline underline-offset-4 hover:text-keep-action"
-        >
-          Read the full FAQ
-        </a>
-        .
+        <Trans t={t} i18nKey="splashFaq.moreQuestion">
+          {"Have another question? "}
+          <a
+            href="/faqs"
+            onClick={(e) => go(e, "/faqs")}
+            className="text-keep-text/80 underline underline-offset-4 hover:text-keep-action"
+          >
+            Read the full FAQ
+          </a>
+          {"."}
+        </Trans>
       </p>
     </section>
   );

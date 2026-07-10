@@ -1,4 +1,5 @@
 import type { ArchivedRoomBrief, RoomInfo } from "@thekeep/shared";
+import { i18n } from "./i18n.js";
 
 /**
  * The caller's archived rooms (rooms they own that auto-parked once everyone
@@ -8,7 +9,7 @@ import type { ArchivedRoomBrief, RoomInfo } from "@thekeep/shared";
  */
 export async function fetchArchivedRooms(): Promise<ArchivedRoomBrief[]> {
   const r = await fetch("/rooms/mine/archived", { credentials: "include" });
-  if (!r.ok) throw new Error(`Couldn't load your archived rooms (${r.status}).`);
+  if (!r.ok) throw new Error(i18n.t("errors:rooms.archivedLoad", { status: r.status }));
   const j = (await r.json()) as { rooms: ArchivedRoomBrief[] };
   return j.rooms;
 }
@@ -23,7 +24,7 @@ export async function hideArchivedRoom(roomId: string): Promise<void> {
     method: "POST",
     credentials: "include",
   });
-  if (!r.ok) throw new Error(`Couldn't hide that room (${r.status}).`);
+  if (!r.ok) throw new Error(i18n.t("errors:rooms.hideFailed", { status: r.status }));
 }
 
 /**
@@ -34,7 +35,7 @@ export async function hideArchivedRoom(roomId: string): Promise<void> {
  */
 export async function fetchRoomInfo(roomId: string): Promise<RoomInfo> {
   const r = await fetch(`/rooms/${encodeURIComponent(roomId)}/info`, { credentials: "include" });
-  if (!r.ok) throw new Error(`Couldn't load room info (${r.status}).`);
+  if (!r.ok) throw new Error(i18n.t("errors:rooms.infoLoad", { status: r.status }));
   const j = (await r.json()) as { info: RoomInfo };
   return j.info;
 }

@@ -5,6 +5,7 @@
  * tokens into clickable chips in the viewer.
  */
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorldEntityLight } from "@thekeep/shared";
 
 export interface LinkTarget {
@@ -28,6 +29,7 @@ export function buildLinkTargets(
 }
 
 export function EntryLinkPicker({ targets, onPick }: { targets: LinkTarget[]; onPick: (token: string) => void }) {
+  const { t } = useTranslation("worlds");
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const filtered = useMemo(() => {
@@ -44,9 +46,9 @@ export function EntryLinkPicker({ targets, onPick }: { targets: LinkTarget[]; on
         type="button"
         onClick={() => setOpen(true)}
         className="rounded border border-keep-rule px-2 py-0.5 text-[11px] text-keep-muted hover:bg-keep-banner"
-        title="Insert a link to a Location / NPC / Item / Faction / Lore page"
+        title={t("linkPicker.buttonTitle")}
       >
-        + Link entry
+        {t("linkPicker.button")}
       </button>
     );
   }
@@ -57,13 +59,13 @@ export function EntryLinkPicker({ targets, onPick }: { targets: LinkTarget[]; on
           autoFocus
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search entries…"
+          placeholder={t("linkPicker.searchPlaceholder")}
           className="flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
         />
-        <button type="button" onClick={() => { setOpen(false); setQ(""); }} className="rounded border border-keep-rule px-2 py-1 text-[11px] text-keep-muted hover:bg-keep-banner">Close</button>
+        <button type="button" onClick={() => { setOpen(false); setQ(""); }} className="rounded border border-keep-rule px-2 py-1 text-[11px] text-keep-muted hover:bg-keep-banner">{t("common:close")}</button>
       </div>
       {filtered.length === 0 ? (
-        <p className="px-1 py-2 text-xs italic text-keep-muted">No matching entries.</p>
+        <p className="px-1 py-2 text-xs italic text-keep-muted">{t("linkPicker.noMatches")}</p>
       ) : (
         <ul className="max-h-48 overflow-y-auto">
           {filtered.map((t) => (

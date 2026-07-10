@@ -4,6 +4,7 @@ import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared
 import { users } from "../../db/schema.js";
 import type { Db } from "../../db/index.js";
 import type { SessionUser } from "../../commands/types.js";
+import { tFor } from "../../i18n.js";
 import { socketsForUser } from "../presence.js";
 import { broadcastPresence } from "./presence.js";
 
@@ -111,7 +112,7 @@ export async function exitIncognitoOnCharSwitch(
     // Tell the mod plainly why they're visible again.
     socket.emit("error:notice", {
       code: "INCOGNITO_OFF",
-      message: "You switched characters, so you're no longer incognito.",
+      message: tFor(user.locale, "errors:server.realtime.incognitoOff"),
     });
     // Reappear consistently in every room the account is in (mirrors the
     // command's all-rooms refresh, not just the room the switch happened in).

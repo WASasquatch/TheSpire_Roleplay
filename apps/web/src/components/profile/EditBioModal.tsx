@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Code2, Paintbrush2 } from "lucide-react";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
+import { formatNumber } from "../../lib/intlFormat.js";
 import { useChat } from "../../state/store.js";
 
 // Same lazy GrapesJS designer the profile editor uses. Heavy, so it only
@@ -41,6 +43,7 @@ export function EditBioModal({
   onSave: (bioHtml: string) => Promise<void>;
   onClose: () => void;
 }): React.JSX.Element {
+  const { t } = useTranslation("profile");
   const [bioHtml, setBioHtml] = useState(initialBio);
   const [bioMode, setBioMode] = useState<"source" | "designer">("designer");
   const [saving, setSaving] = useState(false);
@@ -69,7 +72,7 @@ export function EditBioModal({
       await onSave(bioHtml);
       onClose();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Save failed.");
+      setErr(e instanceof Error ? e.message : t("errors:saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -84,15 +87,15 @@ export function EditBioModal({
         {/* Header */}
         <div className="flex items-center justify-between gap-3 border-b border-keep-rule px-4 py-2">
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-keep-text">Edit Bio</div>
+            <div className="truncate text-sm font-semibold text-keep-text">{t("editBio.title")}</div>
             <div className="truncate text-xs text-keep-muted">{targetLabel}</div>
           </div>
           <div className="flex items-center gap-2">
             {designerAvailable ? (
               <div className="inline-flex items-center gap-1 rounded-lg border border-keep-rule bg-keep-bg/60 p-1">
                 {([
-                  { m: "designer", label: "Designer", Icon: Paintbrush2 },
-                  { m: "source", label: "Source", Icon: Code2 },
+                  { m: "designer", label: t("bioMode.designer"), Icon: Paintbrush2 },
+                  { m: "source", label: t("bioMode.source"), Icon: Code2 },
                 ] as const).map(({ m, label, Icon }) => (
                   <button
                     key={m}
@@ -114,7 +117,7 @@ export function EditBioModal({
             <button
               type="button"
               onClick={onClose}
-              aria-label="Close"
+              aria-label={t("common:close")}
               className="flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-base text-keep-text hover:bg-keep-banner"
             >
               ✕
@@ -127,7 +130,7 @@ export function EditBioModal({
           {effectiveMode === "designer" ? (
             <div className="min-h-0 flex-1 overflow-hidden rounded border border-keep-rule">
               <Suspense
-                fallback={<div className="flex h-full items-center justify-center text-xs italic text-keep-muted">Loading the designer…</div>}
+                fallback={<div className="flex h-full items-center justify-center text-xs italic text-keep-muted">{t("bioMode.loadingDesigner")}</div>}
               >
                 <ProfileDesigner value={bioHtml} onChange={setBioHtml} />
               </Suspense>
@@ -137,11 +140,11 @@ export function EditBioModal({
               value={bioHtml}
               onChange={(e) => setBioHtml(e.target.value)}
               className="min-h-0 w-full flex-1 resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs outline-none focus:border-keep-action"
-              placeholder="<p>Bio HTML…</p>"
+              placeholder={t("editBio.sourcePlaceholder")}
             />
           )}
           <div className={`mt-1 text-right text-[10px] tabular-nums ${tooLong ? "text-[#e06070]" : "text-keep-muted"}`}>
-            {bioHtml.length.toLocaleString()} / {maxBioLength.toLocaleString()}
+            {formatNumber(bioHtml.length)} / {formatNumber(maxBioLength)}
           </div>
           {err ? <div className="mt-1 text-xs text-[#e06070]">{err}</div> : null}
         </div>
@@ -153,7 +156,7 @@ export function EditBioModal({
             onClick={onClose}
             className="rounded border border-keep-rule bg-keep-panel px-3 py-1.5 text-xs text-keep-text hover:bg-keep-banner"
           >
-            Cancel
+            {t("common:cancel")}
           </button>
           <button
             type="button"
@@ -161,7 +164,7 @@ export function EditBioModal({
             disabled={saving || tooLong}
             className="rounded border border-keep-action/80 bg-keep-action px-3 py-1.5 text-xs font-semibold text-keep-bg disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? "Saving…" : "Save Bio"}
+            {saving ? t("common:saving") : t("editBio.saveBio")}
           </button>
         </div>
       </div>

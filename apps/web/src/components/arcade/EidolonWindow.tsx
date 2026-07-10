@@ -15,6 +15,7 @@
  * inline window to a blurred frame and produced the "blank page" on phones.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal } from "../cosmetics/Modal";
 import { ensureInjectedStyle } from "../../lib/injectStyle";
 import { EidolonTamer } from "./EidolonTamer";
@@ -65,6 +66,7 @@ export function EidolonWindow({ characterId, onClose }: { characterId: string | 
   // an unstyled in-flow blob (the "blank page / no window" report); dev has no
   // CSP so it looked fine.
   useEffect(() => { ensureInjectedStyle("eidolon-window-css", WINDOW_CSS); }, []);
+  const { t } = useTranslation("arcade");
   const mobile = useIsMobile();
   const [pos, setPos] = useState<Pos>(loadPos);
   const posRef = useRef(pos); posRef.current = pos;
@@ -109,8 +111,8 @@ export function EidolonWindow({ characterId, onClose }: { characterId: string | 
       <Modal onClose={onClose} variant="mobile-fullscreen" zIndex={50}>
         <div className="ei-window-m" onClick={(e) => e.stopPropagation()}>
           <div className="ei-window-bar ei-window-bar--static">
-            <span className="ei-window-title">🥚 Eidolon Tamer</span>
-            <button className="ei-window-x" onClick={onClose} aria-label="Close">✕</button>
+            <span className="ei-window-title">{t("arcade.eidolon.windowTitle")}</span>
+            <button className="ei-window-x" onClick={onClose} aria-label={t("common:close")}>✕</button>
           </div>
           <div className="ei-window-body">
             <EidolonTamer characterId={characterId} />
@@ -124,8 +126,8 @@ export function EidolonWindow({ characterId, onClose }: { characterId: string | 
   return (
     <div ref={winRef} className="ei-window" style={{ left: pos.x, top: pos.y }}>
       <div className="ei-window-bar" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
-        <span className="ei-window-title">🥚 Eidolon Tamer</span>
-        <button className="ei-window-x" onClick={onClose} aria-label="Close" onPointerDown={(e) => e.stopPropagation()}>✕</button>
+        <span className="ei-window-title">{t("arcade.eidolon.windowTitle")}</span>
+        <button className="ei-window-x" onClick={onClose} aria-label={t("common:close")} onPointerDown={(e) => e.stopPropagation()}>✕</button>
       </div>
       <div className="ei-window-body">
         <EidolonTamer characterId={characterId} />

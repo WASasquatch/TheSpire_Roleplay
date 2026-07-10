@@ -31,6 +31,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type {
   BackupOperationStatus,
   BackupSnapshotEntry,
@@ -38,6 +39,8 @@ import type {
   ContentImportDiffEntry,
   FullBackupInspectReport,
 } from "@thekeep/shared";
+import { i18n } from "../../lib/i18n.js";
+import { formatDateTime, formatNumber } from "../../lib/intlFormat.js";
 
 interface CreateResponse extends BackupSnapshotEntry { /* same shape */ }
 interface ContentImportResult {
@@ -56,6 +59,7 @@ interface FullImportResult {
 }
 
 export function AdminBackupsTab() {
+  const { t } = useTranslation("admin");
   const [snapshots, setSnapshots] = useState<BackupSnapshotEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -72,7 +76,7 @@ export function AdminBackupsTab() {
     setError(null);
     try {
       const res = await fetch("/admin/backup/snapshots", { credentials: "include" });
-      if (!res.ok) throw new Error(`list failed: ${res.status}`);
+      if (!res.ok) throw new Error(t("backups.listFailedStatus", { status: res.status }));
       const body = (await res.json()) as { snapshots: BackupSnapshotEntry[] };
       setSnapshots(body.snapshots);
     } catch (e) {
@@ -80,7 +84,7 @@ export function AdminBackupsTab() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -133,8 +137,7 @@ export function AdminBackupsTab() {
 
   const createSnapshot = useCallback(
     async (kind: "full" | "content") => {
-      const label = kind === "full" ? "full DB" : "content";
-      setBusy(`Starting ${label} snapshot…`);
+      setBusy(kind === "full" ? t("backups.startingFull") : t("backups.startingContent"));
       setError(null);
       try {
         const res = await fetch(`/admin/backup/${kind}/create`, {
@@ -149,14 +152,14 @@ export function AdminBackupsTab() {
           const op = body.busy?.currentOperation;
           setError(
             op
-              ? `Another backup operation is in progress (${op.kind}: ${op.message}). Wait for it to finish before starting another.`
-              : "Server is busy with another backup operation. Try again in a moment.",
+              ? t("backups.busyDetailed", { kind: op.kind, message: op.message })
+              : t("backups.busyGeneric"),
           );
           return;
         }
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-          throw new Error(body.message || body.error || `create failed: ${res.status}`);
+          throw new Error(body.message || body.error || t("backups.createFailedStatus", { status: res.status }));
         }
         const entry = (await res.json()) as CreateResponse;
         // Immediately trigger a browser download of the just-created
@@ -173,7 +176,7 @@ export function AdminBackupsTab() {
         setBusy(null);
       }
     },
-    [refresh],
+    [refresh, t],
   );
 
   /* ---------- delete ---------- */
@@ -181,8 +184,8 @@ export function AdminBackupsTab() {
   const removeSnapshot = useCallback(
     async (entry: BackupSnapshotEntry) => {
       // eslint-disable-next-line no-alert
-      if (!window.confirm(`Delete snapshot "${entry.filename}"? This can't be undone.`)) return;
-      setBusy(`Deleting ${entry.filename}…`);
+      if (!window.confirm(t("backups.deleteSnapshotConfirm", { filename: entry.filename }))) return;
+      setBusy(t("backups.deletingFile", { filename: entry.filename }));
       try {
         const res = await fetch(`/admin/backup/snapshots/${encodeURIComponent(entry.id)}`, {
           method: "DELETE",
@@ -190,7 +193,7 @@ export function AdminBackupsTab() {
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(body.error || `delete failed: ${res.status}`);
+          throw new Error(body.error || t("backups.deleteFailedStatus", { status: res.status }));
         }
         await refresh();
       } catch (e) {
@@ -199,19 +202,15 @@ export function AdminBackupsTab() {
         setBusy(null);
       }
     },
-    [refresh],
+    [refresh, t],
   );
 
   return (
     <div className="space-y-4">
       <header className="space-y-1">
-        <h3 className="font-action text-lg">Backups</h3>
+        <h3 className="font-action text-lg">{t("backups.title")}</h3>
         <p className="text-xs text-keep-muted">
-          Snapshot the database (full file) or the admin-customizable content (items, name styles, ranks, border frames,
-          custom commands, settings, system rooms + worlds). Every snapshot is a ZIP that bundles the database payload
-          AND every uploaded image (emoticon sheets, logos, rank sigil + border PNGs), so restoring on a fresh host
-          comes up with everything intact. Each destructive import auto-saves a pre-restore safety snapshot so undo is
-          one click away.
+          {t("backups.description")}
         </p>
       </header>
 
@@ -276,13 +275,14 @@ function FullDbPanel({
   onBusy: (msg: string | null) => void;
   busy: boolean;
 }) {
+  const { t } = useTranslation("admin");
   const [report, setReport] = useState<(FullBackupInspectReport & { __file?: File }) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    onBusy("Uploading + inspecting archive…");
+    onBusy(t("backups.uploadingInspecting"));
     onError("");
     try {
       const res = await fetch("/admin/backup/full/inspect", {
@@ -294,13 +294,13 @@ function FullDbPanel({
       if (res.status === 409) {
         const body = (await res.json().catch(() => ({}))) as { busy?: BackupOperationStatus };
         if (body.busy?.currentOperation) {
-          onError(`Another backup operation is in progress (${body.busy.currentOperation.kind}). Wait for it to finish.`);
+          onError(t("backups.busyOtherOp", { kind: body.busy.currentOperation.kind }));
           return;
         }
       }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error || `inspect failed: ${res.status}`);
+        throw new Error(body.error || t("backups.inspectFailedStatus", { status: res.status }));
       }
       const r = (await res.json()) as FullBackupInspectReport;
       setReport({ ...r, __file: f });
@@ -316,20 +316,20 @@ function FullDbPanel({
   async function commitImport() {
     if (!report || !report.__file) return;
     if (!report.ok) {
-      onError("Cannot import, file failed validation.");
+      onError(t("backups.cannotImportInvalid"));
       return;
     }
     if (report.missingMigrations.length > 0) {
       onError(
-        `Cannot import, this install is missing ${report.missingMigrations.length} migration(s) the backup expects. Deploy first.`,
+        t("backups.cannotImportMissingMigrations", { count: report.missingMigrations.length }),
       );
       return;
     }
     // eslint-disable-next-line no-alert
     if (!window.confirm(
-      "Replacing the live database AND the uploads tree with this backup will sign every user out, drop unsaved changes, and restart the server. A pre-restore safety snapshot will be taken automatically. Continue?",
+      t("backups.fullImportConfirm"),
     )) return;
-    onBusy("Importing full archive, the server will restart…");
+    onBusy(t("backups.importingFull"));
     onError("");
     try {
       const res = await fetch("/admin/backup/full/import", {
@@ -341,22 +341,22 @@ function FullDbPanel({
       if (res.status === 409) {
         const body = (await res.json().catch(() => ({}))) as { busy?: BackupOperationStatus; error?: string; message?: string };
         if (body.busy?.currentOperation) {
-          onError(`Another backup operation is in progress (${body.busy.currentOperation.kind}). Wait for it to finish.`);
+          onError(t("backups.busyOtherOp", { kind: body.busy.currentOperation.kind }));
           onBusy(null);
           return;
         }
         // Other 409 (schema-behind) falls through to the generic error
-        throw new Error(body.message || body.error || "import refused");
+        throw new Error(body.message || body.error || t("backups.importRefused"));
       }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-        throw new Error(body.message || body.error || `import failed: ${res.status}`);
+        throw new Error(body.message || body.error || t("backups.importFailedStatus", { status: res.status }));
       }
       const result = (await res.json()) as FullImportResult;
       // Don't refresh, the server is about to exit. Just surface
       // the message; the page will become unreachable for ~30s.
       onError("");
-      onBusy(`${result.message} (${result.uploadsRestored} upload file(s) staged. Pre-restore snapshot: ${result.preSnapshotId})`);
+      onBusy(`${result.message} ${t("backups.fullImportSuffix", { count: result.uploadsRestored, id: result.preSnapshotId })}`);
       setReport(null);
       // After a short window, force a reload so the admin lands on
       // the restored install.
@@ -368,11 +368,11 @@ function FullDbPanel({
   }
 
   return (
-    <section className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-3">
+    <section data-admin-anchor="backups.fullTitle" className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-3">
       <header className="flex items-baseline justify-between gap-2">
-        <h4 className="font-action text-sm">Full database snapshot</h4>
+        <h4 className="font-action text-sm">{t("backups.fullTitle")}</h4>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          .zip, database.sqlite + uploads/ (everything: users, messages, earning, cosmetics, all images)
+          {t("backups.fullSubtitle")}
         </span>
       </header>
       <div className="flex flex-wrap items-center gap-2">
@@ -382,10 +382,10 @@ function FullDbPanel({
           onClick={() => void onCreate()}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-sm text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          Create + download
+          {t("backups.createDownload")}
         </button>
         <label className="rounded border border-keep-rule px-3 py-1 text-sm text-keep-text hover:bg-keep-banner cursor-pointer">
-          Upload .zip to inspect…
+          {t("backups.uploadToInspect")}
           <input
             ref={fileInputRef}
             type="file"
@@ -400,36 +400,42 @@ function FullDbPanel({
       {report ? (
         <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/30 p-3 text-xs">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <span className="font-semibold">Inspect report</span>
+            <span className="font-semibold">{t("backups.inspectReport")}</span>
             <span className="text-keep-muted">{formatBytes(report.sizeBytes)}</span>
           </div>
           {!report.ok ? (
             <p className="text-keep-accent">
-              File failed validation, not a valid backup archive, or the inner database isn't from a Spire install
-              (missing the <span className="font-mono">users.system</span> sentinel row that every Spire install seeds).
+              <Trans t={t} i18nKey="backups.invalidArchive">
+                {"File failed validation, not a valid backup archive, or the inner database isn't from a Spire install (missing the "}
+                <span className="font-mono">users.system</span>
+                {" sentinel row that every Spire install seeds)."}
+              </Trans>
             </p>
           ) : (
             <>
               <ul className="grid grid-cols-2 gap-1">
-                <li>Users: <span className="font-mono">{report.counts.users.toLocaleString()}</span></li>
-                <li>Characters: <span className="font-mono">{report.counts.characters.toLocaleString()}</span></li>
-                <li>Messages: <span className="font-mono">{report.counts.messages.toLocaleString()}</span></li>
-                <li>Rooms: <span className="font-mono">{report.counts.rooms.toLocaleString()}</span></li>
+                <li><Trans t={t} i18nKey="backups.countUsers" values={{ count: formatNumber(report.counts.users) }}>{"Users: "}<span className="font-mono">{"{{count}}"}</span></Trans></li>
+                <li><Trans t={t} i18nKey="backups.countCharacters" values={{ count: formatNumber(report.counts.characters) }}>{"Characters: "}<span className="font-mono">{"{{count}}"}</span></Trans></li>
+                <li><Trans t={t} i18nKey="backups.countMessages" values={{ count: formatNumber(report.counts.messages) }}>{"Messages: "}<span className="font-mono">{"{{count}}"}</span></Trans></li>
+                <li><Trans t={t} i18nKey="backups.countRooms" values={{ count: formatNumber(report.counts.rooms) }}>{"Rooms: "}<span className="font-mono">{"{{count}}"}</span></Trans></li>
                 <li className="col-span-2 pt-1 border-t border-keep-rule/40">
-                  Bundled uploads:{" "}
-                  <span className="font-mono">{report.uploadsFileCount.toLocaleString()}</span> file(s),{" "}
-                  <span className="font-mono">{formatBytes(report.uploadsBytes)}</span>
+                  <Trans t={t} i18nKey="backups.bundledUploads" values={{ count: formatNumber(report.uploadsFileCount), bytes: formatBytes(report.uploadsBytes) }}>
+                    {"Bundled uploads: "}
+                    <span className="font-mono">{"{{count}}"}</span>
+                    {" file(s), "}
+                    <span className="font-mono">{"{{bytes}}"}</span>
+                  </Trans>
                 </li>
               </ul>
               {report.missingMigrations.length > 0 ? (
                 <p className="text-keep-accent">
-                  ⚠ Target install is missing {report.missingMigrations.length} migration(s) the backup expects. Deploy before importing:
+                  {t("backups.targetMissingMigrations", { count: report.missingMigrations.length })}
                   <span className="ml-1 font-mono break-all">{report.missingMigrations.slice(0, 3).join(", ")}{report.missingMigrations.length > 3 ? "…" : ""}</span>
                 </p>
               ) : null}
               {report.extraMigrationsOnServer.length > 0 ? (
                 <p className="text-keep-muted">
-                  Note: this install has {report.extraMigrationsOnServer.length} migration(s) ahead of the backup. Import will still work; newer columns get default values.
+                  {t("backups.extraMigrationsNote", { count: report.extraMigrationsOnServer.length })}
                 </p>
               ) : null}
               <div className="flex flex-wrap gap-2 pt-1">
@@ -439,7 +445,7 @@ function FullDbPanel({
                   disabled={busy || report.missingMigrations.length > 0}
                   className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-sm text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
                 >
-                  Import (replaces live DB + uploads, restarts server)
+                  {t("backups.fullImportButton")}
                 </button>
                 <button
                   type="button"
@@ -447,7 +453,7 @@ function FullDbPanel({
                   disabled={busy}
                   className="rounded border border-keep-rule px-3 py-1 text-sm text-keep-muted hover:bg-keep-banner"
                 >
-                  Cancel
+                  {t("common:cancel")}
                 </button>
               </div>
             </>
@@ -475,13 +481,14 @@ function ContentPanel({
   onBusy: (msg: string | null) => void;
   busy: boolean;
 }) {
+  const { t } = useTranslation("admin");
   const [report, setReport] = useState<(ContentBackupInspectReport & { __file?: File }) | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function onFileChosen(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    onBusy("Uploading + inspecting content archive…");
+    onBusy(t("backups.uploadingInspectingContent"));
     onError("");
     try {
       const res = await fetch("/admin/backup/content/inspect", {
@@ -493,14 +500,14 @@ function ContentPanel({
       if (res.status === 409) {
         const body = (await res.json().catch(() => ({}))) as { busy?: BackupOperationStatus; error?: string; message?: string };
         if (body.busy?.currentOperation) {
-          onError(`Another backup operation is in progress (${body.busy.currentOperation.kind}). Wait for it to finish.`);
+          onError(t("backups.busyOtherOp", { kind: body.busy.currentOperation.kind }));
           return;
         }
-        throw new Error(body.message || body.error || "inspect refused");
+        throw new Error(body.message || body.error || t("backups.inspectRefused"));
       }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-        throw new Error(body.message || body.error || `inspect failed: ${res.status}`);
+        throw new Error(body.message || body.error || t("backups.inspectFailedStatus", { status: res.status }));
       }
       const r = (await res.json()) as ContentBackupInspectReport;
       setReport({ ...r, __file: f });
@@ -517,7 +524,7 @@ function ContentPanel({
     const diff = report.diff;
     if (diff.missingMigrations.length > 0) {
       onError(
-        `Cannot import, this install is missing ${diff.missingMigrations.length} migration(s) the backup expects. Deploy first.`,
+        t("backups.cannotImportMissingMigrations", { count: diff.missingMigrations.length }),
       );
       return;
     }
@@ -535,9 +542,14 @@ function ContentPanel({
     // by the backup's snapshot.
     // eslint-disable-next-line no-alert
     if (!window.confirm(
-      `MIRROR RESTORE: this will DELETE ${totals.wipe.toLocaleString()} row(s) currently on this install and REPLACE them with ${totals.add.toLocaleString()} row(s) from the backup, across ${diff.entries.length} tables. It will also REPLACE the live uploads tree with the ${report.uploadsFileCount.toLocaleString()} file(s) bundled in the archive. A pre-import safety snapshot will be saved automatically so you can roll back if needed. Continue?`,
+      t("backups.mirrorConfirm", {
+        wipe: formatNumber(totals.wipe),
+        add: formatNumber(totals.add),
+        tables: diff.entries.length,
+        files: formatNumber(report.uploadsFileCount),
+      }),
     )) return;
-    onBusy("Importing content backup…");
+    onBusy(t("backups.importingContent"));
     onError("");
     try {
       const res = await fetch("/admin/backup/content/import", {
@@ -549,19 +561,19 @@ function ContentPanel({
       if (res.status === 409) {
         const body = (await res.json().catch(() => ({}))) as { busy?: BackupOperationStatus; error?: string; message?: string };
         if (body.busy?.currentOperation) {
-          onError(`Another backup operation is in progress (${body.busy.currentOperation.kind}). Wait for it to finish.`);
+          onError(t("backups.busyOtherOp", { kind: body.busy.currentOperation.kind }));
           onBusy(null);
           return;
         }
-        throw new Error(body.message || body.error || "import refused");
+        throw new Error(body.message || body.error || t("backups.importRefused"));
       }
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
-        throw new Error(body.message || body.error || `import failed: ${res.status}`);
+        throw new Error(body.message || body.error || t("backups.importFailedStatus", { status: res.status }));
       }
       const result = (await res.json()) as ContentImportResult;
       onError("");
-      onBusy(`Imported: ${result.inserted} row(s) added, ${result.uploadsRestored} upload file(s) restored. Pre-import snapshot: ${result.preSnapshotId}`);
+      onBusy(t("backups.contentImportDone", { inserted: result.inserted, files: result.uploadsRestored, id: result.preSnapshotId }));
       setReport(null);
       await onImported();
       // Clear the success line after a few seconds so the panel
@@ -574,11 +586,11 @@ function ContentPanel({
   }
 
   return (
-    <section className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-3">
+    <section data-admin-anchor="backups.contentTitle" className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-3">
       <header className="flex items-baseline justify-between gap-2">
-        <h4 className="font-action text-sm">Content backup (ZIP envelope)</h4>
+        <h4 className="font-action text-sm">{t("backups.contentTitle")}</h4>
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          .zip, content.json (every exportable table) + uploads/ (every uploaded image)
+          {t("backups.contentSubtitle")}
         </span>
       </header>
       <div className="flex flex-wrap items-center gap-2">
@@ -588,10 +600,10 @@ function ContentPanel({
           onClick={() => void onCreate()}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-sm text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          Create + download
+          {t("backups.createDownload")}
         </button>
         <label className="rounded border border-keep-rule px-3 py-1 text-sm text-keep-text hover:bg-keep-banner cursor-pointer">
-          Upload .zip to inspect…
+          {t("backups.uploadToInspect")}
           <input
             ref={fileInputRef}
             type="file"
@@ -606,29 +618,38 @@ function ContentPanel({
       {report ? (
         <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/30 p-3 text-xs">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <span className="font-semibold">Inspect report</span>
+            <span className="font-semibold">{t("backups.inspectReport")}</span>
             <span className="text-keep-muted">
-              format v{report.diff.uploadedVersion} → server v{report.diff.serverVersion} · {formatBytes(report.sizeBytes)}
+              {t("backups.formatVersions", { uploaded: report.diff.uploadedVersion, server: report.diff.serverVersion })} · {formatBytes(report.sizeBytes)}
             </span>
           </div>
           {report.diff.missingMigrations.length > 0 ? (
             <p className="text-keep-accent">
-              ⚠ This install is missing {report.diff.missingMigrations.length} migration(s) the backup expects:
+              {t("backups.installMissingMigrations", { count: report.diff.missingMigrations.length })}
               <span className="ml-1 font-mono break-all">{report.diff.missingMigrations.slice(0, 3).join(", ")}{report.diff.missingMigrations.length > 3 ? "…" : ""}</span>
             </p>
           ) : null}
           <p className="text-keep-muted">
-            Bundled uploads:{" "}
-            <span className="font-mono text-keep-text">{report.uploadsFileCount.toLocaleString()}</span> file(s),{" "}
-            <span className="font-mono text-keep-text">{formatBytes(report.uploadsBytes)}</span>
-            , will replace the live <span className="font-mono">/uploads/</span> tree on import.
+            <Trans
+              t={t}
+              i18nKey="backups.bundledUploadsReplace"
+              values={{ count: formatNumber(report.uploadsFileCount), bytes: formatBytes(report.uploadsBytes) }}
+            >
+              {"Bundled uploads: "}
+              <span className="font-mono text-keep-text">{"{{count}}"}</span>
+              {" file(s), "}
+              <span className="font-mono text-keep-text">{"{{bytes}}"}</span>
+              {", will replace the live "}
+              <span className="font-mono">/uploads/</span>
+              {" tree on import."}
+            </Trans>
           </p>
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-keep-rule/60 text-[10px] uppercase tracking-widest text-keep-muted">
-                <th className="py-1 pr-2">Table</th>
-                <th className="py-1 px-2 text-right">From backup</th>
-                <th className="py-1 pl-2 text-right">Wipes from target</th>
+                <th className="py-1 pr-2">{t("backups.colTable")}</th>
+                <th className="py-1 px-2 text-right">{t("backups.colFromBackup")}</th>
+                <th className="py-1 pl-2 text-right">{t("backups.colWipes")}</th>
               </tr>
             </thead>
             <tbody>
@@ -642,7 +663,13 @@ function ContentPanel({
             </tbody>
           </table>
           <p className="text-keep-muted">
-            Content backup is a <b className="text-keep-text">mirror restore</b>, every table the document carries gets wiped on this install and replaced with the source rows, and the entire <span className="font-mono">/uploads/</span> tree is replaced with the archive's. Tables not in the document are left untouched. A pre-import safety snapshot is saved automatically so you can roll back.
+            <Trans t={t} i18nKey="backups.mirrorExplainer">
+              {"Content backup is a "}
+              <b className="text-keep-text">mirror restore</b>
+              {", every table the document carries gets wiped on this install and replaced with the source rows, and the entire "}
+              <span className="font-mono">/uploads/</span>
+              {" tree is replaced with the archive's. Tables not in the document are left untouched. A pre-import safety snapshot is saved automatically so you can roll back."}
+            </Trans>
           </p>
           <div className="flex flex-wrap gap-2 pt-1">
             <button
@@ -651,7 +678,7 @@ function ContentPanel({
               disabled={busy || report.diff.missingMigrations.length > 0}
               className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-sm text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
             >
-              Import (mirror restore)
+              {t("backups.mirrorImportButton")}
             </button>
             <button
               type="button"
@@ -659,7 +686,7 @@ function ContentPanel({
               disabled={busy}
               className="rounded border border-keep-rule px-3 py-1 text-sm text-keep-muted hover:bg-keep-banner"
             >
-              Cancel
+              {t("common:cancel")}
             </button>
           </div>
         </div>
@@ -683,6 +710,7 @@ function SnapshotsPanel({
   onRefresh: () => Promise<void>;
   onDelete: (entry: BackupSnapshotEntry) => Promise<void>;
 }) {
+  const { t } = useTranslation("admin");
   const grouped = useMemo(() => {
     const out: Record<string, BackupSnapshotEntry[]> = { manual: [], pre_full_import: [], pre_content_import: [] };
     for (const s of snapshots) {
@@ -693,25 +721,25 @@ function SnapshotsPanel({
   }, [snapshots]);
 
   return (
-    <section className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-3">
+    <section data-admin-anchor="backups.snapshotsTitle" className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-3">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
-        <h4 className="font-action text-sm">On-disk snapshots</h4>
+        <h4 className="font-action text-sm">{t("backups.snapshotsTitle")}</h4>
         <button
           type="button"
           onClick={() => void onRefresh()}
           disabled={loading}
           className="rounded border border-keep-rule px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
         >
-          {loading ? "Refreshing…" : "Refresh"}
+          {loading ? t("backups.refreshing") : t("refresh")}
         </button>
       </header>
       <p className="text-[11px] text-keep-muted">
-        Manual snapshots are downloads you triggered. Pre-import snapshots are taken automatically before each restore so you can undo. Up to 10 of each kind are retained; the oldest are pruned automatically.
+        {t("backups.snapshotsHelp")}
       </p>
 
-      <SnapshotGroup title="Manual" entries={grouped.manual ?? []} onDelete={onDelete} />
-      <SnapshotGroup title="Pre full-DB import (safety copies)" entries={grouped.pre_full_import ?? []} onDelete={onDelete} />
-      <SnapshotGroup title="Pre content import (safety copies)" entries={grouped.pre_content_import ?? []} onDelete={onDelete} />
+      <SnapshotGroup title={t("backups.groupManual")} entries={grouped.manual ?? []} onDelete={onDelete} />
+      <SnapshotGroup title={t("backups.groupPreFull")} entries={grouped.pre_full_import ?? []} onDelete={onDelete} />
+      <SnapshotGroup title={t("backups.groupPreContent")} entries={grouped.pre_content_import ?? []} onDelete={onDelete} />
     </section>
   );
 }
@@ -725,34 +753,35 @@ function SnapshotGroup({
   entries: BackupSnapshotEntry[];
   onDelete: (entry: BackupSnapshotEntry) => Promise<void>;
 }) {
+  const { t } = useTranslation("admin");
   return (
     <div>
       <h5 className="text-[10px] uppercase tracking-widest text-keep-muted">{title}</h5>
       {entries.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No snapshots in this bucket.</p>
+        <p className="text-xs italic text-keep-muted">{t("backups.emptyBucket")}</p>
       ) : (
         <ul className="mt-1 divide-y divide-keep-rule/30">
           {entries.map((e) => (
             <li key={e.id} className="flex flex-wrap items-center gap-2 py-1 text-xs">
               <span className="inline-block w-12 shrink-0 rounded border border-keep-rule/60 bg-keep-banner/40 px-1 text-center text-[10px] uppercase tracking-widest text-keep-muted">
-                {e.kind}
+                {t(`backups.kind.${e.kind}`, { defaultValue: e.kind })}
               </span>
               <span className="min-w-0 flex-1 truncate font-mono">{e.filename}</span>
               <span className="shrink-0 text-keep-muted">{formatBytes(e.sizeBytes)}</span>
-              <span className="shrink-0 text-keep-muted">{new Date(e.createdAt).toLocaleString()}</span>
+              <span className="shrink-0 text-keep-muted">{formatDateTime(e.createdAt)}</span>
               <button
                 type="button"
                 onClick={() => { void triggerDownload(e.id); }}
                 className="rounded border border-keep-rule px-2 py-0.5 text-xs hover:bg-keep-banner"
               >
-                Download
+                {t("backups.download")}
               </button>
               <button
                 type="button"
                 onClick={() => void onDelete(e)}
                 className="rounded border border-keep-rule px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/10"
               >
-                Delete
+                {t("common:delete")}
               </button>
             </li>
           ))}
@@ -781,7 +810,7 @@ async function triggerDownload(id: string): Promise<void> {
     credentials: "include",
   });
   if (!res.ok) {
-    let detail = `download failed: ${res.status}`;
+    let detail = i18n.t("admin:backups.downloadFailedStatus", { status: res.status });
     try {
       const body = (await res.json()) as { error?: string };
       if (body.error) detail = `${detail}, ${body.error}`;

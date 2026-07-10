@@ -5,6 +5,7 @@ import { characters, users } from "../../db/schema.js";
 import { resolveDisplayName } from "../../auth/session.js";
 import { getSettings } from "../../settings.js";
 import { eqNameInsensitive } from "../../lib/nameLookup.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const MAX_NAME_LEN = 40;
@@ -58,11 +59,11 @@ async function createSubcommand(ctx: CommandContext, rawName: string) {
     return notice(
       ctx,
       "BAD_CHAR_NAME",
-      "Character name must be 1-40 chars: letters, numbers, spaces, _ - '",
+      tFor(ctx.user.locale, "commands:char.badName"),
     );
   }
   const existing = await findCharacter(ctx, name);
-  if (existing) return notice(ctx, "DUP_CHAR", `You already have a character named "${name}".`);
+  if (existing) return notice(ctx, "DUP_CHAR", tFor(ctx.user.locale, "commands:char.duplicate", { name }));
 
   const countRows = await ctx.db
     .select({ n: sql<number>`count(*)` })
@@ -71,7 +72,7 @@ async function createSubcommand(ctx: CommandContext, rawName: string) {
   const count = countRows[0]?.n ?? 0;
   const { maxCharactersPerUser } = await getSettings(ctx.db);
   if (count >= maxCharactersPerUser) {
-    return notice(ctx, "CHAR_LIMIT", `Limit of ${maxCharactersPerUser} characters per account.`);
+    return notice(ctx, "CHAR_LIMIT", tFor(ctx.user.locale, "commands:char.limit", { max: maxCharactersPerUser }));
   }
 
   const id = nanoid();
@@ -121,7 +122,7 @@ async function switchSubcommand(ctx: CommandContext, rawName: string) {
   if (/^(ooc|master|off|none)$/i.test(name)) return clearSubcommand(ctx);
 
   const c = await findCharacter(ctx, name);
-  if (!c) return notice(ctx, "NO_CHAR", `No character named "${name}".`);
+  if (!c) return notice(ctx, "NO_CHAR", tFor(ctx.user.locale, "commands:char.notFound", { name }));
 
   await applyTabCharacter(ctx, c.id);
 }
@@ -133,14 +134,14 @@ async function clearSubcommand(ctx: CommandContext) {
 async function editSubcommand(ctx: CommandContext, rawName: string) {
   const name = normalizeCharName(rawName);
   const c = await findCharacter(ctx, name);
-  if (!c) return notice(ctx, "NO_CHAR", `No character named "${name}".`);
+  if (!c) return notice(ctx, "NO_CHAR", tFor(ctx.user.locale, "commands:char.notFound", { name }));
   ctx.socket.emit("ui:hint", { kind: "open-character-editor", characterId: c.id });
 }
 
 async function deleteSubcommand(ctx: CommandContext, rawName: string) {
   const name = normalizeCharName(rawName);
   const c = await findCharacter(ctx, name);
-  if (!c) return notice(ctx, "NO_CHAR", `No character named "${name}".`);
+  if (!c) return notice(ctx, "NO_CHAR", tFor(ctx.user.locale, "commands:char.notFound", { name }));
 
   await ctx.db
     .update(characters)
@@ -247,8 +248,8 @@ export const charCommand: CommandHandler = {
         if (names.length === 0) {
           ctx.socket.emit("ui:hint", {
             kind: "open-info-modal",
-            title: "Your characters",
-            body: "You have no characters yet.\nCreate one with /char create <name>.",
+            title: tFor(ctx.user.locale, "commands:char.listTitle"),
+            body: tFor(ctx.user.locale, "commands:char.listEmptyBody"),
           });
         } else {
           // One name per line so long lists stay scannable. Toast
@@ -256,14 +257,14 @@ export const charCommand: CommandHandler = {
           // afford to spread out.
           ctx.socket.emit("ui:hint", {
             kind: "open-info-modal",
-            title: `Your characters (${names.length})`,
+            title: tFor(ctx.user.locale, "commands:char.listTitleCount", { total: names.length }),
             body: names.map((n) => `  ${n}`).join("\n"),
           });
         }
         return;
       }
       default:
-        notice(ctx, "BAD_SUBCMD", `Unknown subcommand. Try /char create, switch, edit, delete, clear (or 'switch OOC'), list.`);
+        notice(ctx, "BAD_SUBCMD", tFor(ctx.user.locale, "commands:char.badSubcommand"));
     }
   },
 };

@@ -24,6 +24,7 @@ import {
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
 import { softHideUserMessages } from "../lib/purgeUserMessages.js";
+import { tFor } from "../i18n.js";
 import {
   auditServer,
   roomsOfServerWhere,
@@ -78,14 +79,14 @@ export function registerServerModerationRoutes(ctx: ServerRoutesCtx): void {
     let body: z.infer<typeof banBody>;
     try { body = banBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const target = await resolveServerTarget(body.target);
+    const target = await resolveServerTarget(body.target, gate.me.locale);
     if (!target.ok) { reply.code(404); return { error: target.error }; }
-    if (target.userId === gate.me.id) { reply.code(409); return { error: "You can't ban yourself." }; }
-    if (target.userId === gate.server.ownerUserId) { reply.code(409); return { error: "The server owner can't be banned from their own server." }; }
-    const targetUser = (await db.select({ role: users.role }).from(users)
+    if (target.userId === gate.me.id) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.common.cantBanSelf") }; }
+    if (target.userId === gate.server.ownerUserId) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.ownerCantBeBanned") }; }
+    const targetUser = (await db.select({ role: users.role, locale: users.locale }).from(users)
       .where(eq(users.id, target.userId)).limit(1))[0];
     if (targetUser && isModeratorRole(targetUser.role)) {
-      reply.code(409); return { error: `${target.username} is site staff and can't be server-banned.` };
+      reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.staffCantBeBanned", { name: target.username }) };
     }
 
     const until = body.hours ? new Date(Date.now() + body.hours * 3_600_000) : null;
@@ -119,7 +120,9 @@ export function registerServerModerationRoutes(ctx: ServerRoutesCtx): void {
         affected.add(inRoom);
         s.emit("error:notice", {
           code: "SERVER_BANNED",
-          message: `You have been banned from "${gate.server.name}"${until ? ` until ${until.toISOString().slice(0, 10)}` : ""}.`,
+          message: until
+            ? tFor(targetUser?.locale ?? null, "errors:server.servers.bannedNoticeUntil", { name: gate.server.name, date: until.toISOString().slice(0, 10) })
+            : tFor(targetUser?.locale ?? null, "errors:server.servers.bannedNotice", { name: gate.server.name }),
         });
         if (landing && landing.id !== inRoom) {
           s.join(`room:${landing.id}`);
@@ -224,14 +227,14 @@ export function registerServerModerationRoutes(ctx: ServerRoutesCtx): void {
     let body: z.infer<typeof muteBody>;
     try { body = muteBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const target = await resolveServerTarget(body.target);
+    const target = await resolveServerTarget(body.target, gate.me.locale);
     if (!target.ok) { reply.code(404); return { error: target.error }; }
-    if (target.userId === gate.me.id) { reply.code(409); return { error: "You can't mute yourself." }; }
-    if (target.userId === gate.server.ownerUserId) { reply.code(409); return { error: "The server owner can't be muted in their own server." }; }
-    const targetUser = (await db.select({ role: users.role }).from(users)
+    if (target.userId === gate.me.id) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.cantMuteSelf") }; }
+    if (target.userId === gate.server.ownerUserId) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.ownerCantBeMuted") }; }
+    const targetUser = (await db.select({ role: users.role, locale: users.locale }).from(users)
       .where(eq(users.id, target.userId)).limit(1))[0];
     if (targetUser && isModeratorRole(targetUser.role)) {
-      reply.code(409); return { error: `${target.username} is site staff and can't be server-muted.` };
+      reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.staffCantBeMuted", { name: target.username }) };
     }
 
     const until = new Date(Date.now() + body.hours * 3_600_000);
@@ -263,7 +266,9 @@ export function registerServerModerationRoutes(ctx: ServerRoutesCtx): void {
         if ((s.data as { userId?: string }).userId !== target.userId) continue;
         s.emit("error:notice", {
           code: "SERVER_MUTED",
-          message: `You've been muted in "${gate.server.name}" for ${hoursLabel}${reason ? `: ${reason}` : "."}`,
+          message: reason
+            ? tFor(targetUser?.locale ?? null, "errors:server.servers.mutedNoticeReason", { name: gate.server.name, hours: hoursLabel, reason })
+            : tFor(targetUser?.locale ?? null, "errors:server.servers.mutedNotice", { name: gate.server.name, hours: hoursLabel }),
         });
       }
     } catch { /* best-effort */ }
@@ -348,20 +353,20 @@ export function registerServerModerationRoutes(ctx: ServerRoutesCtx): void {
     if (!(await serversLive(reply))) return { error: "not found" };
     const gate = await requireServerOwner(req, req.params.id);
     if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
-    if (gate.server.isSystem) { reply.code(409); return { error: "The home server can't be transferred." }; }
+    if (gate.server.isSystem) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.homeNoTransfer") }; }
     let body: z.infer<typeof transferBody>;
     try { body = transferBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const target = await resolveServerTarget(body.target);
+    const target = await resolveServerTarget(body.target, gate.me.locale);
     if (!target.ok) { reply.code(404); return { error: target.error }; }
-    if (target.userId === gate.server.ownerUserId) { reply.code(409); return { error: "They already own this server." }; }
+    if (target.userId === gate.server.ownerUserId) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.alreadyOwns") }; }
     const targetUser = (await db.select({ role: users.role }).from(users)
       .where(eq(users.id, target.userId)).limit(1))[0];
     if (!targetUser) { reply.code(404); return { error: "no such user" }; }
     const ban = (await db.select().from(serverBans)
       .where(and(eq(serverBans.serverId, gate.server.id), eq(serverBans.userId, target.userId))).limit(1))[0];
     if (ban && (!ban.until || +ban.until > Date.now())) {
-      reply.code(409); return { error: "That user is banned from this server - lift the ban first." };
+      reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.targetBanned") };
     }
     const oldOwnerId = gate.server.ownerUserId;
     db.transaction((tx) => {

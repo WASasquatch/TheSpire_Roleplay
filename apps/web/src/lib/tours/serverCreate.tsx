@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type { CoachStep } from "../../components/tours/CoachTour.js";
 
 /**
@@ -11,25 +12,25 @@ import type { CoachStep } from "../../components/tours/CoachTour.js";
  * spotlighting it would ring an element the viewer can't see. Every step here
  * targets a field inside the open form.
  */
-export const steps: CoachStep[] = [
+export const steps = (t: TFunction<"tours">): CoachStep[] => [
   {
-    title: "Name your server",
-    body: "Give your community a name people will recognize. You can change how it looks later.",
+    title: t("serverCreate.name.title"),
+    body: t("serverCreate.name.body"),
     targets: ['[data-tour="server-create-name"]'],
   },
   {
-    title: "Pick an address",
-    body: "This is the short link people use to reach your server. We check it's free as you type.",
+    title: t("serverCreate.address.title"),
+    body: t("serverCreate.address.body"),
     targets: ['[data-tour="server-create-slug"]'],
   },
   {
-    title: "Say what it's for",
-    body: "Tell our reviewers who your community is for and what its rooms will hold.",
+    title: t("serverCreate.purpose.title"),
+    body: t("serverCreate.purpose.body"),
     targets: ['[data-tour="server-create-purpose"]'],
   },
   {
-    title: "Send it in",
-    body: "Apply and our moderators take it from there. You'll hear back here and in chat once it's decided.",
+    title: t("serverCreate.submit.title"),
+    body: t("serverCreate.submit.body"),
     targets: ['[data-tour="server-create-submit"]'],
   },
 ];

@@ -36,6 +36,16 @@ export const worlds = sqliteTable(
       .notNull()
       .default("private"),
     /**
+     * Owner-set "18+ world" flag (migration 0333, age-restriction plan).
+     * Orthogonal to `visibility` — an 18+ world can still be private,
+     * public, or open among adults. When true: excluded from catalog and
+     * browse listings for viewers who can't see NSFW, and the world viewer
+     * + /w/:slug public page HARD-block minors and anonymous visitors.
+     * Only adult owners may set it; flips keep membership rows
+     * (keep-but-hide, mirroring rooms).
+     */
+    isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
+    /**
      * Per-world theme JSON. Applied only when rendering the world's editor /
      * viewer modals - never bleeds into chat or the userlist. Null = use the
      * viewer's chat theme as a fallback.

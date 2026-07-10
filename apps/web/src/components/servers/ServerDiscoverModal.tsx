@@ -18,6 +18,7 @@
  * visibility contract.
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import DOMPurify from "dompurify";
 import {
   ArrowRight,
@@ -94,6 +95,7 @@ interface Props {
 }
 
 export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose }: Props) {
+  const { t } = useTranslation("servers");
   const [list, setList] = useState<ServerSummary[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(!!initialCreate && canApply);
@@ -108,8 +110,8 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
   const refresh = useCallback(() => {
     listServers()
       .then((l) => { setList(l); setErr(null); })
-      .catch((e) => setErr(e instanceof Error ? e.message : "Couldn't load servers."));
-  }, []);
+      .catch((e) => setErr(e instanceof Error ? e.message : t("discover.loadError")));
+  }, [t]);
   useEffect(() => { refresh(); }, [refresh]);
 
   // Keep the CTA banner honest: load on open and after the form submits/closes.
@@ -143,7 +145,7 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
         <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner/30 px-4 py-2.5">
           <h3 className="flex items-center gap-2 font-action text-lg text-keep-text">
             <Compass className="h-5 w-5 text-keep-accent" aria-hidden="true" />
-            Discover servers
+            {t("discover.title")}
           </h3>
           <CloseButton onClick={onClose} />
         </div>
@@ -152,7 +154,7 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
           {err ? (
             <p className="rounded border border-keep-rule bg-keep-panel/40 px-3 py-2 text-sm text-keep-accent">{err}</p>
           ) : !list ? (
-            <p className="py-6 text-center text-sm italic text-keep-muted">Gathering the servers…</p>
+            <p className="py-6 text-center text-sm italic text-keep-muted">{t("discover.gathering")}</p>
           ) : (
             <div className="space-y-5">
               {/* Prominent create-a-server call-to-action / application status.
@@ -168,7 +170,7 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
 
               {mine.length > 0 ? (
                 <section>
-                  <SectionLabel icon={<Star className="h-3.5 w-3.5" aria-hidden="true" />} text="Your servers" count={mine.length} />
+                  <SectionLabel icon={<Star className="h-3.5 w-3.5" aria-hidden="true" />} text={t("discover.yourServers")} count={mine.length} />
                   <ul className="space-y-2">
                     {mine.map((s) => (
                       <ServerCard key={s.id} server={s} onEnter={() => enter(s)} onJoined={refresh} />
@@ -220,6 +222,7 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
   onEnter: (server: ServerSummary) => void;
   onJoined: () => void;
 }) {
+  const { t } = useTranslation("servers");
   const [discover, setDiscover] = useState<ServerDiscover | null>(null);
   const [tags, setTags] = useState<ServerTagCount[]>([]);
   const [query, setQuery] = useState("");
@@ -275,7 +278,7 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
 
   return (
     <section className="space-y-3">
-      <SectionLabel icon={<Globe className="h-3.5 w-3.5" aria-hidden="true" />} text="Discover" count={searchMode ? (resultRows?.length ?? 0) : popular.length + fresh.length} />
+      <SectionLabel icon={<Globe className="h-3.5 w-3.5" aria-hidden="true" />} text={t("discover.sectionLabel")} count={searchMode ? (resultRows?.length ?? 0) : popular.length + fresh.length} />
 
       {/* Search bar */}
       <div className="relative">
@@ -283,16 +286,16 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name or tag…"
-          aria-label="Search servers by name or tag"
+          placeholder={t("discover.searchPlaceholder")}
+          aria-label={t("discover.searchAria")}
           className="w-full rounded border border-keep-rule bg-keep-bg py-2 pl-8 pr-8 text-sm outline-none focus:border-keep-action"
         />
         {query ? (
           <button
             type="button"
             onClick={() => setQuery("")}
-            aria-label="Clear search text"
-            title="Clear"
+            aria-label={t("discover.clearSearchAria")}
+            title={t("discover.clearTitle")}
             className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-keep-muted hover:text-keep-text"
           >
             <X className="h-4 w-4" aria-hidden="true" />
@@ -330,8 +333,8 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
         <div className="flex flex-wrap items-center gap-2 text-xs text-keep-muted">
           {activeTag ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-keep-action bg-keep-action/10 px-2 py-0.5 text-keep-action">
-              Tag: {activeTag}
-              <button type="button" onClick={() => setActiveTag(null)} aria-label={`Remove ${activeTag} filter`} title="Remove tag filter"
+              {t("discover.tagLabel", { tag: activeTag })}
+              <button type="button" onClick={() => setActiveTag(null)} aria-label={t("discover.removeTagAria", { tag: activeTag })} title={t("discover.removeTagTitle")}
                 className="hover:text-keep-text">
                 <X className="h-3 w-3" aria-hidden="true" />
               </button>
@@ -343,7 +346,7 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
             className="inline-flex items-center gap-1 rounded border border-keep-rule px-2 py-0.5 uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action"
           >
             <RotateCcw className="h-3 w-3" aria-hidden="true" />
-            Back to browse
+            {t("discover.backToBrowse")}
           </button>
         </div>
       ) : null}
@@ -352,14 +355,14 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
       {searchMode ? (
         <div className="space-y-2">
           {!resultRows || searching ? (
-            <p className="py-4 text-center text-sm italic text-keep-muted">Searching…</p>
+            <p className="py-4 text-center text-sm italic text-keep-muted">{t("discover.searching")}</p>
           ) : resultRows.length === 0 ? (
             <p className="rounded border border-dashed border-keep-rule px-3 py-4 text-center text-sm italic text-keep-muted">
-              No servers match your search.
+              {t("discover.noMatches")}
             </p>
           ) : (
             <>
-              <p className="text-[11px] text-keep-muted">{resultRows.length} {resultRows.length === 1 ? "result" : "results"}</p>
+              <p className="text-[11px] text-keep-muted">{t("discover.results", { count: resultRows.length })}</p>
               <ul className="space-y-2">
                 {resultRows.map((s) => (
                   <ServerCard key={s.id} server={s} onEnter={() => onEnter(s)} onJoined={onJoined} />
@@ -369,27 +372,27 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
           )}
         </div>
       ) : !discover ? (
-        <p className="py-4 text-center text-sm italic text-keep-muted">Gathering the catalog…</p>
+        <p className="py-4 text-center text-sm italic text-keep-muted">{t("discover.gatheringCatalog")}</p>
       ) : popular.length === 0 && fresh.length === 0 ? (
         <p className="rounded border border-dashed border-keep-rule px-3 py-4 text-center text-sm italic text-keep-muted">
-          No other servers to explore yet.
-          {canApply ? " Be the first to raise one." : ""}
+          {t("discover.emptyCatalog")}
+          {canApply ? t("discover.emptyCatalogApply") : ""}
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <DiscoverColumn
             icon={<Flame className="h-3.5 w-3.5" aria-hidden="true" />}
-            label="Popular"
+            label={t("discover.popular")}
             rows={popular}
-            emptyText="No popular servers yet."
+            emptyText={t("discover.noPopular")}
             onEnter={onEnter}
             onJoined={onJoined}
           />
           <DiscoverColumn
             icon={<Sparkles className="h-3.5 w-3.5" aria-hidden="true" />}
-            label="New"
+            label={t("discover.new")}
             rows={fresh}
-            emptyText="No new servers yet."
+            emptyText={t("discover.noNew")}
             onEnter={onEnter}
             onJoined={onJoined}
           />
@@ -442,6 +445,7 @@ function CreateServerCta({
   status: ServerApplicationStatus | null | undefined;
   onCreate: () => void;
 }) {
+  const { t } = useTranslation("servers");
   const pending = status?.pending ?? null;
   const rejected = status?.rejected ?? null;
 
@@ -450,14 +454,18 @@ function CreateServerCta({
       <section className="rounded border border-keep-action/40 bg-keep-action/5 p-3.5">
         <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-widest text-keep-action">
           <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-          Application under review
+          {t("discover.cta.underReview")}
         </div>
         <p className="mt-1.5 text-sm text-keep-text">
-          Your server <strong>{pending.requestedName}</strong>
-          <span className="text-keep-muted"> (/s/{pending.requestedSlug})</span> is awaiting a moderator's decision.
+          <Trans
+            t={t}
+            i18nKey="discover.cta.pendingBody"
+            values={{ name: pending.requestedName, slug: pending.requestedSlug }}
+            components={{ strong: <strong />, muted: <span className="text-keep-muted" /> }}
+          />
         </p>
         <p className="mt-1 text-xs text-keep-muted">
-          We'll notify you here and in chat once it's reviewed. You can raise another server after this one is decided.
+          {t("discover.cta.pendingNote")}
         </p>
       </section>
     );
@@ -473,10 +481,10 @@ function CreateServerCta({
           <div>
             <h4 className="flex items-center gap-1.5 font-action text-base text-keep-text">
               <Sparkles className="h-4 w-4 text-keep-action" aria-hidden="true" />
-              Raise your own server
+              {t("discover.cta.raiseTitle")}
             </h4>
             <p className="mt-0.5 text-xs text-keep-muted">
-              Gather your own community with its own rooms, address, and economy. Submit a short application and our moderators take it from there.
+              {t("discover.cta.raiseBody")}
             </p>
           </div>
         </div>
@@ -486,13 +494,18 @@ function CreateServerCta({
           className="group flex shrink-0 items-center justify-center gap-1.5 self-start rounded border border-keep-action bg-keep-action px-4 py-2 text-xs font-semibold uppercase tracking-widest text-keep-bg transition-colors hover:bg-keep-action/90 sm:self-auto"
         >
           {rejected ? <RotateCcw className="h-4 w-4" aria-hidden="true" /> : <Plus className="h-4 w-4" aria-hidden="true" />}
-          {rejected ? "Try again" : "Create your server"}
+          {rejected ? t("discover.cta.tryAgain") : t("discover.createYourServer")}
           <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
         </button>
       </div>
       {rejected?.reviewNote ? (
         <p className="border-t border-keep-action/30 bg-keep-bg/40 px-4 py-2 text-xs text-keep-muted">
-          Your last application for <strong className="text-keep-text">{rejected.requestedName}</strong> wasn't approved: "{rejected.reviewNote}". You're welcome to revise it and apply again.
+          <Trans
+            t={t}
+            i18nKey="discover.cta.rejectedNote"
+            values={{ name: rejected.requestedName, note: rejected.reviewNote }}
+            components={{ strong: <strong className="text-keep-text" /> }}
+          />
         </p>
       ) : null}
     </section>
@@ -518,6 +531,7 @@ function ServerCard({ server, onEnter, onJoined }: {
   /** Refetch the catalog after a join/apply so this card's state is honest. */
   onJoined: () => void;
 }) {
+  const { t } = useTranslation("servers");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Inline expand for invite-code entry / application prose.
@@ -558,7 +572,7 @@ function ServerCard({ server, onEnter, onJoined }: {
       onJoined();
       onEnter();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't join.");
+      setErr(e instanceof Error ? e.message : t("discover.card.joinError"));
     } finally {
       setBusy(false);
     }
@@ -572,7 +586,7 @@ function ServerCard({ server, onEnter, onJoined }: {
       onJoined();
       onEnter();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "That invite didn't work.");
+      setErr(e instanceof Error ? e.message : t("discover.card.inviteError"));
     } finally {
       setBusy(false);
     }
@@ -585,7 +599,7 @@ function ServerCard({ server, onEnter, onJoined }: {
       setApplied(true);
       setExpand(null);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't send your application.");
+      setErr(e instanceof Error ? e.message : t("discover.card.applyError"));
     } finally {
       setBusy(false);
     }
@@ -601,7 +615,7 @@ function ServerCard({ server, onEnter, onJoined }: {
       else await setServerDefault(server.id);
       onJoined();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't update your default server.");
+      setErr(e instanceof Error ? e.message : t("discover.card.defaultError"));
     } finally {
       setBusy(false);
     }
@@ -617,7 +631,7 @@ function ServerCard({ server, onEnter, onJoined }: {
     if (!ownerId) return;
     getSocket().emit("profile:fetch", { username: `@id:${ownerId}` }, (res) => {
       if (res.ok) setOpenProfile(res.profile);
-      else setErr(res.message ?? "Couldn't open that profile.");
+      else setErr(res.message ?? t("discover.card.profileError"));
     });
   }
 
@@ -674,9 +688,9 @@ function ServerCard({ server, onEnter, onJoined }: {
           <div className="flex items-center gap-1.5">
             <span className={`truncate font-semibold ${hasBanner ? "" : "text-keep-text"}`}>{server.name}</span>
             {server.isSystem ? (
-              <Landmark className="h-3.5 w-3.5 shrink-0 text-keep-accent" aria-label="Home server" />
+              <Landmark className="h-3.5 w-3.5 shrink-0 text-keep-accent" aria-label={t("discover.card.homeServer")} />
             ) : server.status === "featured" ? (
-              <Star className="h-3.5 w-3.5 shrink-0 text-keep-accent" aria-label="Featured" />
+              <Star className="h-3.5 w-3.5 shrink-0 text-keep-accent" aria-label={t("discover.card.featured")} />
             ) : null}
           </div>
           {server.tagline ? (
@@ -689,13 +703,13 @@ function ServerCard({ server, onEnter, onJoined }: {
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); openOwner(); }}
-              title={`View ${owner.name}'s profile — message them to ask about joining`}
-              aria-label={`View ${owner.name}'s profile`}
+              title={t("discover.card.ownerTitle", { name: owner.name })}
+              aria-label={t("discover.card.ownerAria", { name: owner.name })}
               className={`mt-1 flex max-w-full items-center gap-1 text-[11px] ${hasBanner ? "text-white/85 hover:text-white" : "text-keep-muted hover:text-keep-action"}`}
             >
               <User className="h-3 w-3 shrink-0" aria-hidden="true" />
               <span className="truncate">
-                by <span className="font-medium underline decoration-dotted underline-offset-2">{owner.name}</span>
+                <Trans t={t} i18nKey="discover.card.byOwner" values={{ name: owner.name }} components={{ owner: <span className="font-medium underline decoration-dotted underline-offset-2" /> }} />
               </span>
             </button>
           ) : null}
@@ -710,8 +724,8 @@ function ServerCard({ server, onEnter, onJoined }: {
             <button
               type="button"
               onClick={onEnter}
-              title="Global staff: enter to moderate without joining"
-              aria-label={`Enter ${server.name} as global staff`}
+              title={t("discover.card.staffEnterTitle")}
+              aria-label={t("discover.card.staffEnterAria", { name: server.name })}
               className={`group flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-widest ${
                 hasBanner
                   ? "border-white/50 text-white hover:bg-white/10"
@@ -719,7 +733,7 @@ function ServerCard({ server, onEnter, onJoined }: {
               }`}
             >
               <Crown className="h-3.5 w-3.5" aria-hidden="true" />
-              Enter
+              {t("discover.card.enter")}
             </button>
           ) : null}
           {member ? (
@@ -732,8 +746,8 @@ function ServerCard({ server, onEnter, onJoined }: {
                 onClick={() => void toggleDefault()}
                 disabled={busy}
                 aria-pressed={!!server.isMyDefault}
-                title={server.isMyDefault ? "Your default server: your profile shows this server's identity. Click to clear." : "Set as my default: your profile will show this server's rank, border, and name style."}
-                aria-label={server.isMyDefault ? `${server.name} is your default server, click to clear` : `Set ${server.name} as your default server`}
+                title={server.isMyDefault ? t("discover.card.defaultOnTitle") : t("discover.card.defaultOffTitle")}
+                aria-label={server.isMyDefault ? t("discover.card.defaultOnAria", { name: server.name }) : t("discover.card.defaultOffAria", { name: server.name })}
                 className={`flex h-8 w-8 items-center justify-center rounded border transition-colors disabled:opacity-50 ${
                   server.isMyDefault
                     ? "border-keep-accent bg-keep-accent/15 text-keep-accent"
@@ -749,14 +763,14 @@ function ServerCard({ server, onEnter, onJoined }: {
                 onClick={onEnter}
                 className="group flex items-center gap-1.5 rounded border border-keep-action/60 bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
               >
-                Enter
+                {t("discover.card.enter")}
                 <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
               </button>
             </>
           ) : applied ? (
             <span className={`flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-widest ${hasBanner ? "border-white/40 text-white/90" : "border-keep-rule text-keep-muted"}`}>
               <Clock className="h-3.5 w-3.5" aria-hidden="true" />
-              Applied
+              {t("discover.card.applied")}
             </span>
           ) : server.joinMode === "open" ? (
             <button
@@ -765,7 +779,7 @@ function ServerCard({ server, onEnter, onJoined }: {
               disabled={busy}
               className="flex items-center gap-1.5 rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
             >
-              {busy ? "…" : "Join"}
+              {busy ? "…" : t("discover.card.join")}
             </button>
           ) : server.joinMode === "invite" ? (
             <button
@@ -775,7 +789,7 @@ function ServerCard({ server, onEnter, onJoined }: {
               className={`flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-widest hover:border-keep-action hover:text-keep-action ${expand === "invite" ? "border-keep-action text-keep-action" : hasBanner ? "border-white/40 text-white" : "border-keep-rule text-keep-text"}`}
             >
               <Mail className="h-3.5 w-3.5" aria-hidden="true" />
-              Enter code
+              {t("discover.card.enterCode")}
             </button>
           ) : (
             <button
@@ -785,7 +799,7 @@ function ServerCard({ server, onEnter, onJoined }: {
               className={`flex items-center gap-1.5 rounded border px-3 py-1.5 text-xs font-semibold uppercase tracking-widest hover:border-keep-action hover:text-keep-action ${expand === "apply" ? "border-keep-action text-keep-action" : hasBanner ? "border-white/40 text-white" : "border-keep-rule text-keep-text"}`}
             >
               <ScrollText className="h-3.5 w-3.5" aria-hidden="true" />
-              Apply
+              {t("discover.card.apply")}
             </button>
           )}
         </div>
@@ -794,12 +808,12 @@ function ServerCard({ server, onEnter, onJoined }: {
       {/* Inline invite-code entry */}
       {expand === "invite" ? (
         <div className="mt-2.5 space-y-1.5 border-t border-keep-rule/60 pt-2.5">
-          <p className={`text-xs ${hasBanner ? "text-white/85" : "text-keep-muted"}`}>This server is invite-only. Enter the code you were given to join and enter.</p>
+          <p className={`text-xs ${hasBanner ? "text-white/85" : "text-keep-muted"}`}>{t("discover.card.inviteBlurb")}</p>
           <div className="flex items-center gap-2">
             <input
               value={code}
               onChange={(e) => setCode(e.target.value)}
-              placeholder="Invite code"
+              placeholder={t("discover.card.invitePlaceholder")}
               autoFocus
               className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 font-mono text-sm outline-none focus:border-keep-action"
               onKeyDown={(e) => { if (e.key === "Enter") void inviteJoin(); }}
@@ -810,7 +824,7 @@ function ServerCard({ server, onEnter, onJoined }: {
               disabled={busy || !code.trim()}
               className="shrink-0 rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
             >
-              {busy ? "…" : "Join"}
+              {busy ? "…" : t("discover.card.join")}
             </button>
           </div>
         </div>
@@ -819,25 +833,25 @@ function ServerCard({ server, onEnter, onJoined }: {
       {/* Inline application prose */}
       {expand === "apply" ? (
         <div className="mt-2.5 space-y-2 border-t border-keep-rule/60 pt-2.5">
-          <p className={`text-xs ${hasBanner ? "text-white/85" : "text-keep-muted"}`}>Joining is by application. The owner reviews each request before letting you in.</p>
+          <p className={`text-xs ${hasBanner ? "text-white/85" : "text-keep-muted"}`}>{t("discover.card.applyBlurb")}</p>
           <textarea
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
             maxLength={500}
             rows={3}
             autoFocus
-            placeholder="Tell this server's owner why you'd like to join (optional)."
+            placeholder={t("discover.card.applyPlaceholder")}
             className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
           />
           <div className="flex items-center justify-between gap-2">
-            <span className={`text-[11px] ${hasBanner ? "text-white/80" : "text-keep-muted"}`}>You'll get a notice once it's decided.</span>
+            <span className={`text-[11px] ${hasBanner ? "text-white/80" : "text-keep-muted"}`}>{t("discover.card.applyNotice")}</span>
             <button
               type="button"
               onClick={() => void sendApplication()}
               disabled={busy}
               className="shrink-0 rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
             >
-              {busy ? "…" : "Send application"}
+              {busy ? "…" : t("discover.card.sendApplication")}
             </button>
           </div>
         </div>
@@ -850,11 +864,12 @@ function ServerCard({ server, onEnter, onJoined }: {
 }
 
 function JoinModeBadge({ mode, onBanner }: { mode: ServerSummary["joinMode"]; onBanner?: boolean }) {
+  const { t } = useTranslation("servers");
   const meta = mode === "open"
-    ? { icon: <Globe className="h-3 w-3" aria-hidden="true" />, text: "Open to all" }
+    ? { icon: <Globe className="h-3 w-3" aria-hidden="true" />, text: t("discover.badge.open") }
     : mode === "invite"
-      ? { icon: <Mail className="h-3 w-3" aria-hidden="true" />, text: "Invite only" }
-      : { icon: <ScrollText className="h-3 w-3" aria-hidden="true" />, text: "By application" };
+      ? { icon: <Mail className="h-3 w-3" aria-hidden="true" />, text: t("discover.badge.invite") }
+      : { icon: <ScrollText className="h-3 w-3" aria-hidden="true" />, text: t("discover.badge.application") };
   return (
     <span
       className={`mt-1 inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
@@ -878,6 +893,7 @@ function JoinModeBadge({ mode, onBanner }: { mode: ServerSummary["joinMode"]; on
  * recent rejection shows the review note.
  */
 function CreateServerForm({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation("servers");
   const [mine, setMine] = useState<ServerCreationApplicationWire[] | null>(null);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -942,7 +958,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
       });
       setSubmitted(true);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Submit failed.");
+      setErr(e instanceof Error ? e.message : t("discover.form.submitError"));
     } finally {
       setBusy(false);
     }
@@ -951,12 +967,12 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
   const slugNote = !slugCheck || slug.length < 3
     ? null
     : slugCheck.ok
-      ? { text: "available", tone: "text-keep-action" }
+      ? { text: t("discover.form.slugAvailable"), tone: "text-keep-action" }
       : {
-          text: slugCheck.reason === "taken" ? "already a server"
-            : slugCheck.reason === "pending" ? "claimed by a pending application"
-            : slugCheck.reason === "reserved" ? "reserved word"
-            : "lowercase letters, numbers, hyphens (3-40)",
+          text: slugCheck.reason === "taken" ? t("discover.form.slugTaken")
+            : slugCheck.reason === "pending" ? t("discover.form.slugPending")
+            : slugCheck.reason === "reserved" ? t("discover.form.slugReserved")
+            : t("discover.form.slugInvalid"),
           tone: "text-keep-accent",
         };
   const purposeLen = purpose.trim().length;
@@ -974,13 +990,13 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-action text-lg text-keep-text">Create your server</h3>
+          <h3 className="font-action text-lg text-keep-text">{t("discover.createYourServer")}</h3>
           <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => setForcedTourId("server-create")}
-              title="Show me around"
-              aria-label="Show me around this form"
+              title={t("discover.form.tourTitle")}
+              aria-label={t("discover.form.tourAria")}
               className="flex h-7 w-7 items-center justify-center rounded-full border border-keep-rule text-keep-muted transition-colors hover:border-keep-action hover:text-keep-action"
             >
               <HelpCircle className="h-4 w-4" aria-hidden="true" />
@@ -990,58 +1006,61 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
         </div>
 
         {mine === null ? (
-          <p className="text-sm italic text-keep-muted">Checking your applications…</p>
+          <p className="text-sm italic text-keep-muted">{t("discover.form.checking")}</p>
         ) : submitted ? (
           <div className="space-y-2 text-sm text-keep-text">
-            <p><strong>Application sent.</strong> The site's moderators will review it; you'll get a notice here and in chat when it's decided.</p>
-            <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-panel">Close</button>
+            <p><Trans t={t} i18nKey="discover.form.sentBody" components={{ strong: <strong /> }} /></p>
+            <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-panel">{t("discover.form.close")}</button>
           </div>
         ) : pending ? (
           <div className="space-y-2 text-sm text-keep-text">
             <p>
-              Your application for <strong>{pending.requestedName}</strong>
-              <span className="text-keep-muted"> (/s/{pending.requestedSlug})</span> is
-              <span className="text-keep-action"> pending review</span>.
+              <Trans
+                t={t}
+                i18nKey="discover.form.pendingBody"
+                values={{ name: pending.requestedName, slug: pending.requestedSlug }}
+                components={{ strong: <strong />, muted: <span className="text-keep-muted" />, action: <span className="text-keep-action" /> }}
+              />
             </p>
-            <p className="text-xs text-keep-muted">One application at a time. You can apply again once it's decided.</p>
+            <p className="text-xs text-keep-muted">{t("discover.form.oneAtATime")}</p>
           </div>
         ) : (
           <div className="space-y-3">
             {lastRejected?.reviewNote ? (
               <p className="rounded border border-keep-rule bg-keep-panel/40 px-2 py-1.5 text-xs text-keep-muted">
-                Your last application was declined: "{lastRejected.reviewNote}"
+                {t("discover.form.declinedNote", { note: lastRejected.reviewNote })}
               </p>
             ) : null}
             <label className="block text-sm">
-              <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Server name</span>
+              <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("discover.form.serverName")}</span>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={SERVER_NAME_MAX}
-                placeholder="The Obsidian Court"
+                placeholder={t("discover.form.namePlaceholder")}
                 data-tour="server-create-name"
                 className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
               />
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">
-                Address <span className="normal-case text-keep-rule">/s/</span>
+                {t("discover.form.address")} <span className="normal-case text-keep-rule">/s/</span>
                 {slugNote ? <span className={`ml-2 normal-case ${slugNote.tone}`}>{slugNote.text}</span> : null}
               </span>
               <input
                 value={slug}
                 onChange={(e) => { setSlugTouched(true); setSlug(e.target.value.toLowerCase()); }}
                 maxLength={40}
-                placeholder="obsidian-court"
+                placeholder={t("discover.form.slugPlaceholder")}
                 data-tour="server-create-slug"
                 className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 font-mono text-sm outline-none focus:border-keep-action"
               />
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">
-                What is your server for?
+                {t("discover.form.purposeLabel")}
                 <span className={`ml-2 normal-case tabular-nums ${purposeLen > 0 && purposeLen < SERVER_PURPOSE_MIN ? "text-keep-accent" : "text-keep-rule"}`}>
-                  {purposeLen}/{SERVER_PURPOSE_MAX}{purposeLen < SERVER_PURPOSE_MIN ? ` (min ${SERVER_PURPOSE_MIN})` : ""}
+                  {purposeLen}/{SERVER_PURPOSE_MAX}{purposeLen < SERVER_PURPOSE_MIN ? t("discover.form.minSuffix", { n: SERVER_PURPOSE_MIN }) : ""}
                 </span>
               </span>
               <textarea
@@ -1049,7 +1068,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setPurpose(e.target.value)}
                 maxLength={SERVER_PURPOSE_MAX}
                 rows={4}
-                placeholder="Tell the reviewers what community this server gathers and what its rooms will hold."
+                placeholder={t("discover.form.purposePlaceholder")}
                 data-tour="server-create-purpose"
                 className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
               />
@@ -1059,7 +1078,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
                 when rules are set; sanitized (defense-in-depth) before display. */}
             {hasRules ? (
               <div className="space-y-2">
-                <span className="block text-xs uppercase tracking-widest text-keep-muted">Before you apply</span>
+                <span className="block text-xs uppercase tracking-widest text-keep-muted">{t("discover.form.beforeYouApply")}</span>
                 <div
                   className="prose prose-sm max-h-72 max-w-none overflow-y-auto break-words rounded border border-keep-rule bg-keep-panel/30 px-3 py-2 text-keep-text sm:max-h-96"
                   dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(rulesHtml!) }}
@@ -1071,14 +1090,14 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
                     onChange={(e) => setAgreed(e.target.checked)}
                     className="mt-0.5"
                   />
-                  <span>I agree to these rules</span>
+                  <span>{t("discover.form.agree")}</span>
                 </label>
               </div>
             ) : null}
 
             {err ? <p className="text-xs text-keep-accent">{err}</p> : null}
             <div className="flex items-center justify-between gap-2">
-              <p className="text-[11px] text-keep-muted">Reviewed by the site's moderators. Approved servers appear in the catalog with you as owner.</p>
+              <p className="text-[11px] text-keep-muted">{t("discover.form.reviewNote")}</p>
               <button
                 type="button"
                 onClick={() => void submit()}
@@ -1086,7 +1105,7 @@ function CreateServerForm({ onClose }: { onClose: () => void }) {
                 data-tour="server-create-submit"
                 className="shrink-0 rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
               >
-                {busy ? "…" : "Apply"}
+                {busy ? "…" : t("discover.card.apply")}
               </button>
             </div>
           </div>

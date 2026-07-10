@@ -14,7 +14,10 @@
  * carry our own here rather than widen it).
  */
 import { useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { ProfileView, ServerViewerState } from "@thekeep/shared";
+import { i18n } from "../../lib/i18n.js";
+import { formatDate, formatDateTime } from "../../lib/intlFormat.js";
 import { ProfileModal } from "../profile/ProfileModal.js";
 
 /* ============================================================
@@ -50,7 +53,7 @@ interface ServerReportWire {
 
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   const j = (await r.json().catch(() => null)) as ({ error?: string } & T) | null;
-  if (!r.ok) throw new Error(j?.error ?? `Request failed (${r.status}).`);
+  if (!r.ok) throw new Error(j?.error ?? i18n.t("errors:requestFailed", { status: r.status }));
   return j as T;
 }
 
@@ -98,6 +101,7 @@ function ReportCard({
   onChanged: () => void;
   onViewAuthor?: (userId: string) => void;
 }) {
+  const { t } = useTranslation("servers");
   const [note, setNote] = useState("");
   const open = report.status === "open";
   const authorId = report.messageUserId ?? null;
@@ -109,7 +113,7 @@ function ReportCard({
           <button
             type="button"
             onClick={() => onViewAuthor(authorId)}
-            title="View this member's profile to verify the report"
+            title={t("reportsTab.viewAuthorTitle")}
             className="text-sm font-semibold text-keep-text underline decoration-dotted underline-offset-2 hover:text-keep-action"
           >
             {report.messageDisplayName}
@@ -117,8 +121,8 @@ function ReportCard({
         ) : (
           <span className="text-sm font-semibold text-keep-text">{report.messageDisplayName}</span>
         )}
-        <span className="text-[11px] text-keep-muted">in {report.roomName}</span>
-        <span className="ml-auto text-[10px] text-keep-muted">{new Date(report.createdAt).toLocaleString()}</span>
+        <span className="text-[11px] text-keep-muted">{t("reportsTab.inRoom", { room: report.roomName })}</span>
+        <span className="ml-auto text-[10px] text-keep-muted">{formatDateTime(report.createdAt)}</span>
       </div>
 
       <p className="whitespace-pre-wrap break-words rounded border border-keep-rule/60 bg-keep-bg px-2 py-1 text-sm text-keep-text">
@@ -126,8 +130,8 @@ function ReportCard({
       </p>
 
       <div className="text-[11px] text-keep-muted">
-        Reported by <span className="text-keep-text">{report.reporterDisplayName}</span>
-        {report.reason ? <span> · "{report.reason}"</span> : null}
+        <Trans t={t} i18nKey="reportsTab.reportedBy" values={{ name: report.reporterDisplayName }} components={{ reporter: <span className="text-keep-text" /> }} />
+        {report.reason ? <span>{t("reportsTab.reasonSuffix", { reason: report.reason })}</span> : null}
       </div>
 
       {open ? (
@@ -136,7 +140,7 @@ function ReportCard({
             value={note}
             onChange={(e) => setNote(e.target.value)}
             maxLength={500}
-            placeholder="Resolution note (optional, kept in the Mod Log)"
+            placeholder={t("reportsTab.notePlaceholder")}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
           />
           <div className="flex flex-wrap justify-end gap-2">
@@ -146,7 +150,7 @@ function ReportCard({
               onClick={() => void run(async () => { await apiResolveServerReport(serverId, report.id, "dismissed", note); onChanged(); })}
               className="rounded border border-keep-rule px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50"
             >
-              Dismiss
+              {t("reportsTab.dismiss")}
             </button>
             <button
               type="button"
@@ -154,16 +158,16 @@ function ReportCard({
               onClick={() => void run(async () => { await apiResolveServerReport(serverId, report.id, "reviewed", note); onChanged(); })}
               className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
             >
-              Mark reviewed
+              {t("reportsTab.markReviewed")}
             </button>
           </div>
         </div>
       ) : (
         <div className="border-t border-keep-rule/60 pt-1.5 text-[11px] text-keep-muted">
           <span className="uppercase tracking-widest text-keep-accent">{report.status}</span>
-          {report.resolvedByDisplayName ? <span> by {report.resolvedByDisplayName}</span> : null}
-          {report.resolvedAt ? <span> · {new Date(report.resolvedAt).toLocaleDateString()}</span> : null}
-          {report.resolutionNote ? <span className="italic"> · "{report.resolutionNote}"</span> : null}
+          {report.resolvedByDisplayName ? <span>{t("reportsTab.bySuffix", { name: report.resolvedByDisplayName })}</span> : null}
+          {report.resolvedAt ? <span> · {formatDate(report.resolvedAt)}</span> : null}
+          {report.resolutionNote ? <span className="italic">{t("reportsTab.reasonSuffix", { reason: report.resolutionNote })}</span> : null}
         </div>
       )}
     </li>
@@ -187,6 +191,7 @@ export default function ReportsTab({
   run: (fn: () => Promise<void>) => Promise<void>;
   onSaved: () => void;
 }): React.ReactElement {
+  const { t } = useTranslation("servers");
   const [reports, setReports] = useState<ServerReportWire[] | null>(null);
   const [tick, setTick] = useState(0);
   const [viewing, setViewing] = useState<ProfileView | null>(null);
@@ -214,14 +219,14 @@ export default function ReportsTab({
     setViewError(null);
     try {
       const r = await fetch(`/profiles/${encodeURIComponent(`@id:${userId}`)}`, { credentials: "include" });
-      if (!r.ok) { setViewError(r.status === 404 ? "That member no longer exists." : `Couldn't load their profile (HTTP ${r.status}).`); return; }
+      if (!r.ok) { setViewError(r.status === 404 ? t("reportsTab.memberGone") : t("reportsTab.profileLoadHttp", { status: r.status })); return; }
       const j = await r.json();
-      if (j && "private" in j) { setViewError("That profile is restricted."); return; }
+      if (j && "private" in j) { setViewError(t("console.users.profileRestricted")); return; }
       setViewing(j as ProfileView);
-    } catch { setViewError("Couldn't load their profile."); }
+    } catch { setViewError(t("reportsTab.profileLoadError")); }
   }
 
-  if (!reports) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+  if (!reports) return <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>;
 
   const open = reports.filter((r) => r.status === "open");
   const resolved = reports.filter((r) => r.status !== "open");
@@ -229,15 +234,14 @@ export default function ReportsTab({
   return (
     <div className="max-w-2xl space-y-4">
       <p className="text-[11px] text-keep-muted">
-        Reports your members filed against this server's messages. Direct-message and profile reports go to the
-        platform team, not here.
+        {t("reportsTab.blurb")}
       </p>
       {viewError ? <p className="text-xs text-keep-accent">{viewError}</p> : null}
 
       <section className="space-y-1.5">
-        <p className="text-xs uppercase tracking-widest text-keep-muted">Open ({open.length})</p>
+        <p className="text-xs uppercase tracking-widest text-keep-muted">{t("reportsTab.openHeading", { n: open.length })}</p>
         {open.length === 0 ? (
-          <p className="text-xs italic text-keep-muted">Nothing waiting. All clear.</p>
+          <p className="text-xs italic text-keep-muted">{t("reportsTab.noneOpen")}</p>
         ) : (
           <ul className="space-y-2">
             {open.map((r) => (
@@ -249,7 +253,7 @@ export default function ReportsTab({
 
       {resolved.length > 0 ? (
         <section className="space-y-1.5">
-          <p className="text-xs uppercase tracking-widest text-keep-muted">Recently resolved</p>
+          <p className="text-xs uppercase tracking-widest text-keep-muted">{t("reportsTab.recentlyResolved")}</p>
           <ul className="space-y-2">
             {resolved.map((r) => (
               <ReportCard key={r.id} report={r} serverId={serverId} busy={busy || !canManage} run={run} onChanged={refresh} onViewAuthor={openProfile} />

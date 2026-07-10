@@ -1,0 +1,520 @@
+{
+  "dismiss": "Dismiss",
+  "backLink": "← Back",
+  "gathering": "Gathering communities…",
+  "errorFallback": "error",
+  "topCommunitiesTitle": "Top Communities",
+  "stats": {
+    "messages24hLabel_one": "message in the last 24h",
+    "messages24hLabel_other": "messages in the last 24h"
+  },
+  "duration": {
+    "indefinitely": "indefinitely",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days",
+    "hours_one": "{{count}} hour",
+    "hours_other": "{{count}} hours",
+    "minutes_one": "{{count}} minute",
+    "minutes_other": "{{count}} minutes",
+    "seconds": "{{seconds}} seconds"
+  },
+  "shell": {
+    "tagline": "a chat sanctuary",
+    "checking": "checking {{siteName}}...",
+    "projectCredit": "The Spire Roleplay Chat v{{version}}",
+    "stats": {
+      "onlineOutOf_one": "<0>{{count}}</0><1>user online out of</1><2>{{total}}</2>",
+      "onlineOutOf_other": "<0>{{count}}</0><1>users online out of</1><2>{{total}}</2>",
+      "usersOnline_one": "user online",
+      "usersOnline_other": "users online",
+      "publicRooms_one": "public room",
+      "publicRooms_other": "public rooms",
+      "privateChambers_one": "private chamber",
+      "privateChambers_other": "private chambers"
+    },
+    "meta": {
+      "retentionIndefinite": "Messages are kept indefinitely",
+      "retention": "Messages are kept for {{duration}}",
+      "sessionIdle": "sessions log out after {{duration}} idle"
+    }
+  },
+  "publicShell": {
+    "openSite": "Open {{siteName}}",
+    "signIn": "Sign in to {{siteName}}"
+  },
+  "boot": {
+    "checkingSession": "checking session..."
+  },
+  "auth": {
+    "enterHeading": "enter the spire",
+    "registerHeading": "create a vessel",
+    "logIn": "Log in",
+    "register": "Register",
+    "loggingIn": "Logging in...",
+    "registering": "Registering...",
+    "needAccount": "Need an account? Register.",
+    "alreadyHaveOne": "Already have one? Log in.",
+    "registrationClosed": "Registration is currently closed.",
+    "forgotPassword": "Forgot password?",
+    "email": "Email",
+    "emailOrUsername": "Email or username",
+    "masterUsername": "Master username",
+    "password": "Password",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password",
+    "dateOfBirth": "Date of birth",
+    "dobHelper": "You must be at least {{minAge}} to join {{siteName}}.",
+    "minorIsolation": "Only show me other members under 18 and staff. You can change this later in your settings.",
+    "beforeYouRegister": "before you register",
+    "rulesAgreement": "I understand {{siteName}} hosts user written stories and roleplay, and some areas are for adults only. I agree to the <1>site rules</1>.",
+    "captchaHeading": "Quick check (anti-bot)",
+    "captchaLoading": "loading...",
+    "captchaPlaceholder": "answer",
+    "captchaNew": "new question",
+    "captchaNewTitle": "Get a different question",
+    "tickBoxTitle": "Tick the box to confirm you agree to the house rules.",
+    "rulesRequired": "Please read and agree to the house rules to register.",
+    "dobRequired": "Please enter your date of birth.",
+    "minAgeError": "You must be at least {{minAge}} years old to create an account.",
+    "captchaRequired": "Please answer the verification question.",
+    "registerFailed": "register failed",
+    "loginFailed": "login failed",
+    "or": "or",
+    "continueWithGoogle": "Continue with Google",
+    "googleFailed": "Google sign-in failed. Please try again.",
+    "googleSigningIn": "Signing you in with Google…",
+    "profilePrivate": "<0>{{name}}</0>'s profile is <2>private</2>. Please sign in or register to view it.",
+    "profileView": "You're trying to view <1>{{name}}</1>'s profile. Sign in or register to continue.",
+    "worldPrivate": "<0>{{name}}</0> is a <2>private</2> world. Please sign in or register to view it.",
+    "returnForumRegister": "You're creating an account on <1>{{siteName}}</1> to access the forum <3>{{forum}}</3>. Once you've registered, we'll take you straight back to it.",
+    "returnForumLogin": "After you sign in, we'll return you to the forum <1>{{forum}}</1>."
+  },
+  "googleFinish": {
+    "heading": "finish your vessel",
+    "intro": "You're signing in with <1>Google</1>. Pick a username and agree to the house rules to finish creating your account on <3>{{siteName}}</3>.",
+    "rulesRequired": "Please read and agree to the house rules to finish signing up.",
+    "finishFailed": "Couldn't finish signing up.",
+    "finishing": "Finishing…",
+    "finishCta": "Finish signing up"
+  },
+  "emailPages": {
+    "backToSignIn": "Back to sign in",
+    "continueToSignIn": "Continue to sign in",
+    "goToSignIn": "Go to sign in",
+    "checkEmail": "Check your email",
+    "resetSent": "If an account exists for that email, a password reset link is on its way. It expires in 1 hour. Check your inbox (and spam folder).",
+    "resetTitle": "Reset your password",
+    "resetIntro": "Enter your account email and we'll send you a link to choose a new password.",
+    "genericError": "Something went wrong. Please try again.",
+    "tryAgain": "Please try again.",
+    "sending": "Sending...",
+    "sendResetLink": "Send reset link",
+    "invalidLink": "Invalid link",
+    "resetMissingToken": "This reset link is missing its token. Request a new one from the sign-in page.",
+    "passwordUpdated": "Password updated",
+    "passwordChanged": "Your password has been changed. You can now sign in with your new password.",
+    "chooseNewPassword": "Choose a new password",
+    "newPassword": "New password",
+    "confirmPassword": "Confirm password",
+    "mismatch": "Passwords don't match yet.",
+    "minChars": "At least 8 characters.",
+    "resetFailed": "Could not reset your password.",
+    "updating": "Updating...",
+    "updatePassword": "Update password",
+    "verifyTitle": "Email verification",
+    "verifyMissingToken": "This confirmation link is missing its token.",
+    "verifyInvalid": "This confirmation link is invalid or has expired.",
+    "verifyFailed": "Could not confirm your email.",
+    "confirming": "Confirming your email…",
+    "confirmed": "Your email is confirmed. Thanks! You can sign in and start writing."
+  },
+  "verifyGate": {
+    "sent": "Sent! Check your inbox (and spam).",
+    "sending": "Sending…",
+    "resend": "Resend verification email",
+    "sendFailed": "Couldn't send right now. Try again in a minute.",
+    "tryLater": "Try again in a minute.",
+    "checking": "Checking…",
+    "refreshCta": "I've verified — refresh",
+    "notYet": "Not verified yet — open the link in your email, then try again.",
+    "block": "<0>Verify your email to chat.</0> Click the link we sent, then <2>{{refreshLabel}}</2>. Don't see it? Check your <4>spam</4> folder, then <6>{{resendLabel}}</6> · <8>wrong email?</8>",
+    "nudge": "Please verify your email to secure your account. <1>{{resendLabel}}</1>"
+  },
+  "faqPage": {
+    "title": "FAQ",
+    "empty": "No FAQ entries have been posted yet.",
+    "notFound": "That FAQ entry doesn't exist (or isn't published).",
+    "statusError": "status {{status}}",
+    "loadFailed": "load failed",
+    "allFaqs": "← All FAQs"
+  },
+  "landing": {
+    "tagline": "Where stories and communities live.",
+    "tabJoin": "Join",
+    "tabHost": "Host",
+    "tabCommunities": "Communities",
+    "tabFeatures": "Features",
+    "tabFaq": "FAQ",
+    "tabRules": "Rules",
+    "tabForums": "Forums",
+    "joinTitle": "Join the story",
+    "joinBody": "Step into live roleplay rooms, build a cast of characters, explore shared worlds, and write alongside a whole community.",
+    "createAccount": "Create my free account",
+    "reassurance": "Free forever. No download, no card. Jump into a room in under a minute.",
+    "onlineNow_one": "<0>{{formatted}}</0> roleplayer online now",
+    "onlineNow_other": "<0>{{formatted}}</0> roleplayers online now",
+    "google": "Google",
+    "signInWithGoogle": "Sign in with Google",
+    "hostTitle": "Host your own community",
+    "hostBody": "Run your own chat community and forums, with your own rooms, members, roles, and moderation. Free to start, right in your browser.",
+    "startCommunity": "Start a community",
+    "seeLiveForum": "See a live forum →",
+    "bringCommunity": "Bring your community to {{siteName}}",
+    "bringBody": "Give your game, guild, or fandom a real home, free, with the tools to run it your way.",
+    "ownChatTitle": "Your own chat community",
+    "ownChat": [
+      "Live rooms for real-time roleplay",
+      "Members, roles, and invites",
+      "Its own economy and cosmetics",
+      "Moderation tools you control"
+    ],
+    "ownForumsTitle": "Your own forums",
+    "ownForums": [
+      "Boards for play-by-post and discussion",
+      "A moderator team and membership rules",
+      "A public page you can share anywhere",
+      "Threaded topics that last for weeks"
+    ],
+    "visitForums": "Visit {{siteName}} Forums",
+    "startYourOwn": "Start your own community →",
+    "closingTitle": "Your first scene is waiting",
+    "closingBody": "Registration takes a minute. Build a character, step into a public room, and start writing tonight.",
+    "justBrowsing": "Just browsing? <1>Read stories in the Scriptorium</1>, no account needed.",
+    "whatYouGet": "What you get here",
+    "showLess": "Show less",
+    "showMore": "Show {{n}} more",
+    "credFree": "Free and open source",
+    "credRules": "Your community, your rules",
+    "credLongform": "Built for long-lived roleplay groups",
+    "credBrowser": "Play right in your browser",
+    "writersSteppedIn_one": "writer has stepped in",
+    "writersSteppedIn_other": "writers have stepped in",
+    "onlineRightNow": "online right now",
+    "publicRoomsOpen_one": "public room open",
+    "publicRoomsOpen_other": "public rooms open"
+  },
+  "features": {
+    "kicker": "What you can do here",
+    "heading": "Everything Your Story Needs",
+    "welcome": "Welcome, every writer, dreamer, and creature from all walks of life. There's a place for your stories here.",
+    "listAria": "Feature list",
+    "overview": "Overview",
+    "introHeading": "Play and pick-up games on any device",
+    "introAlt": "A look inside The Spire",
+    "items": {
+      "characters": {
+        "title": "Characters",
+        "tagline": "Play a whole cast, not just one face",
+        "desc": "Create up to 100 distinct characters on a single account, each with their own portrait, bio, stats, and inventory. Switch personas instantly, and join several games in different tabs at once.",
+        "points": [
+          "Up to 100 characters per account",
+          "Portraits, bios, stats & inventory",
+          "Per-character account management"
+        ],
+        "ctaLabel": "Create your cast"
+      },
+      "communities": {
+        "title": "Communities",
+        "tagline": "Host your own community, or join one",
+        "desc": "Beyond the native Spire, anyone can create their own community: a space with its own chat rooms, members, roles, economy, and moderation. Run it your way, or join communities other people have built.",
+        "points": [
+          "Your own rooms, members & roles",
+          "Per-community economy & cosmetics",
+          "Moderation tools you control"
+        ],
+        "ctaLabel": "Start a community"
+      },
+      "rooms": {
+        "title": "Live Roleplay",
+        "tagline": "Real-time scenes, day or night",
+        "desc": "Write together in open public rooms, or private rooms. Set the scene, and use NPC speakers to bring characters to life. Dice rolls, whispers, emotes, and slash commands keep the scene moving.",
+        "points": [
+          "Public & private password protected rooms",
+          "Room descriptions, scenes, and NPC speakers to enrich storytelling",
+          "Dice, actions, and whispers commands",
+          "Emoticons and emote stickers + custom emotes"
+        ]
+      },
+      "worlds": {
+        "title": "Worlds & Wikis",
+        "tagline": "Build the setting, not just the scene",
+        "desc": "Give your game a permanent home: a world wiki with typed entries for locations, NPCs, items, and factions, a lore page tree, story arcs, and session logs, all cross-linked like a real knowledge base.",
+        "points": [
+          "Typed entries: locations, NPCs, items, factions",
+          "Lore pages, story arcs & session logs",
+          "Vibe sliders show players what to expect"
+        ]
+      },
+      "forums": {
+        "title": "Forums & PBP",
+        "tagline": "Join or host your own forums here",
+        "desc": "Join an existing forum hosting Play-by-Post games, or run a forum for your own games, guilds, or fandoms. You get your own boards, a moderator team, and membership rules.",
+        "points": [
+          "Your own boards & moderator roles",
+          "Open, application, or invite-only membership",
+          "A public page at your own /f/ address"
+        ],
+        "ctaLabel": "Browse the community forums"
+      },
+      "scriptorium": {
+        "title": "The Scriptorium",
+        "tagline": "Publish original fiction & fanfiction",
+        "desc": "Post your stories with chapters, content ratings, and reviews in a rich editor built for writers. Readers can shelve your books in their library, and you can even offer paid copies with in-app point currency.",
+        "points": [
+          "Original fiction & fanfiction with chapters",
+          "Reviews, ratings & reader libraries",
+          "Earn gold, and offer paid copies of your work"
+        ],
+        "ctaLabel": "Browse the Scriptorium"
+      },
+      "profiles": {
+        "title": "Profiles",
+        "tagline": "A page that is truly yours",
+        "desc": "Every character gets a customizable profile page: custom CSS, backgrounds, image galleries, and links. Make it match your character, not a template.",
+        "points": [
+          "Custom HTML, CSS & backgrounds",
+          "Image galleries & links",
+          "Distinct looks per character",
+          "Show off item collections & pets"
+        ]
+      },
+      "earning": {
+        "title": "Earning & Rewards",
+        "tagline": "Progress that respects your time",
+        "desc": "Active writers earn XP, ranks, and currency just by playing. Spend it on cosmetics, name styles, room transitions, and gifts for friends. No decay, no daily chores.",
+        "points": [
+          "XP, ranks & point currency for writing",
+          "Shop with collectible items, gifts, throwables, and pets",
+          "Customizable Name Styles, Border Frames, and more",
+          "No grind required to keep your standing"
+        ]
+      },
+      "community": {
+        "title": "Find Your Circle",
+        "tagline": "Built for long-lived communities",
+        "desc": "Friends lists, per-character presence, and safety tools like blocking and ignores keep the community healthy. Themes from medieval to sci-fi make it feel like home.",
+        "points": [
+          "Friends & online presence",
+          "Blocking, ignore & moderation tools",
+          "Light & dark themes for every taste + customize your own"
+        ]
+      }
+    }
+  },
+  "featuredWorlds": {
+    "sectionAria": "Featured worlds",
+    "kicker": "Featured Worlds",
+    "cardsTitle": "World Settings to Explore",
+    "orbTitle": "Worlds to Peer Into",
+    "orbSubtitle": "scry through the crystal at each realm",
+    "previous": "Previous world",
+    "next": "Next world",
+    "enterAria": "Enter {{name}}",
+    "controlsAria": "Featured worlds carousel controls",
+    "dotAria": "World {{index}} of {{total}}: {{name}}",
+    "toldInPages_one": "A world told in {{count}} page.",
+    "toldInPages_other": "A world told in {{count}} pages.",
+    "pages_one": "{{count}} page",
+    "pages_other": "{{count}} pages",
+    "pagesBy_one": "{{count}} page · by {{name}}",
+    "pagesBy_other": "{{count}} pages · by {{name}}",
+    "members_one": "{{count}} member",
+    "members_other": "{{count}} members",
+    "byOwner": "by {{name}}",
+    "vibe": "Vibe",
+    "enterCta": "Enter this world →",
+    "genre": {
+      "fantasy": "Fantasy",
+      "scifi": "Sci-Fi",
+      "modern": "Modern",
+      "horror": "Horror",
+      "western": "Western",
+      "steampunk": "Steampunk",
+      "mythological": "Mythological",
+      "other": "Original Setting",
+      "unknown": "World"
+    },
+    "eyebrow": {
+      "fantasy": "A realm of",
+      "scifi": "A future of",
+      "modern": "A city of",
+      "horror": "A nightmare of",
+      "western": "A frontier of",
+      "steampunk": "A foundry of",
+      "mythological": "A myth of",
+      "other": "A world of"
+    }
+  },
+  "popular": {
+    "sectionAria": "Popular {{siteName}} chat servers",
+    "heading": "Popular {{siteName}} Chat Servers",
+    "sub": "Places people are already gathering. Take a look inside.",
+    "visitTitle": "Visit {{name}}",
+    "homeBadge": "Home",
+    "members_one": "{{formatted}} member",
+    "members_other": "{{formatted}} members",
+    "online": "{{formatted}} online",
+    "lastPost": "Last post {{time}}"
+  },
+  "communities": {
+    "sub": "The most active communities in our network. Take a look, and list your own.",
+    "emptyRail": "No communities listed yet. Be the first to list yours.",
+    "browseAll": "Browse all communities →"
+  },
+  "board": {
+    "sortTraffic": "Most active",
+    "sortIn": "Most sent to us",
+    "sortOut": "Most sent out",
+    "sortAz": "A to Z",
+    "emptyDefault": "No communities match your search.",
+    "searchPlaceholder": "Search by name or tag…",
+    "searchAria": "Search communities by name or tag",
+    "clearSearch": "Clear search text",
+    "sortLabel": "Sort",
+    "sortAria": "Sort communities",
+    "clearTag": "Clear tag",
+    "showing": "Showing {{from}}–{{to}} of {{total}}",
+    "pageOf": "Page {{page}} of {{total}}",
+    "prevPage": "Previous page",
+    "nextPage": "Next page"
+  },
+  "card": {
+    "visit": "Visit",
+    "noTitle": "No Title",
+    "noDescription": "No Description",
+    "seeLess": "See less",
+    "seeMore": "See more",
+    "moreTags": "+{{count}}",
+    "visitsInTitle": "Visits sent to us",
+    "visitsInSr": "visits sent to us",
+    "visitsOutTitle": "Visits we sent you",
+    "visitsOutSr": "visits we sent you"
+  },
+  "portal": {
+    "status": {
+      "pending": "Pending review",
+      "approved": "Live",
+      "rejected": "Needs changes",
+      "disabled": "Hidden"
+    },
+    "listYourCommunity": "List your community",
+    "backToBoard": "Back to the board",
+    "title": "Top RP Communities",
+    "addYourCommunity": "Add Your Community",
+    "intro": "List your roleplay community here. Add our link-back to your site, and we'll count visits both ways so everyone can see what's active.",
+    "emptyBoard": "No communities listed yet. Be the first — hit Add Your Community.",
+    "loginToList": "Log in to list your community.",
+    "ownEntry": "You'll own the entry, so you can return anytime to copy your link-back.",
+    "loadFailed": "Couldn't load your submissions.",
+    "mySubmissions": "My submissions",
+    "noneYet": "You haven't listed a community yet.",
+    "listCommunity": "List a community",
+    "fieldTitle": "Title",
+    "titlePlaceholder": "Your community's name",
+    "fieldTargetUrl": "Target URL",
+    "targetPlaceholder": "https://example.com",
+    "urlHint": "Use a full http/https link.",
+    "fieldDescription": "Description",
+    "descPlaceholder": "A line or two about your community",
+    "fieldIconUrl": "Icon URL (optional)",
+    "iconPlaceholder": "https://example.com/icon.png",
+    "fieldBannerUrl": "Banner URL (optional)",
+    "bannerPlaceholder": "https://example.com/banner.jpg",
+    "fieldTags": "Tags (optional)",
+    "tagsHint": "Genre or category, so seekers can find you.",
+    "submitFailed": "Couldn't submit. Try again.",
+    "pendingNote": "Thanks! Your community is pending review. It goes live once a moderator approves it.",
+    "submitting": "Submitting…",
+    "submitCta": "Submit for review",
+    "withdrawFailed": "Couldn't withdraw.",
+    "edit": "Edit",
+    "withdraw": "Withdraw",
+    "linkBackLabel": "Your link-back (put this on your site)",
+    "copyLinkBack": "Copy link-back",
+    "editNote": "Editing a live listing sends it back for review before it shows again.",
+    "iconUrlAria": "Icon URL",
+    "bannerUrlAria": "Banner URL",
+    "saveFailed": "Couldn't save."
+  },
+  "splashNav": {
+    "sectionsAria": "Page sections",
+    "explore": "Explore",
+    "signUp": "Sign up",
+    "closeMenu": "Close section menu",
+    "openMenu": "Open section menu"
+  },
+  "topCommunities": {
+    "docTitle": "Top Communities · {{siteName}}",
+    "homeAria": "{{siteName}} home",
+    "addYourSite": "Add Your Site",
+    "emptyBoard": "No communities listed yet. Be the first — hit Add Your Site."
+  },
+  "splashFaq": {
+    "title": "Frequently asked questions",
+    "moreQuestion": "Have another question? <1>Read the full FAQ</1>."
+  },
+  "seo": {
+    "homepageTagline": "Roleplay Chat, Communities & Forums",
+    "defaultDescription": "Host your own roleplay chat community or forum, or dive into live RP chat, character profiles, worlds, and collaborative writing.",
+    "defaultTitle": "{{siteName}} - {{tagline}}",
+    "forum": {
+      "title": "{{name}} - Forum · {{siteName}}",
+      "genericDescription": "{{name}} is a community forum on {{siteName}}, with boards for play-by-post and discussion."
+    },
+    "world": {
+      "title": "{{name}} - Roleplay World · {{siteName}}",
+      "genericDescription": "{{name}} is a roleplay world on {{siteName}}. Lore, places, and characters in one wiki."
+    },
+    "community": {
+      "title": "{{name}} - Community · {{siteName}}",
+      "genericDescription": "{{name}} is a roleplay community on {{siteName}}, with its own chat rooms and forums."
+    },
+    "login": {
+      "title": "Log in · {{siteName}} - {{tagline}}",
+      "description": "Sign in to {{siteName}} to continue your stories, manage characters, and rejoin your roleplay rooms."
+    },
+    "register": {
+      "title": "Create your character · {{siteName}} - {{tagline}}",
+      "description": "Join {{siteName}}. Build a character, step into the worlds, and find your roleplay circle. Free to sign up."
+    },
+    "accountAccess": {
+      "title": "Account access · {{siteName}}"
+    },
+    "scriptorium": {
+      "title": "Scriptorium - Collaborative Stories · {{siteName}}",
+      "description": "Read and write collaborative roleplay fiction on {{siteName}}. The Scriptorium hosts open-invite stories, one-shots, and long-form serials from the community."
+    },
+    "faqs": {
+      "title": "Help & FAQ · {{siteName}}",
+      "description": "Answers to common questions about {{siteName}}: getting started, roleplay chat, characters, communities, forums, and account help."
+    },
+    "topCommunities": {
+      "title": "Top Communities · {{siteName}}",
+      "description": "Discover the top roleplay communities, chat servers, and forums featured on {{siteName}}. Browse the webring and find your next home for RP."
+    },
+    "service": {
+      "name": "Community & forum hosting on {{siteName}}",
+      "serviceType": "Online community and forum hosting",
+      "description": "Create and run your own roleplay chat community or forum on {{siteName}}, with rooms, members, roles, moderation, and a shareable public page."
+    },
+    "noscript": {
+      "intro": "{{siteName}} is a home for live, text-based roleplay, and a platform where anyone can host their own community. Join the roleplay, or create your own chat community and forums with your own rooms, members, roles, and moderation.",
+      "body": "Step into live roleplay chat rooms, build characters, explore shared worlds, write collaborative stories in the Scriptorium, or host your own community or forum.",
+      "registerLink": "Create your free account",
+      "loginLink": "Log in",
+      "forumsLink": "Browse the {{siteName}} forums",
+      "scriptoriumLink": "Read stories in the Scriptorium",
+      "jsNote": "This page needs JavaScript enabled for the full experience."
+    }
+  }
+}

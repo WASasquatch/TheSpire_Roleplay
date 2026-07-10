@@ -22,7 +22,9 @@
  */
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { ServerViewerState } from "@thekeep/shared";
+import { i18n } from "../../lib/i18n.js";
 
 /* ============================================================
  * Props (matches the console tab action contract; serverId passed directly).
@@ -105,7 +107,7 @@ interface TitleKindInput {
  * ============================================================ */
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   const j = (await r.json().catch(() => null)) as ({ error?: string } & T) | null;
-  if (!r.ok) throw new Error(j?.error ?? `Request failed (${r.status}).`);
+  if (!r.ok) throw new Error(j?.error ?? i18n.t("errors:requestFailed", { status: r.status }));
   return j as T;
 }
 const sid = (id: string) => encodeURIComponent(id);
@@ -159,6 +161,7 @@ function formatMs(ms: number): string {
  * Tab
  * ============================================================ */
 export default function CommandsTitlesTab({ serverId, viewer, busy, run, onSaved }: CommandsTitlesTabProps) {
+  const { t } = useTranslation("servers");
   const canCommands = viewer.isOwner || viewer.permissions.includes("manage_commands");
   const canTitles = viewer.isOwner || viewer.permissions.includes("manage_titles");
   return (
@@ -167,7 +170,7 @@ export default function CommandsTitlesTab({ serverId, viewer, busy, run, onSaved
       {canTitles ? <TitlesSection serverId={serverId} busy={busy} run={run} onSaved={onSaved} /> : null}
       {!canCommands && !canTitles ? (
         <p className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">
-          You don't hold the commands or titles permission on this server.
+          {t("commandsTab.noPermission")}
         </p>
       ) : null}
     </div>
@@ -178,6 +181,7 @@ export default function CommandsTitlesTab({ serverId, viewer, busy, run, onSaved
  * Commands section
  * ============================================================ */
 function CommandsSection({ serverId, busy, run, onSaved }: { serverId: string; busy: boolean; run: CommandsTitlesTabProps["run"]; onSaved: () => void }) {
+  const { t } = useTranslation("servers");
   const [cmds, setCmds] = useState<CustomCmdRow[]>([]);
   const [games, setGames] = useState<SocialGameRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -193,7 +197,7 @@ function CommandsSection({ serverId, busy, run, onSaved }: { serverId: string; b
       setCmds(j.commands);
       setGames(j.socialGames ?? []);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "load failed");
+      setErr(e instanceof Error ? e.message : t("shared.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -204,9 +208,8 @@ function CommandsSection({ serverId, busy, run, onSaved }: { serverId: string; b
     <section className="space-y-3">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="text-xs text-keep-muted sm:max-w-[60%]">
-          <span className="mb-1 block text-sm font-semibold text-keep-text">Commands</span>
-          This server's own slash commands, beyond the built-ins. Names are shared
-          across the whole site, so a name already taken elsewhere is rejected.
+          <span className="mb-1 block text-sm font-semibold text-keep-text">{t("commandsTab.commandsHeading")}</span>
+          {t("commandsTab.commandsBlurb")}
         </div>
         <button
           type="button"
@@ -214,7 +217,7 @@ function CommandsSection({ serverId, busy, run, onSaved }: { serverId: string; b
           onClick={() => { setAdding(true); setEditing(null); }}
           className="self-end rounded border border-keep-rule bg-keep-banner px-3 py-1 text-xs hover:bg-keep-banner/80 disabled:opacity-50 sm:self-auto"
         >
-          + New command
+          {t("commandsTab.newCommand")}
         </button>
       </div>
 
@@ -237,26 +240,26 @@ function CommandsSection({ serverId, busy, run, onSaved }: { serverId: string; b
           onCancel={() => setEditing(null)}
           onSubmit={(input) => run(async () => { await apiPatchCommand(serverId, editing.id, input); setEditing(null); onSaved(); await reload(); })}
           onDelete={() => {
-            if (!window.confirm(`Delete /${editing.name}?`)) return;
+            if (!window.confirm(t("commandsTab.deleteCommandConfirm", { name: editing.name }))) return;
             void run(async () => { await apiDeleteCommand(serverId, editing.id); setEditing(null); onSaved(); await reload(); });
           }}
         />
       ) : null}
 
       {loading ? (
-        <div className="text-xs text-keep-muted">loading…</div>
+        <div className="text-xs text-keep-muted">{t("commandsTab.loading")}</div>
       ) : cmds.length === 0 ? (
-        <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">No custom commands yet.</div>
+        <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">{t("commandsTab.noCommands")}</div>
       ) : (
         <div className="-mx-1 overflow-x-auto px-1">
           <table className="w-full min-w-[560px] text-xs">
             <thead className="bg-keep-banner/50 uppercase tracking-widest text-keep-muted">
               <tr>
-                <th className="px-2 py-1 text-left">Name</th>
-                <th className="px-2 py-1 text-left">Kind</th>
-                <th className="px-2 py-1 text-left">Aliases</th>
-                <th className="px-2 py-1 text-left">Template</th>
-                <th className="px-2 py-1">On</th>
+                <th className="px-2 py-1 text-left">{t("commandsTab.colName")}</th>
+                <th className="px-2 py-1 text-left">{t("commandsTab.colKind")}</th>
+                <th className="px-2 py-1 text-left">{t("commandsTab.colAliases")}</th>
+                <th className="px-2 py-1 text-left">{t("commandsTab.colTemplate")}</th>
+                <th className="px-2 py-1">{t("commandsTab.colOn")}</th>
                 <th className="px-2 py-1"></th>
               </tr>
             </thead>
@@ -282,7 +285,7 @@ function CommandsSection({ serverId, busy, run, onSaved }: { serverId: string; b
                       onClick={() => { setEditing(c); setAdding(false); }}
                       className="mr-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
                     >
-                      Edit
+                      {t("shared.edit")}
                     </button>
                   </td>
                 </tr>
@@ -309,16 +312,16 @@ function SocialGamesPanel({ games, loading, serverId, busy, run, onSaved }: {
   run: CommandsTitlesTabProps["run"];
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("servers");
   if (loading) return null;
   if (!games.length) return null;
   return (
     <section className="mt-4 space-y-2 border-t border-keep-rule pt-4">
       <div className="text-xs text-keep-muted">
         <span className="mr-2 inline-block rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action">
-          Social games
+          {t("commandsTab.socialGamesChip")}
         </span>
-        Reward + duration for the built-in social games on THIS server. "Inherits" means
-        it uses the platform default until you set your own; Reset returns to inheriting.
+        {t("commandsTab.socialGamesBlurb")}
       </div>
       <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
         {games.map((g) => (
@@ -337,6 +340,7 @@ function SocialGameCard({ game: g, serverId, busy, run, onSaved }: {
   run: CommandsTitlesTabProps["run"];
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("servers");
   // Duration shown in SECONDS for friendliness; blank = inherit.
   const [durationSec, setDurationSec] = useState<string>(g.durationMs != null ? String(Math.round(g.durationMs / 1000)) : "");
   const [xp, setXp] = useState<string>(String(g.rewardXp));
@@ -367,34 +371,34 @@ function SocialGameCard({ game: g, serverId, busy, run, onSaved }: {
     <article className="flex flex-col gap-2 rounded border border-keep-rule bg-keep-bg/40 p-3 text-xs">
       <header className="flex items-baseline justify-between gap-2">
         <h4 className="font-semibold">/{g.name} <span className="text-keep-muted">· {g.label}</span></h4>
-        <span className="text-[10px] uppercase tracking-widest text-keep-muted">{g.hasConfig ? "custom" : "inherits"}</span>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">{g.hasConfig ? t("commandsTab.custom") : t("commandsTab.inherits")}</span>
       </header>
       <p className="text-[11px] text-keep-muted">{g.description}</p>
       <label className="block">
-        <span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{g.durationLabel} (seconds, blank = default {formatMs(g.defaultDurationMs)})</span>
-        <input type="number" min={1} value={durationSec} onChange={(e) => setDurationSec(e.target.value)} placeholder="default" className={`${inputCls} w-28`} />
+        <span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{t("commandsTab.durationLabel", { label: g.durationLabel, default: formatMs(g.defaultDurationMs) })}</span>
+        <input type="number" min={1} value={durationSec} onChange={(e) => setDurationSec(e.target.value)} placeholder={t("commandsTab.defaultPlaceholder")} className={`${inputCls} w-28`} />
       </label>
       {g.supportsReward ? (
         <div className="grid grid-cols-2 gap-2">
-          <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">XP / winner</span>
+          <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{t("commandsTab.xpPerWinner")}</span>
             <input type="number" min={0} value={xp} onChange={(e) => setXp(e.target.value)} className={inputCls} /></label>
-          <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">Currency / winner</span>
+          <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{t("commandsTab.currencyPerWinner")}</span>
             <input type="number" min={0} value={currency} onChange={(e) => setCurrency(e.target.value)} className={inputCls} /></label>
-          <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">Item key (optional)</span>
-            <input value={itemKey} onChange={(e) => setItemKey(e.target.value)} placeholder="none" className={`${inputCls} font-mono`} /></label>
-          <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">Item count</span>
+          <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{t("commandsTab.itemKeyLabel")}</span>
+            <input value={itemKey} onChange={(e) => setItemKey(e.target.value)} placeholder={t("commandsTab.nonePlaceholder")} className={`${inputCls} font-mono`} /></label>
+          <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{t("commandsTab.itemCountLabel")}</span>
             <input type="number" min={0} value={itemCount} onChange={(e) => setItemCount(e.target.value)} disabled={!itemKey.trim()} className={inputCls} /></label>
         </div>
       ) : (
-        <p className="italic text-keep-muted">Reward fields ignored (prize is the host's stake).</p>
+        <p className="italic text-keep-muted">{t("commandsTab.rewardIgnored")}</p>
       )}
       <div className="flex justify-end gap-2">
         {g.hasConfig ? (
           <button type="button" disabled={busy} onClick={reset}
-            className="rounded border border-keep-rule px-2 py-1 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50">Reset</button>
+            className="rounded border border-keep-rule px-2 py-1 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50">{t("commandsTab.reset")}</button>
         ) : null}
         <button type="button" disabled={busy} onClick={save}
-          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save</button>
+          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("shared.save")}</button>
       </div>
     </article>
   );
@@ -408,6 +412,7 @@ function CommandForm({ mode, initial, busy, onSubmit, onCancel, onDelete }: {
   onCancel: () => void;
   onDelete?: () => void;
 }) {
+  const { t } = useTranslation("servers");
   const KIND_PRESETS = {
     action: { template: "{sender} ", css: "font-style: italic", color: "theme:action" as string | null },
     say: { template: "[{sender}] ", css: "", color: null as string | null },
@@ -476,67 +481,67 @@ function CommandForm({ mode, initial, busy, onSubmit, onCancel, onDelete }: {
       }
       await onSubmit(body);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("shared.saveFailed"));
     }
   }
 
   return (
     <form onSubmit={submit} className="rounded border border-keep-rule bg-keep-bg p-3 text-xs">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="truncate font-semibold">{mode === "create" ? "New command" : `Edit /${initial?.name}`}</div>
-        <button type="button" onClick={onCancel} className="shrink-0 text-keep-muted hover:text-keep-text">cancel</button>
+        <div className="truncate font-semibold">{mode === "create" ? t("commandsTab.newCommandTitle") : t("commandsTab.editCommandTitle", { name: initial?.name })}</div>
+        <button type="button" onClick={onCancel} className="shrink-0 text-keep-muted hover:text-keep-text">{t("commandsTab.cancelLower")}</button>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Name</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("commandsTab.colName")}</span>
           <input
             required value={name} onChange={(e) => setName(e.target.value)}
-            placeholder="hug" maxLength={32} pattern="[a-zA-Z][a-zA-Z0-9_-]*"
+            placeholder={t("commandsTab.namePlaceholder")} maxLength={32} pattern="[a-zA-Z][a-zA-Z0-9_-]*"
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
           />
         </label>
         <label>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Kind</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("commandsTab.colKind")}</span>
           <select value={kind} onChange={(e) => setKind(e.target.value as "action" | "say")} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1">
-            <option value="action">action - renders like /me (no brackets)</option>
-            <option value="say">say - renders as a normal message</option>
+            <option value="action">{t("commandsTab.kindAction")}</option>
+            <option value="say">{t("commandsTab.kindSay")}</option>
           </select>
         </label>
         <label className="col-span-1 sm:col-span-2">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Template</span>
-          <textarea required value={template} onChange={(e) => setTemplate(e.target.value)} placeholder="hugs {target} tightly." rows={2} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("commandsTab.colTemplate")}</span>
+          <textarea required value={template} onChange={(e) => setTemplate(e.target.value)} placeholder={t("commandsTab.templatePlaceholder")} rows={2} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
         </label>
         <label className="col-span-1 sm:col-span-2">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Description (optional)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("commandsTab.descriptionLabel")}</span>
           <input value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1" />
         </label>
         <label className="col-span-1 sm:col-span-2">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Aliases (space-separated, optional)</span>
-          <input value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="embrace cuddle" className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("commandsTab.aliasesLabel")}</span>
+          <input value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder={t("commandsTab.aliasesPlaceholder")} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
         </label>
         <div className="col-span-1 flex items-start gap-2 sm:col-span-2">
           <input id={`allow-inline-${initial?.id ?? "new"}`} type="checkbox" checked={allowInline} onChange={(e) => onToggleAllowInline(e.target.checked)} className="mt-0.5" />
           <label htmlFor={`allow-inline-${initial?.id ?? "new"}`} className="flex-1">
-            <span className="block uppercase tracking-widest text-keep-muted">Allow inline use</span>
-            <span className="block text-[10px] text-keep-muted">Lets people splice this into a sentence with <code>!{name || "name"}</code>. The standalone <code>/{name || "name"}</code> form keeps working either way.</span>
+            <span className="block uppercase tracking-widest text-keep-muted">{t("commandsTab.allowInline")}</span>
+            <span className="block text-[10px] text-keep-muted"><Trans t={t} i18nKey="commandsTab.allowInlineHint" values={{ name: name || t("commandsTab.nameFallback") }} components={{ code: <code /> }} /></span>
           </label>
         </div>
         {allowInline ? (
           <label className="col-span-1 sm:col-span-2">
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Inline template (optional)</span>
-            <textarea value={inlineTemplate} onChange={(e) => setInlineTemplate(e.target.value)} placeholder="flips heads" rows={2} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("commandsTab.inlineTemplateLabel")}</span>
+            <textarea value={inlineTemplate} onChange={(e) => setInlineTemplate(e.target.value)} placeholder={t("commandsTab.inlineTemplatePlaceholder")} rows={2} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
           </label>
         ) : null}
         <label className="col-span-1 sm:col-span-2">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">CSS (optional)</span>
-          <input value={css} onChange={(e) => setCss(e.target.value)} placeholder="font-weight: bold; color: #4a8;" className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
-          <span className="mt-0.5 block text-[10px] text-keep-muted">Typography + color only; other properties are dropped on save.</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("commandsTab.cssLabel")}</span>
+          <input value={css} onChange={(e) => setCss(e.target.value)} placeholder={t("commandsTab.cssPlaceholder")} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
+          <span className="mt-0.5 block text-[10px] text-keep-muted">{t("commandsTab.cssHint")}</span>
         </label>
         <label className="col-span-1 sm:col-span-2 flex items-center gap-2">
           <input type="checkbox" checked={color === null} onChange={(e) => setColor(e.target.checked ? null : "#4a8a6a")} />
-          <span className="uppercase tracking-widest text-keep-muted">Inherit sender's chat color</span>
+          <span className="uppercase tracking-widest text-keep-muted">{t("commandsTab.inheritColor")}</span>
           {color !== null ? (
-            <input type="text" value={color} onChange={(e) => setColor(e.target.value)} placeholder="#4a8a6a or theme:action" className="ml-2 w-40 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
+            <input type="text" value={color} onChange={(e) => setColor(e.target.value)} placeholder={t("commandsTab.colorPlaceholder")} className="ml-2 w-40 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
           ) : null}
         </label>
       </div>
@@ -546,11 +551,11 @@ function CommandForm({ mode, initial, busy, onSubmit, onCancel, onDelete }: {
       <div className="mt-3 flex items-center justify-between">
         <div>
           {mode === "edit" && onDelete ? (
-            <button type="button" disabled={busy} onClick={onDelete} className="rounded border border-keep-accent/60 bg-keep-bg px-3 py-1 text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50">Delete</button>
+            <button type="button" disabled={busy} onClick={onDelete} className="rounded border border-keep-accent/60 bg-keep-bg px-3 py-1 text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50">{t("shared.delete")}</button>
           ) : null}
         </div>
         <button type="submit" disabled={busy} className="rounded border border-keep-action/60 bg-keep-action/10 px-3 py-1 font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20 disabled:opacity-50">
-          {mode === "create" ? "Create" : "Save"}
+          {mode === "create" ? t("commandsTab.create") : t("shared.save")}
         </button>
       </div>
     </form>
@@ -561,6 +566,7 @@ function CommandForm({ mode, initial, busy, onSubmit, onCancel, onDelete }: {
  * Titles section
  * ============================================================ */
 function TitlesSection({ serverId, busy, run, onSaved }: { serverId: string; busy: boolean; run: CommandsTitlesTabProps["run"]; onSaved: () => void }) {
+  const { t } = useTranslation("servers");
   const [kinds, setKinds] = useState<TitleKindRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -574,7 +580,7 @@ function TitlesSection({ serverId, busy, run, onSaved }: { serverId: string; bus
       const j = await apiGetTitles(serverId);
       setKinds(j.kinds);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "load failed");
+      setErr(e instanceof Error ? e.message : t("shared.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -585,12 +591,13 @@ function TitlesSection({ serverId, busy, run, onSaved }: { serverId: string; bus
     <section className="space-y-3 border-t border-keep-rule pt-5">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div className="text-xs text-keep-muted sm:max-w-[60%]">
-          <span className="mb-1 block text-sm font-semibold text-keep-text">Titles</span>
-          This server's mutual-title kinds. People claim them via{" "}
-          <code>/request &lt;slug&gt; &lt;user&gt;</code>. <code>{"{target}"}</code> is the
-          other party's name. Symmetric kinds share one label; asymmetric kinds
-          (mentor / apprentice) set distinct A and B labels. Slugs are shared
-          across the whole site.
+          <span className="mb-1 block text-sm font-semibold text-keep-text">{t("commandsTab.titlesHeading")}</span>
+          <Trans
+            t={t}
+            i18nKey="commandsTab.titlesBlurb"
+            values={{ cmd: "/request <slug> <user>", target: "{target}" }}
+            components={{ code: <code /> }}
+          />
         </div>
         <button
           type="button"
@@ -598,7 +605,7 @@ function TitlesSection({ serverId, busy, run, onSaved }: { serverId: string; bus
           onClick={() => { setAdding(true); setEditing(null); }}
           className="self-end rounded border border-keep-rule bg-keep-banner px-3 py-1 text-xs hover:bg-keep-banner/80 disabled:opacity-50 sm:self-auto"
         >
-          + New title kind
+          {t("commandsTab.newTitleKind")}
         </button>
       </div>
 
@@ -622,8 +629,8 @@ function TitlesSection({ serverId, busy, run, onSaved }: { serverId: string; bus
           onSubmit={(input) => run(async () => { await apiPutTitle(serverId, editing.id, input); setEditing(null); onSaved(); await reload(); })}
           onDelete={() => {
             const msg = editing.usageCount > 0
-              ? `Delete this kind? ${editing.usageCount} active or pending title(s) of this kind will also be removed.`
-              : "Delete this kind?";
+              ? t("commandsTab.deleteKindInUseConfirm", { n: editing.usageCount })
+              : t("commandsTab.deleteKindConfirm");
             if (!window.confirm(msg)) return;
             void run(async () => { await apiDeleteTitle(serverId, editing.id); setEditing(null); onSaved(); await reload(); });
           }}
@@ -631,21 +638,21 @@ function TitlesSection({ serverId, busy, run, onSaved }: { serverId: string; bus
       ) : null}
 
       {loading ? (
-        <div className="text-xs text-keep-muted">loading…</div>
+        <div className="text-xs text-keep-muted">{t("commandsTab.loading")}</div>
       ) : kinds.length === 0 ? (
-        <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">No title kinds yet.</div>
+        <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">{t("commandsTab.noTitleKinds")}</div>
       ) : (
         <div className="-mx-1 overflow-x-auto px-1">
           <table className="w-full min-w-[720px] text-xs">
             <thead className="bg-keep-banner/50 uppercase tracking-widest text-keep-muted">
               <tr>
-                <th className="px-2 py-1 text-left">Slug</th>
-                <th className="px-2 py-1 text-left">Label</th>
-                <th className="px-2 py-1 text-left">A side</th>
-                <th className="px-2 py-1 text-left">B side</th>
-                <th className="px-2 py-1">Excl.</th>
-                <th className="px-2 py-1">In use</th>
-                <th className="px-2 py-1">On</th>
+                <th className="px-2 py-1 text-left">{t("commandsTab.colSlug")}</th>
+                <th className="px-2 py-1 text-left">{t("commandsTab.colLabel")}</th>
+                <th className="px-2 py-1 text-left">{t("commandsTab.colASide")}</th>
+                <th className="px-2 py-1 text-left">{t("commandsTab.colBSide")}</th>
+                <th className="px-2 py-1">{t("commandsTab.colExcl")}</th>
+                <th className="px-2 py-1">{t("commandsTab.colInUse")}</th>
+                <th className="px-2 py-1">{t("commandsTab.colOn")}</th>
                 <th className="px-2 py-1"></th>
               </tr>
             </thead>
@@ -656,7 +663,7 @@ function TitlesSection({ serverId, busy, run, onSaved }: { serverId: string; bus
                   <td className="px-2 py-1">{k.label}</td>
                   <td className="max-w-[180px] truncate px-2 py-1" title={k.formatA}>{k.formatA}</td>
                   <td className="max-w-[180px] truncate px-2 py-1" title={k.formatB}>
-                    {k.symmetric ? <span className="italic text-keep-muted">(same)</span> : k.formatB}
+                    {k.symmetric ? <span className="italic text-keep-muted">{t("commandsTab.same")}</span> : k.formatB}
                   </td>
                   <td className="px-2 py-1 text-center">{k.exclusive ? "✓" : ""}</td>
                   <td className="px-2 py-1 text-center tabular-nums">{k.usageCount}</td>
@@ -668,7 +675,7 @@ function TitlesSection({ serverId, busy, run, onSaved }: { serverId: string; bus
                       onClick={() => { setEditing(k); setAdding(false); }}
                       className="mr-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
                     >
-                      Edit
+                      {t("shared.edit")}
                     </button>
                   </td>
                 </tr>
@@ -689,11 +696,12 @@ function TitleKindForm({ mode, initial, busy, onSubmit, onCancel, onDelete }: {
   onCancel: () => void;
   onDelete?: () => void;
 }) {
+  const { t } = useTranslation("servers");
   const [slug, setSlug] = useState(initial?.slug ?? "");
   const [label, setLabel] = useState(initial?.label ?? "");
   const [symmetric, setSymmetric] = useState(initial?.symmetric ?? true);
-  const [formatA, setFormatA] = useState(initial?.formatA ?? "Married to {target}");
-  const [formatB, setFormatB] = useState(initial?.formatB ?? "Married to {target}");
+  const [formatA, setFormatA] = useState(initial?.formatA ?? t("commandsTab.formatAPlaceholder"));
+  const [formatB, setFormatB] = useState(initial?.formatB ?? t("commandsTab.formatAPlaceholder"));
   const [exclusive, setExclusive] = useState(initial?.exclusive ?? false);
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [error, setError] = useState<string | null>(null);
@@ -712,53 +720,53 @@ function TitleKindForm({ mode, initial, busy, onSubmit, onCancel, onDelete }: {
         enabled,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("shared.saveFailed"));
     }
   }
 
   return (
     <form onSubmit={submit} className="space-y-2 rounded border border-keep-rule bg-keep-bg p-3 text-xs">
       <div className="mb-1 flex items-center justify-between gap-2">
-        <div className="truncate font-semibold">{mode === "create" ? "New title kind" : `Edit ${initial?.slug}`}</div>
-        <button type="button" onClick={onCancel} className="shrink-0 text-keep-muted hover:text-keep-text">cancel</button>
+        <div className="truncate font-semibold">{mode === "create" ? t("commandsTab.newTitleKindTitle") : t("commandsTab.editTitleKindTitle", { slug: initial?.slug })}</div>
+        <button type="button" onClick={onCancel} className="shrink-0 text-keep-muted hover:text-keep-text">{t("commandsTab.cancelLower")}</button>
       </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <label className="space-y-1">
-          <div className="uppercase tracking-widest text-keep-muted">Slug</div>
-          <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="marriage" className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" required />
+          <div className="uppercase tracking-widest text-keep-muted">{t("commandsTab.colSlug")}</div>
+          <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} placeholder={t("commandsTab.slugPlaceholder")} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" required />
         </label>
         <label className="space-y-1">
-          <div className="uppercase tracking-widest text-keep-muted">Label</div>
-          <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="Marriage" className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1" required />
+          <div className="uppercase tracking-widest text-keep-muted">{t("commandsTab.colLabel")}</div>
+          <input type="text" value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("commandsTab.labelPlaceholder")} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1" required />
         </label>
       </div>
 
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={symmetric} onChange={(e) => setSymmetric(e.target.checked)} />
-        <span>Symmetric (same label on both sides)</span>
+        <span>{t("commandsTab.symmetricLabel")}</span>
       </label>
 
       <label className="block space-y-1">
-        <div className="uppercase tracking-widest text-keep-muted">{symmetric ? "Display format" : "A side (requester)"}</div>
-        <input type="text" value={formatA} onChange={(e) => setFormatA(e.target.value)} placeholder="Married to {target}" className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" required />
-        <div className="text-[10px] text-keep-muted">{"{target} is replaced with the other party's display name."}</div>
+        <div className="uppercase tracking-widest text-keep-muted">{symmetric ? t("commandsTab.displayFormat") : t("commandsTab.aSideLabel")}</div>
+        <input type="text" value={formatA} onChange={(e) => setFormatA(e.target.value)} placeholder={t("commandsTab.formatAPlaceholder")} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" required />
+        <div className="text-[10px] text-keep-muted">{t("commandsTab.targetHint")}</div>
       </label>
 
       {!symmetric ? (
         <label className="block space-y-1">
-          <div className="uppercase tracking-widest text-keep-muted">B side (recipient)</div>
-          <input type="text" value={formatB} onChange={(e) => setFormatB(e.target.value)} placeholder="{gender:Son|Daughter|Child} of {target}" className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" required />
+          <div className="uppercase tracking-widest text-keep-muted">{t("commandsTab.bSideLabel")}</div>
+          <input type="text" value={formatB} onChange={(e) => setFormatB(e.target.value)} placeholder={t("commandsTab.formatBPlaceholder")} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" required />
         </label>
       ) : null}
 
       <div className="flex flex-wrap gap-4">
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={exclusive} onChange={(e) => setExclusive(e.target.checked)} />
-          <span>Exclusive (one accepted per identity)</span>
+          <span>{t("commandsTab.exclusiveLabel")}</span>
         </label>
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          <span>Enabled</span>
+          <span>{t("shared.enabled")}</span>
         </label>
       </div>
 
@@ -767,11 +775,11 @@ function TitleKindForm({ mode, initial, busy, onSubmit, onCancel, onDelete }: {
       <div className="flex items-center justify-between pt-1">
         <div>
           {mode === "edit" && onDelete ? (
-            <button type="button" disabled={busy} onClick={onDelete} className="rounded border border-keep-accent/60 bg-keep-bg px-3 py-1 text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50">Delete</button>
+            <button type="button" disabled={busy} onClick={onDelete} className="rounded border border-keep-accent/60 bg-keep-bg px-3 py-1 text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50">{t("shared.delete")}</button>
           ) : null}
         </div>
         <button type="submit" disabled={busy} className="rounded border border-keep-action/60 bg-keep-action/10 px-3 py-1 font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20 disabled:opacity-50">
-          {mode === "create" ? "Create" : "Save"}
+          {mode === "create" ? t("commandsTab.create") : t("shared.save")}
         </button>
       </div>
     </form>

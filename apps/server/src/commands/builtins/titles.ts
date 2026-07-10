@@ -9,6 +9,8 @@ import {
   requestTitle,
 } from "../../titles/service.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
+import { isIsolatedBetweenIds } from "../../auth/ageIsolation.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -48,17 +50,17 @@ export const requestCommand: CommandHandler = {
         .where(eq(titleKinds.enabled, true))
         .orderBy(titleKinds.slug);
       if (kinds.length === 0) {
-        notice(ctx, "NO_KINDS", "No title kinds are configured.");
+        notice(ctx, "NO_KINDS", tFor(ctx.user.locale, "commands:request.noKinds"));
         return;
       }
       const body = kinds.map((k) => `${k.slug} (${k.label})`).join(", ");
-      notice(ctx, "REQUEST_KINDS", `Available titles: ${body}. Usage: /request <kind> <user>.`);
+      notice(ctx, "REQUEST_KINDS", tFor(ctx.user.locale, "commands:request.kinds", { kinds: body }));
       return;
     }
 
     const targetName = rest.join(" ").trim();
     if (!targetName) {
-      notice(ctx, "NEED_TARGET", `Usage: /request ${first} <user-or-character>`);
+      notice(ctx, "NEED_TARGET", tFor(ctx.user.locale, "commands:request.needTarget", { kind: first }));
       return;
     }
 
@@ -68,10 +70,11 @@ export const requestCommand: CommandHandler = {
       currentIdentity(ctx.user),
       targetName,
       first,
+      ctx.user.locale,
     );
 
     if (!result.ok) {
-      notice(ctx, result.code ?? "REQUEST_FAILED", result.message ?? "Request failed.");
+      notice(ctx, result.code ?? "REQUEST_FAILED", result.message ?? tFor(ctx.user.locale, "commands:request.failed"));
       return;
     }
 
@@ -85,7 +88,7 @@ export const requestCommand: CommandHandler = {
     notice(
       ctx,
       "REQUEST_SENT",
-      `Request sent to ${targetName}. They'll see an Accept | Decline prompt.`,
+      tFor(ctx.user.locale, "commands:request.sent", { name: targetName }),
     );
   },
 };
@@ -117,7 +120,7 @@ export const dissolveCommand: CommandHandler = {
   async run(ctx) {
     const args = ctx.args;
     if (args.length === 0) {
-      notice(ctx, "NEED_TARGET", "Usage: /dissolve [kind] <user-or-character>");
+      notice(ctx, "NEED_TARGET", tFor(ctx.user.locale, "commands:dissolve.usage"));
       return;
     }
 
@@ -141,7 +144,7 @@ export const dissolveCommand: CommandHandler = {
       // one identity prompts for a token instead of silently picking one.
       const resolution = await resolveIdentityArg(ctx.db, targetName);
       if (resolution.kind === "none") {
-        notice(ctx, "NO_USER", `No user or character named "${targetName}".`);
+        notice(ctx, "NO_USER", tFor(ctx.user.locale, "commands:shared.noUserOrCharacter", { name: targetName }));
         return;
       }
       if (resolution.kind === "ambiguous") {
@@ -182,14 +185,17 @@ export const dissolveCommand: CommandHandler = {
           ),
         );
       if (candidates.length === 0) {
-        notice(ctx, "NO_TITLE", `You have no accepted titles with ${target.displayName}.`);
+        notice(ctx, "NO_TITLE", tFor(ctx.user.locale, "commands:dissolve.noTitle", { name: target.displayName }));
         return;
       }
       if (candidates.length > 1) {
         notice(
           ctx,
           "AMBIGUOUS",
-          `Multiple titles with ${target.displayName} (${candidates.map((c) => c.slug).join(", ")}). Specify which: /dissolve <kind> <name>.`,
+          tFor(ctx.user.locale, "commands:dissolve.ambiguous", {
+            name: target.displayName,
+            kinds: candidates.map((c) => c.slug).join(", "),
+          }),
         );
         return;
       }
@@ -202,10 +208,11 @@ export const dissolveCommand: CommandHandler = {
       currentIdentity(ctx.user),
       targetName,
       kindSlug,
+      ctx.user.locale,
     );
 
     if (!result.ok) {
-      notice(ctx, result.code ?? "DISSOLVE_FAILED", result.message ?? "Dissolve failed.");
+      notice(ctx, result.code ?? "DISSOLVE_FAILED", result.message ?? tFor(ctx.user.locale, "commands:dissolve.failed"));
       return;
     }
 
@@ -220,7 +227,7 @@ export const dissolveCommand: CommandHandler = {
     notice(
       ctx,
       "DISSOLVE_SENT",
-      `Dissolve request sent to ${targetName}. They'll see an Accept | Decline prompt.`,
+      tFor(ctx.user.locale, "commands:dissolve.sent", { name: targetName }),
     );
   },
 };
@@ -253,29 +260,37 @@ export const titlesCommand: CommandHandler = {
 
     if (!target) {
       const me = currentIdentity(ctx.user);
-      titles = await listTitlesForIdentity(ctx.db, me);
+      // Viewer-aware (age plan, Phase 5): even your OWN list hides titles
+      // whose other party you're isolated with — the chip names them.
+      titles = await listTitlesForIdentity(ctx.db, me, ctx.user.id);
       identityName = me.displayName;
     } else {
       const resolution = await resolveIdentityArg(ctx.db, target);
       if (resolution.kind === "none") {
-        notice(ctx, "NO_USER", `No user or character named "${target}".`);
+        notice(ctx, "NO_USER", tFor(ctx.user.locale, "commands:shared.noUserOrCharacter", { name: target }));
         return;
       }
       if (resolution.kind === "ambiguous") {
         emitAmbiguousIdentityModal(ctx, target, resolution.matches);
         return;
       }
-      titles = await listTitlesForIdentity(ctx.db, resolution.target);
+      // Minor isolation (age plan, Phase 5): an isolated pair can't list
+      // each other's titles — same no-such-user line as a failed resolve.
+      if (await isIsolatedBetweenIds(ctx.db, ctx.user.id, resolution.target.userId)) {
+        notice(ctx, "NO_USER", tFor(ctx.user.locale, "commands:shared.noUserOrCharacter", { name: target }));
+        return;
+      }
+      titles = await listTitlesForIdentity(ctx.db, resolution.target, ctx.user.id);
       identityName = resolution.target.displayName;
     }
 
     if (titles.length === 0) {
-      notice(ctx, "NO_TITLES", `${identityName} has no mutual titles.`);
+      notice(ctx, "NO_TITLES", tFor(ctx.user.locale, "commands:titles.none", { name: identityName }));
       return;
     }
 
     const body = titles.map((t) => t.text).join("; ");
-    notice(ctx, "TITLE_LIST", `${identityName}: ${body}`);
+    notice(ctx, "TITLE_LIST", tFor(ctx.user.locale, "commands:titles.list", { name: identityName, titles: body }));
   },
 };
 // Avoid unused-import warning in case of future trims.

@@ -16,10 +16,13 @@ import type { Db } from "../db/index.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { sanitizeBio } from "../auth/html.js";
 import { recordAudit } from "../audit.js";
+import { tFor } from "../i18n.js";
 
 interface SessionUserCtx {
   id: string;
   role: Role;
+  /** users.locale (i18n Phase 3) — refusal copy renders in the admin's language. */
+  locale?: string | null;
 }
 
 const createSchema = z.object({
@@ -97,10 +100,10 @@ export async function registerAdminFaqRoutes(
   app.post<{ Body: unknown }>("/admin/faqs", async (req, reply) => {
     if (!(await requirePermission(req, reply, "manage_faqs"))) return;
     const body = createSchema.parse(req.body);
-    const slug = normalizeFaqSlug(body.slug);
-    if (!slug) { reply.code(400); return { error: "Slug must be 3–40 chars: lowercase letters, numbers, underscore (and not reserved)." }; }
-    if (await slugTaken(db, slug)) { reply.code(409); return { error: "That slug is already taken." }; }
     const me = sessionOf(req);
+    const slug = normalizeFaqSlug(body.slug);
+    if (!slug) { reply.code(400); return { error: tFor(me.locale, "errors:server.faqs.slugRuleAdmin") }; }
+    if (await slugTaken(db, slug)) { reply.code(409); return { error: tFor(me.locale, "errors:server.faqs.slugTaken") }; }
     const id = nanoid();
     await db.insert(faqs).values({
       id,
@@ -129,9 +132,10 @@ export async function registerAdminFaqRoutes(
 
     const patch: Record<string, unknown> = { updatedAt: new Date() };
     if (body.slug !== undefined) {
+      const su = sessionOf(req);
       const slug = normalizeFaqSlug(body.slug);
-      if (!slug) { reply.code(400); return { error: "Invalid slug." }; }
-      if (await slugTaken(db, slug, req.params.id)) { reply.code(409); return { error: "That slug is already taken." }; }
+      if (!slug) { reply.code(400); return { error: tFor(su.locale, "errors:server.faqs.invalidSlug") }; }
+      if (await slugTaken(db, slug, req.params.id)) { reply.code(409); return { error: tFor(su.locale, "errors:server.faqs.slugTaken") }; }
       patch.slug = slug;
     }
     if (body.question !== undefined) patch.question = body.question;

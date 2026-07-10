@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from "react";
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { MAX_TAGS_PER_ENTITY, normalizeTag } from "@thekeep/shared";
 
 /**
@@ -15,14 +16,15 @@ export function TagInput({
   tags: string[];
   onChange: (next: string[]) => void;
 }) {
+  const { t } = useTranslation("common");
   const [draft, setDraft] = useState("");
   const full = tags.length >= MAX_TAGS_PER_ENTITY;
 
   function commit(raw: string) {
     const next = [...tags];
     for (const part of raw.split(",")) {
-      const t = normalizeTag(part);
-      if (t && !next.includes(t) && next.length < MAX_TAGS_PER_ENTITY) next.push(t);
+      const tag = normalizeTag(part);
+      if (tag && !next.includes(tag) && next.length < MAX_TAGS_PER_ENTITY) next.push(tag);
     }
     onChange(next);
     setDraft("");
@@ -39,16 +41,16 @@ export function TagInput({
 
   return (
     <div className="flex flex-wrap items-center gap-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5">
-      {tags.map((t) => (
+      {tags.map((tag) => (
         <span
-          key={t}
+          key={tag}
           className="inline-flex items-center gap-1 rounded-full bg-keep-panel/60 px-2 py-0.5 text-xs lowercase text-keep-text"
         >
-          {t}
+          {tag}
           <button
             type="button"
-            onClick={() => onChange(tags.filter((x) => x !== t))}
-            aria-label={`Remove ${t}`}
+            onClick={() => onChange(tags.filter((x) => x !== tag))}
+            aria-label={t("tagInput.removeTag", { tag })}
             className="text-keep-muted hover:text-keep-text"
           >
             <X className="h-3 w-3" aria-hidden="true" />
@@ -62,12 +64,12 @@ export function TagInput({
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={onKeyDown}
           onBlur={() => { if (draft.trim()) commit(draft); }}
-          placeholder={tags.length ? "Add tag…" : "e.g. high fantasy, 18+, sci-fi"}
+          placeholder={tags.length ? t("tagInput.addPlaceholder") : t("tagInput.examplePlaceholder")}
           className="min-w-[8rem] flex-1 bg-transparent px-1 py-0.5 text-sm outline-none"
-          aria-label="Add a tag"
+          aria-label={t("tagInput.addAria")}
         />
       ) : (
-        <span className="px-1 text-[10px] text-keep-muted">Max {MAX_TAGS_PER_ENTITY} tags</span>
+        <span className="px-1 text-[10px] text-keep-muted">{t("tagInput.maxTags", { count: MAX_TAGS_PER_ENTITY })}</span>
       )}
     </div>
   );

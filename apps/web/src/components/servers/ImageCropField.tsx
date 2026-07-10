@@ -18,18 +18,20 @@
  * server console, and could later serve forums or worlds the same way.
  */
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { RotateCcw, Upload } from "lucide-react";
 import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, clampAvatarCrop, isDefaultAvatarCrop, type AvatarCrop } from "@thekeep/shared";
 import { cropStyleFor } from "../../lib/avatarCrop.js";
 
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif";
 
-/** Read a picked file as a data URL with a fail-fast size guard. */
-function readImageFile(file: File, maxBytes: number): Promise<string> {
+/** Read a picked file as a data URL with a fail-fast size guard. Error copy is
+ *  passed in (already translated) so this helper stays render-agnostic. */
+function readImageFile(file: File, maxBytes: number, messages: { tooLarge: string; readError: string }): Promise<string> {
   return new Promise((resolve, reject) => {
-    if (file.size > maxBytes) { reject(new Error(`Image too large (max ${Math.round(maxBytes / 1024)}KB).`)); return; }
+    if (file.size > maxBytes) { reject(new Error(messages.tooLarge)); return; }
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Couldn't read that file."));
+    reader.onerror = () => reject(new Error(messages.readError));
     reader.onload = () => resolve(String(reader.result));
     reader.readAsDataURL(file);
   });
@@ -86,6 +88,7 @@ export function ImageCropField({
    *  alongside the controls (no silent auto-save). */
   onSaveCrop?: () => void;
 }) {
+  const { t } = useTranslation("servers");
   const width = previewWidth ?? (shape === "circle" ? 144 : 320);
   const height = shape === "circle" ? width : Math.round(width / aspect);
 
@@ -127,8 +130,13 @@ export function ImageCropField({
   async function pick(file: File | null | undefined) {
     if (!file) return;
     setPickErr(null);
-    try { onPickFile(await readImageFile(file, maxBytes)); }
-    catch (e) { setPickErr(e instanceof Error ? e.message : "Couldn't read that file."); }
+    try {
+      onPickFile(await readImageFile(file, maxBytes, {
+        tooLarge: t("imageCrop.tooLarge", { max: Math.round(maxBytes / 1024) }),
+        readError: t("imageCrop.readError"),
+      }));
+    }
+    catch (e) { setPickErr(e instanceof Error ? e.message : t("imageCrop.readError")); }
   }
 
   const isDefault = isDefaultAvatarCrop(crop);
@@ -164,7 +172,7 @@ export function ImageCropField({
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center px-2 text-center text-[10px] italic text-keep-muted">
-              {imgError ? "Couldn't load image" : "No image yet"}
+              {imgError ? t("imageCrop.loadError") : t("imageCrop.noImage")}
             </div>
           )}
         </div>
@@ -174,19 +182,19 @@ export function ImageCropField({
           <div className="flex flex-wrap items-center gap-2">
             <label className={`inline-flex cursor-pointer items-center gap-1.5 rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg ${busy ? "opacity-50" : "hover:bg-keep-action/90"}`}>
               <Upload className="h-3.5 w-3.5" aria-hidden="true" />
-              {url ? "Replace" : "Upload"}
+              {url ? t("imageCrop.replace") : t("imageCrop.upload")}
               <input type="file" accept={ACCEPT} disabled={busy} className="hidden"
                 onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ""; }} />
             </label>
             {url ? (
               <button type="button" disabled={busy} onClick={onClear}
-                className="rounded border border-keep-rule px-2 py-1 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50">Remove</button>
+                className="rounded border border-keep-rule px-2 py-1 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50">{t("imageCrop.remove")}</button>
             ) : null}
           </div>
           {showsCrop ? (
             <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted">Zoom</span>
+                <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted">{t("imageCrop.zoom")}</span>
                 <input
                   type="range"
                   min={AVATAR_CROP_MIN_ZOOM}
@@ -200,14 +208,14 @@ export function ImageCropField({
                   type="button"
                   onClick={() => onCropChange({ ...AVATAR_CROP_DEFAULTS })}
                   disabled={isDefault}
-                  title="Reset position & zoom"
+                  title={t("imageCrop.resetTitle")}
                   className="inline-flex shrink-0 items-center gap-1 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-40"
                 >
                   <RotateCcw className="h-3 w-3" aria-hidden="true" />
-                  Reset
+                  {t("imageCrop.reset")}
                 </button>
               </div>
-              <p className="text-[10px] text-keep-muted">Drag the image to reposition; slide to zoom.</p>
+              <p className="text-[10px] text-keep-muted">{t("imageCrop.dragHint")}</p>
               {onSaveCrop ? (
                 <button
                   type="button"
@@ -215,7 +223,7 @@ export function ImageCropField({
                   disabled={!cropDirty || savingCrop}
                   className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
                 >
-                  {savingCrop ? "Saving…" : cropDirty ? "Save position" : "Saved"}
+                  {savingCrop ? t("shared.saving") : cropDirty ? t("imageCrop.savePosition") : t("imageCrop.saved")}
                 </button>
               ) : null}
             </div>

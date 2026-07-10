@@ -1,0 +1,496 @@
+{
+  "appName": "The Spire",
+  "cancel": "Cancel",
+  "clear": "Clear",
+  "close": "Close",
+  "copied": "Copied",
+  "copy": "Copy",
+  "default": "Default",
+  "delete": "Delete",
+  "loading": "Loading…",
+  "loadingDots": "Loading...",
+  "menu": "Menu",
+  "off": "Off",
+  "on": "On",
+  "owner": "Owner",
+  "preview": "Preview",
+  "save": "Save",
+  "saving": "Saving…",
+  "savingDots": "Saving...",
+  "set": "Set",
+  "banner": {
+    "collapseBanner": "Collapse banner",
+    "showBanner": "Show banner",
+    "more": "More",
+    "siteLinks": "Site links",
+    "earning": "Earning",
+    "earningTitle": "Your Earning, XP, Currency, ranks, and cosmetics",
+    "scriptorium": "Scriptorium",
+    "scriptoriumTitle": "The Scriptorium. Long-form fiction by the people who live here",
+    "scriptoriumInvites_one": "{{count}} pending collaboration invite. Open the Scriptorium to act on it",
+    "scriptoriumInvites_other": "{{count}} pending collaboration invites. Open the Scriptorium to act on them",
+    "worlds": "Worlds",
+    "worldsTitle": "Worlds catalog. Browse open roleplay worlds, lore, and wikis",
+    "staff": "Staff",
+    "staffTitle": "Meet the staff, the mods and admins who run the Spire",
+    "topCommunities": "Top Communities",
+    "topCommunitiesTitle": "Top RP Communities. List your own and copy your link-back",
+    "arcade": "Arcade",
+    "arcadeTitle": "The Spire Arcade. Play the cabinet's games, like the Eidolon Tamer",
+    "rules": "Rules",
+    "rulesTitle": "The app rules and this server's own rules",
+    "faq": "FAQ",
+    "faqTitle": "Frequently asked questions for this server",
+    "serverAdmin": "Server Admin",
+    "serverAdminTitle": "Manage this server: settings, rooms, members, moderation",
+    "globalAdmin": "Global Admin",
+    "globalAdminTitle": "Global Admin: platform settings and cross-community oversight",
+    "exit": "Exit",
+    "exitTitle": "Log out and return to the login screen",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu"
+  },
+  "toolMenu": {
+    "closeTools": "Close tools",
+    "openMenuTitle": "Open the menu",
+    "sections": {
+      "worldbuilding": "Worldbuilding",
+      "writing": "Writing",
+      "roleplay": "Roleplay",
+      "forums": "Forums",
+      "rooms": "Rooms",
+      "myRooms": "My Rooms",
+      "people": "People",
+      "display": "Display",
+      "account": "Account"
+    },
+    "worldbuilding": {
+      "myWorlds": "My Worlds",
+      "myWorldsHint": "Manage your worlds + pages",
+      "catalog": "World Catalog",
+      "catalogHint": "Browse open worlds"
+    },
+    "writing": {
+      "myStories": "My Stories",
+      "myStoriesHint": "Drafts + published, open the editor",
+      "scriptorium": "Scriptorium",
+      "scriptoriumHint": "Browse the library, read and write"
+    },
+    "roleplay": {
+      "setMood": "Set Mood",
+      "setMoodHint": "Show a mood next to your name",
+      "moodPlaceholder": "e.g. brooding, exhausted, smug",
+      "setScene": "Set Scene",
+      "setSceneHint": "Set the room's scene title",
+      "scenePlaceholder": "e.g. The dragon's lair",
+      "endScene": "End scene",
+      "npcsOn": "NPCs: On",
+      "npcsOnHint": "Enable NPC voice in this room",
+      "npcsOff": "NPCs: Off",
+      "npcsOffHint": "Disable NPC voice in this room"
+    },
+    "forums": {
+      "catalog": "Forums Catalog",
+      "catalogHint": "Community-owned message boards",
+      "create": "Create a Forum",
+      "createHint": "Apply to open your own forum",
+      "openForum": "Open {{name}}",
+      "newActivity": "New activity since your last visit"
+    },
+    "rooms": {
+      "find": "Find Rooms",
+      "findHint": "Search for a room by name",
+      "findPlaceholder": "search text (or empty for all)",
+      "findSubmit": "Find",
+      "list": "List Rooms",
+      "listHint": "Show all public rooms",
+      "newPrivate": "New Private Room",
+      "newPrivateHint": "Create a password-locked room",
+      "privateNamePlaceholder": "room name",
+      "privatePasswordPlaceholder": "password",
+      "createRoom": "Create room"
+    },
+    "myRooms": {
+      "loading": "Loading your rooms…",
+      "empty": "No archived rooms yet. A room you own is archived once everyone leaves it, then shows up here so you can bring it back.",
+      "recreate": "Recreate",
+      "recreateTitle": "Recreate and join {{name}}",
+      "recreatePrivateTitle": "Recreate and join {{name}} (returns private with its original password)",
+      "hideTitle": "Remove {{name}} from this list, doesn't delete it; recreate any time with /go",
+      "hideAria": "Remove {{name}} from your rooms list"
+    },
+    "people": {
+      "messages": "Messages",
+      "messagesHint": "DMs, friends, and friend requests, all in one place",
+      "allUsers": "All Users",
+      "allUsersHint": "Browse the user directory",
+      "ignoreList": "Ignore List",
+      "ignoreListHint": "Show or clear your ignore list"
+    },
+    "display": {
+      "chatColor": "Chat Color",
+      "chatColorHint": "Set your chat color",
+      "fontSize": "Font Size: {{step}}",
+      "fontSizeHint": "Cycle local chat font size",
+      "reduceMotion": "Reduce Motion: {{state}}",
+      "reduceMotionForcedHint": "On because your device asks for it",
+      "reduceMotionHint": "Soft fades; stops auto-playing motion. Helps if motion feels unwell",
+      "reduceCosmetics": "Reduce cosmetic effects: {{state}}",
+      "reduceCosmeticsUpstreamHint": "On already from your motion or performance settings. Quiets name-style and avatar-border animations",
+      "reduceCosmeticsHint": "Quiets name-style and avatar-border animations for smoother, lighter chat",
+      "language": "Language: {{language}}",
+      "languageHint": "Choose the interface language",
+      "slowMode": "Slow mode: every {{seconds}}s",
+      "slowModeHint": "Real-time userlist + typing paused; resyncs on a schedule",
+      "refresh": "Refresh",
+      "refreshHint": "Refresh once, or slow real-time updates to ease load on this device"
+    },
+    "account": {
+      "editProfile": "Edit Profile",
+      "editProfileHint": "Open your profile editor",
+      "earning": "Your Earning",
+      "earningHint": "Wallet, ranks, shop, items, collection, pets",
+      "bookmarks": "Bookmarks",
+      "bookmarksHint": "Your saved chat messages",
+      "exportData": "Export my data",
+      "exportPreparing": "Preparing export…",
+      "exportHint": "Download your profile, characters, worlds, and stories",
+      "toggleAway": "Toggle Away",
+      "toggleAwayHint": "Mark yourself away"
+    },
+    "arcade": "Spire Arcade",
+    "arcadeTitle": "Play the arcade's games, like the Eidolon Tamer",
+    "tour": "Take the tour",
+    "tourTitle": "Replay the guided walkthrough of the chat and its rails",
+    "help": "Help / Commands",
+    "helpTitle": "Browse the guides and every command",
+    "export": {
+      "success": "Your data export downloaded — keep it somewhere safe.",
+      "failure": "Couldn't build your export just now. Try again in a minute."
+    }
+  },
+  "identity": {
+    "closeMenu": "Close identity menu",
+    "switchHeader": "Switch identity",
+    "noOthers": "No other characters on this account.",
+    "noneYet": "No characters yet, create one below.",
+    "create": "Create Character",
+    "createTitle": "Create a new character and start setting it up",
+    "leave": "← Leave Character (OOC)",
+    "leaveTitle": "Drop the active character and return to your master (OOC) account.",
+    "goIncognito": "Go Incognito",
+    "leaveIncognito": "Leave Incognito",
+    "incognitoGoTitle": "Disappear from userlists and observe rooms unseen. Mod/admin only.",
+    "incognitoLeaveTitle": "Reveal yourself, the room sees you join again.",
+    "switchTitleInCharacter": "Switch character or return to OOC",
+    "switchTitleOoc": "Switch into a character",
+    "activeCharacter": "Active character",
+    "ooc": "OOC",
+    "oocName": "{{name}} (OOC)"
+  },
+  "messenger": {
+    "unreadDms_one": "{{count}} unread DM",
+    "unreadDms_other": "{{count}} unread DMs",
+    "friendRequests_one": "{{count}} friend request",
+    "friendRequests_other": "{{count}} friend requests",
+    "tooltipBoth": "{{dms}} + {{requests}}, open Messages",
+    "tooltipSummary": "{{summary}}, open Messages",
+    "open": "Open Messages"
+  },
+  "refresh": {
+    "current": "currently every {{seconds}}s",
+    "description": "Pauses the real-time userlist + typing churn and resyncs on this schedule — eases load on a slower device. Chat messages stay live.",
+    "presetNow": "Now (one-shot)",
+    "presetEvery10s": "Every 10s",
+    "presetEvery30s": "Every 30s",
+    "presetEvery60s": "Every 60s",
+    "presetEvery5m": "Every 5m",
+    "secondsPlaceholder": "seconds"
+  },
+  "language": {
+    "description": "Applies right away, no reload needed. System default follows your device's language.",
+    "systemDefault": "System default"
+  },
+  "infoModal": {
+    "escHint": "Press <1>Esc</1> or click outside to close."
+  },
+  "welcome": {
+    "title": "Welcome",
+    "gotIt": "Got it"
+  },
+  "tagInput": {
+    "removeTag": "Remove {{tag}}",
+    "addPlaceholder": "Add tag…",
+    "examplePlaceholder": "e.g. high fantasy, 18+, sci-fi",
+    "addAria": "Add a tag",
+    "maxTags_one": "Max {{count}} tag",
+    "maxTags_other": "Max {{count}} tags"
+  },
+  "richEditor": {
+    "loadingEditor": "Loading editor...",
+    "startWriting": "Start writing...",
+    "boldLabel": "B",
+    "boldTitle": "Bold (Ctrl+B)",
+    "italicLabel": "I",
+    "italicTitle": "Italic (Ctrl+I)",
+    "underlineLabel": "U",
+    "underlineTitle": "Underline (Ctrl+U)",
+    "strikeLabel": "S",
+    "strikeTitle": "Strikethrough",
+    "h2Label": "H2",
+    "h2Title": "Heading 2",
+    "h3Label": "H3",
+    "h3Title": "Heading 3",
+    "paragraphTitle": "Paragraph",
+    "bulletListLabel": "• List",
+    "bulletListTitle": "Bullet list",
+    "orderedListLabel": "1. List",
+    "orderedListTitle": "Numbered list",
+    "blockquoteTitle": "Blockquote",
+    "hrTitle": "Horizontal rule",
+    "linkLabel": "Link",
+    "linkTitle": "Add or edit link",
+    "linkPrompt": "Link URL (https://…). Leave blank to remove.",
+    "noteLabel": "+ Note",
+    "noteTitle": "Insert a margin note, visible to collaborators in drafts; stripped on publish",
+    "notePlaceholder": "your note here",
+    "undoTitle": "Undo (Ctrl+Z)",
+    "redoTitle": "Redo (Ctrl+Shift+Z)"
+  },
+  "formatting": {
+    "bold": "Bold (**text**)",
+    "italic": "Italic (*text*)",
+    "underline": "Underline",
+    "strike": "Strikethrough (~~text~~)",
+    "color": "Color selected text",
+    "code": "Inline code (`text`)",
+    "spoiler": "Spoiler (||text||, click to reveal)",
+    "blockquote": "Blockquote, prefixes selected lines with '> '",
+    "link": "Link, [text](url)",
+    "image": "Image, ![alt](url)",
+    "placeholderBold": "bold",
+    "placeholderItalic": "italic",
+    "placeholderUnderline": "underline",
+    "placeholderStrike": "strike",
+    "placeholderCode": "code",
+    "placeholderSpoiler": "spoiler",
+    "placeholderText": "text",
+    "linkUrlPrompt": "Link URL (https://…)",
+    "linkTextPrompt": "Link text",
+    "imageUrlPrompt": "Image URL (https://… ending in .png/.jpg/.webp/etc.)",
+    "imageAltPrompt": "Alt text (optional)",
+    "charCountAria": "Character count: {{length}} of {{max}}",
+    "charCountTitle": "{{length}} / {{max}} characters",
+    "chars": "Chars"
+  },
+  "rating": {
+    "nsfw": "18+",
+    "nsfwTitle": "Adults only. Members under 18 cannot see this.",
+    "sfw": "SFW",
+    "sfwTitle": "Safe for everyone."
+  },
+  "themePicker": {
+    "applyPreset": "Apply preset: {{name}}",
+    "revertTitle": "Revert to system default",
+    "slots": {
+      "bg": { "label": "Background", "hint": "Main chat backdrop" },
+      "panel": { "label": "Panel", "hint": "Banner, side rails, modal headers" },
+      "border": { "label": "Border", "hint": "Rule lines and frame edges" },
+      "text": { "label": "Text", "hint": "Primary readable text" },
+      "muted": { "label": "Muted", "hint": "Timestamps, hints, secondary text" },
+      "action": { "label": "Action", "hint": "Highlights, current room, links" },
+      "accent": { "label": "Accent", "hint": "Strong call-to-action / Exit button" },
+      "system": { "label": "System", "hint": "Italic system messages" }
+    },
+    "preview": {
+      "caption": "· preview",
+      "sampleName": "Sigrid",
+      "sampleMessage": "hello there.",
+      "actionLine": "<0>Sigrid</0> draws her sword.",
+      "sampleSystem": "* Topic set: Welcome to The Spire.",
+      "sampleAnnouncement": "📣 Announcement!"
+    }
+  },
+  "itemZoom": {
+    "fullViewAria": "{{name}}, full view",
+    "closeHint": "Tap anywhere or press Esc to close"
+  },
+  "createRoom": {
+    "title": "Create a room",
+    "intro": "Pick a name. Spaces become underscores, so <1>Oak Tavern</1> becomes <3>Oak_Tavern</3>.",
+    "nameLabel": "Room name",
+    "namePlaceholder": "e.g. Oak_Tavern",
+    "privateLabel": "Private <1>(password required to join)</1>",
+    "submit": "Create",
+    "errorNameRequired": "Enter a room name.",
+    "errorNameInvalid": "Names can use letters, numbers, and _ - ' (up to 40 characters).",
+    "errorPasswordRequired": "A private room needs a password."
+  },
+  "password": "Password",
+  "roomPassword": {
+    "title": "Private room",
+    "prompt": "<0>{{name}}</0> requires a password to join.",
+    "join": "Join",
+    "joining": "Joining…"
+  },
+  "theater": {
+    "videoFrameTitle": "Theater video",
+    "noVideoQueued": "No video queued. Add one with <1>/theater add &lt;url&gt;</1>, or stream your own with <3>/theater live &lt;url&gt;</3>.",
+    "howToStream": "How to stream your desktop →",
+    "hostNotQueued": "The host hasn't queued a video yet.",
+    "tapToUnmute": "🔇 Tap to unmute",
+    "copyLink": "Copy link",
+    "noSourceSet": "No source set.",
+    "muteTitle": "Mute audio (local only)",
+    "streamHelp": "Stream help",
+    "streamHelpTitle": "How to stream your own video (VLC / OBS + a tunnel)",
+    "reactAria": "React {{emoji}}",
+    "liveBadge": "● Live",
+    "liveIndicator": "Live",
+    "previous": "Previous",
+    "next": "Next",
+    "pauseEveryone": "Pause for everyone",
+    "playEveryone": "Play for everyone",
+    "pauseButton": "⏸ Pause",
+    "playButton": "▶ Play",
+    "seekAria": "Seek",
+    "loopLabel": "loop: {{mode}}",
+    "loopTitle": "Loop mode (set with /theater loop)",
+    "resizeAria": "Resize video panel"
+  },
+  "stylePicker": {
+    "useSiteDefault": "(use site default)"
+  },
+  "synonyms": {
+    "listAria": "Synonyms",
+    "headerFor": "Synonyms for \"{{word}}\""
+  },
+  "nameTag": {
+    "viewProfile": "view profile ({{who}})",
+    "whisper": "whisper {{name}}",
+    "whisperAway": "whisper {{name}} (away: {{message}})",
+    "admin": "{{name}} - admin",
+    "adminAway": "{{name}} - admin (away: {{message}})",
+    "moodTitle": "mood: {{mood}}",
+    "ooc": "(ooc)",
+    "oocTitle": "Speaking from their master / OOC account, not as a character",
+    "away": "[away]"
+  },
+  "presence": {
+    "online": "online"
+  },
+  "relTime": {
+    "justNow": "just now",
+    "minutesAgo": "{{value}}m ago",
+    "hoursAgo": "{{value}}h ago",
+    "daysAgo": "{{value}}d ago",
+    "dayAtTime": "{{day}} at {{time}}"
+  },
+  "errorBoundary": {
+    "body": "The app hit an unexpected error. Reloading usually fixes it.",
+    "reload": "Reload"
+  },
+  "userHtml": {
+    "youtubeTitle": "YouTube video"
+  },
+  "linkPreview": {
+    "removeTitle": "Remove this preview for everyone (the link stays in your message)",
+    "removeAria": "Remove link preview"
+  },
+  "marquee": {
+    "regionAria": "Site announcements",
+    "sourceLabel": "{{name}} Announcements",
+    "showAnnouncement": "Show announcement {{index}} of {{total}}",
+    "showSource": "Show {{name}} Announcements",
+    "dismissAria": "Dismiss site announcements",
+    "dismissTitle": "Hide announcements for 24 hours (or until an admin edits them). Bring them back sooner from the Room Info bar."
+  },
+  "gender": {
+    "male": "male",
+    "female": "female",
+    "nonbinary": "nonbinary",
+    "other": "other",
+    "undisclosed": "undisclosed",
+    "options": {
+      "undisclosed": "Undisclosed",
+      "male": "Male",
+      "female": "Female",
+      "nonbinary": "Non-binary",
+      "other": "Other"
+    }
+  },
+  "notify": {
+    "whispers": "{{name}} whispers",
+    "announcementMention": "Announcement (mentions you)",
+    "announcement": "Announcement",
+    "nameMention": "{{name}} (mentions you)",
+    "mentionsYou": "{{name}} mentions you",
+    "rolls": "{{name}} rolls {{body}}"
+  },
+  "ledger": {
+    "reason": {
+      "messageSay": "Chat message",
+      "messageAction": "Action / scene / NPC",
+      "messageWhisper": "Whisper",
+      "forumTopic": "Forum topic",
+      "forumReply": "Forum reply",
+      "presenceIc": "Presence (in-character)",
+      "presenceOoc": "Presence (OOC)",
+      "currencySendOut": "Sent Currency",
+      "currencySendIn": "Received Currency",
+      "backfill": "Historical backfill",
+      "adminGrant": "Admin grant",
+      "adminRevoke": "Admin revoke",
+      "rollover": "Rolled over from deleted character",
+      "flairProfileBanner": "Purchase: Custom Profile Banner",
+      "flairTypingPhrase": "Purchase: Custom Typing Phrase",
+      "flairProfileVisitors": "Purchase: Profile Visitor Counter",
+      "flairProfileMarquee": "Purchase: Profile Quote Marquee",
+      "reactionSheetSubmission": "Reaction sheet submission",
+      "reactionSheetRefund": "Reaction sheet refund",
+      "purchase": "Purchase: {{item}}",
+      "borderPurchase": "Border purchase: {{item}}",
+      "itemPurchase": "Item purchase: {{item}}"
+    },
+    "unknownItem": "(unknown item)",
+    "gave": "Gave {{item}}",
+    "gaveTo": "Gave {{item}} to {{name}}",
+    "received": "Received {{item}}",
+    "receivedFrom": "Received {{item}} from {{name}}",
+    "threw": "Threw {{item}}",
+    "threwAt": "Threw {{item}} at {{name}}",
+    "dropped": "Dropped {{item}}",
+    "droppedOn": "Dropped {{item}} on {{name}}"
+  },
+  "flair": {
+    "loadingSettings": "Loading profile-flair settings…",
+    "visitors": {
+      "legend": "Profile visitors",
+      "description": "Distinct visitors counted with one-per-day dedupe. Members are signed-in viewers; external counts anonymous traffic.",
+      "members": "Members",
+      "external": "External",
+      "total": "Total",
+      "showToggle": "Show the visitors counter on my public profile.",
+      "purchase": "Purchase the <1>Profile Visitor Counter</1> Flair to track and display visitor counts."
+    },
+    "marquee": {
+      "legend": "Quote marquee",
+      "description": "Up to {{max}} short quotes ({{maxLen}} characters each) that rotate on your profile every ~8 seconds. Markdown supported.",
+      "purchase": "Purchase the <1>Profile Quote Marquee</1> Flair to add rotating quotes to your profile.",
+      "quotePlaceholder": "A short, memorable line…",
+      "saveQuotes": "Save quotes"
+    },
+    "visitorToggle": {
+      "legend": "Visitor counter",
+      "show": "Show the visitor counter on my public profile.",
+      "note": "When off, only you see the member / external breakdown in Edit Profile → Flair."
+    },
+    "quotesRegion": "Profile quotes",
+    "showQuote": "Show quote {{index}} of {{total}}",
+    "visitorsChip": {
+      "title": "{{members}} members + {{external}} external",
+      "visitors_one": "visitor",
+      "visitors_other": "visitors"
+    }
+  }
+}

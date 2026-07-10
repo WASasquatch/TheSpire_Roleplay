@@ -1,5 +1,6 @@
 import DOMPurify from "dompurify";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { OnboardingConfig } from "@thekeep/shared";
 import { Modal } from "../cosmetics/Modal.js";
 
@@ -40,6 +41,7 @@ type Answers = Record<string, string[]>;
  * completed it, the modal resolves via `onDone` without blocking the member.
  */
 export function ServerOnboardingModal({ serverId, welcomeHtml, serverName, onDone }: Props) {
+  const { t } = useTranslation("servers");
   const [config, setConfig] = useState<OnboardingConfig | null>(null);
   const [hash, setHash] = useState("");
   const [answers, setAnswers] = useState<Answers>({});
@@ -118,13 +120,13 @@ export function ServerOnboardingModal({ serverId, welcomeHtml, serverName, onDon
       });
       if (!res.ok) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
-        setError(j.error ?? "Something went wrong. Please try again.");
+        setError(j.error ?? t("joinFlow.genericError"));
         setSubmitting(false);
         return;
       }
       onDone();
     } catch {
-      setError("Network error. Please try again.");
+      setError(t("joinFlow.networkError"));
       setSubmitting(false);
     }
   }
@@ -134,7 +136,7 @@ export function ServerOnboardingModal({ serverId, welcomeHtml, serverName, onDon
   if (loading || !config) return null;
 
   const cleanWelcome = welcomeHtml?.trim() ? DOMPurify.sanitize(welcomeHtml) : "";
-  const title = serverName ? `Welcome to ${serverName}` : "Welcome";
+  const title = serverName ? t("joinFlow.welcomeTo", { name: serverName }) : t("joinFlow.welcome");
 
   return (
     // Backdrop + Esc disabled: the flow resolves only through the buttons so the
@@ -158,7 +160,7 @@ export function ServerOnboardingModal({ serverId, welcomeHtml, serverName, onDon
           ) : null}
 
           <p className="mb-4 text-sm text-keep-text/70">
-            Pick a few roles to get started. You can change these any time.
+            {t("joinFlow.pickRoles")}
           </p>
 
           <div className="flex flex-col gap-5">
@@ -212,7 +214,7 @@ export function ServerOnboardingModal({ serverId, welcomeHtml, serverName, onDon
             disabled={submitting}
             className="rounded border border-keep-rule bg-keep-panel/40 px-3 py-1 text-sm text-keep-text/80 hover:bg-keep-panel/70 disabled:opacity-50"
           >
-            Skip for now
+            {t("joinFlow.skip")}
           </button>
           <button
             type="button"
@@ -220,7 +222,7 @@ export function ServerOnboardingModal({ serverId, welcomeHtml, serverName, onDon
             disabled={submitting}
             className="rounded border border-keep-action/60 bg-keep-action/10 px-3 py-1 text-sm font-semibold text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
           >
-            {submitting ? "Saving..." : "Continue"}
+            {submitting ? t("joinFlow.saving") : t("joinFlow.continue")}
           </button>
         </footer>
       </div>

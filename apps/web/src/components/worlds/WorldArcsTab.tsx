@@ -4,6 +4,7 @@
  * full in WorldDetail, so this edits in place without an extra fetch.
  */
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorldArc, WorldArcStatus, WorldDetail } from "@thekeep/shared";
 import { WORLD_ARC_STATUSES, deriveSlug } from "@thekeep/shared";
 import { createWorldArc, deleteWorldArc, updateWorldArc } from "../../lib/worldEntities.js";
@@ -15,6 +16,7 @@ export function WorldArcsTab({
   detail: WorldDetail;
   onChanged: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation("worlds");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -23,8 +25,8 @@ export function WorldArcsTab({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-action text-sm uppercase tracking-widest text-keep-muted">Arcs</h3>
-        <button type="button" onClick={() => { setCreating(true); setSelectedId(null); }} className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs hover:bg-keep-banner">+ New arc</button>
+        <h3 className="font-action text-sm uppercase tracking-widest text-keep-muted">{t("arcs.heading")}</h3>
+        <button type="button" onClick={() => { setCreating(true); setSelectedId(null); }} className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs hover:bg-keep-banner">{t("arcs.new")}</button>
       </div>
       {err ? <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{err}</div> : null}
 
@@ -33,7 +35,7 @@ export function WorldArcsTab({
       ) : selected ? (
         <ArcEditor key={selected.id} worldId={worldId} arc={selected} onCancel={() => setSelectedId(null)} onSaved={async () => { await onChanged(); }} onDeleted={async () => { setSelectedId(null); await onChanged(); }} onError={setErr} />
       ) : detail.arcs.length === 0 ? (
-        <p className="italic text-keep-muted">No arcs yet.</p>
+        <p className="italic text-keep-muted">{t("kb.noArcs")}</p>
       ) : (
         <ul className="space-y-1">
           {detail.arcs.map((a) => (
@@ -41,7 +43,7 @@ export function WorldArcsTab({
               <button type="button" onClick={() => setSelectedId(a.id)} className="flex w-full items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1.5 text-left text-sm hover:border-keep-action/40">
                 <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: a.color ?? "var(--keep-action)" }} />
                 <span className="min-w-0 flex-1 truncate font-semibold">{a.title}</span>
-                <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted">{a.status}</span>
+                <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted">{t(`arcStatus.${a.status}`)}</span>
               </button>
             </li>
           ))}
@@ -61,6 +63,7 @@ function ArcEditor({
   onDeleted?: () => void | Promise<void>;
   onError: (m: string | null) => void;
 }) {
+  const { t } = useTranslation("worlds");
   const [title, setTitle] = useState(arc?.title ?? "");
   const [slug, setSlug] = useState(arc?.slug ?? "");
   const [slugDirty, setSlugDirty] = useState(!!arc);
@@ -79,38 +82,38 @@ function ArcEditor({
       const a = arc ? await updateWorldArc(worldId, arc.id, input) : await createWorldArc(worldId, input);
       await onSaved(a);
     } catch (x) {
-      onError(x instanceof Error ? x.message : "save failed");
+      onError(x instanceof Error ? x.message : t("errors.saveFailed"));
     } finally { setBusy(false); }
   }
   async function remove() {
     if (!arc || busy) return;
-    if (!window.confirm(`Delete arc "${title}"? Entries/pages/sessions keep existing but lose this arc.`)) return;
+    if (!window.confirm(t("arcs.confirmDelete", { title }))) return;
     setBusy(true);
     try { await deleteWorldArc(worldId, arc.id); await onDeleted?.(); }
-    catch (x) { onError(x instanceof Error ? x.message : "delete failed"); }
+    catch (x) { onError(x instanceof Error ? x.message : t("errors.deleteFailed")); }
     finally { setBusy(false); }
   }
 
   return (
     <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-bg/30 p-3 text-sm">
-      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Title</span>
+      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.title")}</span>
         <input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1" /></label>
-      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Slug</span>
+      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.slug")}</span>
         <input value={effectiveSlug} onChange={(e) => { setSlug(e.target.value); setSlugDirty(true); }} className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs" /></label>
-      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Summary</span>
+      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.summary")}</span>
         <input value={summary} onChange={(e) => setSummary(e.target.value)} className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1" /></label>
       <div className="flex items-center gap-3">
-        <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Status</span>
+        <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.status")}</span>
           <select value={status} onChange={(e) => setStatus(e.target.value as WorldArcStatus)} className="mt-0.5 block rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
-            {WORLD_ARC_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            {WORLD_ARC_STATUSES.map((s) => <option key={s} value={s}>{t(`arcStatus.${s}`)}</option>)}
           </select></label>
-        <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Color</span>
-          <input value={color} onChange={(e) => setColor(e.target.value)} placeholder="#5b8def" className="mt-0.5 w-28 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs" /></label>
+        <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.color")}</span>
+          <input value={color} onChange={(e) => setColor(e.target.value)} placeholder={t("arcs.colorPlaceholder")} className="mt-0.5 w-28 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs" /></label>
       </div>
       <div className="flex items-center gap-2 pt-1">
-        <button type="button" disabled={busy || !title.trim()} onClick={() => void save()} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action disabled:opacity-50">Save</button>
-        <button type="button" onClick={onCancel} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">Cancel</button>
-        {arc ? <button type="button" disabled={busy} onClick={() => void remove()} className="ml-auto rounded border border-keep-accent/50 px-3 py-1 text-xs text-keep-accent hover:bg-keep-accent/10">Delete</button> : null}
+        <button type="button" disabled={busy || !title.trim()} onClick={() => void save()} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action disabled:opacity-50">{t("common:save")}</button>
+        <button type="button" onClick={onCancel} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">{t("common:cancel")}</button>
+        {arc ? <button type="button" disabled={busy} onClick={() => void remove()} className="ml-auto rounded border border-keep-accent/50 px-3 py-1 text-xs text-keep-accent hover:bg-keep-accent/10">{t("common:delete")}</button> : null}
       </div>
     </div>
   );

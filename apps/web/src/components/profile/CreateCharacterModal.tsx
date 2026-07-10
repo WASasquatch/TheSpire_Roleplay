@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Modal } from "../cosmetics/Modal.js";
 import { readError } from "../../lib/http.js";
 
@@ -40,6 +41,7 @@ export function CreateCharacterModal<T = CreatedCharacter>({
   onCancel: () => void;
   onCreated: (c: T) => void;
 }) {
+  const { t } = useTranslation("profile");
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,7 +80,7 @@ export function CreateCharacterModal<T = CreatedCharacter>({
       const c = await res.json();
       onCreated(c as T);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "create failed");
+      setError(err instanceof Error ? err.message : t("errors.createFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -91,36 +93,42 @@ export function CreateCharacterModal<T = CreatedCharacter>({
         onSubmit={submit}
         className="keep-frame w-[min(420px,96vw)] rounded bg-keep-parchment p-4"
       >
-        <h3 className="mb-2 font-action text-lg">New character</h3>
+        <h3 className="mb-2 font-action text-lg">{t("createCharacter.title")}</h3>
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Character name</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.characterName")}</span>
           <input
             // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. John_Smith"
+            placeholder={t("createCharacter.namePlaceholder")}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-base outline-none focus:border-keep-action md:text-sm"
           />
         </label>
         <p className="mt-1 text-[10px] text-keep-muted">
-          1-40 chars: letters, numbers, _ - ' or a non-breaking space (Alt+0160). Character names can't be changed, choose wisely.
+          {t("createCharacter.nameRules")}
         </p>
         {/* Dedicated space warning. Spaces parse as argument separators,
             so a name with one breaks /whisper, /char, etc. Offer the
             one-click underscore fix right next to the explanation. */}
         {hasAsciiSpace ? (
           <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-[11px] text-keep-accent">
-            A normal space isn&apos;t allowed, it breaks chat commands like{" "}
-            <span className="font-semibold">/whisper</span>. Use an underscore (<span className="font-mono">_</span>)
-            or a non-breaking space (<span className="font-semibold">Alt+0160</span>) instead.
+            <Trans
+              t={t}
+              i18nKey="createCharacter.spaceWarning"
+              components={{
+                cmd: <span className="font-semibold" />,
+                mono: <span className="font-mono" />,
+                key: <span className="font-semibold" />,
+              }}
+            />
             <button
               type="button"
               onClick={fixSpaces}
               className="ml-1 rounded border border-keep-accent/50 px-1.5 py-0.5 font-semibold uppercase tracking-wide hover:bg-keep-accent/20"
             >
-              Replace spaces with _
+              {t("createCharacter.replaceSpaces")}
             </button>
           </div>
         ) : null}
@@ -135,14 +143,14 @@ export function CreateCharacterModal<T = CreatedCharacter>({
             onClick={onCancel}
             className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
           >
-            Cancel
+            {t("common:cancel")}
           </button>
           <button
             type="submit"
             disabled={!localValid || submitting}
             className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-1 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
           >
-            {submitting ? "Creating..." : "Create"}
+            {submitting ? t("createCharacter.creating") : t("createCharacter.create")}
           </button>
         </div>
       </form>

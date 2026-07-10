@@ -76,7 +76,17 @@ export async function buildUsersApp(db: Db): Promise<FastifyInstance> {
  *  (id/email/username/passwordHash); everything else takes its schema default. */
 export async function createUser(
   db: Db,
-  opts: { role?: Role; username?: string; disabledAt?: Date | null } = {},
+  opts: {
+    role?: Role;
+    username?: string;
+    disabledAt?: Date | null;
+    /** ISO birthdate (age plan). Omitted/null = legacy adult. */
+    birthdate?: string | null;
+    /** The adult "Hide 18+ content" preference. */
+    hideNsfw?: boolean;
+    /** The minor isolation opt-in (age plan Phase 5). */
+    isolateFromAdults?: boolean;
+  } = {},
 ): Promise<{ id: string; username: string; role: Role }> {
   const id = nanoid();
   const username = opts.username ?? `u_${id.slice(0, 8)}`;
@@ -88,6 +98,9 @@ export async function createUser(
     passwordHash: "x",
     role,
     ...(opts.disabledAt !== undefined ? { disabledAt: opts.disabledAt } : {}),
+    ...(opts.birthdate !== undefined ? { birthdate: opts.birthdate } : {}),
+    ...(opts.hideNsfw !== undefined ? { hideNsfw: opts.hideNsfw } : {}),
+    ...(opts.isolateFromAdults !== undefined ? { isolateFromAdults: opts.isolateFromAdults } : {}),
   });
   return { id, username, role };
 }

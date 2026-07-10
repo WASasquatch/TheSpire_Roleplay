@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Ban } from "lucide-react";
+import { Trans, useTranslation } from "react-i18next";
 import type { ForumManagedEntry } from "@thekeep/shared";
 import { banFromForum, fetchMyManagedForums } from "../../lib/forums.js";
 import { Modal } from "../cosmetics/Modal.js";
@@ -18,6 +19,7 @@ export function ForumBanFromProfile({ targetUserId, targetName }: {
   targetUserId: string;
   targetName: string;
 }) {
+  const { t } = useTranslation("forums");
   const [forums, setForums] = useState<ForumManagedEntry[] | null>(null);
   const [step, setStep] = useState<"idle" | "pick" | "confirm">("idle");
   const [chosen, setChosen] = useState<ForumManagedEntry | null>(null);
@@ -55,7 +57,7 @@ export function ForumBanFromProfile({ targetUserId, targetName }: {
       ...(reason.trim() ? { reason: reason.trim() } : {}),
     })
       .then(() => { setDone(true); close(); })
-      .catch((e) => setError(e instanceof Error ? e.message : "Ban failed."))
+      .catch((e) => setError(e instanceof Error ? e.message : t("banFromProfile.banFailed")))
       .finally(() => setBusy(false));
   }
 
@@ -65,11 +67,11 @@ export function ForumBanFromProfile({ targetUserId, targetName }: {
         type="button"
         onClick={open}
         disabled={done}
-        title={done ? "Banned from your forum" : "Ban this user from a forum you run"}
+        title={done ? t("banFromProfile.doneTitle") : t("banFromProfile.buttonTitle")}
         className="flex items-center gap-1.5 rounded border border-keep-system/60 px-2 py-1 text-xs text-keep-system hover:bg-keep-system/10 disabled:opacity-50"
       >
         <Ban className="h-4 w-4" aria-hidden="true" />
-        {done ? "Forum-banned" : "Ban from forum"}
+        {done ? t("banFromProfile.doneLabel") : t("banFromProfile.buttonLabel")}
       </button>
 
       {step !== "idle" ? (
@@ -80,8 +82,8 @@ export function ForumBanFromProfile({ targetUserId, targetName }: {
           >
             {step === "pick" ? (
               <>
-                <h2 className="font-action text-lg">Ban from which forum?</h2>
-                <p className="mt-1 text-sm text-keep-muted">You run more than one. Pick where to ban <b>{targetName}</b>.</p>
+                <h2 className="font-action text-lg">{t("banFromProfile.pickTitle")}</h2>
+                <p className="mt-1 text-sm text-keep-muted"><Trans t={t} i18nKey="banFromProfile.pickIntro" values={{ name: targetName }} components={{ b: <b /> }} /></p>
                 <ul className="mt-3 space-y-1">
                   {forums.map((f) => (
                     <li key={f.id}>
@@ -101,14 +103,14 @@ export function ForumBanFromProfile({ targetUserId, targetName }: {
                   ))}
                 </ul>
                 <div className="mt-4 flex justify-end">
-                  <button type="button" onClick={close} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">Cancel</button>
+                  <button type="button" onClick={close} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">{t("common:cancel")}</button>
                 </div>
               </>
             ) : (
               <>
-                <h2 className="font-action text-lg">Ban from {chosen?.name}</h2>
+                <h2 className="font-action text-lg">{t("banFromProfile.confirmTitle", { name: chosen?.name ?? "" })}</h2>
                 <p className="mt-1 text-sm text-keep-muted">
-                  Bans <b>{targetName}</b> from this forum's boards only, not the rest of the Spire.
+                  <Trans t={t} i18nKey="banFromProfile.confirmIntro" values={{ name: targetName }} components={{ b: <b /> }} />
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
                   <select
@@ -116,29 +118,29 @@ export function ForumBanFromProfile({ targetUserId, targetName }: {
                     onChange={(e) => setHours(e.target.value)}
                     className="rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
                   >
-                    <option value="24">1 day</option>
-                    <option value="168">7 days</option>
-                    <option value="720">30 days</option>
-                    <option value="perm">Permanent</option>
+                    <option value="24">{t("duration.day1")}</option>
+                    <option value="168">{t("duration.days7")}</option>
+                    <option value="720">{t("duration.days30")}</option>
+                    <option value="perm">{t("duration.permanent")}</option>
                   </select>
                   <input
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
                     maxLength={300}
-                    placeholder="Reason (shown to them)"
+                    placeholder={t("shared.reasonPlaceholder")}
                     className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
                   />
                 </div>
                 {error ? <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">{error}</div> : null}
                 <div className="mt-4 flex justify-end gap-2">
-                  <button type="button" onClick={close} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">Cancel</button>
+                  <button type="button" onClick={close} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">{t("common:cancel")}</button>
                   <button
                     type="button"
                     disabled={busy}
                     onClick={submit}
                     className="rounded border border-keep-system/70 bg-keep-system/15 px-3 py-1 text-sm font-semibold text-keep-system disabled:opacity-50"
                   >
-                    {busy ? "Banning…" : "Ban"}
+                    {busy ? t("banFromProfile.banning") : t("shared.ban")}
                   </button>
                 </div>
               </>

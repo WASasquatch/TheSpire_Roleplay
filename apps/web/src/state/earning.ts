@@ -30,6 +30,7 @@ import {
   ackRankUpNotification,
   fetchEarningMe,
 } from "../lib/earning.js";
+import { i18n } from "../lib/i18n.js";
 import { useChat } from "./store.js";
 
 /**
@@ -54,7 +55,7 @@ async function fetchEarningMeForServer(
   });
   if (!r.ok) {
     const msg = await r.text().catch(() => "");
-    throw new Error(msg || `Request failed (${r.status}).`);
+    throw new Error(msg || i18n.t("errors:requestFailed", { status: r.status }));
   }
   return (await r.json()) as EarningMeResponse;
 }
@@ -178,7 +179,7 @@ export const useEarning = create<EarningState>((set, get) => ({
         if (reqId !== latestRefreshReq) return;
         set({
           loading: false,
-          error: err instanceof Error ? err.message : "Failed to load Earning.",
+          error: err instanceof Error ? err.message : i18n.t("errors:earning.loadFailed"),
         });
       } finally {
         // Only clear the shared slot if we're still the latest request;

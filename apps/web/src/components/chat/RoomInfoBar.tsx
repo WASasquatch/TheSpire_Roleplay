@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Check,
   ChevronDown,
@@ -16,6 +17,8 @@ import {
 } from "lucide-react";
 import type { PinnedMessage, RoomInfo, RoomSummary } from "@thekeep/shared";
 import { customCmdCssToStyle, resolveMessageColor } from "@thekeep/shared";
+import { RatingChip } from "../shared/RatingChip.js";
+import { formatDate, formatNumber } from "../../lib/intlFormat.js";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { fetchRoomInfo } from "../../lib/rooms.js";
@@ -53,7 +56,7 @@ function isImageIcon(icon: string | null | undefined): boolean {
 
 function fmtCreated(ms: number): string {
   try {
-    return new Date(ms).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+    return formatDate(ms, { year: "numeric", month: "short", day: "numeric" });
   } catch {
     return "-";
   }
@@ -79,6 +82,7 @@ function Bevel() {
  * `/icon` command (no inline editor here, by design).
  */
 export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMessage = false, onJumpToMessage, onUnpin }: Props) {
+  const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   // Pins strip: collapsed to a "N pinned" summary by default, expands to a
   // scrollable list. Independent of the room-details pullout below.
@@ -120,7 +124,7 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
   const bannerText = room.topic
     ? room.topic
     : room.currentSceneTitle
-      ? `Scene: ${room.currentSceneTitle}`
+      ? t("roomInfo.scene", { title: room.currentSceneTitle })
       : null;
 
   return (
@@ -136,11 +140,11 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
             onClick={() => setPinsExpanded((v) => !v)}
             aria-expanded={pinsExpanded}
             className="flex w-full items-center gap-2 px-3 py-1 text-xs text-keep-muted hover:bg-keep-banner/40"
-            title={pinsExpanded ? "Hide pinned messages" : "Show pinned messages"}
+            title={pinsExpanded ? t("roomInfo.hidePins") : t("roomInfo.showPins")}
           >
             <Pin size={12} aria-hidden />
             <span className="font-action tracking-wide text-keep-text">
-              {roomPins.length} pinned
+              {t("roomInfo.pinnedCount", { count: roomPins.length })}
             </span>
             <span className="ml-auto">
               {pinsExpanded ? <ChevronUp size={14} aria-hidden /> : <ChevronDown size={14} aria-hidden />}
@@ -166,7 +170,7 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
-        aria-label={expanded ? "Hide room details" : "Show room details"}
+        aria-label={expanded ? t("roomInfo.hideDetailsAria") : t("roomInfo.showDetailsAria")}
         onClick={() => setExpanded((v) => !v)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -175,7 +179,7 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
           }
         }}
         className="flex w-full cursor-pointer items-stretch px-3 py-1.5 text-sm hover:bg-keep-banner/60"
-        title={expanded ? "Click to hide room details" : "Click for room details"}
+        title={expanded ? t("roomInfo.hideDetailsTitle") : t("roomInfo.showDetailsTitle")}
       >
         {/* Left: icon + name */}
         <div className="flex min-w-0 shrink-0 items-center gap-2">
@@ -192,6 +196,10 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
             )
           ) : null}
           <span className="truncate font-action tracking-wide text-keep-text">{room.name}</span>
+          {/* Rating chip (age-restriction plan, Phase 2): the current room's
+              effective 18+/SFW state, always visible in the bar. Minors never
+              receive an 18+ room at all, so they only ever see SFW here. */}
+          <RatingChip nsfw={!!room.isNsfw} />
         </div>
 
         <Bevel />
@@ -202,7 +210,7 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
             <span className="truncate italic text-keep-muted">{bannerText}</span>
           ) : (
             <span className="truncate text-keep-muted/50">
-              No topic set{canEdit ? " - add one with /topic" : ""}
+              {canEdit ? t("roomInfo.noTopicEditable") : t("roomInfo.noTopic")}
             </span>
           )}
         </div>
@@ -211,24 +219,24 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
 
         {/* Right: quick stats + chevron */}
         <div className="flex shrink-0 items-center gap-3 text-xs text-keep-muted">
-          <span className="hidden items-center gap-1 sm:flex" title="Room created">
+          <span className="hidden items-center gap-1 sm:flex" title={t("roomInfo.createdTitle")}>
             <Clock size={12} aria-hidden />
             {fmtCreated(room.createdAt)}
           </span>
-          <span className="flex items-center gap-1" title="Messages ever sent here">
+          <span className="flex items-center gap-1" title={t("roomInfo.messagesTitle")}>
             <MessagesSquare size={12} aria-hidden />
-            {room.messageCount.toLocaleString()}
+            {formatNumber(room.messageCount)}
           </span>
           {marqueeHidden ? (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); resurrectMarquee(); }}
               className="flex items-center gap-1 rounded border border-keep-action/40 bg-keep-action/15 px-1.5 py-0.5 text-keep-action hover:border-keep-action hover:bg-keep-action/30"
-              title="Bring back the announcements banner you hid"
-              aria-label="Bring back announcements"
+              title={t("roomInfo.announcementsTitle")}
+              aria-label={t("roomInfo.announcementsAria")}
             >
               <Megaphone size={12} aria-hidden />
-              <span className="hidden sm:inline">Announcements</span>
+              <span className="hidden sm:inline">{t("roomInfo.announcements")}</span>
             </button>
           ) : null}
           {expanded ? <ChevronUp size={16} aria-hidden /> : <ChevronDown size={16} aria-hidden />}
@@ -240,9 +248,9 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
       {expanded ? (
         <div className={`border-t border-keep-rule/60 bg-keep-bg/40 px-3 py-2${reduceMotion ? " tk-slide-down-in" : ""}`}>
           {loading ? (
-            <div className="py-1 text-center text-xs text-keep-muted">Loading room details…</div>
+            <div className="py-1 text-center text-xs text-keep-muted">{t("roomInfo.loadingDetails")}</div>
           ) : error || !info ? (
-            <div className="py-1 text-center text-xs text-keep-muted">Couldn't load room details.</div>
+            <div className="py-1 text-center text-xs text-keep-muted">{t("roomInfo.loadFailed")}</div>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {/* Sections always render — empty ones show a placeholder (and,
@@ -250,31 +258,31 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
                   the dossier reads the same whether or not a room is filled in.
                   Description: wide column on the left; metadata flows to its
                   right (next cell) so the horizontal space is used. */}
-              <Card icon={<ScrollText size={12} aria-hidden />} title="Description" className="lg:col-span-2">
+              <Card icon={<ScrollText size={12} aria-hidden />} title={t("roomInfo.description")} className="lg:col-span-2">
                 {info.description ? (
                   <p className="whitespace-pre-wrap text-xs leading-snug text-keep-text/90">{info.description}</p>
                 ) : (
-                  <Empty text="No description added." hint={canEdit ? "Add one with /describe <text>" : null} />
+                  <Empty text={t("roomInfo.noDescription")} hint={canEdit ? t("roomInfo.describeHint") : null} />
                 )}
               </Card>
 
-              <Card icon={<Info size={12} aria-hidden />} title="Details">
+              <Card icon={<Info size={12} aria-hidden />} title={t("roomInfo.details")}>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs leading-tight">
-                  <Meta label="Type" value={info.type === "private" ? "Private 🔒" : "Public"} />
+                  <Meta label={t("roomInfo.type")} value={info.type === "private" ? t("roomInfo.private") : t("roomInfo.public")} />
                   {info.slug ? <LinkRow slug={info.slug} /> : null}
-                  {info.ownerName ? <Meta label="Owner" value={info.ownerName} /> : null}
-                  <Meta label="Created" value={fmtCreated(info.createdAt)} />
-                  <Meta label="Messages" value={info.messageCount.toLocaleString()} />
+                  {info.ownerName ? <Meta label={t("common:owner")} value={info.ownerName} /> : null}
+                  <Meta label={t("roomInfo.created")} value={fmtCreated(info.createdAt)} />
+                  <Meta label={t("roomInfo.messages")} value={formatNumber(info.messageCount)} />
                   {info.messageExpiryMinutes && info.messageExpiryMinutes > 0 ? (
-                    <Meta label="Auto-expire" value={`${info.messageExpiryMinutes} min`} />
+                    <Meta label={t("roomInfo.autoExpire")} value={t("roomInfo.autoExpireValue", { count: info.messageExpiryMinutes })} />
                   ) : null}
                   {info.difficultyClass != null ? (
-                    <Meta label="Roll DC" value={String(info.difficultyClass)} />
+                    <Meta label={t("roomInfo.rollDc")} value={String(info.difficultyClass)} />
                   ) : null}
-                  {info.theaterMode ? <Meta label="Theater" value="On" /> : null}
+                  {info.theaterMode ? <Meta label={t("roomInfo.theater")} value={t("common:on")} /> : null}
                   {info.linkedWorld ? (
                     <>
-                      <dt className="text-keep-muted">World</dt>
+                      <dt className="text-keep-muted">{t("roomInfo.world")}</dt>
                       <dd className="truncate">
                         {onOpenWorld ? (
                           <button
@@ -293,7 +301,7 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
                 </dl>
               </Card>
 
-              <Card icon={<Drama size={12} aria-hidden />} title="Current scene">
+              <Card icon={<Drama size={12} aria-hidden />} title={t("roomInfo.currentScene")}>
                 {info.currentScene ? (
                   <>
                     <p className="text-xs leading-snug text-keep-text/90">{info.currentScene.title}</p>
@@ -307,11 +315,11 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
                     ) : null}
                   </>
                 ) : (
-                  <Empty text="No current scene." hint={canEdit ? "Set the scene with /scene <title>" : null} />
+                  <Empty text={t("roomInfo.noScene")} hint={canEdit ? t("roomInfo.sceneHint") : null} />
                 )}
               </Card>
 
-              <Card icon={<Users size={12} aria-hidden />} title={info.npcs.length > 0 ? `NPCs (${info.npcs.length})` : "NPCs"}>
+              <Card icon={<Users size={12} aria-hidden />} title={info.npcs.length > 0 ? t("roomInfo.npcsCount", { count: info.npcs.length }) : t("roomInfo.npcs")}>
                 {info.npcs.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
                     {info.npcs.map((n) => (
@@ -324,7 +332,7 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
                     ))}
                   </div>
                 ) : (
-                  <Empty text="No NPCs voiced here yet." hint={canEdit ? "Voice one with /npc <Name> <text>" : null} />
+                  <Empty text={t("roomInfo.noNpcs")} hint={canEdit ? t("roomInfo.npcHint") : null} />
                 )}
               </Card>
             </div>
@@ -378,6 +386,7 @@ function Meta({ label, value }: { label: string; value: string }) {
  * people straight here. (Owners/mods can rename the handle with `/slug`.)
  */
 function LinkRow({ slug }: { slug: string }) {
+  const { t } = useTranslation("chat");
   const { copied, copy: copyToClipboard } = useCopyToClipboard({ resetMs: 1200 });
   const token = `{room:${slug}}`;
   const copy = () => {
@@ -386,13 +395,13 @@ function LinkRow({ slug }: { slug: string }) {
   };
   return (
     <>
-      <dt className="text-keep-muted">Link</dt>
+      <dt className="text-keep-muted">{t("roomInfo.link")}</dt>
       <dd className="truncate">
         <button
           type="button"
           onClick={copy}
-          title="Copy the chat shortcut that links to this room"
-          aria-label={`Copy ${token}`}
+          title={t("roomInfo.copyLinkTitle")}
+          aria-label={t("roomInfo.copyTokenAria", { token })}
           className="inline-flex max-w-full items-center gap-1 text-keep-action hover:text-keep-action/80"
         >
           <span className="truncate font-mono text-[11px]">{token}</span>
@@ -424,6 +433,7 @@ function PinRow({
    *  hard-deleted (see the Props doc). */
   onUnpin?: (idForUnpin: string) => void;
 }) {
+  const { t } = useTranslation("chat");
   const themeBg = useActiveTheme().bg;
   const color = resolveMessageColor(pin.color, themeBg);
   const cmdStyle = pin.kind === "cmd" ? customCmdCssToStyle(pin.cmdCss ?? null, themeBg) : null;
@@ -441,11 +451,11 @@ function PinRow({
       <Pin size={12} aria-hidden className="mt-1 shrink-0 text-keep-action/70" />
       <div className="min-w-0 flex-1">
         <div className="text-[10px] uppercase tracking-widest text-keep-muted">
-          <b className="text-keep-text">{pin.displayName ?? "Someone"}</b>
+          <b className="text-keep-text">{pin.displayName ?? t("roomInfo.someone")}</b>
           {pin.pinnedByDisplayName ? (
             <>
               <span className="mx-1">·</span>
-              <span className="italic">pinned by {pin.pinnedByDisplayName}</span>
+              <span className="italic">{t("roomInfo.pinnedBy", { name: pin.pinnedByDisplayName })}</span>
             </>
           ) : null}
         </div>
@@ -454,14 +464,14 @@ function PinRow({
             type="button"
             onClick={() => onJump!(pin.messageId!)}
             className="mt-0.5 block w-full text-left text-sm leading-snug hover:underline"
-            title="Jump to this message"
+            title={t("actions.jumpToMessage")}
           >
             <span className="break-words" style={bodyStyle}>{parseInline(body)}</span>
           </button>
         ) : (
           <div
             className="mt-0.5 block w-full text-left text-sm leading-snug"
-            title="The original message is gone; showing the pinned copy."
+            title={t("roomInfo.pinGone")}
           >
             <span className="break-words" style={bodyStyle}>{parseInline(body)}</span>
           </div>
@@ -477,8 +487,8 @@ function PinRow({
         <button
           type="button"
           onClick={() => onUnpin(pin.messageId ?? pin.id)}
-          title="Unpin this message"
-          aria-label="Unpin this message"
+          title={t("roomInfo.unpin")}
+          aria-label={t("roomInfo.unpin")}
           className="mt-0.5 shrink-0 rounded border border-keep-rule/60 bg-keep-bg/60 p-1 text-keep-muted opacity-0 hover:border-keep-accent hover:text-keep-accent group-hover:opacity-100"
         >
           <PinOff size={12} aria-hidden />

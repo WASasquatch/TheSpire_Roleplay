@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import { messages, perRoomNotifyPrefs, roomReads, rooms, users } from "../db/schema.js";
+import { isAdultUser } from "../auth/ageGate.js";
 import { pulseRoomUnread } from "../notifications/engine.js";
 import { emitToUser } from "../realtime/presence.js";
 import { getSessionUser } from "./auth.js";
@@ -41,14 +42,29 @@ const muteBody = z.object({
  * absent rooms as {unread:0, hasMention:false, muted:false}.
  */
 export async function computeRoomUnread(db: Db, userId: string, onlyRoomId?: string): Promise<RoomUnreadMap> {
-  // The viewer's username, needed for the by-name mention approximation.
-  const uname = (await db
-    .select({ username: users.username })
+  // The viewer's username (by-name mention approximation) + birthdate (age
+  // plan, Phase 2): a minor MEMBER of an effectively-18+ room — membership
+  // rows are kept-but-hidden on a flip — gets no unread entry for it,
+  // matching the live fanRoomUnreadBump exclusion. The room isn't in their
+  // rail, so a badge for it would be a dead signal (and a room-id leak).
+  const viewer = (await db
+    .select({ username: users.username, birthdate: users.birthdate })
     .from(users)
     .where(eq(users.id, userId))
-    .limit(1))[0]?.username ?? "";
+    .limit(1))[0];
+  const uname = viewer?.username ?? "";
+  const viewerIsAdult = viewer ? isAdultUser(viewer) : false;
 
   const roomFilter = onlyRoomId ? sql` AND m.room_id = ${onlyRoomId}` : sql``;
+  // Effective rating in SQL: room flag OR its server's (NULL server = the
+  // default, SFW by invariant), plus the PER-MESSAGE stamp — rows a minor
+  // can never read (18+-era history in a flipped-back room, replies under
+  // an NSFW-tagged topic in an all-ages board) must not count into their
+  // badge either, matching the live fanRoomUnreadBump skip and the
+  // backlog/search stamped-history clause. Adults skip the clause entirely.
+  const ageFilter = viewerIsAdult
+    ? sql``
+    : sql` AND r.is_nsfw = 0 AND COALESCE(s.is_nsfw, 0) = 0 AND m.is_nsfw = 0`;
   const lowerName = `%@${uname.toLowerCase()}%`;
   const mentionJson = `%"userId":"${userId}"%`;
 
@@ -65,6 +81,8 @@ export async function computeRoomUnread(db: Db, userId: string, onlyRoomId?: str
            ) AS mentions
     FROM messages m
     JOIN room_members rm ON rm.room_id = m.room_id AND rm.user_id = ${userId}
+    JOIN rooms r ON r.id = m.room_id
+    LEFT JOIN servers s ON s.id = r.server_id
     LEFT JOIN room_reads rr ON rr.room_id = m.room_id AND rr.user_id = ${userId}
     WHERE m.kind != 'whisper'
       AND m.deleted_at IS NULL
@@ -72,6 +90,7 @@ export async function computeRoomUnread(db: Db, userId: string, onlyRoomId?: str
       AND m.user_id != ${userId}
       AND m.created_at > COALESCE(rr.last_read_at, 0)
       ${roomFilter}
+      ${ageFilter}
     GROUP BY m.room_id
   `);
 

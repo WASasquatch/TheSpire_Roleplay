@@ -4,11 +4,13 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { type Role, VERSION } from "@thekeep/shared";
 import { serverMembers, sessions, users } from "../db/schema.js";
+import { exceedsMaximumPlausibleAge, isAdultUser, meetsMinimumAge, minimumSignupAge } from "../auth/ageGate.js";
 import { hashPassword, verifyPassword } from "../auth/passwords.js";
 import { permissionsFor } from "../auth/permissions.js";
 import { getSettings } from "../settings.js";
 import { createEmailToken, consumeEmailToken } from "../email/tokens.js";
 import { sendPasswordResetEmail, sendVerificationEmail } from "../email/templates.js";
+import { parseAcceptLanguage, tFor } from "../i18n.js";
 import type { Db } from "../db/index.js";
 
 /** Password-reset link validity. Short by design — these are sensitive. */
@@ -120,14 +122,27 @@ const credentialsSchema = z.object({
     errorMap: () => ({ message: "you must accept the disclaimer to register" }),
   }),
   /**
-   * Age + mature content acknowledgment. Combined into one field because the
-   * UI presents them as a single statement: "I am 18 or older and understand
-   * this site may contain mature content." Same literal-true posture as the
-   * disclaimer above so a coerced truthy value can't slip through.
+   * Date of birth, ISO YYYY-MM-DD (age-restriction plan Phase 0). Replaces
+   * the old discarded "I am 18 or older" checkbox (`acceptAgeMature`) as the
+   * age signal — and unlike it, this one is STORED (`users.birthdate`) so
+   * every gate can derive adult/minor at read time. Shape only here;
+   * calendar validity + the minimum age (13 or 18 per the
+   * `allowMinorSignups` flag) are checked in the handler where settings are
+   * in hand.
    */
-  acceptAgeMature: z.literal(true, {
-    errorMap: () => ({ message: "you must confirm you are 18+ and understand this site may contain mature content" }),
+  birthdate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, {
+    message: "enter your date of birth",
   }),
+  /**
+   * Optional signup-time capture of the minor isolation mode (age plan,
+   * Phase 5): the form reveals an "Only show me other members under 18 and
+   * staff" checkbox when the entered birth date is under 18. Persisted only
+   * when the account actually derives minor, so a direct POST can't plant
+   * the flag on an adult account (it would be inert anyway — the predicate
+   * requires isMinor — but the stored state should match what the settings
+   * UI can show).
+   */
+  isolateFromAdults: z.boolean().optional(),
   /**
    * Captcha token issued by GET /auth/captcha. Single-use; the server
    * deletes the entry on validation, so a leaked token can't be replayed.
@@ -211,7 +226,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     const settings = await getSettings(db);
     if (!settings.registrationOpen) {
       reply.code(503);
-      return { error: "registration is closed" };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.registrationClosed") };
     }
     const body = credentialsSchema.parse(req.body);
 
@@ -220,7 +235,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     // generic 400 so they can't tell they tripped the trap.
     if (body.hp && body.hp.trim().length > 0) {
       reply.code(400);
-      return { error: "registration failed" };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.registrationFailed") };
     }
 
     // IP block: a banned user can't just register a burner account from the
@@ -231,7 +246,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       const { isIpBanned } = await import("../auth/ipBan.js");
       if (await isIpBanned(db, req.ip)) {
         reply.code(403);
-        return { error: "Registration isn't available from your network right now." };
+        return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.networkRegistrationRestricted") };
       }
     }
 
@@ -239,7 +254,24 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     // answer doesn't cost us a username/email lookup.
     if (!consumeCaptcha(body.captchaId, body.captchaAnswer)) {
       reply.code(400);
-      return { error: "captcha was wrong or expired - please try again" };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.captchaWrong") };
+    }
+
+    // Age floor. `allowMinorSignups` OFF (default) keeps the historical 18+
+    // posture; ON lowers it to 13 (under-13 is always rejected — COPPA).
+    // Neutral copy, and nothing about the failed attempt is stored.
+    const minAge = minimumSignupAge(settings);
+    if (!meetsMinimumAge(body.birthdate, minAge)) {
+      reply.code(400);
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.minAge", { minAge }) };
+    }
+    // Plausibility ceiling (mirrors the admin DOB editor's 130-year bound):
+    // a birthdate a century-plus back is a typo (1911 for 2011), and the
+    // exact typo matters — it would silently derive an ADULT account with
+    // every minor gate off and no self-service correction path.
+    if (exceedsMaximumPlausibleAge(body.birthdate)) {
+      reply.code(400);
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.implausibleBirthdate") };
     }
 
     // Username + email cap checks. Both errors collapse to the same generic
@@ -259,7 +291,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     const emailCount = emailCountRow?.n ?? 0;
     if (usernameTaken || emailCount >= settings.maxAccountsPerEmail) {
       reply.code(409);
-      return { error: "registration conflict - try a different email or username" };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.registrationConflict") };
     }
 
     // Bootstrap: if there are no human accounts yet (only the `system`
@@ -279,6 +311,13 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
         email: body.email,
         username: body.username,
         passwordHash: await hashPassword(body.password),
+        // The stored age signal. Post-feature accounts always carry one;
+        // only pre-feature (legacy) rows are NULL, and those derive adult.
+        birthdate: body.birthdate,
+        // Minor isolation opt-in from the signup form (see the schema note:
+        // minors only; the age floor above already rejected under-13s, so
+        // this can only be a 13-17 account when it persists true).
+        isolateFromAdults: (body.isolateFromAdults ?? false) && !isAdultUser({ birthdate: body.birthdate }),
         // The bootstrap user gets `masteradmin` so they hold every
         // lever needed to configure a fresh install (branding,
         // settings, rules, role escalation). Subsequent users default
@@ -308,7 +347,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       const msg = err instanceof Error ? err.message : "";
       if (/UNIQUE|users_username_uq/i.test(msg)) {
         reply.code(409);
-        return { error: "registration conflict - try a different email or username" };
+        return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.registrationConflict") };
       }
       throw err;
     }
@@ -346,7 +385,9 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     if (settings.emailVerificationEnabled && !isFirstUser) {
       try {
         const token = await createEmailToken(db, id, "email_verify", VERIFY_TTL_MS);
-        void sendVerificationEmail(db, body.email, body.username, token);
+        // Brand-new account: no saved users.locale yet, so the request's
+        // Accept-Language pick is the recipient-language signal (i18n plan §3).
+        void sendVerificationEmail(db, body.email, body.username, token, parseAcceptLanguage(req.headers["accept-language"]));
       } catch (err) { req.log.error({ err }, "verification email send failed"); }
     }
     // Wire shape: `role` and `permissions` now always ride on the
@@ -392,7 +433,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       const { isIpBanned } = await import("../auth/ipBan.js");
       if (await isIpBanned(db, req.ip)) {
         reply.code(403);
-        return { error: "Access from your network is currently restricted." };
+        return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.networkRestricted") };
       }
     }
 
@@ -410,7 +451,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
 
     if (!u) {
       reply.code(401);
-      return { error: "invalid credentials" };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.invalidCredentials") };
     }
     if (u.disabledAt) {
       // Lazily lift a TIMED ban that has lapsed so the user can sign back
@@ -425,13 +466,13 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
           .where(eq(users.id, u.id));
       } else {
         reply.code(401);
-        return { error: "invalid credentials" };
+        return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.invalidCredentials") };
       }
     }
     const ok = await verifyPassword(u.passwordHash, body.password);
     if (!ok) {
       reply.code(401);
-      return { error: "invalid credentials" };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.invalidCredentials") };
     }
     await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, u.id));
     const sessionToken = await issueSession(db, u.id, req);
@@ -577,7 +618,10 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       if (u.disabledAt) continue; // never mail a banned/disabled account
       try {
         const token = await createEmailToken(db, u.id, "password_reset", RESET_TTL_MS);
-        void sendPasswordResetEmail(db, u.email, u.username, token);
+        // Recipient language: the account's saved locale wins; a never-set
+        // (null) locale falls back to the requester's Accept-Language —
+        // normally the same person, standing at the forgot-password form.
+        void sendPasswordResetEmail(db, u.email, u.username, token, u.locale ?? parseAcceptLanguage(req.headers["accept-language"]));
       } catch (err) { req.log.error({ err }, "password reset email send failed"); }
     }
     return { ok: true };
@@ -594,7 +638,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     const userId = await consumeEmailToken(db, body.token, "password_reset");
     if (!userId) {
       reply.code(400);
-      return { error: "This reset link is invalid or has expired. Request a new one." };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.resetLinkInvalid") };
     }
     await db.update(users).set({ passwordHash: await hashPassword(body.password), hasPassword: true }).where(eq(users.id, userId));
     await db.delete(sessions).where(eq(sessions.userId, userId));
@@ -628,11 +672,11 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     if (u.hasPassword) {
       if (!body.currentPassword) {
         reply.code(400);
-        return { error: "Enter your current password." };
+        return { error: tFor(me.locale, "errors:server.auth.enterCurrentPassword") };
       }
       if (!(await verifyPassword(u.passwordHash, body.currentPassword))) {
         reply.code(400);
-        return { error: "Your current password is incorrect." };
+        return { error: tFor(me.locale, "errors:server.auth.currentPasswordIncorrect") };
       }
     }
     await db
@@ -672,7 +716,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     const userId = await consumeEmailToken(db, body.token, "email_verify");
     if (!userId) {
       reply.code(400);
-      return { error: "This confirmation link is invalid or has expired." };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.confirmLinkInvalid") };
     }
     await db.update(users).set({ emailVerifiedAt: new Date() }).where(eq(users.id, userId));
     return { ok: true };
@@ -690,7 +734,9 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     if (row.emailVerifiedAt) return { ok: true, alreadyVerified: true };
     try {
       const token = await createEmailToken(db, row.id, "email_verify", VERIFY_TTL_MS);
-      void sendVerificationEmail(db, row.email, row.username, token);
+      // Saved locale first; the signed-in requester IS the recipient, so
+      // their Accept-Language is the natural fallback when it's unset.
+      void sendVerificationEmail(db, row.email, row.username, token, row.locale ?? parseAcceptLanguage(req.headers["accept-language"]));
     } catch (err) { req.log.error({ err }, "resend verification email failed"); }
     return { ok: true };
   });
@@ -737,7 +783,17 @@ export function readBearerToken(req: FastifyRequest): string | null {
 export async function getSessionUser(
   req: FastifyRequest,
   db: Db,
-): Promise<{ id: string; username: string; role: Role; activeCharacterId: string | null } | null> {
+): Promise<{
+  id: string;
+  username: string;
+  role: Role;
+  activeCharacterId: string | null;
+  birthdate: string | null;
+  isAdult: boolean;
+  hideNsfw: boolean;
+  isolateFromAdults: boolean;
+  locale: string | null;
+} | null> {
   const sid = readBearerToken(req);
   if (!sid) return null;
   const row = (await db.select().from(sessions).where(eq(sessions.id, sid)).limit(1))[0];
@@ -757,6 +813,24 @@ export async function getSessionUser(
     // synced on identity switches; HTTP requests reflect whatever
     // the last socket sync wrote.
     activeCharacterId: u.activeCharacterId,
+    // Age context (age-restriction plan Phase 0). `isAdult` is DERIVED
+    // here, per request, so a minor account graduates on its 18th
+    // birthday with no write; `birthdate` + `hideNsfw` ride along so
+    // routes can feed canSeeNsfw() without a second lookup. Never echo
+    // birthdate into any response other than the owner's own.
+    birthdate: u.birthdate,
+    isAdult: isAdultUser(u),
+    hideNsfw: u.hideNsfw,
+    // Minor isolation flag (age plan Phase 5): rides the session so route
+    // handlers can evaluate isIsolatedBetween / isolationVisibleSql against
+    // the viewer without a second lookup. Together with role + birthdate
+    // above, the session satisfies IsolationSubject structurally.
+    isolateFromAdults: u.isolateFromAdults,
+    // Recipient language (i18n plan Phase 3): users.locale rides the
+    // session so HTTP routes can localize transient responses via
+    // localeForUser/tFor (src/i18n.ts) without a second lookup.
+    // Null = auto ("System default") → en for server-generated text.
+    locale: u.locale,
   };
 }
 

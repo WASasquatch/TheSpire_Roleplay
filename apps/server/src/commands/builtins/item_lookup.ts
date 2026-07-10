@@ -1,5 +1,6 @@
 import type { CommandContext, CommandHandler } from "../types.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
+import { tFor } from "../../i18n.js";
 import { findItem } from "./items.js";
 
 /**
@@ -49,7 +50,7 @@ export const itemCommand: CommandHandler = {
   async run(ctx) {
     const query = ctx.argsText.trim();
     if (!query) {
-      notice(ctx, "ITEM_USAGE", "Usage: /item <name-or-alias>");
+      notice(ctx, "ITEM_USAGE", tFor(ctx.user.locale, "commands:item.usage"));
       return;
     }
     // Per-server catalog (migration 0298): look the item up in the catalog of
@@ -57,7 +58,7 @@ export const itemCommand: CommandHandler = {
     const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
     const row = await findItem(ctx.db, query, sid);
     if (!row) {
-      notice(ctx, "ITEM_NOT_FOUND", `No item called "${query}".`);
+      notice(ctx, "ITEM_NOT_FOUND", tFor(ctx.user.locale, "commands:shared.itemNotFound", { name: query }));
       return;
     }
     // Carry the resolved row inline so the client opens the zoom

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Modal } from "./cosmetics/Modal.js";
 
 interface Props {
@@ -24,6 +25,7 @@ const NAME_RX = /^[\p{L}\p{N}_\-']{1,40}$/u;
  * user had typed the command.
  */
 export function CreateRoomModal({ onCommand, onClose }: Props) {
+  const { t } = useTranslation("common");
   const [name, setName] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [password, setPassword] = useState("");
@@ -40,15 +42,15 @@ export function CreateRoomModal({ onCommand, onClose }: Props) {
     // survives the command's first-token split intact.
     const cleanName = name.trim().replace(/\s+/g, "_");
     if (!cleanName) {
-      setError("Enter a room name.");
+      setError(t("createRoom.errorNameRequired"));
       return;
     }
     if (!NAME_RX.test(cleanName)) {
-      setError("Names can use letters, numbers, and _ - ' (up to 40 characters).");
+      setError(t("createRoom.errorNameInvalid"));
       return;
     }
     if (isPrivate && !password.trim()) {
-      setError("A private room needs a password.");
+      setError(t("createRoom.errorPasswordRequired"));
       return;
     }
 
@@ -67,13 +69,15 @@ export function CreateRoomModal({ onCommand, onClose }: Props) {
         onClick={(e) => e.stopPropagation()}
         className="keep-frame w-full rounded bg-keep-bg p-5 text-keep-text md:w-[min(440px,78vw)]"
       >
-        <h2 className="font-action text-lg">Create a room</h2>
+        <h2 className="font-action text-lg">{t("createRoom.title")}</h2>
         <p className="mt-1 text-sm text-keep-muted">
-          Pick a name. Spaces become underscores, so <b>Oak Tavern</b> becomes <b>Oak_Tavern</b>.
+          <Trans t={t} i18nKey="createRoom.intro">
+            Pick a name. Spaces become underscores, so <b>Oak Tavern</b> becomes <b>Oak_Tavern</b>.
+          </Trans>
         </p>
 
         <label className="mt-3 block text-xs uppercase tracking-wider text-keep-muted" htmlFor="create-room-name">
-          Room name
+          {t("createRoom.nameLabel")}
         </label>
         <input
           id="create-room-name"
@@ -84,7 +88,7 @@ export function CreateRoomModal({ onCommand, onClose }: Props) {
           onChange={(e) => { setName(e.target.value); setError(null); }}
           autoComplete="off"
           className="mt-1 block w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-base outline-none focus:border-keep-action md:text-sm"
-          placeholder="e.g. Oak_Tavern"
+          placeholder={t("createRoom.namePlaceholder")}
         />
 
         <label className="mt-3 flex items-center gap-2 text-sm">
@@ -94,13 +98,17 @@ export function CreateRoomModal({ onCommand, onClose }: Props) {
             onChange={(e) => { setIsPrivate(e.target.checked); setError(null); }}
             className="h-4 w-4 accent-keep-action"
           />
-          <span>Private <span className="text-keep-muted">(password required to join)</span></span>
+          <span>
+            <Trans t={t} i18nKey="createRoom.privateLabel">
+              Private <span className="text-keep-muted">(password required to join)</span>
+            </Trans>
+          </span>
         </label>
 
         {isPrivate ? (
           <>
             <label className="mt-3 block text-xs uppercase tracking-wider text-keep-muted" htmlFor="create-room-password">
-              Password
+              {t("password")}
             </label>
             <input
               id="create-room-password"
@@ -109,7 +117,7 @@ export function CreateRoomModal({ onCommand, onClose }: Props) {
               onChange={(e) => { setPassword(e.target.value); setError(null); }}
               autoComplete="new-password"
               className="mt-1 block w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-base outline-none focus:border-keep-action md:text-sm"
-              placeholder="Password"
+              placeholder={t("password")}
             />
           </>
         ) : null}
@@ -126,14 +134,14 @@ export function CreateRoomModal({ onCommand, onClose }: Props) {
             onClick={onClose}
             className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
           >
-            Cancel
+            {t("cancel")}
           </button>
           <button
             type="submit"
             disabled={!name.trim() || (isPrivate && !password.trim())}
             className="rounded border border-keep-action/60 bg-keep-action/10 px-3 py-1 text-sm font-semibold text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
           >
-            Create
+            {t("createRoom.submit")}
           </button>
         </div>
       </form>

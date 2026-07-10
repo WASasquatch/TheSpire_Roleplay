@@ -43,6 +43,7 @@ import { creditPool } from "../earning/award.js";
 import { clampToDailyCap, earnedTodayForCap } from "../earning/dailyCap.js";
 import { resolveActiveServerId } from "../earning/pool.js";
 import { ownsPurchase } from "../earning/purchases.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -77,7 +78,7 @@ export async function registerGrimholdRoutes(app: FastifyInstance, db: Db, io: I
     const me = await getSessionUser(req, db);
     if (!me) return { ok: false, code: 401, body: { error: "auth" } };
     if (!(await hasPermission(me, "use_arcade", db)) || !(await hasPermission(me, "use_grimhold", db))) {
-      return { ok: false, code: 403, body: { error: "The Grimhold cabinet isn't available to you." } };
+      return { ok: false, code: 403, body: { error: tFor(me.locale, "errors:server.arcade.grimholdUnavailable") } };
     }
     let scope: Scope = "user";
     let ownerId = me.id;

@@ -13,6 +13,7 @@
  */
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useEarning } from "../../state/earning.js";
 
 interface Props {
@@ -31,6 +32,7 @@ const NO_TIERS: never[] = [];
 const NO_CHARS: never[] = [];
 
 export function EarningRibbon({ onOpenEarning }: Props) {
+  const { t } = useTranslation("earning");
   // Select the snapshot ONCE (a stable reference from the store) and
   // derive the slices outside the selector. This avoids the
   // returns-a-new-array-per-render hazard above.
@@ -49,10 +51,10 @@ export function EarningRibbon({ onOpenEarning }: Props) {
   const rank = ranks.find((r) => r.key === top.toRankKey);
   const tierLabel = tiers.find((t) => t.rankKey === top.toRankKey && t.tier === top.toTier)?.label ?? `${top.toTier}`;
   const onBehalfOf = top.scope === "character" && top.characterId
-    ? (characters.find((c) => c.ownerId === top.characterId)?.displayName ?? "your character")
+    ? (characters.find((c) => c.ownerId === top.characterId)?.displayName ?? t("ribbon.yourCharacter"))
     : null;
   const borderHint = top.newlyEligibleBorderKeys.length > 0
-    ? ` Border unlocked for ${top.newlyEligibleBorderKeys.map((k) => ranks.find((r) => r.key === k)?.name ?? k).join(", ")}.`
+    ? t("ribbon.borderUnlocked", { ranks: top.newlyEligibleBorderKeys.map((k) => ranks.find((r) => r.key === k)?.name ?? k).join(", ") })
     : "";
 
   if (collapsed) {
@@ -61,10 +63,10 @@ export function EarningRibbon({ onOpenEarning }: Props) {
         type="button"
         onClick={() => setCollapsed(false)}
         className="keep-notice keep-notice-accent flex w-full items-center justify-center gap-2 px-4 py-1 text-xs uppercase tracking-widest text-keep-action hover:brightness-110"
-        title="Show earning notification"
+        title={t("ribbon.showTitle")}
       >
         <span>★</span>
-        <span>{unack.length} new rank{unack.length === 1 ? "" : " ups"}</span>
+        <span>{t("ribbon.newRankUps", { count: unack.length })}</span>
       </button>
     );
   }
@@ -76,12 +78,12 @@ export function EarningRibbon({ onOpenEarning }: Props) {
         <div>
           {onBehalfOf ? <span className="text-keep-muted">({onBehalfOf}) </span> : null}
           <span className="font-semibold">
-            You've reached {rank?.name ?? top.toRankKey} {tierLabel}.
+            {t("ribbon.reached", { rank: rank?.name ?? top.toRankKey, tier: tierLabel })}
           </span>
           {borderHint ? <span className="text-keep-muted">{borderHint}</span> : null}
           {unack.length > 1 ? (
             <span className="ml-2 text-xs text-keep-muted">
-              (+{unack.length - 1} more)
+              {t("ribbon.more", { count: unack.length - 1 })}
             </span>
           ) : null}
         </div>
@@ -95,32 +97,32 @@ export function EarningRibbon({ onOpenEarning }: Props) {
         }}
         className="shrink-0 rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs uppercase tracking-widest text-keep-action hover:bg-keep-action/25"
       >
-        Open Earning
+        {t("ribbon.openEarning")}
       </button>
       <button
         type="button"
         onClick={() => void dismissOne(top.id)}
         className="shrink-0 rounded border border-keep-rule px-2 py-0.5 text-xs uppercase tracking-widest text-keep-muted hover:bg-keep-bg/60 hover:text-keep-text"
-        title="Dismiss this notification"
+        title={t("ribbon.dismissTitle")}
       >
-        Dismiss
+        {t("ribbon.dismiss")}
       </button>
       {unack.length > 1 ? (
         <button
           type="button"
           onClick={() => void dismissAll()}
           className="shrink-0 rounded border border-keep-rule px-2 py-0.5 text-xs uppercase tracking-widest text-keep-muted hover:bg-keep-bg/60 hover:text-keep-text"
-          title="Dismiss all"
+          title={t("ribbon.dismissAllTitle")}
         >
-          All
+          {t("ribbon.dismissAllShort")}
         </button>
       ) : null}
       <button
         type="button"
         onClick={() => setCollapsed(true)}
         className="shrink-0 text-keep-muted hover:text-keep-text"
-        title="Collapse"
-        aria-label="Collapse"
+        title={t("ribbon.collapse")}
+        aria-label={t("ribbon.collapse")}
       >
         −
       </button>

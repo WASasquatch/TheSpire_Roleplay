@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
+import { useTranslation } from "react-i18next";
 import type { FaqEntry } from "@thekeep/shared";
 import type { FaqRoute } from "../lib/faqUrl.js";
 import { navigateAwayFromFaq } from "../lib/faqUrl.js";
@@ -27,6 +28,7 @@ export function FaqPage({ route }: { route: FaqRoute }) {
 }
 
 function Shell({ title, children }: { title: string; children: React.ReactNode }) {
+  const { t } = useTranslation("marketing");
   // Apply the site's splash palette so this standalone public page matches the
   // rest of the site instead of the flat light :root defaults (keep-* vars are
   // otherwise unset on this route, since the authed shell never mounts here).
@@ -49,7 +51,7 @@ function Shell({ title, children }: { title: string; children: React.ReactNode }
             onClick={(e) => { e.preventDefault(); navigateAwayFromFaq(); }}
             className="text-sm text-keep-muted hover:text-keep-action"
           >
-            ← Back
+            {t("backLink")}
           </a>
         </header>
         <div className="keep-frame rounded border border-keep-rule bg-keep-panel/40 px-5 py-4 md:px-6 md:py-5">
@@ -61,6 +63,7 @@ function Shell({ title, children }: { title: string; children: React.ReactNode }
 }
 
 function FaqIndex() {
+  const { t } = useTranslation("marketing");
   const [faqs, setFaqs] = useState<FaqEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const currentServerId = useChat((s) => s.currentServerId);
@@ -68,10 +71,11 @@ function FaqIndex() {
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/faqs${faqServerQuery(currentServerId)}`, { credentials: "include" })
-      .then(async (r) => { if (!r.ok) throw new Error(`status ${r.status}`); return r.json() as Promise<{ faqs: FaqEntry[] }>; })
+      .then(async (r) => { if (!r.ok) throw new Error(t("faqPage.statusError", { status: r.status })); return r.json() as Promise<{ faqs: FaqEntry[] }>; })
       .then((j) => { if (!cancelled) setFaqs(j.faqs); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : t("faqPage.loadFailed")); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentServerId]);
 
   // Group by category (uncategorized last), preserving server sort order.
@@ -85,13 +89,13 @@ function FaqIndex() {
   const ordered = [...groups.entries()].sort((a, b) => (a[0] === "" ? 1 : b[0] === "" ? -1 : 0));
 
   return (
-    <Shell title="FAQ">
+    <Shell title={t("faqPage.title")}>
       {error ? (
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
       ) : faqs === null ? (
-        <p className="italic text-keep-muted">Loading…</p>
+        <p className="italic text-keep-muted">{t("common:loading")}</p>
       ) : faqs.length === 0 ? (
-        <p className="italic text-keep-muted">No FAQ entries have been posted yet.</p>
+        <p className="italic text-keep-muted">{t("faqPage.empty")}</p>
       ) : (
         <div className="space-y-5">
           {ordered.map(([category, entries]) => (
@@ -115,6 +119,7 @@ function FaqIndex() {
 }
 
 function FaqEntryView({ slug }: { slug: string }) {
+  const { t } = useTranslation("marketing");
   const [faq, setFaq] = useState<FaqEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
   const currentServerId = useChat((s) => s.currentServerId);
@@ -124,24 +129,25 @@ function FaqEntryView({ slug }: { slug: string }) {
     setFaq(null); setError(null);
     fetch(`/api/faqs/${encodeURIComponent(slug)}${faqServerQuery(currentServerId)}`, { credentials: "include" })
       .then(async (r) => {
-        if (r.status === 404) throw new Error("That FAQ entry doesn't exist (or isn't published).");
-        if (!r.ok) throw new Error(`status ${r.status}`);
+        if (r.status === 404) throw new Error(t("faqPage.notFound"));
+        if (!r.ok) throw new Error(t("faqPage.statusError", { status: r.status }));
         return r.json() as Promise<{ faq: FaqEntry }>;
       })
       .then((j) => { if (!cancelled) setFaq(j.faq); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : t("faqPage.loadFailed")); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, currentServerId]);
 
   return (
-    <Shell title={faq ? faq.question : "FAQ"}>
+    <Shell title={faq ? faq.question : t("faqPage.title")}>
       {error ? (
         <div className="space-y-3">
           <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
-          <a href="/faqs" className="text-sm text-keep-action hover:underline">← All FAQs</a>
+          <a href="/faqs" className="text-sm text-keep-action hover:underline">{t("faqPage.allFaqs")}</a>
         </div>
       ) : faq === null ? (
-        <p className="italic text-keep-muted">Loading…</p>
+        <p className="italic text-keep-muted">{t("common:loading")}</p>
       ) : (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold text-keep-text">{faq.question}</h2>
@@ -149,7 +155,7 @@ function FaqEntryView({ slug }: { slug: string }) {
             className="prose prose-sm max-w-none"
             dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(faq.answerHtml) }}
           />
-          <a href="/faqs" className="inline-block text-sm text-keep-action hover:underline">← All FAQs</a>
+          <a href="/faqs" className="inline-block text-sm text-keep-action hover:underline">{t("faqPage.allFaqs")}</a>
         </div>
       )}
     </Shell>

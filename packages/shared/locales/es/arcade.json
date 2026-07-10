@@ -1,0 +1,282 @@
+{
+  "arcade": {
+    "notEnoughCurrency": "No tienes suficientes monedas",
+    "games": {
+      "eidolon": "Eidolon Tamer",
+      "urugal": "Urugal's Descent",
+      "grimhold": "Grimhold"
+    },
+    "launcher": {
+      "title": "🕹 Spire Arcade",
+      "subtitle": "Un gabinete de juegos en crecimiento para jugar entre escenas. Cada juego se desbloquea una vez y es tuyo para siempre.",
+      "eidolonDescription": "Incuba un familiar gótico, uno de cuatro huevos, o incuba una de tus propias mascotas; luego mantenlo alimentado, entretenido, limpio y sano. Sigue viviendo mientras no estás. Dale comida de tu bolsa, cúralo con una poción.",
+      "urugalDescription": "Un roguelike gótico. Elige una clase y adéntrate en un calabozo generado proceduralmente: pelea, saquea y desciende tan profundo como te atrevas. Cada partida es distinta y cada piso es una nueva apuesta.",
+      "grimholdDescription": "Un gabinete con seis diversiones malditas: Runefall, Loong, Arrowstorm, The Spire, Graveward y Voidwake. Partidas arcade rápidas que sueltan Monedas y XP poco a poco, con tope diario.",
+      "desktopOnly": "Solo en PC",
+      "desktopOnlyNote": "Disponible solo en computadora.",
+      "unavailable": "No disponible para ti por ahora.",
+      "play": "▶ Jugar",
+      "unlock": "Desbloquear",
+      "unlocking": "Desbloqueando…",
+      "unlockEidolonTitle": "Desbloquear el Eidolon Tamer",
+      "unlockUrugalTitle": "Desbloquear Urugal's Descent",
+      "unlockGrimholdTitle": "Desbloquear el gabinete Grimhold",
+      "unlockFailed": "El desbloqueo falló.",
+      "moreGames": "Más juegos",
+      "comingSoon": "Próximamente en el gabinete."
+    },
+    "urugal": {
+      "windowTitle": "🗡 Urugal's Descent",
+      "floor": "piso {{floor}}"
+    },
+    "grimhold": {
+      "windowTitle": "🕹 Grimhold",
+      "award": "+{{currency}}c · +{{xp}} xp"
+    },
+    "eidolon": {
+      "windowTitle": "🥚 Eidolon Tamer",
+      "loading": "Invocando…",
+      "forbidden": "El Arcade está cerrado para ti por ahora.",
+      "locked": "Este juego está bloqueado. Desbloquea el Eidolon Tamer desde el Spire Arcade.",
+      "familiarAria": "familiar",
+      "eggAria": "huevo durmiente",
+      "kindPet": "Mascota",
+      "kindEidolon": "Eidolon",
+      "clock": {
+        "am": "AM",
+        "pm": "PM"
+      },
+      "species": {
+        "dragon": { "name": "Dragón", "tagline": "Resistente · Voraz" },
+        "gargoyle": { "name": "Gárgola", "tagline": "Estoica · Fácil de cuidar" },
+        "wraith": { "name": "Espectro", "tagline": "Frugal · Inquieto" },
+        "slime": { "name": "Slime", "tagline": "Mugroso · Relajado" }
+      },
+      "traits": {
+        "hardy": { "label": "Resistente", "flavor": "Se sacude las enfermedades y se aferra a la vida." },
+        "gluttonous": { "label": "Glotón", "flavor": "Siempre tiene hambre, pero la comida lo deleita." },
+        "stoic": { "label": "Estoico", "flavor": "De ánimo parejo; tarda en entristecerse y tarda en alegrarse." },
+        "vivacious": { "label": "Vivaz", "flavor": "Sentimientos intensos: decae rápido, pero se anima rápido." },
+        "pristine": { "label": "Impecable", "flavor": "Meticulosamente, imposiblemente limpio." },
+        "feral": { "label": "Salvaje", "flavor": "Indómito y brioso; exige muchos cuidados." }
+      },
+      "variants": {
+        "prismatic": "Prismático"
+      },
+      "growth": {
+        "hatchling": "Cría",
+        "adult": "Adulto",
+        "elder": "Anciano"
+      },
+      "select": {
+        "title": "Elige un huevo para invocar",
+        "orPet": "- o incuba con una mascota -",
+        "needPet": "- consigue una mascota para incubarla como familiar -",
+        "yourPet": "tu mascota"
+      },
+      "readout": {
+        "dragWisp": "<0>Arrastra el fuego fatuo</0> cerca de tu familiar y suéltalo.",
+        "scrub": "<0>Frota</0> para quitar la mugre."
+      },
+      "nameplate": {
+        "unbound": "sin vínculo",
+        "dormant": "en letargo",
+        "afflicted": "doliente"
+      },
+      "age": {
+        "daysHours": "{{days}}d {{hours}}h",
+        "days": "{{days}}d",
+        "hours": "{{hours}}h"
+      },
+      "level": "Nv {{level}}",
+      "levelRow": {
+        "totalXpTitle": "{{xp}} XP en total",
+        "streakTitle": "{{status}} · XP pasiva ×{{multiplier}}",
+        "tendedToday": "Atendido hoy",
+        "notTendedToday": "Aún sin atender hoy",
+        "xpTrackTitle": "{{current}} / {{total}} para el siguiente nivel",
+        "remindersOn": "Recordatorios diarios activados",
+        "remindersOff": "Recordatorios diarios desactivados",
+        "remindersAria": "Activar o desactivar recordatorios diarios"
+      },
+      "hall": {
+        "link": "📖 El Salón, familiares del pasado",
+        "title": "El Salón, familiares del pasado",
+        "openAria": "Abrir el Salón",
+        "header": "El Salón · familiares del pasado",
+        "opening": "Abriendo el Salón…",
+        "empty": "Ningún familiar ha partido todavía. Los que críes serán recordados aquí.",
+        "sold": "vendido",
+        "released": "liberado"
+      },
+      "sell": {
+        "title": "Se vende por las monedas que ha ganado (la ventaja heredada no cuenta) y te deja libre para domar de nuevo",
+        "confirm": "Confirmar venta",
+        "sell": "Vender"
+      },
+      "gauges": {
+        "satiety": "Saciedad",
+        "spirit": "Espíritu",
+        "vigor": "Vigor",
+        "hygiene": "Higiene",
+        "health": "Salud"
+      },
+      "dead": {
+        "notice": "Ha entrado en letargo. Un objeto mágico lo despertará.",
+        "release": "Liberar"
+      },
+      "actions": {
+        "feed": "Alimentar",
+        "play": "Jugar",
+        "toys": "Juguetes",
+        "cleanse": "Limpiar",
+        "remedy": "Remedio",
+        "wake": "Despertar",
+        "rest": "Descansar",
+        "use": "Usar",
+        "revive": "Revivir"
+      },
+      "float": {
+        "streak": "🔥 ¡Racha de {{days}} días!",
+        "streakReward": "🔥 ¡Racha de {{days}} días · +{{reward}}!",
+        "levelUp": "✦ Nivel {{level}} ✦",
+        "xpGain": "+{{xp}} XP",
+        "ritualFaltered": "El ritual falló.",
+        "variant": "✦ ¡{{label}}! ✦",
+        "rare": "Raro",
+        "bloodline": "✦ el linaje perdura · Nv {{level}} ✦",
+        "hatched": "✦ eclosionó ✦",
+        "releaseFailed": "No se pudo liberar.",
+        "sold": "✦ vendido · +{{value}}",
+        "saleFailed": "La venta falló.",
+        "remindersFailed": "No se pudieron actualizar los recordatorios.",
+        "cleansed": "✦ limpio",
+        "awoken": "✦ despierto",
+        "slumber": "✦ descanso",
+        "nom": "✦ ñam",
+        "remedy": "✦ remedio",
+        "vitality": "+ vitalidad"
+      },
+      "drawer": {
+        "feedTitle": "Alimenta a tu familiar",
+        "wakeTitle": "Despierta a tu familiar",
+        "toyTitle": "Juega con un juguete",
+        "remedyTitle": "Atiende su dolencia",
+        "walletTitle": "Tus monedas",
+        "reviveNote": "Tu familiar yace en letargo. Un objeto mágico lo despertará a una frágil segunda vida.",
+        "basicHeal": "Curación básica · −",
+        "basicHealNote": "un poco de vitalidad, sin cura",
+        "basicHealTitle": "Gasta monedas en una curación básica",
+        "emptyFood": "Aún no hay comida en la tienda.",
+        "emptyRevive": "Necesitas un objeto mágico para despertarlo.",
+        "emptyToy": "Aún no hay juguetes en la tienda.",
+        "emptyRemedy": "Aún no hay remedios en la tienda.",
+        "owned_one": "{{count}} adquirido",
+        "owned_other": "{{count}} adquiridos",
+        "owned_many": "{{count}} adquiridos",
+        "noneOwned": "ninguno adquirido",
+        "buy": "Comprar",
+        "buyOneFor": "Compra uno por {{price}}",
+        "purchaseFailed": "La compra falló."
+      }
+    }
+  },
+  "emoticons": {
+    "pickerButton": {
+      "insert": "Insertar emoticón"
+    },
+    "picker": {
+      "confirmSpend": "¿Usar este emoticón de la comunidad por {{cost}} Monedas? {{cost}} Monedas van al creador de la hoja. No se te volverá a preguntar en esta sesión.",
+      "chargeFailed": "no se pudo cobrar",
+      "noSheets": "No hay hojas de emoticones instaladas.",
+      "unicodeTabTitle": "Emoji Unicode (fuente del sistema)",
+      "unicodeTabLabel": "Emoji Unicode",
+      "communityTabTitle": "Emoticones de la comunidad (1 Moneda por uso, se paga al creador)",
+      "communityTabLabel": "Comunidad",
+      "recent": "Recientes",
+      "cellCostVisitor": "{{label}} ({{cost}} Monedas por uso)",
+      "cellCostOwner": "{{label}} ({{cost}} Monedas por uso para visitantes; gratis para ti)",
+      "noLabeledCellsYet": "Esta hoja aún no tiene celdas etiquetadas.",
+      "communityEmpty": "Aún no hay hojas de la comunidad. Las hojas enviadas por usuarios y aprobadas aparecen aquí. Las hojas de pago cuestan {{cost}} Monedas por uso (van al creador); las gratuitas están marcadas como Gratis.",
+      "communityHeader": "Hojas de la comunidad",
+      "sortNewTitle": "Más nuevas primero",
+      "sortOldTitle": "Más antiguas primero",
+      "sortTopTitle": "Más usadas primero",
+      "sortNew": "Nuevas",
+      "sortOld": "Antiguas",
+      "sortTop": "Top",
+      "byAuthor": "de @{{name}}",
+      "costPerUse": "{{cost}} Monedas por uso",
+      "costPerUseOwner": "{{cost}} Monedas por uso (gratis para ti)",
+      "free": "Gratis",
+      "freeYours": "Gratis (tuya)",
+      "uses_one": "{{count}} uso",
+      "uses_other": "{{count}} usos",
+      "uses_many": "{{count}} usos",
+      "back": "← Atrás",
+      "backTitle": "Volver a las hojas de la comunidad",
+      "noLabeledCells": "Esta hoja no tiene celdas etiquetadas.",
+      "searchPlaceholder": "Buscar emoji…",
+      "searchAria": "Buscar emoji Unicode",
+      "noMatch": "Ningún emoji coincide con “{{query}}”. Prueba un sinónimo en inglés como “happy” o “love”."
+    },
+    "typeahead": {
+      "suggestionsAria": "Sugerencias de emoji",
+      "kindEmoji": "emoji",
+      "kindSheet": "hoja",
+      "footer": "↑↓ navegar · enter / tab para insertar · esc para cerrar"
+    },
+    "submission": {
+      "title": "Custom Reaction Sheet",
+      "build": {
+        "header": "Arma tu hoja",
+        "spec": "Las hojas son <1>una cuadrícula de 4x4 con celdas cuadradas</1>, enviadas a <3>600x600px</3> (cada celda queda de 150x150px) en <5>PNG, WebP o APNG con fondo transparente</5> para que las reacciones se integren bien sobre cualquier tema de chat. También se aceptan JPEG / GIF, pero se pierde la transparencia.",
+        "animated": "<0>WebP y APNG pueden ser animados</0>. Ciclos de reposo, parpadeos, destellos, etc. se conservan en el selector. Puedes dibujar en un lienzo más grande para mayor claridad, pero redúcelo a 600x600px antes de enviarlo para que el archivo no pese demasiado.",
+        "demoSheet": "Hoja de ejemplo (PNG)",
+        "alignmentGrid": "Cuadrícula de alineación (PNG)",
+        "gridNote": "Los bordes de la cuadrícula de alineación son solo guías visuales. Quítalos de tu hoja final para que los demás no vean líneas alrededor de cada reacción."
+      },
+      "form": {
+        "header": "Envía una hoja nueva",
+        "paidFromCharacter": "Se paga desde <1>este personaje</1>: <3></3> por envío",
+        "paidFromMaster": "Se paga desde <1>tu fondo principal</1>: <3></3> por envío",
+        "wallet": "Billetera: <1></1>",
+        "slugLabel": "Slug (minúsculas, a-z 0-9 -)",
+        "slugPlaceholder": "mis-emotes",
+        "slugError": "El slug debe tener de 1 a 40 caracteres, minúsculas/dígitos/guiones, sin guion al inicio ni al final.",
+        "nameLabel": "Nombre de la hoja (visible en el selector)",
+        "imageLabel": "Imagen de la hoja. Cuadrícula de 4x4 a <1>600x600px</1> (celdas de 150px). <3>Se recomienda PNG, WebP o APNG con transparencia</3> (WebP / APNG pueden ser animados); se aceptan JPEG / GIF pero pierden la transparencia. ≤6 MB.",
+        "previewAlt": "Vista previa",
+        "cellLabels": "Etiquetas de celdas ({{filled}}/{{total}})",
+        "cellLabelsNote": "Prellenadas según el orden de ánimos de la hoja de ejemplo. Edita cualquier celda cuya reacción sea distinta, o déjala en blanco para ocultar ese espacio del selector. El orden sigue la cuadrícula de 4x4 de izquierda a derecha y de arriba abajo.",
+        "reviewNote": "Pasa por revisión de un moderador. Los envíos rechazados se reembolsan.",
+        "chooseImage": "Elige una imagen",
+        "fixSlug": "Corrige el slug",
+        "addName": "Agrega un nombre de hoja",
+        "labelOneCell": "Etiqueta al menos una celda",
+        "notEnoughCurrency": "No tienes suficientes Monedas",
+        "submit": "Enviar a revisión",
+        "submitting": "Enviando…",
+        "unsupportedType": "Tipo de imagen no compatible, usa PNG, APNG, JPEG, WebP o GIF.",
+        "tooLarge": "El archivo pesa más de 6 MB, comprímelo o redúcelo.",
+        "readFailed": "No se pudo leer el archivo.",
+        "submitFailed": "El envío falló"
+      },
+      "history": {
+        "header": "Mis envíos",
+        "loadFailed": "No se pudo cargar el historial",
+        "empty": "Aún no hay envíos.",
+        "statusPending": "Esperando revisión del moderador",
+        "statusApproved": "Aprobado, ya en el selector",
+        "statusRejectedRefunded": "Rechazado, se reembolsaron {{amount}} Monedas",
+        "statusRejected": "Rechazado",
+        "reason": "Motivo: {{reason}}",
+        "useCount_one": "{{count}} uso",
+        "useCount_other": "{{count}} usos",
+        "useCount_many": "{{count}} usos",
+        "chargeToggle": "Cobrar {{cost}} Monedas por uso",
+        "saveFailed": "no se pudo guardar"
+      }
+    }
+  }
+}

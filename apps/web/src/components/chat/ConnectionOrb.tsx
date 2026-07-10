@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getSocket } from "../../lib/socket.js";
 
 /**
@@ -20,6 +21,7 @@ type Status = "online" | "reconnecting" | "offline";
 const OFFLINE_AFTER_MS = 15_000;
 
 export function ConnectionOrb() {
+  const { t } = useTranslation("chat");
   const socket = getSocket();
   const [status, setStatus] = useState<Status>(socket.connected ? "online" : "reconnecting");
   // Bumped on each heartbeat to retrigger the one-shot green pulse animation.
@@ -75,9 +77,9 @@ export function ConnectionOrb() {
   }
 
   const label =
-    status === "online" ? "Connected, click to resync"
-    : status === "reconnecting" ? "Reconnecting… click to retry now"
-    : "Offline, click to reconnect";
+    status === "online" ? t("connection.online")
+    : status === "reconnecting" ? t("connection.reconnecting")
+    : t("connection.offline");
 
   return (
     <button

@@ -6,6 +6,7 @@ import type { Db } from "./db/index.js";
 import { serverSettings, siteSettings } from "./db/schema.js";
 import type { EarningConfig } from "./earning/config.js";
 import { parseEarningConfig, normalizeEarningConfig } from "./earning/config.js";
+import { rebuildMinorFilter } from "./realtime/minorLanguageFilter.js";
 
 /**
  * Stable, short hash of the welcome HTML used to decide whether a user has
@@ -225,6 +226,26 @@ export interface SiteSettings {
    * default; `bypass_automod` exempts trusted/mods/admins.
    */
   automodEnabled: boolean;
+  /**
+   * Registration minimum-age switch (migration 0330, age-restriction plan).
+   * OFF (default) = new accounts must be 18 or older; ON = 13 or older. It
+   * controls ONLY the signup floor (`minimumSignupAge` in auth/ageGate.ts);
+   * every other age gate is unconditional code. Existing accounts are never
+   * affected by flipping it.
+   */
+  allowMinorSignups: boolean;
+  /**
+   * Minor language filter master switch (migration 0339, age plan Phase 7).
+   * When true, `maskForMinors` (realtime/minorLanguageFilter.ts) masks
+   * strong language in payloads served to under-18 viewers. Stored rows are
+   * never modified and adults always see the original, so this defaults ON:
+   * protective-by-default the moment minors arrive, invisible until then.
+   */
+  minorFilterEnabled: boolean;
+  /** Admin-added words the minor filter also masks, on top of its built-in English list. */
+  minorFilterTerms: string[];
+  /** Words the minor filter must never mask (false-positive fixes). */
+  minorFilterAllow: string[];
   updatedAt: number;
 }
 
@@ -255,11 +276,17 @@ export async function ensureSiteSettings(db: Db): Promise<SiteSettings> {
   const existing = (await db.select().from(siteSettings).where(eq(siteSettings.id, "singleton")).limit(1))[0];
   if (existing) {
     cached = rowToSettings(existing);
+    // Cache reseed is the one chokepoint BOTH boot and every updateSettings
+    // flow through (updateSettings nulls the cache then re-reads via here),
+    // so hooking the minor-filter rebuild in keeps the matcher in lockstep
+    // with the stored config without a second wiring point.
+    rebuildMinorFilter(cached);
     return cached;
   }
   await db.insert(siteSettings).values({ id: "singleton" }).onConflictDoNothing();
   const fresh = (await db.select().from(siteSettings).where(eq(siteSettings.id, "singleton")).limit(1))[0]!;
   cached = rowToSettings(fresh);
+  rebuildMinorFilter(cached);
   return cached;
 }
 
@@ -401,6 +428,14 @@ export interface SettingsPatch {
   antiSpamEnabled?: boolean;
   /** Auto-moderation master switch (migration 0319). */
   automodEnabled?: boolean;
+  /** Registration minimum-age switch (migration 0330): true = 13+, false = 18+. */
+  allowMinorSignups?: boolean;
+  /** Minor language filter master switch (migration 0339). */
+  minorFilterEnabled?: boolean;
+  /** Full replacement list of admin-added filter words; stored as JSON. Entries are trimmed, empties dropped. */
+  minorFilterTerms?: string[];
+  /** Full replacement never-censor list; same storage + cleanup as the added words. */
+  minorFilterAllow?: string[];
   /** MaxMind account ID for the geo accuracy upgrade. Empty string or null clears it (disables the upgrade). */
   maxmindAccountId?: string | null;
   /** MaxMind license key. Empty string or null clears it. SECRET — never echoed back to clients. */
@@ -487,6 +522,17 @@ export async function updateSettings(
   if (patch.serversEnabled !== undefined) update.serversEnabled = patch.serversEnabled;
   if (patch.antiSpamEnabled !== undefined) update.antiSpamEnabled = patch.antiSpamEnabled;
   if (patch.automodEnabled !== undefined) update.automodEnabled = patch.automodEnabled;
+  if (patch.allowMinorSignups !== undefined) update.allowMinorSignups = patch.allowMinorSignups;
+  if (patch.minorFilterEnabled !== undefined) update.minorFilterEnabled = patch.minorFilterEnabled;
+  // Overlay word lists: store what the admin typed (trimmed, empties
+  // dropped) so the settings textarea round-trips faithfully; the matcher
+  // (realtime/minorLanguageFilter.ts) lowercases at compile time.
+  if (patch.minorFilterTerms !== undefined) {
+    update.minorFilterTermsJson = JSON.stringify(cleanWordList(patch.minorFilterTerms));
+  }
+  if (patch.minorFilterAllow !== undefined) {
+    update.minorFilterAllowJson = JSON.stringify(cleanWordList(patch.minorFilterAllow));
+  }
   // Empty/whitespace clears the credential (disables the upgrade); otherwise store trimmed.
   if (patch.maxmindAccountId !== undefined) {
     const v = (patch.maxmindAccountId ?? "").trim();
@@ -586,8 +632,35 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     serversEnabled: !!row.serversEnabled,
     antiSpamEnabled: !!row.antiSpamEnabled,
     automodEnabled: !!row.automodEnabled,
+    allowMinorSignups: !!row.allowMinorSignups,
+    minorFilterEnabled: !!row.minorFilterEnabled,
+    minorFilterTerms: parseWordList(row.minorFilterTermsJson),
+    minorFilterAllow: parseWordList(row.minorFilterAllowJson),
     updatedAt: +row.updatedAt,
   };
+}
+
+/** Trim entries, drop empties, dedupe — shared cleanup for the minor-filter
+ *  overlay lists on their way into storage. */
+function cleanWordList(entries: string[]): string[] {
+  return [...new Set(entries.map((e) => e.trim()).filter((e) => e.length > 0))];
+}
+
+/**
+ * Tolerant parse for the minor-filter overlay columns (JSON string
+ * arrays, default '[]'). Missing / malformed / non-array → empty list so
+ * the filter degrades to its built-in English list rather than throwing on
+ * a hand-edited row. Non-string members are dropped, not coerced.
+ */
+function parseWordList(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((v): v is string => typeof v === "string" && v.trim().length > 0);
+  } catch {
+    return [];
+  }
 }
 
 /**

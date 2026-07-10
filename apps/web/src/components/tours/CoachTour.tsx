@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 
 /**
@@ -56,6 +57,7 @@ export function CoachTour({
   onClose: () => void;
   icon?: ReactNode;
 }) {
+  const { t } = useTranslation("tours");
   const [step, setStep] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [, forceTick] = useState(0);
@@ -109,8 +111,21 @@ export function CoachTour({
       setRect(null);
       return false;
     };
+    let slow = 0;
     const poll = () => {
-      if (measure() || tries > 40) return; // ~40 frames (~0.7s) then give up
+      if (measure()) return;
+      if (tries > 40) {
+        // ~40 frames (~0.7s) of fast polling, then drop to a slow tick
+        // instead of giving up: several steps point at LATE-mounting
+        // targets the copy tells the user to open themselves (the forum
+        // topic composer, a settings panel). The spotlight should attach
+        // the moment the element appears, not only on the next
+        // scroll/resize.
+        slow = window.setInterval(() => {
+          if (measure() && slow) { window.clearInterval(slow); slow = 0; }
+        }, 750);
+        return;
+      }
       tries += 1;
       raf = requestAnimationFrame(poll);
     };
@@ -120,6 +135,7 @@ export function CoachTour({
     window.addEventListener("scroll", onMove, true);
     return () => {
       cancelAnimationFrame(raf);
+      if (slow) window.clearInterval(slow);
       window.removeEventListener("resize", onMove);
       window.removeEventListener("scroll", onMove, true);
     };
@@ -249,8 +265,8 @@ export function CoachTour({
           <button
             type="button"
             onClick={onClose}
-            title="Skip the tour"
-            aria-label="Skip the tour"
+            title={t("coach.skipTour")}
+            aria-label={t("coach.skipTour")}
             className="rounded p-0.5 text-keep-muted hover:bg-keep-bg hover:text-keep-text"
           >
             <X className="h-4 w-4" aria-hidden />
@@ -273,7 +289,7 @@ export function CoachTour({
                 onClick={back}
                 className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs text-keep-muted hover:text-keep-text"
               >
-                Back
+                {t("coach.back")}
               </button>
             ) : (
               <button
@@ -281,7 +297,7 @@ export function CoachTour({
                 onClick={onClose}
                 className="rounded px-3 py-1 text-xs text-keep-muted hover:text-keep-text"
               >
-                Skip
+                {t("coach.skip")}
               </button>
             )}
             <button
@@ -289,7 +305,7 @@ export function CoachTour({
               onClick={next}
               className="rounded border border-keep-accent bg-keep-accent px-4 py-1 text-xs font-semibold text-keep-bg hover:opacity-90"
             >
-              {isLast ? "Got it" : "Next"}
+              {isLast ? t("coach.gotIt") : t("coach.next")}
             </button>
           </div>
         </div>

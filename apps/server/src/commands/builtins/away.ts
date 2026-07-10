@@ -1,5 +1,6 @@
 import { addMessage, broadcastPresence } from "../../realtime/broadcast.js";
 import { clearAway, getAway, setAway } from "../../realtime/awayState.js";
+import { tFor } from "../../i18n.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -77,7 +78,7 @@ export const backCommand: CommandHandler = {
     if (!wasAway) {
       ctx.socket.emit("error:notice", {
         code: "not-away",
-        message: "You're not marked as away.",
+        message: tFor(ctx.user.locale, "commands:away.notAway"),
       });
       return;
     }

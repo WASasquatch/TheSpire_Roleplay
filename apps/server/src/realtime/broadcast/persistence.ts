@@ -12,6 +12,7 @@ import type {
 import {
   extractMentions,
   extractMentionTokens,
+  isModeratorRole,
   mentionsField,
   parseNpcStats,
   mentionTokenRegex,
@@ -25,10 +26,14 @@ import {
   ignores,
   messages,
   rooms,
+  servers,
   userActiveCosmetics,
   userEarning,
   users,
 } from "../../db/schema.js";
+import { isAdultUser } from "../../auth/ageGate.js";
+import { isIsolatedBetween, isolationActiveFor, isolationVisibleSql } from "../../auth/ageIsolation.js";
+import { maskForMinors, maskMessageForMinors } from "../minorLanguageFilter.js";
 import { pushToUser } from "../../push.js";
 import { notify as notifyCenter } from "../../notifications/engine.js";
 import type { Db } from "../../db/index.js";
@@ -47,6 +52,7 @@ import { emptyPollState, loadPollState } from "../../polls.js";
 import { readPoolRank } from "../../earning/resolver.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
 import { routeMessage } from "../../earning/routing.js";
+import { tFor } from "../../i18n.js";
 import { userIsOnline } from "./presence.js";
 import { isHiddenIncognitoIdentity } from "./incognito.js";
 
@@ -175,6 +181,14 @@ export async function addMessage(
      * creation). Ignored on every other kind.
      */
     pollDataJson?: string | null;
+    /**
+     * Compose-time NSFW topic tag (age-restriction plan, Phase 3). Set by
+     * the forum:post handler on NEW topics whose author checked "Mark this
+     * topic NSFW" (adults only — the handler rejects it from minors). ORed
+     * into the write-time stamp below, so the tag can RAISE a row's rating
+     * but never lower the room's own effective state.
+     */
+    isNsfw?: boolean;
   },
 ): Promise<string | null> {
   // Inline-command expansion. The body may carry user-authored
@@ -199,7 +213,7 @@ export async function addMessage(
     if (expanded.length > maxMessageLength) {
       ctx.socket.emit("error:notice", {
         code: "TOO_LONG",
-        message: `Messages capped at ${maxMessageLength} chars after inline-command expansion.`,
+        message: tFor(ctx.user.locale, "errors:server.realtime.messagesCappedExpanded", { max: maxMessageLength }),
       });
       return null;
     }
@@ -387,6 +401,32 @@ export async function addMessage(
   // (flag-off: the room homes to the default server, so this is the
   // single existing pool — byte-identical to today).
   const messageServerId = await resolveRoomServerId(ctx.db, ctx.roomId);
+  // EFFECTIVE 18+ rating at send time (age-restriction plan, Phase 2):
+  // `server.is_nsfw OR room.is_nsfw`, snapshot-at-send like rankKey/color,
+  // so history written while a space was 18+ stays hidden from minors even
+  // after a flip back. One indexed join read; a NULL serverId leaves the
+  // join empty (the default server is SFW by invariant).
+  const ratingRow = (await ctx.db
+    .select({ roomNsfw: rooms.isNsfw, serverNsfw: servers.isNsfw })
+    .from(rooms)
+    .leftJoin(servers, eq(servers.id, rooms.serverId))
+    .where(eq(rooms.id, ctx.roomId))
+    .limit(1))[0];
+  let messageIsNsfw = (!!ratingRow && (ratingRow.roomNsfw || !!ratingRow.serverNsfw)) || !!payload.isNsfw;
+  // Reply inheritance (age plan, Phase 3): a reply is stamped at least as
+  // high as its PARENT — max(room effective flag, topic tag) — so replies
+  // under an NSFW-tagged forum topic filter with their topic everywhere the
+  // message clause runs (search, backlog, notifications). This also covers
+  // chat replies to a flipped-back room's 18+-era rows: the child snapshots
+  // the parent's body (`replyToBodySnippet`), so the stamp must ride along.
+  if (!messageIsNsfw && payload.replyToId) {
+    const parentStamp = (await ctx.db
+      .select({ isNsfw: messages.isNsfw })
+      .from(messages)
+      .where(eq(messages.id, payload.replyToId))
+      .limit(1))[0];
+    messageIsNsfw = !!parentStamp?.isNsfw;
+  }
   try {
     const u = (await ctx.db
       .select({ showRankInChat: users.showRankInChat })
@@ -486,6 +526,8 @@ export async function addMessage(
     // sceneImageUrl are gated to their kinds.
     pollDataJson: payload.kind === "poll" ? (payload.pollDataJson ?? null) : null,
     mentionsJson: mentionsSnapshot ? JSON.stringify(mentionsSnapshot) : null,
+    // Write-time 18+ stamp (see ratingRow above). Never recomputed later.
+    isNsfw: messageIsNsfw,
     rankKey: rankKeySnapshot,
     tier: tierSnapshot,
     senderInlineAvatarEnabled: inlineAvatarEnabledSnapshot,
@@ -555,7 +597,7 @@ export async function addMessage(
       : {}),
     ...(mentionsSnapshot ? { mentions: mentionsSnapshot } : {}),
   };
-  await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user.id, out);
+  await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user, out, messageIsNsfw);
 
   // Belt-and-suspenders: emit directly to the sender's socket too. The
   // room broadcast above only reaches sockets currently subscribed to
@@ -566,7 +608,15 @@ export async function addMessage(
   // history. The client-side `appendMessage` dedupes by id, so this
   // duplicate-on-the-wire is invisible in the typical happy path
   // (socket is in the room → first delivery wins, second is dropped).
-  ctx.socket.emit("message:new", out);
+  //
+  // Minor language filter (§J): a minor SENDER's own echo is masked too —
+  // it's a read like any other, and an unmasked echo would race the masked
+  // fan-out copy for the same message id. Adult senders keep the exact
+  // `out` object (byte-identical).
+  ctx.socket.emit(
+    "message:new",
+    ctx.user.isAdult ? out : (maskMessageForMinors(out) ?? out),
+  );
 
   // Per-channel unread pulse (migration 0318). Fire-and-forget: bump the
   // `room:unread` badge for room members who are NOT currently parked in this
@@ -576,13 +626,13 @@ export async function addMessage(
   // eligible member's live sockets); it deliberately does NOT recompute the
   // room tree and NEVER prompts a /rooms refetch on the client. Whisper /
   // targeted-system rows are excluded inside the helper.
-  void fanRoomUnreadBump(ctx.io, ctx.db, ctx.roomId, out, ctx.user.id, payload.kind);
+  void fanRoomUnreadBump(ctx.io, ctx.db, ctx.roomId, out, ctx.user.id, payload.kind, messageIsNsfw);
 
   // Fire-and-forget push triggers for offline recipients. Privacy contract:
   // payloads carry only the *kind* of event ("whisper" / "mention") and the
   // author's display name - never the body. The user has to come back to
   // the chat to read what was said.
-  void pushTriggers(ctx.io, ctx.db, out, ctx.user, payload.kind);
+  void pushTriggers(ctx.io, ctx.db, out, ctx.user, payload.kind, messageIsNsfw);
 
   // Fire-and-forget link unfurl (OpenGraph preview). Off the hot path:
   // the card arrives via a message:update once the target site answers.
@@ -707,6 +757,13 @@ export async function addMessage(
  * route through `addMessage` (which would broadcast to the whole room),
  * so without an explicit call here offline-recipient push notifications
  * never fire.
+ *
+ * `roomIsNsfw` (age-restriction plan, Phase 2): when the message was sent
+ * in an effectively-18+ room, mention notifications (the Notification
+ * Center row persists a 140-char body snippet — a direct leak vector) and
+ * their web pushes are SKIPPED for minor recipients. The whisper path
+ * defaults it false: whispers in 18+ rooms are between adults (minors
+ * can't be present), and a whisper push carries no body anyway.
  */
 export async function pushTriggers(
   io: Io,
@@ -714,6 +771,7 @@ export async function pushTriggers(
   msg: ChatMessage,
   sender: SessionUser,
   kind: MessageKind,
+  roomIsNsfw = false,
 ): Promise<void> {
   try {
     if (kind === "whisper" && msg.toUserId) {
@@ -748,10 +806,38 @@ export async function pushTriggers(
     // notified. Shared by the exact token path and the legacy name path so a
     // message can't double-ping someone it mentions two ways.
     const seen = new Set<string>();
-    const notify = async (targetUserId: string | null | undefined, disabled: boolean): Promise<void> => {
+    // Minor language filter (§J): the inbox row persists a 140-char body
+    // snippet, so a minor RECIPIENT's row is written masked (rows are
+    // per-recipient — write-time masking is the durable fix). Masked once,
+    // lazily, and shared across every minor recipient of this message; the
+    // FULL body is masked before slicing so a term split at the 140
+    // boundary can't leak its unmasked head. Adults' rows are byte-
+    // identical to today.
+    let minorMaskedBody: string | null | undefined;
+    const notify = async (
+      targetUserId: string | null | undefined,
+      disabled: boolean,
+      target: { birthdate: string | null; role: string; isolateFromAdults: boolean } | null,
+    ): Promise<void> => {
       if (!targetUserId || disabled || targetUserId === sender.id) return;
+      const birthdate = target?.birthdate ?? null;
+      // Minor recipient + 18+ room: no inbox row (its snippet would leak the
+      // body), no web push. Adults keep both regardless of the hide pref
+      // (HARD tier). `disabled` already returned above, so `birthdate` here
+      // is always the real column value of an existing row.
+      if (roomIsNsfw && !isAdultUser({ birthdate })) return;
+      // Isolated pair (age plan, Phase 5): the engine below would drop the
+      // inbox row anyway, but the offline web push carries the sender's
+      // display name in its title, so kill the whole delivery here. The
+      // target's age columns rode the lookups above; no extra query.
+      if (target && isIsolatedBetween(sender, target)) return;
       if (seen.has(targetUserId)) return;
       seen.add(targetUserId);
+      const recipientIsMinor = !isAdultUser({ birthdate });
+      if (recipientIsMinor && minorMaskedBody === undefined) {
+        minorMaskedBody = maskForMinors(msg.body);
+      }
+      const snippetSource = recipientIsMinor ? (minorMaskedBody ?? msg.body) : msg.body;
       // Persist a Notification Center row + live bell pulse for everyone
       // mentioned (online or not). The engine's own push is suppressed
       // (push:false) because the offline web-push just below is this surface's
@@ -764,7 +850,7 @@ export async function pushTriggers(
         serverId: roomServerId,
         actor: { id: sender.id, name: sender.displayName },
         title: `${sender.displayName} mentioned you`,
-        snippet: msg.body.slice(0, 140),
+        snippet: snippetSource.slice(0, 140),
         target: { kind: "room", id: msg.roomId },
         // Carry the exact message so the click jumps to and flashes it (the
         // room switch is handled by jumpToMessage's room:join on the client).
@@ -788,8 +874,17 @@ export async function pushTriggers(
     // happens to share the name.
     const tokenNames = new Set(tokenRefs.map((r) => r.name));
     for (const ref of tokenRefs) {
-      const u = (await db.select({ disabledAt: users.disabledAt }).from(users).where(eq(users.id, ref.userId)).limit(1))[0];
-      await notify(ref.userId, !u || !!u.disabledAt);
+      const u = (await db
+        .select({
+          disabledAt: users.disabledAt,
+          birthdate: users.birthdate,
+          role: users.role,
+          isolateFromAdults: users.isolateFromAdults,
+        })
+        .from(users)
+        .where(eq(users.id, ref.userId))
+        .limit(1))[0];
+      await notify(ref.userId, !u || !!u.disabledAt, u ?? null);
     }
 
     // 2. Legacy / hand-typed `@name` mentions, resolved by name. Mentions can
@@ -816,7 +911,7 @@ export async function pushTriggers(
           if (owner && owner.activeCharacterId === c.id) target = owner;
         }
       }
-      await notify(target?.id, !!target?.disabledAt);
+      await notify(target?.id, !!target?.disabledAt, target ?? null);
     }
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -836,29 +931,79 @@ export async function pushTriggers(
  *
  * NOTE: System messages still go through `addSystemMessage` which uses a
  * direct `io.to(...).emit` - those should never be filterable by /ignore.
+ *
+ * `roomIsNsfw` (age-restriction plan, Phase 2): in an effectively-18+ room,
+ * sockets whose session snapshot isn't adult are also withheld. Minors
+ * can't normally BE in such a room, so this only bites in the flip race —
+ * the window between `/nsfw on` (or a server flip) and the eviction loop
+ * booting them out. Adult-ness rides `socket.data.user` (set at handshake),
+ * so no extra queries; a socket with no snapshot fails closed.
+ *
+ * Isolation (age plan, Phase 5): a recipient isolated with the SENDER —
+ * either side is an actively-isolated minor, the other an adult non-staff —
+ * is withheld exactly like a blocked pair. `sender` is the fresh session
+ * snapshot (chat:input reloads it per send) and the recipient side rides
+ * `socket.data.user`, so this is a pure in-memory check per socket. The
+ * isolated-pair scan only runs when the sender could be party to one.
+ *
+ * Minor language filter (Phase 7, plan_ext.md §J): when any connected
+ * recipient's session snapshot derives under-18, the masked variant of the
+ * message is computed ONCE (a shallow clone with body/title/quote-snippet
+ * masked — see maskMessageForMinors) and every minor recipient receives
+ * that shared clone; adults always receive the shared ORIGINAL object,
+ * byte-identical to today. The minor-presence scan is an in-memory pass
+ * over the room's sockets (fetched once, reused by the slow path below),
+ * so a room with no minors does zero masking work. A snapshot-less socket
+ * fails closed (treated as a minor → masked), matching the NSFW gate's
+ * posture one paragraph up.
  */
-async function emitFiltered(
+export async function emitFiltered(
   io: Io,
   db: Db,
   roomId: string,
-  senderUserId: string,
+  sender: SessionUser,
   msg: ChatMessage,
+  roomIsNsfw = false,
 ): Promise<void> {
+  const senderUserId = sender.id;
   const ignorerRows = await db
     .select({ userId: ignores.userId })
     .from(ignores)
     .where(eq(ignores.ignoredUserId, senderUserId));
   const blockedWithSender = await blockedUserIdsFor(db, senderUserId);
-  if (ignorerRows.length === 0 && blockedWithSender.size === 0) {
+  // The sender can be in an isolated pair only when they're an actively-
+  // isolated minor themselves OR an adult (whom some isolated minor may be
+  // hiding from). Staff senders never are, and neither are plain minors,
+  // so those keep the room-wide fast path. Adult sends take the per-socket
+  // loop — the file's own posture ("fine at our scale; cache if hot").
+  const senderMayIsolate = !isModeratorRole(sender.role)
+    && (isAdultUser(sender) || isolationActiveFor(sender));
+  // One socket enumeration serves both the minor-presence guard here and
+  // the per-socket delivery loop below (in-memory on the default adapter;
+  // cheaper than either DB read above).
+  const sockets = await io.in(`room:${roomId}`).fetchSockets();
+  const anyMinorRecipient = sockets.some(
+    (s) => !(s.data as { user?: SessionUser }).user?.isAdult,
+  );
+  // Computed at most once per message; null = clean (or filter disabled),
+  // in which case minors receive the original like everyone else.
+  const minorVariant = anyMinorRecipient ? maskMessageForMinors(msg) : null;
+  if (!roomIsNsfw && !senderMayIsolate && ignorerRows.length === 0
+    && blockedWithSender.size === 0 && !minorVariant) {
     io.to(`room:${roomId}`).emit("message:new", msg);
     return;
   }
   const hide = new Set<string>([...ignorerRows.map((r) => r.userId), ...blockedWithSender]);
-  const sockets = await io.in(`room:${roomId}`).fetchSockets();
   for (const s of sockets) {
     const uid = (s.data as { userId?: string }).userId;
     if (uid && hide.has(uid)) continue;
-    s.emit("message:new", msg);
+    if (roomIsNsfw && !(s.data as { user?: SessionUser }).user?.isAdult) continue;
+    // Mutual isolation: evaluated against the recipient's session snapshot.
+    // A snapshot-less socket (shouldn't exist post-handshake) skips the
+    // check, mirroring how the block set relies on socket.data alone.
+    const recipient = (s.data as { user?: SessionUser }).user;
+    if (senderMayIsolate && recipient && uid !== senderUserId && isIsolatedBetween(sender, recipient)) continue;
+    s.emit("message:new", minorVariant && !recipient?.isAdult ? minorVariant : msg);
   }
 }
 
@@ -886,6 +1031,9 @@ async function fanRoomUnreadBump(
   msg: ChatMessage,
   senderUserId: string,
   kind: MessageKind,
+  /** Effective 18+ rating of the room (age plan, Phase 2): minor members get
+   *  no unread/mention bumps from an 18+ room they can't even see. */
+  roomIsNsfw = false,
 ): Promise<void> {
   try {
     // Whispers + any targeted-to-one-user row aren't room-wide unread. System
@@ -925,6 +1073,7 @@ async function fanRoomUnreadBump(
     const rows = await db.all<{
       user_id: string;
       username: string;
+      birthdate: string | null;
       unread: number;
       mentions: number;
       muted: number;
@@ -932,6 +1081,7 @@ async function fanRoomUnreadBump(
     }>(sql`
       SELECT rm.user_id AS user_id,
              u.username AS username,
+             u.birthdate AS birthdate,
              COUNT(m.id) AS unread,
              SUM(
                CASE WHEN m.id IS NOT NULL
@@ -951,13 +1101,27 @@ async function fanRoomUnreadBump(
         AND m.target_user_id IS NULL
         AND m.user_id != rm.user_id
         AND m.created_at > COALESCE(rr.last_read_at, 0)
+        -- Per-message 18+ stamp (age plan, Phase 2/3): rows a minor member
+        -- can never read (18+-era history in a flipped-back room, replies
+        -- under an NSFW-tagged topic) must not count into their live badge
+        -- or flip hasMention (which bypasses their room mute) — matching
+        -- the authoritative computeRoomUnread ageFilter. Adults (NULL
+        -- birthdate = legacy adult) count every row; the strictly-greater
+        -- date test is the same SQL minor predicate isolationVisibleSql
+        -- uses (date('now') is UTC, boundary birthday = adult).
+        AND (m.is_nsfw = 0 OR NOT (u.birthdate IS NOT NULL AND u.birthdate > date('now','-18 years')))
       WHERE rm.room_id = ${roomId}
         AND rm.user_id != ${senderUserId}
-      GROUP BY rm.user_id, u.username, p.muted, p.muted_until
+      GROUP BY rm.user_id, u.username, u.birthdate, p.muted, p.muted_until
     `);
 
     for (const r of rows) {
       if (liveUserIds.has(r.user_id)) continue; // saw it live
+      // 18+ room: minor members (keep-but-hide membership rows) never get
+      // an unread or mention bump — the room isn't in their rail at all.
+      // Derived in JS via isAdultUser so malformed birthdates fail closed
+      // exactly like every other gate.
+      if (roomIsNsfw && !isAdultUser({ birthdate: r.birthdate })) continue;
       const hasMention = (r.mentions ?? 0) > 0;
       const muteActive = !!r.muted && (!r.muted_until || r.muted_until > now);
       // A muted room stays silent unless the new activity mentions the member.
@@ -1112,8 +1276,12 @@ export async function sendRoomBacklogTo(
   // 50-row messages SELECT it rides alongside. Gates on the granular
   // `view_deleted_message_body` key so the matrix can hand the carve-
   // out to a mod tier without minting them as a full admin.
+  // `birthdate` rides the same lookup so the 18+ history filter below is
+  // derived fresh here — the relocate paths (kick/ban/room-delete) call
+  // this without a session user in hand. `isolateFromAdults` makes the row
+  // an IsolationSubject for the Phase 5 author filter below.
   const viewerRow = (await db
-    .select({ role: users.role })
+    .select({ role: users.role, birthdate: users.birthdate, isolateFromAdults: users.isolateFromAdults })
     .from(users)
     .where(eq(users.id, viewerUserId))
     .limit(1))[0];
@@ -1144,12 +1312,22 @@ export async function sendRoomBacklogTo(
   // Whispers are scoped to this room's server (NULL→default), so a whisper sent
   // in another server doesn't overlay into this backlog.
   const backlogServerId = await resolveRoomServerId(db, roomId);
+  // HARD tier: 18+-stamped history is withheld from minors; adults always
+  // see it, hide preference or not (a minor can't be IN an 18+ room, so
+  // this only bites on flipped-back rooms and Phase 3 NSFW topics).
+  const viewerIsAdult = viewerRow ? isAdultUser(viewerRow) : false;
   const recentPlusOne = await db
     .select()
     .from(messages)
     .where(and(
-      roomVisibilityWhere(roomId, viewerUserId, backlogServerId),
+      roomVisibilityWhere(roomId, viewerUserId, backlogServerId, viewerIsAdult),
       clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
+      // Isolation (Phase 5): scrollback authored by an account this viewer
+      // is isolated with drops, exactly like the blocked-author filter
+      // below — author-keyed, so system lines (staff-role sentinel) and
+      // the viewer's own rows always survive. Undefined for the common
+      // non-isolating viewer classes.
+      isolationVisibleSql(viewerRow, messages.userId),
     ))
     .orderBy(desc(messages.createdAt))
     .limit(BACKLOG_LIMIT + 1);
@@ -1211,6 +1389,16 @@ export async function sendRoomBacklogTo(
         ? { deletedByDisplayName: m.deletedByDisplayName }
         : {}),
     }));
+  // Minor language filter (§J): an under-18 viewer's backlog masks each
+  // line's body / topic title / quote snippet. The wire objects above are
+  // already per-viewer (never shared), so replacing entries in place is
+  // safe; clean rows keep their original object. Adults skip the loop
+  // entirely — zero masking work.
+  if (!viewerIsAdult) {
+    for (let i = 0; i < backlog.length; i++) {
+      backlog[i] = maskMessageForMinors(backlog[i]!) ?? backlog[i]!;
+    }
+  }
   // Embed reactions inline so the ReactionBar renders without a
   // per-row fetch. Single batched query keyed on the backlog's
   // message ids; messages with zero reactions just don't get the

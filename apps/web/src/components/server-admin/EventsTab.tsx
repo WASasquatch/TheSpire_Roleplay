@@ -18,12 +18,14 @@
  * as profile bios; the server re-sanitizes on save.
  */
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   ServerEvent,
   ServerEventRsvp,
   ServerViewerState,
 } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { EVENT_ICONS, EventIcon } from "../../lib/eventIcons.js";
 
 interface EventsTabProps {
@@ -47,16 +49,17 @@ interface PickerRoom { id: string; name: string }
 interface PickerChar { id: string; name: string }
 
 /** Reminder-lead options offered in the form; MUST match the server's
- *  REMINDER_LEADS_MS allow-list (servers/events.ts). */
-const REMINDER_OPTIONS: { label: string; ms: number | null }[] = [
-  { label: "No reminder", ms: null },
-  { label: "5 minutes before", ms: 5 * 60_000 },
-  { label: "10 minutes before", ms: 10 * 60_000 },
-  { label: "15 minutes before", ms: 15 * 60_000 },
-  { label: "30 minutes before", ms: 30 * 60_000 },
-  { label: "1 hour before", ms: 60 * 60_000 },
-  { label: "2 hours before", ms: 2 * 60 * 60_000 },
-  { label: "1 day before", ms: 24 * 60 * 60_000 },
+ *  REMINDER_LEADS_MS allow-list (servers/events.ts). Labels live in the
+ *  catalog (resolved at render) so a live language flip re-labels them. */
+const REMINDER_OPTIONS: { labelKey: string; ms: number | null }[] = [
+  { labelKey: "eventsTab.reminderNone", ms: null },
+  { labelKey: "eventsTab.reminder5m", ms: 5 * 60_000 },
+  { labelKey: "eventsTab.reminder10m", ms: 10 * 60_000 },
+  { labelKey: "eventsTab.reminder15m", ms: 15 * 60_000 },
+  { labelKey: "eventsTab.reminder30m", ms: 30 * 60_000 },
+  { labelKey: "eventsTab.reminder1h", ms: 60 * 60_000 },
+  { labelKey: "eventsTab.reminder2h", ms: 2 * 60 * 60_000 },
+  { labelKey: "eventsTab.reminder1d", ms: 24 * 60 * 60_000 },
 ];
 
 /** A UTC ms epoch → the `datetime-local` value string in LOCAL time (the input
@@ -77,18 +80,16 @@ function localInputToMs(value: string): number | null {
 }
 
 export default function EventsTab({ serverId, viewer }: EventsTabProps) {
+  const { t } = useTranslation("servers");
   const canManage = viewer.permissions.includes("manage_events");
   return (
     <div className="max-w-3xl space-y-6">
       <section>
         <h2 className="mb-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
-          Community events
+          {t("eventsTab.heading")}
         </h2>
         <p className="mb-3 text-xs text-keep-muted">
-          Schedule sessions, tournaments, or lore nights on this server's calendar. Members can
-          RSVP going, maybe, or can't make it, and an optional reminder pings everyone who's going
-          a little before it starts. Cancelling keeps the event on the calendar marked cancelled;
-          deleting removes it entirely.
+          {t("eventsTab.blurb")}
         </p>
         <EventsSection serverId={serverId} canManage={canManage} />
       </section>
@@ -97,6 +98,7 @@ export default function EventsTab({ serverId, viewer }: EventsTabProps) {
 }
 
 function EventsSection({ serverId, canManage }: { serverId: string; canManage: boolean }) {
+  const { t } = useTranslation("servers");
   const [rows, setRows] = useState<EventRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ServerEvent | null>(null);
@@ -143,13 +145,13 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
       const j = (await r.json()) as { events: EventRow[] };
       setRows(j.events);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("shared.loadFailed"));
     }
   }
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [serverId]);
 
   async function cancelEvent(row: EventRow) {
-    if (!window.confirm("Cancel this event? It stays on the calendar marked cancelled.")) return;
+    if (!window.confirm(t("eventsTab.cancelConfirm"))) return;
     try {
       const r = await fetch(`/servers/${sid(serverId)}/events/${sid(row.event.id)}`, {
         method: "PATCH",
@@ -160,12 +162,12 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "cancel failed");
+      setError(e instanceof Error ? e.message : t("eventsTab.cancelFailed"));
     }
   }
 
   async function remove(row: EventRow) {
-    if (!window.confirm("Delete this event? RSVPs are lost and members lose it on refresh.")) return;
+    if (!window.confirm(t("eventsTab.deleteConfirm"))) return;
     try {
       const r = await fetch(`/servers/${sid(serverId)}/events/${sid(row.event.id)}`, {
         method: "DELETE",
@@ -174,11 +176,11 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "delete failed");
+      setError(e instanceof Error ? e.message : t("announceTab.deleteFailed"));
     }
   }
 
-  if (rows === null) return <p className="text-xs italic text-keep-muted">Loading…</p>;
+  if (rows === null) return <p className="text-xs italic text-keep-muted">{t("shared.loading")}</p>;
   return (
     <div className="space-y-3">
       {error ? <p className="text-xs text-keep-accent">{error}</p> : null}
@@ -188,7 +190,7 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
           onClick={() => { setAdding(true); setEditing(null); }}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/25"
         >
-          + New event
+          {t("eventsTab.newEvent")}
         </button>
       ) : null}
       {(adding || editing) && canManage ? (
@@ -202,14 +204,14 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
         />
       ) : null}
       {rows.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No events yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("eventsTab.noEvents")}</p>
       ) : (
         <table className="w-full min-w-[560px] text-xs">
           <thead>
             <tr className="border-b border-keep-rule text-keep-muted">
-              <th className="px-2 py-1 text-left">Event</th>
-              <th className="px-2 py-1 text-left">When</th>
-              <th className="px-2 py-1 text-left">RSVPs</th>
+              <th className="px-2 py-1 text-left">{t("eventsTab.colEvent")}</th>
+              <th className="px-2 py-1 text-left">{t("eventsTab.colWhen")}</th>
+              <th className="px-2 py-1 text-left">{t("eventsTab.colRsvps")}</th>
               <th className="px-2 py-1"></th>
             </tr>
           </thead>
@@ -223,31 +225,31 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
                       <EventIcon name={ev.icon} className="h-3.5 w-3.5 shrink-0 text-keep-muted" />
                       {ev.title}
                       {ev.status === "cancelled" ? (
-                        <span className="ml-1 text-[10px] uppercase tracking-widest text-keep-accent">(cancelled)</span>
+                        <span className="ml-1 text-[10px] uppercase tracking-widest text-keep-accent">{t("eventsTab.statusCancelled")}</span>
                       ) : ev.status === "live" ? (
-                        <span className="ml-1 text-[10px] uppercase tracking-widest text-keep-action">(live)</span>
+                        <span className="ml-1 text-[10px] uppercase tracking-widest text-keep-action">{t("eventsTab.statusLive")}</span>
                       ) : ev.status === "ended" ? (
-                        <span className="ml-1 text-[10px] uppercase tracking-widest text-keep-muted">(ended)</span>
+                        <span className="ml-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("eventsTab.statusEnded")}</span>
                       ) : null}
                     </div>
                     {ev.linkedRoomId ? (
                       <div className="text-[10px] text-keep-muted">
-                        Room: {roomNameById.get(ev.linkedRoomId) ?? ev.linkedRoomId}
+                        {t("eventsTab.roomLine", { name: roomNameById.get(ev.linkedRoomId) ?? ev.linkedRoomId })}
                       </div>
                     ) : null}
                     {ev.reminderLeadMs ? (
-                      <div className="text-[10px] text-keep-muted">Reminder set</div>
+                      <div className="text-[10px] text-keep-muted">{t("eventsTab.reminderSet")}</div>
                     ) : null}
                   </td>
                   <td className="px-2 py-2">
-                    <div>{new Date(ev.startsAt).toLocaleString()}</div>
+                    <div>{formatDateTime(ev.startsAt)}</div>
                     {ev.endsAt ? (
-                      <div className="text-[10px] text-keep-muted">to {new Date(ev.endsAt).toLocaleString()}</div>
+                      <div className="text-[10px] text-keep-muted">{t("eventsTab.toDate", { date: formatDateTime(ev.endsAt) })}</div>
                     ) : null}
                   </td>
                   <td className="px-2 py-2">
-                    <span className="text-keep-text">{row.counts.going}</span> going
-                    {row.counts.maybe ? <span className="text-keep-muted"> · {row.counts.maybe} maybe</span> : null}
+                    <span className="text-keep-text">{row.counts.going}</span>{t("eventsTab.goingSuffix")}
+                    {row.counts.maybe ? <span className="text-keep-muted">{t("eventsTab.maybeSuffix", { n: row.counts.maybe })}</span> : null}
                   </td>
                   <td className="px-2 py-2 text-right">
                     {canManage ? (
@@ -257,7 +259,7 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
                           onClick={() => { setEditing(ev); setAdding(false); }}
                           className="mr-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
                         >
-                          Edit
+                          {t("shared.edit")}
                         </button>
                         {ev.status !== "cancelled" ? (
                           <button
@@ -265,7 +267,7 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
                             onClick={() => void cancelEvent(row)}
                             className="mr-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
                           >
-                            Cancel
+                            {t("shared.cancel")}
                           </button>
                         ) : null}
                         <button
@@ -273,7 +275,7 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
                           onClick={() => void remove(row)}
                           className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/20"
                         >
-                          Delete
+                          {t("shared.delete")}
                         </button>
                       </>
                     ) : null}
@@ -303,6 +305,7 @@ function EventForm({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const { t } = useTranslation("servers");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [icon, setIcon] = useState<string | null>(initial?.icon ?? null);
   const iconMenuRef = useRef<HTMLDetailsElement | null>(null);
@@ -321,10 +324,10 @@ function EventForm({
     setError(null);
     try {
       const startMs = localInputToMs(startsAt);
-      if (!title.trim()) throw new Error("A title is required.");
-      if (startMs == null) throw new Error("A start time is required.");
+      if (!title.trim()) throw new Error(t("eventsTab.titleRequired"));
+      if (startMs == null) throw new Error(t("eventsTab.startRequired"));
       const endMs = endsAt ? localInputToMs(endsAt) : null;
-      if (endMs != null && endMs <= startMs) throw new Error("The end time must be after the start time.");
+      if (endMs != null && endMs <= startMs) throw new Error(t("eventsTab.endAfterStart"));
 
       const payload = {
         title: title.trim(),
@@ -348,7 +351,7 @@ function EventForm({
       if (!r.ok) throw new Error(await readError(r));
       await onSaved();
     } catch (e2) {
-      setError(e2 instanceof Error ? e2.message : "save failed");
+      setError(e2 instanceof Error ? e2.message : t("shared.saveFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -358,14 +361,14 @@ function EventForm({
     <form onSubmit={submit} className="space-y-2 rounded border border-keep-rule bg-keep-panel/30 p-3 text-xs">
       <details ref={iconMenuRef} className="block">
         <summary className="flex cursor-pointer list-none items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
-          <span className="uppercase tracking-widest text-keep-muted">Icon</span>
+          <span className="uppercase tracking-widest text-keep-muted">{t("eventsTab.iconLabel")}</span>
           {icon ? (
             <span className="flex items-center gap-1 text-keep-text">
               <EventIcon name={icon} className="h-4 w-4" />
               {icon}
             </span>
           ) : (
-            <span className="text-keep-muted">None</span>
+            <span className="text-keep-muted">{t("eventsTab.iconNone")}</span>
           )}
           <span className="ml-auto text-keep-muted">▾</span>
         </summary>
@@ -373,12 +376,12 @@ function EventForm({
           <button
             type="button"
             onClick={() => { setIcon(null); if (iconMenuRef.current) iconMenuRef.current.open = false; }}
-            title="No icon"
-            aria-label="No icon"
+            title={t("eventsTab.noIcon")}
+            aria-label={t("eventsTab.noIcon")}
             aria-pressed={icon == null}
             className={`flex h-8 w-8 items-center justify-center rounded border text-[9px] uppercase ${icon == null ? "border-keep-action bg-keep-action/15 text-keep-action" : "border-keep-rule text-keep-muted hover:bg-keep-banner"}`}
           >
-            None
+            {t("eventsTab.iconNone")}
           </button>
           {Object.entries(EVENT_ICONS).map(([name, Ico]) => {
             const on = icon === name;
@@ -400,32 +403,32 @@ function EventForm({
       </details>
 
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Title</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("eventsTab.titleLabel")}</span>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           maxLength={140}
-          placeholder="Friday night session"
+          placeholder={t("eventsTab.titlePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
         />
       </label>
 
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Description (optional, HTML allowed)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("eventsTab.descriptionLabel")}</span>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={3}
           maxLength={8000}
-          placeholder="What's happening, who it's for, anything to prep."
+          placeholder={t("eventsTab.descriptionPlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px]"
         />
       </label>
 
       <div className="flex flex-wrap gap-2">
         <label className="block flex-1">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Starts</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("eventsTab.startsLabel")}</span>
           <input
             type="datetime-local"
             value={startsAt}
@@ -434,7 +437,7 @@ function EventForm({
           />
         </label>
         <label className="block flex-1">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Ends (optional)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("eventsTab.endsLabel")}</span>
           <input
             type="datetime-local"
             value={endsAt}
@@ -443,46 +446,46 @@ function EventForm({
           />
         </label>
       </div>
-      <p className="text-[10px] text-keep-muted">Times use your local clock; members see them in theirs.</p>
+      <p className="text-[10px] text-keep-muted">{t("eventsTab.localClockHint")}</p>
 
       <div className="flex flex-wrap gap-2">
         <label className="block flex-1">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Host (optional)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("eventsTab.hostLabel")}</span>
           <select
             value={hostCharacterId ?? ""}
             onChange={(e) => setHostCharacterId(e.target.value || null)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="">None / OOC</option>
+            <option value="">{t("eventsTab.hostNone")}</option>
             {chars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </label>
         <label className="block flex-1">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Linked room (optional)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("eventsTab.linkedRoomLabel")}</span>
           <select
             value={linkedRoomId ?? ""}
             onChange={(e) => setLinkedRoomId(e.target.value || null)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="">None</option>
+            <option value="">{t("eventsTab.iconNone")}</option>
             {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
         </label>
       </div>
 
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Reminder</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("eventsTab.reminderLabel")}</span>
         <select
           value={reminderLeadMs == null ? "" : String(reminderLeadMs)}
           onChange={(e) => setReminderLeadMs(e.target.value ? Number(e.target.value) : null)}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
         >
           {REMINDER_OPTIONS.map((o) => (
-            <option key={o.label} value={o.ms == null ? "" : String(o.ms)}>{o.label}</option>
+            <option key={o.labelKey} value={o.ms == null ? "" : String(o.ms)}>{t(o.labelKey)}</option>
           ))}
         </select>
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          Pings everyone RSVP'd going or maybe, once, this far before the start.
+          {t("eventsTab.reminderHint")}
         </span>
       </label>
 
@@ -490,11 +493,11 @@ function EventForm({
       <div className="flex justify-end gap-2">
         <button type="button" onClick={onCancel}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner">
-          Cancel
+          {t("shared.cancel")}
         </button>
         <button type="submit" disabled={submitting}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50">
-          {submitting ? "Saving…" : initial ? "Save changes" : "Create event"}
+          {submitting ? t("shared.saving") : initial ? t("announceTab.saveChanges") : t("eventsTab.createEvent")}
         </button>
       </div>
     </form>

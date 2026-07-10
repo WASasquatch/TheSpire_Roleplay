@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { readError } from "../../lib/http.js";
 
 /* =============================================================
@@ -23,6 +24,7 @@ interface NavLinkInput {
 }
 
 export function LinksTab({ onLinksChanged }: { onLinksChanged: () => void }) {
+  const { t } = useTranslation("admin");
   const [links, setLinks] = useState<NavLinkRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +37,7 @@ export function LinksTab({ onLinksChanged }: { onLinksChanged: () => void }) {
       const j = (await r.json()) as { links: NavLinkRow[] };
       setLinks(j.links);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "load failed");
+      setError(err instanceof Error ? err.message : t("loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -67,7 +69,7 @@ export function LinksTab({ onLinksChanged }: { onLinksChanged: () => void }) {
   }
 
   async function destroy(id: string) {
-    if (!window.confirm("Delete this link?")) return;
+    if (!window.confirm(t("links.deleteConfirm"))) return;
     const r = await fetch(`/admin/nav-links/${id}`, {
       method: "DELETE",
       credentials: "include",
@@ -80,7 +82,7 @@ export function LinksTab({ onLinksChanged }: { onLinksChanged: () => void }) {
   return (
     <div className="space-y-3">
       <p className="text-xs text-keep-muted">
-        Banner links shown to all users. The Exit/logout link is built-in.
+        {t("links.description")}
       </p>
 
       {error ? <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div> : null}
@@ -88,21 +90,21 @@ export function LinksTab({ onLinksChanged }: { onLinksChanged: () => void }) {
       <NewLinkForm onCreate={create} />
 
       {loading ? (
-        <div className="text-keep-muted">loading...</div>
+        <div className="text-keep-muted">{t("loading")}</div>
       ) : links.length === 0 ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">
-          No links yet. Add one above.
+          {t("links.empty")}
         </div>
       ) : (
         <div className="-mx-1 overflow-x-auto px-1">
         <table className="w-full min-w-[560px] text-xs">
           <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
             <tr>
-              <th className="px-2 py-1 text-left">Pos</th>
-              <th className="px-2 py-1 text-left">Label</th>
-              <th className="px-2 py-1 text-left">URL</th>
-              <th className="px-2 py-1">Target</th>
-              <th className="px-2 py-1">On</th>
+              <th className="px-2 py-1 text-left">{t("links.colPos")}</th>
+              <th className="px-2 py-1 text-left">{t("links.colLabel")}</th>
+              <th className="px-2 py-1 text-left">{t("links.colUrl")}</th>
+              <th className="px-2 py-1">{t("links.colTarget")}</th>
+              <th className="px-2 py-1">{t("common:on")}</th>
               <th className="px-2 py-1"></th>
             </tr>
           </thead>
@@ -119,6 +121,7 @@ export function LinksTab({ onLinksChanged }: { onLinksChanged: () => void }) {
 }
 
 function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void> }) {
+  const { t } = useTranslation("admin");
   const [label, setLabel] = useState("");
   const [href, setHref] = useState("");
   const [position, setPosition] = useState("0");
@@ -141,21 +144,21 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
       setHref("");
       setPosition("0");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "create failed");
+      setError(err instanceof Error ? err.message : t("createFailed"));
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <form onSubmit={submit} className="rounded border border-keep-rule bg-keep-bg p-2 text-xs">
-      <div className="mb-1 font-semibold">Add a link</div>
+    <form data-admin-anchor="links.addTitle" onSubmit={submit} className="rounded border border-keep-rule bg-keep-bg p-2 text-xs">
+      <div className="mb-1 font-semibold">{t("links.addTitle")}</div>
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-12">
         <input
           required
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="Label (e.g. Rules)"
+          placeholder={t("links.labelPlaceholder")}
           maxLength={40}
           className="col-span-2 rounded border border-keep-rule px-2 py-1 sm:col-span-3"
         />
@@ -163,7 +166,7 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
           required
           value={href}
           onChange={(e) => setHref(e.target.value)}
-          placeholder="https://example.com or /path"
+          placeholder={t("links.hrefPlaceholder")}
           maxLength={500}
           className="col-span-2 rounded border border-keep-rule px-2 py-1 sm:col-span-5"
         />
@@ -173,7 +176,7 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
           onChange={(e) => setPosition(e.target.value)}
           min={0}
           max={9999}
-          title="Sort order - lower renders first"
+          title={t("links.positionTitle")}
           className="col-span-1 rounded border border-keep-rule px-2 py-1"
         />
         <select
@@ -181,15 +184,15 @@ function NewLinkForm({ onCreate }: { onCreate: (i: NavLinkInput) => Promise<void
           onChange={(e) => setTarget(e.target.value as "_self" | "_blank")}
           className="col-span-1 rounded border border-keep-rule px-2 py-1 sm:col-span-2"
         >
-          <option value="_blank">new tab</option>
-          <option value="_self">same tab</option>
+          <option value="_blank">{t("links.targetNewTab")}</option>
+          <option value="_self">{t("links.targetSameTab")}</option>
         </select>
         <button
           type="submit"
           disabled={submitting}
           className="keep-button col-span-2 rounded border border-keep-rule bg-keep-banner px-2 py-1 disabled:opacity-50 hover:bg-keep-banner/80 sm:col-span-1"
         >
-          {submitting ? "..." : "Add"}
+          {submitting ? "..." : t("add")}
         </button>
       </div>
       {error ? <div className="mt-1 text-keep-accent">{error}</div> : null}
@@ -206,6 +209,7 @@ function LinkRow({
   onPatch: (id: string, p: Partial<NavLinkInput>) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
+  const { t } = useTranslation("admin");
   const [draft, setDraft] = useState(link);
   const dirty =
     draft.label !== link.label ||
@@ -260,8 +264,8 @@ function LinkRow({
           onChange={(e) => setDraft({ ...draft, target: e.target.value as "_self" | "_blank" })}
           className="rounded border border-keep-rule px-1 py-0.5"
         >
-          <option value="_blank">new</option>
-          <option value="_self">same</option>
+          <option value="_blank">{t("links.targetNew")}</option>
+          <option value="_self">{t("links.targetSame")}</option>
         </select>
       </td>
       <td className="px-2 py-1 text-center">
@@ -274,7 +278,7 @@ function LinkRow({
             onClick={commit}
             className="keep-button mr-1 rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80"
           >
-            Save
+            {t("common:save")}
           </button>
         ) : null}
         <button
@@ -282,7 +286,7 @@ function LinkRow({
           onClick={() => onDelete(link.id)}
           className="rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
         >
-          Delete
+          {t("common:delete")}
         </button>
       </td>
     </tr>

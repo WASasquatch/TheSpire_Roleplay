@@ -1,3 +1,4 @@
+import { tFor } from "../../i18n.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -19,7 +20,7 @@ function rejectArgs(ctx: Parameters<NonNullable<CommandHandler["run"]>>[0], usag
   if (ctx.argsText.trim()) {
     ctx.socket.emit("error:notice", {
       code: "NO_ARGS",
-      message: `${usage} takes no arguments.`,
+      message: tFor(ctx.user.locale, "commands:earningUi.noArgs", { command: usage }),
     });
     return true;
   }

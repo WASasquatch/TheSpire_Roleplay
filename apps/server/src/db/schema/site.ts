@@ -351,12 +351,42 @@ export const siteSettings = sqliteTable("site_settings", {
    */
   antiSpamEnabled: integer("anti_spam_enabled", { mode: "boolean" }).notNull().default(false),
   /**
+   * Registration minimum-age switch (migration 0330) — "the flip" of the
+   * age-restriction plan. OFF (default) = new accounts must be 18+ (the
+   * historical posture, now enforced by date of birth); ON = 13+. This is
+   * the ONLY thing the flag controls: every other age gate is
+   * unconditional code that no-ops until minor accounts exist. Flipping
+   * back OFF stops new minor signups; existing minor accounts keep their
+   * gates.
+   */
+  allowMinorSignups: integer("allow_minor_signups", { mode: "boolean" }).notNull().default(false),
+  /**
    * Auto-moderation master switch (migration 0319). When true, the chat + forum
    * pipelines run the enabled `automod_rules` (keyword/regex/link/invite/mention
    * filters) before a message lands. Off by default so admins opt in; the
    * `bypass_automod` permission exempts trusted users, mods, and admins.
    */
   automodEnabled: integer("automod_enabled", { mode: "boolean" }).notNull().default(false),
+  /**
+   * Minor language filter master switch (migration 0339, age plan Phase 7).
+   * When true, strong language is MASKED at read time for under-18 viewers
+   * (see realtime/minorLanguageFilter.ts). Stored rows are never modified and
+   * adults always see the original, so this defaults ON: protective the
+   * moment minor accounts exist, invisible until then.
+   */
+  minorFilterEnabled: integer("minor_filter_enabled", { mode: "boolean" }).notNull().default(true),
+  /**
+   * Admin-editable ADDED words for the minor language filter (JSON string
+   * array, migration 0339). Folded into the matcher on top of obscenity's
+   * English preset — community-specific terms and non-English gaps.
+   */
+  minorFilterTermsJson: text("minor_filter_terms_json").notNull().default("[]"),
+  /**
+   * Admin-editable NEVER-CENSOR words for the minor language filter (JSON
+   * string array, migration 0339). Whitelisted in the matcher to fix
+   * Scunthorpe-class false positives.
+   */
+  minorFilterAllowJson: text("minor_filter_allow_json").notNull().default("[]"),
   /**
    * First-party analytics master switch (migration 0310). When false the ingest
    * routes + server-side page-view recorder become no-ops. Default on; additive

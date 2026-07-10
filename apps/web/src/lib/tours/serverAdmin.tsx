@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type { CoachStep } from "../../components/tours/CoachTour.js";
 
 /**
@@ -7,40 +8,40 @@ import type { CoachStep } from "../../components/tours/CoachTour.js";
  * strip (always mounted) and names the tab it's talking about, rather than a
  * control that only exists while its tab is open.
  */
-export const steps: CoachStep[] = [
+export const steps = (t: TFunction<"tours">): CoachStep[] => [
   {
-    title: "Your server's control room",
-    body: "Everything about this community lives behind these tabs. Pick one to work on it, and your changes save right here.",
+    title: t("serverAdmin.controlRoom.title"),
+    body: t("serverAdmin.controlRoom.body"),
     targets: ['[data-tour="server-settings-tab-strip"]'],
   },
   {
-    title: "Name and how people join",
-    body: "The Overview tab sets your server's name, tagline, and whether folks join instantly, apply, or need an invite.",
+    title: t("serverAdmin.overview.title"),
+    body: t("serverAdmin.overview.body"),
     targets: ['[data-tour="server-settings-tab-overview"]', '[data-tour="server-settings-tab-strip"]'],
   },
   {
-    title: "Make it yours",
-    body: "The Appearance tab is for your icon, banner, and colors, so members always know which server they're in.",
+    title: t("serverAdmin.appearance.title"),
+    body: t("serverAdmin.appearance.body"),
     targets: ['[data-tour="server-settings-tab-appearance"]', '[data-tour="server-settings-tab-strip"]'],
   },
   {
-    title: "Add your rooms",
-    body: "Open the Rooms tab and use New room to add a place to talk. Give it a name and it shows up for your members.",
+    title: t("serverAdmin.rooms.title"),
+    body: t("serverAdmin.rooms.body"),
     targets: ['[data-tour="server-settings-tab-rooms"]', '[data-tour="server-settings-tab-strip"]'],
   },
   {
-    title: "Give someone a hand",
-    body: "In the Members tab, Make mod hands a trusted member the tools to help you run the place.",
+    title: t("serverAdmin.members.title"),
+    body: t("serverAdmin.members.body"),
     targets: ['[data-tour="server-settings-tab-members"]', '[data-tour="server-settings-tab-strip"]'],
   },
   {
-    title: "Decide who can do what",
-    body: "The Roles tab is where you appoint staff and choose exactly which powers they hold. Grant only what each person needs.",
+    title: t("serverAdmin.roles.title"),
+    body: t("serverAdmin.roles.body"),
     targets: ['[data-tour="server-settings-tab-roles"]', '[data-tour="server-settings-tab-strip"]'],
   },
   {
-    title: "Nothing is lost",
-    body: "Each tab has its own Save button. Make your changes, press Save, and you're done. You can reopen this walkthrough any time from the question mark up top.",
+    title: t("serverAdmin.save.title"),
+    body: t("serverAdmin.save.body"),
     targets: ['[data-tour="server-settings-tab-strip"]'],
   },
 ];

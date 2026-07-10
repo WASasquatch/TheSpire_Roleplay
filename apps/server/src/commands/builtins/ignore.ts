@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { ignores, users } from "../../db/schema.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg, type ResolvedTarget } from "../identityArg.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -28,7 +29,7 @@ async function resolveIgnoreTarget(
 ): Promise<ResolvedTarget | null> {
   const resolution = await resolveIdentityArg(ctx.db, raw);
   if (resolution.kind === "none") {
-    notice(ctx, "NO_USER", `No user named "${raw}".`);
+    notice(ctx, "NO_USER", tFor(ctx.user.locale, "commands:shared.noUserNamed", { name: raw }));
     return null;
   }
   if (resolution.kind === "ambiguous") {
@@ -81,21 +82,21 @@ export const ignoreCommand: CommandHandler = {
         .where(eq(ignores.userId, ctx.user.id));
       const names = rows.map((r) => r.username).sort();
       const body = names.length
-        ? `You are ignoring: ${names.join(", ")}`
-        : "Your ignore list is empty. Use /ignore <name> to add someone.";
+        ? tFor(ctx.user.locale, "commands:ignore.list", { names: names.join(", ") })
+        : tFor(ctx.user.locale, "commands:ignore.listEmpty");
       notice(ctx, "IGNORE_LIST", body);
       return;
     }
 
     if (target.toLowerCase() === "clear") {
       await ctx.db.delete(ignores).where(eq(ignores.userId, ctx.user.id));
-      notice(ctx, "IGNORE_CLEARED", "Ignore list cleared.");
+      notice(ctx, "IGNORE_CLEARED", tFor(ctx.user.locale, "commands:ignore.cleared"));
       return;
     }
 
     const resolved = await resolveIgnoreTarget(ctx, target);
     if (!resolved) return;
-    if (resolved.userId === ctx.user.id) return notice(ctx, "IGNORE_SELF", "You can't ignore yourself.");
+    if (resolved.userId === ctx.user.id) return notice(ctx, "IGNORE_SELF", tFor(ctx.user.locale, "commands:ignore.self"));
 
     // Toggle semantics: /ignore on an already-ignored user removes the
     // block (matches /unignore). This lets the user re-use the same
@@ -114,7 +115,7 @@ export const ignoreCommand: CommandHandler = {
       await ctx.db
         .delete(ignores)
         .where(and(eq(ignores.userId, ctx.user.id), eq(ignores.ignoredUserId, resolved.userId)));
-      notice(ctx, "UNIGNORED", `No longer ignoring ${resolved.masterUsername}.`);
+      notice(ctx, "UNIGNORED", tFor(ctx.user.locale, "commands:ignore.removed", { name: resolved.masterUsername }));
       return;
     }
 
@@ -123,7 +124,7 @@ export const ignoreCommand: CommandHandler = {
       .values({ userId: ctx.user.id, ignoredUserId: resolved.userId })
       .onConflictDoNothing();
 
-    notice(ctx, "IGNORED", `Now ignoring ${resolved.masterUsername}. Use /unignore ${resolved.masterUsername} (or /ignore ${resolved.masterUsername} again) to undo.`);
+    notice(ctx, "IGNORED", tFor(ctx.user.locale, "commands:ignore.added", { name: resolved.masterUsername }));
   },
 };
 
@@ -138,7 +139,7 @@ export const unignoreCommand: CommandHandler = {
   description: "Stop ignoring a user; their messages will reach you again.",
   async run(ctx) {
     const target = ctx.argsText.trim();
-    if (!target) return notice(ctx, "NEED_NAME", "Usage: /unignore <username>");
+    if (!target) return notice(ctx, "NEED_NAME", tFor(ctx.user.locale, "commands:unignore.usage"));
 
     const resolved = await resolveIgnoreTarget(ctx, target);
     if (!resolved) return;
@@ -148,9 +149,9 @@ export const unignoreCommand: CommandHandler = {
       .where(and(eq(ignores.userId, ctx.user.id), eq(ignores.ignoredUserId, resolved.userId)));
 
     if (result.changes === 0) {
-      notice(ctx, "NOT_IGNORED", `You weren't ignoring ${resolved.masterUsername}.`);
+      notice(ctx, "NOT_IGNORED", tFor(ctx.user.locale, "commands:unignore.notIgnored", { name: resolved.masterUsername }));
     } else {
-      notice(ctx, "UNIGNORED", `No longer ignoring ${resolved.masterUsername}.`);
+      notice(ctx, "UNIGNORED", tFor(ctx.user.locale, "commands:ignore.removed", { name: resolved.masterUsername }));
     }
   },
 };

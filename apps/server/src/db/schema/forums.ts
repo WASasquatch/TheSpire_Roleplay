@@ -61,6 +61,23 @@ export const forums = sqliteTable(
      *  may READ boards/topics/replies without an account. Posting and
      *  joining always require login. Off by default. */
     publicBrowsing: integer("public_browsing", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Whole-forum 18+ flag (migration 0336, age-restriction plan). When
+     * true: excluded from the forums catalog + discover search for viewers
+     * who can't see NSFW; /f/<slug> behaves like a non-publicBrowsing
+     * forum for minors/anonymous (teaser only, generic OG meta); every
+     * board inherits the gate. Individual BOARDS need no column — boards
+     * are rooms, so `rooms.is_nsfw` covers board-level 18+. Owner toggle,
+     * adult-only write, audited (`forum_nsfw_update`).
+     */
+    isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Optional public-safe banner variant (migration 0336, decision #10).
+     * Mirrors servers.sfwBannerUrl: shown on public/discovery surfaces to
+     * viewers who can't see NSFW when the forum is 18+; NULL = art-less
+     * name/colors fallback.
+     */
+    sfwBannerUrl: text("sfw_banner_url"),
     /** Owner toggle (migration 0268): when true, a mod holding the
      *  `create_tags` granular permission may mint a topic tag on the fly when
      *  tagging a topic. Off = the curated catalog only, offered per category. */

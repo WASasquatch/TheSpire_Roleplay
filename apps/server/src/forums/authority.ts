@@ -23,6 +23,7 @@ import type { ForumPermission } from "@thekeep/shared";
 import { FORUM_FEATURE_PERMISSIONS, FORUM_PERMISSIONS, parseForumPermissions } from "@thekeep/shared";
 import { forumBans, forumMembers, forumUsergroupMembers, forumUsergroups, forums, roomThreadCategories, rooms } from "../db/schema.js";
 import { resolveScopedAuthority, scopedCan, type Caller } from "../auth/scopedAuthority.js";
+import { tFor } from "../i18n.js";
 import type { Db } from "../db/index.js";
 
 type ForumRow = typeof forums.$inferSelect;
@@ -125,7 +126,10 @@ export async function forumAuthority(
  */
 export async function forumGateForBoard(
   db: Db,
-  user: Caller,
+  // Denial copy renders in the CALLER's language when the caller shape
+  // carries users.locale (SessionUser does); narrow {id, role} callers
+  // simply fall back to en.
+  user: Caller & { locale?: string | null },
   forumId: string,
 ): Promise<{ ok: true; authority: ForumAuthority } | { ok: false; code: string; message: string }> {
   const authority = await forumAuthority(db, user, forumId);
@@ -135,20 +139,22 @@ export async function forumGateForBoard(
     return { ok: true, authority };
   }
   if (authority.ban) {
-    const untilTxt = authority.ban.until
-      ? ` until ${authority.ban.until.toISOString().slice(0, 10)}`
-      : "";
     return {
       ok: false,
       code: "FORUM_BANNED",
-      message: `You are banned from the "${authority.forum.name}" forum${untilTxt}.`,
+      message: authority.ban.until
+        ? tFor(user.locale, "errors:server.forums.bannedFromNamedUntil", {
+            name: authority.forum.name,
+            date: authority.ban.until.toISOString().slice(0, 10),
+          })
+        : tFor(user.locale, "errors:server.forums.bannedFromNamed", { name: authority.forum.name }),
     };
   }
   if (!authority.canParticipate) {
     return {
       ok: false,
       code: "FORUM_MEMBERS_ONLY",
-      message: `"${authority.forum.name}" accepts posts from approved members. Apply from the forum's page.`,
+      message: tFor(user.locale, "errors:server.forums.approvedMembersOnly", { name: authority.forum.name }),
     };
   }
   return { ok: true, authority };

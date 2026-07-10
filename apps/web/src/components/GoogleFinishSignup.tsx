@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import DOMPurify from "dompurify";
+import { Trans, useTranslation } from "react-i18next";
 import { useChat } from "../state/store.js";
-import { Field, SplashShell } from "./AuthGate.js";
+import { Field, SplashShell, earliestAllowedBirthdate, isoAgeUtc, latestAllowedBirthdate } from "./AuthGate.js";
 
 /**
  * Finish-signup screen for the Google sign-in flow.
@@ -30,30 +31,45 @@ export function GoogleFinishSignup({
   /** Applies the returned auth bundle (setSessionToken + markLoginIntent + setMe). */
   onAuthenticated: (bundle: unknown) => void;
 }) {
+  const { t } = useTranslation("marketing");
   const branding = useChat((s) => s.branding);
   const [username, setUsername] = useState("");
-  // Same two agreements the email/password register form collects. The
-  // house-rules box is always required; the admin-set disclaimer (when
-  // present) rides along in the same checkbox copy. The age/mature box is
-  // a baseline content-rating gate, not site-specific policy.
+  // Same agreements + age signal the email/password register form
+  // collects: the site-rules box is always required (the admin-set
+  // disclaimer, when present, rides along above it), and the date of
+  // birth replaces the old 18+ checkbox (age-restriction plan Phase 0).
   const [accepted, setAccepted] = useState(false);
-  const [acceptedAgeMature, setAcceptedAgeMature] = useState(false);
+  const [birthdate, setBirthdate] = useState("");
+  /**
+   * Minor isolation opt-in (age plan Phase 5), revealed only when the
+   * entered date of birth is under 18 — same optional checkbox as the
+   * register form; changeable later in the profile editor's Privacy tab.
+   */
+  const [isolatePref, setIsolatePref] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const disclaimerText = branding.registerDisclaimerHtml.trim();
+  const minAge = branding.minimumSignupAge ?? 18;
   const canSubmit =
-    !submitting && username.trim() !== "" && accepted && acceptedAgeMature;
+    !submitting && username.trim() !== "" && accepted && birthdate !== "";
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     if (!accepted) {
-      setError("Please read and agree to the house rules to finish signing up.");
+      setError(t("googleFinish.rulesRequired"));
       return;
     }
-    if (!acceptedAgeMature) {
-      setError("Please confirm you are 18+ and understand this site may contain mature content.");
+    if (!birthdate) {
+      setError(t("auth.dobRequired"));
+      return;
+    }
+    // Courtesy pre-check with the same copy the server returns; the server
+    // stays authoritative.
+    const enteredAge = isoAgeUtc(birthdate);
+    if (enteredAge === null || enteredAge < minAge) {
+      setError(t("auth.minAgeError", { minAge }));
       return;
     }
     setSubmitting(true);
@@ -65,10 +81,13 @@ export function GoogleFinishSignup({
         body: JSON.stringify({
           code,
           username: username.trim(),
-          // Server's finishBody wants these TOP-LEVEL as literal-true, exactly
-          // like /auth/register (NOT nested under `disclaimers`).
+          // Server's finishBody wants these TOP-LEVEL, exactly like
+          // /auth/register (NOT nested under `disclaimers`).
           acceptDisclaimer: true,
-          acceptAgeMature: true,
+          birthdate,
+          // Only under-18 signups carry the isolation opt-in; the server
+          // clamps it to minor accounts regardless.
+          ...(enteredAge < 18 && isolatePref ? { isolateFromAdults: true } : {}),
         }),
       });
       if (!res.ok) {
@@ -81,12 +100,12 @@ export function GoogleFinishSignup({
         const detail = firstIssue
           ? `${firstIssue.path ? `${firstIssue.path}: ` : ""}${firstIssue.message}`
           : null;
-        throw new Error(detail ?? body.error ?? "Couldn't finish signing up.");
+        throw new Error(detail ?? body.error ?? t("googleFinish.finishFailed"));
       }
       const bundle = await res.json();
       onAuthenticated(bundle);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "error");
+      setError(err instanceof Error ? err.message : t("errorFallback"));
     } finally {
       setSubmitting(false);
     }
@@ -96,16 +115,25 @@ export function GoogleFinishSignup({
     <SplashShell>
       <form onSubmit={submit} className="space-y-3">
         <div className="text-center text-[10px] uppercase tracking-[0.25em] text-keep-muted">
-          finish your vessel
+          {t("googleFinish.heading")}
         </div>
 
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 px-3 py-2 text-xs text-keep-text/90">
-          You're signing in with <b>Google</b>. Pick a username and agree to the house
-          rules to finish creating your account on <b>{branding.siteName || "The Spire"}</b>.
+          <Trans
+            t={t}
+            i18nKey="googleFinish.intro"
+            values={{ siteName: branding.siteName || "The Spire" }}
+          >
+            {"You're signing in with "}
+            <b>Google</b>
+            {". Pick a username and agree to the house rules to finish creating your account on "}
+            <b>{"{{siteName}}"}</b>
+            {"."}
+          </Trans>
         </div>
 
         <Field
-          label="Master username"
+          label={t("auth.masterUsername")}
           value={username}
           onChange={setUsername}
           autoComplete="username"
@@ -119,7 +147,7 @@ export function GoogleFinishSignup({
           {disclaimerText ? (
             <>
               <div className="text-[10px] uppercase tracking-[0.25em] text-keep-muted">
-                before you register
+                {t("auth.beforeYouRegister")}
               </div>
               <div
                 className="prose prose-sm max-h-48 max-w-none overflow-y-auto pr-1 text-xs text-keep-text/90"
@@ -135,36 +163,63 @@ export function GoogleFinishSignup({
               className="mt-0.5 scale-90"
             />
             <span>
-              I have read and agree to the{" "}
-              <a
-                href="/rules"
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={(e) => e.stopPropagation()}
-                className="underline underline-offset-2 hover:text-keep-action"
+              <Trans
+                t={t}
+                i18nKey="auth.rulesAgreement"
+                values={{ siteName: branding.siteName || "The Spire" }}
               >
-                house rules
-              </a>
-              {disclaimerText ? " and the disclaimer above" : ""}.
+                {"I understand {{siteName}} hosts user written stories and roleplay, and some areas are for adults only. I agree to the "}
+                <a
+                  href="/rules"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="underline underline-offset-2 hover:text-keep-action"
+                >
+                  site rules
+                </a>
+                {"."}
+              </Trans>
             </span>
           </label>
         </div>
 
-        {/* Age + mature content acknowledgment — same copy + posture as the
-            register form's always-required gate. */}
-        <label className="flex cursor-pointer items-start gap-2 rounded border border-keep-border/50 bg-keep-bg/25 px-3 py-2 text-[11px] leading-snug text-keep-muted">
-          <input
-            type="checkbox"
-            checked={acceptedAgeMature}
-            onChange={(e) => setAcceptedAgeMature(e.target.checked)}
-            className="mt-0.5 scale-90"
-          />
-          <span>
-            I am <b className="text-keep-text">18 years or older</b>, and I understand this
-            site may contain mature content (in user profiles, room descriptions, and
-            roleplay).
-          </span>
-        </label>
+        {/* Date of birth — same field + posture as the register form (the
+            server stores it and enforces the minimum age). */}
+        <Field
+          label={t("auth.dateOfBirth")}
+          value={birthdate}
+          onChange={setBirthdate}
+          type="date"
+          autoComplete="bday"
+          min={earliestAllowedBirthdate()}
+          max={latestAllowedBirthdate(minAge)}
+          helper={t("auth.dobHelper", { minAge, siteName: branding.siteName || "The Spire" })}
+        />
+
+        {/* Minor isolation opt-in (age plan Phase 5): revealed only when
+            the entered birth date is under 18 AND the signup floor admits
+            minors, exactly like the register form (with an 18 floor the
+            checkbox would tease an account state that can't exist).
+            Optional either way. */}
+        {(() => {
+          if (minAge >= 18) return null;
+          const enteredAge = birthdate ? isoAgeUtc(birthdate) : null;
+          if (enteredAge === null || enteredAge >= 18) return null;
+          return (
+            <label className="flex items-start gap-2 rounded border border-keep-border/50 bg-keep-bg/25 px-3 py-2 text-[11px] text-keep-muted">
+              <input
+                type="checkbox"
+                checked={isolatePref}
+                onChange={(e) => setIsolatePref(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                {t("auth.minorIsolation")}
+              </span>
+            </label>
+          );
+        })()}
 
         {error ? (
           <div className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">
@@ -175,10 +230,10 @@ export function GoogleFinishSignup({
         <button
           type="submit"
           disabled={!canSubmit}
-          title={!accepted ? "Tick the box to confirm you agree to the house rules." : undefined}
+          title={!accepted ? t("auth.tickBoxTitle") : undefined}
           className="w-full rounded border border-keep-border bg-keep-panel py-2 text-sm font-semibold tracking-wide hover:bg-keep-panel/80 disabled:opacity-50"
         >
-          {submitting ? "Finishing…" : "Finish signing up"}
+          {submitting ? t("googleFinish.finishing") : t("googleFinish.finishCta")}
         </button>
       </form>
     </SplashShell>

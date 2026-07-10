@@ -103,6 +103,7 @@ import { creditPool } from "../earning/award.js";
 import { DEFAULT_SERVER_ID, readPool } from "../earning/pool.js";
 import { mergeMaxEverHeld, resolveRankForXp } from "../earning/resolver.js";
 import { emitToUser } from "../realtime/presence.js";
+import { tFor } from "../i18n.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -1489,7 +1490,7 @@ export async function registerServerEarningRoutes(
       .where(and(eq(characterEarning.serverId, g.serverId), eq(characterEarning.rankKey, req.params.key))))[0];
     if ((userCount?.n ?? 0) + (charCount?.n ?? 0) > 0) {
       reply.code(409);
-      return { error: "rank is in use", message: "Disable the rank instead, existing rank-holders should not be displaced." };
+      return { error: "rank is in use", message: tFor(g.me.locale, "errors:server.earning.rankInUse") };
     }
     await db.delete(ranks).where(and(eq(ranks.serverId, g.serverId), eq(ranks.key, req.params.key)));
     await audit(g.serverId, g.me.id, "server_earning_catalog_edit", { kind: "rank_delete", rankKey: req.params.key });
@@ -1550,7 +1551,7 @@ export async function registerServerEarningRoutes(
       .where(and(eq(characterEarning.serverId, g.serverId), eq(characterEarning.rankKey, existing.rankKey), eq(characterEarning.tier, existing.tier))))[0];
     if ((userCount?.n ?? 0) + (charCount?.n ?? 0) > 0) {
       reply.code(409);
-      return { error: "tier is in use", message: "Disable the tier or change the threshold so users move out before deleting." };
+      return { error: "tier is in use", message: tFor(g.me.locale, "errors:server.earning.tierInUse") };
     }
     await db.delete(rankTiers).where(and(eq(rankTiers.serverId, g.serverId), eq(rankTiers.id, req.params.tierId)));
     await audit(g.serverId, g.me.id, "server_earning_catalog_edit", { kind: "tier_delete", tierId: req.params.tierId });
@@ -1678,7 +1679,7 @@ export async function registerServerEarningRoutes(
     if (!existing) { reply.code(404); return { error: "style not found" }; }
     if (existing.isBuiltin) {
       reply.code(409);
-      return { error: "built-in styles cannot be deleted", message: "Disable it instead, the seed row backs anyone who owns it." };
+      return { error: "built-in styles cannot be deleted", message: tFor(g.me.locale, "errors:server.earning.builtinDisableInstead") };
     }
     await db.delete(nameStyles).where(and(eq(nameStyles.serverId, g.serverId), eq(nameStyles.key, req.params.key)));
     await audit(g.serverId, g.me.id, "server_earning_catalog_edit", { kind: "name_style_delete", styleKey: req.params.key });
@@ -1788,7 +1789,7 @@ export async function registerServerEarningRoutes(
     if (!existing) { reply.code(404); return { error: "border not found" }; }
     if (existing.isBuiltin) {
       reply.code(409);
-      return { error: "built-in borders cannot be deleted", message: "Disable it instead, the seed row backs anyone who owns it." };
+      return { error: "built-in borders cannot be deleted", message: tFor(g.me.locale, "errors:server.earning.builtinDisableInstead") };
     }
     await db.delete(freeformBorders).where(and(eq(freeformBorders.serverId, g.serverId), eq(freeformBorders.key, req.params.key)));
     await audit(g.serverId, g.me.id, "server_earning_catalog_edit", { kind: "freeform_border_delete", borderKey: req.params.key });
@@ -1953,7 +1954,7 @@ export async function registerServerEarningRoutes(
     if (!existing) { reply.code(404); return { error: "item not found" }; }
     if (existing.isBuiltin) {
       reply.code(409);
-      return { error: "built-in items cannot be deleted", message: "Disable it instead, the seed row backs anyone who owns it." };
+      return { error: "built-in items cannot be deleted", message: tFor(g.me.locale, "errors:server.earning.builtinDisableInstead") };
     }
     await db.delete(items).where(and(eq(items.serverId, g.serverId), eq(items.key, req.params.key)));
     await audit(g.serverId, g.me.id, "server_earning_catalog_edit", { kind: "item_delete", itemKey: req.params.key });

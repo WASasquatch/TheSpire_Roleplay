@@ -33,3 +33,36 @@ export async function callerCanEditRoom(
   )[0];
   return m?.role === "owner" || m?.role === "mod";
 }
+
+/**
+ * Is any controller-capable user (per `callerCanEditRoom`) connected to the
+ * room right now, other than `excludeUserId`?
+ *
+ * Drives the passive theater `ended`/`error` gate: while an owner/mod is
+ * connected their OWN player is the authoritative end-of-source reporter, so
+ * a plain viewer's report is ignored — a crafted one was the only way a
+ * non-controller could still skip/restart the video for the whole room. With
+ * no controller connected, viewer reports keep the playlist advancing (and
+ * dead sources skipping) unattended.
+ *
+ * Typed structurally against the one Socket.IO surface it touches so tests
+ * can hand it a plain fake; reads the `socket.data.user` handshake snapshot,
+ * same as the rest of the realtime layer (a socket without one is skipped —
+ * it shouldn't be in a room at all).
+ */
+export async function anyConnectedRoomController(
+  io: { in(room: string): { fetchSockets(): Promise<Array<{ data: unknown }>> } },
+  db: Db,
+  roomId: string,
+  excludeUserId?: string,
+): Promise<boolean> {
+  const sockets = await io.in(`room:${roomId}`).fetchSockets();
+  const checked = new Set<string>(excludeUserId ? [excludeUserId] : []);
+  for (const s of sockets) {
+    const su = (s.data as { user?: { id: string; role: import("@thekeep/shared").Role } }).user;
+    if (!su || checked.has(su.id)) continue;
+    checked.add(su.id);
+    if (await callerCanEditRoom(db, su, roomId)) return true;
+  }
+  return false;
+}

@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   banAccount,
   fetchUserModeration,
   unbanAccount,
   type UserModeration,
 } from "../../lib/profileModeration.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { BanModal } from "./BanModal.js";
 
 function fmtTs(ts: number | null): string {
   if (ts == null) return "-";
-  try { return new Date(ts).toLocaleString(); } catch { return "-"; }
+  try { return formatDateTime(ts); } catch { return "-"; }
 }
 
 /**
@@ -30,6 +32,7 @@ export function AccountBanControl({
   canBan: boolean;
   onChanged?: (() => void) | undefined;
 }) {
+  const { t } = useTranslation("moderation");
   const [mod, setMod] = useState<UserModeration | null>(null);
   const [banOpen, setBanOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -58,7 +61,7 @@ export function AccountBanControl({
     if (busy) return;
     setBusy(true); setErr(null);
     try { await unbanAccount(userId); await refreshMod(); onChanged?.(); }
-    catch (e) { setErr(e instanceof Error ? e.message : "Unban failed."); }
+    catch (e) { setErr(e instanceof Error ? e.message : t("accountBan.unbanFailed")); }
     finally { setBusy(false); }
   }
 
@@ -67,10 +70,14 @@ export function AccountBanControl({
       {/* Active-ban banner */}
       {ban ? (
         <div className="rounded border border-[#e06070]/50 bg-[#e06070]/10 px-2.5 py-1.5 text-[11px] text-keep-text">
-          <span className="font-semibold text-[#e06070]">⛔ Banned</span>{" "}
-          {ban.bannedUntil ? <>until {fmtTs(ban.bannedUntil)}</> : <>permanently</>}
-          {ban.reason ? <>, “{ban.reason}”</> : null}
-          {ban.by ? <span className="text-keep-muted"> (by {ban.by})</span> : null}
+          <span className="font-semibold text-[#e06070]">{t("accountBan.banned")}</span>{" "}
+          {ban.bannedUntil
+            ? t("accountBan.bannedUntil", { time: fmtTs(ban.bannedUntil) })
+            : t("accountBan.bannedPermanently")}
+          {ban.reason ? t("accountBan.reasonSuffix", { reason: ban.reason }) : null}
+          {ban.by ? (
+            <span className="text-keep-muted"> {t("accountBan.bannedBy", { name: ban.by })}</span>
+          ) : null}
         </div>
       ) : null}
 
@@ -82,7 +89,7 @@ export function AccountBanControl({
             disabled={busy}
             className="rounded border border-keep-rule bg-keep-panel px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-keep-text hover:bg-keep-banner disabled:opacity-50"
           >
-            {busy ? "Working…" : "Unban"}
+            {busy ? t("accountBan.working") : t("accountBan.unban")}
           </button>
         ) : (
           <button
@@ -90,7 +97,7 @@ export function AccountBanControl({
             onClick={() => setBanOpen(true)}
             className="rounded border border-[#e06070]/60 bg-[#e06070]/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-[#e06070] hover:bg-[#e06070]/20"
           >
-            Ban
+            {t("accountBan.ban")}
           </button>
         )}
       </div>
@@ -100,19 +107,19 @@ export function AccountBanControl({
       {mod && mod.history.length > 0 ? (
         <details className="text-[11px] text-keep-muted">
           <summary className="cursor-pointer select-none uppercase tracking-widest">
-            Ban history ({mod.history.length})
+            {t("accountBan.historySummary", { count: mod.history.length })}
           </summary>
           <ul className="mt-1 flex flex-col gap-0.5">
             {mod.history.map((h, i) => (
               <li key={i} className="leading-snug">
                 <span className="text-keep-text">{fmtTs(h.at)}</span>{" "}
-                {h.action === "account_ban" ? (
-                  <>ban{h.until ? <> (until {fmtTs(h.until)})</> : <> (permanent)</>}</>
-                ) : (
-                  <>unban</>
-                )}{" "}
-                <span className="text-keep-muted">by {h.by}</span>
-                {h.reason ? <>, “{h.reason}”</> : null}
+                {h.action === "account_ban"
+                  ? h.until
+                    ? t("accountBan.historyBanUntil", { time: fmtTs(h.until) })
+                    : t("accountBan.historyBanPermanent")
+                  : t("accountBan.historyUnban")}{" "}
+                <span className="text-keep-muted">{t("accountBan.historyBy", { name: h.by })}</span>
+                {h.reason ? t("accountBan.reasonSuffix", { reason: h.reason }) : null}
               </li>
             ))}
           </ul>
@@ -131,7 +138,7 @@ export function AccountBanControl({
               await refreshMod();
               onChanged?.();
             } catch (e) {
-              setErr(e instanceof Error ? e.message : "Ban failed.");
+              setErr(e instanceof Error ? e.message : t("accountBan.banFailed"));
               throw e; // keep the modal open on failure
             } finally {
               setBusy(false);

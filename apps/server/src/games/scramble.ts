@@ -58,6 +58,7 @@ import {
   type BuiltinCommandReward,
 } from "./config.js";
 import { pickSourceWord, SCRAMBLE_DICTIONARY } from "./scrambleDictionary.js";
+import { tFor } from "../i18n.js";
 
 export const SCRAMBLE_KIND = "scramble";
 export const SCRAMBLE_COMMAND_NAME = "scramble";
@@ -176,6 +177,8 @@ export function isValidHostSourceWord(raw: string): boolean {
  */
 export function parseScrambleStartArgs(
   args: ReadonlyArray<string>,
+  /** Host's users.locale — the parse errors are host-facing notices. */
+  locale: string | null = null,
 ): { rounds: number; hostWords: string[] } | { error: string } {
   if (args.length === 0) {
     return { rounds: SCRAMBLE_DEFAULT_ROUNDS, hostWords: [] };
@@ -201,12 +204,21 @@ export function parseScrambleStartArgs(
   if (invalid.length > 0) {
     const list = invalid.map((w) => `"${w}"`).join(", ");
     return {
-      error: `Word${invalid.length === 1 ? "" : "s"} ${list} won't work as a source word. Use ${SCRAMBLE_MIN_HOST_WORD_LEN} to ${SCRAMBLE_MAX_HOST_WORD_LEN} letters, no digits or punctuation.`,
+      error: tFor(locale, "errors:server.scramble.badSourceWords", {
+        count: invalid.length,
+        list,
+        min: SCRAMBLE_MIN_HOST_WORD_LEN,
+        max: SCRAMBLE_MAX_HOST_WORD_LEN,
+      }),
     };
   }
   if (hostWords.length > rounds) {
     return {
-      error: `You gave ${hostWords.length} words but asked for ${rounds} rounds. Drop ${hostWords.length - rounds}, or raise the rounds count.`,
+      error: tFor(locale, "errors:server.scramble.tooManyWords", {
+        words: hostWords.length,
+        rounds,
+        drop: hostWords.length - rounds,
+      }),
     };
   }
   return { rounds, hostWords };

@@ -6,6 +6,7 @@
  * other types are world_entities. Bodies render `@kind:slug` cross-link chips.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   WorldDetail, WorldEntity, WorldEntityKindDef, WorldEntityLight, WorldMemberRef, WorldPage, WorldSession,
 } from "@thekeep/shared";
@@ -30,6 +31,7 @@ export interface KbMembership {
 }
 
 export function WorldKnowledgeBase({ worldId, detail, membership }: { worldId: string; detail: WorldDetail; membership?: KbMembership }) {
+  const { t } = useTranslation("worlds");
   const [view, setView] = useState<"overview" | "wiki">("overview");
   const [lens, setLens] = useState<WikiLens>("type");
   const [search, setSearch] = useState("");
@@ -48,8 +50,15 @@ export function WorldKnowledgeBase({ worldId, detail, membership }: { worldId: s
       key: k.key, label: k.label, description: k.description,
       icon: k.icon ?? "✦", color: k.color ?? "#8a8a8a", sortOrder: k.sortOrder, builtIn: false,
     }));
-    return [...BUILTIN_WORLD_ENTITY_KINDS, ...custom];
-  }, [detail.entityKinds]);
+    // Built-in kind labels/descriptions localize; custom kinds are the
+    // author's own text and render as written.
+    const builtIn: WorldEntityKindDef[] = BUILTIN_WORLD_ENTITY_KINDS.map((k) => ({
+      ...k,
+      label: t(`kinds.${k.key}.label`),
+      description: t(`kinds.${k.key}.description`),
+    }));
+    return [...builtIn, ...custom];
+  }, [detail.entityKinds, t]);
   const labelFor = (k: string) => kindDefs.find((d) => d.key === k)?.label ?? k;
   const countFor = (key: string) => key === "lore" ? detail.pages.length : detail.entities.filter((e) => e.kind === key).length;
 
@@ -77,22 +86,22 @@ export function WorldKnowledgeBase({ worldId, detail, membership }: { worldId: s
       hits.push({ label: e.name, sub: labelFor(e.kind), onClick: () => openEntry(e.kind, e.slug) });
     }
     for (const p of detail.pages) if (p.title.toLowerCase().includes(q)) {
-      hits.push({ label: p.title, sub: "Lore", onClick: () => openEntry("lore", p.slug) });
+      hits.push({ label: p.title, sub: t("kb.lore"), onClick: () => openEntry("lore", p.slug) });
     }
     for (const s of detail.sessions) if (s.title.toLowerCase().includes(q)) {
-      hits.push({ label: s.title, sub: "Session", onClick: () => { setView("wiki"); setLens("session"); setOpenSessionId(s.id); } });
+      hits.push({ label: s.title, sub: t("kb.session"), onClick: () => { setView("wiki"); setLens("session"); setOpenSessionId(s.id); } });
     }
     return hits.slice(0, 40);
-  }, [search, detail]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [search, detail, t]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const lenses: Array<[WikiLens, string]> = [["type", "By Type"], ["tag", "By Tag"], ["arc", "By Arc"], ["session", "By Session"]];
+  const lenses: Array<[WikiLens, string]> = [["type", t("kb.lensType")], ["tag", t("kb.lensTag")], ["arc", t("kb.lensArc")], ["session", t("kb.lensSession")]];
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Top nav: Overview | Wiki + search */}
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-keep-rule bg-keep-banner/30 px-3 py-1.5">
         <nav className="flex gap-1">
-          {([["overview", "Overview"], ["wiki", "Wiki"]] as const).map(([key, label]) => (
+          {([["overview", t("kb.tabOverview")], ["wiki", t("kb.tabWiki")]] as const).map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -108,14 +117,14 @@ export function WorldKnowledgeBase({ worldId, detail, membership }: { worldId: s
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search titles…"
+          placeholder={t("kb.searchPlaceholder")}
           className="ml-auto w-44 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
         />
       </div>
 
       {searchResults ? (
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          <ResultList title={`${searchResults.length} result${searchResults.length === 1 ? "" : "s"}`} rows={searchResults} />
+          <ResultList title={t("kb.results", { count: searchResults.length })} rows={searchResults} />
         </div>
       ) : view === "overview" ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -132,7 +141,7 @@ export function WorldKnowledgeBase({ worldId, detail, membership }: { worldId: s
         <>
           {/* Wiki control panel: sort world content by lens */}
           <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-keep-rule/60 bg-keep-bg/40 px-3 py-1.5">
-            <span className="mr-1 text-[10px] uppercase tracking-widest text-keep-muted">Sort by</span>
+            <span className="mr-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("kb.sortBy")}</span>
             {lenses.map(([key, label]) => (
               <button
                 key={key}
@@ -171,13 +180,6 @@ export function WorldKnowledgeBase({ worldId, detail, membership }: { worldId: s
 
 /* ---------- Overview ---------- */
 
-function titleCase(s: string): string {
-  return s.split(/[-_]/).map((w) => (w ? w[0]!.toUpperCase() + w.slice(1) : w)).join(" ");
-}
-function joinModeLabel(m: string): string {
-  return m === "application" ? "By application" : m === "invite-only" ? "Invite-only" : "Open";
-}
-
 function OverviewPanel({
   detail, kindDefs, countFor, labelFor, membership, onPickType, onPickTag, onPickArc, onGoWiki, onOpen,
 }: {
@@ -192,15 +194,16 @@ function OverviewPanel({
   onGoWiki: () => void;
   onOpen: (kind: string, slug: string) => void;
 }) {
+  const { t } = useTranslation("worlds");
   const w = detail.world;
   const recent = useMemo(() => {
     type R = { key: string; label: string; sub: string; updatedAt: number; onClick: () => void };
     const rows: R[] = [
       ...detail.entities.map((e) => ({ key: `e:${e.id}`, label: e.name, sub: labelFor(e.kind), updatedAt: e.updatedAt, onClick: () => onOpen(e.kind, e.slug) })),
-      ...detail.pages.map((p) => ({ key: `p:${p.id}`, label: p.title, sub: "Lore", updatedAt: p.updatedAt, onClick: () => onOpen("lore", p.slug) })),
+      ...detail.pages.map((p) => ({ key: `p:${p.id}`, label: p.title, sub: t("kb.lore"), updatedAt: p.updatedAt, onClick: () => onOpen("lore", p.slug) })),
     ];
     return rows.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
-  }, [detail, labelFor, onOpen]);
+  }, [detail, labelFor, onOpen, t]);
 
   const tagCounts = useMemo(() => {
     const m = new Map<string, number>();
@@ -213,20 +216,22 @@ function OverviewPanel({
     + detail.pages.filter((p) => p.arcId === arcId).length
     + detail.sessions.filter((s) => s.arcId === arcId).length;
 
+  // Fact VALUES for the closed enums map through the catalog (en values
+  // reproduce the old titleCase() output exactly); counts/dates stay raw.
   const facts: Array<[string, string]> = [];
-  if (w.genre) facts.push(["Genre", titleCase(w.genre)]);
-  if (w.pacing) facts.push(["Pacing", titleCase(w.pacing)]);
-  facts.push(["Status", titleCase(w.status)]);
-  facts.push(["Visibility", titleCase(w.visibility)]);
-  facts.push(["Join mode", joinModeLabel(w.joinMode ?? "open")]);
-  facts.push(["Members", String(w.memberCount)]);
-  facts.push(["Lore pages", String(w.pageCount)]);
-  facts.push(["Entries", String(detail.entities.length)]);
-  if (w.linkedRoomCount > 0) facts.push(["Linked rooms", String(w.linkedRoomCount)]);
-  facts.push(["Created", new Date(w.createdAt).toISOString().slice(0, 10)]);
+  if (w.genre) facts.push([t("overview.facts.genre"), t(`overview.factValues.genre.${w.genre}`)]);
+  if (w.pacing) facts.push([t("overview.facts.pacing"), t(`overview.factValues.pacing.${w.pacing}`)]);
+  facts.push([t("overview.facts.status"), t(`overview.factValues.status.${w.status}`)]);
+  facts.push([t("overview.facts.visibility"), t(`overview.factValues.visibility.${w.visibility}`)]);
+  facts.push([t("overview.facts.joinMode"), t(`overview.factValues.joinMode.${w.joinMode ?? "open"}`)]);
+  facts.push([t("overview.facts.members"), String(w.memberCount)]);
+  facts.push([t("overview.facts.lorePages"), String(w.pageCount)]);
+  facts.push([t("overview.facts.entries"), String(detail.entities.length)]);
+  if (w.linkedRoomCount > 0) facts.push([t("overview.facts.linkedRooms"), String(w.linkedRoomCount)]);
+  facts.push([t("overview.facts.created"), new Date(w.createdAt).toISOString().slice(0, 10)]);
 
   const vibe = WORLD_VIBE_AXES
-    .map((a) => ({ key: a.key, label: a.label, desc: a.desc, value: w.vibeStats[a.key] ?? null }))
+    .map((a) => ({ key: a.key, label: t(`vibeAxes.${a.key}.label`), desc: t(`vibeAxes.${a.key}.desc`), value: w.vibeStats[a.key] ?? null }))
     .filter((a) => a.value != null) as Array<{ key: string; label: string; desc: string; value: number }>;
 
   return (
@@ -244,11 +249,11 @@ function OverviewPanel({
       {/* About — contained, larger copy. Full-width so a short description
           doesn't leave a tall dead block beside the sidebar. */}
       <section className="rounded-lg border border-keep-rule/60 bg-keep-bg/40 p-4">
-        <h3 className="mb-1.5 text-[10px] uppercase tracking-widest text-keep-muted">About</h3>
+        <h3 className="mb-1.5 text-[10px] uppercase tracking-widest text-keep-muted">{t("overview.about")}</h3>
         {w.description ? (
           <p className="whitespace-pre-wrap text-base leading-relaxed">{w.description}</p>
         ) : (
-          <p className="italic text-keep-muted">This world has no description yet.</p>
+          <p className="italic text-keep-muted">{t("overview.noDescription")}</p>
         )}
         {(w.tags.length > 0 || w.contentWarnings.length > 0) ? (
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -268,7 +273,7 @@ function OverviewPanel({
 
       {vibe.length > 0 ? (
         <section className="rounded-lg border border-keep-rule/60 bg-keep-bg/40 p-4">
-          <h3 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">Vibe</h3>
+          <h3 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">{t("overview.vibe")}</h3>
           <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-2 lg:grid-cols-3">
             {vibe.map((a) => (
               <div key={a.key} title={a.desc}>
@@ -284,8 +289,8 @@ function OverviewPanel({
 
       <section>
         <div className="mb-2 flex items-baseline justify-between">
-          <h3 className="text-[10px] uppercase tracking-widest text-keep-muted">Contents</h3>
-          <button type="button" onClick={onGoWiki} className="text-[11px] text-keep-action hover:underline">Open wiki →</button>
+          <h3 className="text-[10px] uppercase tracking-widest text-keep-muted">{t("overview.contents")}</h3>
+          <button type="button" onClick={onGoWiki} className="text-[11px] text-keep-action hover:underline">{t("overview.openWiki")}</button>
         </div>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
           {kindDefs.map((d) => (
@@ -309,21 +314,21 @@ function OverviewPanel({
 
       {recent.length > 0 ? (
         <section>
-          <h3 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">Recently edited</h3>
+          <h3 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">{t("overview.recentlyEdited")}</h3>
           <ResultList rows={recent} />
         </section>
       ) : null}
 
       {detail.arcs.length > 0 ? (
         <section>
-          <h3 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">Arcs</h3>
+          <h3 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">{t("overview.arcs")}</h3>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {detail.arcs.map((a) => (
               <button key={a.id} type="button" onClick={() => onPickArc(a.id)} className="flex items-center gap-2 rounded-lg border border-keep-rule/60 bg-keep-bg/40 p-3 text-left hover:border-keep-action/50">
                 <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: a.color ?? "var(--keep-action)" }} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold">{a.title}</span>
-                  <span className="block text-[10px] uppercase tracking-widest text-keep-muted">{a.status}</span>
+                  <span className="block text-[10px] uppercase tracking-widest text-keep-muted">{t(`arcStatus.${a.status}`)}</span>
                 </span>
                 <span className="shrink-0 font-action text-lg tabular-nums">{arcCounts(a.id)}</span>
               </button>
@@ -334,7 +339,7 @@ function OverviewPanel({
 
       {tagCounts.length > 0 ? (
         <section>
-          <h3 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">Tags</h3>
+          <h3 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">{t("overview.tags")}</h3>
           <div className="flex flex-wrap gap-1.5">
             {tagCounts.map(([t, n]) => (
               <button key={t} type="button" onClick={() => onPickTag(t)} className="rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1 text-xs hover:border-keep-action/50">
@@ -363,6 +368,7 @@ function FactsCard({ facts }: { facts: Array<[string, string]> }) {
 
 /** Join / Apply / Invite-only / Leave card for the Overview. */
 function JoinCard({ detail, membership }: { detail: WorldDetail; membership: KbMembership }) {
+  const { t } = useTranslation("worlds");
   const w = detail.world;
   const wrap = (text: string, action: ReactNode) => (
     <div className="flex h-full flex-col justify-center rounded-lg border border-keep-action/40 bg-keep-action/5 p-4">
@@ -373,27 +379,27 @@ function JoinCard({ detail, membership }: { detail: WorldDetail; membership: KbM
   const btn = "keep-button rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-sm text-keep-action disabled:opacity-50";
 
   if (detail.viewerIsMember) {
-    return wrap("You're a member of this world.", (
-      <button type="button" disabled={membership.busy} onClick={membership.onLeave} className="keep-button rounded border border-keep-accent/50 px-3 py-1 text-sm text-keep-accent disabled:opacity-50">Leave world</button>
+    return wrap(t("joinCard.member"), (
+      <button type="button" disabled={membership.busy} onClick={membership.onLeave} className="keep-button rounded border border-keep-accent/50 px-3 py-1 text-sm text-keep-accent disabled:opacity-50">{t("joinCard.leaveWorld")}</button>
     ));
   }
   // joinMode drives the card, independent of visibility: resolveWorld already
   // gated who can SEE this world, so a public / link-shared world still joins or
   // applies here (a private one the viewer can't resolve never renders this).
-  if (!membership.isAuthenticated) return wrap("Sign in to join this world.", null);
+  if (!membership.isAuthenticated) return wrap(t("joinCard.signIn"), null);
   const joinMode = w.joinMode ?? "open";
   if (joinMode === "invite-only") {
-    return wrap("This world is invite-only. The author adds members directly. Message them if you'd like in.", null);
+    return wrap(t("joinCard.inviteOnly"), null);
   }
   if (joinMode === "application") {
     const app = detail.viewerApplication;
-    if (app && app.status === "pending") return wrap("Your application is pending the author's review.", null);
-    return wrap("This world accepts applications to join.", (
-      <button type="button" disabled={membership.busy} onClick={membership.onApply} className={btn}>{app && app.status === "rejected" ? "Reapply" : "Apply to join"}</button>
+    if (app && app.status === "pending") return wrap(t("joinCard.pending"), null);
+    return wrap(t("joinCard.acceptsApplications"), (
+      <button type="button" disabled={membership.busy} onClick={membership.onApply} className={btn}>{app && app.status === "rejected" ? t("actions.reapply") : t("joinCard.applyToJoin")}</button>
     ));
   }
-  return wrap("This world is open. Join as your current identity.", (
-    <button type="button" disabled={membership.busy} onClick={membership.onJoin} className={btn}>Join world</button>
+  return wrap(t("joinCard.open"), (
+    <button type="button" disabled={membership.busy} onClick={membership.onJoin} className={btn}>{t("joinCard.joinWorld")}</button>
   ));
 }
 
@@ -413,6 +419,7 @@ function TypePanel({
   setOpenEntityId: (id: string | null) => void;
   onOpenEntry: (kind: string, slug: string) => void;
 }) {
+  const { t } = useTranslation("worlds");
   const tree = useMemo(() => buildWorldTree(detail.pages), [detail.pages]);
   const selectedPage = detail.pages.find((p) => p.id === selectedPageId) ?? null;
   const entries = detail.entities.filter((e) => e.kind === activeKind);
@@ -430,7 +437,7 @@ function TypePanel({
       </aside>
       <section className="min-h-0 flex-1 p-4">
         {activeKind === "lore" ? (
-          tree.length === 0 ? <p className="italic text-keep-muted">No Lore pages yet.</p> : (
+          tree.length === 0 ? <p className="italic text-keep-muted">{t("kb.noLorePages")}</p> : (
             <div className="flex flex-col gap-4 md:flex-row">
               <div className="md:w-56 md:shrink-0">
                 <ViewerTree nodes={tree} selectedId={selectedPageId} onSelect={setSelectedPageId} />
@@ -443,7 +450,7 @@ function TypePanel({
         ) : openEntityId ? (
           <EntityDetail worldId={worldId} entityId={openEntityId} onBack={() => setOpenEntityId(null)} onOpenEntry={onOpenEntry} />
         ) : entries.length === 0 ? (
-          <p className="italic text-keep-muted">No entries of this kind.</p>
+          <p className="italic text-keep-muted">{t("kb.noEntriesOfKind")}</p>
         ) : (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {entries.map((e) => <EntityCard key={e.id} entity={e} onClick={() => setOpenEntityId(e.id)} />)}
@@ -459,6 +466,7 @@ function TypePanel({
 function TagPanel({ detail, labelFor, activeTag, setActiveTag, onOpen }: {
   detail: WorldDetail; labelFor: (k: string) => string; activeTag: string | null; setActiveTag: (t: string | null) => void; onOpen: (kind: string, slug: string) => void;
 }) {
+  const { t } = useTranslation("worlds");
   const tags = useMemo(() => {
     const m = new Map<string, number>();
     for (const e of detail.entities) for (const t of e.tags) m.set(t, (m.get(t) ?? 0) + 1);
@@ -473,7 +481,7 @@ function TagPanel({ detail, labelFor, activeTag, setActiveTag, onOpen }: {
             {t} <span className="tabular-nums text-keep-muted">{n}</span>
           </button>
         ))}
-        {tags.length === 0 ? <p className="italic text-keep-muted">No tagged entries yet.</p> : null}
+        {tags.length === 0 ? <p className="italic text-keep-muted">{t("kb.noTaggedEntries")}</p> : null}
       </div>
       {activeTag ? (
         <ResultList rows={matches.map((e) => ({ key: e.id, label: e.name, sub: labelFor(e.kind), onClick: () => onOpen(e.kind, e.slug) }))} />
@@ -488,27 +496,28 @@ function ArcPanel({ detail, labelFor, activeArc, setActiveArc, onOpen, onOpenSes
   detail: WorldDetail; labelFor: (k: string) => string; activeArc: string | null; setActiveArc: (a: string | null) => void;
   onOpen: (kind: string, slug: string) => void; onOpenSession: (id: string) => void;
 }) {
+  const { t } = useTranslation("worlds");
   const arc = activeArc ? detail.arcs.find((a) => a.id === activeArc) ?? null : null;
   const rows = useMemo(() => {
     if (!activeArc) return [];
     type R = { key: string; label: string; sub: string; onClick: () => void };
     const out: R[] = [
       ...detail.entities.filter((e) => e.arcId === activeArc).map((e) => ({ key: `e:${e.id}`, label: e.name, sub: labelFor(e.kind), onClick: () => onOpen(e.kind, e.slug) })),
-      ...detail.pages.filter((p) => p.arcId === activeArc).map((p) => ({ key: `p:${p.id}`, label: p.title, sub: "Lore", onClick: () => onOpen("lore", p.slug) })),
-      ...detail.sessions.filter((s) => s.arcId === activeArc).map((s) => ({ key: `s:${s.id}`, label: s.title, sub: "Session", onClick: () => onOpenSession(s.id) })),
+      ...detail.pages.filter((p) => p.arcId === activeArc).map((p) => ({ key: `p:${p.id}`, label: p.title, sub: t("kb.lore"), onClick: () => onOpen("lore", p.slug) })),
+      ...detail.sessions.filter((s) => s.arcId === activeArc).map((s) => ({ key: `s:${s.id}`, label: s.title, sub: t("kb.session"), onClick: () => onOpenSession(s.id) })),
     ];
     return out;
-  }, [activeArc, detail, labelFor, onOpen, onOpenSession]);
+  }, [activeArc, detail, labelFor, onOpen, onOpenSession, t]);
   return (
     <div className="space-y-3 p-4">
       <div className="flex flex-wrap gap-1.5">
         {detail.arcs.map((a) => (
           <button key={a.id} type="button" onClick={() => setActiveArc(a.id)} className={`flex items-center gap-1.5 rounded border px-2 py-1 text-xs ${activeArc === a.id ? "border-keep-action text-keep-action" : "border-keep-rule/60 hover:border-keep-action/50"}`}>
             <span className="inline-block h-2 w-2 rounded-full" style={{ background: a.color ?? "var(--keep-action)" }} />{a.title}
-            <span className="text-[10px] uppercase text-keep-muted">{a.status}</span>
+            <span className="text-[10px] uppercase text-keep-muted">{t(`arcStatus.${a.status}`)}</span>
           </button>
         ))}
-        {detail.arcs.length === 0 ? <p className="italic text-keep-muted">No arcs yet.</p> : null}
+        {detail.arcs.length === 0 ? <p className="italic text-keep-muted">{t("kb.noArcs")}</p> : null}
       </div>
       {arc ? (
         <>
@@ -525,12 +534,13 @@ function ArcPanel({ detail, labelFor, activeArc, setActiveArc, onOpen, onOpenSes
 function SessionPanel({ worldId, detail, openSessionId, setOpenSessionId, onOpenEntry }: {
   worldId: string; detail: WorldDetail; openSessionId: string | null; setOpenSessionId: (id: string | null) => void; onOpenEntry: (kind: string, slug: string) => void;
 }) {
+  const { t } = useTranslation("worlds");
   if (openSessionId) {
     return <div className="p-4"><SessionDetail worldId={worldId} sessionId={openSessionId} onBack={() => setOpenSessionId(null)} onOpenEntry={onOpenEntry} /></div>;
   }
   return (
     <div className="p-4">
-      {detail.sessions.length === 0 ? <p className="italic text-keep-muted">No sessions logged yet.</p> : (
+      {detail.sessions.length === 0 ? <p className="italic text-keep-muted">{t("kb.noSessions")}</p> : (
         <ul className="space-y-1">
           {detail.sessions.map((s) => {
             const arc = s.arcId ? detail.arcs.find((a) => a.id === s.arcId) : null;
@@ -556,10 +566,11 @@ function SessionPanel({ worldId, detail, openSessionId, setOpenSessionId, onOpen
 /* ---------- Shared building blocks ---------- */
 
 function ResultList({ title, rows }: { title?: string; rows: Array<{ key?: string; label: string; sub: string; onClick: () => void }> }) {
+  const { t } = useTranslation("worlds");
   return (
     <div className="space-y-1">
       {title ? <div className="text-[10px] uppercase tracking-widest text-keep-muted">{title}</div> : null}
-      {rows.length === 0 ? <p className="italic text-keep-muted">Nothing here.</p> : (
+      {rows.length === 0 ? <p className="italic text-keep-muted">{t("kb.nothingHere")}</p> : (
         <ul className="space-y-1">
           {rows.map((r, i) => (
             <li key={r.key ?? i}>
@@ -588,20 +599,23 @@ function EntityCard({ entity, onClick }: { entity: WorldEntityLight; onClick: ()
 }
 
 function EntityDetail({ worldId, entityId, onBack, onOpenEntry }: { worldId: string; entityId: string; onBack: () => void; onOpenEntry: (kind: string, slug: string) => void }) {
+  const { t } = useTranslation("worlds");
   const [entity, setEntity] = useState<WorldEntity | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     setEntity(null); setErr(null);
-    fetchWorldEntity(worldId, entityId).then((e) => { if (alive) setEntity(e); }).catch((x) => { if (alive) setErr(x instanceof Error ? x.message : "load failed"); });
+    fetchWorldEntity(worldId, entityId).then((e) => { if (alive) setEntity(e); }).catch((x) => { if (alive) setErr(x instanceof Error ? x.message : t("errors.loadFailed")); });
     return () => { alive = false; };
+    // `t` deliberately omitted: a language flip must not refetch the entry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worldId, entityId]);
   if (err) return <p className="text-xs text-keep-accent">{err}</p>;
-  if (!entity) return <p className="italic text-keep-muted">Loading…</p>;
+  if (!entity) return <p className="italic text-keep-muted">{t("common:loading")}</p>;
   const stats = Object.entries(entity.stats);
   return (
     <article id={anchorIdFor(entity.kind, entity.slug)}>
-      <button type="button" onClick={onBack} className="mb-2 text-xs text-keep-muted hover:text-keep-action">← Back</button>
+      <button type="button" onClick={onBack} className="mb-2 text-xs text-keep-muted hover:text-keep-action">{t("kb.back")}</button>
       <div className="flex items-start gap-3">
         {entity.imageUrl ? <img src={entity.imageUrl} alt="" className="h-20 w-20 shrink-0 rounded border border-keep-rule/40 object-cover" /> : null}
         <div className="min-w-0">
@@ -625,19 +639,22 @@ function EntityDetail({ worldId, entityId, onBack, onOpenEntry }: { worldId: str
 }
 
 function SessionDetail({ worldId, sessionId, onBack, onOpenEntry }: { worldId: string; sessionId: string; onBack: () => void; onOpenEntry: (kind: string, slug: string) => void }) {
+  const { t } = useTranslation("worlds");
   const [session, setSession] = useState<WorldSession | null>(null);
   const [err, setErr] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     setSession(null); setErr(null);
-    fetchWorldSession(worldId, sessionId).then((s) => { if (alive) setSession(s); }).catch((x) => { if (alive) setErr(x instanceof Error ? x.message : "load failed"); });
+    fetchWorldSession(worldId, sessionId).then((s) => { if (alive) setSession(s); }).catch((x) => { if (alive) setErr(x instanceof Error ? x.message : t("errors.loadFailed")); });
     return () => { alive = false; };
+    // `t` deliberately omitted: a language flip must not refetch the log.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worldId, sessionId]);
   if (err) return <p className="text-xs text-keep-accent">{err}</p>;
-  if (!session) return <p className="italic text-keep-muted">Loading…</p>;
+  if (!session) return <p className="italic text-keep-muted">{t("common:loading")}</p>;
   return (
     <article>
-      <button type="button" onClick={onBack} className="mb-2 text-xs text-keep-muted hover:text-keep-action">← Back</button>
+      <button type="button" onClick={onBack} className="mb-2 text-xs text-keep-muted hover:text-keep-action">{t("kb.back")}</button>
       <h3 className="font-action text-xl">{session.title}</h3>
       {session.sessionDate ? <p className="text-[11px] tabular-nums text-keep-muted">{new Date(session.sessionDate).toISOString().slice(0, 10)}</p> : null}
       {session.summary ? <p className="mt-1 text-sm text-keep-muted">{session.summary}</p> : null}
@@ -648,6 +665,7 @@ function SessionDetail({ worldId, sessionId, onBack, onOpenEntry }: { worldId: s
 
 /** Sanitized + legibility-nudged HTML body with `@kind:slug` chips wired. */
 function BodyHtml({ html, onOpenEntry, className }: { html: string; onOpenEntry: (kind: string, slug: string) => void; className?: string }) {
+  const { t } = useTranslation("worlds");
   const themeBg = useActiveTheme().bg;
   const ref = useRef<HTMLDivElement | null>(null);
   const safe = useMemo(() => html.trim() ? legibleHtmlColors(sanitizeUserHtml(html), themeBg) : "", [html, themeBg]);
@@ -659,7 +677,7 @@ function BodyHtml({ html, onOpenEntry, className }: { html: string; onOpenEntry:
     el.addEventListener("click", handler);
     return () => el.removeEventListener("click", handler);
   }, [safe, onOpenEntry]);
-  if (!safe) return <p className="italic text-keep-muted">Nothing written here yet.</p>;
+  if (!safe) return <p className="italic text-keep-muted">{t("kb.nothingWritten")}</p>;
   return (
     <div
       ref={ref}
@@ -670,7 +688,8 @@ function BodyHtml({ html, onOpenEntry, className }: { html: string; onOpenEntry:
 }
 
 function PageView({ page, onOpenEntry }: { page: WorldPage | null; onOpenEntry: (kind: string, slug: string) => void }) {
-  if (!page) return <p className="italic text-keep-muted">Pick a Lore page.</p>;
+  const { t } = useTranslation("worlds");
+  if (!page) return <p className="italic text-keep-muted">{t("kb.pickLorePage")}</p>;
   return (
     <article id={anchorIdFor("lore", page.slug)}>
       <h3 className="mb-2 font-action text-xl">{page.title}</h3>
@@ -697,17 +716,18 @@ function ViewerTree({ nodes, selectedId, onSelect }: { nodes: WorldTreeNode[]; s
 }
 
 function MemberGallery({ members }: { members: WorldMemberRef[] }) {
+  const { t } = useTranslation("worlds");
   if (members.length === 0) return null;
   return (
-    <section aria-label="World members">
+    <section aria-label={t("kb.membersRegion")}>
       <header className="mb-1.5 flex items-baseline justify-between">
-        <span className="text-[10px] uppercase tracking-widest text-keep-muted">Members</span>
+        <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("kb.members")}</span>
         <span className="text-[10px] text-keep-muted">{members.length}</span>
       </header>
       <div className="flex flex-wrap gap-2 overflow-hidden" style={{ maxHeight: 96 }}>
         {members.map((m) => {
           const cropStyle = cropStyleFor(m.avatarCrop);
-          const title = m.characterId !== null ? `${m.displayName} (${m.username})` : m.displayName;
+          const title = m.characterId !== null ? t("kb.memberTitle", { name: m.displayName, username: m.username }) : m.displayName;
           return (
             <span key={m.userId} title={title} className="relative inline-block h-9 w-9 shrink-0 overflow-hidden rounded-full border border-keep-rule bg-keep-bg">
               {m.avatarUrl ? (

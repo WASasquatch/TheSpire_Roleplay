@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type { EmoticonSheet } from "@thekeep/shared";
 import { EMOTICON_SHEET_CELL_COUNT, isEmoticonCellEmpty } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
@@ -27,6 +28,7 @@ import {
  * hash → new URL → busts any picker cache.
  */
 export function AdminEmoticonsTab() {
+  const { t } = useTranslation("admin");
   const sheets = useEmoticons((s) => s.sheets);
   const [creatingOpen, setCreatingOpen] = useState(false);
 
@@ -46,9 +48,9 @@ export function AdminEmoticonsTab() {
 
       <header className="flex items-center justify-between gap-2">
         <div>
-          <h3 className="font-action text-base">Emoticon sheets</h3>
+          <h3 className="font-action text-base">{t("emoticons.title")}</h3>
           <p className="text-xs text-keep-muted">
-            Each sheet is a 4×4 grid. The bottom row is reserved for future cells, leave any label blank or "empty" to hide a cell from the picker.
+            {t("emoticons.description")}
           </p>
         </div>
         <button
@@ -56,7 +58,7 @@ export function AdminEmoticonsTab() {
           onClick={() => setCreatingOpen((v) => !v)}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg"
         >
-          {creatingOpen ? "Cancel" : "+ New sheet"}
+          {creatingOpen ? t("common:cancel") : t("emoticons.newSheet")}
         </button>
       </header>
 
@@ -71,7 +73,7 @@ export function AdminEmoticonsTab() {
 
       {sheets.length === 0 ? (
         <p className="rounded border border-keep-rule bg-keep-panel/30 p-3 text-xs italic text-keep-muted">
-          No emoticon sheets installed yet.
+          {t("emoticons.noSheets")}
         </p>
       ) : (
         <ul className="space-y-3">
@@ -90,6 +92,7 @@ export function AdminEmoticonsTab() {
  *  Create form, slug + name + cells + image upload
  * ============================================================= */
 function CreateSheetForm({ onCreated }: { onCreated: () => void }) {
+  const { t } = useTranslation("admin");
   const [slug, setSlug] = useState("");
   const [name, setName] = useState("");
   const [cells, setCells] = useState<string[]>(() => new Array(EMOTICON_SHEET_CELL_COUNT).fill(""));
@@ -116,7 +119,7 @@ function CreateSheetForm({ onCreated }: { onCreated: () => void }) {
     setBusy(true);
     setErr(null);
     try {
-      if (!imageDataUrl) throw new Error("upload a sheet image first");
+      if (!imageDataUrl) throw new Error(t("emoticons.noImageError"));
       const r = await fetch("/admin/emoticons/sheets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -126,7 +129,7 @@ function CreateSheetForm({ onCreated }: { onCreated: () => void }) {
       if (!r.ok) throw new Error(await readError(r));
       onCreated();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "create failed");
+      setErr(e instanceof Error ? e.message : t("createFailed"));
     } finally {
       setBusy(false);
     }
@@ -134,25 +137,25 @@ function CreateSheetForm({ onCreated }: { onCreated: () => void }) {
 
   return (
     <div className="rounded border border-keep-action/40 bg-keep-panel/30 p-3 space-y-3">
-      <h4 className="font-action text-sm">New emoticon sheet</h4>
+      <h4 className="font-action text-sm">{t("emoticons.newSheetTitle")}</h4>
       {err ? <p className="text-xs text-keep-accent">{err}</p> : null}
       <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
         <label className="block text-xs">
-          <span className="block uppercase tracking-widest text-keep-muted">Slug</span>
+          <span className="block uppercase tracking-widest text-keep-muted">{t("emoticons.slugLabel")}</span>
           <input
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
-            placeholder="e.g. orc-default"
+            placeholder={t("emoticons.slugPlaceholder")}
             className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
             maxLength={40}
           />
         </label>
         <label className="block text-xs">
-          <span className="block uppercase tracking-widest text-keep-muted">Display name</span>
+          <span className="block uppercase tracking-widest text-keep-muted">{t("emoticons.displayNameLabel")}</span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Orc"
+            placeholder={t("emoticons.displayNamePlaceholder")}
             className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
             maxLength={80}
           />
@@ -160,7 +163,7 @@ function CreateSheetForm({ onCreated }: { onCreated: () => void }) {
       </div>
       <div>
         <label className="block text-xs">
-          <span className="block uppercase tracking-widest text-keep-muted">Sheet image (PNG / JPG / WebP / GIF, 4×4 grid)</span>
+          <span className="block uppercase tracking-widest text-keep-muted">{t("emoticons.imageLabel")}</span>
           <input
             type="file"
             accept="image/png,image/jpeg,image/webp,image/gif"
@@ -171,7 +174,7 @@ function CreateSheetForm({ onCreated }: { onCreated: () => void }) {
         {imageDataUrl ? (
           <img
             src={imageDataUrl}
-            alt="preview"
+            alt={t("emoticons.previewAlt")}
             className="mt-2 max-h-48 rounded border border-keep-rule object-contain"
           />
         ) : null}
@@ -184,7 +187,7 @@ function CreateSheetForm({ onCreated }: { onCreated: () => void }) {
           disabled={busy || !slug.trim() || !name.trim() || !imageDataUrl}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          {busy ? "Creating..." : "Create sheet"}
+          {busy ? t("emoticons.creating") : t("emoticons.createSheet")}
         </button>
       </div>
     </div>
@@ -195,6 +198,7 @@ function CreateSheetForm({ onCreated }: { onCreated: () => void }) {
  *  Per-sheet editor, labels, replace image, delete
  * ============================================================= */
 function SheetEditor({ sheet }: { sheet: EmoticonSheet }) {
+  const { t } = useTranslation("admin");
   const [name, setName] = useState(sheet.name);
   const [cells, setCells] = useState<string[]>(sheet.cells);
   const [busy, setBusy] = useState(false);
@@ -234,7 +238,7 @@ function SheetEditor({ sheet }: { sheet: EmoticonSheet }) {
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 2000);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "save failed");
+      setErr(e instanceof Error ? e.message : t("saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -255,7 +259,7 @@ function SheetEditor({ sheet }: { sheet: EmoticonSheet }) {
 
   async function del() {
     if (!window.confirm(
-      `Delete "${sheet.name}" (${sheet.slug})? Every reaction placed with this sheet on any chat message, DM, or forum post will also be removed. Cannot be undone.`,
+      t("emoticons.deleteConfirm", { name: sheet.name, slug: sheet.slug }),
     )) return;
     setBusy(true);
     setErr(null);
@@ -267,7 +271,7 @@ function SheetEditor({ sheet }: { sheet: EmoticonSheet }) {
       if (!r.ok) throw new Error(await readError(r));
       await fetchEmoticonCatalog();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "delete failed");
+      setErr(e instanceof Error ? e.message : t("deleteFailed"));
       setBusy(false);
     }
   }
@@ -283,7 +287,7 @@ function SheetEditor({ sheet }: { sheet: EmoticonSheet }) {
             maxLength={80}
           />
           <p className="mt-0.5 truncate text-[10px] font-mono text-keep-muted">
-            slug: {sheet.slug} · image: {sheet.imageUrl}
+            {t("emoticons.slugImageLine", { slug: sheet.slug, image: sheet.imageUrl })}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -300,7 +304,7 @@ function SheetEditor({ sheet }: { sheet: EmoticonSheet }) {
             disabled={busy}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50"
           >
-            Replace image
+            {t("emoticons.replaceImage")}
           </button>
           <button
             type="button"
@@ -308,7 +312,7 @@ function SheetEditor({ sheet }: { sheet: EmoticonSheet }) {
             disabled={busy}
             className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
           >
-            {busy ? "Saving..." : savedFlash ? "Saved" : "Save"}
+            {busy ? t("common:savingDots") : savedFlash ? t("emoticons.saved") : t("common:save")}
           </button>
           <button
             type="button"
@@ -316,7 +320,7 @@ function SheetEditor({ sheet }: { sheet: EmoticonSheet }) {
             disabled={busy}
             className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2 py-1 text-[11px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
           >
-            Delete
+            {t("common:delete")}
           </button>
         </div>
       </header>
@@ -345,10 +349,11 @@ function CellLabelEditor({
    *  create flow, the sheet doesn't exist in the catalog yet. */
   sheetSlug?: string;
 }) {
+  const { t } = useTranslation("admin");
   return (
     <div>
       <p className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
-        Cell labels (4×4, row-major). Empty or "empty" = hidden from picker.
+        {t("emoticons.cellLabelsHelp")}
       </p>
       <div className="grid grid-cols-4 gap-1">
         {cells.map((label, i) => {
@@ -370,7 +375,7 @@ function CellLabelEditor({
               <input
                 value={label}
                 onChange={(e) => onChange(i, e.target.value)}
-                placeholder="label"
+                placeholder={t("emoticons.cellPlaceholder")}
                 maxLength={40}
                 className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-1 py-0.5 text-xs"
               />
@@ -392,6 +397,7 @@ function CellLabelEditor({
  *  the asset file.
  * ============================================================= */
 function SubmissionsQueue() {
+  const { t } = useTranslation("admin");
   const [rows, setRows] = useState<AdminEmoticonSubmission[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -404,7 +410,7 @@ function SubmissionsQueue() {
       const r = await fetchAdminEmoticonSubmissions();
       setRows(r.submissions);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to load submissions");
+      setErr(e instanceof Error ? e.message : t("emoticons.loadSubmissionsFailed"));
     } finally {
       setLoading(false);
     }
@@ -423,7 +429,7 @@ function SubmissionsQueue() {
       // via socket and re-fetch).
       await fetchEmoticonCatalog();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Approve failed");
+      setErr(e instanceof Error ? e.message : t("emoticons.approveFailed"));
     } finally {
       setBusyId(null);
     }
@@ -431,7 +437,7 @@ function SubmissionsQueue() {
 
   async function reject(row: AdminEmoticonSubmission) {
     const reason = window.prompt(
-      `Reject "${row.name}" from ${row.submitterLabel}?\n\nOptional reason (shown to the submitter):`,
+      t("emoticons.rejectPrompt", { name: row.name, submitter: row.submitterLabel }),
       "",
     );
     // null = cancel; empty string = reject without a reason
@@ -443,9 +449,9 @@ function SubmissionsQueue() {
       await refresh();
       // Quick toast so the admin sees the refund landed.
       // eslint-disable-next-line no-alert
-      window.alert(`Rejected. Refunded ${r.refundedAmount} Currency to the submitter.`);
+      window.alert(t("emoticons.rejectedAlert", { amount: r.refundedAmount }));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Reject failed");
+      setErr(e instanceof Error ? e.message : t("emoticons.rejectFailed"));
     } finally {
       setBusyId(null);
     }
@@ -458,9 +464,9 @@ function SubmissionsQueue() {
     <section className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="font-action text-base">User submissions</h3>
+          <h3 className="font-action text-base">{t("emoticons.submissionsTitle")}</h3>
           <p className="text-xs text-keep-muted">
-            Reject refunds the paid Currency and deletes the image. Approve makes the sheet live for everyone.
+            {t("emoticons.submissionsDescription")}
           </p>
         </div>
         <button
@@ -468,7 +474,7 @@ function SubmissionsQueue() {
           onClick={() => void refresh()}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner"
         >
-          Refresh
+          {t("refresh")}
         </button>
       </header>
       {err ? (
@@ -477,14 +483,14 @@ function SubmissionsQueue() {
         </div>
       ) : null}
       {loading ? (
-        <p className="text-xs text-keep-muted">Loading…</p>
+        <p className="text-xs text-keep-muted">{t("common:loading")}</p>
       ) : (
         <>
           <div className="text-[10px] uppercase tracking-widest text-keep-muted">
-            Pending ({pending.length})
+            {t("emoticons.pendingCount", { count: pending.length })}
           </div>
           {pending.length === 0 ? (
-            <p className="text-xs italic text-keep-muted">Nothing waiting for review.</p>
+            <p className="text-xs italic text-keep-muted">{t("emoticons.nothingPending")}</p>
           ) : (
             <ul className="space-y-2">
               {pending.map((r) => (
@@ -501,7 +507,7 @@ function SubmissionsQueue() {
           {recent.length > 0 ? (
             <>
               <div className="mt-3 text-[10px] uppercase tracking-widest text-keep-muted">
-                Recently reviewed
+                {t("emoticons.recentlyReviewed")}
               </div>
               <ul className="space-y-2">
                 {recent.map((r) => (
@@ -527,6 +533,7 @@ function SubmissionRow({
   onApprove?: () => void;
   onReject?: () => void;
 }) {
+  const { t } = useTranslation("admin");
   return (
     <li className="flex flex-wrap items-center gap-2 rounded border border-keep-rule p-2 text-xs">
       {row.status !== "rejected" ? (
@@ -540,7 +547,7 @@ function SubmissionRow({
         />
       ) : (
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-banner/40 text-[10px] uppercase text-keep-muted">
-          Rejected
+          {t("emoticons.rejectedBox")}
         </div>
       )}
       <div className="min-w-0 flex-1">
@@ -548,12 +555,12 @@ function SubmissionRow({
           {row.name} <span className="text-keep-muted">· {row.slug}</span>
         </div>
         <div className="text-[10px] text-keep-muted">
-          By {row.submitterLabel} · {row.costPaid != null ? `${row.costPaid} Currency` : "no cost recorded"}
-          {row.status !== "pending" ? ` · ${row.status}` : ""}
+          {t("emoticons.byUser", { name: row.submitterLabel })} · {row.costPaid != null ? t("emoticons.costPaid", { cost: row.costPaid }) : t("emoticons.noCost")}
+          {row.status !== "pending" ? ` · ${t(`emoticons.status.${row.status}`)}` : ""}
         </div>
         {row.rejectionReason ? (
           <div className="text-[10px] italic text-keep-accent">
-            Reason: {row.rejectionReason}
+            {t("emoticons.reason", { reason: row.rejectionReason })}
           </div>
         ) : null}
       </div>
@@ -565,7 +572,7 @@ function SubmissionRow({
             disabled={busy}
             className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
           >
-            Approve
+            {t("emoticons.approve")}
           </button>
           <button
             type="button"
@@ -573,7 +580,7 @@ function SubmissionRow({
             disabled={busy}
             className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
           >
-            Reject
+            {t("emoticons.reject")}
           </button>
         </div>
       ) : null}

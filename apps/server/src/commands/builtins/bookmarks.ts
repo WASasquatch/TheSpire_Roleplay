@@ -1,3 +1,4 @@
+import { tFor } from "../../i18n.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -18,7 +19,7 @@ export const bookmarksCommand: CommandHandler = {
     if (ctx.argsText.trim()) {
       ctx.socket.emit("error:notice", {
         code: "NO_ARGS",
-        message: "/bookmarks takes no arguments. Open the modal and edit categories there.",
+        message: tFor(ctx.user.locale, "commands:bookmarks.noArgs"),
       });
       return;
     }

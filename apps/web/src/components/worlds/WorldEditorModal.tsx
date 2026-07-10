@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type {
   Theme,
   WorldApplicationEntry,
@@ -29,6 +30,7 @@ import {
   removeWorldCollaborator,
   type WorldTreeNode,
 } from "../../lib/worlds.js";
+import { formatDateTime, formatTime } from "../../lib/intlFormat.js";
 import { readError } from "../../lib/http.js";
 import { ActiveThemeContext, themeStyle, useActiveTheme } from "../../lib/theme.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
@@ -52,6 +54,7 @@ interface Props {
  * tree refetches on every mutation so sortOrder/parent moves stay in sync.
  */
 export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
+  const { t } = useTranslation("worlds");
   const [detail, setDetail] = useState<WorldDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(null);
@@ -72,7 +75,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
         setSelectedPageId(null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     }
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [worldId]);
@@ -83,7 +86,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
   async function deleteWorld() {
     if (!detail) return;
     if (!window.confirm(
-      `Delete "${detail.world.name}"? This cascades to all ${detail.world.pageCount} pages and removes any room links. Cannot be undone.`,
+      t("confirmDeleteWorld", { name: detail.world.name, pages: detail.world.pageCount }),
     )) return;
     try {
       const r = await fetch(`/worlds/${worldId}`, { method: "DELETE", credentials: "include" });
@@ -91,14 +94,16 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
       onDeleted?.();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "delete failed");
+      setError(e instanceof Error ? e.message : t("errors.deleteFailed"));
     }
   }
 
   async function deletePage(p: WorldPage) {
     const childCount = detail?.pages.filter((x) => x.parentPageId === p.id).length ?? 0;
-    const tail = childCount > 0 ? ` and its ${childCount} child page${childCount === 1 ? "" : "s"}` : "";
-    if (!window.confirm(`Delete "${p.title}"${tail}? Cannot be undone.`)) return;
+    const msg = childCount > 0
+      ? t("editor.confirmDeletePageChildren", { title: p.title, count: childCount })
+      : t("editor.confirmDeletePage", { title: p.title });
+    if (!window.confirm(msg)) return;
     try {
       const r = await fetch(`/worlds/${worldId}/pages/${p.id}`, {
         method: "DELETE",
@@ -108,7 +113,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
       if (selectedPageId === p.id) setSelectedPageId(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "delete failed");
+      setError(e instanceof Error ? e.message : t("errors.deleteFailed"));
     }
   }
 
@@ -128,7 +133,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
           <h2 className="font-action text-lg">
-            {detail ? `Edit world: ${detail.world.name}` : "Edit world"}
+            {detail ? t("editor.titleNamed", { name: detail.world.name }) : t("editor.title")}
             {detail ? <span className="ml-2 text-xs text-keep-muted">/{detail.world.slug}</span> : null}
           </h2>
           <CloseButton onClick={onClose} />
@@ -141,20 +146,20 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
         ) : null}
 
         {detail === null ? (
-          <p className="p-4 italic text-keep-muted">Loading...</p>
+          <p className="p-4 italic text-keep-muted">{t("common:loadingDots")}</p>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col md:flex-row">
             {/* Left: page tree */}
             <aside className="flex shrink-0 flex-col border-keep-rule md:w-72 md:border-r">
               <div className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-1.5 text-xs">
-                <span className="uppercase tracking-widest text-keep-muted">Pages</span>
+                <span className="uppercase tracking-widest text-keep-muted">{t("editor.pages")}</span>
                 <button
                   type="button"
                   onClick={() => { setCreatingUnderParent("root"); setSelectedPageId(null); setKbView(null); }}
                   className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[11px] hover:bg-keep-banner"
-                  title="Add a top-level Lore page"
+                  title={t("editor.addPageTitle")}
                 >
-                  + Page
+                  {t("editor.addPage")}
                 </button>
               </div>
               <div className="min-h-0 flex-1 overflow-y-auto p-1 text-sm">
@@ -167,12 +172,12 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
                       : "text-keep-muted hover:bg-keep-muted/25"
                   }`}
                 >
-                  World settings
+                  {t("editor.worldSettings")}
                 </button>
                 {([
-                  ["entries", "Knowledge base", "Locations, NPCs, Items, Factions, custom kinds"],
-                  ["arcs", "Arcs", "Storyline groupings"],
-                  ["sessions", "Sessions", "Chronological session logs"],
+                  ["entries", t("editor.navEntries"), t("editor.navEntriesTitle")],
+                  ["arcs", t("editor.navArcs"), t("editor.navArcsTitle")],
+                  ["sessions", t("editor.navSessions"), t("editor.navSessionsTitle")],
                 ] as const).map(([key, label, title]) => (
                   <button
                     key={key}
@@ -186,9 +191,9 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
                     {label}
                   </button>
                 ))}
-                <div className="mt-1 border-t border-keep-rule/40 pt-1 text-[10px] uppercase tracking-widest text-keep-muted">Lore pages</div>
+                <div className="mt-1 border-t border-keep-rule/40 pt-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("editor.lorePages")}</div>
                 {tree.length === 0 ? (
-                  <p className="p-2 italic text-keep-muted">No pages yet.</p>
+                  <p className="p-2 italic text-keep-muted">{t("editor.noPages")}</p>
                 ) : (
                   <PageTree
                     nodes={tree}
@@ -265,6 +270,7 @@ function PageTree({
   onSelect: (id: string) => void;
   onAddChild: (parentId: string) => void;
 }) {
+  const { t } = useTranslation("worlds");
   return (
     <ul className="space-y-0.5">
       {nodes.map((n) => (
@@ -288,7 +294,7 @@ function PageTree({
                 type="button"
                 onClick={() => onAddChild(n.page.id)}
                 className="hidden rounded border border-keep-rule bg-keep-bg px-1 text-[10px] text-keep-muted hover:bg-keep-banner group-hover:inline"
-                title="Add child page"
+                title={t("editor.addChildTitle")}
               >
                 +
               </button>
@@ -323,6 +329,7 @@ function WorldMetaEditor({
   onSaved: () => Promise<void> | void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("worlds");
   const w = detail.world;
   // "Can manage collaborators", computed client-side so the panel
   // works even when the server response predates the viewerIsOwner
@@ -331,14 +338,21 @@ function WorldMetaEditor({
   // server's POST/DELETE /worlds/:id/collaborators gate so the UI
   // doesn't show controls that would 403 on submit.
   const me = useChat((s) => s.me);
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
   const myId = me?.id ?? null;
   const canManageCollaborators =
     (!!myId && myId === w.ownerUserId)
     || (!!me && me.permissions.includes("edit_others_world"));
+  // The "18+ world" flag is owner-set (or edit_others_world staff) and
+  // adults only — the server rejects everyone else, so the checkbox
+  // simply doesn't render for viewers who can't flip it (age plan
+  // Phase 4; collaborators edit pages, not the world's rating).
+  const canSetNsfw = viewerIsAdult && canManageCollaborators;
   const [name, setName] = useState(w.name);
   const [slug, setSlug] = useState(w.slug);
   const [description, setDescription] = useState(w.description ?? "");
   const [visibility, setVisibility] = useState<WorldVisibility>(w.visibility);
+  const [isNsfw, setIsNsfw] = useState<boolean>(w.isNsfw ?? false);
   // null = "no theme set" (fall back to viewer's chat theme); a Theme object
   // = author has explicit colors. Both states need to round-trip via PATCH.
   const [theme, setTheme] = useState<Theme | null>(w.theme);
@@ -397,6 +411,7 @@ function WorldMetaEditor({
       if (slug.trim() && slug.trim().toLowerCase() !== w.slug) body.slug = slug.trim().toLowerCase();
       if ((description.trim() || null) !== w.description) body.description = description.trim() || null;
       if (visibility !== w.visibility) body.visibility = visibility;
+      if (isNsfw !== (w.isNsfw ?? false)) body.isNsfw = isNsfw;
       // Theme diff: stringify-compare so we only send when something actually
       // changed. Null vs null is a no-op; null vs Theme (or vice versa) writes.
       if (JSON.stringify(theme) !== JSON.stringify(w.theme)) body.theme = theme;
@@ -442,7 +457,7 @@ function WorldMetaEditor({
       setSavedAt(Date.now());
       await onSaved();
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "save failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -450,15 +465,13 @@ function WorldMetaEditor({
 
   return (
     <form onSubmit={submit} className="space-y-3 text-xs">
-      <h3 className="font-action text-base">World settings</h3>
+      <h3 className="font-action text-base">{t("editor.worldSettings")}</h3>
       <p className="text-[11px] text-keep-muted">
-        {detail.pages.length} {detail.pages.length === 1 ? "page" : "pages"}. Visibility controls who can read this
-        world: private = only you, public = anyone with the URL, open = also listed in the catalog and linkable from
-        other people's rooms.
+        {t("editor.metaIntro", { count: detail.pages.length })}
       </p>
 
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Name</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.name")}</span>
         <input
           type="text"
           value={name}
@@ -468,7 +481,7 @@ function WorldMetaEditor({
         />
       </label>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Slug</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.slug")}</span>
         <input
           type="text"
           value={slug}
@@ -476,11 +489,11 @@ function WorldMetaEditor({
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono outline-none focus:border-keep-action"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          Used in URLs and the /world link slash command. Lowercase letters, numbers, hyphens; 1-60 chars.
+          {t("editor.slugHint")}
         </span>
       </label>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Description</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.description")}</span>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -490,63 +503,79 @@ function WorldMetaEditor({
         />
       </label>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Visibility</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.visibility")}</span>
         <select
           value={visibility}
           onChange={(e) => setVisibility(e.target.value as WorldVisibility)}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
         >
-          <option value="private">Private (only you)</option>
-          <option value="public">Public (anyone with the link)</option>
-          <option value="open">Open (catalog-listed, others can link to their rooms)</option>
+          <option value="private">{t("visibilityOption.private")}</option>
+          <option value="public">{t("visibilityOption.public")}</option>
+          <option value="open">{t("visibilityOption.open")}</option>
         </select>
       </label>
 
+      {canSetNsfw ? (
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={isNsfw}
+            onChange={(e) => setIsNsfw(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="min-w-0">
+            <span className="block uppercase tracking-widest text-keep-muted">{t("editor.nsfwLabel")}</span>
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              {t("editor.nsfwHint")}
+            </span>
+          </span>
+        </label>
+      ) : null}
+
       <fieldset className="rounded border border-keep-rule p-3 space-y-3">
         <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">
-          Catalog metadata
+          {t("editor.catalogMetadata")}
         </legend>
         <p className="text-[11px] text-keep-muted">
-          Surfaces in the World Catalog filter UI. Genre and tags help readers find your
-          world; content warnings let them filter what they'd rather not encounter.
+          {t("editor.catalogIntro")}
         </p>
 
         <label className="block">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Genre</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.genre")}</span>
           <select
             value={genre}
             onChange={(e) => setGenre(e.target.value as WorldGenre)}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="fantasy">Fantasy</option>
-            <option value="modern">Modern</option>
-            <option value="scifi">Sci-Fi</option>
-            <option value="horror">Horror</option>
-            <option value="western">Western</option>
-            <option value="steampunk">Steampunk</option>
-            <option value="mythological">Mythological</option>
-            <option value="other">Other</option>
+            <option value="fantasy">{t("genre.fantasy")}</option>
+            <option value="modern">{t("genre.modern")}</option>
+            <option value="scifi">{t("genre.scifi")}</option>
+            <option value="horror">{t("genre.horror")}</option>
+            <option value="western">{t("genre.western")}</option>
+            <option value="steampunk">{t("genre.steampunk")}</option>
+            <option value="mythological">{t("genre.mythological")}</option>
+            <option value="other">{t("genre.other")}</option>
           </select>
         </label>
 
         <div>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Tags</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.tags")}</span>
           {tags.length > 0 ? (
             <div className="mb-1 flex flex-wrap gap-1">
-              {tags.map((t) => (
+              {tags.map((tag) => (
                 <button
-                  key={t}
+                  key={tag}
                   type="button"
-                  onClick={() => removeTag(t)}
-                  title={`Remove "${t}"`}
+                  onClick={() => removeTag(tag)}
+                  title={t("editor.removeTagTitle", { tag })}
                   className="rounded border border-keep-action/40 bg-keep-action/10 px-1.5 py-0 text-[11px] text-keep-action hover:bg-keep-accent/15 hover:text-keep-accent"
                 >
-                  {t} <span aria-hidden>×</span>
+                  {tag} <span aria-hidden>×</span>
                 </button>
               ))}
             </div>
           ) : (
-            <div className="mb-1 text-[10px] italic text-keep-muted">No tags yet.</div>
+            <div className="mb-1 text-[10px] italic text-keep-muted">{t("editor.noTags")}</div>
           )}
           <div className="mb-1 flex gap-1">
             <input
@@ -559,7 +588,7 @@ function WorldMetaEditor({
                   addTag(tagDraft);
                 }
               }}
-              placeholder="add a custom tag..."
+              placeholder={t("editor.addTagPlaceholder")}
               maxLength={32}
               className="flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
             />
@@ -569,20 +598,20 @@ function WorldMetaEditor({
               disabled={!tagDraft.trim()}
               className="rounded border border-keep-rule bg-keep-banner px-2 py-1 text-[11px] hover:bg-keep-banner/80 disabled:opacity-50"
             >
-              add
+              {t("editor.addTag")}
             </button>
           </div>
           {canonicalNotSelected.length > 0 ? (
             <div className="flex flex-wrap gap-1">
-              <span className="text-[10px] uppercase tracking-widest text-keep-muted">Common:</span>
-              {canonicalNotSelected.map((t) => (
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("editor.commonLabel")}</span>
+              {canonicalNotSelected.map((tag) => (
                 <button
-                  key={t}
+                  key={tag}
                   type="button"
-                  onClick={() => addTag(t)}
+                  onClick={() => addTag(tag)}
                   className="rounded border border-keep-rule bg-keep-bg/50 px-1.5 py-0 text-[11px] text-keep-muted hover:border-keep-action hover:bg-keep-action/10 hover:text-keep-action"
                 >
-                  + {t}
+                  + {tag}
                 </button>
               ))}
             </div>
@@ -590,7 +619,7 @@ function WorldMetaEditor({
         </div>
 
         <div>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Content warnings</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.contentWarnings")}</span>
           <div className="flex flex-wrap gap-2 text-[11px]">
             {CONTENT_WARNINGS.map((c) => (
               <label key={c} className="flex items-center gap-1">
@@ -606,12 +635,12 @@ function WorldMetaEditor({
         </div>
 
         <label className="block">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Cover image URL</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.coverImageUrl")}</span>
           <input
             type="url"
             value={coverImageUrl}
             onChange={(e) => setCoverImageUrl(e.target.value)}
-            placeholder="https://example.com/cover.jpg"
+            placeholder={t("editor.coverPlaceholder")}
             maxLength={2000}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
           />
@@ -623,7 +652,7 @@ function WorldMetaEditor({
                   via Referer to whoever hosts the image. */}
               <img
                 src={coverImageUrl}
-                alt="cover preview"
+                alt={t("editor.coverPreviewAlt")}
                 referrerPolicy="no-referrer"
                 className="block max-h-32 max-w-full rounded border border-keep-rule object-cover"
               />
@@ -632,49 +661,47 @@ function WorldMetaEditor({
         </label>
 
         <label className="block">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Pacing</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.pacing")}</span>
           <select
             value={pacing}
             onChange={(e) => setPacing(e.target.value as WorldPacing | "")}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="">(unspecified)</option>
-            <option value="freeform">Freeform (anyone, any character, anytime)</option>
-            <option value="drop-in">Drop-in (pick-up scenes, no continuity expected)</option>
-            <option value="casual">Casual (pick-up scenes, recurring threads)</option>
-            <option value="slice-of-life">Slice-of-life (ambient, low-stakes)</option>
-            <option value="structured">Structured (planned scenes / arcs)</option>
-            <option value="long-form">Long-form (extended arcs, deep commitment)</option>
+            <option value="">{t("editor.pacingUnspecified")}</option>
+            <option value="freeform">{t("editor.pacingFreeform")}</option>
+            <option value="drop-in">{t("editor.pacingDropIn")}</option>
+            <option value="casual">{t("editor.pacingCasual")}</option>
+            <option value="slice-of-life">{t("editor.pacingSliceOfLife")}</option>
+            <option value="structured">{t("editor.pacingStructured")}</option>
+            <option value="long-form">{t("editor.pacingLongForm")}</option>
           </select>
         </label>
 
         <label className="block">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Status</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.status")}</span>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value as WorldStatus)}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="active">Active</option>
-            <option value="archived">Archived (hidden from catalog)</option>
+            <option value="active">{t("editor.statusActive")}</option>
+            <option value="archived">{t("editor.statusArchived")}</option>
             {status === "featured" ? (
-              <option value="featured">Featured (admin-curated)</option>
+              <option value="featured">{t("editor.statusFeatured")}</option>
             ) : null}
           </select>
           <span className="mt-0.5 block text-[10px] text-keep-muted">
-            Featured status is admin-curated only; owners can move between Active and Archived.
+            {t("editor.statusHint")}
           </span>
         </label>
       </fieldset>
 
       <fieldset className="rounded border border-keep-rule p-3 space-y-3">
         <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">
-          Vibe stats
+          {t("editor.vibeStats")}
         </legend>
         <p className="text-[11px] text-keep-muted">
-          Tune what the play in this world feels like. Each axis is 0&ndash;100 and shows as a bar on your
-          catalog card. Leave an axis unset (clear it) if your setting has nothing to say about it &mdash; the
-          card hides the bar instead of showing a tiny "0%".
+          {t("editor.vibeIntro")}
         </p>
         <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {WORLD_VIBE_AXES.map((axis) => {
@@ -685,9 +712,9 @@ function WorldMetaEditor({
                   <label
                     className="text-keep-text"
                     htmlFor={`vibe-${axis.key}`}
-                    title={axis.desc}
+                    title={t(`vibeAxes.${axis.key}.desc`)}
                   >
-                    {axis.label}
+                    {t(`vibeAxes.${axis.key}.label`)}
                   </label>
                   {/* Live percentage readout doubles as a typeable
                       number input, handy when you want an exact
@@ -700,7 +727,7 @@ function WorldMetaEditor({
                       min={0}
                       max={100}
                       value={value ?? ""}
-                      placeholder="unset"
+                      placeholder={t("editor.vibeUnset")}
                       onChange={(e) => {
                         const raw = e.target.value;
                         if (raw === "") {
@@ -712,7 +739,7 @@ function WorldMetaEditor({
                         const clamped = Math.max(0, Math.min(100, v));
                         setVibeStats({ ...vibeStats, [axis.key]: clamped });
                       }}
-                      aria-label={`${axis.label} percentage`}
+                      aria-label={t("editor.vibePercentAria", { axis: t(`vibeAxes.${axis.key}.label`) })}
                       className="w-12 rounded border border-keep-rule bg-keep-bg px-1 py-0 text-right tabular-nums text-keep-text outline-none focus:border-keep-action"
                     />
                     <span>%</span>
@@ -736,18 +763,18 @@ function WorldMetaEditor({
                       type="button"
                       onClick={() => setVibeStats({ ...vibeStats, [axis.key]: null })}
                       className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-                      title="Clear this axis"
+                      title={t("editor.vibeClearTitle")}
                     >
-                      clear
+                      {t("editor.vibeClear")}
                     </button>
                   ) : (
                     <button
                       type="button"
                       onClick={() => setVibeStats({ ...vibeStats, [axis.key]: 50 })}
                       className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-                      title="Set this axis to 50%"
+                      title={t("editor.vibeSetTitle")}
                     >
-                      set
+                      {t("editor.vibeSet")}
                     </button>
                   )}
                 </div>
@@ -759,21 +786,21 @@ function WorldMetaEditor({
 
       <fieldset className="rounded border border-keep-rule p-3 space-y-3">
         <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">
-          Membership
+          {t("editor.membership")}
         </legend>
         <label className="block">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Join mode</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.joinMode")}</span>
           <select
             value={joinMode}
             onChange={(e) => setJoinMode(e.target.value as WorldJoinMode)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="open">Open &mdash; one-click Join from the catalog</option>
-            <option value="application">Application &mdash; people apply, you approve / reject</option>
-            <option value="invite-only">Invite-only &mdash; only you can add members</option>
+            <option value="open">{t("editor.joinModeOpen")}</option>
+            <option value="application">{t("editor.joinModeApplication")}</option>
+            <option value="invite-only">{t("editor.joinModeInviteOnly")}</option>
           </select>
           <span className="mt-0.5 block text-[10px] text-keep-muted">
-            Independent of visibility &mdash; a private world can still take applications from people you share the link with.
+            {t("editor.joinModeHint")}
           </span>
         </label>
 
@@ -783,8 +810,10 @@ function WorldMetaEditor({
             actually seat anyone. */}
         {joinMode === "invite-only" ? (
           <div className="rounded border border-keep-action/40 bg-keep-action/10 p-2 text-[11px] text-keep-muted">
-            <span className="font-semibold text-keep-action">Invite-only:</span>{" "}
-            the catalog Join button is disabled for everyone. The only way someone becomes a member is if you add them directly using the search field below. Switch to <em>Application</em> if you want would-be members to apply for review instead.
+            <span className="font-semibold text-keep-action">{t("editor.inviteOnlyLabel")}</span>{" "}
+            <Trans t={t} i18nKey="editor.inviteOnlyBody">
+              the catalog Join button is disabled for everyone. The only way someone becomes a member is if you add them directly using the search field below. Switch to <em>Application</em> if you want would-be members to apply for review instead.
+            </Trans>
           </div>
         ) : null}
 
@@ -810,11 +839,10 @@ function WorldMetaEditor({
 
       <fieldset className="rounded border border-keep-rule p-3">
         <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">
-          Theme
+          {t("editor.theme")}
         </legend>
         <p className="mb-2 text-[11px] text-keep-muted">
-          A custom palette for this world's editor and viewer modals only. Doesn't affect chat
-          or the userlist - just the wiki views your readers see.
+          {t("editor.themeIntro")}
         </p>
         {theme === null ? (
           <button
@@ -822,13 +850,13 @@ function WorldMetaEditor({
             onClick={() => setTheme(DEFAULT_THEME)}
             className="rounded border border-keep-rule bg-keep-banner px-2 py-1 text-xs hover:bg-keep-banner/80"
           >
-            Add a custom theme
+            {t("editor.addTheme")}
           </button>
         ) : (
           <>
             <ThemePicker
               theme={theme}
-              onChange={(t) => setTheme(t)}
+              onChange={(next) => setTheme(next)}
               onReset={() => setTheme(DEFAULT_THEME)}
             />
             <button
@@ -836,7 +864,7 @@ function WorldMetaEditor({
               onClick={() => setTheme(null)}
               className="mt-2 rounded border border-keep-accent/40 bg-keep-bg px-2 py-1 text-[11px] text-keep-accent hover:bg-keep-accent/10"
             >
-              Remove custom theme (use viewer's chat theme)
+              {t("editor.removeTheme")}
             </button>
           </>
         )}
@@ -857,18 +885,18 @@ function WorldMetaEditor({
           onClick={onDelete}
           className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
         >
-          Delete world
+          {t("editor.deleteWorld")}
         </button>
         <div className="flex items-center gap-3">
           {savedAt ? (
-            <span className="text-[10px] text-keep-muted">saved {new Date(savedAt).toLocaleTimeString()}</span>
+            <span className="text-[10px] text-keep-muted">{t("editor.savedAt", { time: formatTime(savedAt) })}</span>
           ) : null}
           <button
             type="submit"
             disabled={busy || !name.trim()}
             className="keep-button rounded border border-keep-action bg-keep-action/15 px-3 py-0.5 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
           >
-            {busy ? "Saving..." : "Save"}
+            {busy ? t("common:savingDots") : t("common:save")}
           </button>
         </div>
       </div>
@@ -891,6 +919,7 @@ function CollaboratorsPanel({
   initialCollaborators: WorldDetail["collaborators"];
   onChanged: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation("worlds");
   const [list, setList] = useState(initialCollaborators);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -910,7 +939,7 @@ function CollaboratorsPanel({
       setDraft("");
       await onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "could not add");
+      setErr(e instanceof Error ? e.message : t("errors.couldNotAdd"));
     } finally {
       setBusy(false);
     }
@@ -925,7 +954,7 @@ function CollaboratorsPanel({
       setList(r.collaborators);
       await onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "could not remove");
+      setErr(e instanceof Error ? e.message : t("errors.couldNotRemove"));
     } finally {
       setBusy(false);
     }
@@ -934,15 +963,15 @@ function CollaboratorsPanel({
   return (
     <div className="rounded border border-keep-rule p-3 text-xs">
       <div className="flex items-baseline justify-between">
-        <h4 className="font-action text-sm">Collaborators</h4>
+        <h4 className="font-action text-sm">{t("collab.heading")}</h4>
         <span className="text-[10px] text-keep-muted">
-          {list.length} {list.length === 1 ? "editor" : "editors"} besides you
+          {t("collab.count", { count: list.length })}
         </span>
       </div>
       <p className="mt-1 text-[11px] text-keep-muted">
         {viewerIsOwner
-          ? "Invite other users to co-edit this world's pages. They can add, edit, and delete pages, but only you can manage this list, change visibility critical bits, or delete the world."
-          : "Users with edit access to this world. Only the owner can add or remove collaborators."}
+          ? t("collab.ownerDescription")
+          : t("collab.viewerDescription")}
       </p>
       {list.length > 0 ? (
         <ul className="mt-2 space-y-1">
@@ -959,14 +988,14 @@ function CollaboratorsPanel({
                   disabled={busy}
                   className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
                 >
-                  Remove
+                  {t("collab.remove")}
                 </button>
               ) : null}
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-2 italic text-keep-muted">No collaborators yet.</p>
+        <p className="mt-2 italic text-keep-muted">{t("collab.none")}</p>
       )}
       {viewerIsOwner ? (
         <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -980,7 +1009,7 @@ function CollaboratorsPanel({
                 void add();
               }
             }}
-            placeholder="username to invite"
+            placeholder={t("collab.placeholder")}
             maxLength={80}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
           />
@@ -990,7 +1019,7 @@ function CollaboratorsPanel({
             disabled={busy || draft.trim().length === 0}
             className="rounded border border-keep-action bg-keep-action/15 px-2 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
           >
-            {busy ? "..." : "Add"}
+            {busy ? "..." : t("collab.add")}
           </button>
         </div>
       ) : null}
@@ -1020,6 +1049,7 @@ function PageEditor({
   onSaved: () => Promise<void> | void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("worlds");
   const [title, setTitle] = useState(page.title);
   const [slug, setSlug] = useState(page.slug);
   const [bodyHtml, setBodyHtml] = useState(page.bodyHtml);
@@ -1058,7 +1088,7 @@ function PageEditor({
       setSavedAt(Date.now());
       await onSaved();
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "save failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -1069,7 +1099,7 @@ function PageEditor({
       <h3 className="font-action text-base">{page.title}</h3>
 
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Title</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.title")}</span>
         <input
           type="text"
           value={title}
@@ -1079,7 +1109,7 @@ function PageEditor({
         />
       </label>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Slug</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.slug")}</span>
         <input
           type="text"
           value={slug}
@@ -1088,35 +1118,35 @@ function PageEditor({
         />
       </label>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Body (HTML)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("page.bodyHtml")}</span>
         <textarea
           value={bodyHtml}
           onChange={(e) => setBodyHtml(e.target.value)}
           rows={14}
-          placeholder="<p>Write the page body here. Same HTML allow-list as your bio (b, i, em, p, ul/ol/li, blockquote, h3-h6, etc.).</p>"
+          placeholder={t("page.bodyPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px] outline-none focus:border-keep-action"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          HTML is sanitized server-side. Disallowed tags and attributes are stripped on save.
+          {t("page.sanitizedHint")}
         </span>
       </label>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <label className="block">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Parent page</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("page.parentPage")}</span>
           <select
             value={parentPageId}
             onChange={(e) => setParentPageId(e.target.value)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="">(top level)</option>
+            <option value="">{t("page.topLevel")}</option>
             {parentOptions.map((p) => (
               <option key={p.id} value={p.id}>{p.title}</option>
             ))}
           </select>
         </label>
         <label className="block">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Sort order</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("page.sortOrder")}</span>
           <input
             type="number"
             value={sortOrder}
@@ -1126,7 +1156,7 @@ function PageEditor({
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
           />
           <span className="mt-0.5 block text-[10px] text-keep-muted">
-            Lower = higher in the sidebar. Ties broken by creation time.
+            {t("page.sortOrderHint")}
           </span>
         </label>
       </div>
@@ -1139,18 +1169,18 @@ function PageEditor({
           onClick={onDelete}
           className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
         >
-          Delete page
+          {t("page.deletePage")}
         </button>
         <div className="flex items-center gap-3">
           {savedAt ? (
-            <span className="text-[10px] text-keep-muted">saved {new Date(savedAt).toLocaleTimeString()}</span>
+            <span className="text-[10px] text-keep-muted">{t("editor.savedAt", { time: formatTime(savedAt) })}</span>
           ) : null}
           <button
             type="submit"
             disabled={busy || !title.trim()}
             className="keep-button rounded border border-keep-action bg-keep-action/15 px-3 py-0.5 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
           >
-            {busy ? "Saving..." : "Save"}
+            {busy ? t("common:savingDots") : t("common:save")}
           </button>
         </div>
       </div>
@@ -1175,6 +1205,7 @@ function NewPageForm({
   onCancel: () => void;
   onCreated: (p: WorldPage) => void;
 }) {
+  const { t } = useTranslation("worlds");
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
   const [bodyHtml, setBodyHtml] = useState("");
@@ -1203,7 +1234,7 @@ function NewPageForm({
       const p = (await r.json()) as WorldPage;
       onCreated(p);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "create failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.createFailed"));
     } finally {
       setBusy(false);
     }
@@ -1214,11 +1245,11 @@ function NewPageForm({
   return (
     <form onSubmit={submit} className="space-y-3 text-xs">
       <h3 className="font-action text-base">
-        New page
-        {parentTitle ? <span className="ml-2 text-xs text-keep-muted">under {parentTitle}</span> : null}
+        {t("page.newPage")}
+        {parentTitle ? <span className="ml-2 text-xs text-keep-muted">{t("page.under", { title: parentTitle })}</span> : null}
       </h3>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Title</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.title")}</span>
         <input
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
@@ -1230,22 +1261,22 @@ function NewPageForm({
         />
       </label>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Slug (optional)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("page.slugOptional")}</span>
         <input
           type="text"
           value={slug}
           onChange={(e) => setSlug(e.target.value)}
-          placeholder={previewSlug || "e.g. cities-of-aerith"}
+          placeholder={previewSlug || t("page.slugPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono outline-none focus:border-keep-action"
         />
       </label>
       <label className="block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Body (HTML, optional)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("page.bodyOptional")}</span>
         <textarea
           value={bodyHtml}
           onChange={(e) => setBodyHtml(e.target.value)}
           rows={6}
-          placeholder="You can fill this in later."
+          placeholder={t("page.bodyOptionalPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px] outline-none focus:border-keep-action"
         />
       </label>
@@ -1258,14 +1289,14 @@ function NewPageForm({
           onClick={onCancel}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:bg-keep-banner hover:text-keep-text"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           disabled={busy || !title.trim()}
           className="keep-button rounded border border-keep-action bg-keep-action/15 px-3 py-0.5 font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          {busy ? "Creating..." : "Create page"}
+          {busy ? t("creating") : t("page.createPage")}
         </button>
       </div>
     </form>
@@ -1321,9 +1352,11 @@ interface InviteSearchRow {
   token: string;
   /** Display label rendered as the row's primary text. */
   label: string;
-  /** Sublabel, "OOC" for master rows, the master's username for
-   *  character rows so owners can tell two Jaggers apart. */
-  sublabel: string;
+  /** Master username for character rows (so owners can tell two
+   *  Jaggers apart); null for the master OOC row itself. The
+   *  sublabel copy is derived at render time so it follows a
+   *  language switch. */
+  masterUsername: string | null;
   /** Live online state from the directory; surfaced as a tiny
    *  dot so an owner has some signal whether the invitee will
    *  see the membership immediately. */
@@ -1339,6 +1372,7 @@ function InviteMemberPanel({
    *  the member gallery. */
   onInvited: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation("worlds");
   const [query, setQuery] = useState("");
   const [rows, setRows] = useState<InviteSearchRow[]>([]);
   const [searching, setSearching] = useState(false);
@@ -1383,7 +1417,7 @@ function InviteMemberPanel({
               out.push({
                 token: `@id:${u.userId}`,
                 label: u.username,
-                sublabel: "OOC (master account)",
+                masterUsername: null,
                 online: u.online,
               });
             }
@@ -1395,7 +1429,7 @@ function InviteMemberPanel({
                 // Master parenthetical disambiguates same-named
                 // characters across accounts, the whole point of
                 // doing this through tokens.
-                sublabel: `Character · ${u.username}`,
+                masterUsername: u.username,
                 online: u.online,
               });
             }
@@ -1421,13 +1455,13 @@ function InviteMemberPanel({
       if (!r.ok) throw new Error(await readError(r));
       const data = (await r.json()) as { ok: true; displayName?: string; alreadyMember?: boolean };
       const name = data.displayName ?? row.label;
-      setLastInvited(data.alreadyMember ? `${name} is already a member` : `Invited ${name}`);
+      setLastInvited(data.alreadyMember ? t("editor.invite.alreadyMember", { name }) : t("editor.invite.invited", { name }));
       // Auto-clear the confirmation so a string of invites doesn't
       // leave a stale row on screen.
       window.setTimeout(() => setLastInvited(null), 4_000);
       await onInvited();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "invite failed");
+      setError(e instanceof Error ? e.message : t("errors.inviteFailed"));
     } finally {
       setInviting(null);
     }
@@ -1436,15 +1470,15 @@ function InviteMemberPanel({
   return (
     <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/30 p-2">
       <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-        Invite a member
+        {t("editor.invite.heading")}
       </span>
       <input
         type="text"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        placeholder="Search by username or character name…"
+        placeholder={t("editor.invite.searchPlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
-        aria-label="Search for a user or character to invite"
+        aria-label={t("editor.invite.searchAria")}
       />
       {error ? (
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-1.5 text-[11px] text-keep-accent">
@@ -1458,26 +1492,30 @@ function InviteMemberPanel({
       ) : null}
       {query.trim().length < 2 ? (
         <p className="text-[11px] italic text-keep-muted">
-          Type at least two letters. Each identity (the OOC handle plus every character on that account) shows up as its own row so you can pick exactly which face joins.
+          {t("editor.invite.typeMore")}
         </p>
       ) : searching && rows.length === 0 ? (
-        <p className="text-[11px] italic text-keep-muted">Searching…</p>
+        <p className="text-[11px] italic text-keep-muted">{t("editor.invite.searching")}</p>
       ) : rows.length === 0 ? (
-        <p className="text-[11px] italic text-keep-muted">No matches.</p>
+        <p className="text-[11px] italic text-keep-muted">{t("editor.invite.noMatches")}</p>
       ) : (
         <ul className="divide-y divide-keep-rule/40 overflow-hidden rounded border border-keep-rule/40">
           {rows.map((row) => (
             <li key={row.token} className="flex items-center gap-2 bg-keep-bg/40 px-2 py-1">
               <span
                 aria-hidden
-                title={row.online ? "Online now" : "Offline"}
+                title={row.online ? t("editor.invite.onlineNow") : t("editor.invite.offline")}
                 className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${
                   row.online ? "bg-keep-action" : "bg-keep-muted/50"
                 }`}
               />
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm text-keep-text">{row.label}</div>
-                <div className="truncate text-[10px] text-keep-muted">{row.sublabel}</div>
+                <div className="truncate text-[10px] text-keep-muted">
+                  {row.masterUsername !== null
+                    ? t("editor.invite.characterSublabel", { name: row.masterUsername })
+                    : t("editor.invite.oocSublabel")}
+                </div>
               </div>
               <button
                 type="button"
@@ -1485,7 +1523,7 @@ function InviteMemberPanel({
                 disabled={inviting !== null}
                 className="shrink-0 rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/30 disabled:opacity-50"
               >
-                {inviting === row.token ? "…" : "Invite"}
+                {inviting === row.token ? "…" : t("editor.invite.invite")}
               </button>
             </li>
           ))}
@@ -1506,6 +1544,7 @@ function ApplicationQuestionsEditor({
   questions: string[];
   onChange: (next: string[]) => void;
 }) {
+  const { t } = useTranslation("worlds");
   function setAt(i: number, v: string) {
     const next = [...questions];
     next[i] = v;
@@ -1529,7 +1568,7 @@ function ApplicationQuestionsEditor({
     <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/30 p-2">
       <div className="flex items-baseline justify-between">
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          Questions ({questions.length} / {WORLD_APP_MAX_QUESTIONS})
+          {t("editor.questions.header", { current: questions.length, max: WORLD_APP_MAX_QUESTIONS })}
         </span>
         <button
           type="button"
@@ -1537,13 +1576,12 @@ function ApplicationQuestionsEditor({
           disabled={questions.length >= WORLD_APP_MAX_QUESTIONS}
           className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0 text-[10px] hover:bg-keep-banner disabled:opacity-50"
         >
-          + add
+          {t("editor.questions.add")}
         </button>
       </div>
       {questions.length === 0 ? (
         <p className="text-[11px] italic text-keep-muted">
-          No questions &mdash; applicants will submit just their intent to join. Add a question or two to gather
-          context (RP experience, character concept, schedule, etc.).
+          {t("editor.questions.empty")}
         </p>
       ) : (
         <ul className="space-y-1">
@@ -1554,7 +1592,7 @@ function ApplicationQuestionsEditor({
                 type="text"
                 value={q}
                 maxLength={WORLD_APP_QUESTION_MAX_LEN}
-                placeholder="e.g. Tell us about your character concept."
+                placeholder={t("editor.questions.placeholder")}
                 onChange={(e) => setAt(i, e.target.value)}
                 className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
               />
@@ -1564,21 +1602,21 @@ function ApplicationQuestionsEditor({
                   onClick={() => move(i, -1)}
                   disabled={i === 0}
                   className="rounded border border-keep-rule bg-keep-bg px-1 text-[8px] hover:bg-keep-banner disabled:opacity-30"
-                  title="Move up"
+                  title={t("editor.questions.moveUp")}
                 >▲</button>
                 <button
                   type="button"
                   onClick={() => move(i, 1)}
                   disabled={i === questions.length - 1}
                   className="rounded border border-keep-rule bg-keep-bg px-1 text-[8px] hover:bg-keep-banner disabled:opacity-30"
-                  title="Move down"
+                  title={t("editor.questions.moveDown")}
                 >▼</button>
               </div>
               <button
                 type="button"
                 onClick={() => removeAt(i)}
                 className="rounded border border-keep-accent/40 bg-keep-bg px-1.5 py-0 text-[10px] text-keep-accent hover:bg-keep-accent/10"
-                title="Remove this question"
+                title={t("editor.questions.removeTitle")}
               >
                 ×
               </button>
@@ -1603,6 +1641,7 @@ function PendingApplicationsPanel({
    *  refresh members list (approved applicant joined). */
   onChanged: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation("worlds");
   const [loading, setLoading] = useState(true);
   const [list, setList] = useState<WorldApplicationList | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1621,7 +1660,7 @@ function PendingApplicationsPanel({
       const data = (await r.json()) as WorldApplicationList;
       setList(data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -1653,7 +1692,7 @@ function PendingApplicationsPanel({
       await refresh();
       await onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "review failed");
+      setError(e instanceof Error ? e.message : t("errors.reviewFailed"));
     } finally {
       setReviewing(null);
     }
@@ -1663,7 +1702,7 @@ function PendingApplicationsPanel({
     <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/30 p-2">
       <div className="flex items-baseline justify-between">
         <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-          Pending applications {list ? `(${list.pending.length})` : ""}
+          {t("editor.apps.pendingHeader")} {list ? `(${list.pending.length})` : ""}
         </span>
         <button
           type="button"
@@ -1671,7 +1710,7 @@ function PendingApplicationsPanel({
           disabled={loading}
           className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0 text-[10px] hover:bg-keep-banner disabled:opacity-50"
         >
-          {loading ? "refreshing…" : "refresh"}
+          {loading ? t("editor.apps.refreshing") : t("editor.apps.refresh")}
         </button>
       </div>
       {error ? (
@@ -1680,9 +1719,9 @@ function PendingApplicationsPanel({
         </div>
       ) : null}
       {loading && !list ? (
-        <p className="text-[11px] italic text-keep-muted">Loading applications…</p>
+        <p className="text-[11px] italic text-keep-muted">{t("editor.apps.loading")}</p>
       ) : list && list.pending.length === 0 ? (
-        <p className="text-[11px] italic text-keep-muted">No pending applications.</p>
+        <p className="text-[11px] italic text-keep-muted">{t("editor.apps.none")}</p>
       ) : list ? (
         <ul className="space-y-2">
           {list.pending.map((app) => (
@@ -1690,12 +1729,12 @@ function PendingApplicationsPanel({
               <div className="flex items-baseline justify-between gap-2">
                 <span className="font-semibold text-keep-text">{app.applicantUsername}</span>
                 <span className="text-[10px] text-keep-muted">
-                  {new Date(app.submittedAt).toLocaleString()}
+                  {formatDateTime(app.submittedAt)}
                 </span>
               </div>
               {app.questions.length === 0 ? (
                 <p className="mt-1 text-[11px] italic text-keep-muted">
-                  No questions &mdash; applicant submitted just their intent to join.
+                  {t("editor.apps.noQuestions")}
                 </p>
               ) : (
                 <ul className="mt-1 space-y-1">
@@ -1703,7 +1742,7 @@ function PendingApplicationsPanel({
                     <li key={i} className="rounded border border-keep-rule/40 bg-keep-banner/30 p-1.5">
                       <div className="text-[10px] uppercase tracking-widest text-keep-muted">{q}</div>
                       <div className="mt-0.5 whitespace-pre-wrap text-[12px] text-keep-text">
-                        {app.answers[i] || <span className="italic text-keep-muted">(empty)</span>}
+                        {app.answers[i] || <span className="italic text-keep-muted">{t("application.emptyAnswer")}</span>}
                       </div>
                     </li>
                   ))}
@@ -1714,7 +1753,7 @@ function PendingApplicationsPanel({
                   rows={2}
                   value={notes[app.id] ?? ""}
                   maxLength={WORLD_APP_REVIEW_NOTE_MAX_LEN}
-                  placeholder="Optional note for the applicant (shown on approve / reject)…"
+                  placeholder={t("editor.apps.notePlaceholder")}
                   onChange={(e) => setNotes((m) => ({ ...m, [app.id]: e.target.value }))}
                   className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-[11px] outline-none focus:border-keep-action"
                 />
@@ -1725,7 +1764,7 @@ function PendingApplicationsPanel({
                     disabled={reviewing === app.id}
                     className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-[11px] text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
                   >
-                    {reviewing === app.id ? "…" : "Approve"}
+                    {reviewing === app.id ? "…" : t("editor.apps.approve")}
                   </button>
                   <button
                     type="button"
@@ -1733,7 +1772,7 @@ function PendingApplicationsPanel({
                     disabled={reviewing === app.id}
                     className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2 py-0.5 text-[11px] text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
                   >
-                    Reject
+                    {t("editor.apps.reject")}
                   </button>
                 </div>
               </div>
@@ -1747,7 +1786,7 @@ function PendingApplicationsPanel({
           onToggle={(e) => setShowRecent((e.currentTarget as HTMLDetailsElement).open)}
         >
           <summary className="cursor-pointer text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">
-            Recent decisions ({list.recent.length})
+            {t("editor.apps.recentDecisions", { total: list.recent.length })}
           </summary>
           <ul className="mt-1 space-y-1">
             {list.recent.map((app) => (
@@ -1763,13 +1802,13 @@ function PendingApplicationsPanel({
                     ? "text-keep-accent"
                     : "text-keep-muted"
                 }>
-                  {app.status}
+                  {t(`appStatus.${app.status}`)}
                 </span>
                 <span className="text-[10px] text-keep-muted">
-                  {app.reviewedAt ? new Date(app.reviewedAt).toLocaleString() : ""}
+                  {app.reviewedAt ? formatDateTime(app.reviewedAt) : ""}
                 </span>
                 {app.reviewNote ? (
-                  <span className="basis-full italic text-keep-muted">“{app.reviewNote}”</span>
+                  <span className="basis-full italic text-keep-muted">{t("editor.apps.reviewNoteQuoted", { note: app.reviewNote })}</span>
                 ) : null}
               </li>
             ))}

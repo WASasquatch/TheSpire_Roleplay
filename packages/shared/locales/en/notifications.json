@@ -1,0 +1,170 @@
+{
+  "ago": {
+    "now": "now",
+    "minutes": "{{value}}m",
+    "hours": "{{value}}h",
+    "days": "{{value}}d",
+    "weeks": "{{value}}w"
+  },
+  "app": {
+    "loading": "loading..."
+  },
+  "bell": {
+    "title": "Notifications",
+    "unreadAria": "Notifications ({{total}} unread)",
+    "markAllRead": "Mark all read",
+    "settings": "Notification settings",
+    "back": "Back to notifications",
+    "empty": "You have no notifications yet"
+  },
+  "category": {
+    "mention": "Mentions",
+    "dm": "Direct messages",
+    "friend": "Friend requests",
+    "server": "Server events",
+    "forum": "Forum activity",
+    "earning": "Earning milestones",
+    "announcement": "Announcements",
+    "report": "Report outcomes"
+  },
+  "dm": {
+    "notificationTitle": "Direct message from {{name}}",
+    "messageRemoved": "[message removed]",
+    "pushBody": "You have a new direct message.",
+    "newMessageTitle": "New message from {{name}}"
+  },
+  "friend": {
+    "requestTitle": "{{name}} sent you a friend request",
+    "acceptTitle": "{{name}} accepted your friend request",
+    "requestSnippet": "Open your friends list to respond.",
+    "acceptSnippet": "You're now friends.",
+    "requestPushTitle": "New friend request",
+    "acceptPushTitle": "Friend request accepted",
+    "requestPushBody": "{{name}} sent you a friend request.",
+    "acceptPushBody": "{{name}} accepted your request."
+  },
+  "server": {
+    "appApprovedMessage": "Your server \"{{name}}\" was approved - find it on the server rail!",
+    "appDeclinedMessage": "Your server application \"{{name}}\" was declined.",
+    "appDeclinedMessageNote": "Your server application \"{{name}}\" was declined: {{note}}",
+    "appApprovedTitle": "Server approved: {{name}}",
+    "appDeclinedTitle": "Server application declined",
+    "appApprovedSnippet": "Find it on the server rail.",
+    "appDeclinedSnippet": "Your application for \"{{name}}\" was declined.",
+    "emoticonApprovedTitle": "Emoticon approved",
+    "emoticonApprovedSnippet": "Your emoticon :{{slug}}: was approved.",
+    "emoticonDeclinedTitle": "Emoticon declined",
+    "emoticonDeclinedSnippet": "Your emoticon :{{slug}}: was declined.",
+    "emoticonDeclinedRefundSnippet": "Your emoticon :{{slug}}: was declined and your currency refunded."
+  },
+  "emailGate": {
+    "chatHidden": "Chat messages are hidden while you verify your email."
+  },
+  "expiry": {
+    "notice": "Messages auto-expire after {{window}}",
+    "days_one": "{{count}} day",
+    "days_other": "{{count}} days",
+    "hours_one": "{{count}} hour",
+    "hours_other": "{{count}} hours",
+    "minutes_one": "{{count}} minute",
+    "minutes_other": "{{count}} minutes"
+  },
+  "filter": {
+    "all": "All",
+    "servers": "Servers",
+    "dms": "DMs"
+  },
+  "friendRequest": {
+    "wantsToBeFriends": "<0>{{name}}</0><1> wants to be friends.</1>",
+    "accept": "Accept",
+    "decline": "Decline"
+  },
+  "history": {
+    "returnToLiveTitle": "Reload the recent backlog and return to live chat",
+    "viewingOlder": "Viewing older history, click to return to live"
+  },
+  "incognito": {
+    "banner": "You're incognito as <1>{{alias}}</1>. The userlist hides you and your messages render as system lines.",
+    "leave": "Leave"
+  },
+  "mutual": {
+    "request": "<0>{{name}}</0><1> wants to share the title </1><2>{{kind}}</2><3> with you. Your profile would show: </3><4>“{{preview}}”</4>",
+    "dissolve": "<0>{{name}}</0><1> wants to remove your shared </1><2>{{kind}}</2><3> title. Currently shows: </3><4>“{{preview}}”</4>"
+  },
+  "prefs": {
+    "description": "Choose what lands in your bell. A muted type makes no alert at all: no row, badge, or push."
+  },
+  "profileAction": {
+    "switchToOoc": "Switch to OOC",
+    "switchTo": "Switch to {{name}}",
+    "disable": "Disable {{name}}"
+  },
+  "push": {
+    "title": "Browser notifications",
+    "on": "On: you'll be pinged even when the app is closed.",
+    "denied": "Blocked in your browser settings. Allow notifications for this site to enable.",
+    "unsupported": "Your browser doesn't support push notifications.",
+    "off": "Off: turn on to be pinged when the app is closed.",
+    "turnOn": "Turn on",
+    "turnOff": "Turn off"
+  },
+  "session": {
+    "expired": "Your session expired due to inactivity. Please log in again."
+  },
+  "staleVersion": {
+    "running": "You're running <1>{{siteName}} {{version}}</1>. The current version is <3>{{staleVersion}}</3>.",
+    "refreshPrompt": "Please refresh to update.",
+    "refresh": "Refresh",
+    "dismissTitle": "Dismiss until a newer version is announced",
+    "dismissAria": "Dismiss update banner"
+  },
+  "system": {
+    "friendRequest": "{{name}} sent you a friend request. Open Messages to accept or decline.",
+    "chapterPublished": "✦ {{author}} published \"{{chapter}}\" of {{story}}.",
+    "watchOnline": "{{name}} is online.",
+    "watchOnlineLine": "☆ {{name}} is online.",
+    "watchingTitle": "Watching",
+    "myRoomsHeader": "Your archived rooms ({{total}}). Tap one to load its /go command into your message box:",
+    "myRoomsEmpty": "You have no archived rooms. A room you own is archived once everyone leaves it; it'll show up here so you can bring it back."
+  },
+  "tabTitle": {
+    "profile": "{{name}} - Roleplay Profile · {{siteName}}",
+    "world": "Roleplay World · {{siteName}}",
+    "story": "Story · Scriptorium · {{siteName}}",
+    "default": "{{siteName}} - Roleplay Chat & Collaborative Writing"
+  },
+  "theater": {
+    "playerFailed": "The theater player couldn't load. Reload the page to try again."
+  },
+  "toast": {
+    "ageRestrictedProfile": "This profile is marked 18+ and can't be viewed from your account.",
+    "serverLinkGone": "That server link is private or no longer exists.",
+    "noMemberToShow": "No member to show right now.",
+    "arcadeUnavailable": "The Spire Arcade isn't available to you.",
+    "gameUnavailable": "That game isn't available to you.",
+    "storyUnavailable": "That story isn't available to you.",
+    "roomUnavailable": "That room isn't available to you.",
+    "exportFailed": "Couldn't generate the chat export. Try a shorter range.",
+    "friendUpdate": "Friend update from {{name}}.",
+    "pageLoadFailed": "Couldn't load that page.",
+    "noLandingRoom": "{{name}} has no room to enter yet.",
+    "serverOpenFailed": "Couldn't open that server.",
+    "googleLinked": "Google account linked.",
+    "googleAlreadyLinked": "That Google account is already connected to a different account.",
+    "googleAccountDisabled": "That account is disabled. Please contact an admin.",
+    "googleSignInFailed": "Google sign-in didn't complete. Please try again.",
+    "topicGone": "Couldn't open that topic, it may have been removed.",
+    "threadGone": "Couldn't open that thread, it may have been removed.",
+    "messageGone": "Couldn't load that message, it may have been removed.",
+    "loadFailed": "load failed",
+    "switchFailed": "switch failed",
+    "forumsHiddenUnverified": "Forums are hidden while you verify your email."
+  },
+  "worldBanner": {
+    "openTitle": "Open this room's linked world",
+    "world": "World",
+    "byOwner": "by {{name}}",
+    "hideTitle": "Hide this world banner. It'll come back if the room's linked world changes.",
+    "hideAria": "Hide world banner"
+  }
+}

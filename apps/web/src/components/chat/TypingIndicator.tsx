@@ -27,6 +27,8 @@
  * the per-identity lookup.
  */
 
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { TypingEntry } from "@thekeep/shared";
 import { useChat } from "../../state/store.js";
 
@@ -35,6 +37,7 @@ interface Props {
 }
 
 export function TypingIndicator({ roomId }: Props) {
+  const { t } = useTranslation("chat");
   const typers = useChat((s) => (roomId ? s.typersByRoom[roomId] : undefined));
   if (!typers || typers.length === 0) return null;
   return (
@@ -57,12 +60,12 @@ export function TypingIndicator({ roomId }: Props) {
       aria-live="polite"
       className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-keep-bg via-keep-bg/90 to-transparent px-3 pb-1 pt-3 text-xs italic text-keep-muted"
     >
-      {formatTyperLabel(typers)}
+      {formatTyperLabel(t, typers)}
     </div>
   );
 }
 
-function formatTyperLabel(typers: readonly TypingEntry[]): string {
+function formatTyperLabel(t: TFunction<"chat">, typers: readonly TypingEntry[]): string {
   switch (typers.length) {
     case 0:
       return "";
@@ -75,14 +78,14 @@ function formatTyperLabel(typers: readonly TypingEntry[]): string {
       // capped, trimmed), so we render it verbatim, but always
       // as a text node, never as HTML.
       const phrase = typers[0]!.phrase;
-      if (phrase) return `${typers[0]!.displayName} ${phrase}`;
-      return `${typers[0]!.displayName} is typing…`;
+      if (phrase) return t("typing.withPhrase", { name: typers[0]!.displayName, phrase });
+      return t("typing.one", { name: typers[0]!.displayName });
     }
     case 2:
-      return `${typers[0]!.displayName} and ${typers[1]!.displayName} are typing…`;
+      return t("typing.two", { a: typers[0]!.displayName, b: typers[1]!.displayName });
     case 3:
-      return `${typers[0]!.displayName}, ${typers[1]!.displayName}, and ${typers[2]!.displayName} are typing…`;
+      return t("typing.three", { a: typers[0]!.displayName, b: typers[1]!.displayName, c: typers[2]!.displayName });
     default:
-      return "Several people are typing…";
+      return t("typing.several");
   }
 }

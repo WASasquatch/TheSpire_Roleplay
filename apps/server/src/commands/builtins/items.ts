@@ -57,6 +57,7 @@ import {
 } from "../../db/schema.js";
 import { addSystemMessage, currentOccupants } from "../../realtime/broadcast.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 type ItemCommandKind = "give" | "throw" | "drop";
@@ -230,7 +231,7 @@ function renderTemplate(
 async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Promise<void> {
   const parsed = parseItemCommandArgs(ctx.args);
   if (!parsed) {
-    notice(ctx, "ITEM_CMD_USAGE", `Usage: /${kind} <name> [num] <item>`);
+    notice(ctx, "ITEM_CMD_USAGE", tFor(ctx.user.locale, "commands:items.usage", { command: kind }));
     return;
   }
   const { targetName, quantity, itemQuery } = parsed;
@@ -242,11 +243,11 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
   const sid = await resolveRoomServerId(ctx.db, ctx.roomId);
   const item = await findItem(ctx.db, itemQuery, sid);
   if (!item) {
-    notice(ctx, "ITEM_NOT_FOUND", `No item called "${itemQuery}".`);
+    notice(ctx, "ITEM_NOT_FOUND", tFor(ctx.user.locale, "commands:shared.itemNotFound", { name: itemQuery }));
     return;
   }
   if (!item.enabled) {
-    notice(ctx, "ITEM_DISABLED", `${item.name} isn't usable right now.`);
+    notice(ctx, "ITEM_DISABLED", tFor(ctx.user.locale, "commands:shared.itemNotUsable", { name: item.name }));
     return;
   }
 
@@ -259,7 +260,11 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
                        item.dropMessagesJson;
   const template = pickTemplate(messageJson);
   if (!template) {
-    notice(ctx, "ITEM_CMD_UNSUPPORTED", `${item.name} can't be /${kind === "throw" ? "thrown" : kind === "drop" ? "dropped" : "given"}.`);
+    notice(ctx, "ITEM_CMD_UNSUPPORTED", tFor(
+      ctx.user.locale,
+      kind === "throw" ? "commands:items.cantThrow" : kind === "drop" ? "commands:items.cantDrop" : "commands:items.cantGive",
+      { name: item.name },
+    ));
     return;
   }
 
@@ -271,9 +276,12 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
   const match = matchOccupant(occupants, targetName);
   if (!match.ok) {
     if (match.ambiguous) {
-      notice(ctx, "ITEM_CMD_AMBIGUOUS", `Multiple users match "${targetName}": ${match.matches.join(", ")}. Be more specific.`);
+      notice(ctx, "ITEM_CMD_AMBIGUOUS", tFor(ctx.user.locale, "commands:items.ambiguous", {
+        name: targetName,
+        matches: match.matches.join(", "),
+      }));
     } else {
-      notice(ctx, "ITEM_CMD_NO_TARGET", `No one named "${targetName}" is in this room.`);
+      notice(ctx, "ITEM_CMD_NO_TARGET", tFor(ctx.user.locale, "commands:items.noTarget", { name: targetName }));
     }
     return;
   }
@@ -296,7 +304,7 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
       notice(
         ctx,
         "ITEM_CMD_COOLDOWN",
-        `Slow down, you can /${kind} again in ${remaining}s.`,
+        tFor(ctx.user.locale, "commands:items.cooldown", { command: kind, seconds: remaining }),
       );
       return;
     }
@@ -494,7 +502,11 @@ async function handleItemCommand(ctx: CommandContext, kind: ItemCommandKind): Pr
       notice(
         ctx,
         "ITEM_INSUFFICIENT",
-        `You have ${result.have ?? 0} ${itemNoun}, can't ${kind} ${quantity}.`,
+        tFor(
+          ctx.user.locale,
+          kind === "throw" ? "commands:items.insufficientThrow" : kind === "drop" ? "commands:items.insufficientDrop" : "commands:items.insufficientGive",
+          { have: result.have ?? 0, item: itemNoun, want: quantity },
+        ),
       );
     } else {
       notice(ctx, "ITEM_CMD_FAILED", result.error);

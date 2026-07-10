@@ -1,0 +1,173 @@
+{
+  "ago": {
+    "now": "ahora",
+    "minutes": "{{value}}m",
+    "hours": "{{value}}h",
+    "days": "{{value}}d",
+    "weeks": "{{value}} sem"
+  },
+  "app": {
+    "loading": "cargando..."
+  },
+  "bell": {
+    "title": "Notificaciones",
+    "unreadAria": "Notificaciones ({{total}} sin leer)",
+    "markAllRead": "Marcar todo como leído",
+    "settings": "Configuración de notificaciones",
+    "back": "Volver a las notificaciones",
+    "empty": "Aún no tienes notificaciones"
+  },
+  "category": {
+    "mention": "Menciones",
+    "dm": "Mensajes directos",
+    "friend": "Solicitudes de amistad",
+    "server": "Eventos del servidor",
+    "forum": "Actividad de foros",
+    "earning": "Hitos de Recompensas",
+    "announcement": "Anuncios",
+    "report": "Resultados de reportes"
+  },
+  "dm": {
+    "notificationTitle": "Mensaje directo de {{name}}",
+    "messageRemoved": "[mensaje eliminado]",
+    "pushBody": "Tienes un mensaje directo nuevo.",
+    "newMessageTitle": "Mensaje nuevo de {{name}}"
+  },
+  "friend": {
+    "requestTitle": "{{name}} te envió una solicitud de amistad",
+    "acceptTitle": "{{name}} aceptó tu solicitud de amistad",
+    "requestSnippet": "Abre tu lista de amigos para responder.",
+    "acceptSnippet": "Ahora son amigos.",
+    "requestPushTitle": "Nueva solicitud de amistad",
+    "acceptPushTitle": "Solicitud de amistad aceptada",
+    "requestPushBody": "{{name}} te envió una solicitud de amistad.",
+    "acceptPushBody": "{{name}} aceptó tu solicitud."
+  },
+  "server": {
+    "appApprovedMessage": "Tu servidor \"{{name}}\" fue aprobado - ¡encuéntralo en la barra de servidores!",
+    "appDeclinedMessage": "Tu solicitud de servidor \"{{name}}\" fue rechazada.",
+    "appDeclinedMessageNote": "Tu solicitud de servidor \"{{name}}\" fue rechazada: {{note}}",
+    "appApprovedTitle": "Servidor aprobado: {{name}}",
+    "appDeclinedTitle": "Solicitud de servidor rechazada",
+    "appApprovedSnippet": "Encuéntralo en la barra de servidores.",
+    "appDeclinedSnippet": "Tu solicitud para \"{{name}}\" fue rechazada.",
+    "emoticonApprovedTitle": "Emoticón aprobado",
+    "emoticonApprovedSnippet": "Tu emoticón :{{slug}}: fue aprobado.",
+    "emoticonDeclinedTitle": "Emoticón rechazado",
+    "emoticonDeclinedSnippet": "Tu emoticón :{{slug}}: fue rechazado.",
+    "emoticonDeclinedRefundSnippet": "Tu emoticón :{{slug}}: fue rechazado y se te reembolsaron las monedas."
+  },
+  "emailGate": {
+    "chatHidden": "Los mensajes del chat están ocultos mientras verificas tu correo."
+  },
+  "expiry": {
+    "notice": "Los mensajes se borran automáticamente tras {{window}}",
+    "days_one": "{{count}} día",
+    "days_other": "{{count}} días",
+    "days_many": "{{count}} días",
+    "hours_one": "{{count}} hora",
+    "hours_other": "{{count}} horas",
+    "hours_many": "{{count}} horas",
+    "minutes_one": "{{count}} minuto",
+    "minutes_other": "{{count}} minutos",
+    "minutes_many": "{{count}} minutos"
+  },
+  "filter": {
+    "all": "Todas",
+    "servers": "Servidores",
+    "dms": "MD"
+  },
+  "friendRequest": {
+    "wantsToBeFriends": "<0>{{name}}</0><1> quiere que sean amigos.</1>",
+    "accept": "Aceptar",
+    "decline": "Rechazar"
+  },
+  "history": {
+    "returnToLiveTitle": "Recargar el historial reciente y volver al chat en vivo",
+    "viewingOlder": "Viendo historial anterior, haz clic para volver al chat en vivo"
+  },
+  "incognito": {
+    "banner": "Estás en modo incógnito como <1>{{alias}}</1>. La lista de usuarios te oculta y tus mensajes se muestran como líneas del sistema.",
+    "leave": "Salir"
+  },
+  "mutual": {
+    "request": "<0>{{name}}</0><1> quiere compartir el título </1><2>{{kind}}</2><3> contigo. Tu perfil mostraría: </3><4>“{{preview}}”</4>",
+    "dissolve": "<0>{{name}}</0><1> quiere quitar el título </1><2>{{kind}}</2><3> que comparten. Actualmente muestra: </3><4>“{{preview}}”</4>"
+  },
+  "prefs": {
+    "description": "Elige qué llega a tu campana de notificaciones. Un tipo silenciado no genera ninguna alerta: ni fila, ni insignia, ni push."
+  },
+  "profileAction": {
+    "switchToOoc": "Cambiar a OOC",
+    "switchTo": "Cambiar a {{name}}",
+    "disable": "Desactivar {{name}}"
+  },
+  "push": {
+    "title": "Notificaciones del navegador",
+    "on": "Activado: recibirás avisos incluso con la app cerrada.",
+    "denied": "Bloqueadas en la configuración de tu navegador. Permite las notificaciones para este sitio para activarlas.",
+    "unsupported": "Tu navegador no admite notificaciones push.",
+    "off": "Desactivado: actívalas para recibir avisos cuando la app esté cerrada.",
+    "turnOn": "Activar",
+    "turnOff": "Desactivar"
+  },
+  "session": {
+    "expired": "Tu sesión venció por inactividad. Vuelve a iniciar sesión."
+  },
+  "staleVersion": {
+    "running": "Estás usando <1>{{siteName}} {{version}}</1>. La versión actual es <3>{{staleVersion}}</3>.",
+    "refreshPrompt": "Recarga la página para actualizar.",
+    "refresh": "Recargar",
+    "dismissTitle": "Descartar hasta que se anuncie una versión más reciente",
+    "dismissAria": "Descartar el aviso de actualización"
+  },
+  "system": {
+    "friendRequest": "{{name}} te envió una solicitud de amistad. Abre Mensajes para aceptarla o rechazarla.",
+    "chapterPublished": "✦ {{author}} publicó \"{{chapter}}\" de {{story}}.",
+    "watchOnline": "{{name}} está en línea.",
+    "watchOnlineLine": "☆ {{name}} está en línea.",
+    "watchingTitle": "Siguiendo",
+    "myRoomsHeader": "Tus salas archivadas ({{total}}). Toca una para cargar su comando /go en tu cuadro de mensaje:",
+    "myRoomsEmpty": "No tienes salas archivadas. Una sala tuya se archiva cuando todos salen de ella; aparecerá aquí para que puedas recuperarla."
+  },
+  "tabTitle": {
+    "profile": "{{name}} - Perfil de rol · {{siteName}}",
+    "world": "Mundo de rol · {{siteName}}",
+    "story": "Historia · Scriptorium · {{siteName}}",
+    "default": "{{siteName}} - Chat de rol y escritura colaborativa"
+  },
+  "theater": {
+    "playerFailed": "El reproductor del teatro no se pudo cargar. Recarga la página para intentarlo de nuevo."
+  },
+  "toast": {
+    "ageRestrictedProfile": "Este perfil está marcado como 18+ y no se puede ver desde tu cuenta.",
+    "serverLinkGone": "Ese enlace de servidor es privado o ya no existe.",
+    "noMemberToShow": "No hay ningún miembro para mostrar por ahora.",
+    "arcadeUnavailable": "El Spire Arcade no está disponible para ti.",
+    "gameUnavailable": "Ese juego no está disponible para ti.",
+    "storyUnavailable": "Esa historia no está disponible para ti.",
+    "roomUnavailable": "Esa sala no está disponible para ti.",
+    "exportFailed": "No se pudo generar la exportación del chat. Prueba con un rango más corto.",
+    "friendUpdate": "Novedad de amistad de {{name}}.",
+    "pageLoadFailed": "No se pudo cargar esa página.",
+    "noLandingRoom": "{{name}} aún no tiene una sala para entrar.",
+    "serverOpenFailed": "No se pudo abrir ese servidor.",
+    "googleLinked": "Cuenta de Google vinculada.",
+    "googleAlreadyLinked": "Esa cuenta de Google ya está conectada a otra cuenta.",
+    "googleAccountDisabled": "Esa cuenta está deshabilitada. Contacta a un admin.",
+    "googleSignInFailed": "El inicio de sesión con Google no se completó. Inténtalo de nuevo.",
+    "topicGone": "No se pudo abrir ese tema, puede que lo hayan eliminado.",
+    "threadGone": "No se pudo abrir ese hilo, puede que lo hayan eliminado.",
+    "messageGone": "No se pudo cargar ese mensaje, puede que lo hayan eliminado.",
+    "loadFailed": "error al cargar",
+    "switchFailed": "error al cambiar",
+    "forumsHiddenUnverified": "Los foros están ocultos mientras verificas tu correo."
+  },
+  "worldBanner": {
+    "openTitle": "Abrir el mundo vinculado a esta sala",
+    "world": "Mundo",
+    "byOwner": "de {{name}}",
+    "hideTitle": "Ocultar este banner del mundo. Volverá a aparecer si cambia el mundo vinculado a la sala.",
+    "hideAria": "Ocultar el banner del mundo"
+  }
+}

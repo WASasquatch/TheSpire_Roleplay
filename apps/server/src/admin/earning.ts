@@ -20,6 +20,7 @@ import { z } from "zod";
 import { hasPermission } from "../auth/permissions.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
 import { emitToUser } from "../realtime/presence.js";
+import { tFor } from "../i18n.js";
 import type { Db } from "../db/index.js";
 import {
   characterEarning,
@@ -151,7 +152,13 @@ const earningConfigSchema = z.object({
   }).strict(),
 }).strict();
 
-interface SessionUserCtx { id: string; role: Role }
+interface SessionUserCtx { id: string; role: Role; locale?: string | null }
+
+/** The caller's users.locale off the admin preHandler's session attach —
+ *  refusal copy renders in the admin's own language (i18n Phase 3). */
+function callerLocale(req: FastifyRequest): string | null {
+  return (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser?.locale ?? null;
+}
 
 /** Body shape for new-rank creation. */
 const createRankBody = z.object({
@@ -423,7 +430,7 @@ export function registerAdminEarningRoutes(
       reply.code(409);
       return {
         error: "rank is in use",
-        message: "Disable the rank instead, existing rank-holders should not be displaced.",
+        message: tFor(callerLocale(req), "errors:server.earning.rankInUse"),
       };
     }
     await db.delete(ranks).where(and(eq(ranks.serverId, DEFAULT_SERVER_ID), eq(ranks.key, req.params.key)));
@@ -510,7 +517,7 @@ export function registerAdminEarningRoutes(
       reply.code(409);
       return {
         error: "tier is in use",
-        message: "Disable the tier or change the threshold so users move out before deleting.",
+        message: tFor(callerLocale(req), "errors:server.earning.tierInUse"),
       };
     }
     await db.delete(rankTiers).where(and(eq(rankTiers.serverId, DEFAULT_SERVER_ID), eq(rankTiers.id, req.params.id)));
@@ -710,7 +717,7 @@ export function registerAdminEarningRoutes(
     if (!existing) { reply.code(404); return { error: "style not found" }; }
     if (existing.isBuiltin) {
       reply.code(409);
-      return { error: "built-in styles cannot be deleted", message: "Disable it instead, the seed row backs anyone who owns it." };
+      return { error: "built-in styles cannot be deleted", message: tFor(callerLocale(req), "errors:server.earning.builtinDisableInstead") };
     }
     await db.delete(nameStyles).where(and(eq(nameStyles.serverId, DEFAULT_SERVER_ID), eq(nameStyles.key, req.params.key)));
     return { ok: true };
@@ -911,7 +918,7 @@ export function registerAdminEarningRoutes(
         reply.code(409);
         return {
           error: "built-in borders cannot be deleted",
-          message: "Disable it instead, the seed row backs anyone who owns it.",
+          message: tFor(callerLocale(req), "errors:server.earning.builtinDisableInstead"),
         };
       }
       // Ownership rows cascade via ON DELETE CASCADE on
@@ -1196,7 +1203,7 @@ export function registerAdminEarningRoutes(
       reply.code(409);
       return {
         error: "built-in items cannot be deleted",
-        message: "Disable it instead, the seed row backs anyone who owns it.",
+        message: tFor(callerLocale(req), "errors:server.earning.builtinDisableInstead"),
       };
     }
     await db.delete(items).where(and(eq(items.serverId, DEFAULT_SERVER_ID), eq(items.key, req.params.key)));

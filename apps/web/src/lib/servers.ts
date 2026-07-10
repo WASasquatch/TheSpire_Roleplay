@@ -18,6 +18,7 @@ import type {
   ServerJoinMode,
   ServerViewerState,
 } from "@thekeep/shared";
+import { i18n } from "./i18n.js";
 
 /**
  * One row in `GET /servers`. Mirrors the forum catalog's `ForumSummary`:
@@ -88,6 +89,16 @@ export interface ServerSummary {
   moderationUntil?: number | null;
   /** Optional staff note shown beneath the suspend/ban notice. */
   moderationNote?: string | null;
+  /** Owner-set "18+ community" flag (age-restriction plan, Phase 2). The
+   *  backend hides 18+ servers from under-18 accounts entirely, so a row with
+   *  this set only ever reaches adults; the client renders it as an "18+"
+   *  chip. Optional: absent (older bundle, or not yet populated) = all-ages. */
+  isNsfw?: boolean;
+  /** Optional public-safe banner variant for an 18+ server: shown on
+   *  discovery cards, share pages, and link previews instead of the real
+   *  banner art for viewers who can't see NSFW. Null/absent = no variant
+   *  (those surfaces fall back to name/colors). */
+  sfwBannerUrl?: string | null;
 }
 
 /**
@@ -174,14 +185,14 @@ export interface PublicServerLanding {
 
 export async function fetchPublicServer(slug: string): Promise<PublicServerLanding> {
   const r = await fetch(`/servers/public/${encodeURIComponent(slug)}`, { credentials: "include" });
-  if (!r.ok) throw new Error(r.status === 404 ? "not found" : `Couldn't load this community (${r.status}).`);
+  if (!r.ok) throw new Error(r.status === 404 ? "not found" : i18n.t("errors:servers.communityLoad", { status: r.status }));
   return (await r.json()) as PublicServerLanding;
 }
 
 /** Pull `{ error }` out of a non-OK response, falling back to the status. */
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   const j = (await r.json().catch(() => null)) as ({ error?: string } & T) | null;
-  if (!r.ok) throw new Error(j?.error ?? `Request failed (${r.status}).`);
+  if (!r.ok) throw new Error(j?.error ?? i18n.t("errors:requestFailed", { status: r.status }));
   return j as T;
 }
 
@@ -189,7 +200,7 @@ async function jsonOrThrow<T>(r: Response): Promise<T> {
  *  the caller (viewerRole != null || isSystem ⇒ owned/joined). */
 export async function listServers(): Promise<ServerSummary[]> {
   const r = await fetch("/servers", { credentials: "include" });
-  if (!r.ok) throw new Error(`Couldn't load servers (${r.status}).`);
+  if (!r.ok) throw new Error(i18n.t("errors:servers.listLoad", { status: r.status }));
   const j = (await r.json()) as { servers: ServerSummary[] };
   return j.servers;
 }
@@ -207,7 +218,7 @@ export interface ServerDiscover {
  *  its error state (the modal already has one). */
 export async function fetchServerDiscover(): Promise<ServerDiscover> {
   const r = await fetch("/servers/discover", { credentials: "include" });
-  if (!r.ok) throw new Error(`Couldn't load the server catalog (${r.status}).`);
+  if (!r.ok) throw new Error(i18n.t("errors:servers.catalogLoad", { status: r.status }));
   const j = (await r.json()) as { popular?: ServerSummary[]; new?: ServerSummary[] };
   return { popular: j.popular ?? [], new: j.new ?? [] };
 }
@@ -257,8 +268,8 @@ export async function fetchServerRegistrationRules(): Promise<string> {
 /** Full detail + the viewer's per-server relationship. */
 export async function getServer(idOrSlug: string): Promise<{ server: ServerDetail; viewer: ServerViewerState }> {
   const r = await fetch(`/servers/${encodeURIComponent(idOrSlug)}`, { credentials: "include" });
-  if (r.status === 404) throw new Error("That server doesn't exist (or was archived).");
-  if (!r.ok) throw new Error(`Couldn't load that server (${r.status}).`);
+  if (r.status === 404) throw new Error(i18n.t("errors:servers.missing"));
+  if (!r.ok) throw new Error(i18n.t("errors:servers.load", { status: r.status }));
   return (await r.json()) as { server: ServerDetail; viewer: ServerViewerState };
 }
 
@@ -343,7 +354,7 @@ export interface ServerCreationApplicationWire {
 /** The viewer's recent create-a-server applications (newest first). */
 export async function fetchMyServerApplications(): Promise<ServerCreationApplicationWire[]> {
   const r = await fetch("/servers/applications/mine", { credentials: "include" });
-  if (!r.ok) throw new Error(`Couldn't load your applications (${r.status}).`);
+  if (!r.ok) throw new Error(i18n.t("errors:servers.applicationsLoad", { status: r.status }));
   const j = (await r.json()) as { applications: ServerCreationApplicationWire[] };
   return j.applications;
 }
@@ -398,11 +409,11 @@ export async function setServerImage(
 export function readServerImageFile(file: File, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     if (file.size > maxBytes) {
-      reject(new Error(`Image too large (max ${Math.round(maxBytes / 1024)}KB).`));
+      reject(new Error(i18n.t("errors:imageTooLarge", { kb: Math.round(maxBytes / 1024) })));
       return;
     }
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Couldn't read that file."));
+    reader.onerror = () => reject(new Error(i18n.t("errors:fileReadFailed")));
     reader.onload = () => resolve(String(reader.result));
     reader.readAsDataURL(file);
   });

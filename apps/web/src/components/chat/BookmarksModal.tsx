@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { customCmdCssToStyle, resolveMessageColor, type Bookmark } from "@thekeep/shared";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { parseInline } from "../../lib/markdown.js";
 import { useActiveTheme } from "../../lib/theme.js";
 import { readError } from "../../lib/http.js";
@@ -28,6 +30,7 @@ const UNCATEGORIZED = "Uncategorized";
  * (the server returns it) so the user can decide to clean the row up.
  */
 export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
+  const { t } = useTranslation("chat");
   const [bookmarks, setBookmarks] = useState<Bookmark[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -42,7 +45,7 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
       const j = (await r.json()) as { bookmarks: Bookmark[] };
       setBookmarks(j.bookmarks);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "load failed");
+      setError(err instanceof Error ? err.message : t("bookmarks.loadFailed"));
     }
   }
   useEffect(() => { load(); }, []);
@@ -86,7 +89,7 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
   }, [bookmarks, query]);
 
   async function removeBookmark(id: string) {
-    if (!window.confirm("Remove this bookmark?")) return;
+    if (!window.confirm(t("bookmarks.removeConfirm"))) return;
     try {
       const r = await fetch(`/me/bookmarks/${encodeURIComponent(id)}`, {
         method: "DELETE",
@@ -95,7 +98,7 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
       if (!r.ok) throw new Error(await readError(r));
       setBookmarks((cur) => (cur ? cur.filter((b) => b.id !== id) : cur));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "delete failed");
+      setError(err instanceof Error ? err.message : t("bookmarks.deleteFailed"));
     }
   }
 
@@ -119,7 +122,7 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
       );
       setEditingId(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("bookmarks.saveFailed"));
     }
   }
 
@@ -139,7 +142,7 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
         className={`${MODAL_CARD_CONTENT} keep-frame bg-keep-bg text-keep-text lg:rounded`}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">Bookmarks</h2>
+          <h2 className="font-action text-lg">{t("bookmarks.title")}</h2>
           <CloseButton onClick={onClose} />
         </header>
 
@@ -149,8 +152,8 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search bookmarks…"
-              aria-label="Search bookmarks"
+              placeholder={t("bookmarks.searchPlaceholder")}
+              aria-label={t("bookmarks.searchAria")}
               className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm placeholder:text-keep-muted"
             />
           </div>
@@ -163,16 +166,15 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
             </div>
           ) : null}
           {bookmarks === null && !error ? (
-            <p className="italic text-keep-muted">loading…</p>
+            <p className="italic text-keep-muted">{t("bookmarks.loading")}</p>
           ) : null}
           {bookmarks && bookmarks.length === 0 ? (
             <p className="italic text-keep-muted">
-              No bookmarks yet. Tap the bookmark icon on a message to save it
-              here, with an optional category and note.
+              {t("bookmarks.empty")}
             </p>
           ) : null}
           {bookmarks && bookmarks.length > 0 && grouped.length === 0 ? (
-            <p className="italic text-keep-muted">No bookmarks match your search.</p>
+            <p className="italic text-keep-muted">{t("bookmarks.noMatches")}</p>
           ) : null}
 
           {grouped.map(({ category, rows }) => {
@@ -186,7 +188,7 @@ export function BookmarksModal({ onClose, onJumpToMessage }: Props) {
                 >
                   <span>
                     <span aria-hidden className="mr-1">{isCollapsed ? "▶" : "▼"}</span>
-                    {category}
+                    {category === UNCATEGORIZED ? t("bookmarks.uncategorized") : category}
                   </span>
                   <span className="tabular-nums">{rows.length}</span>
                 </button>
@@ -235,8 +237,9 @@ function Row({
   onEdit: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("chat");
   const m = bookmark.message;
-  const when = new Date(m.createdAt).toLocaleString();
+  const when = formatDateTime(m.createdAt);
   const removed = m.body === "[message removed]";
   // Archived = the original message expired out of the retention window and
   // we're rendering the saved snapshot. There's no live row to jump to, so
@@ -267,10 +270,10 @@ function Row({
           <b className="text-keep-text">{m.displayName}</b>
           <span className="mx-1">·</span>
           {m.roomName}
-          {m.replyToId ? <span className="ml-1 italic text-keep-action/80">in thread</span> : null}
+          {m.replyToId ? <span className="ml-1 italic text-keep-action/80">{t("bookmarks.inThread")}</span> : null}
           {archived ? (
             <span className="ml-1 rounded bg-keep-muted/20 px-1 py-0.5 text-[9px] not-italic text-keep-muted">
-              Archived
+              {t("bookmarks.archived")}
             </span>
           ) : null}
         </span>
@@ -281,7 +284,7 @@ function Row({
           type="button"
           onClick={onOpen}
           className="mt-1 block w-full text-left text-sm leading-snug hover:underline"
-          title="Jump to this message"
+          title={t("actions.jumpToMessage")}
         >
           <span className="break-words" style={bodyStyle}>
             {parseInline(m.body)}
@@ -295,8 +298,8 @@ function Row({
           className="mt-1 block w-full text-left text-sm leading-snug"
           title={
             removed
-              ? "This message is no longer available."
-              : "The original message expired; showing your saved copy."
+              ? t("bookmarks.removedTooltip")
+              : t("bookmarks.archivedTooltip")
           }
         >
           <span
@@ -313,8 +316,8 @@ function Row({
         </div>
       ) : null}
       <div className="mt-1 flex gap-2 text-[10px] uppercase tracking-widest text-keep-muted opacity-0 group-hover:opacity-100">
-        <button type="button" onClick={onEdit} className="hover:text-keep-action">Edit</button>
-        <button type="button" onClick={onDelete} className="hover:text-keep-accent">Remove</button>
+        <button type="button" onClick={onEdit} className="hover:text-keep-action">{t("bookmarks.edit")}</button>
+        <button type="button" onClick={onDelete} className="hover:text-keep-accent">{t("bookmarks.remove")}</button>
       </div>
     </div>
   );
@@ -329,6 +332,7 @@ function EditForm({
   onSave: (category: string, note: string) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation("chat");
   const [category, setCategory] = useState(bookmark.category);
   const [note, setNote] = useState(bookmark.note ?? "");
   return (
@@ -341,7 +345,7 @@ function EditForm({
         value={category}
         onChange={(e) => setCategory(e.target.value)}
         maxLength={60}
-        placeholder="Category (e.g. 'plot threads', leave empty for Uncategorized)"
+        placeholder={t("bookmarks.categoryPlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus
@@ -351,7 +355,7 @@ function EditForm({
         value={note}
         onChange={(e) => setNote(e.target.value)}
         maxLength={500}
-        placeholder="Optional note"
+        placeholder={t("bookmarks.notePlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
       />
       <div className="flex justify-end gap-1">
@@ -360,13 +364,13 @@ function EditForm({
           onClick={onCancel}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           className="rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/20"
         >
-          Save
+          {t("common:save")}
         </button>
       </div>
     </form>

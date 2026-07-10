@@ -1,5 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { Compass } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { useChat } from "../../state/store.js";
 import { CoachTour, type CoachStep } from "./CoachTour.js";
 
@@ -29,65 +30,55 @@ import { CoachTour, type CoachStep } from "./CoachTour.js";
  * nothing.
  */
 
-// Copy follows the help-content voice: plain, friendly, no dev jargon.
-const WELCOME_STEP: CoachStep = {
-  title: "Welcome to The Spire",
-  body: "Here is a quick tour of the screen so you know where everything is. It takes about a minute, and you can replay it any time from Help.",
-};
-
-const IDENTITY_STEP: CoachStep = {
-  title: "You and your characters",
-  body: "This button at the bottom of the rail shows who you are posting as. Click it to switch into a character, create one, or go back to yourself. To open your own profile, use the Menu just below, or type /profile.",
-  targets: ['[data-tour="identity-button"]'],
-};
-
-const MENU_STEP: CoachStep = {
-  title: "The Menu holds everything",
-  body: "Open the Menu for your profile, worlds, forums, messages, friends, and Help. When you are not sure where something lives, look here first.",
-  targets: ['[data-tour="menu-button"]'],
-};
-
-const COMPOSER_STEP: CoachStep = {
-  title: "Say something",
-  body: "Type here and press Enter to talk. Start a line with / for commands, @ to mention someone, or : to write an action.",
-  targets: ['[data-tour="composer"]'],
-};
-
-const ROOMS_STEP: CoachStep = {
-  title: "Move between rooms",
-  body: "Every room you can join is listed here with its headcount. Click a room's name to hop in. Private rooms ask for a password.",
-  targets: ['[data-tour="rooms-tree"]'],
-};
-
-const COMMUNITIES_STEP: CoachStep = {
-  title: "Explore communities",
-  body: "These icons are the communities you have joined. Use the button at the bottom to discover more, or to apply to start your own.",
-  targets: ['[data-tour="server-rail"]'],
-};
-
-const FORUMS_STEP: CoachStep = {
-  title: "Forums, and this tour again",
-  body: "Forums, for writing you want to keep, live in the Menu and above the room list. You can replay this whole tour any time from Help.",
-  targets: ['[data-tour="menu-button"]'],
-};
-
 export function SiteTour({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation("tours");
   const serversEnabled = useChat((s) => s.branding.serversEnabled === true);
   const setSiteTourForced = useChat((s) => s.setSiteTourForced);
 
+  // Copy follows the help-content voice: plain, friendly, no dev jargon.
+  // Built at render time (not module scope) so a language switch re-renders it.
   // The communities step is only meaningful when the server rail is rendered.
   const steps = useMemo<CoachStep[]>(() => {
     const list: CoachStep[] = [
-      WELCOME_STEP,
-      IDENTITY_STEP,
-      MENU_STEP,
-      COMPOSER_STEP,
-      ROOMS_STEP,
+      {
+        title: t("site.welcome.title"),
+        body: t("site.welcome.body"),
+      },
+      {
+        title: t("site.identity.title"),
+        body: t("site.identity.body"),
+        targets: ['[data-tour="identity-button"]'],
+      },
+      {
+        title: t("site.menu.title"),
+        body: t("site.menu.body"),
+        targets: ['[data-tour="menu-button"]'],
+      },
+      {
+        title: t("site.composer.title"),
+        body: t("site.composer.body"),
+        targets: ['[data-tour="composer"]'],
+      },
+      {
+        title: t("site.rooms.title"),
+        body: t("site.rooms.body"),
+        targets: ['[data-tour="rooms-tree"]'],
+      },
     ];
-    if (serversEnabled) list.push(COMMUNITIES_STEP);
-    list.push(FORUMS_STEP);
+    if (serversEnabled) {
+      list.push({
+        title: t("site.communities.title"),
+        body: t("site.communities.body"),
+        targets: ['[data-tour="server-rail"]'],
+      });
+    }
+    list.push({
+      title: t("site.forums.title"),
+      body: t("site.forums.body"),
+      targets: ['[data-tour="menu-button"]'],
+    });
     return list;
-  }, [serversEnabled]);
+  }, [serversEnabled, t]);
 
   const handleClose = useCallback(() => {
     // Record the seen version so the server stops auto-opening the tour.

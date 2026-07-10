@@ -36,6 +36,7 @@ import {
   parseTagList,
 } from "@thekeep/shared";
 import type { Server as IoServer } from "socket.io";
+import { isMinor } from "../../auth/ageGate.js";
 import { hasPermission } from "../../auth/permissions.js";
 import type {
   worldApplications,
@@ -146,6 +147,9 @@ export const createWorldBody = z.object({
   slug: z.string().max(60).optional(),
   description: z.string().max(2000).nullable().optional(),
   visibility: visibilityEnum.optional(),
+  // Owner-set "18+ world" flag (age-restriction plan Phase 4). Adults
+  // only; enforced at the route layer so the rejection copy is friendly.
+  isNsfw: z.boolean().optional(),
   // Catalog metadata, all optional on create so the world can be filled
   // out incrementally; defaults match the DB column defaults so missing
   // fields land in the catalog's "Other" bucket without an extra step.
@@ -171,6 +175,8 @@ export const updateWorldBody = z.object({
   slug: z.string().max(60).optional(),
   description: z.string().max(2000).nullable().optional(),
   visibility: visibilityEnum.optional(),
+  // Adult owners (or edit_others_world staff) only; route-enforced.
+  isNsfw: z.boolean().optional(),
   theme: z.union([z.record(z.unknown()), z.null()]).optional(),
   genre: genreEnum.optional(),
   tags: tagsArraySchema.optional(),
@@ -503,6 +509,7 @@ export async function toSummary(db: Db, w: typeof worlds.$inferSelect): Promise<
     name: w.name,
     description: w.description,
     visibility: w.visibility as WorldVisibility,
+    isNsfw: w.isNsfw,
     pageCount: await pageCount(db, w.id),
     memberCount: await memberCountFor(db, w.id),
     linkedRoomCount: await linkedRoomCountFor(db, w.id),
@@ -533,6 +540,7 @@ export async function toCatalogEntry(db: Db, w: typeof worlds.$inferSelect): Pro
     ownerUsername: await loadOwnerUsername(db, w.ownerUserId),
     name: w.name,
     description: w.description,
+    isNsfw: w.isNsfw,
     pageCount: await pageCount(db, w.id),
     memberCount: await memberCountFor(db, w.id),
     linkedRoomCount: await linkedRoomCountFor(db, w.id),
@@ -647,6 +655,20 @@ export function entityKindRowToWire(k: typeof worldEntityKinds.$inferSelect): Wo
  *
  * Visibility check: private worlds resolve only for the owner / admin.
  * public + open resolve for anyone.
+ *
+ * HARD age gate (age-restriction plan Phase 4): an 18+ world resolves
+ * only for signed-in ADULT viewers — minors and anonymous visitors get
+ * the same null as a missing world, so every consumer (detail payload,
+ * the /w/:slug page's data fetch, pages, membership, applications,
+ * knowledge base) inherits the 404 posture from this one chokepoint.
+ * There is deliberately NO owner/admin bypass: age gates have none, so
+ * a minor owner whose world an adult staffer flagged 18+ loses access
+ * too. Membership + collaborator rows are never touched by the flag
+ * (keep-but-hide, mirroring rooms) so everything returns if it flips
+ * back — or when the member turns 18. The viewer's adulthood is derived
+ * from `users.birthdate` right here (one point read, 18+ worlds only)
+ * instead of a new parameter so all ~30 existing call sites — and any
+ * future one — can't forget to pass it.
  */
 export async function resolveWorld(
   db: Db,
@@ -681,6 +703,16 @@ export async function resolveWorld(
     }
   }
   if (!w) return null;
+  if (w.isNsfw) {
+    if (!viewerUserId) return null;
+    const viewer = (await db
+      .select({ birthdate: users.birthdate })
+      .from(users)
+      .where(eq(users.id, viewerUserId))
+      .limit(1))[0];
+    // Missing row fails closed, same posture as ageGate's malformed-DOB rule.
+    if (!viewer || isMinor(viewer)) return null;
+  }
   const viewable = w.visibility !== "private"
     || (viewerUserId && w.ownerUserId === viewerUserId)
     || viewerRole === "admin";

@@ -51,6 +51,11 @@ export type AuditAction =
   | "earning_reset"
   | "character_delete_admin"
   | "title_dissolve_admin"
+  // Age restriction (plan.md 2026-07-08). DOB corrections are admin-only
+  // (`edit_user_dob`); the isolation toggle is auditable when staff set or
+  // clear it on a minor's behalf.
+  | "user_dob_update"
+  | "user_isolation_update"
   // Reports
   | "report_resolve"
   | "report_dismiss"
@@ -116,6 +121,12 @@ export type AuditAction =
   | "forum_member_remove"
   | "forum_report_resolve"
   | "forum_usergroup_change"   // create/edit/delete a usergroup, or change its membership
+  // 18+ labeling (age-restriction plan): a room / forum topic / server /
+  // whole forum was marked or unmarked 18+. Metadata carries the new state.
+  | "room_nsfw_update"
+  | "topic_nsfw_update"
+  | "server_nsfw_update"
+  | "forum_nsfw_update"
   // Server moderation (Global Admin suspend/ban/delete of a whole server)
   | "server_moderation_suspend" // indefinite "under review" hold placed on a server
   | "server_moderation_ban"     // timed (auto-expiring) or permanent ban placed on a server
@@ -151,6 +162,8 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
       "kick", "mute", "unmute", "ban", "unban", "announce", "incognito_enter", "incognito_exit",
       "mod_case_create", "mod_case_update", "mod_case_delete", "automod",
       "message_pin", "message_unpin",
+      // 18+ labeling of rooms and whole servers (age-restriction plan).
+      "room_nsfw_update", "server_nsfw_update",
     ],
   },
   forums: {
@@ -170,6 +183,8 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
       "forum_member_remove",
       "forum_report_resolve",
       "forum_usergroup_change",
+      // 18+ labeling of forum topics and whole forums (age-restriction plan).
+      "topic_nsfw_update", "forum_nsfw_update",
     ],
   },
   role_changes: {
@@ -212,6 +227,8 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
       "earning_reset",
       "character_delete_admin",
       "title_dissolve_admin",
+      // Age restriction: DOB corrections + staff-set isolation toggles.
+      "user_dob_update", "user_isolation_update",
     ],
   },
   reports: {

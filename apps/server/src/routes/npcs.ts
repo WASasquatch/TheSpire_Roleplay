@@ -27,6 +27,7 @@ import {
 import { nanoid } from "nanoid";
 import { userNpcs } from "../db/schema.js";
 import type { Db } from "../db/index.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 const NPC_NAME_RX = /^[\p{L}\p{N}_\-' ]{1,40}$/u;
@@ -57,9 +58,9 @@ export async function registerNpcRoutes(app: FastifyInstance, db: Db): Promise<v
     let body: z.infer<typeof npcBody>;
     try { body = npcBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    if (!NPC_NAME_RX.test(body.name)) { reply.code(400); return { error: "NPC name: 1-40 chars, letters/numbers/spaces/_-'." }; }
+    if (!NPC_NAME_RX.test(body.name)) { reply.code(400); return { error: tFor(me.locale, "errors:server.npcs.nameRule") }; }
     const count = Number((await db.select({ n: sql<number>`count(*)` }).from(userNpcs).where(eq(userNpcs.userId, me.id)))[0]?.n ?? 0);
-    if (count >= NPC_MAX_PER_ACCOUNT) { reply.code(409); return { error: `You can save at most ${NPC_MAX_PER_ACCOUNT} NPCs.` }; }
+    if (count >= NPC_MAX_PER_ACCOUNT) { reply.code(409); return { error: tFor(me.locale, "errors:server.npcs.limit", { max: NPC_MAX_PER_ACCOUNT }) }; }
     const id = nanoid();
     await db.insert(userNpcs).values({ id, userId: me.id, name: body.name, statsJson: serializeNpcStats(body.stats ?? []) });
     const row = (await db.select().from(userNpcs).where(eq(userNpcs.id, id)).limit(1))[0];
@@ -73,7 +74,7 @@ export async function registerNpcRoutes(app: FastifyInstance, db: Db): Promise<v
     let body: z.infer<typeof npcBody>;
     try { body = npcBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    if (!NPC_NAME_RX.test(body.name)) { reply.code(400); return { error: "NPC name: 1-40 chars, letters/numbers/spaces/_-'." }; }
+    if (!NPC_NAME_RX.test(body.name)) { reply.code(400); return { error: tFor(me.locale, "errors:server.npcs.nameRule") }; }
     const row = (await db.select().from(userNpcs)
       .where(and(eq(userNpcs.id, req.params.id), eq(userNpcs.userId, me.id))).limit(1))[0];
     if (!row) { reply.code(404); return { error: "no such NPC" }; }

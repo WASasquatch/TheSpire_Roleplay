@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorldDetail } from "@thekeep/shared";
 import { sweepOrphanedUserBioStyles } from "../../lib/userHtml.js";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
@@ -46,6 +47,7 @@ interface Props {
  * non-owners; private ones only resolve for the owner.
  */
 export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAuthenticated = true, openApplicationOnMount = false }: Props) {
+  const { t } = useTranslation("worlds");
   const [detail, setDetail] = useState<WorldDetail | null>(initialDetail ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -68,7 +70,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
       // behaviour stays sane (one history entry per viewer open).
       syncWorldUrl(j.world.slug, { replace: true });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     }
   }
   useEffect(() => {
@@ -105,18 +107,18 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
       const r = await fetch(`/worlds/${worldId}/members`, { method: "POST", credentials: "include" });
       if (!r.ok) throw new Error(await readError(r));
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "join failed"); }
+    } catch (e) { setError(e instanceof Error ? e.message : t("errors.joinFailed")); }
     finally { setBusy(false); }
   }
   async function leave() {
-    if (!window.confirm("Leave this world? You can re-join from the catalog any time.")) return;
+    if (!window.confirm(t("viewer.confirmLeave"))) return;
     setBusy(true);
     setError(null);
     try {
       const r = await fetch(`/worlds/${worldId}/members`, { method: "DELETE", credentials: "include" });
       if (!r.ok) throw new Error(await readError(r));
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "leave failed"); }
+    } catch (e) { setError(e instanceof Error ? e.message : t("errors.leaveFailed")); }
     finally { setBusy(false); }
   }
   // setPrimary was removed alongside the primary-world feature in
@@ -132,7 +134,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
     // manually. Most modern browsers grant clipboard-write to user-
     // initiated handlers, but some (Safari pre-13.1, sandboxed iframes)
     // don't, so we surface the URL inline as a backstop.
-    onError: (url) => window.prompt("Copy this link:", url),
+    onError: (url) => window.prompt(t("viewer.copyPrompt"), url),
   });
   function copyLink() {
     if (!detail) return;
@@ -164,20 +166,30 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
       >
         <header className="flex shrink-0 items-center justify-between gap-3 border-b border-keep-rule bg-keep-banner px-4 py-2">
           <div className="min-w-0">
-            <h2 className="truncate font-action text-lg">{detail?.world.name ?? "World"}</h2>
+            <div className="flex min-w-0 items-center gap-2">
+              <h2 className="truncate font-action text-lg">{detail?.world.name ?? t("viewer.fallbackTitle")}</h2>
+              {detail?.world.isNsfw ? (
+                <span
+                  className="shrink-0 rounded bg-keep-accent/90 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-widest text-keep-bg"
+                  title={t("nsfwChipTitle")}
+                >
+                  {t("common:rating.nsfw")}
+                </span>
+              ) : null}
+            </div>
             {detail ? (
               <div className="text-[11px] text-keep-muted">
-                by {detail.world.ownerUsername}
+                {t("byOwner", { name: detail.world.ownerUsername })}
                 <span className="mx-1">·</span>
-                {detail.world.pageCount} {detail.world.pageCount === 1 ? "page" : "pages"}
+                {t("pageCount", { count: detail.world.pageCount })}
                 <span className="mx-1">·</span>
                 <button
                   type="button"
                   onClick={copyLink}
-                  title={`Copy ${worldShareUrl(detail.world.slug)}`}
+                  title={t("viewer.copyLinkTitle", { url: worldShareUrl(detail.world.slug) })}
                   className="rounded border border-keep-rule/60 px-1 font-mono text-[10px] hover:border-keep-action hover:text-keep-action"
                 >
-                  {copied ? "copied!" : `/w/${detail.world.slug}`}
+                  {copied ? t("viewer.copied") : `/w/${detail.world.slug}`}
                 </button>
               </div>
             ) : null}
@@ -204,7 +216,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
                 onClick={onEdit}
                 className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
               >
-                Edit
+                {t("actions.edit")}
               </button>
             ) : null}
             <CloseButton onClick={onClose} />
@@ -218,7 +230,7 @@ export function WorldViewerModal({ worldId, onClose, onEdit, initialDetail, isAu
         ) : null}
 
         {detail === null && error === null ? (
-          <p className="p-4 italic text-keep-muted">Loading...</p>
+          <p className="p-4 italic text-keep-muted">{t("common:loadingDots")}</p>
         ) : detail !== null ? (
           <WorldKnowledgeBase
             worldId={worldId}
@@ -277,6 +289,7 @@ function MembershipControls({
   onLeave: () => void;
   onApply: () => void;
 }) {
+  const { t } = useTranslation("worlds");
   if (detail.viewerIsMember) {
     return (
       <button
@@ -285,7 +298,7 @@ function MembershipControls({
         disabled={busy}
         className="keep-button rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
       >
-        Leave
+        {t("actions.leave")}
       </button>
     );
   }
@@ -303,10 +316,10 @@ function MembershipControls({
     // the actionable guidance.
     return (
       <span
-        title="The author of this world adds members directly. Message them if you'd like in."
+        title={t("viewer.inviteOnlyTitle")}
         className="inline-flex items-center rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs italic text-keep-muted"
       >
-        Invite-only
+        {t("viewer.inviteOnlyChip")}
       </span>
     );
   }
@@ -315,10 +328,10 @@ function MembershipControls({
     if (app && app.status === "pending") {
       return (
         <span
-          title="Your application is waiting on the author."
+          title={t("viewer.applicationPendingTitle")}
           className="inline-flex items-center rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs italic text-keep-muted"
         >
-          Application pending
+          {t("viewer.applicationPending")}
         </span>
       );
     }
@@ -328,11 +341,11 @@ function MembershipControls({
         onClick={onApply}
         disabled={busy}
         title={app && app.status === "rejected"
-          ? "Your last application was declined. You can apply again."
-          : "Send the author an application to join this world."}
+          ? t("viewer.reapplyTitle")
+          : t("viewer.applyTitle")}
         className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
       >
-        {app && app.status === "rejected" ? "Reapply" : "Apply"}
+        {app && app.status === "rejected" ? t("actions.reapply") : t("actions.apply")}
       </button>
     );
   }
@@ -342,10 +355,10 @@ function MembershipControls({
       type="button"
       onClick={onJoin}
       disabled={busy}
-      title="Join this world as your current identity. Doesn't change room access."
+      title={t("viewer.joinTitle")}
       className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-sm hover:bg-keep-banner/80 disabled:opacity-50"
     >
-      Join
+      {t("actions.join")}
     </button>
   );
 }

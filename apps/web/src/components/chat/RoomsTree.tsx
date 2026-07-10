@@ -8,6 +8,8 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SVGProps,
 } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { legibleAgainstBg, roleRank, type PermissionKey, type RoomOccupant, type RoomSummary, type ServerModPermission, type Theme } from "@thekeep/shared";
 import { Ban, Bell, BellOff, Clapperboard, Landmark, MessagesSquare, Plus, ScrollText, ShieldAlert, UserX, VolumeX } from "lucide-react";
 import { useChat } from "../../state/store.js";
@@ -15,6 +17,7 @@ import { useActiveTheme } from "../../lib/theme.js";
 import { AdminIcon, CharacterMaskIcon, MasterAdminIcon, ModIcon } from "../moderation/StaffIcons.js";
 import { CreateRoomModal } from "../CreateRoomModal.js";
 import { ToolPanel } from "../ToolPanel.js";
+import { RatingChip } from "../shared/RatingChip.js";
 import { UserNameTag } from "../UserNameTag.js";
 import { identityArgFor } from "../../lib/commandText.js";
 import { createPersistedDimension } from "../../lib/persistedDimension.js";
@@ -120,11 +123,12 @@ const ACTION_PILL =
  *  the store directly so the rail updates on every socket pulse without
  *  threading a prop through App. */
 function ForumNotifBadge() {
+  const { t } = useTranslation("chat");
   const unread = useChat((s) => s.forumNotifUnread);
   if (unread <= 0) return null;
   return (
     <span
-      title={`${unread} unread forum notification${unread === 1 ? "" : "s"}`}
+      title={t("rooms.forumNotif", { count: unread })}
       className="rounded-full bg-keep-accent px-1.5 py-0.5 text-[10px] font-bold leading-none text-keep-bg"
     >
       {unread > 99 ? "99+" : unread}
@@ -148,6 +152,7 @@ function ForumNotifBadge() {
  * ForumNotifBadge pill styling so the two read as one family.
  */
 function RoomUnreadCue({ roomId }: { roomId: string }) {
+  const { t } = useTranslation("chat");
   const unread = useChat((s) => s.roomUnread[roomId] ?? 0);
   const hasMention = useChat((s) => !!s.roomHasMention[roomId]);
   const muted = useChat((s) => !!s.roomMuted[roomId]);
@@ -158,15 +163,15 @@ function RoomUnreadCue({ roomId }: { roomId: string }) {
     <span className="ml-1.5 inline-flex shrink-0 items-center gap-1 align-middle">
       {hasMention ? (
         <span
-          title={`You were mentioned (${unread} unread)`}
+          title={t("rooms.mentioned", { count: unread })}
           className="rounded-full bg-keep-accent px-1.5 py-0.5 text-[10px] font-bold leading-none text-keep-bg"
         >
           @{unread > 99 ? "99+" : unread}
         </span>
       ) : showDot ? (
         <span
-          title={`${unread} unread message${unread === 1 ? "" : "s"}`}
-          aria-label={`${unread} unread`}
+          title={t("rooms.unreadMessages", { count: unread })}
+          aria-label={t("rooms.unreadAria", { count: unread })}
           className="h-2.5 w-2.5 rounded-full bg-keep-action"
           style={{ boxShadow: "0 0 0 1.5px rgba(0,0,0,.3)" }}
         />
@@ -185,6 +190,7 @@ function RoomUnreadCue({ roomId }: { roomId: string }) {
  * toggling mute never also switches into the room.
  */
 function RoomMuteToggle({ roomId }: { roomId: string }) {
+  const { t } = useTranslation("chat");
   const muted = useChat((s) => !!s.roomMuted[roomId]);
   const setRoomMuted = useChat((s) => s.setRoomMuted);
   function toggle() {
@@ -210,8 +216,8 @@ function RoomMuteToggle({ roomId }: { roomId: string }) {
       className={`pointer-events-none flex h-6 w-6 shrink-0 items-center justify-center rounded text-keep-muted opacity-0 transition-opacity hover:bg-keep-banner/60 hover:text-keep-text focus:pointer-events-auto focus:opacity-100 group-hover:pointer-events-auto group-hover:opacity-100 ${
         muted ? "pointer-events-auto opacity-100 text-keep-accent" : ""
       }`}
-      title={muted ? "Muted — tap to unmute (mentions still notify)" : "Mute this room"}
-      aria-label={muted ? "Unmute room" : "Mute room"}
+      title={muted ? t("rooms.muteTitleOn") : t("rooms.muteTitleOff")}
+      aria-label={muted ? t("rooms.unmuteAria") : t("rooms.muteAria")}
       aria-pressed={muted}
     >
       {muted ? <BellOff className="h-3.5 w-3.5" aria-hidden /> : <Bell className="h-3.5 w-3.5" aria-hidden />}
@@ -330,6 +336,7 @@ export function RoomsTree({
   onClose,
   fontStep = 1,
 }: Props) {
+  const { t } = useTranslation("chat");
 
   // "Create Room" prompt, opened from the Rooms header button. Local to the
   // rail since it only needs `onCommand` (already threaded through) to fire
@@ -482,8 +489,8 @@ export function RoomsTree({
       <div
         role="separator"
         aria-orientation="vertical"
-        aria-label="Resize userlist"
-        title="Drag to resize the userlist"
+        aria-label={t("rooms.resizeAria")}
+        title={t("rooms.resizeTitle")}
         onPointerDown={startResize}
         onPointerMove={moveResize}
         onPointerUp={endResize}
@@ -522,14 +529,14 @@ export function RoomsTree({
             type="button"
             data-tour="forums-catalog-button"
             onClick={onOpenForums}
-            title="Open the Forums Catalog - long-form boards owned by the community"
+            title={t("rooms.forumsCatalogTitle")}
             className="keep-button flex w-full items-center gap-2 rounded border border-keep-action/60 bg-keep-action/10 px-2.5 py-2 text-left transition-colors hover:border-keep-action hover:bg-keep-action/20 lg:py-1.5"
           >
             <Landmark className="h-4 w-4 shrink-0 text-keep-action" aria-hidden="true" />
-            <span className="font-action text-sm text-keep-text">Forums Catalog</span>
+            <span className="font-action text-sm text-keep-text">{t("rooms.forumsCatalog")}</span>
             <ForumNotifBadge />
             <span aria-hidden className={`ml-auto ${ACTION_PILL}`}>
-              Open
+              {t("rooms.open")}
             </span>
           </button>
         </div>
@@ -539,7 +546,7 @@ export function RoomsTree({
           gets real layout space and never covers the room list. */}
       <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-2 lg:bg-transparent lg:py-1.5">
         <span className="text-xs uppercase tracking-widest text-keep-muted">
-          Rooms <span className="text-keep-rule">({visibleRooms.length})</span>
+          {t("rooms.header")} <span className="text-keep-rule">({visibleRooms.length})</span>
         </span>
         <div className="flex items-center gap-1.5">
           {/* Floating-right create action. Icon-only, so it carries both a
@@ -556,19 +563,19 @@ export function RoomsTree({
             // the Forums "Open" chip. Styled purely by ACTION_PILL so the two
             // stay identical across every theme.
             className={`flex items-center gap-1 ${ACTION_PILL} transition-colors hover:border-keep-action hover:bg-keep-action/20`}
-            aria-label="Create a room"
-            title="Create a new room"
+            aria-label={t("rooms.createRoomAria")}
+            title={t("rooms.createRoomTitle")}
           >
             <Plus className="h-3 w-3" aria-hidden="true" />
-            <span className="hidden sm:inline">New</span>
+            <span className="hidden sm:inline">{t("rooms.new")}</span>
           </button>
           {onClose ? (
             <button
               type="button"
               onClick={onClose}
               className="keep-button flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-base text-keep-text hover:bg-keep-banner lg:hidden"
-              aria-label="Close rooms"
-              title="Close rooms drawer"
+              aria-label={t("rooms.closeRoomsAria")}
+              title={t("rooms.closeRoomsTitle")}
             >
               ✕
             </button>
@@ -577,7 +584,7 @@ export function RoomsTree({
       </div>
       <div data-tour="rooms-tree" className="min-h-0 flex-1 overflow-y-auto">
         {visibleRooms.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-keep-muted">(no rooms)</div>
+          <div className="px-3 py-2 text-xs text-keep-muted">{t("rooms.noRooms")}</div>
         ) : (
           <ul>
             {orderedRooms.map((r) => (
@@ -640,6 +647,7 @@ function RoomGroup({
    *  rooms, so their userlists render read-only). */
   modCaps: RoomModCaps;
 }) {
+  const { t } = useTranslation("chat");
   const isPrivate = room.type === "private";
   /**
    * Flicker guard: bridge transient empty `occupants` arrays so the
@@ -741,7 +749,7 @@ function RoomGroup({
                 if (room.theaterMode) {
                   return (
                     <span
-                      title="theater mode: a shared video plays above the chat"
+                      title={t("rooms.theaterTitle")}
                       className="mr-1 inline-flex shrink-0 align-middle text-keep-accent"
                     >
                       <Clapperboard aria-hidden style={glyphStyle} />
@@ -751,8 +759,8 @@ function RoomGroup({
                 const nested = room.replyMode === "nested";
                 const Icon = nested ? MessagesSquare : ScrollText;
                 const title = nested
-                  ? "threaded conversations, replies persist as forum-style threads"
-                  : "flat chat, chronological, ephemeral feel";
+                  ? t("rooms.threadedTitle")
+                  : t("rooms.flatTitle");
                 return (
                   <span
                     title={title}
@@ -762,9 +770,15 @@ function RoomGroup({
                   </span>
                 );
               })()}
-              {isPrivate ? <span title="private - password required" className="mr-1">🔒</span> : null}
+              {isPrivate ? <span title={t("rooms.privateTitle")} className="mr-1">🔒</span> : null}
               {room.name}
             </span>
+            {/* Rating chip (age-restriction plan, Phase 2): every row is
+                labeled 18+ or SFW so the rail always shows which side of
+                the partition each room is on. `room.isNsfw` is the
+                EFFECTIVE rating (server OR room); under-18 viewers never
+                receive 18+ rows at all, so they only ever see SFW here. */}
+            <RatingChip nsfw={!!room.isNsfw} className="ml-1.5 self-center" />
             {/* Unread dot / mention pill (per-channel). Sits right after the
                 name, before the occupant count, so it reads as a property of
                 the room. Suppressed on the current room's dot by the server
@@ -781,7 +795,7 @@ function RoomGroup({
         </div>
       </div>
       {displayedOccupants.length === 0 ? (
-        <div className="px-5 pb-2 text-[11px] italic text-keep-muted lg:pb-1">empty</div>
+        <div className="px-5 pb-2 text-[11px] italic text-keep-muted lg:pb-1">{t("rooms.empty")}</div>
       ) : (
         <ul className="pb-1">
           {sortedOccupants.map((o) => {
@@ -789,7 +803,7 @@ function RoomGroup({
             // characters in two tabs renders as two occupant rows
             // (one per identity). Keying on userId alone would
             // dup-React-key in that case.
-            const chip = resolveStaffChip(o, theme, siteName);
+            const chip = resolveStaffChip(t, o, theme, siteName);
             return (
                     <li
                       key={`${o.userId}:${o.characterId ?? ""}`}
@@ -889,7 +903,7 @@ function RoomGroup({
                         {o.characterId !== null ? (
                           <CharacterMaskIcon
                             className="h-4 w-4 text-keep-muted"
-                            title="In character"
+                            title={t("rooms.inCharacter")}
                           />
                         ) : null}
                         <span
@@ -905,12 +919,12 @@ function RoomGroup({
                           }}
                           title={
                             o.away
-                              ? `Away${o.awayMessage ? `: ${o.awayMessage}` : ""}`
+                              ? (o.awayMessage ? t("rooms.awayWithMessage", { message: o.awayMessage }) : t("rooms.away"))
                               : o.idle
-                              ? "Idle, tab closed or refreshed, may return"
-                              : "Online"
+                              ? t("rooms.idleTitle")
+                              : t("rooms.online")
                           }
-                          aria-label={o.away ? "Away" : o.idle ? "Idle" : "Online"}
+                          aria-label={o.away ? t("rooms.away") : o.idle ? t("rooms.idle") : t("rooms.online")}
                         />
                         {chip ? (
                           <span
@@ -982,6 +996,7 @@ function OccupantModMenu({
   caps: RoomModCaps;
   onCommand: (text: string) => void;
 }) {
+  const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const myRole = useChat((s) => s.me?.role ?? null);
   const anyCap = caps.kick || caps.mute || caps.ban;
@@ -1014,8 +1029,8 @@ function OccupantModMenu({
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="flex h-5 w-5 items-center justify-center rounded text-keep-muted opacity-70 transition-colors hover:bg-keep-system/15 hover:text-keep-system focus:opacity-100"
-        title={`Moderate ${occupant.displayName}`}
-        aria-label={`Moderate ${occupant.displayName}`}
+        title={t("rooms.moderate", { name: occupant.displayName })}
+        aria-label={t("rooms.moderate", { name: occupant.displayName })}
         aria-haspopup="menu"
         aria-expanded={open}
       >
@@ -1041,9 +1056,9 @@ function OccupantModMenu({
                 role="menuitem"
                 onClick={() => run("kick")}
                 className="flex items-center gap-2 px-2.5 py-1.5 text-left text-keep-text hover:bg-keep-action/10"
-                title="Boot from this room (they can rejoin)"
+                title={t("rooms.kickTitle")}
               >
-                <UserX className="h-3.5 w-3.5 shrink-0" aria-hidden /> Kick
+                <UserX className="h-3.5 w-3.5 shrink-0" aria-hidden /> {t("rooms.kick")}
               </button>
             ) : null}
             {caps.mute ? (
@@ -1052,9 +1067,9 @@ function OccupantModMenu({
                 role="menuitem"
                 onClick={() => run("mute")}
                 className="flex items-center gap-2 px-2.5 py-1.5 text-left text-keep-text hover:bg-keep-accent/10"
-                title="Silence for 10 minutes (adjust the duration from chat)"
+                title={t("rooms.muteActionTitle")}
               >
-                <VolumeX className="h-3.5 w-3.5 shrink-0" aria-hidden /> Mute
+                <VolumeX className="h-3.5 w-3.5 shrink-0" aria-hidden /> {t("rooms.mute")}
               </button>
             ) : null}
             {caps.ban ? (
@@ -1062,12 +1077,12 @@ function OccupantModMenu({
                 type="button"
                 role="menuitem"
                 onClick={() =>
-                  run("ban", `Ban ${occupant.displayName} from this room? They won't be able to re-enter until unbanned.`)
+                  run("ban", t("rooms.banConfirm", { name: occupant.displayName }))
                 }
                 className="flex items-center gap-2 px-2.5 py-1.5 text-left text-keep-system hover:bg-keep-system/10"
-                title="Bar from this room until unbanned"
+                title={t("rooms.banTitle")}
               >
-                <Ban className="h-3.5 w-3.5 shrink-0" aria-hidden /> Ban
+                <Ban className="h-3.5 w-3.5 shrink-0" aria-hidden /> {t("rooms.ban")}
               </button>
             ) : null}
           </span>
@@ -1115,7 +1130,7 @@ interface StaffChip {
  * so a custom palette that happens to pick a slot color too close to
  * the bg gets nudged toward legibility before the icon paints.
  */
-function resolveStaffChip(o: RoomOccupant, theme: Theme, siteName: string): StaffChip | null {
+function resolveStaffChip(t: TFunction<"chat">, o: RoomOccupant, theme: Theme, siteName: string): StaffChip | null {
   // SITE-staff badges (masteradmin / admin / site-mod) are suppressed
   // on character rows so an admin/mod can RP without the public
   // signaling "this character belongs to staff." The OOC ↔ character
@@ -1143,13 +1158,13 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme, siteName: string): Staf
     // one. Site badges (admin/master/site-mod) stay master-only below.
     if (o.role === "mod" || o.role === "owner") {
       return {
-        label: o.role === "owner" ? "Room owner" : "Room Mod",
+        label: o.role === "owner" ? t("staff.roomOwner") : t("staff.roomMod"),
         Icon: ModIcon,
         color: legibleAgainstBg(theme.system, theme.bg),
         title:
           o.role === "owner"
-            ? "Room owner, moderation authority in this room."
-            : "Room Mod, moderation authority in this room.",
+            ? t("staff.roomOwnerTitle")
+            : t("staff.roomModTitle"),
       };
     }
     return null;
@@ -1157,19 +1172,18 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme, siteName: string): Staf
 
   if (o.accountRole === "masteradmin") {
     return {
-      label: `${siteName} Owner`,
+      label: t("staff.siteOwner", { siteName }),
       Icon: MasterAdminIcon,
       color: legibleAgainstBg(theme.accent, theme.bg),
-      title:
-        `${siteName} Owner, site-wide authority including settings, branding, and account management.`,
+      title: t("staff.siteOwnerTitle", { siteName }),
     };
   }
   if (o.accountRole === "admin") {
     return {
-      label: `${siteName} Admin`,
+      label: t("staff.siteAdmin", { siteName }),
       Icon: AdminIcon,
       color: legibleAgainstBg(theme.action, theme.bg),
-      title: `${siteName} Admin, site-wide moderation across every room.`,
+      title: t("staff.siteAdminTitle", { siteName }),
     };
   }
   // Site-mod beats per-room badges in label / tooltip if both apply
@@ -1180,18 +1194,18 @@ function resolveStaffChip(o: RoomOccupant, theme: Theme, siteName: string): Staf
     return {
       label:
         isSiteMod
-          ? `${siteName} Moderator`
+          ? t("staff.siteMod", { siteName })
           : o.role === "owner"
-          ? "Room owner"
-          : "Room Mod",
+          ? t("staff.roomOwner")
+          : t("staff.roomMod"),
       Icon: ModIcon,
       color: legibleAgainstBg(theme.system, theme.bg),
       title:
         isSiteMod
-          ? `${siteName} Moderator, moderation across every room.`
+          ? t("staff.siteModTitle", { siteName })
           : o.role === "owner"
-          ? "Room owner, moderation authority in this room."
-          : "Room Mod, moderation authority in this room.",
+          ? t("staff.roomOwnerTitle")
+          : t("staff.roomModTitle"),
     };
   }
   return null;

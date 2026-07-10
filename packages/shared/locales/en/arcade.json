@@ -1,0 +1,279 @@
+{
+  "arcade": {
+    "notEnoughCurrency": "Not enough currency",
+    "games": {
+      "eidolon": "Eidolon Tamer",
+      "urugal": "Urugal's Descent",
+      "grimhold": "Grimhold"
+    },
+    "launcher": {
+      "title": "🕹 Spire Arcade",
+      "subtitle": "A growing cabinet of games to play between scenes. Each game unlocks once, then it's yours to keep.",
+      "eidolonDescription": "Hatch a gothic familiar, one of four eggs, or hatch one of your own pets, then keep it fed, played with, clean, and well. It lives on while you're away. Feed it food from your bag, cure it with a potion.",
+      "urugalDescription": "A gothic roguelike. Pick a class and delve a procedurally-built dungeon: fight, loot, and descend as deep as you dare. Every run is different, and every floor is a fresh gamble.",
+      "grimholdDescription": "A cabinet of six cursed amusements: Runefall, Loong, Arrowstorm, The Spire, Graveward, and Voidwake. Quick arcade runs that trickle Currency and XP, daily-capped.",
+      "desktopOnly": "Desktop only",
+      "desktopOnlyNote": "Available on desktop only.",
+      "unavailable": "Unavailable to you right now.",
+      "play": "▶ Play",
+      "unlock": "Unlock",
+      "unlocking": "Unlocking…",
+      "unlockEidolonTitle": "Unlock the Eidolon Tamer",
+      "unlockUrugalTitle": "Unlock Urugal's Descent",
+      "unlockGrimholdTitle": "Unlock the Grimhold cabinet",
+      "unlockFailed": "Unlock failed.",
+      "moreGames": "More games",
+      "comingSoon": "Coming soon to the cabinet."
+    },
+    "urugal": {
+      "windowTitle": "🗡 Urugal's Descent",
+      "floor": "floor {{floor}}"
+    },
+    "grimhold": {
+      "windowTitle": "🕹 Grimhold",
+      "award": "+{{currency}}c · +{{xp}} xp"
+    },
+    "eidolon": {
+      "windowTitle": "🥚 Eidolon Tamer",
+      "loading": "Summoning…",
+      "forbidden": "The Arcade is closed to you right now.",
+      "locked": "This game is locked. Unlock the Eidolon Tamer from the Spire Arcade.",
+      "familiarAria": "familiar",
+      "eggAria": "dormant egg",
+      "kindPet": "Pet",
+      "kindEidolon": "Eidolon",
+      "clock": {
+        "am": "AM",
+        "pm": "PM"
+      },
+      "species": {
+        "dragon": { "name": "Dragon", "tagline": "Hardy · Ravenous" },
+        "gargoyle": { "name": "Gargoyle", "tagline": "Stoic · Low-upkeep" },
+        "wraith": { "name": "Wraith", "tagline": "Fasting · Restless" },
+        "slime": { "name": "Slime", "tagline": "Messy · Carefree" }
+      },
+      "traits": {
+        "hardy": { "label": "Hardy", "flavor": "Shrugs off illness and clings to life." },
+        "gluttonous": { "label": "Gluttonous", "flavor": "Always hungry, but food delights it." },
+        "stoic": { "label": "Stoic", "flavor": "Even-tempered; slow to sadden, slow to cheer." },
+        "vivacious": { "label": "Vivacious", "flavor": "Big feelings: dips fast, but cheers fast." },
+        "pristine": { "label": "Pristine", "flavor": "Fastidiously, impossibly clean." },
+        "feral": { "label": "Feral", "flavor": "Wild and spirited; high upkeep." }
+      },
+      "variants": {
+        "prismatic": "Prismatic"
+      },
+      "growth": {
+        "hatchling": "Hatchling",
+        "adult": "Adult",
+        "elder": "Elder"
+      },
+      "select": {
+        "title": "Choose an egg to summon",
+        "orPet": "- or hatch with a pet -",
+        "needPet": "- acquire a pet to hatch one as a familiar -",
+        "yourPet": "your pet"
+      },
+      "readout": {
+        "dragWisp": "<0>Drag the wisp</0> near your familiar, then release.",
+        "scrub": "<0>Scrub</0> the grime away."
+      },
+      "nameplate": {
+        "unbound": "unbound",
+        "dormant": "dormant",
+        "afflicted": "afflicted"
+      },
+      "age": {
+        "daysHours": "{{days}}d {{hours}}h",
+        "days": "{{days}}d",
+        "hours": "{{hours}}h"
+      },
+      "level": "Lv {{level}}",
+      "levelRow": {
+        "totalXpTitle": "{{xp}} total XP",
+        "streakTitle": "{{status}} · passive XP ×{{multiplier}}",
+        "tendedToday": "Tended today",
+        "notTendedToday": "Not tended yet today",
+        "xpTrackTitle": "{{current}} / {{total}} to next level",
+        "remindersOn": "Daily reminders on",
+        "remindersOff": "Daily reminders off",
+        "remindersAria": "Toggle daily reminders"
+      },
+      "hall": {
+        "link": "📖 The Hall, familiars past",
+        "title": "The Hall, familiars past",
+        "openAria": "Open the Hall",
+        "header": "The Hall · familiars past",
+        "opening": "Opening the Hall…",
+        "empty": "No familiars have departed yet. Those you raise will be remembered here.",
+        "sold": "sold",
+        "released": "released"
+      },
+      "sell": {
+        "title": "Sells for the currency it has earned (an inherited head-start isn't counted), and frees you to tame anew",
+        "confirm": "Confirm sale",
+        "sell": "Sell"
+      },
+      "gauges": {
+        "satiety": "Satiety",
+        "spirit": "Spirit",
+        "vigor": "Vigor",
+        "hygiene": "Hygiene",
+        "health": "Health"
+      },
+      "dead": {
+        "notice": "It has gone dormant. A magical item will wake it.",
+        "release": "Release"
+      },
+      "actions": {
+        "feed": "Feed",
+        "play": "Play",
+        "toys": "Toys",
+        "cleanse": "Cleanse",
+        "remedy": "Remedy",
+        "wake": "Wake",
+        "rest": "Rest",
+        "use": "Use",
+        "revive": "Revive"
+      },
+      "float": {
+        "streak": "🔥 {{days}}-day streak!",
+        "streakReward": "🔥 {{days}}-day streak · +{{reward}}!",
+        "levelUp": "✦ Level {{level}} ✦",
+        "xpGain": "+{{xp}} XP",
+        "ritualFaltered": "The ritual faltered.",
+        "variant": "✦ {{label}}! ✦",
+        "rare": "Rare",
+        "bloodline": "✦ the bloodline endures · Lv {{level}} ✦",
+        "hatched": "✦ hatched ✦",
+        "releaseFailed": "Could not release it.",
+        "sold": "✦ sold · +{{value}}",
+        "saleFailed": "Sale failed.",
+        "remindersFailed": "Couldn't update reminders.",
+        "cleansed": "✦ cleansed",
+        "awoken": "✦ awoken",
+        "slumber": "✦ slumber",
+        "nom": "✦ nom",
+        "remedy": "✦ remedy",
+        "vitality": "+ vitality"
+      },
+      "drawer": {
+        "feedTitle": "Feed your familiar",
+        "wakeTitle": "Wake your familiar",
+        "toyTitle": "Play with a toy",
+        "remedyTitle": "Tend its ailment",
+        "walletTitle": "Your currency",
+        "reviveNote": "Your familiar lies dormant. A magical item will wake it to a fragile second life.",
+        "basicHeal": "Basic heal · −",
+        "basicHealNote": "a little vitality, no cure",
+        "basicHealTitle": "Spend currency on a basic heal",
+        "emptyFood": "No food in the shop yet.",
+        "emptyRevive": "You need a magical item to wake it.",
+        "emptyToy": "No toys in the shop yet.",
+        "emptyRemedy": "No curatives in the shop yet.",
+        "owned_one": "{{count}} owned",
+        "owned_other": "{{count}} owned",
+        "noneOwned": "none owned",
+        "buy": "Buy",
+        "buyOneFor": "Buy one for {{price}}",
+        "purchaseFailed": "Purchase failed."
+      }
+    }
+  },
+  "emoticons": {
+    "pickerButton": {
+      "insert": "Insert emoticon"
+    },
+    "picker": {
+      "confirmSpend": "Use this community emoticon for {{cost}} Currency? {{cost}} Currency goes to the sheet's creator. You won't be asked again this session.",
+      "chargeFailed": "could not charge",
+      "noSheets": "No emoticon sheets installed.",
+      "unicodeTabTitle": "Unicode emoji (system font)",
+      "unicodeTabLabel": "Unicode emoji",
+      "communityTabTitle": "Community emoticons (1 Currency per use, paid to the creator)",
+      "communityTabLabel": "Community",
+      "recent": "Recent",
+      "cellCostVisitor": "{{label}} ({{cost}} Currency per use)",
+      "cellCostOwner": "{{label}} ({{cost}} Currency per use for visitors; free for you)",
+      "noLabeledCellsYet": "This sheet has no labeled cells yet.",
+      "communityEmpty": "No community sheets yet. Approved user-submitted sheets show up here. Paid sheets cost {{cost}} Currency per use (goes to the creator); free sheets are marked Free.",
+      "communityHeader": "Community sheets",
+      "sortNewTitle": "Newest first",
+      "sortOldTitle": "Oldest first",
+      "sortTopTitle": "Most-used first",
+      "sortNew": "New",
+      "sortOld": "Old",
+      "sortTop": "Top",
+      "byAuthor": "by @{{name}}",
+      "costPerUse": "{{cost}} Currency per use",
+      "costPerUseOwner": "{{cost}} Currency per use (free for you)",
+      "free": "Free",
+      "freeYours": "Free (yours)",
+      "uses_one": "{{count}} uses",
+      "uses_other": "{{count}} uses",
+      "back": "← Back",
+      "backTitle": "Back to community sheets",
+      "noLabeledCells": "This sheet has no labeled cells.",
+      "searchPlaceholder": "Search emoji…",
+      "searchAria": "Search Unicode emoji",
+      "noMatch": "No emoji match “{{query}}”. Try a synonym like “happy” or “love”."
+    },
+    "typeahead": {
+      "suggestionsAria": "Emoji suggestions",
+      "kindEmoji": "emoji",
+      "kindSheet": "sheet",
+      "footer": "↑↓ navigate · enter / tab to insert · esc to dismiss"
+    },
+    "submission": {
+      "title": "Custom Reaction Sheet",
+      "build": {
+        "header": "Build your sheet",
+        "spec": "Sheets are <1>4x4 grid, square cells</1>, submitted at <3>600x600px</3> (so each cell is 150x150px) as <5>PNG, WebP, or APNG with a transparent background</5> so reactions composite cleanly over any chat theme. JPEG / GIF also accepted but transparency is lost.",
+        "animated": "<0>WebP and APNG can be animated</0>. Looping idle frames, blinks, shimmer, etc. all carry through to the picker. You can work at a larger canvas while drawing for clarity, but downscale to 600x600px before submitting so file size stays reasonable.",
+        "demoSheet": "Demo sheet (PNG)",
+        "alignmentGrid": "Alignment grid (PNG)",
+        "gridNote": "The alignment grid's borders are visual guides only. Strip them out of your final sheet so peers don't see grid lines around every reaction."
+      },
+      "form": {
+        "header": "Submit a new sheet",
+        "paidFromCharacter": "Paid from <1>this character</1>: <3></3> per submission",
+        "paidFromMaster": "Paid from <1>your master pool</1>: <3></3> per submission",
+        "wallet": "Wallet: <1></1>",
+        "slugLabel": "Slug (lowercase, a-z 0-9 -)",
+        "slugPlaceholder": "my-emotes",
+        "slugError": "Slug must be 1-40 chars, lowercase letters/digits/hyphens, no leading/trailing dash.",
+        "nameLabel": "Sheet name (visible in picker)",
+        "imageLabel": "Sheet image. 4x4 grid at <1>600x600px</1> (150px cells). <3>Transparent PNG, WebP, or APNG recommended</3> (WebP / APNG can be animated); JPEG / GIF accepted but lose transparency. ≤6 MB.",
+        "previewAlt": "Preview",
+        "cellLabels": "Cell labels ({{filled}}/{{total}})",
+        "cellLabelsNote": "Pre-filled to match the demo sheet's mood order. Edit any cell whose reaction differs, or blank it out to hide that slot from the picker. Order matches the 4x4 grid left-to-right, top-to-bottom.",
+        "reviewNote": "Reviewed by a moderator. Rejected submissions are refunded.",
+        "chooseImage": "Choose an image",
+        "fixSlug": "Fix the slug",
+        "addName": "Add a sheet name",
+        "labelOneCell": "Label at least one cell",
+        "notEnoughCurrency": "Not enough Currency",
+        "submit": "Submit for review",
+        "submitting": "Submitting…",
+        "unsupportedType": "Unsupported image type, use PNG, APNG, JPEG, WebP, or GIF.",
+        "tooLarge": "File is larger than 6 MB, please compress or resize.",
+        "readFailed": "Failed to read file.",
+        "submitFailed": "Submission failed"
+      },
+      "history": {
+        "header": "My uploads",
+        "loadFailed": "Failed to load history",
+        "empty": "No submissions yet.",
+        "statusPending": "Awaiting moderator review",
+        "statusApproved": "Approved, live in the picker",
+        "statusRejectedRefunded": "Rejected, {{amount}} Currency refunded",
+        "statusRejected": "Rejected",
+        "reason": "Reason: {{reason}}",
+        "useCount_one": "{{count}} use",
+        "useCount_other": "{{count}} uses",
+        "chargeToggle": "Charge {{cost}} Currency per use",
+        "saveFailed": "could not save"
+      }
+    }
+  }
+}

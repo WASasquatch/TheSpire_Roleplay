@@ -1,0 +1,536 @@
+{
+  "dismiss": "Descartar",
+  "backLink": "← Volver",
+  "gathering": "Reuniendo comunidades…",
+  "errorFallback": "error",
+  "topCommunitiesTitle": "Mejores comunidades",
+  "stats": {
+    "messages24hLabel_one": "mensaje en las últimas 24h",
+    "messages24hLabel_other": "mensajes en las últimas 24h",
+    "messages24hLabel_many": "mensajes en las últimas 24h"
+  },
+  "duration": {
+    "indefinitely": "indefinidamente",
+    "days_one": "{{count}} día",
+    "days_other": "{{count}} días",
+    "days_many": "{{count}} días",
+    "hours_one": "{{count}} hora",
+    "hours_other": "{{count}} horas",
+    "hours_many": "{{count}} horas",
+    "minutes_one": "{{count}} minuto",
+    "minutes_other": "{{count}} minutos",
+    "minutes_many": "{{count}} minutos",
+    "seconds": "{{seconds}} segundos"
+  },
+  "shell": {
+    "tagline": "un santuario de chat",
+    "checking": "comprobando {{siteName}}...",
+    "projectCredit": "The Spire Roleplay Chat v{{version}}",
+    "stats": {
+      "onlineOutOf_one": "<0>{{count}}</0><1>usuario en línea de</1><2>{{total}}</2>",
+      "onlineOutOf_other": "<0>{{count}}</0><1>usuarios en línea de</1><2>{{total}}</2>",
+      "onlineOutOf_many": "<0>{{count}}</0><1>usuarios en línea de</1><2>{{total}}</2>",
+      "usersOnline_one": "usuario en línea",
+      "usersOnline_other": "usuarios en línea",
+      "usersOnline_many": "usuarios en línea",
+      "publicRooms_one": "sala pública",
+      "publicRooms_other": "salas públicas",
+      "publicRooms_many": "salas públicas",
+      "privateChambers_one": "aposento privado",
+      "privateChambers_other": "aposentos privados",
+      "privateChambers_many": "aposentos privados"
+    },
+    "meta": {
+      "retentionIndefinite": "Los mensajes se conservan indefinidamente",
+      "retention": "Los mensajes se conservan por {{duration}}",
+      "sessionIdle": "las sesiones se cierran tras {{duration}} de inactividad"
+    }
+  },
+  "publicShell": {
+    "openSite": "Abrir {{siteName}}",
+    "signIn": "Iniciar sesión en {{siteName}}"
+  },
+  "boot": {
+    "checkingSession": "comprobando sesión..."
+  },
+  "auth": {
+    "enterHeading": "entra a The Spire",
+    "registerHeading": "crea un recipiente",
+    "logIn": "Iniciar sesión",
+    "register": "Registrarse",
+    "loggingIn": "Iniciando sesión...",
+    "registering": "Registrando...",
+    "needAccount": "¿Necesitas una cuenta? Regístrate.",
+    "alreadyHaveOne": "¿Ya tienes una? Inicia sesión.",
+    "registrationClosed": "El registro está cerrado por el momento.",
+    "forgotPassword": "¿Olvidaste tu contraseña?",
+    "email": "Correo",
+    "emailOrUsername": "Correo o nombre de usuario",
+    "masterUsername": "Nombre de usuario principal",
+    "password": "Contraseña",
+    "showPassword": "Mostrar contraseña",
+    "hidePassword": "Ocultar contraseña",
+    "dateOfBirth": "Fecha de nacimiento",
+    "dobHelper": "Debes tener al menos {{minAge}} años para unirte a {{siteName}}.",
+    "minorIsolation": "Mostrarme solo a otros miembros menores de 18 y al equipo. Puedes cambiarlo después en tu configuración.",
+    "beforeYouRegister": "antes de registrarte",
+    "rulesAgreement": "Entiendo que {{siteName}} aloja historias y rol escritos por usuarios, y que algunas áreas son solo para adultos. Acepto las <1>reglas del sitio</1>.",
+    "captchaHeading": "Verificación rápida (anti-bots)",
+    "captchaLoading": "cargando...",
+    "captchaPlaceholder": "respuesta",
+    "captchaNew": "nueva pregunta",
+    "captchaNewTitle": "Cambiar la pregunta",
+    "tickBoxTitle": "Marca la casilla para confirmar que aceptas las reglas de la casa.",
+    "rulesRequired": "Lee y acepta las reglas de la casa para registrarte.",
+    "dobRequired": "Ingresa tu fecha de nacimiento.",
+    "minAgeError": "Debes tener al menos {{minAge}} años para crear una cuenta.",
+    "captchaRequired": "Responde la pregunta de verificación.",
+    "registerFailed": "falló el registro",
+    "loginFailed": "falló el inicio de sesión",
+    "or": "o",
+    "continueWithGoogle": "Continuar con Google",
+    "googleFailed": "No se pudo iniciar sesión con Google. Inténtalo de nuevo.",
+    "googleSigningIn": "Iniciando tu sesión con Google…",
+    "profilePrivate": "El perfil de <0>{{name}}</0> es <2>privado</2>. Inicia sesión o regístrate para verlo.",
+    "profileView": "Estás intentando ver el perfil de <1>{{name}}</1>. Inicia sesión o regístrate para continuar.",
+    "worldPrivate": "<0>{{name}}</0> es un mundo <2>privado</2>. Inicia sesión o regístrate para verlo.",
+    "returnForumRegister": "Estás creando una cuenta en <1>{{siteName}}</1> para acceder al foro <3>{{forum}}</3>. En cuanto te registres, te llevaremos directo de vuelta.",
+    "returnForumLogin": "Después de iniciar sesión, te regresaremos al foro <1>{{forum}}</1>."
+  },
+  "googleFinish": {
+    "heading": "termina tu recipiente",
+    "intro": "Estás iniciando sesión con <1>Google</1>. Elige un nombre de usuario y acepta las reglas de la casa para terminar de crear tu cuenta en <3>{{siteName}}</3>.",
+    "rulesRequired": "Lee y acepta las reglas de la casa para terminar el registro.",
+    "finishFailed": "No se pudo completar el registro.",
+    "finishing": "Terminando…",
+    "finishCta": "Terminar el registro"
+  },
+  "emailPages": {
+    "backToSignIn": "Volver al inicio de sesión",
+    "continueToSignIn": "Continuar al inicio de sesión",
+    "goToSignIn": "Ir al inicio de sesión",
+    "checkEmail": "Revisa tu correo",
+    "resetSent": "Si existe una cuenta con ese correo, un enlace para restablecer la contraseña va en camino. Vence en 1 hora. Revisa tu bandeja de entrada (y la carpeta de spam).",
+    "resetTitle": "Restablece tu contraseña",
+    "resetIntro": "Ingresa el correo de tu cuenta y te enviaremos un enlace para elegir una nueva contraseña.",
+    "genericError": "Algo salió mal. Inténtalo de nuevo.",
+    "tryAgain": "Inténtalo de nuevo.",
+    "sending": "Enviando...",
+    "sendResetLink": "Enviar el enlace",
+    "invalidLink": "Enlace no válido",
+    "resetMissingToken": "A este enlace de restablecimiento le falta su token. Solicita uno nuevo desde la página de inicio de sesión.",
+    "passwordUpdated": "Contraseña actualizada",
+    "passwordChanged": "Tu contraseña se cambió. Ya puedes iniciar sesión con tu nueva contraseña.",
+    "chooseNewPassword": "Elige una nueva contraseña",
+    "newPassword": "Nueva contraseña",
+    "confirmPassword": "Confirmar contraseña",
+    "mismatch": "Las contraseñas aún no coinciden.",
+    "minChars": "Al menos 8 caracteres.",
+    "resetFailed": "No se pudo restablecer tu contraseña.",
+    "updating": "Actualizando...",
+    "updatePassword": "Actualizar contraseña",
+    "verifyTitle": "Verificación de correo",
+    "verifyMissingToken": "A este enlace de confirmación le falta su token.",
+    "verifyInvalid": "Este enlace de confirmación no es válido o ya venció.",
+    "verifyFailed": "No se pudo confirmar tu correo.",
+    "confirming": "Confirmando tu correo…",
+    "confirmed": "Tu correo está confirmado. ¡Gracias! Ya puedes iniciar sesión y empezar a escribir."
+  },
+  "verifyGate": {
+    "sent": "¡Enviado! Revisa tu bandeja de entrada (y el spam).",
+    "sending": "Enviando…",
+    "resend": "Reenviar correo de verificación",
+    "sendFailed": "No se pudo enviar ahora. Intenta de nuevo en un minuto.",
+    "tryLater": "Intenta de nuevo en un minuto.",
+    "checking": "Verificando…",
+    "refreshCta": "Ya verifiqué — actualizar",
+    "notYet": "Aún sin verificar — abre el enlace en tu correo y vuelve a intentarlo.",
+    "block": "<0>Verifica tu correo para chatear.</0> Haz clic en el enlace que te enviamos y luego <2>{{refreshLabel}}</2>. ¿No lo ves? Revisa tu carpeta de <4>spam</4> y luego <6>{{resendLabel}}</6> · <8>¿correo equivocado?</8>",
+    "nudge": "Verifica tu correo para proteger tu cuenta. <1>{{resendLabel}}</1>"
+  },
+  "faqPage": {
+    "title": "FAQ",
+    "empty": "Aún no se han publicado entradas en el FAQ.",
+    "notFound": "Esa entrada del FAQ no existe (o no está publicada).",
+    "statusError": "estado {{status}}",
+    "loadFailed": "falló la carga",
+    "allFaqs": "← Todo el FAQ"
+  },
+  "landing": {
+    "tagline": "Donde viven las historias y las comunidades.",
+    "tabJoin": "Únete",
+    "tabHost": "Crea",
+    "tabCommunities": "Comunidades",
+    "tabFeatures": "Funciones",
+    "tabFaq": "FAQ",
+    "tabRules": "Reglas",
+    "tabForums": "Foros",
+    "joinTitle": "Únete a la historia",
+    "joinBody": "Entra a salas de rol en vivo, crea un elenco de personajes, explora mundos compartidos y escribe junto a toda una comunidad.",
+    "createAccount": "Crea tu cuenta gratis",
+    "reassurance": "Gratis para siempre. Sin descargas, sin tarjeta. Entra a una sala en menos de un minuto.",
+    "onlineNow_one": "<0>{{formatted}}</0> jugador de rol en línea ahora",
+    "onlineNow_other": "<0>{{formatted}}</0> jugadores de rol en línea ahora",
+    "onlineNow_many": "<0>{{formatted}}</0> jugadores de rol en línea ahora",
+    "google": "Google",
+    "signInWithGoogle": "Iniciar sesión con Google",
+    "hostTitle": "Crea tu propia comunidad",
+    "hostBody": "Administra tu propia comunidad de chat y foros, con tus propias salas, miembros, roles y moderación. Empieza gratis, directo en tu navegador.",
+    "startCommunity": "Crea una comunidad",
+    "seeLiveForum": "Mira un foro en vivo →",
+    "bringCommunity": "Trae tu comunidad a {{siteName}}",
+    "bringBody": "Dale a tu juego, gremio o fandom un hogar de verdad, gratis, con las herramientas para administrarlo a tu manera.",
+    "ownChatTitle": "Tu propia comunidad de chat",
+    "ownChat": [
+      "Salas en vivo para rol en tiempo real",
+      "Miembros, roles e invitaciones",
+      "Economía y cosméticos propios",
+      "Herramientas de moderación que tú controlas"
+    ],
+    "ownForumsTitle": "Tus propios foros",
+    "ownForums": [
+      "Tableros para rol por publicaciones y discusión",
+      "Un equipo de moderadores y reglas de membresía",
+      "Una página pública que puedes compartir donde sea",
+      "Temas en hilos que duran semanas"
+    ],
+    "visitForums": "Visita los foros de {{siteName}}",
+    "startYourOwn": "Crea tu propia comunidad →",
+    "closingTitle": "Tu primera escena te espera",
+    "closingBody": "El registro toma un minuto. Crea un personaje, entra a una sala pública y empieza a escribir esta misma noche.",
+    "justBrowsing": "¿Solo estás mirando? <1>Lee historias en el Scriptorium</1>, sin necesidad de cuenta.",
+    "whatYouGet": "Lo que te espera aquí",
+    "showLess": "Mostrar menos",
+    "showMore": "Mostrar {{n}} más",
+    "credFree": "Gratis y de código abierto",
+    "credRules": "Tu comunidad, tus reglas",
+    "credLongform": "Pensado para grupos de rol que perduran",
+    "credBrowser": "Juega directo en tu navegador",
+    "writersSteppedIn_one": "escritor ha dado el paso",
+    "writersSteppedIn_other": "escritores han dado el paso",
+    "writersSteppedIn_many": "escritores han dado el paso",
+    "onlineRightNow": "en línea ahora mismo",
+    "publicRoomsOpen_one": "sala pública abierta",
+    "publicRoomsOpen_other": "salas públicas abiertas",
+    "publicRoomsOpen_many": "salas públicas abiertas"
+  },
+  "features": {
+    "kicker": "Lo que puedes hacer aquí",
+    "heading": "Todo lo que tu historia necesita",
+    "welcome": "Bienvenidos, escritores, soñadores y criaturas, vengan de donde vengan. Aquí hay un lugar para sus historias.",
+    "listAria": "Lista de funciones",
+    "overview": "Resumen",
+    "introHeading": "Juega y retoma partidas en cualquier dispositivo",
+    "introAlt": "Un vistazo al interior de The Spire",
+    "items": {
+      "characters": {
+        "title": "Personajes",
+        "tagline": "Interpreta a todo un elenco, no solo a un rostro",
+        "desc": "Crea hasta 100 personajes distintos en una sola cuenta, cada uno con su propio retrato, biografía, estadísticas e inventario. Cambia de personaje al instante y participa en varias partidas en distintas pestañas a la vez.",
+        "points": [
+          "Hasta 100 personajes por cuenta",
+          "Retratos, biografías, estadísticas e inventario",
+          "Administración de la cuenta por personaje"
+        ],
+        "ctaLabel": "Crea tu elenco"
+      },
+      "communities": {
+        "title": "Comunidades",
+        "tagline": "Crea tu propia comunidad o únete a una",
+        "desc": "Además del espacio nativo de The Spire, cualquiera puede crear su propia comunidad: un espacio con sus propias salas de chat, miembros, roles, economía y moderación. Adminístrala a tu manera o únete a comunidades creadas por otros.",
+        "points": [
+          "Tus propias salas, miembros y roles",
+          "Economía y cosméticos por comunidad",
+          "Herramientas de moderación que tú controlas"
+        ],
+        "ctaLabel": "Crea una comunidad"
+      },
+      "rooms": {
+        "title": "Rol en vivo",
+        "tagline": "Escenas en tiempo real, de día o de noche",
+        "desc": "Escribe con otros en salas públicas abiertas o en salas privadas. Prepara la escena y usa voces de NPC para dar vida a los personajes. Las tiradas de dados, los susurros, los emotes y los comandos con barra mantienen la escena en movimiento.",
+        "points": [
+          "Salas públicas y salas privadas con contraseña",
+          "Descripciones de sala, escenas y voces de NPC para enriquecer la narración",
+          "Comandos de dados, acciones y susurros",
+          "Emoticones y stickers de emotes + emotes personalizados"
+        ]
+      },
+      "worlds": {
+        "title": "Mundos y wikis",
+        "tagline": "Construye la ambientación, no solo la escena",
+        "desc": "Dale a tu partida un hogar permanente: una wiki del mundo con entradas por tipo para ubicaciones, NPC, objetos y facciones, un árbol de páginas de lore, arcos argumentales y registros de sesión, todo interconectado como una verdadera base de conocimiento.",
+        "points": [
+          "Entradas por tipo: ubicaciones, NPC, objetos, facciones",
+          "Páginas de lore, arcos argumentales y registros de sesión",
+          "Las barras de ambiente muestran a los jugadores qué esperar"
+        ]
+      },
+      "forums": {
+        "title": "Foros y PBP",
+        "tagline": "Únete a foros o crea los tuyos aquí",
+        "desc": "Únete a un foro existente con partidas de rol por publicaciones (play-by-post) o administra un foro para tus propios juegos, gremios o fandoms. Tendrás tus propios tableros, un equipo de moderadores y reglas de membresía.",
+        "points": [
+          "Tus propios tableros y roles de moderador",
+          "Membresía abierta, por solicitud o solo con invitación",
+          "Una página pública en tu propia dirección /f/"
+        ],
+        "ctaLabel": "Explora los foros de la comunidad"
+      },
+      "scriptorium": {
+        "title": "El Scriptorium",
+        "tagline": "Publica ficción original y fanfiction",
+        "desc": "Publica tus historias con capítulos, clasificaciones de contenido y reseñas en un editor enriquecido hecho para escritores. Los lectores pueden guardar tus libros en su biblioteca, y hasta puedes ofrecer copias de pago con las monedas de la app.",
+        "points": [
+          "Ficción original y fanfiction con capítulos",
+          "Reseñas, clasificaciones y bibliotecas de lectores",
+          "Gana oro y ofrece copias de pago de tu obra"
+        ],
+        "ctaLabel": "Explora el Scriptorium"
+      },
+      "profiles": {
+        "title": "Perfiles",
+        "tagline": "Una página que es realmente tuya",
+        "desc": "Cada personaje tiene una página de perfil personalizable: CSS personalizado, fondos, galerías de imágenes y enlaces. Haz que refleje a tu personaje, no una plantilla.",
+        "points": [
+          "HTML, CSS y fondos personalizados",
+          "Galerías de imágenes y enlaces",
+          "Estilos distintos por personaje",
+          "Presume tus colecciones de objetos y mascotas"
+        ]
+      },
+      "earning": {
+        "title": "Recompensas y progreso",
+        "tagline": "Progreso que respeta tu tiempo",
+        "desc": "Los escritores activos ganan XP, rangos y monedas con solo jugar. Gástalas en cosméticos, estilos de nombre, transiciones de sala y regalos para tus amigos. Sin pérdida de progreso ni tareas diarias.",
+        "points": [
+          "XP, rangos y monedas por escribir",
+          "Tienda con objetos coleccionables, regalos, arrojadizos y mascotas",
+          "Estilos de nombre personalizables, marcos de avatar y más",
+          "No necesitas jugar a diario para conservar tu rango"
+        ]
+      },
+      "community": {
+        "title": "Encuentra tu círculo",
+        "tagline": "Hecho para comunidades que perduran",
+        "desc": "Listas de amigos, presencia por personaje y herramientas de seguridad como el bloqueo y la lista de ignorados mantienen sana la comunidad. Temas que van de lo medieval a la ciencia ficción hacen que te sientas en casa.",
+        "points": [
+          "Amigos y presencia en línea",
+          "Herramientas de bloqueo, ignorados y moderación",
+          "Temas claros y oscuros para todos los gustos + personaliza el tuyo"
+        ]
+      }
+    }
+  },
+  "featuredWorlds": {
+    "sectionAria": "Mundos destacados",
+    "kicker": "Mundos destacados",
+    "cardsTitle": "Ambientaciones para explorar",
+    "orbTitle": "Mundos a los que asomarte",
+    "orbSubtitle": "escudriña cada reino a través del cristal",
+    "previous": "Mundo anterior",
+    "next": "Mundo siguiente",
+    "enterAria": "Entrar a {{name}}",
+    "controlsAria": "Controles del carrusel de mundos destacados",
+    "dotAria": "Mundo {{index}} de {{total}}: {{name}}",
+    "toldInPages_one": "Un mundo contado en {{count}} página.",
+    "toldInPages_other": "Un mundo contado en {{count}} páginas.",
+    "toldInPages_many": "Un mundo contado en {{count}} páginas.",
+    "pages_one": "{{count}} página",
+    "pages_other": "{{count}} páginas",
+    "pages_many": "{{count}} páginas",
+    "pagesBy_one": "{{count}} página · de {{name}}",
+    "pagesBy_other": "{{count}} páginas · de {{name}}",
+    "pagesBy_many": "{{count}} páginas · de {{name}}",
+    "members_one": "{{count}} miembro",
+    "members_other": "{{count}} miembros",
+    "members_many": "{{count}} miembros",
+    "byOwner": "de {{name}}",
+    "vibe": "Ambiente",
+    "enterCta": "Entra a este mundo →",
+    "genre": {
+      "fantasy": "Fantasía",
+      "scifi": "Ciencia ficción",
+      "modern": "Moderno",
+      "horror": "Terror",
+      "western": "Western",
+      "steampunk": "Steampunk",
+      "mythological": "Mitológico",
+      "other": "Ambientación original",
+      "unknown": "Mundo"
+    },
+    "eyebrow": {
+      "fantasy": "Un reino de",
+      "scifi": "Un futuro de",
+      "modern": "Una ciudad de",
+      "horror": "Una pesadilla de",
+      "western": "Una frontera de",
+      "steampunk": "Una fundición de",
+      "mythological": "Un mito de",
+      "other": "Un mundo de"
+    }
+  },
+  "popular": {
+    "sectionAria": "Servidores de chat populares de {{siteName}}",
+    "heading": "Servidores de chat populares de {{siteName}}",
+    "sub": "Lugares donde la gente ya se reúne. Echa un vistazo adentro.",
+    "visitTitle": "Visitar {{name}}",
+    "homeBadge": "Principal",
+    "members_one": "{{formatted}} miembro",
+    "members_other": "{{formatted}} miembros",
+    "members_many": "{{formatted}} miembros",
+    "online": "{{formatted}} en línea",
+    "lastPost": "Última publicación {{time}}"
+  },
+  "communities": {
+    "sub": "Las comunidades más activas de nuestra red. Échales un vistazo y publica la tuya.",
+    "emptyRail": "Aún no hay comunidades publicadas. Publica tú la primera.",
+    "browseAll": "Explora todas las comunidades →"
+  },
+  "board": {
+    "sortTraffic": "Más activas",
+    "sortIn": "Las que más nos envían",
+    "sortOut": "A las que más enviamos",
+    "sortAz": "De la A a la Z",
+    "emptyDefault": "Ninguna comunidad coincide con tu búsqueda.",
+    "searchPlaceholder": "Busca por nombre o etiqueta…",
+    "searchAria": "Buscar comunidades por nombre o etiqueta",
+    "clearSearch": "Borrar el texto de búsqueda",
+    "sortLabel": "Ordenar",
+    "sortAria": "Ordenar comunidades",
+    "clearTag": "Quitar etiqueta",
+    "showing": "Mostrando {{from}}–{{to}} de {{total}}",
+    "pageOf": "Página {{page}} de {{total}}",
+    "prevPage": "Página anterior",
+    "nextPage": "Página siguiente"
+  },
+  "card": {
+    "visit": "Visitar",
+    "noTitle": "Sin título",
+    "noDescription": "Sin descripción",
+    "seeLess": "Ver menos",
+    "seeMore": "Ver más",
+    "moreTags": "+{{count}}",
+    "visitsInTitle": "Visitas que nos enviaron",
+    "visitsInSr": "visitas que nos enviaron",
+    "visitsOutTitle": "Visitas que te enviamos",
+    "visitsOutSr": "visitas que te enviamos"
+  },
+  "portal": {
+    "status": {
+      "pending": "En revisión",
+      "approved": "Publicada",
+      "rejected": "Necesita cambios",
+      "disabled": "Oculta"
+    },
+    "listYourCommunity": "Publica tu comunidad",
+    "backToBoard": "Volver al tablero",
+    "title": "Mejores comunidades de RP",
+    "addYourCommunity": "Agrega tu comunidad",
+    "intro": "Publica aquí tu comunidad de rol. Agrega nuestro enlace de retorno a tu sitio y contaremos las visitas en ambos sentidos, para que todos vean qué está activo.",
+    "emptyBoard": "Aún no hay comunidades publicadas. Publica la primera — usa Agrega tu comunidad.",
+    "loginToList": "Inicia sesión para publicar tu comunidad.",
+    "ownEntry": "La entrada será tuya, así que puedes volver cuando quieras a copiar tu enlace de retorno.",
+    "loadFailed": "No se pudieron cargar tus envíos.",
+    "mySubmissions": "Mis envíos",
+    "noneYet": "Aún no has publicado ninguna comunidad.",
+    "listCommunity": "Publicar una comunidad",
+    "fieldTitle": "Título",
+    "titlePlaceholder": "El nombre de tu comunidad",
+    "fieldTargetUrl": "URL de destino",
+    "targetPlaceholder": "https://example.com",
+    "urlHint": "Usa un enlace http/https completo.",
+    "fieldDescription": "Descripción",
+    "descPlaceholder": "Una o dos líneas sobre tu comunidad",
+    "fieldIconUrl": "URL del ícono (opcional)",
+    "iconPlaceholder": "https://example.com/icon.png",
+    "fieldBannerUrl": "URL del banner (opcional)",
+    "bannerPlaceholder": "https://example.com/banner.jpg",
+    "fieldTags": "Etiquetas (opcional)",
+    "tagsHint": "Género o categoría, para que quienes buscan te encuentren.",
+    "submitFailed": "No se pudo enviar. Intenta de nuevo.",
+    "pendingNote": "¡Gracias! Tu comunidad está pendiente de revisión. Se publicará en cuanto un moderador la apruebe.",
+    "submitting": "Enviando…",
+    "submitCta": "Enviar a revisión",
+    "withdrawFailed": "No se pudo retirar.",
+    "edit": "Editar",
+    "withdraw": "Retirar",
+    "linkBackLabel": "Tu enlace de retorno (colócalo en tu sitio)",
+    "copyLinkBack": "Copiar enlace de retorno",
+    "editNote": "Editar una entrada publicada la envía de nuevo a revisión antes de que vuelva a mostrarse.",
+    "iconUrlAria": "URL del ícono",
+    "bannerUrlAria": "URL del banner",
+    "saveFailed": "No se pudo guardar."
+  },
+  "splashNav": {
+    "sectionsAria": "Secciones de la página",
+    "explore": "Explorar",
+    "signUp": "Regístrate",
+    "closeMenu": "Cerrar el menú de secciones",
+    "openMenu": "Abrir el menú de secciones"
+  },
+  "topCommunities": {
+    "docTitle": "Mejores comunidades · {{siteName}}",
+    "homeAria": "Inicio de {{siteName}}",
+    "addYourSite": "Agrega tu sitio",
+    "emptyBoard": "Aún no hay comunidades publicadas. Publica la primera — usa Agrega tu sitio."
+  },
+  "splashFaq": {
+    "title": "Preguntas frecuentes",
+    "moreQuestion": "¿Tienes otra pregunta? <1>Lee el FAQ completo</1>."
+  },
+  "seo": {
+    "homepageTagline": "Chat de rol, comunidades y foros",
+    "defaultDescription": "Crea tu comunidad de chat de rol o tu foro, o sumérgete en chat de rol en vivo, perfiles de personajes, mundos y escritura colaborativa.",
+    "defaultTitle": "{{siteName}} - {{tagline}}",
+    "forum": {
+      "title": "{{name}} - Foro · {{siteName}}",
+      "genericDescription": "{{name}} es un foro comunitario en {{siteName}}, con tableros para rol por publicaciones y discusión."
+    },
+    "world": {
+      "title": "{{name}} - Mundo de rol · {{siteName}}",
+      "genericDescription": "{{name}} es un mundo de rol en {{siteName}}. Lore, lugares y personajes en una sola wiki."
+    },
+    "community": {
+      "title": "{{name}} - Comunidad · {{siteName}}",
+      "genericDescription": "{{name}} es una comunidad de rol en {{siteName}}, con sus propias salas de chat y foros."
+    },
+    "login": {
+      "title": "Inicia sesión · {{siteName}} - {{tagline}}",
+      "description": "Inicia sesión en {{siteName}} para continuar tus historias, administrar tus personajes y volver a tus salas de rol."
+    },
+    "register": {
+      "title": "Crea tu personaje · {{siteName}} - {{tagline}}",
+      "description": "Únete a {{siteName}}. Crea un personaje, entra a los mundos y encuentra tu círculo de rol. Registrarse es gratis."
+    },
+    "accountAccess": {
+      "title": "Acceso a la cuenta · {{siteName}}"
+    },
+    "scriptorium": {
+      "title": "Scriptorium - Historias colaborativas · {{siteName}}",
+      "description": "Lee y escribe ficción de rol colaborativa en {{siteName}}. El Scriptorium reúne historias abiertas a todos, one-shots y series largas de la comunidad."
+    },
+    "faqs": {
+      "title": "Ayuda y FAQ · {{siteName}}",
+      "description": "Respuestas a preguntas comunes sobre {{siteName}}: primeros pasos, chat de rol, personajes, comunidades, foros y ayuda con tu cuenta."
+    },
+    "topCommunities": {
+      "title": "Mejores comunidades · {{siteName}}",
+      "description": "Descubre las mejores comunidades de rol, servidores de chat y foros destacados en {{siteName}}. Explora el webring y encuentra tu próximo hogar para el RP."
+    },
+    "service": {
+      "name": "Alojamiento de comunidades y foros en {{siteName}}",
+      "serviceType": "Alojamiento de comunidades y foros en línea",
+      "description": "Crea y administra tu propia comunidad de chat de rol o tu foro en {{siteName}}, con salas, miembros, roles, moderación y una página pública para compartir."
+    },
+    "noscript": {
+      "intro": "{{siteName}} es un hogar para el rol en vivo por texto, y una plataforma donde cualquiera puede alojar su propia comunidad. Únete al rol, o crea tu propia comunidad de chat y foros con tus propias salas, miembros, roles y moderación.",
+      "body": "Entra a salas de chat de rol en vivo, crea personajes, explora mundos compartidos, escribe historias colaborativas en el Scriptorium o aloja tu propia comunidad o foro.",
+      "registerLink": "Crea tu cuenta gratis",
+      "loginLink": "Inicia sesión",
+      "forumsLink": "Explora los foros de {{siteName}}",
+      "scriptoriumLink": "Lee historias en el Scriptorium",
+      "jsNote": "Esta página necesita JavaScript activado para la experiencia completa."
+    }
+  }
+}

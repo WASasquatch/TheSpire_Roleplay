@@ -1,3 +1,4 @@
+import { tFor } from "../../i18n.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -16,7 +17,7 @@ export const usersCommand: CommandHandler = {
     if (ctx.argsText.trim()) {
       ctx.socket.emit("error:notice", {
         code: "NO_ARGS",
-        message: "/users takes no arguments. Use /whois <name> to view someone specific.",
+        message: tFor(ctx.user.locale, "commands:users.noArgs"),
       });
       return;
     }

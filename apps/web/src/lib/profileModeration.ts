@@ -5,12 +5,14 @@
  * enforces the permission; these just shape the requests + responses.
  */
 
+import { i18n } from "./i18n.js";
+
 async function readErr(res: Response): Promise<string> {
   try {
     const j = (await res.json()) as { error?: string };
     if (j?.error) return j.error;
   } catch { /* non-JSON body */ }
-  return `Request failed (${res.status})`;
+  return i18n.t("errors:requestFailedBare", { status: res.status });
 }
 
 async function postJson(url: string, body: unknown): Promise<void> {

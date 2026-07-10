@@ -7,6 +7,7 @@ import { sanitizeBio } from "../auth/html.js";
 import { getSettings } from "../settings.js";
 import { hasPermission } from "../auth/permissions.js";
 import type { Db } from "../db/index.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 const TITLE_MAX = 120;
@@ -35,6 +36,16 @@ export async function registerJournalRoutes(app: FastifyInstance, db: Db): Promi
     const me = await getSessionUser(req, db);
     const c = (await db.select().from(characters).where(eq(characters.id, req.params.id)).limit(1))[0];
     if (!c || c.deletedAt) { reply.code(404); return { error: "not found" }; }
+    // Age gate (age-restriction plan Phase 1): an 18+ character's profile
+    // resolves to a stub for under-18 AND anonymous viewers, so its journal
+    // must not be fetchable by id either (HARD tier: minors and anonymous
+    // both denied). 404 mirrors the profile posture (keep-but-hide). The
+    // OWNER keeps access, this route is also the editor's data source and
+    // a minor whose character a mod marked 18+ still manages their own
+    // entries there. No staff exception for minor accounts.
+    if (c.isNsfw && !me?.isAdult && me?.id !== c.userId) {
+      reply.code(404); return { error: "not found" };
+    }
     // Admin reads other characters' private journals via the
     // `view_others_journal` key (privacy-sensitive, flagged in the
     // matrix UI with the yellow chip per PRIVACY_SENSITIVE_KEYS).
@@ -76,7 +87,7 @@ export async function registerJournalRoutes(app: FastifyInstance, db: Db): Promi
     const { maxBioLength } = await getSettings(db);
     if (body.bodyHtml.length > maxBioLength) {
       reply.code(413);
-      return { error: `Entry body capped at ${maxBioLength} chars.` };
+      return { error: tFor(me.locale, "errors:server.profile.journalEntryCap", { max: maxBioLength }) };
     }
 
     const id = nanoid();
@@ -121,7 +132,7 @@ export async function registerJournalRoutes(app: FastifyInstance, db: Db): Promi
         const { maxBioLength } = await getSettings(db);
         if (body.bodyHtml.length > maxBioLength) {
           reply.code(413);
-          return { error: `Entry body capped at ${maxBioLength} chars.` };
+          return { error: tFor(me.locale, "errors:server.profile.journalEntryCap", { max: maxBioLength }) };
         }
       }
 

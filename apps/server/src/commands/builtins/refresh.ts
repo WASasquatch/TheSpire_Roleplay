@@ -1,4 +1,5 @@
 import { sendRoomStateTo } from "../../realtime/broadcast.js";
+import { tFor } from "../../i18n.js";
 import type { CommandHandler } from "../types.js";
 
 const MIN_SECONDS = 5;
@@ -52,7 +53,7 @@ export const refreshCommand: CommandHandler = {
       await sendRoomStateTo(ctx.socket, ctx.io, ctx.db, ctx.roomId);
       ctx.socket.emit("error:notice", {
         code: "REFRESH_OFF",
-        message: "Slow mode off — real-time updates resumed.",
+        message: tFor(ctx.user.locale, "commands:refresh.slowModeOff"),
       });
       return;
     }
@@ -61,14 +62,17 @@ export const refreshCommand: CommandHandler = {
     if (!Number.isFinite(n) || String(n) !== arg.replace(/^\+/, "")) {
       ctx.socket.emit("error:notice", {
         code: "BAD_REFRESH",
-        message: `Usage: /refresh [seconds|off]. Got "${arg}".`,
+        message: tFor(ctx.user.locale, "commands:refresh.badArg", { arg }),
       });
       return;
     }
     if (n < MIN_SECONDS || n > MAX_SECONDS) {
       ctx.socket.emit("error:notice", {
         code: "BAD_REFRESH",
-        message: `Auto-refresh must be between ${MIN_SECONDS} and ${MAX_SECONDS} seconds (or 'off').`,
+        message: tFor(ctx.user.locale, "commands:refresh.outOfRange", {
+          min: MIN_SECONDS,
+          max: MAX_SECONDS,
+        }),
       });
       return;
     }
@@ -76,7 +80,7 @@ export const refreshCommand: CommandHandler = {
     ctx.socket.emit("ui:hint", { kind: "set-refresh-interval", seconds: n });
     ctx.socket.emit("error:notice", {
       code: "REFRESH_ON",
-      message: `Slow mode on: the userlist and typing pause and resync every ${n}s (eases load on slower devices). Chat stays live. /refresh off to stop.`,
+      message: tFor(ctx.user.locale, "commands:refresh.slowModeOn", { seconds: n }),
     });
     // One-shot now too, so the user sees the immediate refresh.
     await sendRoomStateTo(ctx.socket, ctx.io, ctx.db, ctx.roomId);

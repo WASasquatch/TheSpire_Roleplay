@@ -39,4 +39,11 @@ export interface PinnedMessage {
   bodyHtml: string | null;
   /** Original message createdAt (ms) at pin time. */
   origCreatedAt: number | null;
+  /**
+   * 18+ stamp of the source message frozen at pin time (migration 0340,
+   * age-restriction plan). The server already withholds stamped pins from
+   * under-18 viewers (a minor never receives one with this true); it rides
+   * the wire so adult clients could badge 18+-era pins later.
+   */
+  isNsfw: boolean;
 }

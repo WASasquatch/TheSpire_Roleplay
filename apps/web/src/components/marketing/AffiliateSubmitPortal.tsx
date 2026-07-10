@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   ArrowLeft,
   Check,
@@ -50,23 +51,26 @@ import { AffiliateCard } from "./AffiliateCard.js";
 
 /* ---------- status chips (§10 copy) ---------- */
 
+/** Chip chrome per status; the user-facing labels live in the marketing
+ *  catalog (portal.status.*) and are resolved with t() at render time. */
 const STATUS_META: Record<
   AffiliateStatus,
-  { label: string; className: string }
+  { labelKey: string; className: string }
 > = {
-  pending: { label: "Pending review", className: "border-keep-accent/60 bg-keep-accent/10 text-keep-accent" },
-  approved: { label: "Live", className: "border-emerald-500/60 bg-emerald-500/10 text-emerald-400" },
-  rejected: { label: "Needs changes", className: "border-amber-500/60 bg-amber-500/10 text-amber-400" },
-  disabled: { label: "Hidden", className: "border-keep-rule bg-keep-panel/50 text-keep-muted" },
+  pending: { labelKey: "portal.status.pending", className: "border-keep-accent/60 bg-keep-accent/10 text-keep-accent" },
+  approved: { labelKey: "portal.status.approved", className: "border-emerald-500/60 bg-emerald-500/10 text-emerald-400" },
+  rejected: { labelKey: "portal.status.rejected", className: "border-amber-500/60 bg-amber-500/10 text-amber-400" },
+  disabled: { labelKey: "portal.status.disabled", className: "border-keep-rule bg-keep-panel/50 text-keep-muted" },
 };
 
 function StatusChip({ status }: { status: AffiliateStatus }) {
+  const { t } = useTranslation("marketing");
   const meta = STATUS_META[status];
   return (
     <span
       className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${meta.className}`}
     >
-      {meta.label}
+      {t(meta.labelKey)}
     </span>
   );
 }
@@ -79,12 +83,14 @@ function StatusChip({ status }: { status: AffiliateStatus }) {
  * overrides the button chrome for context (e.g. a menu row vs a splash CTA).
  */
 export function SubmitAffiliateButton({
-  label = "List your community",
+  label,
   className,
 }: {
+  /** Defaults to the localized "List your community" (§10 copy). */
   label?: string;
   className?: string;
 }) {
+  const { t } = useTranslation("marketing");
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -97,7 +103,7 @@ export function SubmitAffiliateButton({
         }
       >
         <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-        {label}
+        {label ?? t("portal.listYourCommunity")}
       </button>
       {open ? <AffiliateSubmitPortal onClose={() => setOpen(false)} initialView="add" /> : null}
     </>
@@ -125,6 +131,7 @@ export function AffiliateSubmitPortal({
   onClose: () => void;
   initialView?: PortalView;
 }) {
+  const { t } = useTranslation("marketing");
   const me = useChat((s) => s.me);
   const [view, setView] = useState<PortalView>(initialView);
 
@@ -140,14 +147,14 @@ export function AffiliateSubmitPortal({
               <button
                 type="button"
                 onClick={() => setView("list")}
-                aria-label="Back to the board"
-                title="Back to the board"
+                aria-label={t("portal.backToBoard")}
+                title={t("portal.backToBoard")}
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-keep-rule text-keep-muted hover:border-keep-action hover:text-keep-action"
               >
                 <ArrowLeft className="h-4 w-4" aria-hidden="true" />
               </button>
             ) : null}
-            <h3 className="truncate font-action text-lg text-keep-text">Top RP Communities</h3>
+            <h3 className="truncate font-action text-lg text-keep-text">{t("portal.title")}</h3>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {view === "list" ? (
@@ -157,10 +164,11 @@ export function AffiliateSubmitPortal({
                 className="inline-flex items-center gap-1.5 rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg transition-colors hover:bg-keep-action/90"
               >
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                Add Your Community
+                {t("portal.addYourCommunity")}
               </button>
             ) : null}
-            <CloseButton onClick={onClose} label="Close" />
+            {/* No explicit label: CloseButton defaults to the localized "Close". */}
+            <CloseButton onClick={onClose} />
           </div>
         </div>
 
@@ -170,8 +178,7 @@ export function AffiliateSubmitPortal({
           ) : (
             <>
               <p className="mb-4 text-sm text-keep-muted">
-                List your roleplay community here. Add our link-back to your site, and we&apos;ll count
-                visits both ways so everyone can see what&apos;s active.
+                {t("portal.intro")}
               </p>
               {me ? <SignedInPanes /> : <LoggedOutPrompt />}
             </>
@@ -185,6 +192,7 @@ export function AffiliateSubmitPortal({
 /* ---------- list view: the topsite board ---------- */
 
 function BoardView() {
+  const { t } = useTranslation("marketing");
   const [cards, setCards] = useState<PublicAffiliateCard[] | null>(null);
 
   useEffect(() => {
@@ -196,13 +204,13 @@ function BoardView() {
   }, []);
 
   if (cards === null) {
-    return <p className="py-6 text-center text-sm italic text-keep-muted">Gathering communities…</p>;
+    return <p className="py-6 text-center text-sm italic text-keep-muted">{t("gathering")}</p>;
   }
   return (
     <CommunityBoard
       cards={cards}
       size="large"
-      emptyText="No communities listed yet. Be the first — hit Add Your Community."
+      emptyText={t("portal.emptyBoard")}
     />
   );
 }
@@ -210,24 +218,25 @@ function BoardView() {
 /* ---------- logged-out ---------- */
 
 function LoggedOutPrompt() {
+  const { t } = useTranslation("marketing");
   return (
     <div className="rounded border border-keep-rule bg-keep-panel/40 px-4 py-6 text-center">
-      <p className="text-sm text-keep-text">Log in to list your community.</p>
+      <p className="text-sm text-keep-text">{t("portal.loginToList")}</p>
       <p className="mt-1 text-xs text-keep-muted">
-        You&apos;ll own the entry, so you can return anytime to copy your link-back.
+        {t("portal.ownEntry")}
       </p>
       <div className="mt-4 flex items-center justify-center gap-2">
         <a
           href="/login"
           className="rounded border border-keep-rule px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-text hover:border-keep-action hover:text-keep-action"
         >
-          Log in
+          {t("auth.logIn")}
         </a>
         <a
           href="/register"
           className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg hover:bg-keep-action/90"
         >
-          Register
+          {t("auth.register")}
         </a>
       </div>
     </div>
@@ -237,6 +246,7 @@ function LoggedOutPrompt() {
 /* ---------- logged-in: submit form + my submissions ---------- */
 
 function SignedInPanes() {
+  const { t } = useTranslation("marketing");
   const [mine, setMine] = useState<MyAffiliate[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
@@ -245,10 +255,10 @@ function SignedInPanes() {
       setLoadErr(null);
       setMine(await fetchMyAffiliates());
     } catch (e) {
-      setLoadErr(e instanceof Error ? e.message : "Couldn't load your submissions.");
+      setLoadErr(e instanceof Error ? e.message : t("portal.loadFailed"));
       setMine([]);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void refresh();
@@ -259,16 +269,16 @@ function SignedInPanes() {
       <SubmitForm onSubmitted={refresh} />
 
       <section>
-        <h4 className="mb-2 font-action text-sm text-keep-text">My submissions</h4>
+        <h4 className="mb-2 font-action text-sm text-keep-text">{t("portal.mySubmissions")}</h4>
         {loadErr ? (
           <p className="rounded border border-keep-rule bg-keep-panel/40 px-3 py-2 text-xs text-keep-accent">
             {loadErr}
           </p>
         ) : mine === null ? (
-          <p className="py-3 text-center text-xs italic text-keep-muted">Loading…</p>
+          <p className="py-3 text-center text-xs italic text-keep-muted">{t("common:loading")}</p>
         ) : mine.length === 0 ? (
           <p className="py-3 text-center text-xs italic text-keep-muted">
-            You haven&apos;t listed a community yet.
+            {t("portal.noneYet")}
           </p>
         ) : (
           <ul className="space-y-2">
@@ -307,6 +317,7 @@ const EMPTY_FORM: FormState = {
 };
 
 function SubmitForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) {
+  const { t } = useTranslation("marketing");
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -349,7 +360,7 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) {
       setDone(true);
       await onSubmitted();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't submit. Try again.");
+      setErr(e instanceof Error ? e.message : t("portal.submitFailed"));
     } finally {
       setBusy(false);
     }
@@ -374,11 +385,11 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) {
 
   return (
     <section className="rounded border border-keep-rule bg-keep-panel/30 p-3">
-      <h4 className="mb-2 font-action text-sm text-keep-text">List a community</h4>
+      <h4 className="mb-2 font-action text-sm text-keep-text">{t("portal.listCommunity")}</h4>
 
       {/* Wide live preview on top — exactly how the card lands on the board. */}
       <div className="mb-4">
-        <span className={labelClass}>Preview</span>
+        <span className={labelClass}>{t("common:preview")}</span>
         <div className="mt-1">
           <AffiliateCard card={previewCard} size="large" />
         </div>
@@ -387,75 +398,75 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) {
       {/* Fields. */}
       <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
         <div>
-          <label className={labelClass} htmlFor="aff-title">Title</label>
+          <label className={labelClass} htmlFor="aff-title">{t("portal.fieldTitle")}</label>
           <input
             id="aff-title"
             className={inputClass}
             value={form.title}
             maxLength={AFFILIATE_LIMITS.title}
             onChange={(e) => set("title", e.target.value)}
-            placeholder="Your community's name"
+            placeholder={t("portal.titlePlaceholder")}
           />
         </div>
         <div>
-          <label className={labelClass} htmlFor="aff-target">Target URL</label>
+          <label className={labelClass} htmlFor="aff-target">{t("portal.fieldTargetUrl")}</label>
           <input
             id="aff-target"
             className={inputClass}
             value={form.targetUrl}
             onChange={(e) => set("targetUrl", e.target.value)}
-            placeholder="https://example.com"
+            placeholder={t("portal.targetPlaceholder")}
           />
           {form.targetUrl.trim() && !targetOk ? (
-            <p className="mt-1 text-[11px] text-keep-accent">Use a full http/https link.</p>
+            <p className="mt-1 text-[11px] text-keep-accent">{t("portal.urlHint")}</p>
           ) : null}
         </div>
         <div className="sm:col-span-2">
-          <label className={labelClass} htmlFor="aff-desc">Description</label>
+          <label className={labelClass} htmlFor="aff-desc">{t("portal.fieldDescription")}</label>
           <textarea
             id="aff-desc"
             className={`${inputClass} min-h-[4.5rem] resize-y`}
             value={form.description}
             maxLength={AFFILIATE_LIMITS.description}
             onChange={(e) => set("description", e.target.value)}
-            placeholder="A line or two about your community"
+            placeholder={t("portal.descPlaceholder")}
           />
         </div>
         <div>
-          <label className={labelClass} htmlFor="aff-icon">Icon URL (optional)</label>
+          <label className={labelClass} htmlFor="aff-icon">{t("portal.fieldIconUrl")}</label>
           <input
             id="aff-icon"
             className={inputClass}
             value={form.iconUrl}
             onChange={(e) => set("iconUrl", e.target.value)}
-            placeholder="https://example.com/icon.png"
+            placeholder={t("portal.iconPlaceholder")}
           />
           {form.iconUrl.trim() && !iconOk ? (
-            <p className="mt-1 text-[11px] text-keep-accent">Use a full http/https link.</p>
+            <p className="mt-1 text-[11px] text-keep-accent">{t("portal.urlHint")}</p>
           ) : null}
         </div>
         <div>
-          <label className={labelClass} htmlFor="aff-banner">Banner URL (optional)</label>
+          <label className={labelClass} htmlFor="aff-banner">{t("portal.fieldBannerUrl")}</label>
           <input
             id="aff-banner"
             className={inputClass}
             value={form.bannerUrl}
             onChange={(e) => set("bannerUrl", e.target.value)}
-            placeholder="https://example.com/banner.jpg"
+            placeholder={t("portal.bannerPlaceholder")}
           />
           {form.bannerUrl.trim() && !bannerOk ? (
-            <p className="mt-1 text-[11px] text-keep-accent">Use a full http/https link.</p>
+            <p className="mt-1 text-[11px] text-keep-accent">{t("portal.urlHint")}</p>
           ) : null}
         </div>
         <div className="sm:col-span-2">
-          <label className={labelClass}>Tags (optional)</label>
+          <label className={labelClass}>{t("portal.fieldTags")}</label>
           <div className="mt-1">
             <TagInput
               tags={form.tags}
               onChange={(tags) => { setForm((f) => ({ ...f, tags })); setDone(false); }}
             />
           </div>
-          <p className="mt-1 text-[11px] text-keep-muted">Genre or category, so seekers can find you.</p>
+          <p className="mt-1 text-[11px] text-keep-muted">{t("portal.tagsHint")}</p>
         </div>
       </div>
 
@@ -466,7 +477,7 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) {
       ) : null}
       {done ? (
         <p className="mt-3 rounded border border-keep-rule bg-keep-panel/40 px-3 py-2 text-xs text-keep-text">
-          Thanks! Your community is pending review. It goes live once a moderator approves it.
+          {t("portal.pendingNote")}
         </p>
       ) : null}
 
@@ -477,7 +488,7 @@ function SubmitForm({ onSubmitted }: { onSubmitted: () => Promise<void> }) {
           disabled={!canSubmit}
           className="inline-flex items-center gap-1.5 rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg transition-colors hover:bg-keep-action/90 disabled:opacity-50"
         >
-          {busy ? "Submitting…" : "Submit for review"}
+          {busy ? t("portal.submitting") : t("portal.submitCta")}
         </button>
       </div>
     </section>
@@ -493,6 +504,7 @@ function MySubmissionRow({
   entry: MyAffiliate;
   onChanged: () => Promise<void>;
 }) {
+  const { t } = useTranslation("marketing");
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -505,7 +517,7 @@ function MySubmissionRow({
       await withdrawMyAffiliate(entry.id);
       await onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't withdraw.");
+      setErr(e instanceof Error ? e.message : t("portal.withdrawFailed"));
       setBusy(false);
     }
   }
@@ -549,8 +561,8 @@ function MySubmissionRow({
             type="button"
             onClick={() => setEditing(true)}
             disabled={busy}
-            title="Edit"
-            aria-label="Edit"
+            title={t("portal.edit")}
+            aria-label={t("portal.edit")}
             className="inline-flex h-7 w-7 items-center justify-center rounded border border-keep-rule text-keep-muted hover:border-keep-action hover:text-keep-action disabled:opacity-50"
           >
             <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
@@ -559,8 +571,8 @@ function MySubmissionRow({
             type="button"
             onClick={withdraw}
             disabled={busy}
-            title="Withdraw"
-            aria-label="Withdraw"
+            title={t("portal.withdraw")}
+            aria-label={t("portal.withdraw")}
             className="inline-flex h-7 w-7 items-center justify-center rounded border border-keep-rule text-keep-muted hover:border-keep-accent hover:text-keep-accent disabled:opacity-50"
           >
             <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
@@ -572,7 +584,7 @@ function MySubmissionRow({
       {entry.status === "approved" && entry.linkBackUrl ? (
         <div className="mt-2">
           <label className="block text-[11px] text-keep-muted">
-            Your link-back (put this on your site)
+            {t("portal.linkBackLabel")}
           </label>
           <div className="mt-1 flex items-center gap-1.5">
             <input
@@ -584,8 +596,8 @@ function MySubmissionRow({
             <button
               type="button"
               onClick={copyLinkBack}
-              title="Copy link-back"
-              aria-label="Copy link-back"
+              title={t("portal.copyLinkBack")}
+              aria-label={t("portal.copyLinkBack")}
               className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border border-keep-rule text-keep-muted hover:border-keep-action hover:text-keep-action"
             >
               {copied ? (
@@ -614,6 +626,7 @@ function EditForm({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }) {
+  const { t } = useTranslation("marketing");
   const [form, setForm] = useState<FormState>({
     title: entry.title,
     description: entry.description,
@@ -655,7 +668,7 @@ function EditForm({
       });
       await onSaved();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't save.");
+      setErr(e instanceof Error ? e.message : t("portal.saveFailed"));
       setBusy(false);
     }
   }
@@ -663,44 +676,44 @@ function EditForm({
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-keep-muted">
-        Editing a live listing sends it back for review before it shows again.
+        {t("portal.editNote")}
       </p>
       <input
         className={inputClass}
         value={form.title}
         maxLength={AFFILIATE_LIMITS.title}
         onChange={(e) => set("title", e.target.value)}
-        placeholder="Title"
-        aria-label="Title"
+        placeholder={t("portal.fieldTitle")}
+        aria-label={t("portal.fieldTitle")}
       />
       <textarea
         className={`${inputClass} min-h-[3.5rem] resize-y`}
         value={form.description}
         maxLength={AFFILIATE_LIMITS.description}
         onChange={(e) => set("description", e.target.value)}
-        placeholder="Description"
-        aria-label="Description"
+        placeholder={t("portal.fieldDescription")}
+        aria-label={t("portal.fieldDescription")}
       />
       <input
         className={inputClass}
         value={form.targetUrl}
         onChange={(e) => set("targetUrl", e.target.value)}
-        placeholder="Target URL"
-        aria-label="Target URL"
+        placeholder={t("portal.fieldTargetUrl")}
+        aria-label={t("portal.fieldTargetUrl")}
       />
       <input
         className={inputClass}
         value={form.iconUrl}
         onChange={(e) => set("iconUrl", e.target.value)}
-        placeholder="Icon URL (optional)"
-        aria-label="Icon URL"
+        placeholder={t("portal.fieldIconUrl")}
+        aria-label={t("portal.iconUrlAria")}
       />
       <input
         className={inputClass}
         value={form.bannerUrl}
         onChange={(e) => set("bannerUrl", e.target.value)}
-        placeholder="Banner URL (optional)"
-        aria-label="Banner URL"
+        placeholder={t("portal.fieldBannerUrl")}
+        aria-label={t("portal.bannerUrlAria")}
       />
       <TagInput tags={form.tags} onChange={(tags) => set("tags", tags)} />
       {err ? <p className="text-xs text-keep-accent">{err}</p> : null}
@@ -712,7 +725,7 @@ function EditForm({
           className="mr-auto inline-flex items-center gap-1 text-[11px] text-keep-muted hover:text-keep-action"
         >
           <ExternalLink className="h-3 w-3" aria-hidden="true" />
-          Visit
+          {t("card.visit")}
         </a>
         <button
           type="button"
@@ -720,7 +733,7 @@ function EditForm({
           disabled={busy}
           className="rounded border border-keep-rule px-2.5 py-1 text-xs text-keep-muted hover:text-keep-text disabled:opacity-50"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="button"
@@ -728,7 +741,7 @@ function EditForm({
           disabled={!canSave}
           className="rounded border border-keep-action bg-keep-action px-2.5 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg hover:bg-keep-action/90 disabled:opacity-50"
         >
-          {busy ? "Saving…" : "Save"}
+          {busy ? t("common:saving") : t("common:save")}
         </button>
       </div>
     </div>

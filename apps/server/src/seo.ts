@@ -2,9 +2,10 @@ import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import type { FastifyRequest } from "fastify";
-import { escapeHtml } from "@thekeep/shared";
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, escapeHtml, type SupportedLocale } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { characters, faqs, forums, servers, stories, users, worlds } from "./db/schema.js";
+import { tFor } from "./i18n.js";
 import { areServersEnabled, getSettings } from "./settings.js";
 
 /**
@@ -21,14 +22,40 @@ const DEFAULT_KEYWORDS =
   "writing community, worldbuilding, The Spire chat, The Spire RP";
 
 /**
- * Homepage tagline appended after the admin-configured siteName. Keeps
- * the `<title>` keyword-rich without forcing admins to bake search
- * keywords into the brand name itself, the bare brand still gets to
- * own the `og:site_name` slot. Mirrors the static default in
- * `apps/web/index.html` so the rewritten and bare-GET copies of the
- * page tell the same story to indexers.
+ * Stock copy that old migrations baked into site_settings as REAL row
+ * data, so long-lived installs carry it even though no admin ever typed
+ * it. Migration 0019 made this English blurb the meta_description column
+ * DEFAULT (unlike homepage_tagline, added in 0309 with a '' default), and
+ * 0017 seeded welcome_html with our stock welcome. For the description
+ * fallback chain below we treat BOTH as "unset" on NON-en renders only:
+ * otherwise the localized default (marketing:seo.defaultDescription) is
+ * unreachable and the es splash ships the English 0019 copy in its
+ * meta/og/twitter description. The en splash keeps serving the stock rows
+ * exactly as prod does today — demoting them for en too would silently
+ * swap the LIVE English search/OG snippet as a side effect of the i18n
+ * build ("externalizing a string must not change the English output").
+ * Admin-EDITED copy no longer equals these strings and still sends as
+ * written; the welcome seed is demoted only HERE, the login page renders
+ * it unchanged.
  */
-const HOMEPAGE_TAGLINE = "Roleplay Chat, Communities & Forums";
+const LEGACY_META_DESCRIPTION_DEFAULT =
+  "A roleplay-focused chat sanctuary. Build characters, share scenes, and tell collaborative stories with other writers.";
+const LEGACY_WELCOME_HTML_SEED =
+  "<p>Welcome, traveler. This is a sanctuary for free-form roleplay and collaborative storytelling.</p>\n" +
+  "<p>Sign in to enter the chambers. New writers are always welcome. Register an account, build a character or two, and find your way to a scene.</p>";
+/**
+ * Same story for the system forum's tagline: migration 0229 seeded (and
+ * seed.ts still seeds, with a colon variant) stock English copy into
+ * `forums.tagline` as real row data. The /f/:slug branch demotes a
+ * byte-equal tagline to "unset" on NON-en renders so the localized
+ * marketing:seo.forum.genericDescription is reachable; en keeps shipping
+ * the seeded row verbatim, and owner-edited taglines pass through in
+ * every language.
+ */
+const LEGACY_FORUM_TAGLINE_SEEDS = new Set([
+  "The Spire's town square — announcements, roleplay boards, and community talk.",
+  "The Spire's town square: announcements, roleplay boards, and community talk.",
+]);
 
 /**
  * Generate a fresh nonce for a single HTTP response. Base64 of 16 random
@@ -183,18 +210,47 @@ export async function renderSplashHtml(
    * CSP can permit them while still rejecting injected scripts.
    */
   nonce?: string,
+  /**
+   * Language for the server-rendered `<title>` / meta description
+   * (i18n plan §7). The caller resolves it per request (an explicit
+   * `?lang=` beats the Accept-Language pick); `en` — also the default,
+   * so every existing call site is untouched — renders byte-identical
+   * to the pre-i18n output. Only OUR default copy localizes: admin-set
+   * overrides (siteName, metaDescription, homepageTagline) and
+   * owner-written taglines/descriptions are content and send as written.
+   */
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ): Promise<string> {
   let html = sourceHtml;
 
   const s = await getSettings(db);
 
   const siteName = s.siteName?.trim() || "The Spire";
+  // Description chain: admin-set metaDescription → admin-written welcome →
+  // OUR localized default. On non-en renders, values still equal to the
+  // migration-baked stock copy count as unset (see LEGACY_* above) so the
+  // localized default is actually reachable on installs that never touched
+  // those fields; the en chain treats them as real values, exactly as
+  // before the i18n build, so the live English snippet never changes.
+  const demoteLegacyStock = locale !== DEFAULT_LOCALE;
+  const adminMetaDescription = s.metaDescription?.trim() ?? "";
+  const adminWelcomeHtml =
+    s.welcomeHtml && (!demoteLegacyStock || s.welcomeHtml.trim() !== LEGACY_WELCOME_HTML_SEED)
+      ? s.welcomeHtml
+      : "";
   const siteDescription =
-    s.metaDescription?.trim() ||
-    (s.welcomeHtml ? stripToText(s.welcomeHtml) : "") ||
-    "Host your own roleplay chat community or forum, or dive into live RP chat, character profiles, worlds, and collaborative writing.";
-  // Admin overrides fall back to the built-in defaults when blank.
-  const tagline = s.homepageTagline?.trim() || HOMEPAGE_TAGLINE;
+    (!demoteLegacyStock || adminMetaDescription !== LEGACY_META_DESCRIPTION_DEFAULT
+      ? adminMetaDescription
+      : "") ||
+    (adminWelcomeHtml ? stripToText(adminWelcomeHtml) : "") ||
+    tFor(locale, "marketing:seo.defaultDescription");
+  // Admin overrides fall back to the built-in defaults when blank. The
+  // default homepage tagline keeps the `<title>` keyword-rich without
+  // forcing admins to bake search keywords into the brand name itself
+  // (the bare brand still owns `og:site_name`); its en catalog value
+  // mirrors the static default in `apps/web/index.html` so the rewritten
+  // and bare-GET copies of the page tell the same story to indexers.
+  const tagline = s.homepageTagline?.trim() || tFor(locale, "marketing:seo.homepageTagline");
   const defaultKeywords = s.seoKeywords?.trim() || DEFAULT_KEYWORDS;
 
   // Per-route SEO. Every public bookmarkable page gets its own title,
@@ -209,8 +265,22 @@ export async function renderSplashHtml(
   let description: string;
   let keywords: string;
   let canonicalUrl: string;
-  const perRoute = await resolveRouteMeta(db, pathname, origin, siteName, siteDescription, tagline, defaultKeywords);
+  const perRoute = await resolveRouteMeta(db, pathname, origin, siteName, siteDescription, tagline, defaultKeywords, locale);
   ({ title, description, keywords, canonicalUrl } = perRoute);
+
+  // Localized public pages (i18n plan §7): the splash plus the three
+  // shareable "host your own" surfaces get an hreflang alternate cluster,
+  // and their non-en variants live at `?lang=<lng>` (serveSplash honors
+  // the param ahead of Accept-Language, so the advertised URLs really do
+  // serve that language). The active variant self-canonicalizes — a
+  // canonicalized-away alternate would be dropped from hreflang clusters
+  // by most crawlers. For `en` (the default/no-header case) nothing here
+  // changes: the canonical stays the bare URL, exactly as before.
+  const isLocalizedPublicPage = pathname === "/" || /^\/(?:f|w|s)\//.test(pathname);
+  const bareCanonicalUrl = canonicalUrl;
+  if (isLocalizedPublicPage && locale !== DEFAULT_LOCALE) {
+    canonicalUrl = `${bareCanonicalUrl}${bareCanonicalUrl.includes("?") ? "&" : "?"}lang=${locale}`;
+  }
 
   const titleAttr = escapeHtmlAttr(title);
   const descAttr = escapeHtmlAttr(description);
@@ -291,6 +361,34 @@ export async function renderSplashHtml(
       /<meta name="twitter:image" content="(\/[^"]*)"\s*\/?>/,
       (_m, p: string) => `<meta name="twitter:image" content="${escapeHtmlAttr(routeOgImage ?? (origin + p))}" />`,
     );
+
+  // hreflang alternates (i18n plan §7), spliced directly under the
+  // canonical link on the localized public pages. The cluster is
+  // identical on every language variant (as the spec wants): the default
+  // language + x-default point at the bare canonical, each other locale
+  // at its `?lang=` variant. Grows automatically with SUPPORTED_LOCALES.
+  if (isLocalizedPublicPage) {
+    const alternates = SUPPORTED_LOCALES
+      .map((lng) => {
+        const href = lng === DEFAULT_LOCALE
+          ? bareCanonicalUrl
+          : `${bareCanonicalUrl}${bareCanonicalUrl.includes("?") ? "&" : "?"}lang=${lng}`;
+        return `\n    <link rel="alternate" hreflang="${lng}" href="${escapeHtmlAttr(href)}" />`;
+      })
+      .join("")
+      + `\n    <link rel="alternate" hreflang="x-default" href="${escapeHtmlAttr(bareCanonicalUrl)}" />`;
+    html = html.replace(
+      /<link rel="canonical" href="[^"]*"\s*\/?>/,
+      (m) => `${m}${alternates}`,
+    );
+  }
+
+  // Reflect a non-default page language in the root lang attribute so
+  // crawlers and screen readers agree with the localized meta. The en
+  // path never rewrites (index.html already ships `lang="en"`).
+  if (locale !== DEFAULT_LOCALE) {
+    html = html.replace(/<html lang="en">/, `<html lang="${locale}">`);
+  }
 
   // Auth / transactional pages: inject a robots noindex,follow meta so
   // they aren't indexed as near-duplicates of the homepage (and so single-
@@ -397,9 +495,9 @@ export async function renderSplashHtml(
   if (pathname === "/") {
     graph.push({
       "@type": "Service",
-      name: `Community & forum hosting on ${siteName}`,
-      serviceType: "Online community and forum hosting",
-      description: `Create and run your own roleplay chat community or forum on ${siteName}, with rooms, members, roles, moderation, and a shareable public page.`,
+      name: tFor(locale, "marketing:seo.service.name", { siteName }),
+      serviceType: tFor(locale, "marketing:seo.service.serviceType"),
+      description: tFor(locale, "marketing:seo.service.description", { siteName }),
       provider: { "@id": orgId },
       areaServed: "Worldwide",
       url: `${origin}/`,
@@ -435,19 +533,25 @@ export async function renderSplashHtml(
   // content and their own per-route <head> meta.
   if (pathname === "/") {
     const nameText = escapeHtmlAttr(siteName);
+    // Localized crawlable body (i18n plan §7): the es splash advertises
+    // itself via hreflang + <html lang>, so its only non-JS-rendered prose
+    // must actually BE Spanish or the localized landing reads as a
+    // mislabeled English page to crawlers. en values are byte-identical
+    // to the former literals. The catalog copy is our own prose (no user
+    // content), so it splices into the HTML the same way the literals did.
     const noscript =
       `<noscript>` +
       `<main>` +
       `<h1>${nameText}</h1>` +
-      `<p>${nameText} is a home for live, text-based roleplay, and a platform where anyone can host their own community. Join the roleplay, or create your own chat community and forums with your own rooms, members, roles, and moderation.</p>` +
-      `<p>Step into live roleplay chat rooms, build characters, explore shared worlds, write collaborative stories in the Scriptorium, or host your own community or forum.</p>` +
+      `<p>${tFor(locale, "marketing:seo.noscript.intro", { siteName: nameText })}</p>` +
+      `<p>${tFor(locale, "marketing:seo.noscript.body")}</p>` +
       `<ul>` +
-      `<li><a href="/register">Create your free account</a></li>` +
-      `<li><a href="/login">Log in</a></li>` +
-      `<li><a href="/f/spire">Browse the ${nameText} forums</a></li>` +
-      `<li><a href="/scriptorium">Read stories in the Scriptorium</a></li>` +
+      `<li><a href="/register">${tFor(locale, "marketing:seo.noscript.registerLink")}</a></li>` +
+      `<li><a href="/login">${tFor(locale, "marketing:seo.noscript.loginLink")}</a></li>` +
+      `<li><a href="/f/spire">${tFor(locale, "marketing:seo.noscript.forumsLink", { siteName: nameText })}</a></li>` +
+      `<li><a href="/scriptorium">${tFor(locale, "marketing:seo.noscript.scriptoriumLink")}</a></li>` +
       `</ul>` +
-      `<p>This page needs JavaScript enabled for the full experience.</p>` +
+      `<p>${tFor(locale, "marketing:seo.noscript.jsNote")}</p>` +
       `</main></noscript>`;
     html = html.replace('<div id="root"></div>', `<div id="root"></div>\n    ${noscript}`);
   }
@@ -641,7 +745,9 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
 
   // Non-private worlds (public + open). World owners explicitly chose
   // a non-private visibility, so listing them here matches their
-  // intent that the world be discoverable.
+  // intent that the world be discoverable. 18+ worlds stay out: the
+  // sitemap is an anonymous discovery surface, and anonymous can never
+  // see NSFW (age plan, Phase 4).
   try {
     const rows = await db
       .select({
@@ -649,7 +755,10 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
         updatedAt: worlds.updatedAt,
       })
       .from(worlds)
-      .where(ne(worlds.visibility, "private"))
+      .where(and(
+        ne(worlds.visibility, "private"),
+        eq(worlds.isNsfw, false),
+      ))
       .orderBy(desc(worlds.updatedAt))
       .limit(1000);
     for (const r of rows) {
@@ -668,12 +777,15 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
 
   // Public community forums: owner opted into public browsing, or the system
   // forum. These are the "host your own" landing pages we most want indexed.
+  // 18+ forums stay out (mirrors the servers query below): the sitemap is an
+  // anonymous discovery surface, and anonymous can never see NSFW.
   try {
     const rows = await db
       .select({ slug: forums.slug })
       .from(forums)
       .where(and(
         ne(forums.status, "archived"),
+        eq(forums.isNsfw, false),
         or(eq(forums.publicBrowsing, true), eq(forums.isSystem, true)),
       ))
       .orderBy(desc(forums.createdAt))
@@ -691,6 +803,9 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
 
   // Public, non-archived, non-moderated community servers (mirrors the discover
   // filter; suspended / banned-unexpired hidden via lazy expiry). Flag-gated.
+  // 18+ communities stay out: the sitemap is an anonymous discovery surface,
+  // and anonymous can never see NSFW (age plan, Phase 2). Their /s/ share
+  // pages still resolve for direct links, with public-safe branding.
   if (serversOn) {
     try {
       const rows = await db
@@ -698,6 +813,7 @@ export async function renderSitemapXml(db: Db, origin: string): Promise<string> 
         .from(servers)
         .where(and(
           eq(servers.visibility, "public"),
+          eq(servers.isNsfw, false),
           sql`${servers.status} != 'archived'`,
           sql`${servers.moderationState} != 'suspended'`,
           sql`not (${servers.moderationState} = 'banned' and (${servers.moderationUntil} is null or ${servers.moderationUntil} > ${Date.now()}))`,
@@ -770,10 +886,17 @@ async function resolveRouteMeta(
   origin: string,
   siteName: string,
   siteDescription: string,
-  /** Admin-configured tagline (or the built-in HOMEPAGE_TAGLINE default). */
+  /** Admin-configured tagline (or the localized built-in default). */
   tagline: string,
   /** Admin-configured keyword shelf (or the built-in DEFAULT_KEYWORDS default). */
   defaultKeywords: string,
+  /**
+   * Request language (i18n plan §7). Localizes OUR copy in the title /
+   * description of the public pages (home default, /f, /w, /s); en is
+   * byte-identical to the former literals. Owner-written taglines and
+   * descriptions are content and pass through untranslated.
+   */
+  locale: SupportedLocale = DEFAULT_LOCALE,
 ): Promise<RouteMeta> {
   // ---- bookmarkable form pages ----
   // Auth + transactional pages get a noindex,follow marker: they're
@@ -785,8 +908,8 @@ async function resolveRouteMeta(
   // keep in the sitemap (login/register) so nothing collapses onto `/`.
   if (pathname === "/login") {
     return {
-      title: `Log in · ${siteName} - ${tagline}`,
-      description: `Sign in to ${siteName} to continue your stories, manage characters, and rejoin your roleplay rooms.`,
+      title: tFor(locale, "marketing:seo.login.title", { siteName, tagline }),
+      description: tFor(locale, "marketing:seo.login.description", { siteName }),
       keywords: `${defaultKeywords}, login, sign in`,
       canonicalUrl: `${origin}/login`,
       noindex: true,
@@ -794,8 +917,8 @@ async function resolveRouteMeta(
   }
   if (pathname === "/register") {
     return {
-      title: `Create your character · ${siteName} - ${tagline}`,
-      description: `Join ${siteName}. Build a character, step into the worlds, and find your roleplay circle. Free to sign up.`,
+      title: tFor(locale, "marketing:seo.register.title", { siteName, tagline }),
+      description: tFor(locale, "marketing:seo.register.description", { siteName }),
       keywords: `${defaultKeywords}, sign up, create account, character creation`,
       canonicalUrl: `${origin}/register`,
       noindex: true,
@@ -803,7 +926,7 @@ async function resolveRouteMeta(
   }
   if (pathname === "/forgot-password" || pathname === "/reset-password" || pathname === "/verify-email") {
     return {
-      title: `Account access · ${siteName}`,
+      title: tFor(locale, "marketing:seo.accountAccess.title", { siteName }),
       description: siteDescription,
       keywords: defaultKeywords,
       canonicalUrl: `${origin}/`,
@@ -814,8 +937,8 @@ async function resolveRouteMeta(
   // ---- Scriptorium catalog ----
   if (pathname === "/scriptorium") {
     return {
-      title: `Scriptorium - Collaborative Stories · ${siteName}`,
-      description: `Read and write collaborative roleplay fiction on ${siteName}. The Scriptorium hosts open-invite stories, one-shots, and long-form serials from the community.`,
+      title: tFor(locale, "marketing:seo.scriptorium.title", { siteName }),
+      description: tFor(locale, "marketing:seo.scriptorium.description", { siteName }),
       keywords: `${defaultKeywords}, scriptorium, collaborative stories, story catalog, fanfiction, serial fiction, one-shots`,
       canonicalUrl: `${origin}/scriptorium`,
     };
@@ -876,7 +999,7 @@ async function resolveRouteMeta(
     } catch { /* fall through */ }
     // Private / no match, generic Scriptorium meta, canonical at the catalog.
     return {
-      title: `Scriptorium - Collaborative Stories · ${siteName}`,
+      title: tFor(locale, "marketing:seo.scriptorium.title", { siteName }),
       description: siteDescription,
       keywords: defaultKeywords,
       canonicalUrl: `${origin}/scriptorium`,
@@ -888,8 +1011,8 @@ async function resolveRouteMeta(
   // canonicalizes so it ranks as its own page instead of dedup'ing onto `/`.
   if (pathname === "/faqs") {
     return {
-      title: `Help & FAQ · ${siteName}`,
-      description: `Answers to common questions about ${siteName}: getting started, roleplay chat, characters, communities, forums, and account help.`,
+      title: tFor(locale, "marketing:seo.faqs.title", { siteName }),
+      description: tFor(locale, "marketing:seo.faqs.description", { siteName }),
       keywords: `${defaultKeywords}, faq, help, questions, getting started, how to`,
       canonicalUrl: `${origin}/faqs`,
     };
@@ -929,7 +1052,7 @@ async function resolveRouteMeta(
       }
     } catch { /* fall through */ }
     return {
-      title: `Help & FAQ · ${siteName}`,
+      title: tFor(locale, "marketing:seo.faqs.title", { siteName }),
       description: siteDescription,
       keywords: defaultKeywords,
       canonicalUrl: `${origin}/faqs`,
@@ -941,8 +1064,8 @@ async function resolveRouteMeta(
   // the webring ranks as its own discovery surface rather than collapsing onto `/`.
   if (pathname === "/top-communities") {
     return {
-      title: `Top Communities · ${siteName}`,
-      description: `Discover the top roleplay communities, chat servers, and forums featured on ${siteName}. Browse the webring and find your next home for RP.`,
+      title: tFor(locale, "marketing:seo.topCommunities.title", { siteName }),
+      description: tFor(locale, "marketing:seo.topCommunities.description", { siteName }),
       keywords: `${defaultKeywords}, top communities, roleplay communities, community directory, webring, discover`,
       canonicalUrl: `${origin}/top-communities`,
     };
@@ -1014,7 +1137,7 @@ async function resolveRouteMeta(
       }
     } catch { /* fall through */ }
     return {
-      title: `${siteName} - ${tagline}`,
+      title: tFor(locale, "marketing:seo.defaultTitle", { siteName, tagline }),
       description: siteDescription,
       keywords: defaultKeywords,
       canonicalUrl: `${origin}/`,
@@ -1026,6 +1149,10 @@ async function resolveRouteMeta(
   if (worldMatch) {
     const slug = decodeURIComponent(worldMatch[1]!);
     try {
+      // 18+ worlds fall through to the generic card (age plan, Phase 4):
+      // link previews are seen by everyone including anonymous crawlers,
+      // so an 18+ world's name and owner-written description never reach
+      // a share preview. Same posture as private worlds.
       const row = (await db
         .select({
           name: worlds.name,
@@ -1035,13 +1162,14 @@ async function resolveRouteMeta(
         .where(and(
           eq(worlds.slug, slug),
           ne(worlds.visibility, "private"),
+          eq(worlds.isNsfw, false),
         ))
         .limit(1))[0];
       if (row) {
         const desc = (row.description ? stripToText(row.description) : "")
-          || `${row.name} is a roleplay world on ${siteName}. Lore, places, and characters in one wiki.`;
+          || tFor(locale, "marketing:seo.world.genericDescription", { name: row.name, siteName });
         return {
-          title: `${row.name} - Roleplay World · ${siteName}`,
+          title: tFor(locale, "marketing:seo.world.title", { name: row.name, siteName }),
           description: desc,
           keywords: `${row.name}, roleplay world, worldbuilding, lore, ${defaultKeywords}`,
           canonicalUrl: `${origin}/w/${encodeURIComponent(slug)}`,
@@ -1049,7 +1177,7 @@ async function resolveRouteMeta(
       }
     } catch { /* fall through */ }
     return {
-      title: `${siteName} - ${tagline}`,
+      title: tFor(locale, "marketing:seo.defaultTitle", { siteName, tagline }),
       description: siteDescription,
       keywords: defaultKeywords,
       canonicalUrl: `${origin}/`,
@@ -1075,6 +1203,8 @@ async function resolveRouteMeta(
           logoUrl: forums.logoUrl,
           publicBrowsing: forums.publicBrowsing,
           isSystem: forums.isSystem,
+          isNsfw: forums.isNsfw,
+          sfwBannerUrl: forums.sfwBannerUrl,
         })
         .from(forums)
         .where(and(
@@ -1083,20 +1213,38 @@ async function resolveRouteMeta(
         ))
         .limit(1))[0];
       if (row && (row.publicBrowsing || row.isSystem)) {
-        const desc = row.tagline?.trim()
-          || (row.descriptionHtml ? stripToText(row.descriptionHtml) : "")
-          || `${row.name} is a community forum on ${siteName}, with boards for play-by-post and discussion.`;
+        // 18+ forums (age plan, decision #10): link previews are seen by
+        // everyone, so the card keeps the forum's NAME but swaps in GENERIC
+        // copy and the owner's public-safe banner (or no art at all) — the
+        // tagline, description text, and real banner/logo art an adult
+        // community set inside never reach a share preview.
+        const generic = tFor(locale, "marketing:seo.forum.genericDescription", { name: row.name, siteName });
+        // Non-en renders demote the migration-0229 stock tagline to "unset"
+        // (see LEGACY_FORUM_TAGLINE_SEEDS) so the localized generic copy is
+        // reachable; en keeps serving the seeded row byte-for-byte, and an
+        // owner-edited tagline passes through in every language.
+        const rowTagline = row.tagline?.trim() ?? "";
+        const effectiveTagline =
+          locale !== DEFAULT_LOCALE && LEGACY_FORUM_TAGLINE_SEEDS.has(rowTagline) ? "" : rowTagline;
+        const desc = row.isNsfw
+          ? generic
+          : (effectiveTagline
+              || (row.descriptionHtml ? stripToText(row.descriptionHtml) : "")
+              || generic);
+        const cardImage = row.isNsfw
+          ? (row.sfwBannerUrl || null)
+          : (row.bannerImageUrl || row.logoUrl || null);
         return {
-          title: `${row.name} - Forum · ${siteName}`,
+          title: tFor(locale, "marketing:seo.forum.title", { name: row.name, siteName }),
           description: desc,
           keywords: `${row.name}, forum, play-by-post, community, ${defaultKeywords}`,
           canonicalUrl: `${origin}/f/${encodeURIComponent(slug.toLowerCase())}`,
-          imageUrl: row.bannerImageUrl || row.logoUrl || null,
+          imageUrl: cardImage,
         };
       }
     } catch { /* fall through */ }
     return {
-      title: `${siteName} - ${tagline}`,
+      title: tFor(locale, "marketing:seo.defaultTitle", { siteName, tagline }),
       description: siteDescription,
       keywords: defaultKeywords,
       canonicalUrl: `${origin}/`,
@@ -1123,6 +1271,8 @@ async function resolveRouteMeta(
           status: servers.status,
           moderationState: servers.moderationState,
           moderationUntil: servers.moderationUntil,
+          isNsfw: servers.isNsfw,
+          sfwBannerUrl: servers.sfwBannerUrl,
         })
         .from(servers)
         .where(sql`lower(${servers.slug}) = lower(${slug})`)
@@ -1131,20 +1281,34 @@ async function resolveRouteMeta(
         || (row.moderationState === "banned"
             && (!row.moderationUntil || +row.moderationUntil > Date.now())));
       if (row && row.visibility === "public" && row.status !== "archived" && !moderated) {
-        const desc = row.tagline?.trim()
-          || (row.descriptionHtml ? stripToText(row.descriptionHtml) : "")
-          || `${row.name} is a roleplay community on ${siteName}, with its own chat rooms and forums.`;
+        // 18+ communities (age plan, decision #10 — same posture as the
+        // forum branch above): link previews are seen by everyone, so the
+        // card keeps the server's NAME but swaps in GENERIC copy — the
+        // owner-written tagline and description text an adult community
+        // set inside never reach a share preview.
+        const generic = tFor(locale, "marketing:seo.community.genericDescription", { name: row.name, siteName });
+        const desc = row.isNsfw
+          ? generic
+          : (row.tagline?.trim()
+              || (row.descriptionHtml ? stripToText(row.descriptionHtml) : "")
+              || generic);
+        // Public-safe branding (age plan, decision #10): link previews are
+        // seen by everyone, so an 18+ community's card carries its
+        // public-safe banner or no art at all — never the real banner.
+        const cardImage = row.isNsfw
+          ? (row.sfwBannerUrl || null)
+          : (row.bannerImageUrl || row.logoUrl || null);
         return {
-          title: `${row.name} - Community · ${siteName}`,
+          title: tFor(locale, "marketing:seo.community.title", { name: row.name, siteName }),
           description: desc,
           keywords: `${row.name}, roleplay community, roleplay chat, ${defaultKeywords}`,
           canonicalUrl: `${origin}/s/${encodeURIComponent(slug.toLowerCase())}`,
-          imageUrl: row.bannerImageUrl || row.logoUrl || null,
+          imageUrl: cardImage,
         };
       }
     } catch { /* fall through */ }
     return {
-      title: `${siteName} - ${tagline}`,
+      title: tFor(locale, "marketing:seo.defaultTitle", { siteName, tagline }),
       description: siteDescription,
       keywords: defaultKeywords,
       canonicalUrl: `${origin}/`,
@@ -1153,7 +1317,7 @@ async function resolveRouteMeta(
 
   // ---- Homepage / anything else ----
   return {
-    title: `${siteName} - ${tagline}`,
+    title: tFor(locale, "marketing:seo.defaultTitle", { siteName, tagline }),
     description: siteDescription,
     keywords: defaultKeywords,
     canonicalUrl: `${origin}/`,

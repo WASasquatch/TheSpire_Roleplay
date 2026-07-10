@@ -10,9 +10,11 @@
  * community the link promised.
  */
 import { useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { LogIn, Server, UserPlus, Users } from "lucide-react";
 import { normalizeTheme } from "@thekeep/shared";
 import { fetchPublicServer, type PublicServerLanding } from "../../lib/servers.js";
+import { formatDate, formatNumber } from "../../lib/intlFormat.js";
 import { DEFAULT_STYLE_KEY } from "../../lib/ornaments/index.js";
 import {
   forumBannerInk,
@@ -41,6 +43,7 @@ export function ServerPublicLanding({ slug, onNavigate }: {
   slug: string;
   onNavigate: (path: string) => void;
 }) {
+  const { t } = useTranslation("servers");
   const branding = useChat((s) => s.branding);
   const siteName = branding.siteName || "The Spire";
   const [detail, setDetail] = useState<PublicServerLanding | null>(null);
@@ -50,8 +53,9 @@ export function ServerPublicLanding({ slug, onNavigate }: {
     let alive = true;
     fetchPublicServer(slug)
       .then((d) => { if (alive) setDetail(d); })
-      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : t("shared.loadFailed")); });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug]);
 
   const serverTheme = useMemo(() => {
@@ -86,10 +90,10 @@ export function ServerPublicLanding({ slug, onNavigate }: {
       <div className="relative z-10 mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center gap-3 px-4 text-center">
         <Server className="h-8 w-8 text-keep-muted" aria-hidden="true" />
         <p className="text-sm text-keep-text">
-          {err === "not found" ? "That community is private or no longer exists." : err}
+          {err === "not found" ? t("landing.notFound") : err}
         </p>
         <a href="/" className="text-xs uppercase tracking-widest text-keep-action hover:underline">
-          To {siteName}
+          {t("landing.toSite", { site: siteName })}
         </a>
       </div>
     );
@@ -97,15 +101,15 @@ export function ServerPublicLanding({ slug, onNavigate }: {
   if (!detail) {
     return (
       <div className="relative z-10 flex min-h-screen items-center justify-center">
-        <p className="text-sm italic text-keep-muted">Opening the community…</p>
+        <p className="text-sm italic text-keep-muted">{t("landing.opening")}</p>
       </div>
     );
   }
 
   const isApplication = detail.joinMode === "application";
   const gateCopy = isApplication
-    ? `This community accepts new members by application. Create a free ${siteName} account, then apply to join.`
-    : `Create a free ${siteName} account to step into this community's rooms and forums.`;
+    ? t("landing.gateApply", { site: siteName })
+    : t("landing.gateOpen", { site: siteName });
 
   const hasBanner = !!detail.bannerImageUrl;
   const heroPalette = serverTheme ?? activeTheme;
@@ -155,13 +159,13 @@ export function ServerPublicLanding({ slug, onNavigate }: {
                 style={bannerInk?.meta}
               >
                 {detail.ownerUsername ? (
-                  <span>kept by <span className={bannerInk ? "" : inkClass.strong(heroDark)} style={bannerInk?.strong}>{detail.ownerUsername}</span></span>
+                  <span><Trans t={t} i18nKey="landing.keptBy" values={{ name: detail.ownerUsername }} components={{ owner: <span className={bannerInk ? "" : inkClass.strong(heroDark)} style={bannerInk?.strong} /> }} /></span>
                 ) : null}
                 <span className="inline-flex items-center gap-1">
                   <Users className="h-3 w-3" aria-hidden="true" />
-                  {detail.memberCount > 0 ? `${detail.memberCount.toLocaleString()} member${detail.memberCount === 1 ? "" : "s"}` : "open to all"}
+                  {detail.memberCount > 0 ? t("landing.members", { count: detail.memberCount, formatted: formatNumber(detail.memberCount) }) : t("landing.openToAll")}
                 </span>
-                <span>founded {new Date(detail.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</span>
+                <span>{t("landing.founded", { date: formatDate(detail.createdAt, { year: "numeric", month: "long", day: "numeric" }) })}</span>
               </p>
             </div>
           </div>
@@ -172,7 +176,7 @@ export function ServerPublicLanding({ slug, onNavigate }: {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div className="min-w-0">
               <p className="font-action text-lg text-keep-text md:text-xl">
-                {isApplication ? "Apply to join this community" : "Step inside"}
+                {isApplication ? t("landing.ctaApplyTitle") : t("landing.ctaOpenTitle")}
               </p>
               <p className="mt-1 max-w-2xl text-xs leading-relaxed text-keep-muted md:text-sm">{gateCopy}</p>
             </div>
@@ -183,7 +187,7 @@ export function ServerPublicLanding({ slug, onNavigate }: {
                 className="flex items-center gap-2 rounded border border-keep-action bg-keep-action px-5 py-2.5 text-sm font-semibold uppercase tracking-widest text-keep-bg shadow-lg transition-transform hover:scale-[1.03]"
               >
                 <UserPlus className="h-4 w-4" aria-hidden="true" />
-                {isApplication ? "Register to apply" : "Create your account"}
+                {isApplication ? t("landing.registerToApply") : t("landing.createAccount")}
               </button>
               <button
                 type="button"
@@ -191,7 +195,7 @@ export function ServerPublicLanding({ slug, onNavigate }: {
                 className="flex items-center gap-2 rounded border border-keep-action bg-keep-action/15 px-4 py-2.5 text-sm font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/25"
               >
                 <LogIn className="h-4 w-4" aria-hidden="true" />
-                Log in
+                {t("landing.logIn")}
               </button>
             </div>
           </div>
@@ -206,10 +210,10 @@ export function ServerPublicLanding({ slug, onNavigate }: {
 
         <footer className="border-t border-keep-rule bg-keep-banner/30 px-5 py-3 text-[11px] text-keep-muted md:px-8">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5">
-            <span>Membership: <span className="text-keep-text">{isApplication ? "by application" : "open to all"}</span></span>
-            {detail.ownerUsername ? <span>Owner: <span className="text-keep-text">{detail.ownerUsername}</span></span> : null}
-            <span>Founded: <span className="text-keep-text">{new Date(detail.createdAt).toLocaleDateString()}</span></span>
-            <span className="ml-auto">Hosted by <span className="text-keep-text">{siteName}</span></span>
+            <span>{t("landing.membershipLabel")}<span className="text-keep-text">{isApplication ? t("landing.byApplication") : t("landing.openToAll")}</span></span>
+            {detail.ownerUsername ? <span>{t("landing.ownerLabel")}<span className="text-keep-text">{detail.ownerUsername}</span></span> : null}
+            <span>{t("landing.foundedLabel")}<span className="text-keep-text">{formatDate(detail.createdAt)}</span></span>
+            <span className="ml-auto"><Trans t={t} i18nKey="landing.hostedBy" values={{ site: siteName }} components={{ site: <span className="text-keep-text" /> }} /></span>
           </div>
         </footer>
       </article>

@@ -29,6 +29,16 @@ import { hasPermission } from "./permissions.js";
 export interface SessionUserCtx {
   id: string;
   role: Role;
+  /**
+   * Age context (age-restriction plan Phase 0). Present whenever the ctx
+   * was attached from `getSessionUser` (the admin preHandler does), so
+   * admin handlers can gate on the caller's age without a re-fetch.
+   * Optional because the interface is also satisfied by narrower {id,
+   * role} projections in older call sites.
+   */
+  birthdate?: string | null;
+  isAdult?: boolean;
+  hideNsfw?: boolean;
 }
 
 export async function requireSessionPermission(

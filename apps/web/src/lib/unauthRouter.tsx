@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useChat } from "../state/store.js";
 import { AuthGate, SplashShell } from "../components/AuthGate.js";
 import { SplashLanding } from "../components/marketing/SplashLanding.js";
@@ -172,6 +173,7 @@ function AnonymousStoryReader({
   onClose: () => void;
   onNavigate: (path: string) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [resolved, setResolved] = useState<
     | { kind: "loading" }
     | { kind: "ok"; storyId: string }
@@ -200,21 +202,21 @@ function AnonymousStoryReader({
   }, [handle, slug]);
 
   if (resolved.kind === "loading") {
-    return <p className="p-8 italic text-keep-muted">Loading story...</p>;
+    return <p className="p-8 italic text-keep-muted">{t("anonReader.loading")}</p>;
   }
   if (resolved.kind === "notfound") {
     return (
       <div className="mx-auto max-w-sm p-8 text-center">
-        <p className="font-action text-lg text-keep-text">Story not found</p>
+        <p className="font-action text-lg text-keep-text">{t("anonReader.notFoundTitle")}</p>
         <p className="mt-2 text-sm text-keep-muted">
-          This story doesn't exist or has been removed.
+          {t("anonReader.notFoundBody")}
         </p>
         <button
           type="button"
           onClick={() => onNavigate("/scriptorium")}
           className="mt-4 rounded border border-keep-action bg-keep-action/15 px-3 py-1.5 text-xs uppercase tracking-widest text-keep-action"
         >
-          Back to Scriptorium
+          {t("backToScriptorium")}
         </button>
       </div>
     );
@@ -224,7 +226,7 @@ function AnonymousStoryReader({
       <div className="mx-auto max-w-sm p-8 text-center">
         <p className="font-action text-lg text-keep-text">{resolved.title}</p>
         <p className="mt-2 text-sm text-keep-muted">
-          This story is rated NC-17 (explicit content). You'll need to log in or register to read it.
+          {t("anonReader.nc17Gate")}
         </p>
         <div className="mt-4 flex items-center justify-center gap-2">
           <button
@@ -232,14 +234,14 @@ function AnonymousStoryReader({
             onClick={() => onNavigate(`/login?story=${encodeURIComponent(slug)}`)}
             className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg"
           >
-            Log in
+            {t("marketing:auth.logIn")}
           </button>
           <button
             type="button"
             onClick={() => onNavigate(`/register?story=${encodeURIComponent(slug)}`)}
             className="rounded border border-keep-action bg-keep-action/15 px-3 py-1.5 text-xs uppercase tracking-widest text-keep-action"
           >
-            Register
+            {t("marketing:auth.register")}
           </button>
         </div>
       </div>
@@ -268,6 +270,7 @@ export function PublicViewerShell({
   children: React.ReactNode;
   isAuthenticated: boolean;
 }) {
+  const { t } = useTranslation("marketing");
   const branding = useChat((s) => s.branding);
   const siteName = branding.siteName || "The Spire";
 
@@ -313,7 +316,9 @@ export function PublicViewerShell({
         // modal has natural margin around it.
         className="fixed bottom-3 right-4 z-[60] rounded border border-keep-rule bg-keep-bg/90 px-3 py-1 text-xs uppercase tracking-widest text-keep-action shadow hover:bg-keep-bg md:bottom-auto md:top-3"
       >
-        {isAuthenticated ? `Open ${siteName}` : `Sign in to ${siteName}`}
+        {isAuthenticated
+          ? t("publicShell.openSite", { siteName })
+          : t("publicShell.signIn", { siteName })}
       </a>
       {children}
     </div>
@@ -321,12 +326,13 @@ export function PublicViewerShell({
 }
 
 export function BootSplash() {
+  const { t } = useTranslation("marketing");
   return (
     <SplashShell>
       <div className="flex flex-col items-center gap-3 py-6 text-center">
         <div className="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-keep-muted">
           <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-keep-action" />
-          checking session...
+          {t("boot.checkingSession")}
         </div>
       </div>
     </SplashShell>

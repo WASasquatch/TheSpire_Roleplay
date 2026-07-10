@@ -46,6 +46,7 @@ import { registerServerEventRoutes } from "../servers/events.js";
 // Member-facing self-roles + onboarding (Batch 2). Self-gated on serversEnabled
 // + canParticipate; mounted alongside the manager usergroup routes below.
 import { registerSelfRolesRoutes } from "../servers/selfRoles.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 // Route groups extracted from this file (move-only split). registerServerRoutes
 // builds the shared ServerRoutesCtx below and hands it to each sub-registrar.
@@ -68,14 +69,14 @@ const SERVER_IMAGE_TYPES: Array<{ mime: string; ext: string; magic: number[] }> 
   { mime: "image/gif", ext: "gif", magic: [0x47, 0x49, 0x46, 0x38] },
 ];
 
-function decodeServerDataUrl(dataUrl: string, maxBytes: number): Buffer | { error: string } {
+function decodeServerDataUrl(dataUrl: string, maxBytes: number, locale?: string | null): Buffer | { error: string } {
   const m = /^data:image\/[a-z+]+;base64,(.+)$/i.exec(dataUrl.trim());
-  if (!m) return { error: "expected a base64 image data URL" };
+  if (!m) return { error: tFor(locale ?? null, "errors:server.upload.expectedImageDataUrl") };
   let bytes: Buffer;
   try { bytes = Buffer.from(m[1]!, "base64"); }
-  catch { return { error: "bad base64 payload" }; }
-  if (bytes.length === 0) return { error: "empty image" };
-  if (bytes.length > maxBytes) return { error: `image too large (max ${Math.round(maxBytes / 1024)}KB)` };
+  catch { return { error: tFor(locale ?? null, "errors:server.upload.badBase64") }; }
+  if (bytes.length === 0) return { error: tFor(locale ?? null, "errors:server.upload.emptyImage") };
+  if (bytes.length > maxBytes) return { error: tFor(locale ?? null, "errors:server.upload.tooLarge", { kb: Math.round(maxBytes / 1024) }) };
   return bytes;
 }
 
@@ -108,11 +109,12 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     prefix: string,
     dataUrl: string,
     maxBytes: number,
+    locale?: string | null,
   ): Promise<{ url: string } | { error: string; status: number }> {
-    const decoded = decodeServerDataUrl(dataUrl, maxBytes);
+    const decoded = decodeServerDataUrl(dataUrl, maxBytes, locale);
     if ("error" in decoded) return { error: decoded.error, status: 400 };
     const detected = sniffServerImage(decoded);
-    if (!detected) return { error: "unsupported image type (png, jpg, webp, gif only)", status: 415 };
+    if (!detected) return { error: tFor(locale ?? null, "errors:server.upload.unsupportedType"), status: 415 };
     const hash = createHash("sha256").update(decoded).digest("hex").slice(0, 16);
     const filename = `${prefix}-${hash}.${detected.ext}`;
     await mkdir(serversImgDir, { recursive: true });
@@ -169,16 +171,16 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
   }
 
   /** Resolve a mod/ban/group target to a user account (identity tokens + names). */
-  async function resolveServerTarget(raw: string): Promise<
+  async function resolveServerTarget(raw: string, locale?: string | null): Promise<
     | { ok: true; userId: string; username: string }
     | { ok: false; error: string }
   > {
     const trimmed = raw.trim();
-    if (!trimmed) return { ok: false, error: "Name or @id:/@cid: token required." };
+    if (!trimmed) return { ok: false, error: tFor(locale ?? null, "errors:server.identity.targetRequired") };
     const res = await resolveIdentityArg(db, trimmed);
-    if (res.kind === "none") return { ok: false, error: `No one matches "${trimmed}".` };
+    if (res.kind === "none") return { ok: false, error: tFor(locale ?? null, "errors:server.identity.noMatch", { name: trimmed }) };
     if (res.kind === "ambiguous") {
-      return { ok: false, error: `"${trimmed}" matches several identities - paste their @id: token from the profile.` };
+      return { ok: false, error: tFor(locale ?? null, "errors:server.identity.ambiguous", { name: trimmed }) };
     }
     return { ok: true, userId: res.target.userId, username: res.target.masterUsername };
   }

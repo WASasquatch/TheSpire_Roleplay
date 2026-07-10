@@ -4,6 +4,7 @@
  * WorldDetail; the full body is fetched lazily on edit.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorldDetail } from "@thekeep/shared";
 import { BUILTIN_WORLD_ENTITY_KINDS, deriveSlug } from "@thekeep/shared";
 import { createWorldSession, deleteWorldSession, fetchWorldSession, updateWorldSession } from "../../lib/worldEntities.js";
@@ -23,6 +24,7 @@ export function WorldSessionsTab({
   detail: WorldDetail;
   onChanged: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation("worlds");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -39,8 +41,8 @@ export function WorldSessionsTab({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-action text-sm uppercase tracking-widest text-keep-muted">Sessions</h3>
-        <button type="button" onClick={() => { setCreating(true); setSelectedId(null); }} className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs hover:bg-keep-banner">+ New session</button>
+        <h3 className="font-action text-sm uppercase tracking-widest text-keep-muted">{t("sessions.heading")}</h3>
+        <button type="button" onClick={() => { setCreating(true); setSelectedId(null); }} className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs hover:bg-keep-banner">{t("sessions.new")}</button>
       </div>
       {err ? <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{err}</div> : null}
 
@@ -49,7 +51,7 @@ export function WorldSessionsTab({
       ) : selectedId ? (
         <SessionEditor key={selectedId} worldId={worldId} detail={detail} targets={linkTargets} sessionId={selectedId} onCancel={() => setSelectedId(null)} onSaved={async () => { await onChanged(); }} onDeleted={async () => { setSelectedId(null); await onChanged(); }} onError={setErr} />
       ) : detail.sessions.length === 0 ? (
-        <p className="italic text-keep-muted">No sessions yet.</p>
+        <p className="italic text-keep-muted">{t("sessions.none")}</p>
       ) : (
         <ul className="space-y-1">
           {detail.sessions.map((s) => {
@@ -82,6 +84,7 @@ function SessionEditor({
   onDeleted?: () => void | Promise<void>;
   onError: (m: string | null) => void;
 }) {
+  const { t } = useTranslation("worlds");
   const bodyRef = useRef<HTMLTextAreaElement | null>(null);
   const [title, setTitle] = useState("");
   const [slug, setSlug] = useState("");
@@ -104,9 +107,12 @@ function SessionEditor({
         setTitle(s.title); setSlug(s.slug); setSlugDirty(true); setSummary(s.summary);
         setBodyHtml(s.bodyHtml); setDateStr(dateInputValue(s.sessionDate)); setArcId(s.arcId ?? "");
       })
-      .catch((x) => onError(x instanceof Error ? x.message : "load failed"))
+      .catch((x) => onError(x instanceof Error ? x.message : t("errors.loadFailed")))
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
+    // `t` deliberately omitted: a language flip must not refetch (and reset)
+    // an in-progress edit; the fallback error text just stays pre-flip.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worldId, sessionId, onError]);
 
   async function save() {
@@ -119,15 +125,15 @@ function SessionEditor({
       const s = sessionId ? await updateWorldSession(worldId, sessionId, input) : await createWorldSession(worldId, input);
       await onSaved(s.id);
     } catch (x) {
-      onError(x instanceof Error ? x.message : "save failed");
+      onError(x instanceof Error ? x.message : t("errors.saveFailed"));
     } finally { setBusy(false); }
   }
   async function remove() {
     if (!sessionId || busy) return;
-    if (!window.confirm(`Delete session "${title}"?`)) return;
+    if (!window.confirm(t("sessions.confirmDelete", { title }))) return;
     setBusy(true);
     try { await deleteWorldSession(worldId, sessionId); await onDeleted?.(); }
-    catch (x) { onError(x instanceof Error ? x.message : "delete failed"); }
+    catch (x) { onError(x instanceof Error ? x.message : t("errors.deleteFailed")); }
     finally { setBusy(false); }
   }
 
@@ -140,35 +146,35 @@ function SessionEditor({
     requestAnimationFrame(() => { ta.focus(); const pos = start + token.length; ta.setSelectionRange(pos, pos); });
   }
 
-  if (loading) return <p className="italic text-keep-muted">Loading…</p>;
+  if (loading) return <p className="italic text-keep-muted">{t("common:loading")}</p>;
 
   return (
     <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-bg/30 p-3 text-sm">
-      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Title</span>
+      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.title")}</span>
         <input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1" /></label>
-      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Slug</span>
+      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.slug")}</span>
         <input value={effectiveSlug} onChange={(e) => { setSlug(e.target.value); setSlugDirty(true); }} className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs" /></label>
       <div className="flex flex-wrap items-center gap-3">
-        <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Date</span>
+        <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.date")}</span>
           <input type="date" value={dateStr} onChange={(e) => setDateStr(e.target.value)} className="mt-0.5 block rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm" /></label>
-        <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Arc</span>
+        <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.arc")}</span>
           <select value={arcId} onChange={(e) => setArcId(e.target.value)} className="mt-0.5 block rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
-            <option value="">(none)</option>
+            <option value="">{t("sessions.arcNone")}</option>
             {detail.arcs.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}
           </select></label>
       </div>
-      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">Summary</span>
+      <label className="block"><span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.summary")}</span>
         <input value={summary} onChange={(e) => setSummary(e.target.value)} className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1" /></label>
       <div className="block">
         <div className="mb-0.5 flex items-center justify-between">
-          <span className="text-[11px] uppercase tracking-widest text-keep-muted">Recap / log</span>
+          <span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("sessions.recapLog")}</span>
           <EntryLinkPicker targets={targets} onPick={insertToken} />
         </div>
-        <textarea ref={bodyRef} value={bodyHtml} onChange={(e) => setBodyHtml(e.target.value)} rows={8} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs" placeholder="HTML allowed. Link entries with @npc:slug, @location:slug …" /></div>
+        <textarea ref={bodyRef} value={bodyHtml} onChange={(e) => setBodyHtml(e.target.value)} rows={8} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs" placeholder={t("sessions.bodyPlaceholder")} /></div>
       <div className="flex items-center gap-2 pt-1">
-        <button type="button" disabled={busy || !title.trim()} onClick={() => void save()} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action disabled:opacity-50">Save</button>
-        <button type="button" onClick={onCancel} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">Cancel</button>
-        {sessionId ? <button type="button" disabled={busy} onClick={() => void remove()} className="ml-auto rounded border border-keep-accent/50 px-3 py-1 text-xs text-keep-accent hover:bg-keep-accent/10">Delete</button> : null}
+        <button type="button" disabled={busy || !title.trim()} onClick={() => void save()} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action disabled:opacity-50">{t("common:save")}</button>
+        <button type="button" onClick={onCancel} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">{t("common:cancel")}</button>
+        {sessionId ? <button type="button" disabled={busy} onClick={() => void remove()} className="ml-auto rounded border border-keep-accent/50 px-3 py-1 text-xs text-keep-accent hover:bg-keep-accent/10">{t("common:delete")}</button> : null}
       </div>
     </div>
   );

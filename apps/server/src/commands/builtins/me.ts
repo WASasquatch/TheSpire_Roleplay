@@ -1,4 +1,5 @@
 import { addMessage } from "../../realtime/broadcast.js";
+import { tFor } from "../../i18n.js";
 import type { CommandHandler } from "../types.js";
 
 /**
@@ -26,7 +27,7 @@ export const meCommand: CommandHandler = {
     if (!body) {
       ctx.socket.emit("error:notice", {
         code: "EMPTY_ACTION",
-        message: `Usage: /${ctx.invokedAs} <action>`,
+        message: tFor(ctx.user.locale, "commands:me.usage", { command: ctx.invokedAs }),
       });
       return;
     }

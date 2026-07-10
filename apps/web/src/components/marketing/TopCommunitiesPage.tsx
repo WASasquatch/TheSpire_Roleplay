@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { isDarkPalette } from "@thekeep/shared";
 import { useChat } from "../../state/store.js";
@@ -55,6 +56,7 @@ function navigate(to: string): void {
 }
 
 export function TopCommunitiesPage() {
+  const { t } = useTranslation("marketing");
   const branding = useChat((s) => s.branding);
   const me = useChat((s) => s.me);
   const siteName = branding.siteName || "The Spire";
@@ -65,9 +67,9 @@ export function TopCommunitiesPage() {
 
   useEffect(() => {
     const prev = document.title;
-    document.title = `Top Communities · ${siteName}`;
+    document.title = t("topCommunities.docTitle", { siteName });
     return () => { document.title = prev; };
-  }, [siteName]);
+  }, [siteName, t]);
 
   useEffect(() => {
     let alive = true;
@@ -114,7 +116,7 @@ export function TopCommunitiesPage() {
             href="/"
             onClick={(e) => { e.preventDefault(); navigate("/"); }}
             className="inline-flex flex-col items-center gap-2"
-            aria-label={`${siteName} home`}
+            aria-label={t("topCommunities.homeAria", { siteName })}
           >
             {branding.logoUrl ? (
               <img
@@ -128,7 +130,7 @@ export function TopCommunitiesPage() {
               </span>
             )}
           </a>
-          <p className="text-sm uppercase tracking-[0.35em] text-keep-muted">Top Communities</p>
+          <p className="text-sm uppercase tracking-[0.35em] text-keep-muted">{t("topCommunitiesTitle")}</p>
           <div className="mt-1 flex items-center gap-4">
             <button
               type="button"
@@ -136,26 +138,26 @@ export function TopCommunitiesPage() {
               className="inline-flex items-center gap-1.5 rounded-lg border border-keep-action bg-keep-action px-5 py-2.5 text-sm font-semibold uppercase tracking-widest text-keep-bg shadow-[0_6px_20px_-8px_rgb(var(--keep-action)/0.6)] transition hover:brightness-110 active:brightness-95"
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
-              Add Your Site
+              {t("topCommunities.addYourSite")}
             </button>
             <a
               href="/"
               onClick={(e) => { e.preventDefault(); navigate("/"); }}
               className="text-sm text-keep-muted hover:text-keep-action"
             >
-              ← Back
+              {t("backLink")}
             </a>
           </div>
         </header>
 
         <div className="rounded-2xl border border-keep-border/60 bg-keep-bg/55 p-4 shadow-[0_20px_60px_-24px_rgba(0,0,0,0.75)] ring-1 ring-white/5 backdrop-blur-xl md:p-6">
           {cards === null ? (
-            <p className="py-10 text-center text-sm italic text-keep-muted">Gathering communities…</p>
+            <p className="py-10 text-center text-sm italic text-keep-muted">{t("gathering")}</p>
           ) : (
             <CommunityBoard
               cards={cards}
               size="large"
-              emptyText="No communities listed yet. Be the first — hit Add Your Site."
+              emptyText={t("topCommunities.emptyBoard")}
             />
           )}
         </div>

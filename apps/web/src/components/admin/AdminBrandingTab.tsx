@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { readError } from "../../lib/http.js";
 import { useChat } from "../../state/store.js";
 import { AdminSaveFooter, useAdminShell, type SettingsRow } from "./adminShell.js";
@@ -45,6 +46,7 @@ interface BrandingDraft {
 }
 
 export function BrandingTab() {
+  const { t } = useTranslation("admin");
   const setBranding = useChat((s) => s.setBranding);
   // Edit gate. Branding submits through PUT /admin/settings, which
   // now does per-field gating: a patch that only touches branding
@@ -93,7 +95,7 @@ export function BrandingTab() {
         socialProfileUrls: j.socialProfileUrls ?? "",
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "load failed");
+      setError(err instanceof Error ? err.message : t("loadFailed"));
     }
   }
   useEffect(() => { load(); }, []);
@@ -136,7 +138,7 @@ export function BrandingTab() {
         socialProfileUrls: draft.socialProfileUrls,
       };
       if (body.logoColor && !/^#[0-9a-fA-F]{6}$/.test(body.logoColor as string)) {
-        throw new Error("Logo color must be a 6-digit hex like #2c5d2c (or empty to clear).");
+        throw new Error(t("branding.logoColorError"));
       }
       const r = await fetch("/admin/settings", {
         method: "PUT",
@@ -177,7 +179,7 @@ export function BrandingTab() {
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -198,21 +200,23 @@ export function BrandingTab() {
         savedFlash={savedFlash}
         lastUpdatedAt={data?.updatedAt ?? null}
         error={error}
-        saveLabel="Save branding"
+        saveLabel={t("branding.saveLabel")}
         canEdit={canEditSiteSettings}
-        readOnlyHint="Read-only, needs edit_site_settings to save."
+        readOnlyHint={t("readOnlyNeedsSiteSettings")}
       />,
     );
     return () => shell.setFooter(null);
-  }, [shell, saving, savedFlash, error, data?.updatedAt, canEditSiteSettings]);
+  }, [shell, saving, savedFlash, error, data?.updatedAt, canEditSiteSettings, t]);
 
   if (!data || !draft) {
-    return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
+    return <div className="text-keep-muted text-xs">{error ?? t("loading")}</div>;
   }
 
   // ---- Live preview (pure client, no server work) ----
   // Mirror the server's fallback chain (seo.ts) so the mockups show exactly
-  // what a crawler / card scraper would see for the HOMEPAGE.
+  // what a crawler / card scraper would see for the HOMEPAGE. These fallback
+  // strings deliberately stay UNTRANSLATED: they mirror what the server
+  // actually emits to crawlers, which is English regardless of UI locale.
   const FALLBACK_TAGLINE = "Roleplay Chat, Communities & Forums";
   const previewName = draft.siteName.trim() || "The Spire";
   const previewTagline = draft.homepageTagline.trim() || FALLBACK_TAGLINE;
@@ -242,68 +246,80 @@ export function BrandingTab() {
   return (
     <form id="admin-branding-form" onSubmit={save} className="space-y-4">
       <p className="text-xs text-keep-muted">
-        Public branding shown to every user (including the login screen).
-        Changes apply immediately for everyone after save.
+        {t("branding.description")}
       </p>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Site name</legend>
+      <fieldset data-admin-anchor="branding.siteNameLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.siteNameLegend")}</legend>
         <input
           type="text"
           value={draft.siteName}
           onChange={(e) => setDraft({ ...draft, siteName: e.target.value })}
           maxLength={60}
-          placeholder="The Spire"
+          placeholder={t("branding.siteNamePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
         />
         <p className="mt-1 text-keep-muted">
-          Shown in the banner, login screen, BootSplash, and tab title.
-          Empty falls back to <code>The Spire</code>.
+          <Trans t={t} i18nKey="branding.siteNameHelp">
+            {"Shown in the banner, login screen, BootSplash, and tab title. Empty falls back to "}
+            <code>The Spire</code>
+            {"."}
+          </Trans>
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Site URL</legend>
+      <fieldset data-admin-anchor="branding.siteUrlLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.siteUrlLegend")}</legend>
         <input
           type="url"
           value={draft.siteUrl}
           onChange={(e) => setDraft({ ...draft, siteUrl: e.target.value })}
           maxLength={500}
-          placeholder="https://thespire.games"
+          placeholder={t("branding.siteUrlPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          When set, the banner wraps the site name / logo image in an{" "}
-          unstyled link pointing here, useful for sending visitors back to a
-          marketing landing page or the main domain when the chat lives at a
-          subdomain. The wrapping is invisible (no underline, no color change);
-          the logo still reads as a logo, it just becomes clickable. Must
-          start with <code>http://</code> or <code>https://</code>; leave empty
-          to disable.
+          <Trans t={t} i18nKey="branding.siteUrlHelp">
+            {"When set, the banner wraps the site name / logo image in an unstyled link pointing here, useful for sending visitors back to a marketing landing page or the main domain when the chat lives at a subdomain. The wrapping is invisible (no underline, no color change); the logo still reads as a logo, it just becomes clickable. Must start with "}
+            <code>http://</code>
+            {" or "}
+            <code>https://</code>
+            {"; leave empty to disable."}
+          </Trans>
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Banner cover</legend>
+      <fieldset data-admin-anchor="branding.bannerCoverLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.bannerCoverLegend")}</legend>
         <textarea
           value={draft.bannerCoverCss}
           onChange={(e) => setDraft({ ...draft, bannerCoverCss: e.target.value })}
           rows={2}
           maxLength={1000}
-          placeholder='e.g. url("https://example.com/banner.jpg") center/cover no-repeat'
+          placeholder={t("branding.bannerCoverPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          Full CSS <code>background</code> shorthand applied behind the logo
-          text. Accepts <code>url()</code>, <code>linear-gradient(...)</code>,
-          a solid color, etc. Leave empty to use the theme's panel color.
+          <Trans t={t} i18nKey="branding.bannerCoverHelp">
+            {"Full CSS "}
+            <code>background</code>
+            {" shorthand applied behind the logo text. Accepts "}
+            <code>url()</code>
+            {", "}
+            <code>linear-gradient(...)</code>
+            {", a solid color, etc. Leave empty to use the theme's panel color."}
+          </Trans>
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Logo image</legend>
+      <fieldset data-admin-anchor="branding.logoImageLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.logoImageLegend")}</legend>
         <p className="mb-2 text-keep-muted">
-          Shown in the banner and on the splash in place of the site name. Leave empty to use the text title instead. The default install ships <code>/thespire-logo.png</code>; uploading replaces it with your own image stored on the server (no external host required).
+          <Trans t={t} i18nKey="branding.logoImageHelp">
+            {"Shown in the banner and on the splash in place of the site name. Leave empty to use the text title instead. The default install ships "}
+            <code>/thespire-logo.png</code>
+            {"; uploading replaces it with your own image stored on the server (no external host required)."}
+          </Trans>
         </p>
         <LogoImageRow
           value={draft.logoUrl}
@@ -341,21 +357,21 @@ export function BrandingTab() {
         />
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Logo color</legend>
+      <fieldset data-admin-anchor="branding.logoColorLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.logoColorLegend")}</legend>
         <div className="flex items-center gap-2">
           <input
             type="color"
             value={draft.logoColor || "#1a1a1a"}
             onChange={(e) => setDraft({ ...draft, logoColor: e.target.value })}
             className="h-8 w-10 cursor-pointer rounded border border-keep-rule"
-            aria-label="Logo color"
+            aria-label={t("branding.logoColorLegend")}
           />
           <input
             type="text"
             value={draft.logoColor}
             onChange={(e) => setDraft({ ...draft, logoColor: e.target.value })}
-            placeholder="(empty = inherit theme text color)"
+            placeholder={t("branding.logoColorPlaceholder")}
             maxLength={7}
             pattern="^#[0-9a-fA-F]{6}$|^$"
             className="flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
@@ -364,91 +380,89 @@ export function BrandingTab() {
             type="button"
             onClick={() => setDraft({ ...draft, logoColor: "" })}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:text-keep-text"
-            title="Clear - logo follows the active theme."
+            title={t("branding.logoColorClearTitle")}
           >
-            Clear
+            {t("common:clear")}
           </button>
         </div>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Logo font</legend>
+      <fieldset data-admin-anchor="branding.logoFontLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.logoFontLegend")}</legend>
         <input
           type="text"
           value={draft.logoFont}
           onChange={(e) => setDraft({ ...draft, logoFont: e.target.value })}
           maxLength={200}
-          placeholder='e.g. "Cinzel", "Georgia", serif'
+          placeholder={t("branding.logoFontPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          A CSS <code>font-family</code> stack. Web fonts must be self-hosted
-          or loaded via <code>@import</code> in your stylesheet - this field
-          only changes the family name, not the loading. Empty to use the
-          built-in serif stack.
+          <Trans t={t} i18nKey="branding.logoFontHelp">
+            {"A CSS "}
+            <code>font-family</code>
+            {" stack. Web fonts must be self-hosted or loaded via "}
+            <code>@import</code>
+            {" in your stylesheet - this field only changes the family name, not the loading. Empty to use the built-in serif stack."}
+          </Trans>
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Welcome message</legend>
+      <fieldset data-admin-anchor="branding.welcomeLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.welcomeLegend")}</legend>
         <textarea
           value={draft.welcomeHtml}
           onChange={(e) => setDraft({ ...draft, welcomeHtml: e.target.value })}
           rows={6}
           maxLength={500_000}
-          placeholder="<p>Welcome to <b>The Spire</b> - a roleplay-focused chat sanctuary.</p>&#10;<p>Sign in to enter, or register a new account.</p>"
+          placeholder={t("branding.welcomePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          HTML rendered above the splash login/register form. Sanitized
-          server-side using the same allow-list as profile bios - basic
-          formatting tags, links, lists, and headings (h3-h6) are accepted.
-          Empty hides the welcome block entirely.
+          {t("branding.welcomeHelp")}
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">SEO description</legend>
+      <fieldset data-admin-anchor="branding.seoDescLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.seoDescLegend")}</legend>
         <textarea
           value={draft.metaDescription}
           onChange={(e) => setDraft({ ...draft, metaDescription: e.target.value })}
           rows={3}
           maxLength={500}
-          placeholder="A roleplay-focused chat sanctuary. Build characters, share scenes, and tell collaborative stories with other writers."
+          placeholder={t("branding.seoDescPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
         />
         <p className="mt-1 text-keep-muted">
-          Plain-text description used in <code>&lt;meta name="description"&gt;</code>
-          and the OG / Twitter card. Search engines typically display the
-          first ~155 characters. Empty falls back to the welcome message
-          stripped to text.
+          <Trans t={t} i18nKey="branding.seoDescHelp" shouldUnescape>
+            {"Plain-text description used in "}
+            <code>{'<meta name="description">'}</code>
+            {"and the OG / Twitter card. Search engines typically display the first ~155 characters. Empty falls back to the welcome message stripped to text."}
+          </Trans>
           <span className="ml-1 tabular-nums">
             ({draft.metaDescription.length}/500)
           </span>
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Social card image</legend>
+      <fieldset data-admin-anchor="branding.ogImageLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.ogImageLegend")}</legend>
         <input
           type="url"
           value={draft.ogImageUrl}
           onChange={(e) => setDraft({ ...draft, ogImageUrl: e.target.value })}
           maxLength={2000}
-          placeholder="https://example.com/social-card.png"
+          placeholder={t("branding.ogImagePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          The image shown when someone shares a link on Discord, X, Slack, or
-          Facebook. Used as the default for every page that doesn't have its own
-          card (a shared forum or community uses its own banner). Recommended
-          1200x630, under 1 MB. Empty falls back to the built-in card.
+          {t("branding.ogImageHelp")}
         </p>
         {draft.ogImageUrl.trim() ? (
           <div className="mt-2">
             <img
               src={draft.ogImageUrl.trim()}
-              alt="Social card preview"
+              alt={t("branding.ogImageAlt")}
               className="max-h-40 w-full rounded border border-keep-rule object-cover"
               onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
             />
@@ -456,93 +470,104 @@ export function BrandingTab() {
         ) : null}
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Homepage tagline</legend>
+      <fieldset data-admin-anchor="branding.taglineLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.taglineLegend")}</legend>
         <input
           type="text"
           value={draft.homepageTagline}
           onChange={(e) => setDraft({ ...draft, homepageTagline: e.target.value })}
           maxLength={200}
-          placeholder="Roleplay Chat, Communities & Forums"
+          placeholder={t("branding.taglinePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
         />
         <p className="mt-1 text-keep-muted">
-          Added after the site name in the browser tab and search results on the
-          homepage, login, and register pages, so the title reads{" "}
-          <code>{previewName} - {previewTagline}</code>. Keeps the title
-          keyword-rich without baking search terms into the brand name itself.
-          Empty falls back to <code>{FALLBACK_TAGLINE}</code>.
+          <Trans
+            t={t}
+            i18nKey="branding.taglineHelp"
+            values={{ title: `${previewName} - ${previewTagline}`, fallback: FALLBACK_TAGLINE }}
+          >
+            {"Added after the site name in the browser tab and search results on the homepage, login, and register pages, so the title reads "}
+            <code>{"{{title}}"}</code>
+            {". Keeps the title keyword-rich without baking search terms into the brand name itself. Empty falls back to "}
+            <code>{"{{fallback}}"}</code>
+            {"."}
+          </Trans>
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">SEO keywords</legend>
+      <fieldset data-admin-anchor="branding.seoKeywordsLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.seoKeywordsLegend")}</legend>
         <textarea
           value={draft.seoKeywords}
           onChange={(e) => setDraft({ ...draft, seoKeywords: e.target.value })}
           rows={3}
           maxLength={1000}
-          placeholder="roleplay chat, RP chat, play-by-post forum, community hosting, worldbuilding"
+          placeholder={t("branding.seoKeywordsPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
         />
         <p className="mt-1 text-keep-muted">
-          Comma-separated keyword list for <code>&lt;meta name="keywords"&gt;</code>.
-          Google ignores this, but Bing, DuckDuckGo, and some card scrapers still
-          read it. Empty falls back to the built-in default list.
+          <Trans t={t} i18nKey="branding.seoKeywordsHelp" shouldUnescape>
+            {"Comma-separated keyword list for "}
+            <code>{'<meta name="keywords">'}</code>
+            {". Google ignores this, but Bing, DuckDuckGo, and some card scrapers still read it. Empty falls back to the built-in default list."}
+          </Trans>
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Search-engine verification</legend>
+      <fieldset data-admin-anchor="branding.verificationLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.verificationLegend")}</legend>
         <label className="mb-2 block">
-          <span className="mb-1 block text-keep-muted">Google (Search Console)</span>
+          <span className="mb-1 block text-keep-muted">{t("branding.googleLabel")}</span>
           <input
             type="text"
             value={draft.googleSiteVerification}
             onChange={(e) => setDraft({ ...draft, googleSiteVerification: e.target.value })}
             maxLength={200}
-            placeholder="paste only the content token"
+            placeholder={t("branding.tokenPlaceholder")}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
           />
         </label>
         <label className="block">
-          <span className="mb-1 block text-keep-muted">Bing (Webmaster Tools)</span>
+          <span className="mb-1 block text-keep-muted">{t("branding.bingLabel")}</span>
           <input
             type="text"
             value={draft.bingSiteVerification}
             onChange={(e) => setDraft({ ...draft, bingSiteVerification: e.target.value })}
             maxLength={200}
-            placeholder="paste only the content token"
+            placeholder={t("branding.tokenPlaceholder")}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
           />
         </label>
         <p className="mt-1 text-keep-muted">
-          Paste only the <code>content</code> token from the verification tag,
-          not the whole <code>&lt;meta&gt;</code>. Each gets added to the page{" "}
-          <code>&lt;head&gt;</code> when set. Leave empty once you've switched to
-          the DNS or file verification method.
+          <Trans t={t} i18nKey="branding.verificationHelp" shouldUnescape>
+            {"Paste only the "}
+            <code>content</code>
+            {" token from the verification tag, not the whole "}
+            <code>{"<meta>"}</code>
+            {". Each gets added to the page "}
+            <code>{"<head>"}</code>
+            {" when set. Leave empty once you've switched to the DNS or file verification method."}
+          </Trans>
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Social profiles</legend>
+      <fieldset data-admin-anchor="branding.socialProfilesLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.socialProfilesLegend")}</legend>
         <textarea
           value={draft.socialProfileUrls}
           onChange={(e) => setDraft({ ...draft, socialProfileUrls: e.target.value })}
           rows={3}
           maxLength={2000}
-          placeholder={"https://x.com/yoursite\nhttps://discord.gg/yourinvite\nhttps://bsky.app/profile/yoursite"}
+          placeholder={t("branding.socialProfilesPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          One profile URL per line. Added to the structured data so search
-          engines can connect these accounts to your site. Non-link lines are
-          ignored.
+          {t("branding.socialProfilesHelp")}
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Search indexing</legend>
+      <fieldset data-admin-anchor="branding.indexingLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.indexingLegend")}</legend>
         <label className="flex items-start gap-2">
           <input
             type="checkbox"
@@ -550,29 +575,27 @@ export function BrandingTab() {
             onChange={(e) => setDraft({ ...draft, searchIndexingEnabled: e.target.checked })}
             className="mt-0.5"
           />
-          <span>Allow search engines to index this site</span>
+          <span>{t("branding.indexingAllow")}</span>
         </label>
         {draft.searchIndexingEnabled ? (
           <p className="mt-1 text-keep-muted">
-            Search engines may crawl and index the site normally. Turn this off
-            for a staging or pre-launch install you don't want appearing in
-            search yet.
+            {t("branding.indexingOnHelp")}
           </p>
         ) : (
           <p className="mt-1 text-keep-accent">
-            <b>Off:</b> the site tells all search engines not to index it, and
-            over time it will be removed from Google and other search results.
-            Only use this before launch.
+            <Trans t={t} i18nKey="branding.indexingOffHelp">
+              <b>Off:</b>
+              {" the site tells all search engines not to index it, and over time it will be removed from Google and other search results. Only use this before launch."}
+            </Trans>
           </p>
         )}
       </fieldset>
 
       {/* SERP + social-card live preview (pure client, homepage values) */}
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Search &amp; social preview</legend>
+      <fieldset data-admin-anchor="branding.serpLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.serpLegend")}</legend>
         <p className="mb-2 text-keep-muted">
-          How the homepage looks in a Google result and a Discord / X link card.
-          Live from the values above.
+          {t("branding.serpHelp")}
         </p>
 
         {/* Google SERP snippet */}
@@ -583,12 +606,12 @@ export function BrandingTab() {
         </div>
         <div className="mt-1 flex flex-wrap gap-3 text-[10px] text-keep-muted">
           <span className={titleOver ? "text-keep-accent" : ""}>
-            Title {previewTitle.length}/{SERP_TITLE_MAX}
-            {titleOver ? " (may be cut off)" : ""}
+            {t("branding.titleCount", { length: previewTitle.length, max: SERP_TITLE_MAX })}
+            {titleOver ? t("branding.mayBeCutOff") : ""}
           </span>
           <span className={descOver ? "text-keep-accent" : ""}>
-            Description {previewDescription.length}/{SERP_DESC_MAX}
-            {descOver ? " (may be cut off)" : ""}
+            {t("branding.descCount", { length: previewDescription.length, max: SERP_DESC_MAX })}
+            {descOver ? t("branding.mayBeCutOff") : ""}
           </span>
         </div>
 
@@ -603,7 +626,7 @@ export function BrandingTab() {
             />
           ) : (
             <div className="flex aspect-[1200/630] w-full items-center justify-center bg-keep-bg text-keep-muted">
-              No card image set
+              {t("branding.noCardImage")}
             </div>
           )}
           <div className="p-3">
@@ -614,9 +637,9 @@ export function BrandingTab() {
         </div>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-accent/40 bg-keep-accent/5 p-3 text-xs">
+      <fieldset data-admin-anchor="branding.customHeadLegend" className="rounded border border-keep-accent/40 bg-keep-accent/5 p-3 text-xs">
         <legend className="px-1 uppercase tracking-widest text-keep-accent">
-          Custom head HTML (analytics)
+          {t("branding.customHeadLegend")}
         </legend>
         <textarea
           value={draft.customHeadHtml}
@@ -624,20 +647,22 @@ export function BrandingTab() {
           rows={6}
           maxLength={20_000}
           spellCheck={false}
-          placeholder={`<!-- Plausible -->\n<script defer data-domain="example.com" src="https://plausible.io/js/script.js"></script>\n\n<!-- or Google Analytics, Cloudflare Web Analytics, Umami, etc. -->`}
+          placeholder={t("branding.customHeadPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-accent/80">
-          <b>Raw HTML, not sanitized.</b> Pasted verbatim into <code>&lt;head&gt;</code>
-          on every splash response so analytics fire before React mounts.
-          Anything you put here ships to every visitor on first paint -
-          double-check the snippet from your provider's dashboard before saving.
+          <Trans t={t} i18nKey="branding.customHeadHelp" shouldUnescape>
+            <b>Raw HTML, not sanitized.</b>
+            {" Pasted verbatim into "}
+            <code>{"<head>"}</code>
+            {"on every splash response so analytics fire before React mounts. Anything you put here ships to every visitor on first paint - double-check the snippet from your provider's dashboard before saving."}
+          </Trans>
         </p>
       </fieldset>
 
       {/* Live preview */}
       <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Preview</legend>
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("common:preview")}</legend>
         <div
           className="flex items-center justify-between rounded border border-keep-rule px-4 py-2"
           style={{
@@ -654,7 +679,7 @@ export function BrandingTab() {
             {draft.siteName || "The Spire"}
           </span>
           <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-            preview
+            {t("branding.previewCaption")}
           </span>
         </div>
       </fieldset>
@@ -697,6 +722,7 @@ function LogoImageRow({
    *  independently. */
   canUpload: boolean;
 }) {
+  const { t } = useTranslation("admin");
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -706,11 +732,11 @@ function LogoImageRow({
     e.target.value = ""; // allow re-picking the same file
     if (!f) return;
     if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) {
-      setError("Only PNG, JPEG, WebP, and GIF are accepted.");
+      setError(t("branding.logoTypeError"));
       return;
     }
     if (f.size > 8 * 1024 * 1024) {
-      setError("Image is over 8MB. Resize or recompress before uploading.");
+      setError(t("branding.logoSizeError"));
       return;
     }
     setError(null);
@@ -719,7 +745,7 @@ function LogoImageRow({
       const dataUrl: string = await new Promise((resolve, reject) => {
         const r = new FileReader();
         r.onload = () => resolve(String(r.result ?? ""));
-        r.onerror = () => reject(new Error("file read failed"));
+        r.onerror = () => reject(new Error(t("branding.fileReadFailed")));
         r.readAsDataURL(f);
       });
       const res = await fetch("/admin/upload/logo", {
@@ -732,7 +758,7 @@ function LogoImageRow({
       const j = (await res.json()) as { ok: true; url: string; settings: SettingsRow };
       onUploaded(j);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "upload failed");
+      setError(err instanceof Error ? err.message : t("uploadFailed"));
     } finally {
       setUploading(false);
     }
@@ -745,7 +771,7 @@ function LogoImageRow({
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="(empty = no logo, show text title)"
+          placeholder={t("branding.logoUrlPlaceholder")}
           className="min-w-[14rem] flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <input
@@ -762,16 +788,16 @@ function LogoImageRow({
             disabled={uploading}
             className="rounded border border-keep-rule bg-keep-banner px-3 py-1 hover:bg-keep-banner/80 disabled:opacity-50"
           >
-            {uploading ? "Uploading…" : "Upload…"}
+            {uploading ? t("branding.uploading") : t("branding.upload")}
           </button>
         ) : null}
         <button
           type="button"
           onClick={() => onChange("")}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:text-keep-text"
-          title="Clear, banner falls back to the text site name."
+          title={t("branding.logoClearTitle")}
         >
-          Clear
+          {t("common:clear")}
         </button>
       </div>
       {error ? (
@@ -779,10 +805,10 @@ function LogoImageRow({
       ) : null}
       {value ? (
         <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg p-2">
-          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Preview:</span>
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("branding.previewLabel")}</span>
           <img
             src={value}
-            alt="logo preview"
+            alt={t("branding.logoPreviewAlt")}
             className="max-h-10 w-auto"
             // Surface a broken URL without breaking the form layout.
             onError={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "0.3"; }}

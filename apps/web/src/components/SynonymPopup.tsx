@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useChat } from "../state/store.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";
 
@@ -29,6 +30,7 @@ export function SynonymPopup({
   value: string;
   onChange: (next: string) => void;
 }) {
+  const { t } = useTranslation("common");
   // Per-user opt-out, when set, this component does nothing: no
   // listeners, no fetches, no popup. Lives in the chat store so a
   // toggle in the profile editor takes effect immediately.
@@ -187,7 +189,7 @@ export function SynonymPopup({
   return (
     <ul
       role="listbox"
-      aria-label="Synonyms"
+      aria-label={t("synonyms.listAria")}
       // `bottom-full` anchors the popup to the top edge of the
       // relatively-positioned input wrapper, matching CompleterPopup's
       // placement. `mb-1` adds a tiny gap so the panel doesn't kiss
@@ -195,7 +197,7 @@ export function SynonymPopup({
       className={`absolute bottom-full left-0 z-30 mb-1 max-h-56 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl${reduceMotion ? " tk-slide-up-in" : ""}`}
     >
       <li className="border-b border-keep-rule/40 bg-keep-banner/40 px-2 py-1 text-[10px] uppercase tracking-widest text-keep-muted">
-        Synonyms for "{selRef.current?.word ?? ""}"
+        {t("synonyms.headerFor", { word: selRef.current?.word ?? "" })}
       </li>
       {synonyms.map((s, i) => (
         <li key={s + i}>

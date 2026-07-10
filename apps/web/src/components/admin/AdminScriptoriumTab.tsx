@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type {
   StoryReport,
   StoryReportStatus,
@@ -7,6 +8,7 @@ import type {
 } from "@thekeep/shared";
 import { STORY_RATINGS } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 
 /**
  * Admin queue for Scriptorium reports. Shows open reports first, then
@@ -25,6 +27,7 @@ import { readError } from "../../lib/http.js";
  * queue after each successful action so state stays fresh.
  */
 export function AdminScriptoriumTab() {
+  const { t } = useTranslation("admin");
   const [reports, setReports] = useState<StoryReport[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StoryReportStatus | "all">("open");
@@ -41,47 +44,47 @@ export function AdminScriptoriumTab() {
       const j = (await r.json()) as { reports: StoryReport[] };
       setReports(j.reports);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("loadFailed"));
     }
-  }, [statusFilter, kindFilter]);
+  }, [statusFilter, kindFilter, t]);
 
   useEffect(() => { void load(); }, [load]);
 
   return (
     <div className="space-y-3 p-4">
-      <header className="flex flex-wrap items-baseline justify-between gap-3">
-        <h3 className="font-action text-base">Scriptorium reports</h3>
+      <header data-admin-anchor="scriptorium.title" className="flex flex-wrap items-baseline justify-between gap-3">
+        <h3 className="font-action text-base">{t("scriptorium.title")}</h3>
         <span className="text-xs text-keep-muted">
-          {reports == null ? "Loading…" : `${reports.length} shown`}
+          {reports == null ? t("common:loading") : t("scriptorium.shown", { count: reports.length })}
         </span>
       </header>
 
       <div className="flex flex-wrap items-center gap-3 text-xs">
         <label className="flex items-center gap-1">
-          <span className="uppercase tracking-widest text-keep-muted">Status</span>
+          <span className="uppercase tracking-widest text-keep-muted">{t("scriptorium.statusLabel")}</span>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as StoryReportStatus | "all")}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5"
           >
-            <option value="open">Open</option>
-            <option value="reviewed">Reviewed</option>
-            <option value="dismissed">Dismissed</option>
-            <option value="all">All</option>
+            <option value="open">{t("scriptorium.filterOpen")}</option>
+            <option value="reviewed">{t("scriptorium.filterReviewed")}</option>
+            <option value="dismissed">{t("scriptorium.filterDismissed")}</option>
+            <option value="all">{t("scriptorium.filterAll")}</option>
           </select>
         </label>
         <label className="flex items-center gap-1">
-          <span className="uppercase tracking-widest text-keep-muted">Kind</span>
+          <span className="uppercase tracking-widest text-keep-muted">{t("scriptorium.kindLabel")}</span>
           <select
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value as StoryReportTargetKind | "all")}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5"
           >
-            <option value="all">All</option>
-            <option value="story">Stories</option>
-            <option value="chapter">Chapters</option>
-            <option value="review">Reviews</option>
-            <option value="review_reply">Review replies</option>
+            <option value="all">{t("scriptorium.filterAll")}</option>
+            <option value="story">{t("scriptorium.filterStories")}</option>
+            <option value="chapter">{t("scriptorium.filterChapters")}</option>
+            <option value="review">{t("scriptorium.filterReviews")}</option>
+            <option value="review_reply">{t("scriptorium.filterReviewReplies")}</option>
           </select>
         </label>
         <button
@@ -89,7 +92,7 @@ export function AdminScriptoriumTab() {
           onClick={() => void load()}
           className="ml-auto rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:text-keep-text"
         >
-          Refresh
+          {t("refresh")}
         </button>
       </div>
 
@@ -98,9 +101,9 @@ export function AdminScriptoriumTab() {
       ) : null}
 
       {reports === null ? (
-        <p className="italic text-keep-muted">Loading…</p>
+        <p className="italic text-keep-muted">{t("common:loading")}</p>
       ) : reports.length === 0 ? (
-        <p className="italic text-keep-muted">No reports match the current filters.</p>
+        <p className="italic text-keep-muted">{t("scriptorium.noMatches")}</p>
       ) : (
         <ul className="space-y-3">
           {reports.map((r) => (
@@ -113,12 +116,13 @@ export function AdminScriptoriumTab() {
 }
 
 function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () => Promise<void> | void }) {
+  const { t } = useTranslation("admin");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   async function resolve(status: "reviewed" | "dismissed") {
     if (busy) return;
-    const note = window.prompt(`${status === "reviewed" ? "Mark reviewed" : "Dismiss"}, optional note`);
+    const note = window.prompt(status === "reviewed" ? t("scriptorium.reviewNotePrompt") : t("scriptorium.dismissNotePrompt"));
     if (note === null) return;
     setBusy(true);
     setErr(null);
@@ -132,7 +136,7 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
       if (!r.ok) throw new Error(await readError(r));
       await onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "action failed");
+      setErr(e instanceof Error ? e.message : t("actionFailed"));
     } finally {
       setBusy(false);
     }
@@ -140,16 +144,16 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
 
   async function forceRate() {
     const next = window.prompt(
-      `Force-rate the parent story. Enter a rating (${STORY_RATINGS.join(" / ")})`,
+      t("scriptorium.forceRatePrompt", { ratings: STORY_RATINGS.join(" / ") }),
       "PG-13",
     );
     if (!next) return;
     const trimmed = next.trim() as StoryRating;
     if (!(STORY_RATINGS as readonly string[]).includes(trimmed)) {
-      window.alert(`Invalid rating. Use one of: ${STORY_RATINGS.join(", ")}`);
+      window.alert(t("scriptorium.invalidRating", { ratings: STORY_RATINGS.join(", ") }));
       return;
     }
-    const note = window.prompt("Optional note for the audit log");
+    const note = window.prompt(t("scriptorium.auditNotePrompt"));
     if (note === null) return;
     setBusy(true);
     setErr(null);
@@ -163,16 +167,16 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
       if (!r.ok) throw new Error(await readError(r));
       await onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "force-rate failed");
+      setErr(e instanceof Error ? e.message : t("scriptorium.forceRateFailed"));
     } finally {
       setBusy(false);
     }
   }
 
   async function hide() {
-    if (!window.confirm(`Hide "${report.storyTitle}"? (sets visibility = private)`)) return;
-    const revokeEarnings = window.confirm("Also revoke the author's XP/currency earned from this book? (use for blatant rule-breaking / economy farming)");
-    const note = window.prompt("Optional note for the audit log");
+    if (!window.confirm(t("scriptorium.hideConfirm", { title: report.storyTitle }))) return;
+    const revokeEarnings = window.confirm(t("scriptorium.revokeConfirm"));
+    const note = window.prompt(t("scriptorium.auditNotePrompt"));
     if (note === null) return;
     setBusy(true);
     setErr(null);
@@ -186,16 +190,16 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
       if (!r.ok) throw new Error(await readError(r));
       await onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "hide failed");
+      setErr(e instanceof Error ? e.message : t("scriptorium.hideFailed"));
     } finally {
       setBusy(false);
     }
   }
 
   async function deleteStory() {
-    if (!window.confirm(`HARD DELETE "${report.storyTitle}"? This cascades to chapters, reviews, and reports. Cannot be undone.`)) return;
-    const revokeEarnings = window.confirm("Also revoke the author's XP/currency earned from this book? (use for blatant rule-breaking / economy farming)");
-    const note = window.prompt("Audit log note (required for delete)");
+    if (!window.confirm(t("scriptorium.deleteConfirm", { title: report.storyTitle }))) return;
+    const revokeEarnings = window.confirm(t("scriptorium.revokeConfirm"));
+    const note = window.prompt(t("scriptorium.deleteNotePrompt"));
     if (note === null) return;
     setBusy(true);
     setErr(null);
@@ -209,7 +213,7 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
       if (!r.ok) throw new Error(await readError(r));
       await onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "delete failed");
+      setErr(e instanceof Error ? e.message : t("deleteFailed"));
     } finally {
       setBusy(false);
     }
@@ -222,21 +226,24 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
       <header className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
         <div className="flex items-baseline gap-2">
           <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${kindBadgeClass(report.targetKind)}`}>
-            {report.targetKind.replace("_", " ")}
+            {t(`scriptorium.kind.${report.targetKind}`)}
           </span>
           <h4 className="font-action text-sm">{report.storyTitle}</h4>
           <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${statusBadgeClass(report.status)}`}>
-            {report.status}
+            {t(`scriptorium.status.${report.status}`)}
           </span>
         </div>
         <span className="text-[10px] text-keep-muted">
-          {new Date(report.createdAt).toLocaleString()}
+          {formatDateTime(report.createdAt)}
         </span>
       </header>
 
       <div className="mb-2 text-xs">
-        <span className="text-keep-muted">Reported by</span>{" "}
-        <b>{report.reporterUsername}</b>
+        <Trans t={t} i18nKey="scriptorium.reportedBy" values={{ name: report.reporterUsername }}>
+          <span className="text-keep-muted">Reported by</span>
+          {" "}
+          <b>{"{{name}}"}</b>
+        </Trans>
         {report.reason ? (
           <>
             {" "}<span className="italic">· {report.reason}</span>
@@ -250,8 +257,11 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
 
       {report.resolvedByUsername ? (
         <div className="mb-2 text-[10px] text-keep-muted">
-          Resolved by <b>{report.resolvedByUsername}</b>{" "}
-          {report.resolvedAt ? new Date(report.resolvedAt).toLocaleString() : ""}
+          <Trans t={t} i18nKey="scriptorium.resolvedBy" values={{ name: report.resolvedByUsername }}>
+            {"Resolved by "}
+            <b>{"{{name}}"}</b>
+          </Trans>{" "}
+          {report.resolvedAt ? formatDateTime(report.resolvedAt) : ""}
           {report.resolutionNote ? <>: <i>{report.resolutionNote}</i></> : null}
         </div>
       ) : null}
@@ -263,26 +273,26 @@ function ReportCard({ report, onChanged }: { report: StoryReport; onChanged: () 
           <>
             <button type="button" onClick={() => resolve("reviewed")} disabled={busy}
               className="rounded border border-keep-action bg-keep-action px-2 py-0.5 font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
-              Mark reviewed
+              {t("scriptorium.markReviewed")}
             </button>
             <button type="button" onClick={() => resolve("dismissed")} disabled={busy}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:text-keep-text">
-              Dismiss
+              {t("scriptorium.dismiss")}
             </button>
           </>
         ) : null}
         <span className="text-keep-rule">|</span>
         <button type="button" onClick={forceRate} disabled={busy}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:text-keep-text">
-          Force-rate story
+          {t("scriptorium.forceRate")}
         </button>
         <button type="button" onClick={hide} disabled={busy}
           className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-amber-300">
-          Hide story
+          {t("scriptorium.hideStory")}
         </button>
         <button type="button" onClick={deleteStory} disabled={busy}
           className="rounded border border-keep-accent/60 bg-keep-accent/15 px-2 py-0.5 text-keep-accent">
-          Delete story
+          {t("scriptorium.deleteStory")}
         </button>
       </div>
     </li>

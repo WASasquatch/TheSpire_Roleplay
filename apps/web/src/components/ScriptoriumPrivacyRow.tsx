@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { STORY_CONTENT_WARNINGS } from "@thekeep/shared";
+import { useChat } from "../state/store.js";
 
 /**
  * Scriptorium catalog privacy toggle, a self-saving CW blocklist
@@ -21,6 +23,8 @@ import { STORY_CONTENT_WARNINGS } from "@thekeep/shared";
  * optimistic update with revert-on-fail.
  */
 export function ScriptoriumPrivacyRow() {
+  const { t } = useTranslation("scriptorium");
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
   const [loaded, setLoaded] = useState(false);
   const [cwBlocklist, setCwBlocklist] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -32,7 +36,7 @@ export function ScriptoriumPrivacyRow() {
     void (async () => {
       try {
         const r = await fetch("/me/profile", { credentials: "include" });
-        if (!r.ok) throw new Error("load failed");
+        if (!r.ok) throw new Error(t("errors.loadFailed"));
         const j = await r.json() as {
           storyCwBlocklist?: string[];
         };
@@ -40,7 +44,7 @@ export function ScriptoriumPrivacyRow() {
         setCwBlocklist(j.storyCwBlocklist ?? []);
         setLoaded(true);
       } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : "load failed");
+        if (!cancelled) setErr(e instanceof Error ? e.message : t("errors.loadFailed"));
       }
     })();
     return () => { cancelled = true; };
@@ -57,11 +61,11 @@ export function ScriptoriumPrivacyRow() {
         credentials: "include",
         body: JSON.stringify(patch),
       });
-      if (!r.ok) throw new Error("save failed");
+      if (!r.ok) throw new Error(t("errors.saveFailed"));
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1200);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "save failed");
+      setErr(e instanceof Error ? e.message : t("errors.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -76,27 +80,31 @@ export function ScriptoriumPrivacyRow() {
   }
 
   if (!loaded) {
-    return <p className="text-xs italic text-keep-muted">Loading Scriptorium privacy…</p>;
+    return <p className="text-xs italic text-keep-muted">{t("privacy.loading")}</p>;
   }
 
   return (
     <section className="rounded border border-keep-rule/40 bg-keep-panel/30 p-3">
       <header className="mb-2 flex items-baseline justify-between">
-        <h4 className="font-action text-sm uppercase tracking-widest text-keep-text">Scriptorium</h4>
-        {savedFlash ? <span className="text-[10px] italic text-keep-action">saved</span> : null}
+        <h4 className="font-action text-sm uppercase tracking-widest text-keep-text">{t("privacy.title")}</h4>
+        {savedFlash ? <span className="text-[10px] italic text-keep-action">{t("privacy.savedFlash")}</span> : null}
         {err ? <span className="text-[10px] text-keep-accent">{err}</span> : null}
       </header>
+      {/* The CW blocklist is rating-independent (gore or self-harm tags
+          appear on PG-13 stories too), so under-18 accounts keep it. Only
+          the sentence describing the adult rating behavior swaps out —
+          their catalog is clamped to G / PG / PG-13 server-side (age plan
+          Phase 4), so that copy would be wrong for them. */}
       <p className="mb-3 text-xs text-keep-muted">
-        Catalog preferences for long-form stories. Anonymous viewers see up to R; signed-in
-        viewers see every rating and get a splash warning before opening mature content.
+        {viewerIsAdult ? t("privacy.introAdult") : t("privacy.intro")}
       </p>
 
       <div>
         <label className="block text-[10px] uppercase tracking-widest text-keep-muted">
-          Always hide stories tagged
+          {t("privacy.alwaysHideLabel")}
         </label>
         <p className="mt-1 text-xs text-keep-muted">
-          Cards carrying any of these warnings are hidden from the catalog entirely. Not blurred, just gone.
+          {t("privacy.alwaysHideHint")}
         </p>
         <div className="mt-2 flex flex-wrap gap-1">
           {STORY_CONTENT_WARNINGS.map((cw) => {

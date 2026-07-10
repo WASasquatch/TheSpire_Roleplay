@@ -1,7 +1,9 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { AvatarCrop, CharacterAttribute, CharacterJournalEntry, CharacterPortrait, CharacterStats, CharacterStatsVisibility, CharacterVibeAxisKey, ProfileCollectionEntry, ProfileLink, ProfileView, Role, Theme } from "@thekeep/shared";
-import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, STAT_FIELD_MAX, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, normalizeTheme } from "@thekeep/shared";
-import { Code2, HelpCircle, Paintbrush2 } from "lucide-react";
+import { AVATAR_CROP_DEFAULTS, AVATAR_CROP_MAX_ZOOM, AVATAR_CROP_MIN_ZOOM, CHARACTER_ATTRIBUTES_MAX, CHARACTER_ATTRIBUTE_LABEL_MAX, CHARACTER_ATTRIBUTE_VALUE_MAX, CHARACTER_ATTRIBUTE_VALUE_MIN, CHARACTER_VIBE_AXES, LANGUAGE_TAGS, LANGUAGE_TAG_MAX, STAT_FIELD_MAX, clampAvatarCrop, isDarkPalette, isDefaultAvatarCrop, languageTagByKey, normalizeTheme } from "@thekeep/shared";
+import { Code2, HelpCircle, Paintbrush2, X } from "lucide-react";
+import { LangFlag } from "../flags/LangFlag.js";
 import { applyStyle , DEFAULT_STYLE_KEY } from "../../lib/ornaments/index.js";
 import { DesignerTour } from "../tours/DesignerTour.js";
 import { ProfileFlairEditor, VisitorsVisibilityToggleRow } from "../cosmetics/ProfileFlairEditor.js";
@@ -21,6 +23,8 @@ import {
   type PushState,
 } from "../../lib/push.js";
 import { readError } from "../../lib/http.js";
+import { formatDate, formatNumber } from "../../lib/intlFormat.js";
+import { LOCALE_CHOICES, changeLocale } from "../../lib/i18n.js";
 import { fetchEarningMe, patchEarningSettings, patchProfileBannerUrl } from "../../lib/earning.js";
 import { fetchBlocks, removeBlock, type BlockedUser } from "../../lib/blocks.js";
 import { useChat } from "../../state/store.js";
@@ -31,6 +35,7 @@ import { ThemePicker } from "../cosmetics/ThemePicker.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { CloseButton } from "../shared/CloseButton.js";
 import { ScriptoriumPrivacyRow } from "../ScriptoriumPrivacyRow.js";
+import { BirthDateRow } from "./BirthDateRow.js";
 import { DisplayPrivacyRow } from "./DisplayPrivacyRow.js";
 import { ProfileModal } from "./ProfileModal.js";
 import { CreateCharacterModal } from "./CreateCharacterModal.js";
@@ -110,6 +115,9 @@ interface MasterData {
   avatarCrop?: AvatarCrop;
   includeAvatarInGallery?: boolean;
   gender: Gender;
+  /** Profile language tags (catalog keys, owner's order). Optional for
+   *  forward-compat with older /me/profile responses. */
+  languages?: string[];
   chatColor: string | null;
   activeCharacterId: string | null;
   theme?: Theme;
@@ -199,14 +207,16 @@ interface CharacterRow {
 type Target = { kind: "master" } | { kind: "character"; id: string };
 
 type ClassicStatField = "age" | "race" | "gender" | "height" | "weight" | "alignment" | "occupation";
-const STAT_FIELDS: Array<{ key: ClassicStatField; label: string }> = [
-  { key: "age", label: "Age" },
-  { key: "race", label: "Race" },
-  { key: "gender", label: "Gender" },
-  { key: "height", label: "Height" },
-  { key: "weight", label: "Weight" },
-  { key: "alignment", label: "Alignment" },
-  { key: "occupation", label: "Occupation" },
+/** Classic stat fields in display order. Labels resolve through
+ *  `statFields.<key>` at render time so a language switch relabels live. */
+const STAT_FIELDS: ClassicStatField[] = [
+  "age",
+  "race",
+  "gender",
+  "height",
+  "weight",
+  "alignment",
+  "occupation",
 ];
 
 /**
@@ -224,6 +234,7 @@ const STAT_FIELDS: Array<{ key: ClassicStatField; label: string }> = [
  * a fragmented history.
  */
 export function ProfileEditor({ mode: initialMode, characterId: initialCharId, initialTab, onClose, onSaved, adminContext }: Props) {
+  const { t } = useTranslation("profile");
   const isAdminEdit = !!adminContext;
   const [target, setTarget] = useState<Target>(
     // Admin mode locks the target to the supplied character, no
@@ -259,6 +270,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // onto <html> for every freshly-registered (no-theme) user the moment they
   // open the editor, and stick because the editor applies it directly.
   const siteDefaultTheme = useChat((s) => s.branding.defaultTheme);
+  // Saved UI language (null = "System default"). Lives outside the editor's
+  // save body: the Appearance-tab select applies + persists immediately via
+  // changeLocale, mirroring the Menu row, so there's nothing to save here.
+  const localePref = useChat((s) => s.localePref);
   const [isWideViewport, setIsWideViewport] = useState(isDesignerViewport);
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -307,6 +322,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   const [includeAvatarInGallery, setIncludeAvatarInGallery] = useState(false);
   const [chatColor, setChatColor] = useState<string | null>(null);
   const [gender, setGender] = useState<Gender>("undisclosed");
+  /** Profile language tags (account-level catalog keys, display order). */
+  const [languages, setLanguages] = useState<string[]>([]);
   const [stats, setStats] = useState<CharacterStats>({});
   /** When the form has a theme set; null means "use default / inherit". */
   const [theme, setTheme] = useState<Theme | null>(null);
@@ -472,7 +489,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         setMaster(m);
         setCharacters(cl.characters);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "load failed");
+        if (!cancelled) setError(err instanceof Error ? err.message : t("errors.loadFailed"));
       } finally {
         if (!cancelled) setLoadingList(false);
       }
@@ -500,6 +517,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           setIncludeAvatarInGallery(!!master.includeAvatarInGallery);
           setChatColor(master.chatColor);
           setGender(master.gender ?? "undisclosed");
+          setLanguages(Array.isArray(master.languages) ? master.languages : []);
           setStats({});
           setTheme(master.theme ? normalizeTheme(master.theme) : null);
           setUserStyleKey(typeof master.styleKey === "string" ? master.styleKey : null);
@@ -569,6 +587,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           // from "" so the picker can tell apart "no override set"
           // (inherit) from a deliberate clear-to-default.
           setChatColor(c.chatColor ?? null);
+          // Language tags are ACCOUNT-level; a character target isn't
+          // editing them, but the preview pane still paints the owner's
+          // saved set (same as the real character profile would).
+          setLanguages(Array.isArray(master?.languages) ? master.languages : []);
           try {
             setStats(c.statsJson ? JSON.parse(c.statsJson) : {});
           } catch {
@@ -616,7 +638,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "load failed");
+          setError(err instanceof Error ? err.message : t("errors.loadFailed"));
           setLoadingTarget(false);
         }
       }
@@ -640,6 +662,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             avatarCrop,
             includeAvatarInGallery,
             gender,
+            languages,
             theme,
             styleKey: userStyleKey,
             uiFontFamily: uiFontFamily && uiFontFamily.trim() !== "" ? uiFontFamily.trim() : null,
@@ -683,6 +706,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             // → false, which is what was happening before the fix.
             includeAvatarInGallery,
             gender,
+            languages,
             notifyPref,
             soundDmEnabled,
             soundWhisperEnabled,
@@ -832,7 +856,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         ? { kind: "master" }
         : { kind: "character", id: target.id });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("errors.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -868,7 +892,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         // should refresh to that character's theme.
         onSaved?.({ kind: "character", id: charId });
       } else {
-        setError(res.message ?? "switch failed");
+        setError(res.message ?? t("errors.switchFailed"));
       }
     });
   }
@@ -880,10 +904,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
    */
   async function deleteCharacter() {
     if (target.kind !== "character") return;
-    const charName = characters.find((c) => c.id === target.id)?.name ?? "this character";
-    if (!window.confirm(
-      `Delete "${charName}"? Past chat history keeps the name; the character can't be restored.`,
-    )) return;
+    const charName = characters.find((c) => c.id === target.id)?.name ?? t("editor.header.thisCharacterFallback");
+    if (!window.confirm(t("editor.header.deleteConfirm", { name: charName }))) return;
     setError(null);
     setDeleting(true);
     try {
@@ -898,7 +920,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
       // cleared activeCharacterId, so chat falls back to the master theme).
       onSaved?.({ kind: "master" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "delete failed");
+      setError(err instanceof Error ? err.message : t("errors.deleteFailed"));
     } finally {
       setDeleting(false);
     }
@@ -1046,6 +1068,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
           avatarCrop,
           portraits: previewPortraits,
           gender,
+          languages,
           theme: previewTheme,
           styleKey: userStyleKey || DEFAULT_STYLE_KEY,
           // Titles are populated server-side from accepted relationships;
@@ -1113,6 +1136,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         avatarCrop,
         portraits: previewCharPortraits,
         links,
+        // Account-level tags: the character preview mirrors what the real
+        // character profile shows — the owner's saved language set.
+        languages: Array.isArray(master?.languages) ? master.languages : [],
         // Journal entries are managed inline in the editor (not via preview).
         // The preview ProfileModal shows the character preview as others
         // would see it, but live-fetching journal here would mix the
@@ -1147,14 +1173,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         publicProfileBgMode,
       },
     };
-  }, [target, master, myUserId, name, bioHtml, avatarUrl, includeAvatarInGallery, gender, stats, theme, siteDefaultTheme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle, publicProfileBgUrl, publicProfileBgMode, earningSnapshot]);
+  }, [target, master, myUserId, name, bioHtml, avatarUrl, includeAvatarInGallery, gender, languages, stats, theme, siteDefaultTheme, portraits, links, isPublic, isNsfw, previewMetrics, previewTargetKey, previewCollections, previewNameStyle, publicProfileBgUrl, publicProfileBgMode, earningSnapshot]);
 
   const targetOptions = useMemo(() => {
     return [
-      { value: "master:", label: master ? `Master OOC - ${master.username}` : "Master OOC" },
+      { value: "master:", label: master ? t("editor.header.masterOocWithName", { name: master.username }) : t("editor.header.masterOoc") },
       ...characters.map((c) => ({ value: `character:${c.id}`, label: c.name })),
     ];
-  }, [master, characters]);
+  }, [master, characters, t]);
 
   function onSelectTarget(value: string) {
     if (value.startsWith("master:")) setTarget({ kind: "master" });
@@ -1241,7 +1267,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         {/* header - fixed */}
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-keep-rule bg-keep-banner px-4 py-2">
           <div className="flex min-w-0 items-center gap-2">
-            <h2 className="shrink-0 font-action text-lg">Edit profile</h2>
+            <h2 className="shrink-0 font-action text-lg">{t("editor.header.title")}</h2>
             {isAdminEdit ? (
               // Admin-acting-on-other-user banner. Replaces the
               // master/character switcher + side buttons (those are
@@ -1252,9 +1278,9 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               // the character row) appears here once it lands.
               <span
                 className="shrink-0 rounded border border-keep-accent/60 bg-keep-accent/10 px-2 py-0.5 text-xs uppercase tracking-widest text-keep-accent"
-                title={`Editing as admin: ${name || "loading"} (owned by ${adminContext.ownerUsername})`}
+                title={t("editor.header.adminEditTitle", { name: name || t("editor.header.loadingWord"), owner: adminContext.ownerUsername })}
               >
-                admin edit: {name || "…"} <span className="text-keep-muted normal-case">(owned by {adminContext.ownerUsername})</span>
+                {t("editor.header.adminEditPrefix")} {name || "…"} <span className="text-keep-muted normal-case">{t("editor.header.ownedBy", { owner: adminContext.ownerUsername })}</span>
               </span>
             ) : (
               <>
@@ -1265,7 +1291,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   className="min-w-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm"
                 >
                   {loadingList ? (
-                    <option>loading...</option>
+                    <option>{t("editor.loadingLower")}</option>
                   ) : (
                     targetOptions.map((opt) => (
                       <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -1276,20 +1302,20 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   type="button"
                   onClick={() => setCreateOpen(true)}
                   disabled={loadingList}
-                  title="Create a new character under your account"
+                  title={t("editor.header.newCharacterTitle")}
                   className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner disabled:opacity-50"
                 >
-                  + New
+                  {t("editor.header.newCharacter")}
                 </button>
                 {isCharacter && master && master.activeCharacterId !== (target.kind === "character" ? target.id : null) ? (
                   <button
                     type="button"
                     onClick={switchToCharacter}
                     disabled={switching || loadingTarget}
-                    title="Switch to this character - your chat name and theme update immediately."
+                    title={t("editor.header.switchTitle")}
                     className="keep-button shrink-0 rounded border border-keep-action/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-action hover:bg-keep-action/10 disabled:opacity-50"
                   >
-                    {switching ? "Switching..." : "Switch"}
+                    {switching ? t("editor.header.switching") : t("editor.header.switch")}
                   </button>
                 ) : null}
                 {isCharacter ? (
@@ -1297,10 +1323,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     type="button"
                     onClick={deleteCharacter}
                     disabled={deleting || loadingTarget}
-                    title="Delete this character. Past message history keeps the snapshotted name."
+                    title={t("editor.header.deleteTitle")}
                     className="keep-button shrink-0 rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-sm text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
                   >
-                    {deleting ? "Deleting..." : "Delete"}
+                    {deleting ? t("editor.header.deleting") : t("common:delete")}
                   </button>
                 ) : null}
               </>
@@ -1319,20 +1345,20 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             for this. */}
         {(() => {
           const tabs: Array<{ id: EditorTab; label: string; show: boolean }> = [
-            { id: "description", label: "Description", show: true },
-            { id: "profile",     label: "Profile",     show: true },
-            { id: "appearance",  label: "Appearance",  show: true },
-            { id: "privacy",     label: "Privacy",     show: true },
-            { id: "links",       label: "Links",       show: true },
+            { id: "description", label: t("editor.tabs.description"), show: true },
+            { id: "profile",     label: t("editor.tabs.profile"),     show: true },
+            { id: "appearance",  label: t("editor.tabs.appearance"),  show: true },
+            { id: "privacy",     label: t("editor.tabs.privacy"),     show: true },
+            { id: "links",       label: t("editor.tabs.links"),       show: true },
             // Gallery is per-identity: characters use
             // /characters/:id/portraits (character_portraits table),
             // master uses /me/portraits (user_portraits, added in
             // migration 0113). Both expose the same shape so the
             // editor's PortraitGalleryEditor swaps endpoint URLs
             // based on the active target.
-            { id: "gallery",     label: "Gallery",     show: true },
-            { id: "flair",       label: "Flair",       show: true },
-            { id: "journal",     label: "Journal",     show: isCharacter },
+            { id: "gallery",     label: t("editor.tabs.gallery"),     show: true },
+            { id: "flair",       label: t("editor.tabs.flair"),       show: true },
+            { id: "journal",     label: t("editor.tabs.journal"),     show: isCharacter },
           ];
           const visible = tabs.filter((t) => t.show);
           return (
@@ -1351,7 +1377,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                 <select
                   value={activeTab}
                   onChange={(e) => setActiveTab(e.target.value as EditorTab)}
-                  aria-label="Profile editor section"
+                  aria-label={t("editor.tabs.sectionAria")}
                   className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs uppercase tracking-widest text-keep-text outline-none focus:border-keep-action"
                 >
                   {visible.map((t) => (
@@ -1388,7 +1414,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
 
         {/* Tab content, fills remaining height; scrolls when long. */}
         {loadingTarget ? (
-          <div className="flex flex-1 items-center justify-center text-keep-muted">loading...</div>
+          <div className="flex flex-1 items-center justify-center text-keep-muted">{t("editor.loadingLower")}</div>
         ) : (
           <div
             // Calm-mode fade: remount on tab change (key) so `tk-fade-in`
@@ -1405,7 +1431,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               <div className="flex min-h-0 flex-1 flex-col p-4">
                 <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs">
                   <span className="uppercase tracking-widest text-keep-muted">
-                    {isCharacter ? "Character bio" : "OOC bio"}
+                    {isCharacter ? t("editor.description.characterBio") : t("editor.description.oocBio")}
                   </span>
                   {designerAvailable ? (
                     // Designer / Source toggle. Both edit the same `bioHtml`,
@@ -1417,8 +1443,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                       <button
                         type="button"
                         onClick={() => setShowDesignerTour(true)}
-                        title="Show the Designer tour"
-                        aria-label="Show the Designer tour"
+                        title={t("editor.description.showTour")}
+                        aria-label={t("editor.description.showTour")}
                         className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-keep-rule bg-keep-bg/60 text-keep-muted shadow-sm hover:text-keep-accent"
                       >
                         <HelpCircle className="h-4 w-4" aria-hidden />
@@ -1426,8 +1452,8 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     ) : null}
                     <div data-tour="bio-mode-toggle" className="inline-flex items-center gap-1 rounded-lg border border-keep-rule bg-keep-bg/60 p-1 shadow-sm">
                       {([
-                        { m: "designer", label: "Designer", Icon: Paintbrush2 },
-                        { m: "source", label: "Source", Icon: Code2 },
+                        { m: "designer", label: t("bioMode.designer"), Icon: Paintbrush2 },
+                        { m: "source", label: t("bioMode.source"), Icon: Code2 },
                       ] as const).map(({ m, label, Icon }) => (
                         <button
                           key={m}
@@ -1448,14 +1474,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     </div>
                   ) : (
                     <span className="text-keep-muted">
-                      Full HTML and CSS supported. See Help &rarr; Formatting for tags, theme colors, and the &lt;youtube&gt; shortcut.
+                      {t("editor.description.htmlHint")}
                     </span>
                   )}
                 </div>
                 {designerAvailable && bioMode === "designer" ? (
                   <div className="min-h-0 flex-1 overflow-hidden rounded border border-keep-rule">
                     <Suspense
-                      fallback={<div className="flex h-full items-center justify-center text-xs italic text-keep-muted">Loading the designer…</div>}
+                      fallback={<div className="flex h-full items-center justify-center text-xs italic text-keep-muted">{t("bioMode.loadingDesigner")}</div>}
                     >
                       <ProfileDesigner value={bioHtml} onChange={setBioHtml} />
                     </Suspense>
@@ -1467,13 +1493,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     className="min-h-0 w-full flex-1 resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs outline-none focus:border-keep-action"
                     placeholder={
                       isCharacter
-                        ? "<p>A weather-beaten mercenary from the Reach...</p>"
-                        : "<p>Time-zone, contact preferences, RP boundaries, anything OOC.</p>"
+                        ? t("editor.description.characterPlaceholder")
+                        : t("editor.description.oocPlaceholder")
                     }
                   />
                 )}
                 <div className="mt-1 text-right text-[10px] text-keep-muted tabular-nums">
-                  {bioHtml.length.toLocaleString()} / {(master?.limits?.maxBioLength ?? 50_000).toLocaleString()}
+                  {formatNumber(bioHtml.length)} / {formatNumber(master?.limits?.maxBioLength ?? 50_000)}
                 </div>
                 {designerAvailable && bioMode === "designer" && showDesignerTour ? (
                   <DesignerTour onClose={closeDesignerTour} />
@@ -1486,10 +1512,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             {activeTab === "profile" ? (
               <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
                 <Field
-                  label={isCharacter ? "Character name" : "Master username"}
+                  label={isCharacter ? t("fields.characterName") : t("editor.profileTab.masterUsername")}
                   value={name}
                   readOnly
-                  hint={isCharacter ? "Renaming is blocked - message history snapshots the name at send time." : "Set at registration."}
+                  hint={isCharacter ? t("editor.profileTab.renameBlockedHint") : t("editor.profileTab.setAtRegistration")}
                 />
                 {/* Gender (OOC), moved up here from below the gallery
                     toggle so the "who am I" identity fields cluster
@@ -1500,27 +1526,88 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     standalone field. */}
                 {!isCharacter ? (
                   <label className="block text-xs">
-                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">Gender (OOC)</span>
+                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.profileTab.genderOoc")}</span>
                     <select
                       value={gender}
                       onChange={(e) => setGender(e.target.value as Gender)}
                       className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
                     >
                       {GENDER_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>{o.label}</option>
+                        <option key={o.value} value={o.value}>{t(`gender.options.${o.value}`)}</option>
                       ))}
                     </select>
                     <span className="mt-1 block text-[10px] text-keep-muted">
-                      Renders as an icon next to your username when no character is active.
+                      {t("editor.profileTab.genderHint")}
                     </span>
                   </label>
                 ) : null}
+                {/* Language tags (account-level, master/OOC only). A fixed
+                    catalog picker — chips with a remove ×, plus an "Add a
+                    language" select listing what's left. Tags render as
+                    flag chips in the profile header (characters show the
+                    account's tags too). */}
+                {!isCharacter ? (
+                  <div className="text-xs">
+                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.profileTab.languages")}</span>
+                    {languages.length > 0 ? (
+                      <div className="mb-1.5 flex flex-wrap items-center gap-1">
+                        {languages.map((key) => {
+                          const tag = languageTagByKey.get(key);
+                          if (!tag) return null;
+                          return (
+                            <span
+                              key={key}
+                              className="inline-flex items-center gap-1.5 rounded border border-keep-rule bg-keep-bg px-1.5 py-1 leading-none"
+                            >
+                              <LangFlag code={tag.flag} className="h-2.5 w-[15px] shrink-0 overflow-hidden rounded-[2px] ring-1 ring-black/25" />
+                              <span>{tag.label}</span>
+                              <button
+                                type="button"
+                                onClick={() => setLanguages((prev) => prev.filter((k) => k !== key))}
+                                title={t("editor.profileTab.languagesRemove", { language: tag.label })}
+                                aria-label={t("editor.profileTab.languagesRemove", { language: tag.label })}
+                                className="-mr-0.5 rounded p-0.5 text-keep-muted hover:bg-keep-action/10 hover:text-keep-text"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    {languages.length < LANGUAGE_TAG_MAX ? (
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const key = e.target.value;
+                          if (!key) return;
+                          setLanguages((prev) =>
+                            prev.includes(key) || prev.length >= LANGUAGE_TAG_MAX ? prev : [...prev, key],
+                          );
+                        }}
+                        className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
+                      >
+                        <option value="">{t("editor.profileTab.languagesAdd")}</option>
+                        {LANGUAGE_TAGS.filter((tag) => !languages.includes(tag.key)).map((tag) => (
+                          <option key={tag.key} value={tag.key}>{tag.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="block text-[10px] text-keep-muted">
+                        {t("editor.profileTab.languagesMax", { max: LANGUAGE_TAG_MAX })}
+                      </span>
+                    )}
+                    <span className="mt-1 block text-[10px] text-keep-muted">
+                      {t("editor.profileTab.languagesHint")}
+                    </span>
+                  </div>
+                ) : null}
                 <Field
-                  label="Main Profile Image URL"
+                  label={t("editor.profileTab.mainImageLabel")}
                   value={avatarUrl}
                   onChange={setAvatarUrl}
-                  placeholder="https://example.com/portrait.png"
-                  hint="Drives the userlist icon and the modal hero."
+                  placeholder={t("editor.profileTab.imageUrlPlaceholder")}
+                  hint={t("editor.profileTab.mainImageHint")}
                 />
                 {/* Zoom + pan picker, lets the owner pick which part
                     of the source image becomes the visible circle. The
@@ -1552,24 +1639,23 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   />
                   <span className="min-w-0">
                     <span className="block uppercase tracking-widest text-keep-muted">
-                      Include in Gallery
+                      {t("editor.profileTab.includeInGallery")}
                     </span>
                     <span className="block text-[10px] text-keep-muted">
-                      Show this image as the first tile in your profile gallery
-                      alongside any other portraits you've added. Requires a
-                      Main Profile Image URL above.
+                      {t("editor.profileTab.includeInGalleryHint")}
                     </span>
                   </span>
                 </label>
                 {isCharacter ? (
                   <>
                     <fieldset className="rounded border border-keep-rule p-3">
-                      <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Stats</legend>
+                      <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">{t("modal.sections.stats")}</legend>
                       <p className="mb-2 text-[10px] text-keep-muted">
-                        Click the eye next to a field to hide it on your public profile. The value stays saved either way.
+                        {t("editor.statsSection.hint")}
                       </p>
                       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                        {STAT_FIELDS.map(({ key, label }) => {
+                        {STAT_FIELDS.map((key) => {
+                          const label = t(`statFields.${key}`);
                           const hidden = stats.visibility?.[key] === false;
                           return (
                             <div key={key} className="block text-xs">
@@ -1639,12 +1725,12 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                 />
                 <fieldset className="rounded border border-keep-rule p-3">
                   <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
-                    {isCharacter ? "Character theme" : "OOC theme"}
+                    {isCharacter ? t("editor.appearance.characterTheme") : t("editor.appearance.oocTheme")}
                   </legend>
                   <p className="mb-2 text-[10px] text-keep-muted">
                     {isCharacter
-                      ? "Switching to this character applies this theme to your chat. Others viewing this character's profile see it themed this way."
-                      : "Applied to your chat when no character is active, and to your master profile modal."}
+                      ? t("editor.appearance.characterThemeHint")
+                      : t("editor.appearance.oocThemeHint")}
                   </p>
                   <ThemePicker
                     theme={theme ?? siteDefaultTheme}
@@ -1653,16 +1739,16 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   />
                   {!theme ? (
                     <div className="mt-1 text-[10px] italic text-keep-muted">
-                      Currently using the system default - change a color or pick a preset to start customizing.
+                      {t("editor.appearance.usingDefault")}
                     </div>
                   ) : null}
                 </fieldset>
                 <fieldset className="rounded border border-keep-rule p-3">
-                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Theme style</legend>
+                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">{t("editor.appearance.themeStyle")}</legend>
                   <p className="mb-2 text-[10px] text-keep-muted">
                     {isCharacter
-                      ? "Visual treatment, ornaments, borders, textures, applied when this character is active. Leave on \"use default\" to inherit your master account, then the theme's pinned design, then the site default."
-                      : "Visual treatment, ornaments, borders, textures. Orthogonal to the palette above; the same style works with any colors. Leave on \"use default\" to follow the theme's pinned design (admin-configured per palette) and finally the site default."}
+                      ? t("editor.appearance.themeStyleCharacterHint")
+                      : t("editor.appearance.themeStyleOocHint")}
                   </p>
                   <StylePicker
                     value={userStyleKey}
@@ -1678,25 +1764,25 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     the modal, the BG only changes how that area
                     looks, not how it behaves. */}
                 <fieldset className="rounded border border-keep-rule p-3">
-                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">Public profile background</legend>
+                  <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">{t("editor.bg.legend")}</legend>
                   <p className="mb-2 text-[10px] text-keep-muted">
                     {isCharacter
-                      ? "Image painted behind this character's profile modal for any viewer. Leave the URL empty to use the default backdrop. Per-character, each character can carry its own scene."
-                      : "Image painted behind your master / OOC profile modal for any viewer. Leave the URL empty to use the default backdrop."}
+                      ? t("editor.bg.characterHint")
+                      : t("editor.bg.oocHint")}
                   </p>
                   <label className="block text-xs">
-                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">Image URL</span>
+                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.bg.imageUrl")}</span>
                     <input
                       type="url"
                       value={publicProfileBgUrl}
                       onChange={(e) => setPublicProfileBgUrl(e.target.value)}
-                      placeholder="https://… (leave blank for default)"
+                      placeholder={t("editor.bg.urlPlaceholder")}
                       maxLength={1000}
                       className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
                     />
                   </label>
                   <label className="mt-3 block text-xs">
-                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">Display mode</span>
+                    <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.bg.displayMode")}</span>
                     <select
                       value={publicProfileBgMode}
                       onChange={(e) => {
@@ -1707,10 +1793,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                       }}
                       className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
                     >
-                      <option value="cover">Cover, fill viewport, crop to fit</option>
-                      <option value="contain">Contain, fit inside viewport, letterbox</option>
-                      <option value="tile">Tile, repeat across viewport</option>
-                      <option value="stretch">Stretch, fill exact dimensions</option>
+                      <option value="cover">{t("editor.bg.modeCover")}</option>
+                      <option value="contain">{t("editor.bg.modeContain")}</option>
+                      <option value="tile">{t("editor.bg.modeTile")}</option>
+                      <option value="stretch">{t("editor.bg.modeStretch")}</option>
                     </select>
                   </label>
                   {publicProfileBgUrl.trim() !== "" ? (
@@ -1720,7 +1806,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     // saving. Same backgroundSize / backgroundRepeat
                     // mapping ProfileModal uses at render time.
                     <div className="mt-3">
-                      <span className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">Preview</span>
+                      <span className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">{t("common:preview")}</span>
                       <div
                         className="h-32 w-full rounded border border-keep-rule bg-keep-bg"
                         style={{
@@ -1771,7 +1857,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                       await patchProfileBannerUrl(next, characterId);
                       await refreshEarning();
                     } catch (e) {
-                      setBannerError(e instanceof Error ? e.message : "Save failed");
+                      setBannerError(e instanceof Error ? e.message : t("errors.saveFailedShort"));
                     } finally {
                       setBannerSaving(false);
                     }
@@ -1779,26 +1865,26 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   return (
                     <fieldset className="rounded border border-keep-rule p-3">
                       <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
-                        Profile banner
+                        {t("editor.banner.legend")}
                       </legend>
                       <p className="mb-2 text-[10px] text-keep-muted">
-                        Wide images look best. Anything taller than about 220 pixels gets trimmed down to fit.
+                        {t("editor.banner.hint")}
                       </p>
                       <label className="block text-xs">
-                        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Image link</span>
+                        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.banner.imageLink")}</span>
                         <input
                           type="url"
                           inputMode="url"
                           value={bannerDraft}
                           onChange={(e) => setBannerDraft(e.target.value)}
-                          placeholder="https://… (leave blank to clear)"
+                          placeholder={t("editor.banner.urlPlaceholder")}
                           maxLength={1000}
                           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-xs"
                         />
                       </label>
                       {previewUrl ? (
                         <div className="mt-3">
-                          <span className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">Preview</span>
+                          <span className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">{t("common:preview")}</span>
                           <div className="overflow-hidden rounded border border-keep-rule bg-keep-panel">
                             <img
                               src={previewUrl}
@@ -1827,7 +1913,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                             disabled={bannerSaving}
                             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner disabled:opacity-50"
                           >
-                            Clear
+                            {t("common:clear")}
                           </button>
                         ) : null}
                         <button
@@ -1836,7 +1922,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                           disabled={bannerSaving || !dirty}
                           className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
                         >
-                          {bannerSaving ? "Saving…" : "Save banner"}
+                          {bannerSaving ? t("common:saving") : t("editor.banner.save")}
                         </button>
                       </div>
                     </fieldset>
@@ -1845,18 +1931,14 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                 {!isCharacter ? (
                   <fieldset className="rounded border border-keep-rule p-3">
                     <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
-                      Reading &amp; accessibility
+                      {t("editor.fonts.legend")}
                     </legend>
                     <p className="mb-2 text-[10px] text-keep-muted">
-                      Pick a font and a size to override the defaults if the
-                      regular interface is hard to read. The Google web fonts
-                      load automatically; the rest are system fonts every OS
-                      ships with. Leave on "Default" to follow the site's
-                      built-in font.
+                      {t("editor.fonts.hint")}
                     </p>
                     <label className="block text-xs">
                       <span className="mb-1 block uppercase tracking-widest text-keep-muted">
-                        Font family
+                        {t("editor.fonts.family")}
                       </span>
                       <select
                         value={uiFontFamily ?? ""}
@@ -1871,25 +1953,25 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                         style={uiFontFamily ? { fontFamily: uiFontFamily } : undefined}
                         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
                       >
-                        <option value="">Default (site font)</option>
-                        <optgroup label="Sans-serif (Google)">
+                        <option value="">{t("editor.fonts.defaultSiteFont")}</option>
+                        <optgroup label={t("editor.fonts.groupSans")}>
                           <option value='"Roboto", sans-serif' style={{ fontFamily: '"Roboto", sans-serif' }}>Roboto</option>
                           <option value='"Open Sans", sans-serif' style={{ fontFamily: '"Open Sans", sans-serif' }}>Open Sans</option>
                           <option value='"Inter", sans-serif' style={{ fontFamily: '"Inter", sans-serif' }}>Inter</option>
                           <option value='"Lato", sans-serif' style={{ fontFamily: '"Lato", sans-serif' }}>Lato</option>
                           <option value='"Source Sans 3", sans-serif' style={{ fontFamily: '"Source Sans 3", sans-serif' }}>Source Sans 3</option>
                         </optgroup>
-                        <optgroup label="Serif (Google)">
+                        <optgroup label={t("editor.fonts.groupSerif")}>
                           <option value='"Lora", serif' style={{ fontFamily: '"Lora", serif' }}>Lora</option>
                           <option value='"Merriweather", serif' style={{ fontFamily: '"Merriweather", serif' }}>Merriweather</option>
                           <option value='"Roboto Slab", serif' style={{ fontFamily: '"Roboto Slab", serif' }}>Roboto Slab</option>
                         </optgroup>
-                        <optgroup label="Accessibility">
+                        <optgroup label={t("editor.fonts.groupAccessibility")}>
                           <option value='"Atkinson Hyperlegible", sans-serif' style={{ fontFamily: '"Atkinson Hyperlegible", sans-serif' }}>Atkinson Hyperlegible</option>
-                          <option value='"Comic Sans MS", "Chalkboard SE", sans-serif' style={{ fontFamily: '"Comic Sans MS", "Chalkboard SE", sans-serif' }}>Comic Sans (dyslexia-friendly)</option>
+                          <option value='"Comic Sans MS", "Chalkboard SE", sans-serif' style={{ fontFamily: '"Comic Sans MS", "Chalkboard SE", sans-serif' }}>{t("editor.fonts.comicSans")}</option>
                         </optgroup>
-                        <optgroup label="System fonts">
-                          <option value='system-ui, sans-serif' style={{ fontFamily: 'system-ui, sans-serif' }}>System sans-serif</option>
+                        <optgroup label={t("editor.fonts.groupSystem")}>
+                          <option value='system-ui, sans-serif' style={{ fontFamily: 'system-ui, sans-serif' }}>{t("editor.fonts.systemSans")}</option>
                           <option value='Georgia, serif' style={{ fontFamily: 'Georgia, serif' }}>Georgia</option>
                           <option value='Verdana, sans-serif' style={{ fontFamily: 'Verdana, sans-serif' }}>Verdana</option>
                           <option value='Arial, sans-serif' style={{ fontFamily: 'Arial, sans-serif' }}>Arial</option>
@@ -1898,7 +1980,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     </label>
                     <label className="mt-3 block text-xs">
                       <span className="mb-1 block uppercase tracking-widest text-keep-muted">
-                        Font size
+                        {t("editor.fonts.size")}
                       </span>
                       <select
                         value={uiFontScale ?? ""}
@@ -1912,11 +1994,40 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                         }}
                         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
                       >
-                        <option value="">Default (medium)</option>
-                        <option value="small">Small (14px desktop / 12px mobile)</option>
-                        <option value="medium">Medium (16px desktop / 14px mobile)</option>
-                        <option value="large">Large (18px desktop / 16px mobile)</option>
-                        <option value="xl">Extra large (20px desktop / 18px mobile)</option>
+                        <option value="">{t("editor.fonts.sizeDefault")}</option>
+                        <option value="small">{t("editor.fonts.sizeSmall")}</option>
+                        <option value="medium">{t("editor.fonts.sizeMedium")}</option>
+                        <option value="large">{t("editor.fonts.sizeLarge")}</option>
+                        <option value="xl">{t("editor.fonts.sizeXl")}</option>
+                      </select>
+                    </label>
+                  </fieldset>
+                ) : null}
+                {!isCharacter ? (
+                  <fieldset className="rounded border border-keep-rule p-3">
+                    <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
+                      {t("editor.language.legend")}
+                    </legend>
+                    <p className="mb-2 text-[10px] text-keep-muted">
+                      {t("editor.language.hint")}
+                    </p>
+                    <label className="block text-xs">
+                      <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+                        {t("editor.language.interfaceLanguage")}
+                      </span>
+                      <select
+                        value={localePref ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          const choice = LOCALE_CHOICES.find((c) => c.value === v);
+                          void changeLocale(choice ? choice.value : null);
+                        }}
+                        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+                      >
+                        <option value="">{t("common:language.systemDefault")}</option>
+                        {LOCALE_CHOICES.map((c) => (
+                          <option key={c.value} value={c.value}>{c.label}</option>
+                        ))}
                       </select>
                     </label>
                   </fieldset>
@@ -1998,6 +2109,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   characterId={target.kind === "character" ? target.id : null}
                 />
 
+                {/* Read-only birth date (age plan Phase 0). Master-only,
+                    the date is account-level. No edit control on purpose:
+                    corrections go through staff. */}
+                {!isCharacter ? <BirthDateRow /> : null}
                 {/* Rank-visibility toggles + metric privacy. Both
                     are per-master-account preferences; characters
                     don't have separate versions, so we gate the
@@ -2007,6 +2122,16 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     sections and "checked it, expected it, didn't see
                     a Save button" was a sharp paper-cut earlier. */}
                 {!isCharacter ? <DisplayPrivacyRow /> : null}
+                {/* Adult "Hide 18+ content" preference (age plan Phase
+                    4). Master-only (account-level, feeds the server's
+                    soft canSeeNsfw tier). Renders nothing for minors:
+                    their account can never see 18+ content, so there is
+                    no state for the toggle to show. */}
+                {!isCharacter ? <HideNsfwRow /> : null}
+                {/* Minor isolation mode (age plan Phase 5). Master-only,
+                    account-level; renders nothing for adults (the server
+                    rejects the field for them and goes inert at 18). */}
+                {!isCharacter ? <IsolationRow /> : null}
                 {/* Scriptorium catalog prefs: NSFW opt-in + per-user
                     CW blocklist. Master-only, characters don't have
                     their own catalog filters (the master account is
@@ -2087,17 +2212,17 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
         {/* footer - fixed */}
         <div className="flex shrink-0 items-center justify-between border-t border-keep-rule bg-keep-banner/40 p-2">
           <span className={`text-xs ${savedFlash ? "text-keep-system" : "text-keep-muted"}`}>
-            {savedFlash ? "Saved." : ""}
+            {savedFlash ? t("saved") : ""}
           </span>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => setPreviewing(true)}
               disabled={loadingTarget || !previewProfile}
-              title="Preview this profile as other users will see it (uses your unsaved edits)."
+              title={t("editor.footer.viewProfileTitle")}
               className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm disabled:opacity-50 hover:bg-keep-banner"
             >
-              View profile
+              {t("editor.footer.viewProfile")}
             </button>
             <button
               type="button"
@@ -2108,7 +2233,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               // accent on Save reads as the "go" button at a glance.
               className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm text-keep-muted hover:bg-keep-banner hover:text-keep-text"
             >
-              Cancel
+              {t("common:cancel")}
             </button>
             <button
               type="submit"
@@ -2116,7 +2241,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
               disabled={saving || loadingTarget}
               className="keep-button rounded border border-keep-action bg-keep-action/15 px-4 py-1 text-sm font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
             >
-              {saving ? "Saving..." : "Save"}
+              {saving ? t("common:savingDots") : t("common:save")}
             </button>
           </div>
         </div>
@@ -2227,6 +2352,7 @@ function PortraitGalleryEditor({
   portraits: CharacterPortrait[];
   onChange: (next: CharacterPortrait[]) => void;
 }) {
+  const { t } = useTranslation("profile");
   const [err, setErr] = useState<string | null>(null);
   // Draft slot, the trailing empty card. Captured here (not inside
   // the card itself) so it survives if portraits prop refetches.
@@ -2260,12 +2386,12 @@ function PortraitGalleryEditor({
       onChange(portraits.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
       setErr(null);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "save failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.saveFailed"));
     }
   }
 
   async function remove(id: string) {
-    if (!window.confirm("Remove this portrait from the gallery?")) return;
+    if (!window.confirm(t("editor.gallery.removeConfirm"))) return;
     try {
       const res = await fetch(portraitItemUrl(scope, id), {
         method: "DELETE",
@@ -2274,7 +2400,7 @@ function PortraitGalleryEditor({
       if (!res.ok) throw new Error(await readError(res));
       onChange(portraits.filter((p) => p.id !== id));
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "delete failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.deleteFailed"));
     }
   }
 
@@ -2303,7 +2429,7 @@ function PortraitGalleryEditor({
       setDraftNsfw(false);
       setErr(null);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "add failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.addFailed"));
     }
   }
 
@@ -2335,7 +2461,7 @@ function PortraitGalleryEditor({
         ),
       );
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "reorder failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.reorderFailed"));
     }
   }
 
@@ -2343,9 +2469,9 @@ function PortraitGalleryEditor({
 
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Gallery</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.tabs.gallery")}</legend>
       <p className="mb-3 text-[10px] text-keep-muted">
-        Portraits shown on this profile below the pinned Collection and Bio. The Main Profile Image above drives the userlist icon and the modal hero; tick "Include in Gallery" on the Profile tab to also surface the avatar as the first tile here without duplicating its URL. Mark a card NSFW to blur it for viewers; drag the ⠿ handle or use the ↑ ↓ buttons to reorder. Up to {PORTRAIT_GALLERY_CAP} portraits.
+        {t("editor.gallery.hint", { max: PORTRAIT_GALLERY_CAP })}
       </p>
       {err ? (
         <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-[11px] text-keep-accent">
@@ -2391,12 +2517,24 @@ function PortraitGalleryEditor({
           />
         ) : (
           <p className="text-[11px] italic text-keep-muted">
-            Gallery is full ({PORTRAIT_GALLERY_CAP} portraits). Remove one to add another.
+            {t("editor.gallery.full", { max: PORTRAIT_GALLERY_CAP })}
           </p>
         )}
       </div>
     </fieldset>
   );
+}
+
+/**
+ * Renders its children only for accounts 18 or older (age plan Phase 1).
+ * Wraps the NSFW-flag checkboxes so under-18 accounts never see a control
+ * the server would refuse. Cosmetic mirror only, the write routes reject
+ * the flag regardless. `viewerAge` defaults adult before /me/profile
+ * seeds it, so adult editors never get a flash of missing controls.
+ */
+function MinorSafe({ children }: { children: ReactNode }) {
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
+  return viewerIsAdult ? <>{children}</> : null;
 }
 
 /** Single saved-portrait card with live preview + edit fields +
@@ -2435,6 +2573,7 @@ function PortraitCard({
   onToggleNsfw: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation("profile");
   // Local edit buffers, values commit to the parent (and the
   // server) on blur. This keeps every keystroke from PATCHing,
   // which would be wasteful AND would race when the user is
@@ -2480,7 +2619,7 @@ function PortraitCard({
         {imgStatus !== "error" ? (
           <img
             src={portrait.url}
-            alt={portrait.label ?? "portrait"}
+            alt={portrait.label ?? t("editor.gallery.portraitAltFallback")}
             referrerPolicy="no-referrer"
             onLoad={() => onMarkImg(portrait.url, "loaded")}
             onError={() => onMarkImg(portrait.url, "error")}
@@ -2488,7 +2627,7 @@ function PortraitCard({
           />
         ) : (
           <div className="grid h-full w-full place-items-center text-center text-[9px] uppercase tracking-widest text-keep-accent">
-            won't load
+            {t("editor.gallery.wontLoad")}
           </div>
         )}
       </div>
@@ -2499,7 +2638,7 @@ function PortraitCard({
           <span
             aria-hidden
             className="cursor-grab select-none px-1 text-keep-muted active:cursor-grabbing"
-            title="Drag to reorder"
+            title={t("editor.gallery.dragToReorder")}
           >
             ⠿
           </span>
@@ -2512,7 +2651,7 @@ function PortraitCard({
               if (u && u !== portrait.url) onSaveUrl(u);
               else if (!u) setUrlBuf(portrait.url); // empty = revert; deletion uses the ✕ button
             }}
-            placeholder="https://example.com/portrait.png"
+            placeholder={t("editor.profileTab.imageUrlPlaceholder")}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 font-mono text-[11px] outline-none focus:border-keep-action"
           />
           {/* Up / Down / Delete, universal so touch users have a
@@ -2522,8 +2661,8 @@ function PortraitCard({
             type="button"
             onClick={onMoveUp}
             disabled={index === 0}
-            title="Move up"
-            aria-label="Move up"
+            title={t("editor.gallery.moveUp")}
+            aria-label={t("editor.gallery.moveUp")}
             className="rounded border border-keep-rule bg-keep-bg px-1 text-keep-muted hover:bg-keep-banner disabled:opacity-30"
           >
             ↑
@@ -2532,8 +2671,8 @@ function PortraitCard({
             type="button"
             onClick={onMoveDown}
             disabled={index >= total - 1}
-            title="Move down"
-            aria-label="Move down"
+            title={t("editor.gallery.moveDown")}
+            aria-label={t("editor.gallery.moveDown")}
             className="rounded border border-keep-rule bg-keep-bg px-1 text-keep-muted hover:bg-keep-banner disabled:opacity-30"
           >
             ↓
@@ -2541,8 +2680,8 @@ function PortraitCard({
           <button
             type="button"
             onClick={onDelete}
-            title="Remove portrait"
-            aria-label="Remove portrait"
+            title={t("editor.gallery.removePortrait")}
+            aria-label={t("editor.gallery.removePortrait")}
             className="rounded border border-keep-rule bg-keep-bg px-1 text-keep-accent hover:bg-keep-accent/10"
           >
             ✕
@@ -2557,21 +2696,27 @@ function PortraitCard({
             const cur = portrait.label ?? "";
             if (next !== cur) onSaveLabel(next);
           }}
-          placeholder="Label (optional, e.g. 'transformed')"
+          placeholder={t("editor.gallery.labelPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-0.5 outline-none focus:border-keep-action"
         />
-        <label className="flex items-center gap-1 text-[11px] text-keep-muted">
-          <input
-            type="checkbox"
-            checked={portrait.nsfw}
-            onChange={onToggleNsfw}
-            className="h-3 w-3"
-          />
-          <span>NSFW (viewers see this blurred until they reveal)</span>
-        </label>
+        {/* Per-tile 18+ flag is an adult-only write (age plan Phase 1);
+            hide the checkbox for under-18 accounts so they never see a
+            control the server would refuse. A mod-marked NSFW tile still
+            shows its blurred preview + label/URL editing either way. */}
+        <MinorSafe>
+          <label className="flex items-center gap-1 text-[11px] text-keep-muted">
+            <input
+              type="checkbox"
+              checked={portrait.nsfw}
+              onChange={onToggleNsfw}
+              className="h-3 w-3"
+            />
+            <span>{t("editor.gallery.nsfwLabel")}</span>
+          </label>
+        </MinorSafe>
         {imgStatus === "error" ? (
           <p className="text-[10px] text-keep-accent">
-            This image won't load, either the URL is broken, the host blocks hotlinking, or it requires a referrer the browser strips. Try a direct CDN link.
+            {t("editor.gallery.imgError")}
           </p>
         ) : null}
       </div>
@@ -2603,6 +2748,7 @@ function DraftPortraitCard({
   imgStatus: ImgStatus | null;
   onMarkImg: (url: string, status: ImgStatus) => void;
 }) {
+  const { t } = useTranslation("profile");
   const trimmed = url.trim();
   // Commit-on-card-exit, not commit-on-url-blur: if we POST the
   // moment URL loses focus, the draft card unmounts mid-typing
@@ -2632,11 +2778,11 @@ function DraftPortraitCard({
           />
         ) : trimmed && imgStatus === "error" ? (
           <div className="grid h-full w-full place-items-center text-center text-[9px] uppercase tracking-widest text-keep-accent">
-            won't load
+            {t("editor.gallery.wontLoad")}
           </div>
         ) : (
           <div className="grid h-full w-full place-items-center text-center text-[9px] uppercase tracking-widest text-keep-muted/60">
-            preview
+            {t("editor.gallery.previewPlaceholder")}
           </div>
         )}
       </div>
@@ -2646,28 +2792,31 @@ function DraftPortraitCard({
           value={url}
           onChange={(e) => onUrlChange(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (trimmed) onCommit(); } }}
-          placeholder="Paste an image URL to add a portrait…"
+          placeholder={t("editor.gallery.draftUrlPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-0.5 font-mono text-[11px] outline-none focus:border-keep-action"
         />
         <input
           type="text"
           value={label}
           onChange={(e) => onLabelChange(e.target.value)}
-          placeholder="Label (optional)"
+          placeholder={t("editor.gallery.draftLabelPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-0.5 outline-none focus:border-keep-action"
         />
-        <label className="flex items-center gap-1 text-[11px] text-keep-muted">
-          <input
-            type="checkbox"
-            checked={nsfw}
-            onChange={onNsfwToggle}
-            className="h-3 w-3"
-          />
-          <span>NSFW</span>
-        </label>
+        {/* Same adult-only rule as the saved-card checkbox above. */}
+        <MinorSafe>
+          <label className="flex items-center gap-1 text-[11px] text-keep-muted">
+            <input
+              type="checkbox"
+              checked={nsfw}
+              onChange={onNsfwToggle}
+              className="h-3 w-3"
+            />
+            <span>{t("modal.gallery.nsfw")}</span>
+          </label>
+        </MinorSafe>
         {trimmed && imgStatus === "error" ? (
           <p className="text-[10px] text-keep-accent">
-            Preview won't load. The portrait will still save, but viewers may not see it either, try a direct CDN link.
+            {t("editor.gallery.draftImgError")}
           </p>
         ) : null}
       </div>
@@ -2700,6 +2849,7 @@ function LinksEditor({
   links: ProfileLink[];
   onChange: (next: ProfileLink[]) => void;
 }) {
+  const { t } = useTranslation("profile");
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState("");
   const [url, setUrl] = useState("");
@@ -2750,14 +2900,14 @@ function LinksEditor({
       resetForm();
       setAdding(false);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "add failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.addFailed"));
     } finally {
       setBusy(false);
     }
   }
 
   async function remove(id: string) {
-    if (!window.confirm("Remove this link?")) return;
+    if (!window.confirm(t("editor.links.removeConfirm"))) return;
     try {
       const res = await fetch(`${linksEndpoint(scope)}/${id}`, {
         method: "DELETE",
@@ -2766,7 +2916,7 @@ function LinksEditor({
       if (!res.ok) throw new Error(await readError(res));
       onChange(links.filter((l) => l.id !== id));
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "delete failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.deleteFailed"));
     }
   }
 
@@ -2774,9 +2924,9 @@ function LinksEditor({
 
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Profile links</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.links.legend")}</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Up to {LINKS_CAP} external links rendered as styled chips on this profile. Useful for cross-site character profiles, world docs, refs. They open in a new tab.
+        {t("editor.links.hint", { max: LINKS_CAP })}
       </p>
       {links.length > 0 ? (
         <ul className="mb-2 space-y-1">
@@ -2797,8 +2947,8 @@ function LinksEditor({
               <button
                 type="button"
                 onClick={() => remove(l.id)}
-                title="Remove link"
-                aria-label="Remove link"
+                title={t("editor.links.removeLink")}
+                aria-label={t("editor.links.removeLink")}
                 className="shrink-0 rounded border border-keep-accent/50 bg-keep-bg px-1.5 py-0 text-[10px] text-keep-accent hover:bg-keep-accent/10"
               >
                 ✕
@@ -2807,7 +2957,7 @@ function LinksEditor({
           ))}
         </ul>
       ) : (
-        <p className="mb-2 italic text-keep-muted">No links yet.</p>
+        <p className="mb-2 italic text-keep-muted">{t("editor.links.empty")}</p>
       )}
       {adding ? (
         <div className="space-y-1">
@@ -2815,7 +2965,7 @@ function LinksEditor({
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            placeholder="Title (e.g. 'F-List profile')"
+            placeholder={t("editor.links.titlePlaceholder")}
             maxLength={60}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
@@ -2824,7 +2974,7 @@ function LinksEditor({
             type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://example.com/your-profile"
+            placeholder={t("editor.links.urlPlaceholder")}
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(); } }}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
           />
@@ -2835,32 +2985,32 @@ function LinksEditor({
               onChange={(e) => setCustomColors(e.target.checked)}
               className="h-3 w-3"
             />
-            <span>Customize chip colors</span>
+            <span>{t("editor.links.customizeColors")}</span>
           </label>
           {customColors ? (
             <div className="grid grid-cols-3 gap-2">
               <label className="flex flex-col text-[10px] text-keep-muted">
-                <span className="uppercase tracking-widest">Border</span>
+                <span className="uppercase tracking-widest">{t("editor.links.border")}</span>
                 <input type="color" value={borderColor} onChange={(e) => setBorderColor(e.target.value)} className="h-6 w-full rounded border border-keep-rule" />
               </label>
               <label className="flex flex-col text-[10px] text-keep-muted">
-                <span className="uppercase tracking-widest">Background</span>
+                <span className="uppercase tracking-widest">{t("editor.links.background")}</span>
                 <input type="color" value={bgColor} onChange={(e) => setBgColor(e.target.value)} className="h-6 w-full rounded border border-keep-rule" />
               </label>
               <label className="flex flex-col text-[10px] text-keep-muted">
-                <span className="uppercase tracking-widest">Text</span>
+                <span className="uppercase tracking-widest">{t("editor.links.text")}</span>
                 <input type="color" value={textColor} onChange={(e) => setTextColor(e.target.value)} className="h-6 w-full rounded border border-keep-rule" />
               </label>
             </div>
           ) : null}
           {customColors ? (
             <div className="mt-1 text-[10px] text-keep-muted">
-              Preview:{" "}
+              {t("editor.links.previewLabel")}{" "}
               <span
                 className="inline-block rounded border px-1.5 py-0.5 text-[11px]"
                 style={{ borderColor, backgroundColor: bgColor, color: textColor }}
               >
-                {title.trim() || "Sample link"}
+                {title.trim() || t("editor.links.sampleLink")}
               </span>
             </div>
           ) : null}
@@ -2871,7 +3021,7 @@ function LinksEditor({
               onClick={() => { setAdding(false); resetForm(); }}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
             >
-              Cancel
+              {t("common:cancel")}
             </button>
             <button
               type="button"
@@ -2879,7 +3029,7 @@ function LinksEditor({
               disabled={busy || !title.trim() || !url.trim()}
               className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
             >
-              {busy ? "Adding..." : "Add"}
+              {busy ? t("editor.links.adding") : t("editor.links.add")}
             </button>
           </div>
         </div>
@@ -2888,10 +3038,10 @@ function LinksEditor({
           type="button"
           onClick={() => setAdding(true)}
           disabled={atCap}
-          title={atCap ? `Limit of ${LINKS_CAP} links per profile.` : undefined}
+          title={atCap ? t("editor.links.limitTitle", { max: LINKS_CAP }) : undefined}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
         >
-          + Add link
+          {t("editor.links.addLink")}
         </button>
       )}
     </fieldset>
@@ -2932,6 +3082,7 @@ function AvatarCropPicker({
   crop: AvatarCrop;
   onChange: (next: AvatarCrop) => void;
 }) {
+  const { t } = useTranslation("profile");
   const trimmed = url.trim();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef<{ startX: number; startY: number; baseOffsetX: number; baseOffsetY: number } | null>(null);
@@ -2990,7 +3141,7 @@ function AvatarCropPicker({
   return (
     <div className="space-y-1">
       <span className="block text-xs uppercase tracking-widest text-keep-muted">
-        Avatar position
+        {t("editor.crop.title")}
       </span>
       {/* Tight column constrained to the preview's width so the zoom
           slider and reset button stack neatly below the circle without
@@ -3048,23 +3199,23 @@ function AvatarCropPicker({
                     <path d="M2 12h20" />
                     <path d="M12 2v20" />
                   </svg>
-                  Drag to pan
+                  {t("editor.crop.dragToPan")}
                 </span>
               </span>
             </>
           ) : (
             <div className="flex h-full w-full items-center justify-center px-3 text-center text-[11px] italic text-keep-muted">
               {trimmed && imgError
-                ? "Couldn't load that image, check the URL above."
-                : "Paste a Main Profile Image URL above to crop."}
+                ? t("editor.crop.loadError")
+                : t("editor.crop.needUrl")}
             </div>
           )}
         </div>
         {/* Zoom slider directly under the preview, same width. */}
         <label className="block text-[10px] uppercase tracking-widest text-keep-muted">
           <span className="flex items-baseline justify-between">
-            <span>Zoom</span>
-            <span className="normal-case tracking-normal text-keep-muted">{crop.zoom.toFixed(2)}x</span>
+            <span>{t("editor.crop.zoom")}</span>
+            <span className="normal-case tracking-normal text-keep-muted">{t("editor.crop.zoomValue", { value: crop.zoom.toFixed(2) })}</span>
           </span>
           <input
             type="range"
@@ -3082,9 +3233,9 @@ function AvatarCropPicker({
           onClick={() => onChange({ ...AVATAR_CROP_DEFAULTS })}
           disabled={!showsCrop || isDefaultAvatarCrop(crop)}
           className="self-start rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner disabled:opacity-50"
-          title="Restore centered, no-zoom default"
+          title={t("editor.crop.resetTitle")}
         >
-          Reset crop
+          {t("editor.crop.reset")}
         </button>
       </div>
     </div>
@@ -3181,12 +3332,13 @@ function VisibilityToggle({
   onToggle: () => void;
   label: string;
 }) {
+  const { t } = useTranslation("profile");
   return (
     <button
       type="button"
       onClick={onToggle}
-      title={hidden ? `Show "${label}" on your profile` : `Hide "${label}" from your profile (value stays saved)`}
-      aria-label={hidden ? `Show ${label}` : `Hide ${label}`}
+      title={hidden ? t("editor.visibilityToggle.showTitle", { label }) : t("editor.visibilityToggle.hideTitle", { label })}
+      aria-label={hidden ? t("editor.visibilityToggle.showAria", { label }) : t("editor.visibilityToggle.hideAria", { label })}
       className={`shrink-0 rounded px-1 text-[11px] leading-none transition-colors ${
         hidden
           ? "text-keep-muted/50 hover:text-keep-action"
@@ -3217,6 +3369,7 @@ function VibeAxesEditor({
   stats: CharacterStats;
   onChange: (next: CharacterStats | ((prev: CharacterStats) => CharacterStats)) => void;
 }) {
+  const { t } = useTranslation("profile");
   const sectionHidden = stats.visibility?.vibe === false;
   function setAxis(key: CharacterVibeAxisKey, value: number | null) {
     onChange((prev) => {
@@ -3231,15 +3384,15 @@ function VibeAxesEditor({
   return (
     <fieldset className="rounded border border-keep-rule p-3">
       <legend className="flex items-center gap-2 px-1 text-xs uppercase tracking-widest text-keep-muted">
-        Disposition
+        {t("modal.sections.disposition")}
         <VisibilityToggle
           hidden={sectionHidden}
           onToggle={() => onChange((s) => toggleVisibility(s, "vibe"))}
-          label="Disposition"
+          label={t("modal.sections.disposition")}
         />
       </legend>
       <p className="mb-3 text-[10px] text-keep-muted">
-        Where does your character sit on each of these traits? Drag a slider to set the axis; unset axes don't show on your profile.
+        {t("editor.vibe.hint")}
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {CHARACTER_VIBE_AXES.map((axis) => {
@@ -3248,9 +3401,9 @@ function VibeAxesEditor({
           return (
             <div key={axis.key} className="rounded border border-keep-rule/40 bg-keep-banner/20 p-2">
               <div className="mb-1 flex items-baseline justify-between gap-2 text-[11px]">
-                <span className="font-semibold text-keep-text">{axis.lowLabel}</span>
-                <span className="text-keep-muted">{isSet ? `${value}` : "Not set"}</span>
-                <span className="font-semibold text-keep-text">{axis.highLabel}</span>
+                <span className="font-semibold text-keep-text">{t(`vibe.${axis.key}.low`)}</span>
+                <span className="text-keep-muted">{isSet ? `${value}` : t("editor.vibe.notSet")}</span>
+                <span className="font-semibold text-keep-text">{t(`vibe.${axis.key}.high`)}</span>
               </div>
               <input
                 type="range"
@@ -3260,7 +3413,7 @@ function VibeAxesEditor({
                 value={isSet ? (value as number) : 50}
                 onChange={(e) => setAxis(axis.key, parseInt(e.target.value, 10))}
                 className="w-full"
-                aria-label={`${axis.lowLabel} to ${axis.highLabel}`}
+                aria-label={t("editor.vibe.rangeAria", { low: t(`vibe.${axis.key}.low`), high: t(`vibe.${axis.key}.high`) })}
               />
               {isSet ? (
                 <button
@@ -3268,7 +3421,7 @@ function VibeAxesEditor({
                   onClick={() => setAxis(axis.key, null)}
                   className="mt-1 text-[10px] text-keep-muted hover:text-keep-accent"
                 >
-                  Clear axis
+                  {t("editor.vibe.clearAxis")}
                 </button>
               ) : (
                 <button
@@ -3276,7 +3429,7 @@ function VibeAxesEditor({
                   onClick={() => setAxis(axis.key, 50)}
                   className="mt-1 text-[10px] text-keep-muted hover:text-keep-action"
                 >
-                  Set this axis
+                  {t("editor.vibe.setAxis")}
                 </button>
               )}
             </div>
@@ -3305,6 +3458,7 @@ function AttributesEditor({
   stats: CharacterStats;
   onChange: (next: CharacterStats | ((prev: CharacterStats) => CharacterStats)) => void;
 }) {
+  const { t } = useTranslation("profile");
   const sectionHidden = stats.visibility?.attributes === false;
   const rows = stats.attributes ?? [];
   const canAdd = rows.length < CHARACTER_ATTRIBUTES_MAX;
@@ -3392,19 +3546,19 @@ function AttributesEditor({
   return (
     <fieldset className="rounded border border-keep-rule p-3">
       <legend className="flex items-center gap-2 px-1 text-xs uppercase tracking-widest text-keep-muted">
-        Attributes
+        {t("modal.sections.attributes")}
         <VisibilityToggle
           hidden={sectionHidden}
           onToggle={() => onChange((s) => toggleVisibility(s, "attributes"))}
-          label="Attributes"
+          label={t("modal.sections.attributes")}
         />
       </legend>
       <p className="mb-3 text-[10px] text-keep-muted">
-        Numeric stat block, D&D ability scores ("STR 14"), HP, or any custom attributes you want next to your profile. Each row sets its own min / max so different stat systems can live side by side.
+        {t("editor.attributes.hint")}
       </p>
       {rows.length === 0 ? (
         <p className="mb-2 text-[11px] italic text-keep-muted">
-          No attributes yet. Add one to start a stat block.
+          {t("editor.attributes.empty")}
         </p>
       ) : (
         <ul className="mb-2 space-y-2">
@@ -3414,18 +3568,18 @@ function AttributesEditor({
               className="grid grid-cols-[1fr_60px_60px_60px_auto] items-end gap-2 rounded border border-keep-rule/40 bg-keep-banner/20 p-2 text-[11px]"
             >
               <label className="block">
-                <span className="mb-1 block uppercase tracking-widest text-keep-muted">Label</span>
+                <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.attributes.label")}</span>
                 <input
                   type="text"
                   maxLength={CHARACTER_ATTRIBUTE_LABEL_MAX}
-                  placeholder="e.g. STR"
+                  placeholder={t("editor.attributes.labelPlaceholder")}
                   value={row.label}
                   onChange={(e) => update(idx, { label: e.target.value })}
                   className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block uppercase tracking-widest text-keep-muted">Min</span>
+                <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.attributes.min")}</span>
                 <input
                   type="number"
                   min={CHARACTER_ATTRIBUTE_VALUE_MIN}
@@ -3441,7 +3595,7 @@ function AttributesEditor({
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block uppercase tracking-widest text-keep-muted">Value</span>
+                <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.attributes.value")}</span>
                 <input
                   type="number"
                   min={row.min}
@@ -3457,7 +3611,7 @@ function AttributesEditor({
                 />
               </label>
               <label className="block">
-                <span className="mb-1 block uppercase tracking-widest text-keep-muted">Max</span>
+                <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("editor.attributes.max")}</span>
                 <input
                   type="number"
                   min={CHARACTER_ATTRIBUTE_VALUE_MIN}
@@ -3482,8 +3636,8 @@ function AttributesEditor({
                     type="button"
                     onClick={() => reorder(idx, -1)}
                     disabled={idx === 0}
-                    title="Move this attribute up"
-                    aria-label={`Move ${row.label || "row"} up`}
+                    title={t("editor.attributes.moveUpTitle")}
+                    aria-label={t("editor.attributes.moveUpAria", { label: row.label || t("editor.attributes.rowFallback") })}
                     className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:opacity-30"
                   >
                     ▲
@@ -3492,8 +3646,8 @@ function AttributesEditor({
                     type="button"
                     onClick={() => reorder(idx, 1)}
                     disabled={idx === rows.length - 1}
-                    title="Move this attribute down"
-                    aria-label={`Move ${row.label || "row"} down`}
+                    title={t("editor.attributes.moveDownTitle")}
+                    aria-label={t("editor.attributes.moveDownAria", { label: row.label || t("editor.attributes.rowFallback") })}
                     className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:opacity-30"
                   >
                     ▼
@@ -3502,8 +3656,8 @@ function AttributesEditor({
                 <button
                   type="button"
                   onClick={() => remove(idx)}
-                  title="Remove this attribute"
-                  aria-label={`Remove ${row.label || "row"}`}
+                  title={t("editor.attributes.removeTitle")}
+                  aria-label={t("editor.attributes.removeAria", { label: row.label || t("editor.attributes.rowFallback") })}
                   className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-keep-accent hover:bg-keep-accent/25"
                 >
                   ✕
@@ -3519,7 +3673,7 @@ function AttributesEditor({
         disabled={!canAdd}
         className="rounded border border-keep-action/40 bg-keep-action/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/25 disabled:opacity-40"
       >
-        + Add attribute {canAdd ? "" : `(max ${CHARACTER_ATTRIBUTES_MAX})`}
+        {t("editor.attributes.add")} {canAdd ? "" : t("editor.attributes.addMax", { max: CHARACTER_ATTRIBUTES_MAX })}
       </button>
     </fieldset>
   );
@@ -3534,6 +3688,7 @@ function ChatColorRow({
   value: string | null;
   onChange: (next: string | null) => void;
 }) {
+  const { t } = useTranslation("profile");
   // Local mirror so an in-progress typed hex doesn't bubble up on every
   // keystroke and trigger downstream side effects (formDirty etc.).
   // Pushed up on blur or via the explicit "Set" button, the swatch
@@ -3544,11 +3699,11 @@ function ChatColorRow({
 
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Chat color</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.chatColor.legend")}</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
         {scope === "master"
-          ? "Drives your OOC messages and acts as the fallback for any character without its own color."
-          : "Locks this character's messages to this color, regardless of the tab's /color state. Leave on \"inherit\" to use your OOC color."}
+          ? t("editor.chatColor.masterHint")
+          : t("editor.chatColor.characterHint")}
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <input
@@ -3556,7 +3711,7 @@ function ChatColorRow({
           value={value && /^#[0-9a-fA-F]{6}$/.test(value) ? value : "#990000"}
           onChange={(e) => onChange(e.target.value)}
           className="h-7 w-10 cursor-pointer rounded border border-keep-rule"
-          aria-label="Chat color"
+          aria-label={t("editor.chatColor.legend")}
         />
         <input
           type="text"
@@ -3566,7 +3721,7 @@ function ChatColorRow({
             if (draft === "") onChange(null);
             else if (isHex) onChange(draft);
           }}
-          placeholder={scope === "master" ? "(default)" : "(inherit OOC)"}
+          placeholder={scope === "master" ? t("editor.chatColor.defaultPlaceholder") : t("editor.chatColor.inheritPlaceholder")}
           maxLength={7}
           pattern="^#[0-9a-fA-F]{6}$"
           className="flex-1 min-w-[8rem] rounded border border-keep-rule px-2 py-1 font-mono"
@@ -3575,18 +3730,18 @@ function ChatColorRow({
           type="button"
           onClick={() => onChange(null)}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:text-keep-text"
-          title={scope === "master" ? "Revert to the system default color" : "Inherit the master / OOC color"}
+          title={scope === "master" ? t("editor.chatColor.useDefaultTitle") : t("editor.chatColor.inheritTitle")}
         >
-          {scope === "master" ? "Use default" : "Inherit OOC"}
+          {scope === "master" ? t("editor.chatColor.useDefault") : t("editor.chatColor.inheritOoc")}
         </button>
       </div>
       <div className="mt-2 flex items-center gap-2 text-[11px]">
-        <span className="text-keep-muted">Preview:</span>
+        <span className="text-keep-muted">{t("editor.links.previewLabel")}</span>
         <span
           className="rounded bg-keep-banner/30 px-1.5 py-0.5"
           style={value ? { color: value } : undefined}
         >
-          The quick brown fox jumps.
+          {t("editor.chatColor.sample")}
         </span>
       </div>
     </fieldset>
@@ -3609,6 +3764,7 @@ function NotificationsRow({
   permVersion: number;
   onPermissionChange: () => void;
 }) {
+  const { t } = useTranslation("profile");
   // permVersion is unused inside but its presence forces a re-read of permission()
   // when the parent bumps it after a permission grant/deny.
   void permVersion;
@@ -3622,26 +3778,26 @@ function NotificationsRow({
 
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Desktop notifications</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.notifications.legend")}</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Toasts appear when this tab is hidden - minimized, on another tab, or in another app.
+        {t("editor.notifications.hint")}
       </p>
       <label className="flex items-center gap-2">
-        <span className="w-20 uppercase tracking-widest text-keep-muted">Notify me</span>
+        <span className="w-20 uppercase tracking-widest text-keep-muted">{t("editor.notifications.notifyMe")}</span>
         <select
           value={pref}
           onChange={(e) => onChangePref(e.target.value as NotifyPref)}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
         >
-          <option value="off">Off - never</option>
-          <option value="mentions">Whispers &amp; announcements only</option>
-          <option value="all">All messages in rooms I'm in</option>
+          <option value="off">{t("editor.notifications.off")}</option>
+          <option value="mentions">{t("editor.notifications.mentions")}</option>
+          <option value="all">{t("editor.notifications.all")}</option>
         </select>
       </label>
       <div className="mt-2 flex items-center justify-between gap-2">
         <span className="text-keep-muted">
-          Browser permission:{" "}
-          <span className="font-mono">{supported ? perm : "unsupported"}</span>
+          {t("editor.notifications.permissionLabel")}{" "}
+          <span className="font-mono">{supported ? perm : t("editor.notifications.unsupported")}</span>
         </span>
         {supported && perm === "default" ? (
           <button
@@ -3649,11 +3805,11 @@ function NotificationsRow({
             onClick={enable}
             className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80"
           >
-            Enable
+            {t("editor.enable")}
           </button>
         ) : supported && perm === "denied" ? (
           <span className="text-[10px] text-keep-accent">
-            Denied - re-enable in your browser's site permissions.
+            {t("editor.notifications.denied")}
           </span>
         ) : null}
       </div>
@@ -3693,11 +3849,12 @@ function SoundRow({
   onChangeChat: (v: boolean) => void;
   onChangeAlert: (v: boolean) => void;
 }) {
+  const { t } = useTranslation("profile");
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Sound effects</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.sounds.legend")}</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Per-event audio cues. Saved with the rest of your profile.
+        {t("editor.sounds.hint")}
       </p>
       <label className="mb-1 flex items-start gap-2">
         <input
@@ -3707,9 +3864,9 @@ function SoundRow({
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Direct messages (ping)</span>
+          <span className="block text-keep-text">{t("editor.sounds.dm")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Plays when someone DMs you, anywhere in the app.
+            {t("editor.sounds.dmHint")}
           </span>
         </span>
       </label>
@@ -3721,9 +3878,9 @@ function SoundRow({
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Whispers (whisper)</span>
+          <span className="block text-keep-text">{t("editor.sounds.whisper")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Plays when someone whispers to you in chat. Distinct from DMs so an in-room whisper sounds different from a cross-room ping.
+            {t("editor.sounds.whisperHint")}
           </span>
         </span>
       </label>
@@ -3735,9 +3892,9 @@ function SoundRow({
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Chat messages (tap)</span>
+          <span className="block text-keep-text">{t("editor.sounds.chat")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Plays on incoming room messages and /me actions.
+            {t("editor.sounds.chatHint")}
           </span>
         </span>
       </label>
@@ -3749,9 +3906,9 @@ function SoundRow({
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Announcements (alert)</span>
+          <span className="block text-keep-text">{t("editor.sounds.alert")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Plays on admin announcements and other system events.
+            {t("editor.sounds.alertHint")}
           </span>
         </span>
       </label>
@@ -3774,10 +3931,11 @@ function CharacterDmOptInRow({
   enabled: boolean;
   onChange: (v: boolean) => void;
 }) {
+  const { t } = useTranslation("profile");
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
       <legend className="px-1 uppercase tracking-widest text-keep-muted">
-        Direct Messenger
+        {t("editor.dm.legend")}
       </legend>
       <label className="flex items-start gap-2">
         <input
@@ -3787,12 +3945,9 @@ function CharacterDmOptInRow({
           className="mt-0.5"
         />
         <span>
-          <span className="font-semibold">Reachable as this character</span>
+          <span className="font-semibold">{t("editor.dm.label")}</span>
           <span className="block text-[10px] text-keep-muted">
-            When on, other players can friend-request this character by name and start a DM
-            thread with this identity. When off, this character is hidden from friend lookup
-            and DM recipient pickers; existing friends and conversation history stay
-            untouched, but new messages can't reach this character until you re-enable it.
+            {t("editor.dm.hint")}
           </span>
         </span>
       </label>
@@ -3824,11 +3979,12 @@ function InputBehaviorRow({
   onChangeDisableHistory: (v: boolean) => void;
   onChangeDisableThesaurus: (v: boolean) => void;
 }) {
+  const { t } = useTranslation("profile");
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Input behavior</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.input.legend")}</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Quiet down composer features you don't want to see while typing.
+        {t("editor.input.hint")}
       </p>
       <label className="mb-1 flex items-start gap-2">
         <input
@@ -3838,9 +3994,9 @@ function InputBehaviorRow({
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Disable command and message history</span>
+          <span className="block text-keep-text">{t("editor.input.history")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Turns off the ArrowUp / ArrowDown recall of recently sent messages and commands in the chat composer.
+            {t("editor.input.historyHint")}
           </span>
         </span>
       </label>
@@ -3852,9 +4008,9 @@ function InputBehaviorRow({
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Disable synonym popup on highlighted words</span>
+          <span className="block text-keep-text">{t("editor.input.thesaurus")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Stops the thesaurus list from appearing when you select a word inside the composer.
+            {t("editor.input.thesaurusHint")}
           </span>
         </span>
       </label>
@@ -3885,12 +4041,12 @@ function FlairDisplayRow({
   onChangeDisableBorderStyles: (v: boolean) => void;
   onChangeDisableInlineAvatars: (v: boolean) => void;
 }) {
+  const { t } = useTranslation("profile");
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Visual flair</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.flair.legend")}</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Turn off other people's animated cosmetics for a smoother, lighter experience
-        on older devices. This only changes what you see; everyone else still shows their flair.
+        {t("editor.flair.hint")}
       </p>
       <label className="mb-1 flex items-start gap-2">
         <input
@@ -3900,9 +4056,9 @@ function FlairDisplayRow({
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Disable name styles</span>
+          <span className="block text-keep-text">{t("editor.flair.nameStyles")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Show everyone's name as plain text instead of their gradient, glow, or animated styles.
+            {t("editor.flair.nameStylesHint")}
           </span>
         </span>
       </label>
@@ -3914,9 +4070,9 @@ function FlairDisplayRow({
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Disable avatar borders</span>
+          <span className="block text-keep-text">{t("editor.flair.borders")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Drop the decorative frames around avatars. The avatar still shows, just without the border.
+            {t("editor.flair.bordersHint")}
           </span>
         </span>
       </label>
@@ -3928,9 +4084,9 @@ function FlairDisplayRow({
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Disable inline avatars</span>
+          <span className="block text-keep-text">{t("editor.flair.inlineAvatars")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Show the gender or rank icon next to names in chat and the userlist instead of avatar thumbnails.
+            {t("editor.flair.inlineAvatarsHint")}
           </span>
         </span>
       </label>
@@ -3956,6 +4112,7 @@ function FlairDisplayRow({
  * is no longer reachable once blocked.
  */
 function BlockedUsersRow() {
+  const { t } = useTranslation("profile");
   const [list, setList] = useState<BlockedUser[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -3964,7 +4121,7 @@ function BlockedUsersRow() {
     let cancelled = false;
     fetchBlocks()
       .then((b) => { if (!cancelled) setList(b); })
-      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load"); });
+      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : t("errors.failedToLoad")); });
     return () => { cancelled = true; };
   }, []);
 
@@ -3975,7 +4132,7 @@ function BlockedUsersRow() {
       await removeBlock(userId);
       setList((cur) => (cur ?? []).filter((b) => b.userId !== userId));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to remove");
+      setErr(e instanceof Error ? e.message : t("errors.failedToRemove"));
     } finally {
       setBusyId(null);
     }
@@ -3983,17 +4140,15 @@ function BlockedUsersRow() {
 
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Blocked users</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.blocked.legend")}</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Blocking is mutual and global: you and a blocked user (and all of both your characters) can't
-        see each other anywhere - chat, the userlist, whispers, DMs, friends, or search. Remove a
-        block here to restore visibility.
+        {t("editor.blocked.hint")}
       </p>
       {err ? <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{err}</div> : null}
       {list === null ? (
-        <p className="italic text-keep-muted">Loading…</p>
+        <p className="italic text-keep-muted">{t("common:loading")}</p>
       ) : list.length === 0 ? (
-        <p className="italic text-keep-muted">You haven't blocked anyone.</p>
+        <p className="italic text-keep-muted">{t("editor.blocked.empty")}</p>
       ) : (
         <ul className="space-y-1">
           {list.map((b) => (
@@ -4010,7 +4165,7 @@ function BlockedUsersRow() {
                 onClick={() => void remove(b.userId)}
                 className="shrink-0 rounded border border-keep-rule px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
               >
-                Remove
+                {t("editor.blocked.remove")}
               </button>
             </li>
           ))}
@@ -4032,6 +4187,7 @@ function BlockedUsersRow() {
  * always change it. The server keeps THIS session and revokes the others.
  */
 function PasswordRow() {
+  const { t } = useTranslation("profile");
   // undefined = loading; true = has a password (change mode); false = OAuth-only
   // (set-a-password mode with the highlight).
   const [hasPassword, setHasPassword] = useState<boolean | undefined>(undefined);
@@ -4063,9 +4219,9 @@ function PasswordRow() {
 
   async function submit() {
     setErr(null);
-    if (next.length < 8) { setErr("Your new password must be at least 8 characters."); return; }
-    if (next !== confirm) { setErr("The new passwords don't match."); return; }
-    if (!settingNew && !current) { setErr("Enter your current password."); return; }
+    if (next.length < 8) { setErr(t("editor.password.tooShort")); return; }
+    if (next !== confirm) { setErr(t("editor.password.mismatch")); return; }
+    if (!settingNew && !current) { setErr(t("editor.password.needCurrent")); return; }
     setBusy(true);
     try {
       const r = await fetch("/me/password", {
@@ -4083,7 +4239,7 @@ function PasswordRow() {
       setSaved(true);
       window.setTimeout(() => setSaved(false), 2500);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't save your password");
+      setErr(e instanceof Error ? e.message : t("errors.passwordSaveFailed"));
     } finally {
       setBusy(false);
     }
@@ -4092,31 +4248,29 @@ function PasswordRow() {
   return (
     <fieldset className={`rounded border p-3 text-xs ${settingNew ? "border-keep-accent/60 bg-keep-accent/5" : "border-keep-rule"}`}>
       <legend className="px-1 uppercase tracking-widest text-keep-muted">
-        {settingNew ? "Set a password" : "Password"}
+        {settingNew ? t("editor.password.setLegend") : t("editor.password.legend")}
       </legend>
       {hasPassword === undefined ? (
-        <p className="italic text-keep-muted">Loading…</p>
+        <p className="italic text-keep-muted">{t("common:loading")}</p>
       ) : (
         <>
           {settingNew ? (
             <p className="mb-2 rounded border border-keep-accent/50 bg-keep-accent/10 p-2 text-keep-accent">
-              You sign in with Google and don't have a password yet. Set one now so you can still
-              get in if you ever lose access to your Google account — right now it's your only way in.
+              {t("editor.password.oauthOnly")}
             </p>
           ) : (
             <p className="mb-2 text-[10px] text-keep-muted">
-              Change the password you sign in with. You'll stay signed in here; anywhere else will
-              need the new password.
+              {t("editor.password.changeHint")}
             </p>
           )}
           {err ? <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{err}</div> : null}
-          {saved ? <div className="mb-2 text-keep-system">Password saved.</div> : null}
+          {saved ? <div className="mb-2 text-keep-system">{t("editor.password.saved")}</div> : null}
           <div className="flex flex-col gap-1.5">
             {!settingNew ? (
               <input
                 type="password"
                 autoComplete="current-password"
-                placeholder="Current password"
+                placeholder={t("editor.password.currentPlaceholder")}
                 value={current}
                 onChange={(e) => setCurrent(e.target.value)}
                 className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
@@ -4125,7 +4279,7 @@ function PasswordRow() {
             <input
               type="password"
               autoComplete="new-password"
-              placeholder="New password (at least 8 characters)"
+              placeholder={t("editor.password.newPlaceholder")}
               value={next}
               onChange={(e) => setNext(e.target.value)}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
@@ -4133,7 +4287,7 @@ function PasswordRow() {
             <input
               type="password"
               autoComplete="new-password"
-              placeholder="Confirm new password"
+              placeholder={t("editor.password.confirmPlaceholder")}
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
@@ -4144,7 +4298,7 @@ function PasswordRow() {
               onClick={() => void submit()}
               className="self-start rounded border border-keep-rule px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
             >
-              {busy ? "Saving…" : settingNew ? "Set password" : "Change password"}
+              {busy ? t("common:saving") : settingNew ? t("editor.password.set") : t("editor.password.change")}
             </button>
           </div>
         </>
@@ -4168,6 +4322,7 @@ function PasswordRow() {
  *                not a fetch). On return the app root shows a "linked" toast.
  */
 function ConnectedAccountsRow() {
+  const { t } = useTranslation("profile");
   const googleAuthEnabled = useChat((s) => s.branding.googleAuthEnabled);
   // Undefined = still loading; null = loaded + not linked; string(-able) =
   // linked, carrying the informational provider email (may itself be null
@@ -4191,7 +4346,7 @@ function ConnectedAccountsRow() {
       } catch (e) {
         if (!cancelled) {
           setGoogle(null);
-          setErr(e instanceof Error ? e.message : "Failed to load");
+          setErr(e instanceof Error ? e.message : t("errors.failedToLoad"));
         }
       }
     })();
@@ -4214,7 +4369,7 @@ function ConnectedAccountsRow() {
       if (!r.ok) throw new Error(await readError(r));
       setGoogle(null);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to unlink");
+      setErr(e instanceof Error ? e.message : t("errors.failedToUnlink"));
     } finally {
       setBusy(false);
     }
@@ -4222,14 +4377,13 @@ function ConnectedAccountsRow() {
 
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Connected accounts</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.connected.legend")}</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Link Google to sign in with one tap. Linking doesn't change your account's
-        email or password, it's just another way in.
+        {t("editor.connected.hint")}
       </p>
       {err ? <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{err}</div> : null}
       {google === undefined ? (
-        <p className="italic text-keep-muted">Loading…</p>
+        <p className="italic text-keep-muted">{t("common:loading")}</p>
       ) : (
         <div className="flex items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1.5">
           <span className="min-w-0 flex-1 truncate text-keep-text">
@@ -4237,10 +4391,10 @@ function ConnectedAccountsRow() {
             {google ? (
               <span className="text-keep-muted">
                 {" — "}
-                {google.email ?? "linked"}
+                {google.email ?? t("editor.connected.linkedFallback")}
               </span>
             ) : (
-              <span className="text-keep-muted"> — not linked</span>
+              <span className="text-keep-muted">{" — "}{t("editor.connected.notLinked")}</span>
             )}
           </span>
           {google ? (
@@ -4250,7 +4404,7 @@ function ConnectedAccountsRow() {
               onClick={() => void unlink()}
               className="shrink-0 rounded border border-keep-rule px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
             >
-              Unlink
+              {t("editor.connected.unlink")}
             </button>
           ) : (
             <button
@@ -4262,7 +4416,7 @@ function ConnectedAccountsRow() {
               onClick={() => { window.location.href = "/auth/google/start?mode=link"; }}
               className="shrink-0 rounded border border-keep-rule px-2 py-0.5 hover:bg-keep-banner"
             >
-              Link Google account
+              {t("editor.connected.link")}
             </button>
           )}
         </div>
@@ -4271,7 +4425,208 @@ function ConnectedAccountsRow() {
   );
 }
 
+/**
+ * Adult "Hide 18+ content" preference (age plan Phase 4). One
+ * self-saving checkbox that PUTs `hideNsfw` to /me/profile, the field
+ * behind the server's SOFT `canSeeNsfw` tier (forum topic lists, both
+ * searches, discovery/catalog listings). It does NOT lock adults out of
+ * 18+ rooms they navigate to — that's the point of the soft tier.
+ *
+ * Minor accounts render nothing: they can never see 18+ content, so the
+ * toggle has no state to show (a forced, disabled checkbox is exactly
+ * the dead control the age plan bans for minors).
+ *
+ * Same self-fetch + optimistic-revert pattern as the sibling rows
+ * (DisplayPrivacyRow, ScriptoriumPrivacyRow); additionally mirrors the
+ * saved value into `viewerAge.hideNsfw` in the store so client-side
+ * soft-gated surfaces react without a reload.
+ */
+function HideNsfwRow() {
+  const { t } = useTranslation("profile");
+  const isAdult = useChat((s) => s.viewerAge.isAdult);
+  const [loaded, setLoaded] = useState(false);
+  const [hideNsfw, setHideNsfw] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  useEffect(() => {
+    if (!isAdult) return; // row never renders for minors; skip the fetch
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch("/me/profile", { credentials: "include" });
+        if (!r.ok) throw new Error(t("errors.loadFailed"));
+        const j = await r.json() as { hideNsfw?: boolean };
+        if (cancelled) return;
+        setHideNsfw(j.hideNsfw ?? false);
+        setLoaded(true);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : t("errors.loadFailed"));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot fetch per adult-state; `t` only shapes error copy
+  }, [isAdult]);
+
+  async function save(next: boolean) {
+    const prev = hideNsfw;
+    setHideNsfw(next);
+    setSaving(true);
+    setErr(null);
+    try {
+      const r = await fetch("/me/profile", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hideNsfw: next }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({} as { error?: string }));
+        throw new Error(j.error ?? `HTTP ${r.status}`);
+      }
+      // Keep the store's cosmetic mirror in step so soft-gated surfaces
+      // pick the change up live. Read at call time (not from a render
+      // closure) so a concurrent /me/profile seed isn't clobbered.
+      const cur = useChat.getState().viewerAge;
+      useChat.getState().setViewerAge({ ...cur, hideNsfw: next });
+      setSavedFlash(true);
+      window.setTimeout(() => setSavedFlash(false), 1500);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : t("errors.failedToSave"));
+      setHideNsfw(prev);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!isAdult) return null;
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.nsfwPref.legend")}</legend>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={hideNsfw}
+          disabled={!loaded || saving}
+          onChange={(e) => void save(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">{t("editor.nsfwPref.label")}</span>
+          <span className="block text-[10px] text-keep-muted">
+            {t("editor.nsfwPref.hint")}
+          </span>
+        </span>
+      </label>
+      {err ? (
+        <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-[10px] text-keep-accent">{err}</div>
+      ) : null}
+      {savedFlash ? (
+        <div className="mt-1 text-[10px] text-keep-system">{t("saved")}</div>
+      ) : null}
+    </fieldset>
+  );
+}
+
+/**
+ * Minor isolation toggle (age plan Phase 5). Shown to under-18 accounts
+ * ONLY — the server rejects the field for adults, and an adult (or a
+ * minor who just turned 18) has no state for it to show, so rendering
+ * nothing beats a dead control. Self-saving `isolateFromAdults` via the
+ * /me/profile PUT, same pattern as HideNsfwRow above; mirrors the saved
+ * value into `viewerAge.isolateFromAdults` so client surfaces can react
+ * without a reload (the server repaints presence live on its side).
+ */
+function IsolationRow() {
+  const { t } = useTranslation("profile");
+  const isAdult = useChat((s) => s.viewerAge.isAdult);
+  const [loaded, setLoaded] = useState(false);
+  const [isolate, setIsolate] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  useEffect(() => {
+    if (isAdult) return; // row never renders for adults; skip the fetch
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch("/me/profile", { credentials: "include" });
+        if (!r.ok) throw new Error(t("errors.loadFailed"));
+        const j = await r.json() as { isolateFromAdults?: boolean };
+        if (cancelled) return;
+        setIsolate(j.isolateFromAdults ?? false);
+        setLoaded(true);
+      } catch (e) {
+        if (!cancelled) setErr(e instanceof Error ? e.message : t("errors.loadFailed"));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot fetch per adult-state; `t` only shapes error copy
+  }, [isAdult]);
+
+  async function save(next: boolean) {
+    const prev = isolate;
+    setIsolate(next);
+    setSaving(true);
+    setErr(null);
+    try {
+      const r = await fetch("/me/profile", {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isolateFromAdults: next }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({} as { error?: string }));
+        throw new Error(j.error ?? `HTTP ${r.status}`);
+      }
+      const cur = useChat.getState().viewerAge;
+      useChat.getState().setViewerAge({ ...cur, isolateFromAdults: next });
+      setSavedFlash(true);
+      window.setTimeout(() => setSavedFlash(false), 1500);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : t("errors.failedToSave"));
+      setIsolate(prev);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (isAdult) return null;
+
+  return (
+    <fieldset className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.isolation.legend")}</legend>
+      <label className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={isolate}
+          disabled={!loaded || saving}
+          onChange={(e) => void save(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span className="flex-1">
+          <span className="block text-keep-text">{t("editor.isolation.label")}</span>
+          <span className="block text-[10px] text-keep-muted">
+            {t("editor.isolation.hint")}
+          </span>
+        </span>
+      </label>
+      {err ? (
+        <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-[10px] text-keep-accent">{err}</div>
+      ) : null}
+      {savedFlash ? (
+        <div className="mt-1 text-[10px] text-keep-system">{t("saved")}</div>
+      ) : null}
+    </fieldset>
+  );
+}
+
 function CurrencyPrivacyRow() {
+  const { t } = useTranslation("profile");
   const snapshot = useEarning((s) => s.snapshot);
   const refresh = useEarning((s) => s.refresh);
   const [hideCurrency, setHideCurrency] = useState<boolean | null>(snapshot?.master.hideCurrencyCount ?? null);
@@ -4315,7 +4670,7 @@ function CurrencyPrivacyRow() {
       void refresh();
       window.setTimeout(() => setSavedFlash(false), 1500);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to save");
+      setErr(e instanceof Error ? e.message : t("errors.failedToSave"));
       if (kind === "currency") setHideCurrency(!next); else setHideXp(!next);
     } finally {
       setSaving(false);
@@ -4328,10 +4683,10 @@ function CurrencyPrivacyRow() {
   // live `earning:earned` updates.
   const master = snapshot?.master ?? null;
   const { rank, tierRow } = lookupRankTier(snapshot, master?.rankKey ?? null, master?.tier ?? null);
-  const rankLabel = rank ? `${rank.name}${tierRow ? ` ${tierRow.label}` : ""}` : "Unranked";
+  const rankLabel = rank ? `${rank.name}${tierRow ? ` ${tierRow.label}` : ""}` : t("editor.earning.unranked");
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Earning</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.earning.legend")}</legend>
       <div className="mb-2 flex flex-wrap items-center gap-3 rounded border border-keep-rule bg-keep-bg/50 px-2 py-1.5">
         <span className="font-action uppercase tracking-widest text-keep-text">{rankLabel}</span>
         <span aria-hidden className="h-4 w-px shrink-0 bg-keep-rule/60" />
@@ -4345,17 +4700,16 @@ function CurrencyPrivacyRow() {
             draggable={false}
             onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
           />
-          <span className="font-semibold tabular-nums text-keep-text">{(master?.currency ?? 0).toLocaleString()}</span>
+          <span className="font-semibold tabular-nums text-keep-text">{formatNumber(master?.currency ?? 0)}</span>
         </span>
         <span aria-hidden className="h-4 w-px shrink-0 bg-keep-rule/60" />
         <span className="inline-flex items-baseline gap-1">
-          <span className="font-semibold tabular-nums text-keep-text">{(master?.xp ?? 0).toLocaleString()}</span>
-          <span className="uppercase tracking-widest text-keep-muted">XP</span>
+          <span className="font-semibold tabular-nums text-keep-text">{formatNumber(master?.xp ?? 0)}</span>
+          <span className="uppercase tracking-widest text-keep-muted">{t("modal.hero.xp")}</span>
         </span>
       </div>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Rank, tier, and sigil are always visible on your profile. XP and Currency totals can be
-        hidden independently.
+        {t("editor.earning.hint")}
       </p>
       <label className="mb-2 flex items-start gap-2">
         <input
@@ -4366,9 +4720,9 @@ function CurrencyPrivacyRow() {
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Hide my Currency total from other users</span>
+          <span className="block text-keep-text">{t("editor.earning.hideCurrency")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Other users see "private" instead of your balance in /currency lookups and on your public profile.
+            {t("editor.earning.hideCurrencyHint")}
           </span>
         </span>
       </label>
@@ -4381,9 +4735,9 @@ function CurrencyPrivacyRow() {
           className="mt-0.5"
         />
         <span className="flex-1">
-          <span className="block text-keep-text">Hide my XP total from other users</span>
+          <span className="block text-keep-text">{t("editor.earning.hideXp")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Other users see "private" instead of your XP on your profile and in /exp lookups.
+            {t("editor.earning.hideXpHint")}
           </span>
         </span>
       </label>
@@ -4391,7 +4745,7 @@ function CurrencyPrivacyRow() {
         <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-[10px] text-keep-accent">{err}</div>
       ) : null}
       {savedFlash ? (
-        <div className="mt-1 text-[10px] text-keep-system">Saved.</div>
+        <div className="mt-1 text-[10px] text-keep-system">{t("saved")}</div>
       ) : null}
     </fieldset>
   );
@@ -4424,13 +4778,18 @@ function VisibilityRow({
   onChangeNsfw: (v: boolean) => void;
   kind: "master" | "character";
 }) {
-  const subject = kind === "master" ? "your master profile" : "this character's profile";
+  const { t } = useTranslation("profile");
+  const publicPath = kind === "master" ? "/profiles/<username>" : "/profiles/<character>";
+  // Age plan Phase 1: under-18 accounts can't flag a profile 18+ (the
+  // server rejects the write), so don't render a checkbox that could
+  // only ever error. Cosmetic mirror only, the server stays the gate.
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
   // When NSFW is on, the Public box is disabled and visually shows as
   // unchecked - matches the server's normalization on save.
   const effectivePublic = isNsfw ? false : isPublic;
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Visibility</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.visibilityRow.legend")}</legend>
       <label className="flex items-start gap-2">
         <input
           type="checkbox"
@@ -4440,30 +4799,46 @@ function VisibilityRow({
           className="mt-0.5"
         />
         <span>
-          <span className="font-semibold">Public</span>
+          <span className="font-semibold">{t("editor.visibilityRow.public")}</span>
           <span className="block text-[10px] text-keep-muted">
-            Anyone (including logged-out visitors) can view {subject} via{" "}
-            <code>/profiles/{kind === "master" ? "<username>" : "<character>"}</code>. Uncheck to
-            require login.
+            <Trans
+              t={t}
+              i18nKey={kind === "master" ? "editor.visibilityRow.publicHintMaster" : "editor.visibilityRow.publicHintCharacter"}
+              values={{ path: publicPath }}
+              // Trans entity-escapes interpolated values while building its
+              // node tree; without this the literal "<username>" placeholder
+              // double-escapes and renders as "&lt;username&gt;".
+              shouldUnescape
+              components={{ code: <code /> }}
+            />
           </span>
         </span>
       </label>
-      <label className="mt-2 flex items-start gap-2">
-        <input
-          type="checkbox"
-          checked={isNsfw}
-          onChange={(e) => onChangeNsfw(e.target.checked)}
-          className="mt-0.5"
-        />
-        <span>
-          <span className="font-semibold">NSFW (whole profile)</span>
-          <span className="block text-[10px] text-keep-muted">
-            Forces non-public to anonymous viewers, and shows a warning splash with a "View
-            Profile" button to logged-in viewers before the content renders. Use when the
-            profile itself is explicit (independent of marking individual gallery images NSFW).
+      {/* A minor can't see (or clear) the NSFW checkbox below, so when a
+          moderator has marked their profile 18+ the disabled Public box
+          needs its own explanation - otherwise it reads as a dead control
+          with no stated reason and no path to contest it. */}
+      {!viewerIsAdult && isNsfw ? (
+        <p className="mt-1 text-[10px] text-keep-system">
+          {t("editor.visibilityRow.minorNsfwNote")}
+        </p>
+      ) : null}
+      {viewerIsAdult ? (
+        <label className="mt-2 flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={isNsfw}
+            onChange={(e) => onChangeNsfw(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-semibold">{t("editor.visibilityRow.nsfwLabel")}</span>
+            <span className="block text-[10px] text-keep-muted">
+              {t("editor.visibilityRow.nsfwHint")}
+            </span>
           </span>
-        </span>
-      </label>
+        </label>
+      ) : null}
     </fieldset>
   );
 }
@@ -4477,6 +4852,7 @@ function VisibilityRow({
  * body, only "you have a whisper / mention waiting".
  */
 function PushRow() {
+  const { t } = useTranslation("profile");
   const [state, setState] = useState<PushState | "loading">("loading");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -4494,7 +4870,7 @@ function PushRow() {
       const next = await enablePush();
       setState(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "enable failed");
+      setError(err instanceof Error ? err.message : t("errors.enableFailed"));
     } finally {
       setBusy(false);
     }
@@ -4507,7 +4883,7 @@ function PushRow() {
       const next = await disablePush();
       setState(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "disable failed");
+      setError(err instanceof Error ? err.message : t("errors.disableFailed"));
     } finally {
       setBusy(false);
     }
@@ -4516,7 +4892,7 @@ function PushRow() {
   if (state === "unsupported") {
     return (
       <div className="mt-2 text-[10px] italic text-keep-muted">
-        Browser push isn't available in this browser.
+        {t("editor.push.unsupported")}
       </div>
     );
   }
@@ -4525,15 +4901,15 @@ function PushRow() {
     <div className="mt-2 border-t border-keep-rule/50 pt-2">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <div className="text-keep-text">Browser push (offline)</div>
+          <div className="text-keep-text">{t("editor.push.title")}</div>
           <div className="text-[10px] text-keep-muted">
-            Pings even when this tab is closed. Privacy: payloads carry no message body, just "whisper waiting" / "mention waiting".
+            {t("editor.push.hint")}
           </div>
         </div>
         {state === "loading" ? (
           <span className="text-[10px] text-keep-muted">…</span>
         ) : state === "denied" ? (
-          <span className="text-[10px] text-keep-accent">Permission denied</span>
+          <span className="text-[10px] text-keep-accent">{t("editor.push.denied")}</span>
         ) : state === "subscribed" ? (
           <button
             type="button"
@@ -4541,7 +4917,7 @@ function PushRow() {
             disabled={busy}
             className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner disabled:opacity-50"
           >
-            {busy ? "..." : "Disable"}
+            {busy ? "..." : t("editor.disable")}
           </button>
         ) : (
           <button
@@ -4550,7 +4926,7 @@ function PushRow() {
             disabled={busy}
             className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 text-xs hover:bg-keep-banner/80 disabled:opacity-50"
           >
-            {busy ? "..." : "Enable"}
+            {busy ? "..." : t("editor.enable")}
           </button>
         )}
       </div>
@@ -4565,6 +4941,7 @@ function PushRow() {
  *  chronological order; private entries only show here.
  * ============================================================ */
 function JournalEditor({ characterId }: { characterId: string }) {
+  const { t } = useTranslation("profile");
   const [entries, setEntries] = useState<CharacterJournalEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -4578,19 +4955,19 @@ function JournalEditor({ characterId }: { characterId: string }) {
       const j = (await r.json()) as { entries: CharacterJournalEntry[] };
       setEntries(j.entries);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     }
   }
   useEffect(() => { load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [characterId]);
 
   async function remove(id: string) {
-    if (!window.confirm("Delete this journal entry?")) return;
+    if (!window.confirm(t("editor.journal.deleteConfirm"))) return;
     try {
       const r = await fetch(`/characters/${characterId}/journal/${id}`, { method: "DELETE", credentials: "include" });
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "delete failed");
+      setError(e instanceof Error ? e.message : t("errors.deleteFailed"));
     }
   }
 
@@ -4617,10 +4994,9 @@ function JournalEditor({ characterId }: { characterId: string }) {
 
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Journal</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("editor.tabs.journal")}</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Solo writing attached to this character. Backstory, in-world diary, world notes. Public entries surface on
-        the profile chronologically. Private entries are only visible to you.
+        {t("editor.journal.hint")}
       </p>
       {error ? <div className="mb-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-keep-accent">{error}</div> : null}
       {creating ? (
@@ -4631,9 +5007,9 @@ function JournalEditor({ characterId }: { characterId: string }) {
         />
       ) : null}
       {entries === null ? (
-        <p className="italic text-keep-muted">Loading entries...</p>
+        <p className="italic text-keep-muted">{t("editor.journal.loadingEntries")}</p>
       ) : entries.length === 0 ? (
-        <p className="italic text-keep-muted">No entries yet.</p>
+        <p className="italic text-keep-muted">{t("editor.journal.noEntries")}</p>
       ) : (
         <ol className="space-y-2">
           {entries.map((e) => (
@@ -4649,7 +5025,7 @@ function JournalEditor({ characterId }: { characterId: string }) {
                 <>
                   <header className="flex items-baseline justify-between gap-2">
                     <span className="font-semibold">
-                      {e.title || <span className="italic text-keep-muted">untitled</span>}
+                      {e.title || <span className="italic text-keep-muted">{t("modal.journal.untitled")}</span>}
                       <span
                         className={`ml-2 rounded px-1 text-[10px] uppercase tracking-widest ${
                           e.privacy === "public"
@@ -4657,15 +5033,15 @@ function JournalEditor({ characterId }: { characterId: string }) {
                             : "bg-keep-rule/30 text-keep-muted"
                         }`}
                       >
-                        {e.privacy}
+                        {t(`editor.journal.privacyChip.${e.privacy}`)}
                       </span>
                     </span>
                     <span className="text-[10px] text-keep-muted">
-                      {new Date(e.createdAt).toLocaleDateString()}
+                      {formatDate(e.createdAt)}
                     </span>
                   </header>
                   <details className="mt-1">
-                    <summary className="cursor-pointer text-[10px] uppercase tracking-widest text-keep-muted">Preview</summary>
+                    <summary className="cursor-pointer text-[10px] uppercase tracking-widest text-keep-muted">{t("common:preview")}</summary>
                     <div className="mt-1 max-h-40 overflow-y-auto rounded border border-keep-rule/40 bg-keep-panel/30 p-2 font-mono text-[11px]">
                       {e.bodyHtml}
                     </div>
@@ -4676,14 +5052,14 @@ function JournalEditor({ characterId }: { characterId: string }) {
                       onClick={() => setEditingId(e.id)}
                       className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
                     >
-                      Edit
+                      {t("editor.journal.edit")}
                     </button>
                     <button
                       type="button"
                       onClick={() => remove(e.id)}
                       className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
                     >
-                      Delete
+                      {t("common:delete")}
                     </button>
                   </div>
                 </>
@@ -4698,7 +5074,7 @@ function JournalEditor({ characterId }: { characterId: string }) {
           onClick={() => setCreating(true)}
           className="mt-2 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
         >
-          + Add entry
+          {t("editor.journal.addEntry")}
         </button>
       ) : null}
     </fieldset>
@@ -4716,6 +5092,7 @@ function JournalEntryForm({
   onCancel: () => void;
   onSave: (body: { title: string | null; bodyHtml: string; privacy: "public" | "private" }) => Promise<void>;
 }) {
+  const { t } = useTranslation("profile");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [bodyHtml, setBodyHtml] = useState(initial?.bodyHtml ?? "");
   const [privacy, setPrivacy] = useState<"public" | "private">(initial?.privacy ?? "public");
@@ -4736,7 +5113,7 @@ function JournalEntryForm({
         privacy,
       });
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "save failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -4749,7 +5126,7 @@ function JournalEntryForm({
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         maxLength={120}
-        placeholder="Title (optional)"
+        placeholder={t("editor.journal.titlePlaceholder")}
         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
       />
@@ -4757,19 +5134,19 @@ function JournalEntryForm({
         value={bodyHtml}
         onChange={(e) => setBodyHtml(e.target.value)}
         rows={8}
-        placeholder={"<p>Write your entry here. The same HTML allow-list as your bio applies (b, i, em, p, ul/ol/li, blockquote, h3-h6, etc.).</p>"}
+        placeholder={t("editor.journal.bodyPlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px] outline-none focus:border-keep-action"
       />
       <div className="flex items-center justify-between">
         <label className="flex items-center gap-1 text-[11px] text-keep-muted">
-          <span>Visibility:</span>
+          <span>{t("editor.journal.visibilityLabel")}</span>
           <select
             value={privacy}
             onChange={(e) => setPrivacy(e.target.value as "public" | "private")}
             className="rounded border border-keep-rule bg-keep-bg px-1 py-0.5"
           >
-            <option value="public">Public (on profile)</option>
-            <option value="private">Private (only you)</option>
+            <option value="public">{t("editor.journal.publicOption")}</option>
+            <option value="private">{t("editor.journal.privateOption")}</option>
           </select>
         </label>
         <div className="flex gap-2">
@@ -4778,7 +5155,7 @@ function JournalEntryForm({
             onClick={onCancel}
             className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
           >
-            Cancel
+            {t("common:cancel")}
           </button>
           <button
             type="button"
@@ -4786,7 +5163,7 @@ function JournalEntryForm({
             disabled={busy || !bodyHtml.trim()}
             className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
           >
-            {busy ? "Saving..." : mode === "create" ? "Create" : "Save"}
+            {busy ? t("common:savingDots") : mode === "create" ? t("createCharacter.create") : t("common:save")}
           </button>
         </div>
       </div>

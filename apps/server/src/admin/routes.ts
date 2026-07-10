@@ -59,9 +59,11 @@ import {
   invalidateAutomodCache,
   validateAutomodPattern,
 } from "../realtime/automod.js";
+import { maskForMinors } from "../realtime/minorLanguageFilter.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { globalAuditScopeWhere, recordAudit } from "../audit.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
+import { setRoomNsfw } from "../lib/nsfwRooms.js";
 import { parseLimit } from "../lib/pagination.js";
 import { registerAdminEarningRoutes } from "./earning.js";
 import { registerAdminBackupRoutes } from "./backup.js";
@@ -70,12 +72,20 @@ import { registerAdminAnnouncementRoutes } from "./announcements.js";
 import { registerAdminModCaseRoutes } from "./modCases.js";
 import { registerAdminFaqRoutes } from "./faqs.js";
 import { registerAdminEmailRoutes } from "./email.js";
+import { tFor } from "../i18n.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
 interface SessionUserCtx {
   id: string;
   role: Role;
+  /** Derived at session build (age plan, Phase 0); present whenever the ctx
+   *  came from getSessionUser (the admin preHandler). Absent reads as NOT
+   *  adult — age-gated writes fail closed. */
+  isAdult?: boolean;
+  /** users.locale (i18n Phase 3): the admin's own language for refusal copy
+   *  bounced back at THEM (e.g. setRoomNsfw's gates). */
+  locale?: string | null;
 }
 
 /**
@@ -861,6 +871,8 @@ export async function registerAdminRoutes(
     isDefault: z.boolean().optional(),
     /** "flat" = chronological chat; "nested" = forum-style threads with persistent top-level posts and grouped replies. Enables thread-category management. */
     replyMode: z.enum(["flat", "nested"]).optional(),
+    /** Create the room already flagged 18+ (age plan, Phase 2; adult admins only, never on the default landing). */
+    isNsfw: z.boolean().optional(),
   });
   const adminRoomPatchBody = z.object({
     name: z.string().min(1).max(40).regex(ROOM_NAME_RX).optional(),
@@ -882,6 +894,9 @@ export async function registerAdminRoutes(
      * `rooms.message_expiry_minutes`.
      */
     messageExpiryMinutes: z.number().int().min(1).max(43_200).nullable().optional(),
+    /** 18+ room flag (age plan, Phase 2). Routed through the shared toggle
+     *  core (adult-only, landing-room rule, minor eviction, audit). */
+    isNsfw: z.boolean().optional(),
   });
 
   app.post<{ Body: unknown }>("/admin/rooms", async (req, reply) => {
@@ -891,6 +906,18 @@ export async function registerAdminRoutes(
     if (body.type === "private" && !body.password) {
       reply.code(400);
       return { error: "private rooms require a password" };
+    }
+    // 18+ at creation (age plan, Phase 2): adult accounts only, and never on
+    // the default landing room — minors need somewhere to arrive (§E).
+    if (body.isNsfw) {
+      if (sessionUser.isAdult !== true) {
+        reply.code(403);
+        return { error: tFor(sessionUser.locale, "errors:server.common.nsfwSettingAdultsOnly") };
+      }
+      if (body.isDefault) {
+        reply.code(400);
+        return { error: tFor(sessionUser.locale, "errors:server.servers.landingCantBeNsfw") };
+      }
     }
     // Name uniqueness (case-insensitive). Mirrors the user-facing /go and
     // /private guards.
@@ -932,6 +959,7 @@ export async function registerAdminRoutes(
       lastOwnerUserId: sessionUser.id,
       isSystem: body.isSystem ?? true,
       isDefault: body.isDefault ?? false,
+      isNsfw: body.isNsfw ?? false,
       replyMode: body.replyMode ?? "flat",
       // Home admin-created rooms in the default (is_system) server so the row
       // is never NULL (the column has no DB default). The site-admin "create
@@ -972,6 +1000,17 @@ export async function registerAdminRoutes(
         ))
         .limit(1))[0];
       if (dup) { reply.code(409); return { error: "a room with that name already exists" }; }
+    }
+
+    // Landing-room rule cross-check (age plan §E): making an 18+ room the
+    // default landing is as broken as flagging the landing 18+ — evaluate
+    // the COMBINED post-patch state so neither ordering slips through.
+    const finalNsfw = body.isNsfw ?? room.isNsfw;
+    const finalDefault = body.isDefault ?? room.isDefault;
+    if (finalNsfw && finalDefault) {
+      reply.code(400);
+      const su = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+      return { error: tFor(su?.locale, "errors:server.servers.landingCantBeNsfw") };
     }
 
     // Type/password handling: switching to private requires a password
@@ -1021,7 +1060,34 @@ export async function registerAdminRoutes(
       }
     }
 
-    await db.update(rooms).set(update).where(eq(rooms.id, room.id));
+    // 18+ flag goes through the shared toggle core (adult-only write, minor
+    // eviction, `room_nsfw_update` audit, system line, broadcasts) — the
+    // combined landing check above already ran, and the patched isDefault is
+    // threaded so the core's own landing resolution sees post-patch state.
+    if (body.isNsfw !== undefined && body.isNsfw !== room.isNsfw) {
+      const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser;
+      const result = await setRoomNsfw({
+        db,
+        io,
+        room: { ...room, isDefault: finalDefault },
+        value: body.isNsfw,
+        actor: {
+          id: sessionUser?.id ?? "",
+          isAdult: sessionUser?.isAdult === true,
+          locale: sessionUser?.locale ?? null,
+        },
+      });
+      if (!result.ok) {
+        reply.code(result.code === "AGE_RESTRICTED" ? 403 : 400);
+        return { error: result.message };
+      }
+    }
+
+    // An isNsfw-only patch leaves `update` empty; drizzle rejects an empty
+    // SET and the toggle core already broadcast, so skip the generic write.
+    if (Object.keys(update).length > 0) {
+      await db.update(rooms).set(update).where(eq(rooms.id, room.id));
+    }
 
     // If the metadata changed, refresh anyone currently in the room so they
     // see the new name/topic/replyMode without manually /refresh-ing.
@@ -1094,9 +1160,12 @@ export async function registerAdminRoutes(
 
     for (const s of remoteSockets) {
       s.leave(`room:${room.id}`);
+      // Per-recipient locale: each occupant's session snapshot carries
+      // users.locale, so the transient eviction notice localizes per socket.
+      const occupantLocale = (s.data as { user?: { locale?: string | null } }).user?.locale;
       s.emit("error:notice", {
         code: "ROOM_DELETED",
-        message: `Room "${room.name}" was removed by an administrator.`,
+        message: tFor(occupantLocale, "errors:server.rooms.removedByAdmin", { name: room.name }),
       });
       if (landing) {
         s.join(`room:${landing.id}`);
@@ -1286,6 +1355,18 @@ export async function registerAdminRoutes(
     antiSpamEnabled: z.boolean().optional(),
     /** Content auto-moderation master switch. */
     automodEnabled: z.boolean().optional(),
+    /** Minor language filter master switch (age plan Phase 7): mask strong language for under-18 viewers. */
+    minorFilterEnabled: z.boolean().optional(),
+    /**
+     * Minor-filter overlay lists (full replacement on each save). Bounds are
+     * generous sanity caps, not tuning knobs: 500 entries × 64 chars each is
+     * far beyond any hand-curated word list yet keeps the JSON columns and
+     * the matcher compile bounded.
+     */
+    minorFilterTerms: z.array(z.string().max(64)).max(500).optional(),
+    minorFilterAllow: z.array(z.string().max(64)).max(500).optional(),
+    /** Registration minimum-age switch (age plan): true = 13+, false = 18+. */
+    allowMinorSignups: z.boolean().optional(),
     /** Splash page featured-worlds carousel toggle. */
     featuredWorldsEnabled: z.boolean().optional(),
     /** Splash stat: rolling 24h chat message count. Independent toggle. */
@@ -1365,6 +1446,10 @@ export async function registerAdminRoutes(
       serversEnabled: s.serversEnabled,
       antiSpamEnabled: s.antiSpamEnabled,
       automodEnabled: s.automodEnabled,
+      allowMinorSignups: s.allowMinorSignups,
+      minorFilterEnabled: s.minorFilterEnabled,
+      minorFilterTerms: s.minorFilterTerms,
+      minorFilterAllow: s.minorFilterAllow,
       featuredWorldsEnabled: s.featuredWorldsEnabled,
       splashMessages24hEnabled: s.splashMessages24hEnabled,
       profileDesignerEnabled: s.profileDesignerEnabled,
@@ -1519,6 +1604,23 @@ export async function registerAdminRoutes(
     // Content auto-moderation. Sitewide behavior change → edit_site_settings.
     if (body.automodEnabled !== undefined) {
       patch.automodEnabled = body.automodEnabled;
+    }
+    // Minor language filter (masking for under-18 viewers). Sitewide
+    // behavior change → edit_site_settings; audited below via the shared
+    // settings_update entry like every other field on this route.
+    if (body.minorFilterEnabled !== undefined) {
+      patch.minorFilterEnabled = body.minorFilterEnabled;
+    }
+    if (body.minorFilterTerms !== undefined) {
+      patch.minorFilterTerms = body.minorFilterTerms;
+    }
+    if (body.minorFilterAllow !== undefined) {
+      patch.minorFilterAllow = body.minorFilterAllow;
+    }
+    // Registration minimum age (age plan). Sitewide behavior change →
+    // edit_site_settings (deliberately NOT a branding field).
+    if (body.allowMinorSignups !== undefined) {
+      patch.allowMinorSignups = body.allowMinorSignups;
     }
     if (body.newUserWelcomeHtml !== undefined) {
       // Sanitize via the bio allow-list (same trust posture as welcomeHtml /
@@ -1782,6 +1884,26 @@ export async function registerAdminRoutes(
         label: h.label,
       })),
     };
+  });
+
+  /* Minor-language-filter preview: type a sentence, see exactly what an
+   * under-18 member would see. Evaluates the SAVED filter config through
+   * the same singleton every live surface uses (parity rule shared with
+   * the automod tester above). masked=null means the sentence shows as
+   * written — clean, or the filter is switched off.
+   *
+   * Gated on VIEW (not edit): the Settings tab renders the Try-it box for
+   * anyone who can open the tab, and this is a pure read of the saved
+   * config (writes nothing, reveals nothing the settings GET doesn't
+   * already show). Edit-gating it left read-only delegates with a box
+   * that silently did nothing. */
+  const minorFilterPreviewBody = z.object({ text: z.string().min(1).max(2000) }).strict();
+  app.post<{ Body: unknown }>("/admin/minor-filter/preview", async (req, reply) => {
+    if (!(await requirePermission(req, reply, "view_admin_settings"))) return;
+    let body: z.infer<typeof minorFilterPreviewBody>;
+    try { body = minorFilterPreviewBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    return { masked: maskForMinors(body.text) };
   });
 
   /* ---------- logo upload ----------

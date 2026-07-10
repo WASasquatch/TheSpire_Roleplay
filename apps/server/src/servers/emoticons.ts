@@ -64,6 +64,7 @@ import { notify } from "../notifications/engine.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 import { parseSheetCells } from "../reactions.js";
+import { tFor } from "../i18n.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -221,7 +222,7 @@ export async function registerServerEmoticonRoutes(
     req: Parameters<typeof getSessionUser>[0],
     serverId: string,
   ): Promise<
-    | { ok: true; me: { id: string; role: import("@thekeep/shared").Role }; serverId: string }
+    | { ok: true; me: { id: string; role: import("@thekeep/shared").Role; locale: string | null }; serverId: string }
     | { fail: { code: number; error: string } }
   > {
     if (!areServersEnabled(await getSettings(db))) return { fail: { code: 404, error: "not found" } };
@@ -231,7 +232,7 @@ export async function registerServerEmoticonRoutes(
     const a = await serverAuthority(db, me, serverId);
     if (!a.server) return { fail: { code: 404, error: "no server" } };
     if (!serverCan(a, "manage_emoticons")) return { fail: { code: 403, error: "forbidden" } };
-    return { ok: true, me: { id: me.id, role: me.role }, serverId };
+    return { ok: true, me: { id: me.id, role: me.role, locale: me.locale }, serverId };
   }
 
   /* ---------- List sheets: this server's (editable) + shared (read-only) ---------- */
@@ -416,7 +417,7 @@ export async function registerServerEmoticonRoutes(
         reply.code(409);
         return {
           error: "submission is pending review",
-          message: "Use the Reject button in the submissions queue to refund the submitter's Currency. Direct delete would orphan their payment.",
+          message: tFor(g.me.locale, "errors:server.emoticons.pendingRejectViaQueue"),
         };
       }
 
@@ -541,13 +542,19 @@ export async function registerServerEmoticonRoutes(
 
       io.emit("emoticons:updated");
       if (row.createdByUserId) {
+        // Bell-row copy renders in the SUBMITTER's language.
+        const submitterLocale = (await db
+          .select({ locale: users.locale })
+          .from(users)
+          .where(eq(users.id, row.createdByUserId))
+          .limit(1))[0]?.locale ?? null;
         await notify(db, io, {
           userId: row.createdByUserId,
           category: "server",
           kind: "emoticon_approved",
           serverId: g.serverId,
-          title: "Emoticon approved",
-          snippet: `Your emoticon :${row.slug}: was approved.`,
+          title: tFor(submitterLocale, "notifications:server.emoticonApprovedTitle"),
+          snippet: tFor(submitterLocale, "notifications:server.emoticonApprovedSnippet", { slug: row.slug }),
           target: { kind: "server", id: g.serverId },
         });
       }
@@ -650,15 +657,28 @@ export async function registerServerEmoticonRoutes(
       io.emit("emoticons:updated");
 
       if (row.createdByUserId) {
+        // Bell-row copy renders in the SUBMITTER's language; a reviewer-typed
+        // reason is content and passes through as written.
+        const submitterLocale = (await db
+          .select({ locale: users.locale })
+          .from(users)
+          .where(eq(users.id, row.createdByUserId))
+          .limit(1))[0]?.locale ?? null;
         await notify(db, io, {
           userId: row.createdByUserId,
           category: "server",
           kind: "emoticon_rejected",
           serverId: g.serverId,
-          title: "Emoticon declined",
+          title: tFor(submitterLocale, "notifications:server.emoticonDeclinedTitle"),
           snippet: body.reason
             ? body.reason
-            : `Your emoticon :${row.slug}: was declined${refundAmount > 0 ? " and your currency refunded" : ""}.`,
+            : tFor(
+                submitterLocale,
+                refundAmount > 0
+                  ? "notifications:server.emoticonDeclinedRefundSnippet"
+                  : "notifications:server.emoticonDeclinedSnippet",
+                { slug: row.slug },
+              ),
           target: { kind: "server", id: g.serverId },
         });
       }

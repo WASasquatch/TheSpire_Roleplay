@@ -1,0 +1,1113 @@
+{
+  "shared": {
+    "noUserNamed": "No hay ningún usuario llamado \"{{name}}\".",
+    "noUserOrCharacter": "No hay ningún usuario ni personaje llamado \"{{name}}\".",
+    "roomNotFound": "No se encontró la sala.",
+    "itemNotFound": "No hay ningún objeto llamado \"{{name}}\".",
+    "itemNotUsable": "{{name}} no se puede usar en este momento.",
+    "sessionConflict": "Ya hay una sesión de {{kind}} en curso en esta sala. Espera a que termine."
+  },
+  "identity": {
+    "ambiguousTitle": "\"{{name}}\" coincidió con {{total}} identidades",
+    "ambiguousBody": "Repite el comando con uno de estos:\n{{tokens}}"
+  },
+  "away": {
+    "notAway": "No estás en modo ausente."
+  },
+  "color": {
+    "currentCharacter": "Color actual de este personaje: {{color}}. Uso: /color <hex>  |  /color clear",
+    "currentOoc": "Color actual de tu cuenta OOC: {{color}}. Uso: /color <hex>  |  /color clear",
+    "noneCharacter": "Este personaje no tiene color configurado. Uso: /color <hex>  (p. ej. /color 990000)",
+    "noneOoc": "Tu cuenta OOC no tiene color configurado. Uso: /color <hex>  (p. ej. /color 990000)",
+    "clearedCharacter": "Color de chat del personaje borrado. Se usará tu color OOC.",
+    "clearedOoc": "Color de chat OOC borrado.",
+    "invalidHex": "El color debe ser un valor hexadecimal: p. ej. /color 990000 o /color #abc.",
+    "setCharacter": "Color de chat del personaje establecido en {{color}}.",
+    "setOoc": "Color de chat OOC establecido en {{color}}."
+  },
+  "mood": {
+    "empty": "El ánimo no puede estar vacío (usa /mood clear para quitarlo)."
+  },
+  "me": {
+    "usage": "Uso: /{{command}} <action>"
+  },
+  "users": {
+    "noArgs": "/users no lleva argumentos. Usa /whois <name> para ver a alguien en específico."
+  },
+  "bookmarks": {
+    "noArgs": "/bookmarks no lleva argumentos. Abre la ventana y edita las categorías ahí."
+  },
+  "export": {
+    "badDuration": "No se pudo leer esa duración. Prueba /export 5h, /export 90m o /export 2d (agrega 'light' para una página con fondo claro).",
+    "clamped": "Eso supera el tiempo que el chat se conserva aquí, así que se exportarán los últimos {{duration}}."
+  },
+  "icon": {
+    "permission": "Solo el propietario de la sala o un mod pueden cambiar el ícono de la sala.",
+    "usage": "Uso: /icon <emoji or image URL>  (o /icon clear)",
+    "invalid": "Escribe un solo emoji, un glifo corto o una URL de imagen http(s) (máx. 500 caracteres)."
+  },
+  "item": {
+    "usage": "Uso: /item <name-or-alias>"
+  },
+  "refresh": {
+    "slowModeOff": "Modo lento desactivado — se reanudaron las actualizaciones en tiempo real.",
+    "badArg": "Uso: /refresh [seconds|off]. Se recibió \"{{arg}}\".",
+    "outOfRange": "La actualización automática debe estar entre {{min}} y {{max}} segundos (o 'off').",
+    "slowModeOn": "Modo lento activado: la lista de usuarios y los indicadores de escritura se pausan y se resincronizan cada {{seconds}}s (alivia la carga en dispositivos más lentos). El chat sigue en vivo. /refresh off para detenerlo."
+  },
+  "eidolon": {
+    "usage": "Uso: /eidolon emote",
+    "arcadeLocked": "El Spire Arcade no está disponible para ti.",
+    "notUnlocked": "No has desbloqueado el Eidolon Tamer en esta identidad.",
+    "noFamiliar": "Todavía no tienes un familiar. Incuba uno en el Spire Arcade."
+  },
+  "earningUi": {
+    "noArgs": "{{command}} no lleva argumentos."
+  },
+  "roll": {
+    "badFormat": "Formato de dados no válido. Prueba /roll 1d20, /roll 3d6 o /roll 1d20+3.",
+    "badCount": "La cantidad de dados debe ser de 1 a {{max}}.",
+    "badSides": "Las caras deben ser de 2 a {{max}}.",
+    "badModifier": "El modificador debe estar entre -{{max}} y +{{max}}.",
+    "dcCurrent": "La dificultad de la sala es {{dc}}. Para pasar, una tirada debe igualarla o superarla.",
+    "dcNone": "Esta sala no tiene dificultad configurada. Propietarios/mods pueden fijarla con /roll dc <n>.",
+    "dcPermission": "Solo el propietario de la sala, un mod o un admin pueden fijar la dificultad.",
+    "dcInvalid": "La dificultad debe ser un número entero de 1 a {{max}}. Prueba /roll dc 15.",
+    "usage": "Uso: /roll <NdM[±X]>. Prueba /roll 1d20, /roll 3d6, /roll 1d20+3.",
+    "initUsage": "La iniciativa acepta un modificador plano opcional, p. ej. /init +3.",
+    "initModifierRange": "El modificador de iniciativa debe estar entre -{{max}} y +{{max}}."
+  },
+  "scene": {
+    "permission": "Solo el propietario de la sala o un mod pueden marcar escenas.",
+    "usage": "Uso: /scene <title> o /scene end.",
+    "imageUrlInvalid": "La URL de la imagen de la escena debe ser http(s) y tener 500 caracteres o menos."
+  },
+  "reply": {
+    "usage": "Uso: /reply <message-id> <text>",
+    "empty": "La respuesta está vacía.",
+    "notAvailable": "Ese mensaje ya no está disponible para responder.",
+    "badKind": "Solo puedes responder a mensajes de chat.",
+    "topicLocked": "Este tema está cerrado y no acepta respuestas nuevas."
+  },
+  "trash": {
+    "usage": "Uso: /trash <duration> - p. ej. /trash 30m para eliminar los últimos 30 minutos.",
+    "forum": "/trash no está disponible en salas de foro - elimina los temas uno por uno.",
+    "badDuration": "Duración no válida. Usa formas como 5m, 30m, 1h, 1h30m, 1d.",
+    "none": "No hay mensajes de los últimos {{duration}} para eliminar."
+  },
+  "poll": {
+    "forMissing": "Agrega una duración después de --for, p. ej. --for 2h.",
+    "forInvalid": "Duración de --for no válida. Usa 30m, 2h o 1d.",
+    "usage": "Uso: /poll <question> | <option1> | <option2>. Prueba --multi, --secret o --for 2h.",
+    "noQuestion": "Empieza con la pregunta y luego las opciones: /poll Question? | A | B",
+    "tooFew": "Una encuesta necesita al menos {{min}} opciones, separadas por | . Ejemplo: /poll {{question}} | A | B",
+    "tooMany": "Una encuesta puede tener {{max}} opciones como máximo."
+  },
+  "npc": {
+    "usage": "Uso: /npc <Name> <text>  (o /npc <Name> /me <action>)",
+    "disabled": "/npc está desactivado en esta sala.",
+    "badName": "El nombre del NPC debe tener de 1 a 40 caracteres: letras, números, espacios, _ - '",
+    "empty": "La línea del NPC está vacía."
+  },
+  "npcMode": {
+    "usage": "Uso: /npcmode on  (o)  /npcmode off",
+    "permission": "Solo el propietario de la sala o un mod pueden cambiar el modo NPC."
+  },
+  "whisper": {
+    "usage": "Uso: /whisper <username> <text>",
+    "empty": "El susurro está vacío.",
+    "self": "Susurrarte a ti mismo no sirve de mucho."
+  },
+  "block": {
+    "list": "Has bloqueado a: {{names}}",
+    "listEmpty": "No has bloqueado a nadie. Usa /block <name> para agregar a alguien.",
+    "self": "No puedes bloquearte a ti mismo.",
+    "staff": "No puedes bloquear a {{name}} - los moderadores y admins no se pueden bloquear.",
+    "blocked": "Bloqueaste a {{name}}. Ya no podrán verse. Usa /unblock {{name}} (o Perfil -> Privacidad) para deshacerlo.",
+    "already": "Ya bloqueaste a {{name}}."
+  },
+  "unblock": {
+    "usage": "Uso: /unblock <name>",
+    "notBlocked": "No habías bloqueado a {{name}}.",
+    "stillBlocked": "Quitaste tu bloqueo sobre {{name}}, pero esa persona también te bloqueó, así que todavía no pueden verse.",
+    "done": "Desbloqueaste a {{name}}."
+  },
+  "ignore": {
+    "list": "Estás ignorando a: {{names}}",
+    "listEmpty": "Tu lista de ignorados está vacía. Usa /ignore <name> para agregar a alguien.",
+    "cleared": "Se vació la lista de ignorados.",
+    "self": "No puedes ignorarte a ti mismo.",
+    "removed": "Ya no ignoras a {{name}}.",
+    "added": "Ahora ignoras a {{name}}. Usa /unignore {{name}} (o /ignore {{name}} otra vez) para deshacerlo."
+  },
+  "unignore": {
+    "usage": "Uso: /unignore <username>",
+    "notIgnored": "No estabas ignorando a {{name}}."
+  },
+  "friend": {
+    "usage": "Uso: /friend <name>",
+    "self": "Agregarte a ti mismo como amigo no sirve de mucho.",
+    "alreadyFriends": "{{name}} y tú ya son amigos.",
+    "pending": "La solicitud de amistad a {{name}} sigue pendiente, espera a que use /accept.",
+    "acceptedTheirs": "Aceptaste la solicitud de amistad de {{name}}.",
+    "requestSent": "Solicitud de amistad enviada a {{name}}.",
+    "noRequest": "No hay ninguna solicitud de amistad pendiente de {{name}}."
+  },
+  "accept": {
+    "usage": "Uso: /accept <name>",
+    "done": "{{name}} y tú ahora son amigos."
+  },
+  "decline": {
+    "usage": "Uso: /decline <name>",
+    "done": "Rechazaste la solicitud de amistad de {{name}}."
+  },
+  "unfriend": {
+    "usage": "Uso: /unfriend <name>",
+    "notFriended": "{{name}} no está en tu lista de amigos ni en tu bandeja de entrada.",
+    "done": "Quitaste a {{name}} de tu lista de amigos."
+  },
+  "friends": {
+    "empty": "La lista de amigos de esta identidad está vacía. Usa /friend <name> para enviar una solicitud.",
+    "unknown": "(desconocido)",
+    "list": "Amigos: {{names}}"
+  },
+  "char": {
+    "badName": "El nombre del personaje debe tener de 1 a 40 caracteres: letras, números, espacios, _ - '",
+    "duplicate": "Ya tienes un personaje llamado \"{{name}}\".",
+    "limit": "Límite de {{max}} personajes por cuenta.",
+    "notFound": "No hay ningún personaje llamado \"{{name}}\".",
+    "listTitle": "Tus personajes",
+    "listEmptyBody": "Todavía no tienes personajes.\nCrea uno con /char create <name>.",
+    "listTitleCount": "Tus personajes ({{total}})",
+    "badSubcommand": "Subcomando desconocido. Prueba /char create, switch, edit, delete, clear (o 'switch OOC'), list."
+  },
+  "incognito": {
+    "on": "Ahora estás en modo incógnito como \"{{alias}}\". La sala te ve como si te hubieras ido. Usa /incognito de nuevo para volver.",
+    "off": "Estás de vuelta. La sala te ve como si acabaras de entrar.",
+    "alreadyOn": "Ya estás en modo incógnito.",
+    "alreadyOff": "No estás en modo incógnito.",
+    "aliasUsage": "Uso: /incognito alias <name>",
+    "aliasTooLong": "El alias debe tener 60 caracteres o menos.",
+    "aliasSet": "Alias de incógnito establecido en \"{{alias}}\".",
+    "exitUsage": "Uso: /incognito exit <message>",
+    "exitTooLong": "El mensaje de salida debe tener 280 caracteres o menos.",
+    "exitSaved": "Mensaje de salida de incógnito guardado.",
+    "returnUsage": "Uso: /incognito return <message>",
+    "returnTooLong": "El mensaje de regreso debe tener 280 caracteres o menos.",
+    "returnSaved": "Mensaje de regreso de incógnito guardado.",
+    "cleared": "Alias y mensajes personalizados de incógnito restablecidos a los predeterminados."
+  },
+  "request": {
+    "noKinds": "No hay tipos de título configurados.",
+    "kinds": "Títulos disponibles: {{kinds}}. Uso: /request <kind> <user>.",
+    "needTarget": "Uso: /request {{kind}} <user-or-character>",
+    "failed": "No se pudo enviar la solicitud.",
+    "sent": "Solicitud enviada a {{name}}. Le aparecerá un aviso de Aceptar | Rechazar."
+  },
+  "dissolve": {
+    "usage": "Uso: /dissolve [kind] <user-or-character>",
+    "noTitle": "No tienes títulos aceptados con {{name}}.",
+    "ambiguous": "Tienes varios títulos con {{name}} ({{kinds}}). Especifica cuál: /dissolve <kind> <name>.",
+    "failed": "No se pudo disolver el título.",
+    "sent": "Solicitud de disolución enviada a {{name}}. Le aparecerá un aviso de Aceptar | Rechazar."
+  },
+  "titles": {
+    "none": "{{name}} no tiene títulos mutuos.",
+    "list": "{{name}}: {{titles}}"
+  },
+  "write": {
+    "noStory": "No tienes ninguna historia con el slug \"{{slug}}\". /write new para empezar una."
+  },
+  "story": {
+    "usage": "Uso: /story <slug> [chapter <N>]",
+    "chapterUsage": "El número de capítulo debe ser un entero positivo.",
+    "usageShort": "Uso: /story <slug>",
+    "notFound": "No hay ninguna historia con el slug \"{{slug}}\"."
+  },
+  "scriptorium": {
+    "unknownTab": "La pestaña \"{{tab}}\" no existe. Prueba /scriptorium find | my | reading | following."
+  },
+  "expiry": {
+    "current": "Los mensajes de esta sala se borran automáticamente después de {{minutes}} minutos.",
+    "none": "Esta sala no tiene caducidad propia; solo se aplica la configuración global de retención.",
+    "permission": "Solo el propietario de la sala / mod / admin pueden cambiar la caducidad.",
+    "invalid": "La caducidad debe ser un número entero de minutos entre 1 y 43200 (30 días). Usa /expiry off para quitarla."
+  },
+  "replyMode": {
+    "current": "Modo de respuestas de esta sala: {{mode}}.",
+    "invalid": "El modo de respuestas debe ser 'flat' o 'nested'.",
+    "forumBoard": "Esta sala es un tablero de foro - los tableros siempre usan respuestas anidadas.",
+    "permission": "Solo el propietario de la sala / mod / admin pueden cambiar el modo de respuestas.",
+    "already": "El modo de respuestas ya es {{mode}}."
+  },
+  "nsfw": {
+    "on18": "Esta sala es 18+. Los miembros menores de 18 no pueden verla.",
+    "effectiveCommunity": "Esta sala es 18+ porque toda la comunidad es 18+.",
+    "off18": "Esta sala no es 18+. Cualquiera puede verla.",
+    "usage": "Usa /nsfw on o /nsfw off. /nsfw sin argumentos muestra la configuración actual.",
+    "permission": "Solo el propietario de la sala / mod / admin pueden cambiar la configuración de 18+.",
+    "already18": "Esta sala ya es 18+.",
+    "alreadyNot18": "Esta sala ya está marcada como no 18+."
+  },
+  "list": {
+    "title": "Salas públicas",
+    "empty": "Todavía no existen salas públicas.",
+    "titleCount": "Salas públicas ({{total}})"
+  },
+  "clear": {
+    "badDuration": "Duración no válida. Usa formas como 5m, 30m, 1h, 1h30m, 1d, o solo /clear para limpiar tu propia vista.",
+    "noPermission": "Solo los moderadores pueden limpiar mensajes para todos. /clear sin argumentos oculta los mensajes anteriores solo en tu vista.",
+    "forum": "/clear <duration> no está disponible en salas de foro. Ahí quita los temas uno por uno.",
+    "none": "No hay mensajes de los últimos {{duration}} para ocultar."
+  },
+  "find": {
+    "usage": "Uso: /find <name> - busca salas por nombre parcial.",
+    "title": "Salas que coinciden con \"{{query}}\"",
+    "noMatch": "Ninguna sala coincide con \"{{query}}\".",
+    "tagPrivate": "privada",
+    "tagArchived": "archivada",
+    "titleTruncated": "Salas que coinciden con \"{{query}}\" (primeras {{cap}} de {{total}}+)",
+    "titleCount": "Salas que coinciden con \"{{query}}\" ({{total}})"
+  },
+  "room": {
+    "creationDisabled": "Un administrador desactivó la creación de salas por usuarios.",
+    "limit": "Ya tienes {{owned}} salas - el límite por usuario es {{max}}.",
+    "badName": "El nombre de la sala debe tener de 1 a 40 caracteres: letras, números, espacios, _ - '",
+    "badNameShort": "Nombre de sala no válido.",
+    "passwordIgnored": "{{name}} es una sala pública - la contraseña que escribiste se ignoró.",
+    "badPassword": "Contraseña incorrecta.",
+    "duplicate": "Ya existe una sala llamada \"{{name}}\"."
+  },
+  "go": {
+    "usage": "Uso: /go <room> [password]"
+  },
+  "private": {
+    "usage": "Uso: /private <name> <password>"
+  },
+  "invite": {
+    "usage": "Uso: /invite <username>"
+  },
+  "topic": {
+    "noneSet": "(sin tema definido)",
+    "current": "Tema: {{topic}}",
+    "permission": "Solo el propietario de la sala o un mod pueden cambiar el tema."
+  },
+  "slug": {
+    "current": "Identificador de enlace de la sala: {{slug}}. Pega {room:{{slug}}} en el chat o en un anuncio para enlazar aquí.",
+    "none": "Esta sala todavía no tiene identificador de enlace.",
+    "permission": "Solo el propietario de la sala o un mod pueden cambiar el identificador de enlace de la sala.",
+    "invalid": "El identificador debe usar letras, números y guiones (p. ej. the-tavern).",
+    "taken": "El identificador \"{{slug}}\" ya lo usa otra sala."
+  },
+  "describe": {
+    "title": "Descripción de la sala - {{name}}",
+    "thisRoom": "esta sala",
+    "noneSet": "(sin descripción)",
+    "permission": "Solo el propietario de la sala o un mod pueden cambiar la descripción.",
+    "tooLong": "La descripción tiene un límite de {{max}} caracteres."
+  },
+  "theater": {
+    "kind": {
+      "video": "archivo de video",
+      "youtube": "YouTube",
+      "vimeo": "Vimeo",
+      "live": "transmisión en vivo",
+      "embed": "embed (solo visualización)"
+    },
+    "statusOn": "El teatro está ENCENDIDO (loop: {{loop}}).",
+    "statusOff": "El teatro está APAGADO. Propietario/mod: /theater on para encenderlo.",
+    "playlistEmpty": "La lista de reproducción está vacía - agrega un video con /theater add <url>.",
+    "permChange": "Solo el propietario de la sala / mod / admin pueden cambiar la configuración del teatro.",
+    "badUrl": "Indica una URL multimedia http(s) completa, p. ej. /theater add https://example.com/clip.mp4",
+    "badLiveUrl": "Las transmisiones en vivo deben ser un enlace https (un enlace http simple no carga en este sitio). Consulta la guía de transmisión del Teatro en Ayuda.",
+    "playlistFull": "La lista de reproducción está llena (50 fuentes). Quita algunas con /theater remove <n>.",
+    "queued_one": "Se agregó a la cola {{count}} video de esa lista de reproducción de YouTube.",
+    "queued_other": "Se agregaron a la cola {{count}} videos de esa lista de reproducción de YouTube.",
+    "queued_many": "Se agregaron a la cola {{count}} videos de esa lista de reproducción de YouTube.",
+    "queuedSkipped_one": "Se agregó a la cola {{count}} video de esa lista de reproducción de YouTube ({{skipped}} omitidos - el límite de la lista es 50).",
+    "queuedSkipped_other": "Se agregaron a la cola {{count}} videos de esa lista de reproducción de YouTube ({{skipped}} omitidos - el límite de la lista es 50).",
+    "queuedSkipped_many": "Se agregaron a la cola {{count}} videos de esa lista de reproducción de YouTube ({{skipped}} omitidos - el límite de la lista es 50).",
+    "playlistPrivateOrEmpty": "la lista de reproducción parece privada o vacía",
+    "expandFailedQueuedSingle": "No se pudo expandir esa lista de reproducción de YouTube — {{detail}}. Se agregó solo el video a la cola.",
+    "expandFailed": "No se pudo expandir esa lista de reproducción de YouTube — {{detail}}.",
+    "kindLive": "{{kind}} en vivo",
+    "added": "Agregado a la lista de reproducción del teatro (#{{position}}, {{kind}}): {{source}}",
+    "permStart": "No tienes permiso para iniciar un teatro. Pídele acceso al teatro a un admin.",
+    "alreadyOn": "El modo teatro ya está encendido.",
+    "alreadyOff": "El modo teatro ya está apagado.",
+    "badLoop": "El loop debe ser 'off' (parar al final), 'one' (repetir el actual) o 'all' (avanzar + repetir la lista).",
+    "loopAlready": "El loop ya está en {{mode}}.",
+    "badIndex": "Indica una posición de la lista entre 1 y {{max}}. Consulta /theater list.",
+    "removed": "Quitado de la lista de reproducción del teatro: {{source}}",
+    "alreadyEmpty": "La lista de reproducción ya está vacía.",
+    "cleared": "Se vació la lista de reproducción del teatro.",
+    "usage": "Uso: /theater on|off | add <url> [title] | remove <n> | clear | loop off|one|all | list"
+  },
+  "world": {
+    "noneLinkedAttach": "Ningún mundo está vinculado a esta sala. Usa /world link <slug> para vincular uno.",
+    "viewUsage": "Uso: /world view <slug>",
+    "notVisible": "No hay ningún mundo visible con el slug \"{{slug}}\".",
+    "linkPermission": "Solo el propietario de la sala / mod / admin pueden vincular un mundo.",
+    "linkUsage": "Uso: /world link <slug>",
+    "notOwned": "No tienes un mundo con el slug \"{{slug}}\". Explora el catálogo con /world catalog para usar el mundo abierto de otra persona.",
+    "unlinkPermission": "Solo el propietario de la sala / mod / admin pueden desvincular el mundo.",
+    "noneLinked": "Ningún mundo está vinculado a esta sala.",
+    "joinNoneLinked": "Ningún mundo está vinculado a esta sala. Indica un slug, p. ej. /world join darkrealm.",
+    "notOpen": "\"{{name}}\" no está abierto a nuevos miembros.",
+    "inviteOnly": "\"{{name}}\" es solo con invitación. El autor agrega a los miembros directamente, pregúntale si quieres entrar.",
+    "applicationRequired": "\"{{name}}\" acepta miembros nuevos por solicitud. Se abrió el formulario para ti.",
+    "alreadyMember": "Ya eres miembro de \"{{name}}\" (con esta identidad).",
+    "joined": "Te uniste a \"{{name}}\".",
+    "leaveNoneLinked": "Ningún mundo está vinculado a esta sala. Indica un slug, p. ej. /world leave darkrealm.",
+    "notMember": "No eres miembro de \"{{name}}\" (con esta identidad).",
+    "left": "Abandonaste \"{{name}}\".",
+    "badSubcommand": "\"{{arg}}\" no es un subcomando de /world ni un slug de mundo visible. Prueba /world, /world view <slug>, /world catalog, etc.",
+    "usage": "Prueba /world, /world <slug>, /world view <slug>, /world link <slug>, /world unlink, /world catalog, /world join, /world leave o /world primary."
+  },
+  "kick": {
+    "permission": "Solo el propietario/mod de la sala o un admin del sitio pueden usar /kick.",
+    "usage": "Uso: /kick <username> [reason]",
+    "self": "Expulsarte a ti mismo no sirve de mucho.",
+    "adminProtected": "Solo otro admin puede expulsar a un admin del sitio.",
+    "keymaster": "El maestro de llaves no puede ser expulsado.",
+    "loggedOutReason": "{{name}} cerró tu sesión: {{reason}}",
+    "loggedOut": "{{name}} cerró tu sesión.",
+    "kickedReason": "{{name}} te expulsó de esta sala: {{reason}}",
+    "kicked": "{{name}} te expulsó de esta sala."
+  },
+  "mute": {
+    "permission": "Solo el propietario/mod de la sala o un admin del sitio pueden usar /mute.",
+    "usage": "Uso: /mute <username> <duration> [reason]. Ejemplos: /mute Alice 10m, /mute Bob 1h20m spam",
+    "badDuration": "Duración no válida. Usa formas como 5m, 30m, 1h, 1h20m, 7d.",
+    "self": "Silenciarte a ti mismo no sirve de mucho.",
+    "adminProtected": "Solo otro admin puede silenciar a un admin del sitio.",
+    "keymaster": "El maestro de llaves no puede ser silenciado."
+  },
+  "unmute": {
+    "permission": "Solo el propietario/mod de la sala o un admin del sitio pueden usar /unmute.",
+    "usage": "Uso: /unmute <username>",
+    "notMuted": "{{name}} no tiene un silencio activo aquí."
+  },
+  "promote": {
+    "permission": "Solo el propietario de la sala (o un admin del sitio) puede nombrar mods de sala.",
+    "usage": "Uso: /promote <username>",
+    "self": "Ya estás en lo más alto de esta sala."
+  },
+  "demote": {
+    "permission": "Solo el propietario de la sala (o un admin del sitio) puede degradar mods de sala.",
+    "usage": "Uso: /demote <username>",
+    "notMember": "{{name}} no está en la lista de miembros de esta sala.",
+    "owner": "Usa /demote solo con mods - los propietarios no pueden ser degradados de su propia sala.",
+    "notMod": "{{name}} no es mod."
+  },
+  "promoteAdmin": {
+    "usage": "Uso: /promoteadmin <username>",
+    "rank": "Solo un admin o superior puede otorgar el nivel de admin.",
+    "already": "{{name}} ya es admin del sitio."
+  },
+  "demoteAdmin": {
+    "usage": "Uso: /demoteadmin <username>",
+    "rank": "Solo un admin o superior puede revocar el nivel de admin.",
+    "isOwner": "{{name}} es propietario - degrádalo desde el panel de administración.",
+    "notAdmin": "{{name}} no es admin del sitio.",
+    "keymaster": "El maestro de llaves (el primer admin) no puede ser degradado.",
+    "self": "Para degradarte, pídeselo a otro admin - así la cadena de custodia se mantiene honesta."
+  },
+  "ban": {
+    "permission": "Solo el propietario de la sala o un admin del sitio pueden usar /ban. Los mods de sala pueden usar /kick o /mute.",
+    "usage": "Uso: /ban <username> [duration] [reason]",
+    "self": "Banearte a ti mismo no sirve de mucho.",
+    "adminProtected": "Solo otro admin puede banear a un admin del sitio.",
+    "keymaster": "El maestro de llaves no puede ser baneado.",
+    "bannedTimedReason": "{{name}} te baneó de esta sala por {{duration}}: {{reason}}",
+    "bannedTimed": "{{name}} te baneó de esta sala por {{duration}}.",
+    "bannedReason": "{{name}} te baneó de esta sala: {{reason}}",
+    "banned": "{{name}} te baneó de esta sala."
+  },
+  "unban": {
+    "permission": "Solo el propietario de la sala o un admin del sitio pueden usar /unban.",
+    "usage": "Uso: /unban <username>",
+    "notBanned": "{{name}} no tiene un baneo en esta sala."
+  },
+  "announce": {
+    "usage": "Uso: /announce [all] <text>",
+    "allPermission": "/announce all es solo para admins. Quita 'all' para anunciar en la sala actual.",
+    "allUsage": "Uso: /announce all <text>",
+    "permission": "Solo el propietario/mod de la sala o un admin del sitio pueden usar /announce."
+  },
+  "earning": {
+    "poolLine": "{{scope}}: {{currency}} Monedas · {{xp}} XP{{rankBit}}",
+    "masterScope": "Tu OOC principal",
+    "sendUsage": "Uso: /currency send <target> <amount>",
+    "badAmount": "La cantidad debe ser un número entero.",
+    "suggestionCharacter": "[personaje] {{name}}",
+    "suggestionUser": "[usuario] {{name}}",
+    "didYouMean": "{{message}} Prueba: {{suggestions}}",
+    "sent": "Enviaste {{amount}} Monedas de {{from}} a {{to}}.",
+    "yourMaster": "tu cuenta principal",
+    "characterTarget": "{{name}} (personaje)",
+    "currencyPrivate": "{{name}} mantiene sus Monedas en privado.",
+    "noRecord": "{{name}} todavía no tiene registro de Recompensas.",
+    "currencyView": "{{name}}: {{currency}} Monedas.",
+    "borderWithCost": "{{name}} ({{cost}} Monedas)",
+    "borders": "Bordes disponibles para comprar: {{borders}}. Abre Recompensas para comprarlos.",
+    "expView": "{{name}}: {{xp}} XP{{rankBit}}.",
+    "transfer": {
+      "transfersDisabled": "Las transferencias de Monedas están desactivadas.",
+      "amountWhole": "La cantidad debe ser un número entero.",
+      "amountRange": "La cantidad debe estar entre {{min}} y {{max}} Monedas.",
+      "targetNotFound": "No hay ningún usuario o personaje llamado \"{{name}}\".",
+      "matchesCharAndUser": "\"{{name}}\" coincide con un personaje y con un usuario, especifica un poco más.",
+      "matchesMultipleCharacters": "\"{{name}}\" coincide con varios personajes, especifica un poco más.",
+      "senderCharacterMissing": "No se encontró el personaje remitente.",
+      "senderMissing": "No se encontró al remitente.",
+      "selfSend": "No puedes enviarte Monedas.",
+      "crossServer": "No puedes enviar Monedas a una reserva de otro servidor.",
+      "senderTooNew": "Tu cuenta debe tener al menos {{days}} días para poder enviar Monedas.",
+      "recipientTooNew": "La cuenta del destinatario debe tener al menos {{days}} días.",
+      "dailySendCap": "Eso supera tu límite diario de envío. Te quedan {{remaining}} Monedas por hoy.",
+      "dailyReceiveCap": "{{name}} alcanzó su límite diario de recepción. Inténtalo de nuevo mañana.",
+      "insufficientFundsMaster": "Solo tienes {{balance}} Monedas en tu reserva principal.",
+      "insufficientFundsCharacter": "Solo tienes {{balance}} Monedas en la reserva de {{name}}.",
+      "failed": "La transferencia falló. Inténtalo de nuevo en un momento."
+    }
+  },
+  "items": {
+    "usage": "Uso: /{{command}} <name> [num] <item>",
+    "cantThrow": "{{name}} no se puede lanzar con /throw.",
+    "cantDrop": "{{name}} no se puede soltar con /drop.",
+    "cantGive": "{{name}} no se puede dar con /give.",
+    "ambiguous": "Varios usuarios coinciden con \"{{name}}\": {{matches}}. Especifica un poco más.",
+    "noTarget": "No hay nadie llamado \"{{name}}\" en esta sala.",
+    "cooldown": "Más despacio, puedes usar /{{command}} de nuevo en {{seconds}}s.",
+    "insufficientGive": "Tienes {{have}} {{item}}, no puedes dar {{want}}.",
+    "insufficientThrow": "Tienes {{have}} {{item}}, no puedes lanzar {{want}}.",
+    "insufficientDrop": "Tienes {{have}} {{item}}, no puedes soltar {{want}}."
+  },
+  "profile": {
+    "noArgs": "/profile no lleva argumentos. Usa /whois <name> para ver a otra persona."
+  },
+  "whois": {
+    "noProfiles": "No se encontraron perfiles.",
+    "noIdentityMatch": "Ninguna identidad coincide con \"{{name}}\".",
+    "noActiveMatch": "No hay ningún usuario ni personaje activo llamado \"{{name}}\"."
+  },
+  "duel": {
+    "incognito": "No puedes usar /duel estando en /incognito, cada línea de turno nombra a los participantes.",
+    "usage": "Uso: /duel <opponent> [class]",
+    "nonePending": "No hay ningún desafío de duelo pendiente en esta sala.",
+    "alreadyUnderway": "Ese duelo ya está en marcha.",
+    "notAddressed": "Este desafío no es para ti.",
+    "noneRunning": "No hay ningún duelo en curso en esta sala.",
+    "notActive": "Ese duelo no ha empezado, el oponente todavía no ha aceptado.",
+    "notFighter": "Solo los dos duelistas pueden actuar aquí.",
+    "status": "{{challenger}} ({{challengerClass}}) HP {{challengerHp}}/{{challengerMax}} vs {{defender}} ({{defenderClass}}) HP {{defenderHp}}/{{defenderMax}}. Turno de {{turn}}, quedan {{seconds}}s.",
+    "outOfTurn": "No es tu turno, esperando a {{name}}.",
+    "turnAnnounce": "Turno de {{name}} (HP {{hp}}/{{max}}). /duel attack | defend | parry | rest.",
+    "noOpponent": "Ningún usuario o personaje coincidió con \"{{name}}\".",
+    "self": "No puedes retarte a ti mismo."
+  },
+  "rps": {
+    "incognito": "No puedes abrir ni unirte a piedra, papel o tijera estando en /incognito, la línea del resultado mostraría tu nombre. Primero ejecuta /incognito para volver a ser visible.",
+    "active": "Ya hay una ronda en curso en esta sala (quedan {{seconds}}s). Ejecuta /rps <throw> para entrar.",
+    "usage": "Uso: /rps <rock|paper|scissors>. Las formas cortas también funcionan (r/p/s).",
+    "updated": "Cambiaste tu jugada a {{choice}}. (Quedan {{seconds}}s.)",
+    "entered": "Entraste con {{choice}}. (Quedan {{seconds}}s.)",
+    "gameConflict": "No puedes usar /rps aquí, ya hay una sesión de {{kind}} en curso."
+  },
+  "raffle": {
+    "incognito": "No puedes organizar una rifa estando en /incognito, el anuncio de inicio y la línea del resultado mostrarían tu nombre. Primero ejecuta /incognito para volver a ser visible.",
+    "usage": "Uso: /raffle item <name> [count]  |  /raffle currency <amount>  |  /raffle cancel  |  /raffle status",
+    "noneRunning": "No hay ninguna rifa en curso aquí ahora mismo.",
+    "sitewideNote": " (en todo el sitio)",
+    "status": "Rifa de {{name}}{{scopeNote}} por {{prize}}, {{claimants}} participante(s), quedan {{seconds}}s.",
+    "noneToCancel": "No hay ninguna rifa que cancelar.",
+    "cancelPermission": "Solo quien organiza la rifa puede cancelarla.",
+    "conflictRps": "Ya hay una ronda de piedra, papel o tijera en curso en esta sala. Espera a que termine.",
+    "conflictRaffle": "Ya hay una rifa en curso en esta sala. Espera a que termine.",
+    "conflictSitewide": "Ya hay una rifa en curso en todo el sitio. Espera a que termine.",
+    "itemUsage": "Uso: /raffle item <name> [count]",
+    "notEnoughItems": "Solo tienes {{have}} {{item}}. (Intentaste rifar {{tried}}.)",
+    "currencyUsage": "Uso: /raffle currency <amount>",
+    "notEnoughCurrency": "Tu billetera activa solo tiene {{balance}} Monedas. (Intentaste rifar {{amount}}.)",
+    "firstArg": "El primer argumento debe ser 'item', 'currency', 'cancel' o 'status'."
+  },
+  "claim": {
+    "incognito": "No puedes usar /claim estando en /incognito, los ganadores y la lista de participantes se muestran por nombre. Primero ejecuta /incognito para volver a ser visible.",
+    "notRaffle": "El juego activo ({{kind}}) no es una rifa. No hay nada que reclamar.",
+    "entered": "Entraste. Se sortea en {{seconds}}s.",
+    "already": "Ya estabas dentro. Se sortea en {{seconds}}s."
+  },
+  "trivia": {
+    "incognito": "No puedes organizar trivia estando en /incognito, la línea de inicio te nombra.",
+    "usage": "Uso: /trivia <question> | <answer>",
+    "usagePipe": "Uso: /trivia <question> | <answer> (usa una barra vertical `|` entre la pregunta y la respuesta)."
+  },
+  "answer": {
+    "incognito": "No puedes usar /answer estando en /incognito, la línea del resultado nombra a quienes adivinan.",
+    "usage": "Uso: /answer <your guess>",
+    "none": "No hay ninguna ronda de trivia en curso aquí ahora mismo.",
+    "host": "No puedes usar /answer en tu propia trivia. Espera a que alguien más adivine (o a que se acabe el tiempo).",
+    "miss": "Esa no es, sigue intentando.",
+    "over": "Esa ronda acaba de terminar."
+  },
+  "storydice": {
+    "incognito": "No puedes organizar ni jugar Dados de historias estando en /incognito, las líneas de inicio y resultado nombran a los participantes, y tu propuesta se publica como una línea de chat atribuida a ti.",
+    "none": "No hay ninguna ronda de Dados de historias en curso aquí. Usa /storydice sin argumentos para abrir una.",
+    "once": "Ya enviaste tu propuesta esta ronda. Una por identidad, la sala ya está votando tu publicación."
+  },
+  "scramble": {
+    "incognito": "No puedes organizar ni jugar Letras revueltas estando en /incognito, las líneas de ronda y resultado nombran a los participantes por su nombre visible.",
+    "none": "No hay ninguna ronda de Letras revueltas en curso aquí.",
+    "status": "Ronda {{round}}/{{total}}, letras {{letters}} ({{length}} en total). Quedan {{seconds}}s.",
+    "notHost": "Solo quien organiza la partida actual puede cancelarla.",
+    "active": "La ronda {{round}}/{{total}} de Letras revueltas está en curso (letras {{letters}}). Escribe `/scramble <word>` para adivinar.",
+    "oneWord": "Adivina una palabra a la vez: /scramble <word>.",
+    "tooShort": "Las palabras deben tener al menos 3 letras.",
+    "letters": "Esa palabra no se forma con las letras disponibles.",
+    "notWord": "No está en el diccionario.",
+    "duplicate": "Ya anotaste \"{{word}}\" en esta ronda.",
+    "score": "+{{points}} por \"{{word}}\". Total: {{total}}.",
+    "scoreExact": "+{{points}} por \"{{word}}\" (coincidencia exacta, ¡bono de 2×!). Total: {{total}}.",
+    "gameConflict": "No puedes usar /scramble aquí, ya hay una sesión de {{kind}} en curso."
+  },
+  "games": {
+    "header": "🎮 Juegos sociales:",
+    "rps": "• /rps: Piedra, papel o tijera. Abre una ronda rápida y lanza piedra, papel o tijera.",
+    "trivia": "• /trivia <question> | <answer>: Haz una pregunta de trivia; la sala compite por responder con /answer.",
+    "storydice": "• /storydice: Recibes cuatro palabras de inspiración. Escribe una publicación IC corta que las entrelace. La sala vota al ganador con 📖.",
+    "scramble": "• /scramble [rounds] [words...]: Se revuelven las letras de una palabra; encuentra tantas palabras como puedas. También puedes dar tus propias palabras para cada ronda.",
+    "duel": "• /duel <opponent>: Duelo uno a uno. Elige una clase e intercambia ataques, defensas, paradas y descansos hasta que alguien caiga.",
+    "raffle": "• /raffle item <name> o /raffle currency <amount>: Ofrece un premio de tus cosas. Los demás usan /claim. Se sortea un ganador al azar.",
+    "footer": "Los ganadores pueden llevarse XP, Monedas u objetos de la tienda como bono."
+  },
+  "docs": {
+    "accept": {
+      "description": "Acepta una solicitud de amistad pendiente de este usuario o personaje."
+    },
+    "announce": {
+      "description": "Envía un anuncio de alta visibilidad. 'all' = todas las salas (solo admin); si no, la sala actual (propietario/mod/admin).",
+      "sub": {
+        "<text>": "Anuncia en la sala actual (propietario/mod/admin).",
+        "all": "Anuncia en todo el sitio, a todas las salas (solo admin del sitio)."
+      }
+    },
+    "announceraffle": {
+      "description": "Rifa de todo el sitio, solo para admins. El premio se difunde como una línea de anuncio a todas las salas, y cualquiera en cualquier sala puede usar /claim. La ventana es más larga (3 minutos) para que la gente fuera de la sala anfitriona alcance a verla. El premio se descuenta de tu inventario / billetera activos igual que con /raffle.",
+      "sub": {
+        "item": "Rifa de objeto de todo el sitio.",
+        "currency": "Rifa de Monedas de todo el sitio.",
+        "cancel": "Termina la rifa del sitio antes de tiempo y devuelve el premio. Solo el anfitrión.",
+        "status": "Muestra la rifa del sitio activa (premio, participantes, segundos restantes)."
+      }
+    },
+    "answer": {
+      "description": "Envía una respuesta para la ronda de trivia activa. La primera coincidencia correcta gana la ronda, se revela la respuesta y el temporizador termina antes. Los intentos fallidos se mantienen privados (solo tú ves el aviso de fallo); la línea de resultados al final de la ronda lista todos los intentos para que los espectadores vean quién probó qué."
+    },
+    "away": {
+      "description": "Márcate como ausente con un motivo opcional. Usa /back para volver.",
+      "sub": {
+        "<reason>": "Márcate como ausente con un motivo (visible para otros al pasar el cursor).",
+        "(no args, present)": "Márcate como ausente sin nota de motivo.",
+        "(no args, away)": "Si ya estás ausente, esto te devuelve a presente."
+      }
+    },
+    "back": {
+      "description": "Borra tu estado de ausente y vuelve a presente."
+    },
+    "ban": {
+      "description": "Destierra a un usuario de la sala actual. Solo propietario/admin: los mods de sala pueden usar /kick o /mute, pero solo el propietario de la sala puede vetar a alguien de forma permanente.",
+      "sub": {
+        "<username>": "Baneo permanente sin nota de motivo. Expulsa sus conexiones a la sala de llegada y rechaza su reingreso.",
+        "<duration>": "Baneo con límite de tiempo. Formatos de duración: s/m/h/d, combinables (p. ej. 30m, 1h20m, 7d). Omítelo para permanente.",
+        "[reason]": "Motivo opcional. El usuario expulsado lo ve; el resto ve un aviso del sistema."
+      }
+    },
+    "block": {
+      "description": "Bloquea a un usuario de forma global y mutua: ni tú ni esa persona (ni todos tus personajes) pueden verse en ninguna parte. Más fuerte que /ignore. Se levanta con /unblock o en Perfil -> Privacidad.",
+      "sub": {
+        "<name>": "Bloquea a este usuario de forma global y mutua."
+      }
+    },
+    "bookmarks": {
+      "description": "Abre tus Marcadores, los mensajes de chat e hilos que guardaste para después."
+    },
+    "char": {
+      "description": "Administra tus personajes. /char switch OOC (o /char clear, /char disable) te devuelve a tu cuenta principal.",
+      "sub": {
+        "create": "Crea un personaje nuevo y abre el editor.",
+        "switch": "Cambia a un personaje (define tu nombre visible + tema). Usa 'OOC' como nombre para soltar el personaje activo y volver a ser tu cuenta principal.",
+        "edit": "Abre el editor de un personaje.",
+        "delete": "Elimina un personaje (borrado suave). El historial de mensajes conserva el nombre tal como quedó registrado.",
+        "clear": "Suelta el personaje activo y vuelve a tu cuenta principal (OOC).",
+        "list": "Lista tus personajes."
+      }
+    },
+    "check": {
+      "description": "Haz una prueba 50/50 de Éxito/Fallo. El resultado se difunde a la sala y no se puede repetir. Para prosa con ramificaciones, usa un bloque <check>…</check>."
+    },
+    "claim": {
+      "description": "Entra a la rifa activa. La rifa propia de la sala tiene prioridad cuando aquí corren a la vez una rifa de sala y una del sitio; en ese caso, ve a una sala sin rifa local para usar /claim en la del sitio. Una entrada por identidad por rifa: ejecutarlo dos veces no hace nada."
+    },
+    "clear": {
+      "description": "Sin argumentos: oculta los mensajes anteriores solo de TU vista. Con una duración (mods): oculta los últimos N (p. ej. 30m, 2h) para TODOS, y quedan guardados para que los moderadores los revisen.",
+      "sub": {
+        "(none)": "Oculta los mensajes anteriores de esta sala solo de tu vista (persistente; no elimina).",
+        "<duration>": "Mods: oculta los últimos N de la vista de todos (30s, 5m, 2h, 1h30m, 1d). Se conservan para moderadores; usa /trash para eliminar de forma permanente."
+      }
+    },
+    "collection": {
+      "description": "Abre tu Colección de objetos fijados (Recompensas ▸ Objetos ▸ Colección)."
+    },
+    "color": {
+      "description": "Define el color hex de tus mensajes y acciones en el chat. Ajusta el color del personaje activo cuando estás en personaje, y tu color principal/OOC si no, así el Personaje A y el Personaje B pueden mantener colores de chat distintos.",
+      "sub": {
+        "(no args)": "Muestra tu color de chat actual.",
+        "<hex>": "Define tu color de chat. Acepta #rrggbb, rrggbb, #rgb o rgb (p. ej. /color 990000, /color #abc).",
+        "clear": "Vuelve al color de chat predeterminado."
+      }
+    },
+    "currency": {
+      "description": "Muestra tu saldo de Monedas, consulta el saldo de otra persona o envía Monedas. La salida es privada para ti, nunca se difunde.",
+      "sub": {
+        "(no args)": "Muestra tu propio saldo (principal + personaje activo).",
+        "<user>": "Muestra el saldo de Monedas principal de un usuario (respeta su opción de privacidad).",
+        "send": "Envía Monedas desde tu identidad activa a otro usuario o personaje. Sujeto a topes diarios, requisitos de antigüedad de cuenta y límites de monto configurados en el panel de administración."
+      }
+    },
+    "decline": {
+      "description": "Rechaza una solicitud de amistad pendiente. No se notifica a quien la envió."
+    },
+    "demote": {
+      "description": "Degrada a un mod de sala a miembro (solo el propietario de la sala)."
+    },
+    "demoteadmin": {
+      "description": "Degrada a un admin del sitio a usuario (solo admin). El maestro de llaves no puede ser degradado."
+    },
+    "describe": {
+      "description": "Muestra o define la descripción larga de la sala (se muestra a los usuarios al entrar). Solo propietario/mod pueden editarla.",
+      "sub": {
+        "(no args)": "Muestra la descripción actual.",
+        "<text>": "Define o reemplaza la descripción (propietario/mod/admin).",
+        "clear": "Quita la descripción (propietario/mod/admin)."
+      }
+    },
+    "dissolve": {
+      "description": "Solicita quitar un título mutuo aceptado. La otra parte recibe un aviso de Aceptar | Rechazar. El tipo es opcional cuando solo tienes un título compartido con ese nombre.",
+      "sub": {
+        "<name>": "Disuelve tu título compartido con este usuario. Solo funciona si comparten exactamente un tipo de título.",
+        "<kind> <name>": "Disuelve un tipo de título específico con este usuario (obligatorio cuando comparten varios)."
+      }
+    },
+    "drop": {
+      "description": "Consume un objeto para dejárselo caer a alguien en la sala; es solo ambientación, el destinatario no recibe nada. Igual que /throw pero con otro texto de ambientación. La cantidad es 1 por defecto. Cada objeto trae sus propias líneas aleatorias de `/drop`; si un objeto no tiene, /drop no se permite con él. Sujeto a un tiempo de espera de 4 segundos por remitente.",
+      "sub": {
+        "<name> <item>": "Deja caer uno del objeto indicado sobre un usuario. Se consume de tu inventario; el destinatario no recibe nada.",
+        "<name> <num> <item>": "Deja caer una cantidad específica. Se limita a lo que tu identidad activa realmente posee."
+      }
+    },
+    "duel": {
+      "description": "Combate 1v1 por turnos. Reta a alguien con /duel <name>; el oponente acepta con /duel accept y elige su propia clase. Como retador, define tu clase en la misma línea inicial: /duel Casey as mage. Todos empiezan con 20 HP; las clases (knight/archer/mage/gunslinger) difieren en arma, dados de daño y rango de crítico. Quien gana acuña la recompensa configurada de XP / Monedas / objeto; quien pierde recibe una consolación reducida.",
+      "sub": {
+        "<opponent>": "Reta a alguien con la clase predeterminada (knight). Usa un nombre, o pega un token de identidad para distinguir cuando varias identidades comparten el nombre.",
+        "<opponent> as <class>": "Reta a alguien y define TU clase para la pelea. Clases: knight, archer, mage, gunslinger.",
+        "<opponent> as <class> vs <class>": "Igual que arriba, más una clase sugerida para el oponente. Aun así puede elegir la suya al aceptar.",
+        "accept [class]": "Acepta un reto pendiente. Elige tu clase (por defecto knight, o la que sugirió el retador).",
+        "decline": "Rechaza un reto pendiente.",
+        "attack": "Ataca al oponente. El servidor tira 1d20 + tu modificador de golpe contra su defensa.",
+        "defend": "Cúbrete este turno: el daño recibido se reduce a la mitad. Tu oponente solo ve una postura defensiva genérica.",
+        "parry": "Disputa el próximo ataque: 1d20 contra la tirada del atacante para anular + contraatacar. Tu oponente solo ve una postura defensiva genérica.",
+        "rest": "Recupera 2d6 HP. Pierdes tu ataque este turno.",
+        "status": "Imprime HP, clases, de quién es el turno y los segundos restantes.",
+        "forfeit": "Ríndete. El oponente gana; tú no recibes nada."
+      }
+    },
+    "earnings": {
+      "description": "Abre tu panel de Recompensas (XP, monedas, rango, cosméticos, objetos)."
+    },
+    "eidolon": {
+      "description": "Publica el ánimo actual de tu familiar en la sala como una acción.",
+      "sub": {
+        "emote": "Expresa el ánimo actual de tu familiar."
+      }
+    },
+    "exp": {
+      "description": "Muestra tu XP, rango y grado (principal + personaje activo), más los bordes de rango que puedes comprar. Consulta a otro usuario con /exp <name>. La salida es privada para ti.",
+      "sub": {
+        "(no args)": "Muestra tu propio resumen de Recompensas y los bordes desbloqueados que aún no compras.",
+        "<user>": "Muestra el rango y grado principal de un usuario (siempre públicos)."
+      }
+    },
+    "expiry": {
+      "description": "Muestra o define el vencimiento automático de mensajes por sala (solo propietario/mod).",
+      "sub": {
+        "(no args)": "Muestra la configuración de vencimiento actual de esta sala.",
+        "<minutes>": "Elimina los mensajes con más de N minutos (1-43200 = 30 días).",
+        "off": "Quita el vencimiento de la sala; solo aplica la retención global."
+      }
+    },
+    "export": {
+      "description": "Descarga el chat reciente como un registro HTML con formato: horas, nombres (OOC o personaje) y colores intactos. P. ej. /export 5h, /export 90m, /export 2d. Agrega 'dark' o 'light' para el tema de la página (dark por defecto). Sin duración = últimas 12h. El rango se limita a cuánto tiempo se conservan los mensajes aquí."
+    },
+    "find": {
+      "description": "Busca salas por nombre parcial (sin distinguir mayúsculas). Incluye salas archivadas y privadas.",
+      "sub": {
+        "<name>": "Muestra todas las salas cuyo nombre contiene 'tav' (sin distinguir mayúsculas)."
+      }
+    },
+    "forums": {
+      "description": "Abre el Catálogo de foros. Agrega el slug de un foro para llegar directo (p. ej. /forums spire), o `create` para solicitar el tuyo."
+    },
+    "friend": {
+      "description": "Envía una solicitud de amistad. La amistad queda ligada a quien esté activo en ese momento: si estás en personaje, la solicitud sale de ese personaje; la otra parte nunca ve tu cuenta OOC a través de esta solicitud."
+    },
+    "friends": {
+      "description": "Lista las amistades aceptadas de tu identidad activa. Cambia de personaje para ver la lista de ese personaje."
+    },
+    "games": {
+      "description": "Referencia rápida y privada de todos los juegos sociales y cómo iniciarlos. Útil cuando no recuerdas la palabra clave."
+    },
+    "give": {
+      "description": "Entrega `num` unidades de un objeto a otro usuario en la sala. El objeto sale de tu inventario y llega al suyo (a la identidad que esté usando en ese momento). La cantidad es 1 por defecto. El objeto puede ser el slug (cookie) o el nombre visible (cookies). Cada identidad (OOC + cada personaje) tiene su propio inventario; `/give` es la única forma legal de mover objetos entre ellos.",
+      "sub": {
+        "<name> <item>": "Entrega uno del objeto indicado a un usuario. El objeto puede ser su slug, nombre visible, plural o cualquier alias definido por un admin.",
+        "<name> <num> <item>": "Entrega una cantidad específica. Se limita a lo que tu identidad activa realmente posee."
+      }
+    },
+    "go": {
+      "description": "Entra a una sala (creándola si hace falta). Con contraseña, funciona como /private: crea una sala protegida con contraseña o entra a una sala privada existente sin un aviso aparte.",
+      "sub": {
+        "<room>": "Entra a una sala existente, o crea una sala PÚBLICA nueva con este nombre. Se permiten nombres de varias palabras.",
+        "<room> <password>": "Crea una sala privada con esta contraseña si no existe, o entra a una sala privada existente con ella. Mismo efecto que /private. El primer término separado por espacios es el nombre; todo lo demás es la contraseña."
+      }
+    },
+    "help": {
+      "description": "Abre la ventana de ayuda. Con un argumento, salta directo a ese comando."
+    },
+    "icon": {
+      "description": "Define el ícono de la sala (un emoji o la URL de una imagen) que aparece junto a su nombre en la barra de información. /icon clear lo quita. Solo propietario/mod.",
+      "sub": {
+        "<emoji>": "Usa un emoji como ícono de la sala.",
+        "<image-url>": "Usa una imagen pequeña como ícono de la sala.",
+        "clear": "Quita el ícono de la sala."
+      }
+    },
+    "ignore": {
+      "description": "Alterna ignorar a un usuario (unidireccional: silencia sus mensajes para ti). Ejecútalo de nuevo para deshacerlo. Persiste en tu cuenta a través de todos tus personajes. Para un bloqueo mutuo más fuerte usa /block.",
+      "sub": {
+        "<name>": "Ignora (o, si ya lo ignoras, deja de ignorar) a este usuario.",
+        "clear": "Vacía toda tu lista de ignorados."
+      }
+    },
+    "incognito": {
+      "description": "Desaparece de la lista de usuarios y observa las salas sin ser visto. Solo mod/admin.",
+      "sub": {
+        "(no args)": "Activa o desactiva el modo incógnito.",
+        "on": "Entra en incógnito explícitamente.",
+        "off": "Sal del incógnito explícitamente.",
+        "<alias>": "Entra en incógnito y usa <alias> como el nombre de autor de tus mensajes (por defecto \"System\").",
+        "alias": "Cambia el alias sin cambiar de modo.",
+        "exit": "Define el mensaje de salida personalizado que se difunde cuando entras en incógnito.",
+        "return": "Define el mensaje de entrada personalizado que se difunde cuando vuelves.",
+        "clear": "Restablece el alias y los mensajes de salida/regreso a los predeterminados."
+      }
+    },
+    "initiative": {
+      "description": "Tira 1d20 de iniciativa, con un modificador plano opcional. Si la sala tiene una dificultad definida (/roll dc), el resultado se marca como éxito/fallo."
+    },
+    "invite": {
+      "description": "Invita a un usuario a esta sala. En salas privadas puede entrar sin la contraseña. En salas públicas le envía una notificación de aviso."
+    },
+    "item": {
+      "description": "Abre la vista a pantalla completa de un objeto del catálogo por nombre o alias (igual que tocar un pin de perfil). Coincide con el slug canónico, el nombre visible, el plural o cualquier alias definido por un admin.",
+      "sub": {
+        "<name>": "Busca por nombre visible. Coincide sin distinguir mayúsculas.",
+        "<alias>": "Busca por un alias definido por un admin. Misma lógica de coincidencia que /give / /throw / /drop."
+      }
+    },
+    "kick": {
+      "description": "Propietario/mod de sala: expulsa a un usuario de la sala actual (de vuelta a la sala de llegada). Admin del sitio: cierra la sesión del usuario en todo The Spire.",
+      "sub": {
+        "<username>": "Expulsa sin motivo. Propietarios/mods lo sacan de la sala (puede volver; usa /ban para impedirlo); los admins le cierran la sesión del sitio.",
+        "[reason]": "Motivo opcional que ve el usuario expulsado (en la pantalla de inicio de sesión si lo expulsó un admin) y que se publica como aviso del sistema."
+      }
+    },
+    "list": {
+      "description": "Muestra todas las salas públicas (nombre + tema + número de miembros)."
+    },
+    "me": {
+      "description": "Envía una acción: se muestra como 'TuNombre hace tal cosa.' sin corchetes. Atajo: empieza la línea con `:` y sáltate el resto. `:entra con calma` es lo mismo que `/me entra con calma`."
+    },
+    "mood": {
+      "description": "Define un ánimo/expresión de texto libre que aparece junto a tu nombre (p. ej. /mood enojado). /mood sin argumentos lo borra.",
+      "sub": {
+        "<text>": "Define tu ánimo (máx. 32 caracteres).",
+        "(no args)": "Borra tu ánimo."
+      }
+    },
+    "mute": {
+      "description": "Silencia a un usuario en la sala actual por una duración. Solo mod/propietario/admin.",
+      "sub": {
+        "<duration>": "Formatos de duración: s/m/h/d. Combínalos para duraciones compuestas (p. ej. 1h20m). Ejemplos: 30s, 5m, 2h, 1h20m, 7d.",
+        "[reason]": "Motivo opcional - aparece en el aviso del sistema que se publica al aplicar el silencio."
+      }
+    },
+    "myrooms": {
+      "description": "Lista las salas tuyas que quedaron en silencio (archivadas). Cada una se vuelve un enlace /go de un toque para traerla de vuelta - las salas privadas regresan privadas con su contraseña original."
+    },
+    "npc": {
+      "description": "Da voz a un NPC por nombre en la sala actual. La línea muestra quién le dio voz. El propietario de la sala puede desactivar /npc para juegos temáticos.",
+      "sub": {
+        "<Name> <text>": "Haz que un NPC diga algo.",
+        "<Name> /me <act>": "Haz que un NPC realice una acción (sin comillas)."
+      }
+    },
+    "npcmode": {
+      "description": "Alterna si /npc está permitido en la sala actual. Solo propietario/mod. Útil para juegos temáticos donde cada quien debe dar voz a su propio personaje."
+    },
+    "nsfw": {
+      "description": "Muestra o cambia la configuración 18+ de esta sala (solo propietario/mod pueden cambiarla; solo adultos).",
+      "sub": {
+        "(no args)": "Muestra si esta sala es 18+.",
+        "on": "Marca la sala como 18+. Los miembros menores de 18 ya no pueden verla ni entrar.",
+        "off": "Quita la marca 18+. Los mensajes escritos mientras era 18+ siguen ocultos para los miembros menores de 18."
+      }
+    },
+    "pets": {
+      "description": "Abre tu vitrina de mascotas fijadas (Recompensas ▸ Objetos ▸ Mascotas)."
+    },
+    "poll": {
+      "description": "Inicia una encuesta. Separa la pregunta y cada opción con | . Opciones: --multi (elegir varias), --secret (ocultar quién votó), --for 2h (cierre automático).",
+      "sub": {
+        "basic": "Encuesta de opción única; los nombres de los votantes se muestran después de votar.",
+        "--multi": "Permite que los votantes elijan más de una opción.",
+        "--secret": "Oculta quién votó por qué (solo conteos).",
+        "--for": "Cierre automático tras la duración (30m, 2h, 1d). También puedes cerrarla a mano."
+      }
+    },
+    "private": {
+      "description": "Crea una sala protegida con contraseña. Equivale a /go <name> <password> cuando no existe una sala con ese nombre. El primer término separado por espacios es el nombre; todo lo demás es la contraseña."
+    },
+    "profile": {
+      "description": "Abre el editor de tu perfil activo (principal o personaje actual)."
+    },
+    "promote": {
+      "description": "Asciende a un usuario a mod de sala (solo el propietario de la sala)."
+    },
+    "promoteadmin": {
+      "description": "Asciende a un usuario a admin del sitio (solo admin)."
+    },
+    "raffle": {
+      "description": "Pon un objeto o Monedas en una rifa de sala de 60 segundos. La gente usa /claim para entrar. Al vencer, se sortea al azar una persona entre las inscritas y gana el premio; sin participantes, el premio vuelve a ti. El premio sale de tu inventario / billetera de inmediato.",
+      "sub": {
+        "item": "Rifa uno (o N) de un objeto de tu inventario activo. El objeto puede ser slug, nombre visible o alias, igual que en /give.",
+        "currency": "Rifa un monto de Monedas de tu billetera activa (fondo principal o del personaje, según a quién estés dando voz).",
+        "cancel": "Termina tu rifa activa antes de tiempo y devuelve el premio. Solo el anfitrión.",
+        "status": "Muestra la rifa activa de la sala actual (premio, participantes, segundos restantes)."
+      }
+    },
+    "refresh": {
+      "description": "Actualiza la lista de usuarios + el tema. Con un número, activa el modo lento — pausa el movimiento en vivo de lista de usuarios/escribiendo y resincroniza cada N segundos para aliviar dispositivos lentos.",
+      "sub": {
+        "(none)": "Una vez: vuelve a traer el estado de esta sala ahora mismo.",
+        "<seconds>": "Modo lento: pausa las actualizaciones en vivo de lista de usuarios/escribiendo; resincroniza cada N segundos (5-3600). El chat sigue en vivo.",
+        "off": "Desactiva la actualización automática."
+      }
+    },
+    "reply": {
+      "description": "Responde a un mensaje específico. La respuesta se muestra con una pequeña cita del original encima. Haz clic en la hora de un mensaje para autocompletar este comando."
+    },
+    "replymode": {
+      "description": "Muestra o define cómo se muestran las respuestas en esta sala (solo propietario/mod pueden cambiarlo).",
+      "sub": {
+        "(no args)": "Muestra el modo de respuestas actual.",
+        "flat": "Las respuestas aparecen al final del chat en orden cronológico (predeterminado).",
+        "nested": "Las respuestas se agrupan bajo su mensaje padre en un contenedor de hilo; las últimas 5 visibles por defecto."
+      }
+    },
+    "request": {
+      "description": "Propón un título mutuo (marriage, partner, mate, bestfriend, etc.). La otra parte recibe un aviso de Aceptar | Rechazar. Mira los tipos disponibles con /request list.",
+      "sub": {
+        "list": "Lista los tipos de título disponibles que puedes solicitar."
+      }
+    },
+    "roll": {
+      "description": "Tira dados. NdM = N dados de M caras cada uno. Un ±X opcional suma un modificador plano al total. El resultado se difunde a la sala.",
+      "sub": {
+        "1dM": "Tira un dado de M caras. Salida: 'rolls 1d20: 14'.",
+        "NdM": "Tira N dados de M caras cada uno. La salida muestra las tiradas individuales y el total.",
+        "dM": "Abreviatura de 1dM (la cantidad es 1 por defecto).",
+        "NdM±X": "Suma (o resta) un modificador plano. La salida agrega ' + 3 = 17' después del total de los dados.",
+        "dc <n>": "Propietario/mod/admin: define la dificultad de la sala. /roll dc la muestra; /roll dc clear la quita. Cuando está definida, cada tirada se marca como éxito/fallo contra ella."
+      }
+    },
+    "rps": {
+      "description": "Inicia una ronda de piedra, papel o tijera en esta sala (ventana de 30s), o registra tu jugada cuando hay una ronda en curso. Con 3+ jugadores la regla estándar escala: las jugadas se agrupan, y gana el grupo cuya jugada vence a la otra.",
+      "sub": {
+        "(no args)": "Abre una ronda para que otros se unan. Puedes usar /rps <throw> en cualquier momento antes de que termine el tiempo.",
+        "rock | paper | scissors": "Registra tu jugada. Si no hay ronda en curso, inicia una con tu jugada contada."
+      }
+    },
+    "scene": {
+      "description": "Marca el inicio o el fin de una escena con un letrero. URL de imagen opcional tras un separador `|`. Visible para todos en la sala. Solo propietario/mod.",
+      "sub": {
+        "<title>": "Abre una escena nueva con un letrero.",
+        "<title> | <url>": "Abre una escena nueva con un letrero y una imagen central destacada (haz clic en el letrero para plegarla).",
+        "end": "Cierra la escena actual con un letrero."
+      }
+    },
+    "scramble": {
+      "description": "Abre una ronda de Letras revueltas en esta sala. El juego elige una palabra, revuelve sus letras, y la sala compite por encontrar tantas palabras del diccionario como pueda con esas letras. Los puntos escalan con el largo de la palabra; acertar exactamente la palabra base duplica el puntaje. Los juegos de varias rondas se encadenan solos. El anfitrión también puede aportar sus propias palabras base para controlar el reto; si no, el juego las elige.",
+      "sub": {
+        "(no args)": "Inicia un juego de 3 rondas en esta sala. Las palabras se eligen por ti.",
+        "<rounds>": "Inicia un juego con el número de rondas indicado (1 a 5).",
+        "<rounds> <words___>": "Inicia un juego de varias rondas usando tus propias palabras base para cada ronda. Da una palabra por ronda (o menos, y el resto se eligen por ti).",
+        "<words___>": "Inicia un juego donde el número de rondas iguala el número de palabras que diste.",
+        "<word>": "Durante una ronda en vivo, reclama puntos por una palabra que encontraste. Debe tener al menos 3 letras, estar en el diccionario y formarse con las letras revueltas.",
+        "status": "Recordatorio privado de las letras actuales y cuánto tiempo queda.",
+        "cancel": "Solo el anfitrión. Termina el juego antes; la clasificación actual igual se publica."
+      }
+    },
+    "scriptorium": {
+      "description": "Abre el catálogo del Scriptorium. La biblioteca de ficción de largo aliento de The Spire.",
+      "sub": {
+        "(no args)": "Explora todas las historias públicas.",
+        "find": "Explora todas las historias públicas.",
+        "my": "Abre tus propias historias (borradores + publicadas).",
+        "reading": "Historias que tienes a medio leer.",
+        "following": "Historias a las que estás suscrito."
+      }
+    },
+    "shop": {
+      "description": "Abre la tienda de objetos (Recompensas ▸ Objetos ▸ Tienda)."
+    },
+    "slug": {
+      "description": "Muestra o define el identificador de enlace de la sala para las etiquetas {room:…} (solo propietario/mod pueden cambiarlo).",
+      "sub": {
+        "(no args)": "Muestra el identificador de enlace de la sala y su token de etiqueta {room:…}.",
+        "<handle>": "Define el identificador de enlace de la sala (solo propietario/mod/admin). Letras, números y guiones."
+      }
+    },
+    "story": {
+      "description": "Abre una historia en el lector. Pasa `chapter N` para saltar a un capítulo específico.",
+      "sub": {
+        "(slug)": "Abre la página principal de la historia.",
+        "chapter": "Salta al capítulo N (empezando en 1)."
+      }
+    },
+    "storydice": {
+      "description": "Abre o juega una ronda de Dados de historias. Sin argumentos, abre una ronda de 3 minutos; el servidor elige cuatro palabras clave al azar. Cualquier texto libre se vuelve tu entrada para la ronda: un párrafo IC corto que hile las cuatro palabras. Tu entrada se publica en el chat con estilo propio (encabezado en negrita + cuerpo con sangría) para destacar entre la plática, y el sistema siembra una reacción 📖 para que el botón de voto quede a la mano. La sala vota agregando sus propias reacciones 📖; gana la entrada que junte más. Una entrada por identidad (sin reenvíos).",
+      "sub": {
+        "(no args)": "Abre una ronda. Las cuatro palabras clave se revelan en la línea inicial.",
+        "<your post>": "Envía una entrada de Dados de historias. Llega como una entrada de chat con estilo y una reacción 📖 sembrada para que la sala vote."
+      }
+    },
+    "theater": {
+      "description": "Prepara un panel de video sincronizado para ver en grupo en esta sala (solo propietario/mod pueden cambiarlo).",
+      "sub": {
+        "(no args)": "Muestra la lista de reproducción y la configuración del teatro.",
+        "on": "Activa el modo teatro - muestra el panel de video encima del chat. Requiere acceso al teatro (lo otorga un admin).",
+        "off": "Desactiva el modo teatro y reinicia la reproducción.",
+        "add": "Agrega un video a la lista de reproducción (archivo directo/HLS, YouTube o Vimeo).",
+        "live": "Agrega una transmisión en vivo (p. ej. tu emisión de VLC/OBS por https). Sin retroceso; todos ven el punto en vivo. Mira la guía de transmisión del Teatro en Ayuda.",
+        "remove": "Quita el elemento #2 de la lista (empezando en 1).",
+        "clear": "Vacía la lista de reproducción.",
+        "loop": "Comportamiento al terminar la fuente: off (parar) | one (repetir) | all (avanzar + repetir, predeterminado).",
+        "list": "Muestra la lista de reproducción y la configuración del teatro."
+      }
+    },
+    "throw": {
+      "description": "Consume un objeto para lanzárselo a alguien en la sala; es solo ambientación, el destinatario no recibe nada. La cantidad es 1 por defecto. El objeto puede ser el slug o el nombre visible. Cada objeto trae sus propias líneas aleatorias de `/throw`; si un objeto no tiene, /throw no se permite con él. Sujeto a un tiempo de espera de 4 segundos por remitente.",
+      "sub": {
+        "<name> <item>": "Lanza uno del objeto indicado a un usuario. Se consume de tu inventario; el destinatario no recibe nada.",
+        "<name> <num> <item>": "Lanza una cantidad específica. Se limita a lo que tu identidad activa realmente posee."
+      }
+    },
+    "titles": {
+      "description": "Lista los títulos mutuos tuyos, o de otra persona por nombre.",
+      "sub": {
+        "(no args)": "Lista tus propios títulos (de tu identidad activa - principal o personaje actual).",
+        "<name>": "Lista los títulos aceptados del perfil de otra persona."
+      }
+    },
+    "topic": {
+      "description": "Muestra o define el tema de la sala actual (solo propietario/mod pueden cambiarlo).",
+      "sub": {
+        "(no args)": "Muestra el tema de la sala actual.",
+        "<text>": "Define el tema de la sala (solo propietario/mod/admin). El tema es el titular corto sobre el chat."
+      }
+    },
+    "trash": {
+      "description": "Elimina los mensajes más recientes de esta sala por antigüedad (solo mod/admin). Irreversible.",
+      "sub": {
+        "<duration>": "Elimina de forma definitiva todos los mensajes de los últimos N. Formatos: 30s, 5m, 2h, 1h30m, 1d."
+      }
+    },
+    "trivia": {
+      "description": "Abre una ronda de trivia de 60 segundos en esta sala. La pregunta se difunde; la respuesta queda oculta hasta que alguien la adivine (o se acabe el tiempo). Los jugadores compiten con /answer <text>; la primera coincidencia correcta gana. La comparación es flexible: sin distinguir mayúsculas y quitando artículos iniciales, así 'the eiffel tower' y 'Eiffel Tower' cuentan igual.",
+      "sub": {
+        "<q> | <a>": "Abre una ronda. La barra vertical (|) separa la pregunta de la respuesta."
+      }
+    },
+    "unban": {
+      "description": "Levanta un /ban de la sala actual. Solo propietario/admin; es la pareja de /ban, que los mods de sala no pueden aplicar."
+    },
+    "unblock": {
+      "description": "Levanta un bloqueo que creaste. Su cuenta y personajes vuelven a ser visibles para ti (a menos que esa persona también te haya bloqueado)."
+    },
+    "unfriend": {
+      "description": "Termina una amistad O cancela una solicitud pendiente, en cualquier dirección. Opera solo sobre tu identidad activa."
+    },
+    "unignore": {
+      "description": "Deja de ignorar a un usuario; sus mensajes volverán a llegarte."
+    },
+    "unmute": {
+      "description": "Levanta un /mute de un usuario en la sala actual."
+    },
+    "users": {
+      "description": "Abre el directorio de usuarios registrados (principales + personajes)."
+    },
+    "whisper": {
+      "description": "Envía un mensaje privado 1:1. El destinatario se identifica por su nombre de usuario principal O por el nombre de su personaje activo. Los susurros se guardan solo para el historial de quien envía y quien recibe - nunca son visibles para admins ni otros usuarios.",
+      "sub": {
+        "<name> <text>": "Envía un mensaje privado. Usa un nombre de usuario principal (siempre funciona) o un nombre de personaje (solo si esa persona lo tiene activo)."
+      }
+    },
+    "whois": {
+      "description": "Mira el perfil de alguien (su personaje activo, o el principal si no hay). Sin nombre, abre un perfil al azar.",
+      "sub": {
+        "<name>": "Mira el perfil de este usuario. Los nombres de usuario principales ganan sobre los nombres de personaje si existen ambos.",
+        "(no args)": "Abre un perfil elegido al azar entre todos los principales y personajes activos."
+      }
+    },
+    "world": {
+      "description": "Muestra, vincula o únete a un mundo (wiki). Pasa un slug para abrir directamente cualquier mundo visible.",
+      "sub": {
+        "(no args)": "Abre la wiki del mundo vinculado, si hay uno.",
+        "(slug)": "Abre cualquier mundo visible por su slug.",
+        "view": "Forma explícita del atajo con slug.",
+        "link": "Vincula uno de TUS mundos a esta sala. (Solo propietario/mod/admin.)",
+        "unlink": "Quita el mundo vinculado. (Solo propietario/mod/admin.)",
+        "catalog": "Explora el catálogo de mundos (mundos abiertos que se pueden usar en cualquier sala).",
+        "join": "Únete a un mundo abierto; abre el formulario de solicitud si el mundo lo requiere; te avisa si el mundo es solo con invitación.",
+        "leave": "Abandona un mundo con tu identidad actual."
+      }
+    },
+    "worlds": {
+      "description": "Abre el administrador con la lista de los mundos que has construido."
+    },
+    "write": {
+      "description": "Abre el editor del Scriptorium en un borrador o empieza una historia nueva.",
+      "sub": {
+        "(no args)": "Abre el editor en tu borrador editado más recientemente.",
+        "new": "Abre el asistente de Historia nueva.",
+        "(slug)": "Edita una de tus historias por slug."
+      }
+    },
+    "_flags": {
+      "asymmetric": "asimétrico",
+      "exclusive": "exclusivo, solo uno aceptado a la vez"
+    },
+    "_custom": "(personalizado - {{kind}})"
+  }
+}

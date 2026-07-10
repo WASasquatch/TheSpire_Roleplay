@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import {
   Globe,
   FileText,
@@ -15,8 +16,9 @@ import {
   RotateCcw,
   X,
 } from "lucide-react";
-import type { ArchivedRoomBrief, ForumSummary } from "@thekeep/shared";
+import type { ArchivedRoomBrief, ForumSummary, SupportedLocale } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
+import { LOCALE_CHOICES, changeLocale } from "../lib/i18n.js";
 import {
   getReduceMotionToggle,
   osReduceMotionForced,
@@ -73,12 +75,14 @@ interface Props {
  * within that container - works the same as desktop.
  */
 export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, onOpenMessages, onOpenEarning, onOpenArcade }: Props) {
+  const { t } = useTranslation("common");
   // NOTE: `currentRoomId` + `onJumpToMessage` remain in Props (RoomsTree still
   // passes them) but are no longer consumed here — the message SearchBar they
   // fed moved to the top of the rail (RoomsTree). Left in the interface so the
   // existing mount stays type-compatible without an App-level change.
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [colorOpen, setColorOpen] = useState(false);
+  const [langOpen, setLangOpen] = useState(false);
   const [refreshOpen, setRefreshOpen] = useState(false);
   const [moodOpen, setMoodOpen] = useState(false);
   const [sceneOpen, setSceneOpen] = useState(false);
@@ -113,6 +117,9 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
   const calmActive = useCalmCosmetics();
   const fontStep = useChat((s) => s.fontStep);
   const setFontStep = useChat((s) => s.setFontStep);
+  // Saved UI language (null = "System default"). Seeded from /me/profile;
+  // changeLocale keeps it current, so the row label tracks the live choice.
+  const localePref = useChat((s) => s.localePref);
   const refreshIntervalSec = useChat((s) => s.refreshIntervalSec);
   // "Export my data" (Account section). The export is an AUTHENTICATED GET, so
   // we fetch it (the bearer token rides the patched window.fetch) and download
@@ -135,9 +142,9 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      useChat.getState().setNotice({ code: "EXPORT_OK", message: "Your data export downloaded — keep it somewhere safe." });
+      useChat.getState().setNotice({ code: "EXPORT_OK", message: t("toolMenu.export.success") });
     } catch {
-      useChat.getState().setNotice({ code: "EXPORT_FAILED", message: "Couldn't build your export just now. Try again in a minute." });
+      useChat.getState().setNotice({ code: "EXPORT_FAILED", message: t("toolMenu.export.failure") });
     } finally {
       setExportingData(false);
     }
@@ -391,7 +398,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
               and the backdrop is the only visual separation). */}
           <button
             type="button"
-            aria-label="Close tools"
+            aria-label={t("toolMenu.closeTools")}
             onClick={() => setDrawerOpen(false)}
             className="fixed inset-0 z-30 bg-black/20 md:bg-black/10"
           />
@@ -407,7 +414,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
               tools sections themselves. */}
           <div ref={scrollRef} className="keep-menu-surface absolute inset-x-0 bottom-full z-40 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded-t border-x border-t border-keep-rule bg-keep-bg shadow-2xl">
             <header className="sticky top-0 z-10 flex items-center justify-between border-b border-keep-rule bg-keep-banner px-3 py-2">
-              <span className="text-xs font-action uppercase tracking-widest">Menu</span>
+              <span className="text-xs font-action uppercase tracking-widest">{t("menu")}</span>
               <CloseButton onClick={() => setDrawerOpen(false)} />
             </header>
 
@@ -416,72 +423,72 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
                 with search last (nearest the trigger bar). Each header taps
                 open/closed; opening one auto-collapses the rest. */}
             <Section
-              title="Worldbuilding"
+              title={t("toolMenu.sections.worldbuilding")}
               icon={<Globe size={14} aria-hidden />}
               open={openSection === "Worldbuilding"}
               onToggle={() => toggleSection("Worldbuilding")}
               innerRef={(el) => { sectionRefs.current["Worldbuilding"] = el; }}
             >
-              <MenuItem label="My Worlds" hint="Manage your worlds + pages" onClick={() => fire("/worlds")} />
-              <MenuItem label="World Catalog" hint="Browse open worlds" onClick={() => fire("/world catalog")} />
+              <MenuItem label={t("toolMenu.worldbuilding.myWorlds")} hint={t("toolMenu.worldbuilding.myWorldsHint")} onClick={() => fire("/worlds")} />
+              <MenuItem label={t("toolMenu.worldbuilding.catalog")} hint={t("toolMenu.worldbuilding.catalogHint")} onClick={() => fire("/world catalog")} />
             </Section>
 
             <Section
-              title="Writing"
+              title={t("toolMenu.sections.writing")}
               icon={<FileText size={14} aria-hidden />}
               open={openSection === "Writing"}
               onToggle={() => toggleSection("Writing")}
               innerRef={(el) => { sectionRefs.current["Writing"] = el; }}
             >
-              <MenuItem label="My Stories" hint="Drafts + published, open the editor" onClick={() => fire("/scriptorium my")} />
-              <MenuItem label="Scriptorium" hint="Browse the library, read and write" onClick={() => fire("/scriptorium")} />
+              <MenuItem label={t("toolMenu.writing.myStories")} hint={t("toolMenu.writing.myStoriesHint")} onClick={() => fire("/scriptorium my")} />
+              <MenuItem label={t("toolMenu.writing.scriptorium")} hint={t("toolMenu.writing.scriptoriumHint")} onClick={() => fire("/scriptorium")} />
             </Section>
 
             <Section
-              title="Roleplay"
+              title={t("toolMenu.sections.roleplay")}
               icon={<VenetianMask size={14} aria-hidden />}
               open={openSection === "Roleplay"}
               onToggle={() => toggleSection("Roleplay")}
               innerRef={(el) => { sectionRefs.current["Roleplay"] = el; }}
             >
               <MenuItem
-                label="Set Mood"
-                hint="Show a mood next to your name"
+                label={t("toolMenu.roleplay.setMood")}
+                hint={t("toolMenu.roleplay.setMoodHint")}
                 active={moodOpen}
                 onClick={() => setMoodOpen((v) => !v)}
               />
               {moodOpen ? (
                 <InlinePanel>
                   <InlineForm
-                    placeholder="e.g. brooding, exhausted, smug"
-                    submitLabel="Set"
-                    extraButtons={[{ label: "Clear", onClick: () => fire("/mood clear") }]}
+                    placeholder={t("toolMenu.roleplay.moodPlaceholder")}
+                    submitLabel={t("set")}
+                    extraButtons={[{ label: t("clear"), onClick: () => fire("/mood clear") }]}
                     onSubmit={(text) => { if (text.trim()) fire(`/mood ${text.trim()}`); }}
                   />
                 </InlinePanel>
               ) : null}
               <MenuItem
-                label="Set Scene"
-                hint="Set the room's scene title"
+                label={t("toolMenu.roleplay.setScene")}
+                hint={t("toolMenu.roleplay.setSceneHint")}
                 active={sceneOpen}
                 onClick={() => setSceneOpen((v) => !v)}
               />
               {sceneOpen ? (
                 <InlinePanel>
                   <InlineForm
-                    placeholder="e.g. The dragon's lair"
-                    submitLabel="Set"
-                    extraButtons={[{ label: "End scene", onClick: () => fire("/scene end") }]}
+                    placeholder={t("toolMenu.roleplay.scenePlaceholder")}
+                    submitLabel={t("set")}
+                    extraButtons={[{ label: t("toolMenu.roleplay.endScene"), onClick: () => fire("/scene end") }]}
                     onSubmit={(text) => { if (text.trim()) fire(`/scene ${text.trim()}`); }}
                   />
                 </InlinePanel>
               ) : null}
-              <MenuItem label="NPCs: On" hint="Enable NPC voice in this room" onClick={() => fire("/npcmode on")} />
-              <MenuItem label="NPCs: Off" hint="Disable NPC voice in this room" onClick={() => fire("/npcmode off")} />
+              <MenuItem label={t("toolMenu.roleplay.npcsOn")} hint={t("toolMenu.roleplay.npcsOnHint")} onClick={() => fire("/npcmode on")} />
+              <MenuItem label={t("toolMenu.roleplay.npcsOff")} hint={t("toolMenu.roleplay.npcsOffHint")} onClick={() => fire("/npcmode off")} />
             </Section>
 
             <Section
-              title="Forums"
+              title={t("toolMenu.sections.forums")}
               icon={<MessagesSquare size={14} aria-hidden />}
               open={openSection === "Forums"}
               onToggle={() => toggleSection("Forums")}
@@ -489,12 +496,12 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
               badge={forumNotifUnread}
             >
               <MenuItem
-                label="Forums Catalog"
-                hint="Community-owned message boards"
+                label={t("toolMenu.forums.catalog")}
+                hint={t("toolMenu.forums.catalogHint")}
                 badge={forumNotifUnread}
                 onClick={() => fire("/forums")}
               />
-              <MenuItem label="Create a Forum" hint="Apply to open your own forum" onClick={() => fire("/forums create")} />
+              <MenuItem label={t("toolMenu.forums.create")} hint={t("toolMenu.forums.createHint")} onClick={() => fire("/forums create")} />
               {/* Quick bookmarks: forums you own / have joined, plus open forums
                   you've visited. Indented as a sub-list under the two actions so
                   they read as shortcuts, not top-level menu rows. Each lands
@@ -511,31 +518,31 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
             </Section>
 
             <Section
-              title="Rooms"
+              title={t("toolMenu.sections.rooms")}
               icon={<Landmark size={14} aria-hidden />}
               open={openSection === "Rooms"}
               onToggle={() => toggleSection("Rooms")}
               innerRef={(el) => { sectionRefs.current["Rooms"] = el; }}
             >
               <MenuItem
-                label="Find Rooms"
-                hint="Search for a room by name"
+                label={t("toolMenu.rooms.find")}
+                hint={t("toolMenu.rooms.findHint")}
                 active={findOpen}
                 onClick={() => setFindOpen((v) => !v)}
               />
               {findOpen ? (
                 <InlinePanel>
                   <InlineForm
-                    placeholder="search text (or empty for all)"
-                    submitLabel="Find"
+                    placeholder={t("toolMenu.rooms.findPlaceholder")}
+                    submitLabel={t("toolMenu.rooms.findSubmit")}
                     onSubmit={(text) => fire(text.trim() ? `/find ${text.trim()}` : "/find")}
                   />
                 </InlinePanel>
               ) : null}
-              <MenuItem label="List Rooms" hint="Show all public rooms" onClick={() => fire("/list")} />
+              <MenuItem label={t("toolMenu.rooms.list")} hint={t("toolMenu.rooms.listHint")} onClick={() => fire("/list")} />
               <MenuItem
-                label="New Private Room"
-                hint="Create a password-locked room"
+                label={t("toolMenu.rooms.newPrivate")}
+                hint={t("toolMenu.rooms.newPrivateHint")}
                 active={privateOpen}
                 onClick={() => setPrivateOpen((v) => !v)}
               />
@@ -547,7 +554,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
             </Section>
 
             <Section
-              title="My Rooms"
+              title={t("toolMenu.sections.myRooms")}
               icon={<Archive size={14} aria-hidden />}
               open={openSection === "My Rooms"}
               onToggle={() => toggleSection("My Rooms")}
@@ -555,11 +562,10 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
               {...(archivedRooms ? { badge: archivedRooms.length } : {})}
             >
               {archivedRooms === null ? (
-                <div className="px-3 py-2 text-xs text-keep-muted">Loading your rooms…</div>
+                <div className="px-3 py-2 text-xs text-keep-muted">{t("toolMenu.myRooms.loading")}</div>
               ) : archivedRooms.length === 0 ? (
                 <div className="px-3 py-2 text-xs text-keep-muted">
-                  No archived rooms yet. A room you own is archived once everyone leaves it,
-                  then shows up here so you can bring it back.
+                  {t("toolMenu.myRooms.empty")}
                 </div>
               ) : (
                 archivedRooms.map((r) => (
@@ -574,7 +580,7 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
             </Section>
 
             <Section
-              title="People"
+              title={t("toolMenu.sections.people")}
               icon={<Users size={14} aria-hidden />}
               open={openSection === "People"}
               onToggle={() => toggleSection("People")}
@@ -582,25 +588,25 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
               badge={messagesBadgeTotal}
             >
               <MenuItem
-                label="Messages"
-                hint="DMs, friends, and friend requests, all in one place"
+                label={t("toolMenu.people.messages")}
+                hint={t("toolMenu.people.messagesHint")}
                 badge={messagesBadgeTotal}
                 onClick={() => { onOpenMessages(); setDrawerOpen(false); }}
               />
-              <MenuItem label="All Users" hint="Browse the user directory" onClick={() => fire("/users")} />
-              <MenuItem label="Ignore List" hint="Show or clear your ignore list" onClick={() => fire("/ignore")} />
+              <MenuItem label={t("toolMenu.people.allUsers")} hint={t("toolMenu.people.allUsersHint")} onClick={() => fire("/users")} />
+              <MenuItem label={t("toolMenu.people.ignoreList")} hint={t("toolMenu.people.ignoreListHint")} onClick={() => fire("/ignore")} />
             </Section>
 
             <Section
-              title="Display"
+              title={t("toolMenu.sections.display")}
               icon={<Paintbrush2 size={14} aria-hidden />}
               open={openSection === "Display"}
               onToggle={() => toggleSection("Display")}
               innerRef={(el) => { sectionRefs.current["Display"] = el; }}
             >
               <MenuItem
-                label="Chat Color"
-                hint="Set your chat color"
+                label={t("toolMenu.display.chatColor")}
+                hint={t("toolMenu.display.chatColorHint")}
                 active={colorOpen}
                 onClick={() => setColorOpen((v) => !v)}
               />
@@ -613,16 +619,16 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
                 </InlinePanel>
               ) : null}
               <MenuItem
-                label={`Font Size: ${fontStep}`}
-                hint="Cycle local chat font size"
+                label={t("toolMenu.display.fontSize", { step: fontStep })}
+                hint={t("toolMenu.display.fontSizeHint")}
                 onClick={cycleFont}
               />
               <MenuItem
-                label={`Reduce Motion: ${reduceMotion ? "On" : "Off"}`}
+                label={t("toolMenu.display.reduceMotion", { state: reduceMotion ? t("on") : t("off") })}
                 hint={
                   reduceMotionForced
-                    ? "On because your device asks for it"
-                    : "Soft fades; stops auto-playing motion. Helps if motion feels unwell"
+                    ? t("toolMenu.display.reduceMotionForcedHint")
+                    : t("toolMenu.display.reduceMotionHint")
                 }
                 active={reduceMotion}
                 onClick={() => {
@@ -631,18 +637,32 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
                 }}
               />
               <MenuItem
-                label={`Reduce cosmetic effects: ${calmActive ? "On" : "Off"}`}
+                label={t("toolMenu.display.reduceCosmetics", { state: calmActive ? t("on") : t("off") })}
                 hint={
                   calmActive && !getReduceCosmeticsToggle()
-                    ? "On already from your motion or performance settings. Quiets name-style and avatar-border animations"
-                    : "Quiets name-style and avatar-border animations for smoother, lighter chat"
+                    ? t("toolMenu.display.reduceCosmeticsUpstreamHint")
+                    : t("toolMenu.display.reduceCosmeticsHint")
                 }
                 active={calmActive}
                 onClick={() => setReduceCosmeticsToggle(!getReduceCosmeticsToggle())}
               />
               <MenuItem
-                label={refreshIntervalSec > 0 ? `Slow mode: every ${refreshIntervalSec}s` : "Refresh"}
-                hint={refreshIntervalSec > 0 ? "Real-time userlist + typing paused; resyncs on a schedule" : "Refresh once, or slow real-time updates to ease load on this device"}
+                label={t("toolMenu.display.language", { language: LOCALE_CHOICES.find((c) => c.value === localePref)?.label ?? t("language.systemDefault") })}
+                hint={t("toolMenu.display.languageHint")}
+                active={langOpen}
+                onClick={() => setLangOpen((v) => !v)}
+              />
+              {langOpen ? (
+                <InlinePanel>
+                  <LanguagePicker
+                    current={localePref}
+                    onPick={(locale) => void changeLocale(locale)}
+                  />
+                </InlinePanel>
+              ) : null}
+              <MenuItem
+                label={refreshIntervalSec > 0 ? t("toolMenu.display.slowMode", { seconds: refreshIntervalSec }) : t("toolMenu.display.refresh")}
+                hint={refreshIntervalSec > 0 ? t("toolMenu.display.slowModeHint") : t("toolMenu.display.refreshHint")}
                 active={refreshOpen || refreshIntervalSec > 0}
                 onClick={() => setRefreshOpen((v) => !v)}
               />
@@ -661,27 +681,27 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
             </Section>
 
             <Section
-              title="Account"
+              title={t("toolMenu.sections.account")}
               icon={<Settings size={14} aria-hidden />}
               open={openSection === "Account"}
               onToggle={() => toggleSection("Account")}
               innerRef={(el) => { sectionRefs.current["Account"] = el; }}
             >
-              <MenuItem label="Edit Profile" hint="Open your profile editor" onClick={() => fire("/profile")} />
+              <MenuItem label={t("toolMenu.account.editProfile")} hint={t("toolMenu.account.editProfileHint")} onClick={() => fire("/profile")} />
               {onOpenEarning ? (
                 <MenuItem
-                  label="Your Earning"
-                  hint="Wallet, ranks, shop, items, collection, pets"
+                  label={t("toolMenu.account.earning")}
+                  hint={t("toolMenu.account.earningHint")}
                   onClick={() => { onOpenEarning(); setDrawerOpen(false); }}
                 />
               ) : null}
-              <MenuItem label="Bookmarks" hint="Your saved chat messages" onClick={() => fire("/bookmarks")} />
+              <MenuItem label={t("toolMenu.account.bookmarks")} hint={t("toolMenu.account.bookmarksHint")} onClick={() => fire("/bookmarks")} />
               <MenuItem
-                label={exportingData ? "Preparing export…" : "Export my data"}
-                hint="Download your profile, characters, worlds, and stories"
+                label={exportingData ? t("toolMenu.account.exportPreparing") : t("toolMenu.account.exportData")}
+                hint={t("toolMenu.account.exportHint")}
                 onClick={() => { if (!exportingData) void exportMyData(); }}
               />
-              <MenuItem label="Toggle Away" hint="Mark yourself away" onClick={() => fire("/away")} />
+              <MenuItem label={t("toolMenu.account.toggleAway")} hint={t("toolMenu.account.toggleAwayHint")} onClick={() => fire("/away")} />
             </Section>
 
             {/* Spire Arcade, always exposed (not tucked inside the Account
@@ -693,11 +713,11 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
               <button
                 type="button"
                 onClick={() => { onOpenArcade(); setDrawerOpen(false); }}
-                title="Play the arcade's games, like the Eidolon Tamer"
+                title={t("toolMenu.arcadeTitle")}
                 className="flex w-full items-center gap-2 border-y border-keep-rule/60 bg-keep-banner/40 px-3 py-1.5 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted hover:bg-keep-banner/60 hover:text-keep-text lg:py-1"
               >
                 <span aria-hidden className="shrink-0"><Gamepad2 size={14} aria-hidden /></span>
-                <span className="flex-1 text-left">Spire Arcade</span>
+                <span className="flex-1 text-left">{t("toolMenu.arcade")}</span>
                 <span aria-hidden className="shrink-0 text-sm leading-none text-keep-muted">›</span>
               </button>
             ) : null}
@@ -711,11 +731,11 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
             <button
               type="button"
               onClick={() => { setSiteTourForced(true); setDrawerOpen(false); }}
-              title="Replay the guided walkthrough of the chat and its rails"
+              title={t("toolMenu.tourTitle")}
               className="flex w-full items-center gap-2 border-y border-keep-rule/60 bg-keep-banner/40 px-3 py-1.5 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted hover:bg-keep-banner/60 hover:text-keep-text lg:py-1"
             >
               <span aria-hidden className="shrink-0"><HelpCircle size={14} aria-hidden /></span>
-              <span className="flex-1 text-left">Take the tour</span>
+              <span className="flex-1 text-left">{t("toolMenu.tour")}</span>
               <span aria-hidden className="shrink-0 text-sm leading-none text-keep-muted">›</span>
             </button>
 
@@ -726,11 +746,11 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
             <button
               type="button"
               onClick={() => fire("/help")}
-              title="Browse the guides and every command"
+              title={t("toolMenu.helpTitle")}
               className="flex w-full items-center gap-2 border-y border-keep-rule/60 bg-keep-banner/40 px-3 py-1.5 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted hover:bg-keep-banner/60 hover:text-keep-text lg:py-1"
             >
               <span aria-hidden className="shrink-0"><HelpCircle size={14} aria-hidden /></span>
-              <span className="flex-1 text-left">Help / Commands</span>
+              <span className="flex-1 text-left">{t("toolMenu.help")}</span>
               <span aria-hidden className="shrink-0 text-sm leading-none text-keep-muted">›</span>
             </button>
 
@@ -782,16 +802,15 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
             // drawer doesn't have room for two pips so this is the
             // disambiguation surface for users who can't tell the
             // DM cue from the friend-request cue at a glance.
-            const parts: string[] = [];
-            if (unreadDmsTotal > 0) {
-              parts.push(`${unreadDmsTotal} unread DM${unreadDmsTotal === 1 ? "" : "s"}`);
-            }
-            if (pendingFriendRequestsTotal > 0) {
-              parts.push(`${pendingFriendRequestsTotal} friend request${pendingFriendRequestsTotal === 1 ? "" : "s"}`);
-            }
-            return parts.length > 0 ? `${parts.join(" + ")}, open Messages` : "Open Messages";
+            const dms = unreadDmsTotal > 0 ? t("messenger.unreadDms", { count: unreadDmsTotal }) : null;
+            const requests = pendingFriendRequestsTotal > 0
+              ? t("messenger.friendRequests", { count: pendingFriendRequestsTotal })
+              : null;
+            if (dms && requests) return t("messenger.tooltipBoth", { dms, requests });
+            if (dms || requests) return t("messenger.tooltipSummary", { summary: dms ?? requests });
+            return t("messenger.open");
           })()}
-          aria-label="Open Messages"
+          aria-label={t("messenger.open")}
           className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded border border-keep-rule bg-keep-bg text-sm leading-none hover:bg-keep-banner lg:h-7 lg:w-7"
         >
           <span aria-hidden>✉</span>
@@ -830,13 +849,13 @@ export function ToolPanel({ onCommand, activeCharacterId, activeCharacterName, o
         type="button"
         data-tour="menu-button"
         onClick={() => setDrawerOpen((v) => !v)}
-        title="Open the menu"
+        title={t("toolMenu.openMenuTitle")}
         className={`mt-1 flex h-9 w-full items-center justify-center gap-2 rounded border border-keep-rule text-xs font-semibold uppercase tracking-widest lg:h-7 ${
           drawerOpen ? "bg-keep-banner" : "bg-keep-bg hover:bg-keep-banner"
         }`}
       >
         <span aria-hidden>{drawerOpen ? "▼" : "▲"}</span>
-        Menu
+        {t("menu")}
       </button>
 
       {/* Create-character name prompt. On success switch into the new
@@ -917,9 +936,10 @@ function IdentityButton({
   incognitoMode: boolean;
   onToggleIncognito: () => void;
 }) {
+  const { t } = useTranslation("common");
   const buttonLabel = inCharacter
-    ? activeCharacterName ?? "Active character"
-    : `${masterName ?? "OOC"} (OOC)`;
+    ? activeCharacterName ?? t("identity.activeCharacter")
+    : t("identity.oocName", { name: masterName ?? t("identity.ooc") });
 
   // Filter the dropdown so the *currently active* character doesn't
   // appear as a switch target, switching to yourself is a no-op that
@@ -936,7 +956,7 @@ function IdentityButton({
               viewport so a click anywhere outside closes the panel. */}
           <button
             type="button"
-            aria-label="Close identity menu"
+            aria-label={t("identity.closeMenu")}
             onClick={onClose}
             className="fixed inset-0 z-30 bg-black/20 md:bg-black/10"
           />
@@ -945,15 +965,15 @@ function IdentityButton({
               even when the user has 30+ characters. */}
           <div className="keep-menu-surface absolute inset-x-0 bottom-full z-40 mb-1 max-h-[calc(100dvh-14rem)] overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl">
             <header className="sticky top-0 border-b border-keep-rule bg-keep-banner px-3 py-1 text-[10px] font-action uppercase tracking-[0.2em] text-keep-muted">
-              Switch identity
+              {t("identity.switchHeader")}
             </header>
             {loading && switchTargets.length === 0 ? (
-              <div className="px-3 py-2 text-xs italic text-keep-muted">Loading…</div>
+              <div className="px-3 py-2 text-xs italic text-keep-muted">{t("loading")}</div>
             ) : switchTargets.length === 0 ? (
               <div className="px-3 py-2 text-xs italic text-keep-muted">
                 {inCharacter
-                  ? "No other characters on this account."
-                  : "No characters yet, create one below."}
+                  ? t("identity.noOthers")
+                  : t("identity.noneYet")}
               </div>
             ) : (
               <ul>
@@ -980,11 +1000,11 @@ function IdentityButton({
             <button
               type="button"
               onClick={onCreateCharacter}
-              title="Create a new character and start setting it up"
+              title={t("identity.createTitle")}
               className="flex w-full items-center justify-center gap-1 border-t border-keep-rule bg-keep-action/10 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20 lg:py-1"
             >
               <span aria-hidden>+</span>
-              <span>Create Character</span>
+              <span>{t("identity.create")}</span>
             </button>
             {/* "Leave Character" lives at the very bottom of the
                 dropdown so the destructive option is one extra
@@ -995,10 +1015,10 @@ function IdentityButton({
               <button
                 type="button"
                 onClick={onLeave}
-                title="Drop the active character and return to your master (OOC) account."
+                title={t("identity.leaveTitle")}
                 className="flex w-full items-center justify-center gap-1 border-t border-keep-rule bg-keep-accent/10 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-accent hover:bg-keep-accent/20 lg:py-1"
               >
-                ← Leave Character (OOC)
+                {t("identity.leave")}
               </button>
             ) : null}
             {/* Incognito ("ghost") mode toggle. Only renders for users
@@ -1011,8 +1031,8 @@ function IdentityButton({
                 type="button"
                 onClick={onToggleIncognito}
                 title={incognitoMode
-                  ? "Reveal yourself, the room sees you join again."
-                  : "Disappear from userlists and observe rooms unseen. Mod/admin only."}
+                  ? t("identity.incognitoLeaveTitle")
+                  : t("identity.incognitoGoTitle")}
                 className={`flex w-full items-center justify-center gap-1 border-t border-keep-rule px-3 py-2 text-xs font-semibold uppercase tracking-widest lg:py-1 ${
                   incognitoMode
                     ? "bg-keep-action/20 text-keep-action hover:bg-keep-action/30"
@@ -1020,7 +1040,7 @@ function IdentityButton({
                 }`}
               >
                 <span aria-hidden>👻</span>
-                <span>{incognitoMode ? "Leave Incognito" : "Go Incognito"}</span>
+                <span>{incognitoMode ? t("identity.leaveIncognito") : t("identity.goIncognito")}</span>
               </button>
             ) : null}
           </div>
@@ -1033,8 +1053,8 @@ function IdentityButton({
         onClick={onToggle}
         title={
           inCharacter
-            ? "Switch character or return to OOC"
-            : "Switch into a character"
+            ? t("identity.switchTitleInCharacter")
+            : t("identity.switchTitleOoc")
         }
         // Height locked to h-9 mobile / lg:h-7 desktop to match the
         // adjacent envelope shortcut and the Tools trigger below.
@@ -1241,25 +1261,26 @@ function MenuItem({
  * and an unseen dot when there's been activity since your last visit.
  */
 function ForumBookmarkRow({ forum, onClick }: { forum: ForumSummary; onClick: () => void }) {
+  const { t } = useTranslation("common");
   const isOwner = forum.viewerRole === "owner";
   return (
     <button
       type="button"
       onClick={onClick}
-      title={forum.tagline ?? `Open ${forum.name}`}
+      title={forum.tagline ?? t("toolMenu.forums.openForum", { name: forum.name })}
       className="flex w-full items-center gap-2 border-b border-keep-rule/40 py-1.5 pl-6 pr-3 text-left text-sm hover:bg-keep-banner/40 lg:py-1"
     >
       <Avatar url={forum.logoUrl} name={forum.name} />
       <span className="min-w-0 flex-1 truncate text-keep-text">{forum.name}</span>
       {isOwner ? (
         <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] font-action uppercase tracking-wider text-keep-muted">
-          Owner
+          {t("owner")}
         </span>
       ) : null}
       {forum.unseen ? (
         <span
           aria-hidden
-          title="New activity since your last visit"
+          title={t("toolMenu.forums.newActivity")}
           className="h-2 w-2 shrink-0 rounded-full bg-keep-accent"
         />
       ) : null}
@@ -1282,6 +1303,7 @@ function ForumBookmarkRow({ forum, onClick }: { forum: ForumSummary; onClick: ()
  * Recreate target takes the slack, the X sits flush at the right.
  */
 function ArchivedRoomRow({ room, onRecreate, onHide }: { room: ArchivedRoomBrief; onRecreate: () => void; onHide: () => void }) {
+  const { t } = useTranslation("common");
   return (
     <div className="flex w-full items-center border-b border-keep-rule/40">
       <button
@@ -1289,8 +1311,8 @@ function ArchivedRoomRow({ room, onRecreate, onHide }: { room: ArchivedRoomBrief
         onClick={onRecreate}
         title={
           room.type === "private"
-            ? `Recreate and join ${room.name} (returns private with its original password)`
-            : `Recreate and join ${room.name}`
+            ? t("toolMenu.myRooms.recreatePrivateTitle", { name: room.name })
+            : t("toolMenu.myRooms.recreateTitle", { name: room.name })
         }
         className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-6 pr-2 text-left text-sm hover:bg-keep-banner/40 lg:py-1"
       >
@@ -1305,14 +1327,14 @@ function ArchivedRoomRow({ room, onRecreate, onHide }: { room: ArchivedRoomBrief
         </span>
         <span className="flex shrink-0 items-center gap-1 text-[10px] font-action uppercase tracking-wider text-keep-muted">
           <RotateCcw size={12} aria-hidden />
-          Recreate
+          {t("toolMenu.myRooms.recreate")}
         </span>
       </button>
       <button
         type="button"
         onClick={onHide}
-        title={`Remove ${room.name} from this list, doesn't delete it; recreate any time with /go`}
-        aria-label={`Remove ${room.name} from your rooms list`}
+        title={t("toolMenu.myRooms.hideTitle", { name: room.name })}
+        aria-label={t("toolMenu.myRooms.hideAria", { name: room.name })}
         className="flex h-7 w-7 shrink-0 items-center justify-center rounded text-keep-muted hover:bg-keep-banner/60 hover:text-keep-text"
       >
         <X size={14} aria-hidden />
@@ -1372,6 +1394,7 @@ function InlineForm({
 }
 
 function PrivateForm({ onSubmit }: { onSubmit: (name: string, password: string) => void }) {
+  const { t } = useTranslation("common");
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   function submit(e: FormEvent) {
@@ -1387,7 +1410,7 @@ function PrivateForm({ onSubmit }: { onSubmit: (name: string, password: string) 
         type="text"
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="room name"
+        placeholder={t("toolMenu.rooms.privateNamePlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action lg:py-1"
         // eslint-disable-next-line jsx-a11y/no-autofocus
         autoFocus
@@ -1396,7 +1419,7 @@ function PrivateForm({ onSubmit }: { onSubmit: (name: string, password: string) 
         type="text"
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        placeholder="password"
+        placeholder={t("toolMenu.rooms.privatePasswordPlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action lg:py-1"
       />
       <button
@@ -1404,7 +1427,7 @@ function PrivateForm({ onSubmit }: { onSubmit: (name: string, password: string) 
         disabled={!name.trim() || !password.trim()}
         className="keep-button w-full rounded border border-keep-rule bg-keep-banner px-2 py-1.5 text-xs hover:bg-keep-banner/80 disabled:opacity-50 lg:py-1"
       >
-        Create room
+        {t("toolMenu.rooms.createRoom")}
       </button>
     </form>
   );
@@ -1416,33 +1439,36 @@ const PRESETS = [
   "#333333", "#666666",
 ];
 
-const REFRESH_PRESETS: Array<{ label: string; value: number }> = [
-  { label: "Now (one-shot)", value: -1 },
-  { label: "Every 10s", value: 10 },
-  { label: "Every 30s", value: 30 },
-  { label: "Every 60s", value: 60 },
-  { label: "Every 5m", value: 300 },
+// Labels resolve through t() at render time (not module scope) so a live
+// language switch re-renders the picker in the new language.
+const REFRESH_PRESETS: Array<{ labelKey: string; value: number }> = [
+  { labelKey: "refresh.presetNow", value: -1 },
+  { labelKey: "refresh.presetEvery10s", value: 10 },
+  { labelKey: "refresh.presetEvery30s", value: 30 },
+  { labelKey: "refresh.presetEvery60s", value: 60 },
+  { labelKey: "refresh.presetEvery5m", value: 300 },
 ];
 
 function RefreshPicker({ current, onPick }: { current: number; onPick: (n: number) => void }) {
+  const { t } = useTranslation("common");
   const [custom, setCustom] = useState("");
   return (
     <div className="rounded border border-keep-rule/60 bg-keep-banner/30 p-2 text-xs">
       {current > 0 ? (
-        <div className="mb-1 text-keep-muted">currently every {current}s</div>
+        <div className="mb-1 text-keep-muted">{t("refresh.current", { seconds: current })}</div>
       ) : null}
       <div className="mb-1.5 text-[10px] leading-snug text-keep-muted">
-        Pauses the real-time userlist + typing churn and resyncs on this schedule — eases load on a slower device. Chat messages stay live.
+        {t("refresh.description")}
       </div>
       <ul className="mb-1 space-y-0.5">
         {REFRESH_PRESETS.map((p) => (
-          <li key={p.label}>
+          <li key={p.labelKey}>
             <button
               type="button"
               onClick={() => onPick(p.value)}
               className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-left hover:bg-keep-banner lg:py-1"
             >
-              {p.label}
+              {t(p.labelKey)}
             </button>
           </li>
         ))}
@@ -1453,7 +1479,7 @@ function RefreshPicker({ current, onPick }: { current: number; onPick: (n: numbe
           min={5}
           max={3600}
           step={1}
-          placeholder="seconds"
+          placeholder={t("refresh.secondsPlaceholder")}
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
           className="flex-1 rounded border border-keep-rule px-2 py-1.5 lg:py-1"
@@ -1466,7 +1492,7 @@ function RefreshPicker({ current, onPick }: { current: number; onPick: (n: numbe
           }}
           className="rounded border border-keep-rule bg-keep-banner px-2 py-1.5 hover:bg-keep-banner/80 lg:py-1"
         >
-          Set
+          {t("set")}
         </button>
       </div>
       <button
@@ -1474,13 +1500,51 @@ function RefreshPicker({ current, onPick }: { current: number; onPick: (n: numbe
         onClick={() => onPick(0)}
         className="w-full rounded border border-keep-rule bg-keep-bg py-1.5 hover:bg-keep-banner lg:py-1"
       >
-        Off
+        {t("off")}
       </button>
     </div>
   );
 }
 
+/**
+ * Inline language selector. Selecting applies immediately (i18next flips
+ * live, no reload) and persists via changeLocale — per-device always, and
+ * to the account (`users.locale`) when signed in. "System default" clears
+ * the preference back to browser auto-detection.
+ */
+function LanguagePicker({
+  current,
+  onPick,
+}: {
+  current: SupportedLocale | null;
+  onPick: (locale: SupportedLocale | null) => void;
+}) {
+  const { t } = useTranslation("common");
+  return (
+    <div className="rounded border border-keep-rule/60 bg-keep-banner/30 p-2 text-xs">
+      <div className="mb-1.5 text-[10px] leading-snug text-keep-muted">
+        {t("language.description")}
+      </div>
+      <select
+        value={current ?? ""}
+        onChange={(e) => {
+          const v = e.target.value;
+          const choice = LOCALE_CHOICES.find((c) => c.value === v);
+          onPick(choice ? choice.value : null);
+        }}
+        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 lg:py-1"
+      >
+        <option value="">{t("language.systemDefault")}</option>
+        {LOCALE_CHOICES.map((c) => (
+          <option key={c.value} value={c.value}>{c.label}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function ColorPicker({ onPick, onClear }: { onPick: (hex: string) => void; onClear: () => void }) {
+  const { t } = useTranslation("common");
   const [custom, setCustom] = useState("#990000");
   return (
     <div className="rounded border border-keep-rule/60 bg-keep-banner/30 p-2 text-xs">
@@ -1516,7 +1580,7 @@ function ColorPicker({ onPick, onClear }: { onPick: (hex: string) => void; onCle
           onClick={() => onPick(custom)}
           className="rounded border border-keep-rule bg-keep-banner px-2 py-1.5 hover:bg-keep-banner/80 lg:py-1"
         >
-          Set
+          {t("set")}
         </button>
       </div>
       <button
@@ -1524,7 +1588,7 @@ function ColorPicker({ onPick, onClear }: { onPick: (hex: string) => void; onCle
         onClick={onClear}
         className="keep-button mt-1 w-full rounded border border-keep-rule bg-keep-bg py-1.5 hover:bg-keep-banner lg:py-1"
       >
-        Clear
+        {t("clear")}
       </button>
     </div>
   );

@@ -145,6 +145,15 @@ export interface WorldSummary {
   name: string;
   description: string | null;
   visibility: WorldVisibility;
+  /**
+   * Owner-set "18+ world" flag (age-restriction plan Phase 4). Orthogonal
+   * to `visibility`: an 18+ world can be private/public/open among adults.
+   * The server hides 18+ worlds from minors/anonymous entirely and from
+   * hide-pref adults in listings, so the flag reaches only viewers allowed
+   * to see the world — the client renders it as an "18+" chip. Optional:
+   * absent (older bundle, or not yet populated) means all-ages.
+   */
+  isNsfw?: boolean;
   pageCount: number;
   /** Number of users who've joined this world (excluding the owner unless they explicitly joined). */
   memberCount: number;
@@ -357,6 +366,10 @@ export interface WorldCatalogEntry {
   ownerUsername: string;
   name: string;
   description: string | null;
+  /** Owner-set "18+ world" flag; same semantics as WorldSummary.isNsfw.
+   *  Server-filtered before it reaches any viewer who can't see NSFW.
+   *  Optional: absent means all-ages. */
+  isNsfw?: boolean;
   pageCount: number;
   memberCount: number;
   linkedRoomCount: number;

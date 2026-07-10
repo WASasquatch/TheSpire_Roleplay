@@ -25,6 +25,7 @@ import {
 import type { Db } from "../db/index.js";
 import { recordAudit } from "../audit.js";
 import { resolveProfileServerId } from "../earning/pool.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 /**
@@ -214,7 +215,7 @@ export async function registerProfileFlairRoutes(
       if (body.quotes !== undefined) {
         if (!(await ownsFlair(db, FLAIR_PROFILE_MARQUEE_KEY, identity))) {
           reply.code(403);
-          return { error: "You don't own the Profile Quote Marquee Flair." };
+          return { error: tFor(me.locale, "errors:server.profile.quoteFlairNotOwned") };
         }
         patch.profileMarqueeQuotesJson = serializeProfileMarqueeQuotes(body.quotes);
       }
@@ -222,7 +223,7 @@ export async function registerProfileFlairRoutes(
       if (body.showVisitorsCount !== undefined) {
         if (!(await ownsFlair(db, FLAIR_PROFILE_VISITORS_KEY, identity))) {
           reply.code(403);
-          return { error: "You don't own the Profile Visitor Counter Flair." };
+          return { error: tFor(me.locale, "errors:server.profile.visitorFlairNotOwned") };
         }
         patch.showProfileVisitorsCount = body.showVisitorsCount;
       }

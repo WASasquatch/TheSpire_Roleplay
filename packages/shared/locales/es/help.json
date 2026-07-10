@@ -1,0 +1,29 @@
+{
+  "modal": {
+    "title": "Ayuda",
+    "tabs": {
+      "guides": "Guías",
+      "commands": "Comandos",
+      "formatting": "Formato"
+    },
+    "searchPlaceholder": "Busca comandos, alias, subcomandos...",
+    "takeTour": "Haz el recorrido",
+    "takeTourTitle": "Repite el recorrido guiado por la interfaz",
+    "loading": "cargando...",
+    "noMatches": "sin coincidencias.",
+    "loadFailed": "error al cargar",
+    "loadStatus": "estado {{status}}",
+    "footerMention": "Menciona a alguien en el chat escribiendo <1>@username</1> - un enlace que abre su perfil activo.",
+    "footerTip": "Consejo: <1>/help char</1> te trae directo aquí. Presiona <3>Esc</3> para cerrar."
+  },
+  "commands": {
+    "customBadge": "personalizado",
+    "also": "también: {{aliases}}",
+    "options": "Opciones",
+    "aliases": "alias: {{aliases}}"
+  },
+  "guides": {
+    "intro": "Recorridos en lenguaje sencillo por las funciones principales del sitio. La pestaña Comandos es la referencia precisa de cada comando de barra; esta pestaña es el \"porqué y cuándo\" detrás de ellos.",
+    "jumpTo": "Ir a"
+  }
+}

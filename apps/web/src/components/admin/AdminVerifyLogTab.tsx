@@ -12,6 +12,7 @@
  * Gated on `verify_export_logs` (the outer AdminPanel hides the whole tab).
  */
 import { useCallback, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { fmtDateTimeLocal } from "@thekeep/shared";
 
 interface VerifyMessage {
@@ -61,6 +62,7 @@ function fmtTime(ms: number): string {
 const MAX_CHARS = 50_000_000;
 
 export function AdminVerifyLogTab() {
+  const { t } = useTranslation("admin");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,13 +78,13 @@ export function AdminVerifyLogTab() {
       setResult(null);
       setError(null);
     };
-    reader.onerror = () => setError("Couldn't read that file.");
+    reader.onerror = () => setError(t("verifyLog.fileReadError"));
     reader.readAsText(file);
-  }, []);
+  }, [t]);
 
   const verify = useCallback(async () => {
     const file = text.trim();
-    if (!file) { setError("Paste a log or drop the exported .html file first."); return; }
+    if (!file) { setError(t("verifyLog.emptyError")); return; }
     setBusy(true);
     setError(null);
     setResult(null);
@@ -93,28 +95,28 @@ export function AdminVerifyLogTab() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ file }),
       });
-      if (!r.ok) throw new Error(`verify ${r.status}`);
+      if (!r.ok) throw new Error(t("verifyLog.verifyStatus", { status: r.status }));
       setResult((await r.json()) as VerifyResponse);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Verification request failed.");
+      setError(err instanceof Error ? err.message : t("verifyLog.requestFailed"));
     } finally {
       setBusy(false);
     }
-  }, [text]);
+  }, [text, t]);
 
   // Verdict: authentic (signed + receipt matches), authentic-but-no-receipt
   // (rare: receipt pruned), or failed.
   const verdict = (() => {
     if (!result) return null;
-    if (!result.found) return { tone: "bad", label: "No verification data", detail: result.reason } as const;
-    if (!result.valid) return { tone: "bad", label: "Altered or not from this server", detail: result.reason } as const;
+    if (!result.found) return { tone: "bad", label: t("verifyLog.verdictNoData"), detail: result.reason } as const;
+    if (!result.valid) return { tone: "bad", label: t("verifyLog.verdictAltered"), detail: result.reason } as const;
     if (result.stored?.exists && result.stored.matchesHash) {
-      return { tone: "good", label: "Authentic: signature valid, matches server record", detail: undefined } as const;
+      return { tone: "good", label: t("verifyLog.verdictAuthentic"), detail: undefined } as const;
     }
     if (result.stored?.exists && !result.stored.matchesHash) {
-      return { tone: "bad", label: "Signature valid but does NOT match the server's recorded export", detail: "The receipt exists but its content hash differs. Treat with suspicion." } as const;
+      return { tone: "bad", label: t("verifyLog.verdictMismatch"), detail: t("verifyLog.verdictMismatchDetail") } as const;
     }
-    return { tone: "warn", label: "Signature valid: no server receipt on file", detail: "The signature checks out, but no matching receipt was found (it may have predated receipts or been pruned)." } as const;
+    return { tone: "warn", label: t("verifyLog.verdictNoReceipt"), detail: t("verifyLog.verdictNoReceiptDetail") } as const;
   })();
 
   const toneClass = verdict?.tone === "good"
@@ -126,7 +128,11 @@ export function AdminVerifyLogTab() {
   return (
     <div className="space-y-3 text-xs">
       <p className="text-keep-muted">
-        Paste a submitted chat log, or drop the exported <code>.html</code> file. The log is checked against the server: a green result means it is authentic and unaltered. Editing any part of a log breaks the check.
+        <Trans t={t} i18nKey="verifyLog.description">
+          {"Paste a submitted chat log, or drop the exported "}
+          <code>.html</code>
+          {" file. The log is checked against the server: a green result means it is authentic and unaltered. Editing any part of a log breaks the check."}
+        </Trans>
       </p>
 
       <div
@@ -143,7 +149,7 @@ export function AdminVerifyLogTab() {
         <textarea
           value={text}
           onChange={(e) => { setText(e.target.value.slice(0, MAX_CHARS)); setResult(null); }}
-          placeholder="Drop the exported log here, or paste its contents…"
+          placeholder={t("verifyLog.dropPlaceholder")}
           spellCheck={false}
           className="h-32 w-full resize-y rounded border border-keep-rule bg-keep-bg p-2 font-mono text-[11px] text-keep-text"
         />
@@ -154,14 +160,14 @@ export function AdminVerifyLogTab() {
             disabled={busy}
             className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner/60 disabled:opacity-50"
           >
-            {busy ? "Verifying…" : "Verify"}
+            {busy ? t("verifyLog.verifying") : t("verifyLog.verify")}
           </button>
           <button
             type="button"
             onClick={() => fileInput.current?.click()}
             className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner/60"
           >
-            Choose file…
+            {t("verifyLog.chooseFile")}
           </button>
           {text ? (
             <button
@@ -169,7 +175,7 @@ export function AdminVerifyLogTab() {
               onClick={() => { setText(""); setResult(null); setError(null); }}
               className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner/60"
             >
-              Clear
+              {t("common:clear")}
             </button>
           ) : null}
           <input
@@ -195,19 +201,19 @@ export function AdminVerifyLogTab() {
 
       {result?.meta ? (
         <fieldset className="rounded border border-keep-rule p-3">
-          <legend className="px-1 uppercase tracking-widest text-keep-muted">Export details</legend>
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("verifyLog.exportDetails")}</legend>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
-            <Field label="Verification ID" value={result.receiptId ?? "-"} mono />
-            <Field label="Room" value={result.meta.roomName} />
-            <Field label="Exported by" value={result.meta.exportedByUsername} />
-            <Field label="Generated" value={fmtTime(result.meta.generatedAtMs)} />
-            <Field label="Range start" value={fmtTime(result.meta.rangeStartMs)} />
-            <Field label="Range end" value={fmtTime(result.meta.rangeEndMs)} />
-            <Field label="Messages" value={String(result.meta.messageCount)} />
-            <Field label="Older lines dropped" value={result.meta.truncated ? "yes (cap reached)" : "no"} />
+            <Field label={t("verifyLog.fieldVerificationId")} value={result.receiptId ?? "-"} mono />
+            <Field label={t("verifyLog.fieldRoom")} value={result.meta.roomName} />
+            <Field label={t("verifyLog.fieldExportedBy")} value={result.meta.exportedByUsername} />
+            <Field label={t("verifyLog.fieldGenerated")} value={fmtTime(result.meta.generatedAtMs)} />
+            <Field label={t("verifyLog.fieldRangeStart")} value={fmtTime(result.meta.rangeStartMs)} />
+            <Field label={t("verifyLog.fieldRangeEnd")} value={fmtTime(result.meta.rangeEndMs)} />
+            <Field label={t("verifyLog.fieldMessages")} value={String(result.meta.messageCount)} />
+            <Field label={t("verifyLog.fieldTruncated")} value={result.meta.truncated ? t("verifyLog.truncatedYes") : t("verifyLog.truncatedNo")} />
             <Field
-              label="Server receipt"
-              value={result.stored?.exists ? (result.stored.matchesHash ? "found, matches" : "found, MISMATCH") : "not found"}
+              label={t("verifyLog.fieldReceipt")}
+              value={result.stored?.exists ? (result.stored.matchesHash ? t("verifyLog.receiptMatches") : t("verifyLog.receiptMismatch")) : t("verifyLog.receiptNotFound")}
             />
           </div>
         </fieldset>
@@ -215,7 +221,7 @@ export function AdminVerifyLogTab() {
 
       {result?.valid && result.messages && result.messages.length > 0 ? (
         <fieldset className="rounded border border-keep-rule p-3">
-          <legend className="px-1 uppercase tracking-widest text-keep-muted">Signed messages ({result.messages.length})</legend>
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("verifyLog.signedMessages", { count: result.messages.length })}</legend>
           <div className="max-h-[28rem] space-y-2 overflow-y-auto pr-1">
             {result.messages.map((m) => (
               <div key={m.id} className="border-t border-keep-rule pt-2 first:border-t-0 first:pt-0">
@@ -227,7 +233,7 @@ export function AdminVerifyLogTab() {
                   {m.kind !== "say" ? <span className="rounded border border-keep-rule px-1 uppercase tracking-wider">{m.kind}</span> : null}
                   {m.toDisplayName ? <span>→ {m.toDisplayName}</span> : null}
                   {m.moodSnapshot ? <span className="italic">({m.moodSnapshot})</span> : null}
-                  {m.npcVoicedBy ? <span>voiced by {m.npcVoicedBy}</span> : null}
+                  {m.npcVoicedBy ? <span>{t("verifyLog.voicedBy", { name: m.npcVoicedBy })}</span> : null}
                 </div>
                 {/* Plain text — React escapes it; never dangerouslySetInnerHTML here. */}
                 <div className="whitespace-pre-wrap break-words text-keep-text">{m.body}</div>

@@ -248,6 +248,8 @@ export async function unfurlAndAttach(db: Db, io: Io, args: {
   if (Number(updated.changes ?? 0) === 0) return;
   const row = (await db.select().from(messages).where(eq(messages.id, args.messageId)).limit(1))[0];
   if (!row) return;
-  const { toWire } = await import("./routes/messages.js");
-  io.to(`room:${args.roomId}`).emit("message:update", toWire(row));
+  // Viewer-aware broadcast: an 18+-stamped row's card+body must not reach
+  // minor occupants of a flipped-back room (see emitMessageUpdate).
+  const { emitMessageUpdate } = await import("./routes/messages.js");
+  await emitMessageUpdate(io, row);
 }

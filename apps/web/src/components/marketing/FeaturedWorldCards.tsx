@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorldCatalogEntry, WorldGenre } from "@thekeep/shared";
 import { WORLD_VIBE_AXES } from "@thekeep/shared";
 import { ChevronLeft, ChevronRight, FileText, Globe, Users } from "lucide-react";
@@ -22,15 +23,17 @@ import { SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 
 const ROTATE_MS = 8000;
 
-const GENRE_LABEL: Record<WorldGenre, string> = {
-  fantasy: "Fantasy",
-  scifi: "Sci-Fi",
-  modern: "Modern",
-  horror: "Horror",
-  western: "Western",
-  steampunk: "Steampunk",
-  mythological: "Mythological",
-  other: "Original Setting",
+/** Catalog keys (marketing ns) for the genre chip; resolved with t() at
+ *  render so the labels follow the active language. */
+const GENRE_KEY: Record<WorldGenre, string> = {
+  fantasy: "featuredWorlds.genre.fantasy",
+  scifi: "featuredWorlds.genre.scifi",
+  modern: "featuredWorlds.genre.modern",
+  horror: "featuredWorlds.genre.horror",
+  western: "featuredWorlds.genre.western",
+  steampunk: "featuredWorlds.genre.steampunk",
+  mythological: "featuredWorlds.genre.mythological",
+  other: "featuredWorlds.genre.other",
 };
 
 interface Props {
@@ -38,6 +41,7 @@ interface Props {
 }
 
 export function FeaturedWorldCards({ onNavigate }: Props) {
+  const { t } = useTranslation("marketing");
   const [items, setItems] = useState<WorldCatalogEntry[] | null>(null);
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -82,7 +86,7 @@ export function FeaturedWorldCards({ onNavigate }: Props) {
 
   return (
     <section
-      aria-label="Featured worlds"
+      aria-label={t("featuredWorlds.sectionAria")}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}
@@ -91,15 +95,15 @@ export function FeaturedWorldCards({ onNavigate }: Props) {
     >
       <header className="mb-3 text-center">
         <p className="text-[11px] uppercase tracking-[0.3em] text-keep-muted">
-          Featured Worlds
+          {t("featuredWorlds.kicker")}
         </p>
-        <h3 className="font-action mt-1 text-xl text-keep-text">World Settings to Explore</h3>
+        <h3 className="font-action mt-1 text-xl text-keep-text">{t("featuredWorlds.cardsTitle")}</h3>
       </header>
 
       <div
         role="link"
         tabIndex={0}
-        aria-label={`Enter ${active.name}`}
+        aria-label={t("featuredWorlds.enterAria", { name: active.name })}
         onClick={enter}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -134,37 +138,36 @@ export function FeaturedWorldCards({ onNavigate }: Props) {
           )}
           <div className="min-w-0 flex-1">
             <p className="text-[11px] uppercase tracking-[0.2em] text-keep-accent">
-              {GENRE_LABEL[active.genre] ?? "World"}
+              {t(GENRE_KEY[active.genre] ?? "featuredWorlds.genre.unknown")}
             </p>
             <h4 className="font-action mt-0.5 truncate text-xl leading-tight text-keep-text group-hover:text-keep-action">
               {active.name}
             </h4>
-            <p className="mt-1 truncate text-[13px] text-keep-muted">by {active.ownerUsername}</p>
+            <p className="mt-1 truncate text-[13px] text-keep-muted">{t("featuredWorlds.byOwner", { name: active.ownerUsername })}</p>
           </div>
         </div>
 
         <p className="mt-3 line-clamp-3 text-[15px] leading-relaxed text-keep-text/85">
-          {active.description ??
-            `A world told in ${active.pageCount} ${active.pageCount === 1 ? "page" : "pages"}.`}
+          {active.description ?? t("featuredWorlds.toldInPages", { count: active.pageCount })}
         </p>
 
         {/* Meta counts. Members stay behind the activity-feeds gate. */}
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-keep-muted">
           <span className="inline-flex items-center gap-1">
             <FileText className="h-4 w-4" aria-hidden />
-            {active.pageCount} {active.pageCount === 1 ? "page" : "pages"}
+            {t("featuredWorlds.pages", { count: active.pageCount })}
           </span>
           {activityFeedsEnabled && active.memberCount > 0 ? (
             <span className="inline-flex items-center gap-1">
               <Users className="h-4 w-4" aria-hidden />
-              {active.memberCount} {active.memberCount === 1 ? "member" : "members"}
+              {t("featuredWorlds.members", { count: active.memberCount })}
             </span>
           ) : null}
         </div>
 
         {vibes.length > 0 ? (
           <div className="mt-4 border-t border-keep-rule/40 pt-3">
-            <p className="mb-2 text-[11px] uppercase tracking-[0.25em] text-keep-muted">Vibe</p>
+            <p className="mb-2 text-[11px] uppercase tracking-[0.25em] text-keep-muted">{t("featuredWorlds.vibe")}</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
               {vibes.map((axis) => {
                 const value = active.vibeStats[axis.key]!;
@@ -190,7 +193,7 @@ export function FeaturedWorldCards({ onNavigate }: Props) {
         ) : null}
 
         <p className="mt-4 text-right text-base font-semibold text-keep-action">
-          Enter this world →
+          {t("featuredWorlds.enterCta")}
         </p>
       </div>
 
@@ -198,21 +201,21 @@ export function FeaturedWorldCards({ onNavigate }: Props) {
         <div className="mt-3 flex items-center justify-center gap-3">
           <button
             type="button"
-            aria-label="Previous world"
-            title="Previous world"
+            aria-label={t("featuredWorlds.previous")}
+            title={t("featuredWorlds.previous")}
             onClick={() => advance(-1)}
             className="flex h-7 w-7 items-center justify-center rounded-full border border-keep-border/60 bg-keep-panel/40 text-keep-muted transition hover:border-keep-accent/60 hover:text-keep-text"
           >
             <ChevronLeft className="h-4 w-4" aria-hidden />
           </button>
-          <div className="flex gap-1.5" role="tablist" aria-label="Featured worlds carousel controls">
+          <div className="flex gap-1.5" role="tablist" aria-label={t("featuredWorlds.controlsAria")}>
             {items.map((it, i) => (
               <button
                 key={it.id}
                 type="button"
                 role="tab"
                 aria-selected={i === index}
-                aria-label={`World ${i + 1} of ${items.length}: ${it.name}`}
+                aria-label={t("featuredWorlds.dotAria", { index: i + 1, total: items.length, name: it.name })}
                 onClick={() => { setIndex(i); restart.current += 1; }}
                 className={`h-1.5 w-1.5 rounded-full ${
                   i === index ? "bg-keep-action" : "bg-keep-rule/60 hover:bg-keep-muted"
@@ -222,8 +225,8 @@ export function FeaturedWorldCards({ onNavigate }: Props) {
           </div>
           <button
             type="button"
-            aria-label="Next world"
-            title="Next world"
+            aria-label={t("featuredWorlds.next")}
+            title={t("featuredWorlds.next")}
             onClick={() => advance(1)}
             className="flex h-7 w-7 items-center justify-center rounded-full border border-keep-border/60 bg-keep-panel/40 text-keep-muted transition hover:border-keep-accent/60 hover:text-keep-text"
           >

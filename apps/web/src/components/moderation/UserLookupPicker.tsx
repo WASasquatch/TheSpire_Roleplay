@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { ForumUserSearchHit } from "@thekeep/shared";
 import { searchForumUsers } from "../../lib/forums.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
@@ -16,7 +17,7 @@ import { useReducedMotion } from "../../lib/reducedMotion.js";
 export function UserLookupPicker({
   forumId,
   onSelect,
-  placeholder = "Search by name…",
+  placeholder,
   /** Annotate (and disable) a hit, e.g. "already a mod". Return a string to
    *  disable the row with that reason, or null to leave it selectable. */
   disabledReason,
@@ -28,6 +29,7 @@ export function UserLookupPicker({
   disabledReason?: (hit: ForumUserSearchHit) => string | null;
   autoFocus?: boolean;
 }) {
+  const { t } = useTranslation("moderation");
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<ForumUserSearchHit[]>([]);
   const [loading, setLoading] = useState(false);
@@ -79,7 +81,7 @@ export function UserLookupPicker({
         autoFocus={autoFocus}
         onChange={(e) => setQ(e.target.value)}
         onFocus={() => { if (hits.length > 0) setOpen(true); }}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t("userLookup.searchPlaceholder")}
         autoComplete="off"
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
         role="combobox"
@@ -92,16 +94,16 @@ export function UserLookupPicker({
           className={`absolute z-20 mt-1 max-h-64 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-lg${reduceMotion ? " tk-slide-down-in" : ""}`}
         >
           {loading && hits.length === 0 ? (
-            <li className="px-2 py-2 text-xs text-keep-muted">Searching…</li>
+            <li className="px-2 py-2 text-xs text-keep-muted">{t("userLookup.searching")}</li>
           ) : hits.length === 0 ? (
-            <li className="px-2 py-2 text-xs text-keep-muted">No matches.</li>
+            <li className="px-2 py-2 text-xs text-keep-muted">{t("userLookup.noMatches")}</li>
           ) : (
             hits.map((hit) => {
               const reason = disabledReason?.(hit) ?? null;
               const annotation = reason
-                ?? (hit.forumRole === "owner" ? "owner"
-                  : hit.forumRole === "mod" ? "already a mod"
-                  : hit.banned ? "banned" : null);
+                ?? (hit.forumRole === "owner" ? t("userLookup.annotationOwner")
+                  : hit.forumRole === "mod" ? t("userLookup.annotationAlreadyMod")
+                  : hit.banned ? t("userLookup.annotationBanned") : null);
               return (
                 <li key={hit.userId}>
                   <button

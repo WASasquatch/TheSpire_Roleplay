@@ -26,6 +26,7 @@ import type {
  ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import {
   PUBLIC_READABLE_RATINGS,
+  SFW_RATINGS,
   STORY_AUTOSAVE_HISTORY_CAP,
   STORY_CONTENT_WARNINGS,
   STORY_COPY_PRICE_MIN,
@@ -49,6 +50,7 @@ import {
   startOfUtcDayMs,
 } from "@thekeep/shared";
 import type { Server as IoServer } from "socket.io";
+import { canSeeNsfw, isMinor, type NsfwViewer } from "../../auth/ageGate.js";
 import { hasPermission } from "../../auth/permissions.js";
 import type {
   storyEntities} from "../../db/schema.js";
@@ -304,19 +306,34 @@ export function parseStoredTheme(raw: string | null): Theme | null {
 export async function loadLinkedWorldRef(
   db: Db,
   worldId: string | null,
+  /** The viewer the ref is being built FOR (null = anonymous). */
+  viewer: NsfwViewer | null,
 ): Promise<{ id: string; slug: string; name: string } | null> {
   if (!worldId) return null;
   const w = (await db
-    .select({ id: worlds.id, slug: worlds.slug, name: worlds.name })
+    .select({ id: worlds.id, slug: worlds.slug, name: worlds.name, isNsfw: worlds.isNsfw })
     .from(worlds)
     .where(eq(worlds.id, worldId))
     .limit(1))[0];
-  return w ?? null;
+  if (!w) return null;
+  // 18+ world names never surface to viewers who can't see NSFW (anonymous,
+  // minors, hide-pref adults): the world 404s / stubs for them anyway, so
+  // the ref would be a name+slug leak plus a dead-end link. Mirrors the
+  // profile world-list filter (routes/worlds/membership.ts) — age plan,
+  // Phase 4/decision #10 posture.
+  if (w.isNsfw && !canSeeNsfw(viewer)) return null;
+  return { id: w.id, slug: w.slug, name: w.name };
 }
 
-export async function toCard(db: Db, row: typeof stories.$inferSelect): Promise<StoryCard> {
+export async function toCard(
+  db: Db,
+  row: typeof stories.$inferSelect,
+  /** The viewer the card is for (null = anonymous) — REQUIRED so no list
+   *  surface can forget it; gates the linked-world ref above. */
+  viewer: NsfwViewer | null,
+): Promise<StoryCard> {
   const author = await loadAuthor(db, row.authorUserId, row.authorCharacterId ?? null);
-  const linkedWorld = await loadLinkedWorldRef(db, row.linkedWorldId ?? null);
+  const linkedWorld = await loadLinkedWorldRef(db, row.linkedWorldId ?? null, viewer);
   // getSettings is an in-memory cached singleton, so resolving the default
   // per card is free. Author-set price wins; null inherits the site default.
   const defaultCopyPrice = (await getSettings(db)).earningConfig.scriptorium.copyPrice;
@@ -434,21 +451,23 @@ export async function viewerMayRead(
     ? await hasPermission({ id: viewerUserId, role: viewerRole }, "view_others_scriptorium_drafts", db)
     : false;
 
-  if (isOwner || isAdmin) return { ok: true };
-
   // Active collaborator (any role) can see the story regardless of
   // visibility. Pending collaborators (acceptedAt null) fall through
   // to the public/unlisted branches below.
-  if (viewerUserId && db) {
+  let isCollaborator = false;
+  if (!isOwner && !isAdmin && viewerUserId && db) {
     const collab = (await db
       .select({ acceptedAt: storyCollaborators.acceptedAt })
       .from(storyCollaborators)
       .where(and(eq(storyCollaborators.storyId, story.id), eq(storyCollaborators.userId, viewerUserId)))
       .limit(1))[0];
-    if (collab && collab.acceptedAt) return { ok: true };
+    isCollaborator = !!collab?.acceptedAt;
   }
+  const privileged = isOwner || isAdmin || isCollaborator;
 
-  if (story.visibility === "private") {
+  // Visibility rule first so a private story never leaks its title to a
+  // non-team viewer through the rating stub below.
+  if (!privileged && story.visibility === "private") {
     if (viewerUserId) return { ok: false, missing: true };
     return {
       ok: false,
@@ -461,6 +480,34 @@ export async function viewerMayRead(
       },
     };
   }
+
+  // HARD age gate (age-restriction plan Phase 4): signed-in accounts
+  // under 18 may open G / PG / PG-13 only — stricter than anonymous.
+  // Deliberately checked AFTER the visibility rule but WITHOUT the
+  // owner/admin/collaborator bypass: age gates have none, so a minor
+  // author whose story a mod re-rated R loses access to it (same
+  // posture as the forum NSFW re-tag).
+  if (viewerUserId && db && !(SFW_RATINGS as readonly string[]).includes(story.rating)) {
+    const viewer = (await db
+      .select({ birthdate: users.birthdate })
+      .from(users)
+      .where(eq(users.id, viewerUserId))
+      .limit(1))[0];
+    if (!viewer || isMinor(viewer)) {
+      return {
+        ok: false,
+        stub: {
+          private: true,
+          title: story.title,
+          slug: story.slug,
+          reason: "rating",
+          requiresAuth: false,
+        },
+      };
+    }
+  }
+
+  if (privileged) return { ok: true };
 
   // Anonymous viewers can read up through R (PUBLIC_READABLE_RATINGS).
   // Only NC-17 is gated behind the login wall, the rest is
@@ -995,10 +1042,23 @@ export async function notifyPublish(
   chapter: typeof storyChapters.$inferSelect,
   publishingUserId: string,
 ): Promise<void> {
-  const subs = await db
+  let subs = await db
     .select()
     .from(storySubscriptions)
     .where(eq(storySubscriptions.storyId, story.id));
+  // Age gate on the fan-out (age plan Phase 4): adult-rated stories
+  // never ping under-18 subscribers — they can't open the chapter, so
+  // the socket line / web push would only tease a title they're locked
+  // out of. Only stale subscriptions from before a re-rate land here
+  // (minors can't subscribe to what they can't open).
+  if (subs.length > 0 && !(SFW_RATINGS as readonly string[]).includes(story.rating)) {
+    const subscriberRows = await db
+      .select({ id: users.id, birthdate: users.birthdate })
+      .from(users)
+      .where(inArray(users.id, subs.map((s) => s.userId)));
+    const adultIds = new Set(subscriberRows.filter((r) => !isMinor(r)).map((r) => r.id));
+    subs = subs.filter((s) => adultIds.has(s.userId));
+  }
   if (subs.length === 0) return;
 
   // Resolve the author's display name once.

@@ -1,4 +1,6 @@
+import { useMemo } from "react";
 import { Paintbrush2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { CoachTour, type CoachStep } from "./CoachTour.js";
 
 /**
@@ -17,38 +19,44 @@ import { CoachTour, type CoachStep } from "./CoachTour.js";
  * external API is unchanged (ProfileEditor still mounts `<DesignerTour onClose />`).
  */
 
-// Copy follows the help-content voice: plain, friendly, no dev jargon.
-const STEPS: CoachStep[] = [
-  {
-    title: "Welcome to the Designer",
-    body: "Build your profile by dragging pieces onto the page. No code needed. Here's a quick tour.",
-  },
-  {
-    title: "Your building blocks",
-    body: "Drag any of these onto the page. The themed templates are ready-made styled sections; the plain blocks let you build your own. Hover one to preview what it is.",
-    targets: [".gjs-blocks-c", ".gjs-pn-views-container", ".profile-designer"],
-  },
-  {
-    title: "Your profile page",
-    body: "Drop blocks here, then click any text to type your own. Select a piece to move or restyle it.",
-    targets: [".gjs-cv-canvas", ".profile-designer"],
-  },
-  {
-    title: "Designer or code",
-    body: "Prefer writing your own HTML and CSS? Switch to Source any time. Your work carries across both ways.",
-    targets: ['[data-tour="bio-mode-toggle"]'],
-  },
-  {
-    title: "Save when you're ready",
-    body: "Happy with it? Hit Save to publish your profile. You can come back and tweak it whenever you like.",
-    targets: ['[data-tour="profile-save"]'],
-  },
-];
-
 export function DesignerTour({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation("tours");
+
+  // Copy follows the help-content voice: plain, friendly, no dev jargon.
+  // Built at render time (not module scope) so a language switch re-renders it.
+  const steps = useMemo<CoachStep[]>(
+    () => [
+      {
+        title: t("designer.welcome.title"),
+        body: t("designer.welcome.body"),
+      },
+      {
+        title: t("designer.blocks.title"),
+        body: t("designer.blocks.body"),
+        targets: [".gjs-blocks-c", ".gjs-pn-views-container", ".profile-designer"],
+      },
+      {
+        title: t("designer.canvas.title"),
+        body: t("designer.canvas.body"),
+        targets: [".gjs-cv-canvas", ".profile-designer"],
+      },
+      {
+        title: t("designer.mode.title"),
+        body: t("designer.mode.body"),
+        targets: ['[data-tour="bio-mode-toggle"]'],
+      },
+      {
+        title: t("designer.save.title"),
+        body: t("designer.save.body"),
+        targets: ['[data-tour="profile-save"]'],
+      },
+    ],
+    [t],
+  );
+
   return (
     <CoachTour
-      steps={STEPS}
+      steps={steps}
       onClose={onClose}
       icon={<Paintbrush2 className="h-4 w-4" aria-hidden />}
     />

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { WorldJoinMode, WorldMembership } from "@thekeep/shared";
+import { canSeeNsfw } from "../../auth/ageGate.js";
 import { hasPermission } from "../../auth/permissions.js";
 import {
   characters,
@@ -11,6 +12,7 @@ import {
   worlds,
 } from "../../db/schema.js";
 import { resolveIdentityArg } from "../../commands/identityArg.js";
+import { tFor } from "../../i18n.js";
 import { getSessionUser } from "../auth.js";
 import { broadcastRoomState } from "../../realtime/broadcast.js";
 import { pushToUser } from "../../push.js";
@@ -45,7 +47,7 @@ export async function registerWorldMembershipRoutes(app: FastifyInstance, db: Db
       if (w.ownerUserId !== me.id && w.visibility !== "open"
           && !(await hasPermission(me, "edit_others_world", db))) {
         reply.code(403);
-        return { error: "world isn't open for catalog use" };
+        return { error: tFor(me.locale, "errors:server.worlds.notOpenForCatalog") };
       }
 
       await db
@@ -105,14 +107,14 @@ export async function registerWorldMembershipRoutes(app: FastifyInstance, db: Db
       if (joinMode === "invite-only") {
         reply.code(403);
         return {
-          error: "this world is invite-only; ask the owner to add you",
+          error: tFor(me.locale, "errors:server.worlds.inviteOnly"),
           code: "INVITE_ONLY",
         };
       }
       if (joinMode === "application") {
         reply.code(403);
         return {
-          error: "this world requires an application; use the Apply button",
+          error: tFor(me.locale, "errors:server.worlds.requiresApplication"),
           code: "APPLICATION_REQUIRED",
         };
       }
@@ -183,7 +185,7 @@ export async function registerWorldMembershipRoutes(app: FastifyInstance, db: Db
       if (!body.success) { reply.code(400); return { error: "invalid body" }; }
       const resolution = await resolveIdentityArg(db, body.data.target);
       if (resolution.kind === "none") {
-        reply.code(404); return { error: `no user or character matched "${body.data.target}"` };
+        reply.code(404); return { error: tFor(me.locale, "errors:server.worlds.noIdentityMatch", { name: body.data.target }) };
       }
       if (resolution.kind === "ambiguous") {
         // Surface the disambiguation candidates so the owner can re-run
@@ -191,7 +193,7 @@ export async function registerWorldMembershipRoutes(app: FastifyInstance, db: Db
         // uses on the chat side, just over HTTP.
         reply.code(409);
         return {
-          error: `"${body.data.target}" matches ${resolution.matches.length} identities, re-run with a specific token`,
+          error: tFor(me.locale, "errors:server.worlds.identityAmbiguous", { name: body.data.target, count: resolution.matches.length }),
           candidates: resolution.matches.map((m) => ({
             displayName: m.displayName,
             masterUsername: m.masterUsername,
@@ -286,6 +288,7 @@ export async function registerWorldMembershipRoutes(app: FastifyInstance, db: Db
         joinedAt: worldMembers.joinedAt,
         worldSlug: worlds.slug,
         worldName: worlds.name,
+        worldIsNsfw: worlds.isNsfw,
         ownerUserId: worlds.ownerUserId,
         characterName: characters.name,
         characterDeletedAt: characters.deletedAt,
@@ -295,7 +298,13 @@ export async function registerWorldMembershipRoutes(app: FastifyInstance, db: Db
       .leftJoin(characters, eq(characters.id, worldMembers.characterId))
       .where(eq(worldMembers.userId, me.id))
       .orderBy(asc(worldMembers.joinedAt));
-    const visible = rows.filter((r) => r.characterId === null || r.characterDeletedAt === null);
+    // Keep-but-hide (age plan Phase 4): a minor's membership in a world
+    // that flipped 18+ stays in the table but drops off their "joined"
+    // list — the entry could only dead-end on a 404. It reappears when
+    // the flag flips back or they turn 18.
+    const visible = rows.filter((r) =>
+      (r.characterId === null || r.characterDeletedAt === null)
+      && (me.isAdult || !r.worldIsNsfw));
     const memberships: WorldMembership[] = await Promise.all(
       visible.map(async (r) => ({
         worldId: r.worldId,
@@ -350,6 +359,7 @@ export async function registerWorldMembershipRoutes(app: FastifyInstance, db: Db
         joinedAt: worldMembers.joinedAt,
         worldSlug: worlds.slug,
         worldName: worlds.name,
+        worldIsNsfw: worlds.isNsfw,
         visibility: worlds.visibility,
         ownerUserId: worlds.ownerUserId,
         ownerUsername: users.username,
@@ -378,6 +388,10 @@ export async function registerWorldMembershipRoutes(app: FastifyInstance, db: Db
       // Identity filter.
       if (filterChar === "ooc" && r.characterId !== null) return false;
       if (filterChar && filterChar !== "ooc" && r.characterId !== filterChar) return false;
+      // 18+ world names never surface on profiles for viewers who
+      // can't see NSFW (anonymous, minors, hide-pref adults) — the
+      // linked world would 404 for them anyway (age plan Phase 4).
+      if (r.worldIsNsfw && !canSeeNsfw(me)) return false;
       // Private-world visibility gate (unchanged from v2).
       if (r.visibility !== "private") return true;
       return !!me && (meCanSeePrivateAsAdmin || r.ownerUserId === me.id);

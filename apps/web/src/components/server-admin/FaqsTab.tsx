@@ -19,6 +19,7 @@
  * reference rather than linked.
  */
 import { useEffect, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import DOMPurify from "dompurify";
 import { markdownToHtml, normalizeFaqSlug, type FaqAdminEntry, type ServerViewerState } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
@@ -47,6 +48,7 @@ const btnClass = "rounded border border-keep-rule px-2 py-0.5 text-xs text-keep-
 const sid = (id: string) => encodeURIComponent(id);
 
 export default function FaqsTab({ serverId, viewer, busy, run, onSaved }: FaqsTabProps) {
+  const { t } = useTranslation("servers");
   // The route requires manage_faqs for every action, so anyone who can open this
   // tab can write; the owner short-circuit mirrors serverCan.
   const canManage = viewer.isOwner || viewer.permissions.includes("manage_faqs");
@@ -65,7 +67,7 @@ export default function FaqsTab({ serverId, viewer, busy, run, onSaved }: FaqsTa
       const j = (await r.json()) as { faqs: FaqAdminEntry[] };
       setFaqs(j.faqs);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("shared.loadFailed"));
     }
   }
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [serverId]);
@@ -81,12 +83,12 @@ export default function FaqsTab({ serverId, viewer, busy, run, onSaved }: FaqsTa
 
   async function checkSlug() {
     const norm = normalizeFaqSlug(form.slug);
-    if (!norm) { setSlugStatus("Invalid slug (3-40 chars: a-z, 0-9, _)."); return; }
+    if (!norm) { setSlugStatus(t("faqsTab.slugInvalidLong")); return; }
     try {
       const exceptId = editing && editing !== "new" ? `&exceptId=${encodeURIComponent(editing)}` : "";
       const r = await fetch(`/servers/${sid(serverId)}/faqs/slug-availability?slug=${encodeURIComponent(norm)}${exceptId}`, { credentials: "include" });
       const j = (await r.json()) as { available: boolean; reason?: string | null };
-      setSlugStatus(j.available ? `"${norm}" is available` : j.reason === "invalid" ? "Invalid slug." : `"${norm}" is already taken.`);
+      setSlugStatus(j.available ? t("faqsTab.slugAvailable", { slug: norm }) : j.reason === "invalid" ? t("faqsTab.slugInvalidShort") : t("faqsTab.slugTaken", { slug: norm }));
     } catch { setSlugStatus(null); }
   }
 
@@ -116,7 +118,7 @@ export default function FaqsTab({ serverId, viewer, busy, run, onSaved }: FaqsTa
       await load();
       onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "save failed");
+      setError(e instanceof Error ? e.message : t("shared.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -136,7 +138,7 @@ export default function FaqsTab({ serverId, viewer, busy, run, onSaved }: FaqsTa
   }
 
   async function remove(f: FaqAdminEntry) {
-    if (!window.confirm(`Delete the FAQ "${f.question}"?`)) return;
+    if (!window.confirm(t("faqsTab.deleteConfirm", { question: f.question }))) return;
     await run(async () => {
       const r = await fetch(`/servers/${sid(serverId)}/faqs/${sid(f.id)}`, { method: "DELETE", credentials: "include" });
       if (!r.ok) throw new Error(await readError(r));
@@ -169,14 +171,14 @@ export default function FaqsTab({ serverId, viewer, busy, run, onSaved }: FaqsTa
     <div className="max-w-2xl space-y-4">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h2 className="mb-1 text-xs font-semibold uppercase tracking-widest text-keep-muted">FAQ entries</h2>
+          <h2 className="mb-1 text-xs font-semibold uppercase tracking-widest text-keep-muted">{t("faqsTab.heading")}</h2>
           <p className="text-[11px] text-keep-muted">
-            This server's question/answer entries, shown to members who open its help. Answers accept Markdown or HTML.
+            {t("faqsTab.blurb")}
           </p>
         </div>
         {canManage && editing === null ? (
           <button type="button" onClick={startNew} className="shrink-0 rounded border border-keep-action/50 bg-keep-action/10 px-2 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/20">
-            + New FAQ
+            {t("faqsTab.newFaq")}
           </button>
         ) : null}
       </div>
@@ -187,71 +189,71 @@ export default function FaqsTab({ serverId, viewer, busy, run, onSaved }: FaqsTa
         <form onSubmit={submit} className="space-y-2 rounded border border-keep-action/40 bg-keep-bg/40 p-3">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="text-xs text-keep-muted">
-              Slug (reference id)
-              <input className={inputClass} value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} onBlur={() => void checkSlug()} placeholder="how_this_server_works" maxLength={40} required />
+              {t("faqsTab.slugLabel")}
+              <input className={inputClass} value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} onBlur={() => void checkSlug()} placeholder={t("faqsTab.slugPlaceholder")} maxLength={40} required />
               {slugStatus ? <span className="mt-0.5 block text-[11px] text-keep-muted">{slugStatus}</span> : null}
             </label>
             <label className="text-xs text-keep-muted">
-              Category (optional)
-              <input className={inputClass} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Getting started" maxLength={60} />
+              {t("faqsTab.categoryLabel")}
+              <input className={inputClass} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder={t("faqsTab.categoryPlaceholder")} maxLength={60} />
             </label>
           </div>
           <label className="block text-xs text-keep-muted">
-            Question
+            {t("faqsTab.questionLabel")}
             <input className={inputClass} value={form.question} onChange={(e) => setForm({ ...form, question: e.target.value })} maxLength={200} required />
           </label>
           <label className="block text-xs text-keep-muted">
-            Answer (Markdown or HTML)
+            {t("faqsTab.answerLabel")}
             <textarea className={`${inputClass} min-h-[6rem] font-mono`} value={form.answer} onChange={(e) => setForm({ ...form, answer: e.target.value })} maxLength={8000} required />
           </label>
           {form.answer.trim() ? (
             <div className="rounded border border-keep-rule bg-keep-panel/20 p-2">
-              <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Preview</div>
+              <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("announceTab.preview")}</div>
               <div className="prose prose-sm max-w-none text-keep-text" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(markdownToHtml(form.answer)) }} />
             </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-1 text-xs text-keep-muted">
               <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
-              Published
+              {t("faqsTab.published")}
             </label>
             <label className="flex items-center gap-1 text-xs text-keep-muted">
-              Sort
+              {t("faqsTab.sort")}
               <input className={`${inputClass} w-16`} type="number" value={form.sortOrder} onChange={(e) => setForm({ ...form, sortOrder: e.target.value })} />
             </label>
             <div className="ml-auto flex gap-2">
               <button type="submit" disabled={saving} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50">
-                {saving ? "Saving..." : editing === "new" ? "Create" : "Save"}
+                {saving ? t("faqsTab.savingDots") : editing === "new" ? t("faqsTab.create") : t("shared.save")}
               </button>
-              <button type="button" onClick={() => { setEditing(null); setForm(EMPTY); setSlugStatus(null); }} className={btnClass}>Cancel</button>
+              <button type="button" onClick={() => { setEditing(null); setForm(EMPTY); setSlugStatus(null); }} className={btnClass}>{t("shared.cancel")}</button>
             </div>
           </div>
         </form>
       ) : null}
 
       {faqs === null ? (
-        <p className="text-xs italic text-keep-muted">Loading...</p>
+        <p className="text-xs italic text-keep-muted">{t("faqsTab.loadingDots")}</p>
       ) : faqs.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No FAQ entries yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("faqsTab.noEntries")}</p>
       ) : (
         <ul className="space-y-2">
           {faqs.map((f, i) => (
             <li key={f.id} className="rounded border border-keep-rule bg-keep-panel/30 p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
-                {!f.enabled ? <span className="rounded bg-keep-muted/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-keep-muted">draft</span> : null}
+                {!f.enabled ? <span className="rounded bg-keep-muted/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-keep-muted">{t("faqsTab.draft")}</span> : null}
                 <span className="font-semibold text-keep-text">{f.question}</span>
                 <span className="text-[11px] text-keep-muted">{f.slug}</span>
                 {f.category ? <span className="text-[11px] text-keep-muted">· {f.category}</span> : null}
               </div>
               {canManage ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2">
-                  <button type="button" disabled={busy || i === 0} onClick={() => void move(i, -1)} title="Move up"
+                  <button type="button" disabled={busy || i === 0} onClick={() => void move(i, -1)} title={t("console.onboarding.moveUp")}
                     className="rounded border border-keep-rule px-1.5 py-0.5 text-xs text-keep-muted hover:text-keep-text disabled:opacity-40">↑</button>
-                  <button type="button" disabled={busy || i === faqs.length - 1} onClick={() => void move(i, 1)} title="Move down"
+                  <button type="button" disabled={busy || i === faqs.length - 1} onClick={() => void move(i, 1)} title={t("console.onboarding.moveDown")}
                     className="rounded border border-keep-rule px-1.5 py-0.5 text-xs text-keep-muted hover:text-keep-text disabled:opacity-40">↓</button>
-                  <button type="button" onClick={() => startEdit(f)} className={btnClass}>Edit</button>
-                  <button type="button" onClick={() => void toggleEnabled(f)} className={btnClass}>{f.enabled ? "Unpublish" : "Publish"}</button>
-                  <button type="button" onClick={() => void remove(f)} className="rounded border border-keep-accent/40 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/10">Delete</button>
+                  <button type="button" onClick={() => startEdit(f)} className={btnClass}>{t("shared.edit")}</button>
+                  <button type="button" onClick={() => void toggleEnabled(f)} className={btnClass}>{f.enabled ? t("faqsTab.unpublish") : t("faqsTab.publish")}</button>
+                  <button type="button" onClick={() => void remove(f)} className="rounded border border-keep-accent/40 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/10">{t("shared.delete")}</button>
                 </div>
               ) : null}
             </li>

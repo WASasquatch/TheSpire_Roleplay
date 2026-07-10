@@ -14,6 +14,7 @@ import {
 import { formatDuration, parseDuration } from "../duration.js";
 import { auditServerAction, recordAudit } from "../../audit.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -40,7 +41,7 @@ function notice(ctx: CommandContext, code: string, message: string) {
 async function findUserByName(ctx: CommandContext, name: string) {
   const resolution = await resolveIdentityArg(ctx.db, name);
   if (resolution.kind === "none") {
-    notice(ctx, "NO_USER", `No user named "${name}".`);
+    notice(ctx, "NO_USER", tFor(ctx.user.locale, "commands:shared.noUserNamed", { name }));
     return undefined;
   }
   if (resolution.kind === "ambiguous") {
@@ -196,20 +197,20 @@ export const kickCommand: CommandHandler = {
   ],
   async run(ctx) {
     if (!(await callerCanModerateRoom(ctx, "kick_user", "kick_member"))) {
-      return notice(ctx, "PERM", "Only room owner/mod or a site admin can /kick.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:kick.permission"));
     }
     const [name, ...reasonParts] = ctx.args;
     const reason = reasonParts.join(" ").trim();
-    if (!name) return notice(ctx, "EMPTY", "Usage: /kick <username> [reason]");
+    if (!name) return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:kick.usage"));
 
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
-    if (target.id === ctx.user.id) return notice(ctx, "SELF", "Kicking yourself isn't useful.");
+    if (target.id === ctx.user.id) return notice(ctx, "SELF", tFor(ctx.user.locale, "commands:kick.self"));
     if (roleRank(target.role) > roleRank(ctx.user.role)) {
-      return notice(ctx, "PERM", "Site admins can't be kicked by non-admins.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:kick.adminProtected"));
     }
     if (await isKeymaster(ctx, target.id)) {
-      return notice(ctx, "PERM", "The keymaster can't be kicked.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:kick.keymaster"));
     }
 
     // SITE kick (admin tier): /kick from an admin logs the target out of
@@ -218,9 +219,11 @@ export const kickCommand: CommandHandler = {
     // included) keep the room-level boot below.
     if (isAdminRole(ctx.user.role)) {
       const { forceLogoutUser } = await import("../../auth/session.js");
+      // Recipient-locale message: this line lands on the TARGET's login
+      // splash, so it resolves through their users.locale, not the issuer's.
       await forceLogoutUser(ctx.io, ctx.db, target.id, reason
-        ? `You were logged out by ${ctx.user.displayName}: ${reason}`
-        : `You were logged out by ${ctx.user.displayName}.`);
+        ? tFor(target.locale, "commands:kick.loggedOutReason", { name: ctx.user.displayName, reason })
+        : tFor(target.locale, "commands:kick.loggedOut", { name: ctx.user.displayName }));
       await addMessage(ctx, {
         kind: "system",
         body: reason
@@ -252,11 +255,12 @@ export const kickCommand: CommandHandler = {
       if (data.userId !== target.id) continue;
       if (!s.rooms.has(`room:${ctx.roomId}`)) continue;
       s.leave(`room:${ctx.roomId}`);
+      // Recipient-locale notice: goes to the KICKED user's sockets.
       s.emit("error:notice", {
         code: "KICKED",
         message: reason
-          ? `You were kicked from this room by ${ctx.user.displayName}: ${reason}`
-          : `You were kicked from this room by ${ctx.user.displayName}.`,
+          ? tFor(target.locale, "commands:kick.kickedReason", { name: ctx.user.displayName, reason })
+          : tFor(target.locale, "commands:kick.kicked", { name: ctx.user.displayName }),
       });
       if (landing) {
         s.join(`room:${landing.id}`);
@@ -328,25 +332,25 @@ export const muteCommand: CommandHandler = {
   ],
   async run(ctx) {
     if (!(await callerCanModerateRoom(ctx, "mute_user", "mute_member"))) {
-      return notice(ctx, "PERM", "Only room owner/mod or a site admin can /mute.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:mute.permission"));
     }
     const [name, durationStr, ...reasonParts] = ctx.args;
     const reason = reasonParts.join(" ").trim();
     if (!name || !durationStr) {
-      return notice(ctx, "EMPTY", "Usage: /mute <username> <duration> [reason]. Examples: /mute Alice 10m, /mute Bob 1h20m spam");
+      return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:mute.usage"));
     }
     const ms = parseDuration(durationStr);
     if (ms == null) {
-      return notice(ctx, "BAD_DURATION", "Bad duration. Use forms like 5m, 30m, 1h, 1h20m, 7d.");
+      return notice(ctx, "BAD_DURATION", tFor(ctx.user.locale, "commands:mute.badDuration"));
     }
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
-    if (target.id === ctx.user.id) return notice(ctx, "SELF", "Muting yourself isn't useful.");
+    if (target.id === ctx.user.id) return notice(ctx, "SELF", tFor(ctx.user.locale, "commands:mute.self"));
     if (roleRank(target.role) > roleRank(ctx.user.role)) {
-      return notice(ctx, "PERM", "Site admins can't be muted by non-admins.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:mute.adminProtected"));
     }
     if (await isKeymaster(ctx, target.id)) {
-      return notice(ctx, "PERM", "The keymaster can't be muted.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:mute.keymaster"));
     }
 
     const until = new Date(Date.now() + ms);
@@ -418,10 +422,10 @@ export const unmuteCommand: CommandHandler = {
   description: "Lift a /mute on a user in the current room.",
   async run(ctx) {
     if (!(await callerCanModerateRoom(ctx, "unmute_user", "unmute_member"))) {
-      return notice(ctx, "PERM", "Only room owner/mod or a site admin can /unmute.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:unmute.permission"));
     }
     const name = ctx.argsText.trim();
-    if (!name) return notice(ctx, "EMPTY", "Usage: /unmute <username>");
+    if (!name) return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:unmute.usage"));
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
     // Lift every mute affecting this room that the issuer's authority permits:
@@ -455,7 +459,7 @@ export const unmuteCommand: CommandHandler = {
       )).changes;
     }
     if (lifted === 0) {
-      return notice(ctx, "NOT_MUTED", `${target.username} isn't muted here.`);
+      return notice(ctx, "NOT_MUTED", tFor(ctx.user.locale, "commands:unmute.notMuted", { name: target.username }));
     }
     await addMessage(ctx, {
       kind: "system",
@@ -481,13 +485,13 @@ export const promoteCommand: CommandHandler = {
     // room's roster, the legacy admin shortcut in `callerOwnsRoom`
     // routes through it. Room-owner check stays local (hardcoded).
     if (!(await callerOwnsRoom(ctx, "edit_any_room_metadata"))) {
-      return notice(ctx, "PERM", "Only the room owner (or a site admin) can promote room mods.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:promote.permission"));
     }
     const name = ctx.argsText.trim();
-    if (!name) return notice(ctx, "EMPTY", "Usage: /promote <username>");
+    if (!name) return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:promote.usage"));
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
-    if (target.id === ctx.user.id) return notice(ctx, "SELF", "You're already at the top of this room.");
+    if (target.id === ctx.user.id) return notice(ctx, "SELF", tFor(ctx.user.locale, "commands:promote.self"));
 
     // Authority is per-ACCOUNT: set room_members.role so the caller keeps
     // moderation power in this room across every identity they voice (none
@@ -534,17 +538,17 @@ export const demoteCommand: CommandHandler = {
   description: "Demote a room mod back to member (room owner only).",
   async run(ctx) {
     if (!(await callerOwnsRoom(ctx, "edit_any_room_metadata"))) {
-      return notice(ctx, "PERM", "Only the room owner (or a site admin) can demote room mods.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:demote.permission"));
     }
     const name = ctx.argsText.trim();
-    if (!name) return notice(ctx, "EMPTY", "Usage: /demote <username>");
+    if (!name) return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:demote.usage"));
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
     const displayed = target.__resolvedDisplayName;
     const m = await getRoomMember(ctx, ctx.roomId, target.id);
-    if (!m) return notice(ctx, "NO_MEMBER", `${displayed} isn't in this room's member list.`);
-    if (m.role === "owner") return notice(ctx, "PERM", "Use /demote on mods only - owners can't be demoted from their own room.");
-    if (m.role === "member") return notice(ctx, "NO_MOD", `${displayed} isn't a mod.`);
+    if (!m) return notice(ctx, "NO_MEMBER", tFor(ctx.user.locale, "commands:demote.notMember", { name: displayed }));
+    if (m.role === "owner") return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:demote.owner"));
+    if (m.role === "member") return notice(ctx, "NO_MOD", tFor(ctx.user.locale, "commands:demote.notMod", { name: displayed }));
 
     await ctx.db
       .update(roomMembers)
@@ -579,7 +583,7 @@ export const promoteAdminCommand: CommandHandler = {
   permission: "grant_admin_role",
   async run(ctx) {
     const name = ctx.argsText.trim();
-    if (!name) return notice(ctx, "EMPTY", "Usage: /promoteadmin <username>");
+    if (!name) return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:promoteAdmin.usage"));
     // Role-hierarchy gate. The granular `grant_admin_role` permission
     // makes the command callable, but the matrix-bypass-the-hierarchy
     // attack ("a user-tier account with grant_admin_role promotes
@@ -588,11 +592,11 @@ export const promoteAdminCommand: CommandHandler = {
     // plan.md's hardcoded role-hierarchy exception applied to the
     // grant side.
     if (roleRank(ctx.user.role) < roleRank("admin")) {
-      return notice(ctx, "RANK", "Only an admin or higher can grant the admin tier.");
+      return notice(ctx, "RANK", tFor(ctx.user.locale, "commands:promoteAdmin.rank"));
     }
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
-    if (isAdminRole(target.role)) return notice(ctx, "ALREADY", `${target.username} is already a site admin.`);
+    if (isAdminRole(target.role)) return notice(ctx, "ALREADY", tFor(ctx.user.locale, "commands:promoteAdmin.already", { name: target.username }));
 
     const priorRole = target.role;
     await ctx.db.update(users).set({ role: "admin" }).where(eq(users.id, target.id));
@@ -617,14 +621,14 @@ export const demoteAdminCommand: CommandHandler = {
   permission: "revoke_admin_role",
   async run(ctx) {
     const name = ctx.argsText.trim();
-    if (!name) return notice(ctx, "EMPTY", "Usage: /demoteadmin <username>");
+    if (!name) return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:demoteAdmin.usage"));
     // Role-hierarchy gate. Same reasoning as /promoteadmin's: the
     // granular permission key makes the command callable, but the
     // hardcoded hierarchy refuses an actor below the target's tier
     // from demoting them. Means a user-tier account with
     // revoke_admin_role can't demote actual admins.
     if (roleRank(ctx.user.role) < roleRank("admin")) {
-      return notice(ctx, "RANK", "Only an admin or higher can revoke the admin tier.");
+      return notice(ctx, "RANK", tFor(ctx.user.locale, "commands:demoteAdmin.rank"));
     }
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
@@ -632,14 +636,14 @@ export const demoteAdminCommand: CommandHandler = {
     // demoted via the admin panel by another master, since /demoteadmin
     // has no way to ask "demote to admin" vs "demote to user" anyway.
     if (target.role === "masteradmin") {
-      return notice(ctx, "NOT_ADMIN", `${target.username} is an owner - demote via the admin panel.`);
+      return notice(ctx, "NOT_ADMIN", tFor(ctx.user.locale, "commands:demoteAdmin.isOwner", { name: target.username }));
     }
-    if (target.role !== "admin") return notice(ctx, "NOT_ADMIN", `${target.username} isn't a site admin.`);
+    if (target.role !== "admin") return notice(ctx, "NOT_ADMIN", tFor(ctx.user.locale, "commands:demoteAdmin.notAdmin", { name: target.username }));
     if (await isKeymaster(ctx, target.id)) {
-      return notice(ctx, "KEYMASTER", "The keymaster (first admin) cannot be demoted.");
+      return notice(ctx, "KEYMASTER", tFor(ctx.user.locale, "commands:demoteAdmin.keymaster"));
     }
     if (target.id === ctx.user.id) {
-      return notice(ctx, "SELF", "Demote yourself by asking another admin - keeps the chain of custody honest.");
+      return notice(ctx, "SELF", tFor(ctx.user.locale, "commands:demoteAdmin.self"));
     }
 
     await ctx.db.update(users).set({ role: "user" }).where(eq(users.id, target.id));
@@ -695,10 +699,10 @@ export const banCommand: CommandHandler = {
     // still present), those cover the day-to-day moderation surface
     // without handing out the "you can never come back" lever.
     if (!(await callerOwnsRoom(ctx, "ban_user", "ban_member"))) {
-      return notice(ctx, "PERM", "Only the room owner or a site admin can /ban. Room mods can /kick or /mute instead.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:ban.permission"));
     }
     const [name, maybeDur, ...rest] = ctx.args;
-    if (!name) return notice(ctx, "EMPTY", "Usage: /ban <username> [duration] [reason]");
+    if (!name) return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:ban.usage"));
 
     // Second token is a duration ONLY if it parses cleanly; otherwise it's
     // part of the reason. This keeps `/ban Bob spam` working without a
@@ -716,12 +720,12 @@ export const banCommand: CommandHandler = {
 
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
-    if (target.id === ctx.user.id) return notice(ctx, "SELF", "Banning yourself isn't useful.");
+    if (target.id === ctx.user.id) return notice(ctx, "SELF", tFor(ctx.user.locale, "commands:ban.self"));
     if (roleRank(target.role) > roleRank(ctx.user.role)) {
-      return notice(ctx, "PERM", "Site admins can't be banned by non-admins.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:ban.adminProtected"));
     }
     if (await isKeymaster(ctx, target.id)) {
-      return notice(ctx, "PERM", "The keymaster can't be banned.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:ban.keymaster"));
     }
 
     const until = durationMs ? new Date(Date.now() + durationMs) : null;
@@ -752,11 +756,16 @@ export const banCommand: CommandHandler = {
       if (data.userId !== target.id) continue;
       if (!s.rooms.has(`room:${ctx.roomId}`)) continue;
       s.leave(`room:${ctx.roomId}`);
+      // Recipient-locale notice: goes to the BANNED user's sockets.
       s.emit("error:notice", {
         code: "BANNED",
         message: until
-          ? `You were banned from this room for ${formatDuration(until.getTime() - Date.now())} by ${ctx.user.displayName}${reason ? `: ${reason}` : "."}`
-          : `You were banned from this room by ${ctx.user.displayName}${reason ? `: ${reason}` : "."}`,
+          ? (reason
+              ? tFor(target.locale, "commands:ban.bannedTimedReason", { duration: formatDuration(until.getTime() - Date.now()), name: ctx.user.displayName, reason })
+              : tFor(target.locale, "commands:ban.bannedTimed", { duration: formatDuration(until.getTime() - Date.now()), name: ctx.user.displayName }))
+          : (reason
+              ? tFor(target.locale, "commands:ban.bannedReason", { name: ctx.user.displayName, reason })
+              : tFor(target.locale, "commands:ban.banned", { name: ctx.user.displayName })),
       });
       if (landing) {
         s.join(`room:${landing.id}`);
@@ -797,10 +806,10 @@ export const unbanCommand: CommandHandler = {
     // be able to override an owner's permanent ban decision, which
     // defeats the purpose of restricting /ban to the owner.
     if (!(await callerOwnsRoom(ctx, "unban_user", "unban_member"))) {
-      return notice(ctx, "PERM", "Only the room owner or a site admin can /unban.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:unban.permission"));
     }
     const name = ctx.argsText.trim();
-    if (!name) return notice(ctx, "EMPTY", "Usage: /unban <username>");
+    if (!name) return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:unban.usage"));
     const target = await findUserByName(ctx, name);
     if (!target) return;  // findUserByName emitted the appropriate notice.
 
@@ -808,7 +817,7 @@ export const unbanCommand: CommandHandler = {
       .delete(bans)
       .where(and(eq(bans.roomId, ctx.roomId), eq(bans.userId, target.id)));
     if (r.changes === 0) {
-      return notice(ctx, "NOT_BANNED", `${target.username} isn't banned from this room.`);
+      return notice(ctx, "NOT_BANNED", tFor(ctx.user.locale, "commands:unban.notBanned", { name: target.username }));
     }
     await addMessage(ctx, {
       kind: "system",
@@ -844,16 +853,16 @@ export const announceCommand: CommandHandler = {
   ],
   async run(ctx) {
     const argsText = ctx.argsText.trim();
-    if (!argsText) return notice(ctx, "EMPTY", "Usage: /announce [all] <text>");
+    if (!argsText) return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:announce.usage"));
 
     // Sitewide variant - recognised by leading "all " (case-insensitive).
     const allMatch = /^all\s+(.+)/i.exec(argsText);
     if (allMatch) {
       if (!(await hasPermission(ctx.user, "announce_sitewide", ctx.db))) {
-        return notice(ctx, "PERM", "/announce all is admin-only. Drop 'all' to announce in the current room.");
+        return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:announce.allPermission"));
       }
       const body = allMatch[1]!.trim();
-      if (!body) return notice(ctx, "EMPTY", "Usage: /announce all <text>");
+      if (!body) return notice(ctx, "EMPTY", tFor(ctx.user.locale, "commands:announce.allUsage"));
 
       const allRooms = await ctx.db.select({ id: rooms.id }).from(rooms);
       // Re-use addMessage per room so each room gets its own persisted row,
@@ -872,7 +881,7 @@ export const announceCommand: CommandHandler = {
 
     // Current-room variant - owner/mod/admin only.
     if (!(await callerCanModerateRoom(ctx, "announce_room", "manage_announcements"))) {
-      return notice(ctx, "PERM", "Only room owner/mod or a site admin can /announce.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:announce.permission"));
     }
 
     // Servers ON: a room-scoped announce fans across the ISSUING server's

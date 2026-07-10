@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { SplashShell, Field } from "./AuthGate.js";
 
 /**
@@ -19,6 +20,7 @@ const primaryBtn = "w-full rounded border border-keep-border bg-keep-panel py-2 
 const linkBtn = "w-full text-xs text-keep-muted hover:text-keep-text";
 
 export function ForgotPasswordPage({ onNavigate }: { onNavigate: (p: string) => void }) {
+  const { t } = useTranslation("marketing");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
@@ -34,32 +36,32 @@ export function ForgotPasswordPage({ onNavigate }: { onNavigate: (p: string) => 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: email.trim() }),
       });
-      if (!r.ok) throw new Error("Something went wrong. Please try again.");
+      if (!r.ok) throw new Error(t("emailPages.genericError"));
       setSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Please try again.");
+      setError(err instanceof Error ? err.message : t("emailPages.tryAgain"));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <SplashShell footer={<button type="button" className={linkBtn} onClick={() => onNavigate("/login")}>Back to sign in</button>}>
+    <SplashShell footer={<button type="button" className={linkBtn} onClick={() => onNavigate("/login")}>{t("emailPages.backToSignIn")}</button>}>
       {sent ? (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold tracking-wide">Check your email</h2>
+          <h2 className="text-sm font-semibold tracking-wide">{t("emailPages.checkEmail")}</h2>
           <div className={noticeBox}>
-            If an account exists for that email, a password reset link is on its way. It expires in 1 hour. Check your inbox (and spam folder).
+            {t("emailPages.resetSent")}
           </div>
         </div>
       ) : (
         <form onSubmit={submit} className="space-y-3">
-          <h2 className="text-sm font-semibold tracking-wide">Reset your password</h2>
-          <p className="text-xs text-keep-muted">Enter your account email and we'll send you a link to choose a new password.</p>
-          <Field label="Email" value={email} onChange={setEmail} type="email" autoComplete="email" />
+          <h2 className="text-sm font-semibold tracking-wide">{t("emailPages.resetTitle")}</h2>
+          <p className="text-xs text-keep-muted">{t("emailPages.resetIntro")}</p>
+          <Field label={t("auth.email")} value={email} onChange={setEmail} type="email" autoComplete="email" />
           {error ? <div className={errorBox}>{error}</div> : null}
           <button type="submit" disabled={busy || !email.trim()} className={primaryBtn}>
-            {busy ? "Sending..." : "Send reset link"}
+            {busy ? t("emailPages.sending") : t("emailPages.sendResetLink")}
           </button>
         </form>
       )}
@@ -68,6 +70,7 @@ export function ForgotPasswordPage({ onNavigate }: { onNavigate: (p: string) => 
 }
 
 export function ResetPasswordPage({ onNavigate }: { onNavigate: (p: string) => void }) {
+  const { t } = useTranslation("marketing");
   const [token] = useState(tokenFromUrl);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -91,39 +94,39 @@ export function ResetPasswordPage({ onNavigate }: { onNavigate: (p: string) => v
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
-        throw new Error((j as { error?: string }).error || "Could not reset your password.");
+        throw new Error((j as { error?: string }).error || t("emailPages.resetFailed"));
       }
       setDone(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reset your password.");
+      setError(err instanceof Error ? err.message : t("emailPages.resetFailed"));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <SplashShell footer={<button type="button" className={linkBtn} onClick={() => onNavigate("/login")}>Back to sign in</button>}>
+    <SplashShell footer={<button type="button" className={linkBtn} onClick={() => onNavigate("/login")}>{t("emailPages.backToSignIn")}</button>}>
       {!token ? (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold tracking-wide">Invalid link</h2>
-          <div className={errorBox}>This reset link is missing its token. Request a new one from the sign-in page.</div>
+          <h2 className="text-sm font-semibold tracking-wide">{t("emailPages.invalidLink")}</h2>
+          <div className={errorBox}>{t("emailPages.resetMissingToken")}</div>
         </div>
       ) : done ? (
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold tracking-wide">Password updated</h2>
-          <div className={noticeBox}>Your password has been changed. You can now sign in with your new password.</div>
-          <button type="button" className={primaryBtn} onClick={() => onNavigate("/login")}>Go to sign in</button>
+          <h2 className="text-sm font-semibold tracking-wide">{t("emailPages.passwordUpdated")}</h2>
+          <div className={noticeBox}>{t("emailPages.passwordChanged")}</div>
+          <button type="button" className={primaryBtn} onClick={() => onNavigate("/login")}>{t("emailPages.goToSignIn")}</button>
         </div>
       ) : (
         <form onSubmit={submit} className="space-y-3">
-          <h2 className="text-sm font-semibold tracking-wide">Choose a new password</h2>
-          <Field label="New password" value={password} onChange={setPassword} type="password" autoComplete="new-password" />
-          <Field label="Confirm password" value={confirm} onChange={setConfirm} type="password" autoComplete="new-password" />
-          {mismatch ? <div className="text-[10px] text-keep-accent">Passwords don't match yet.</div> : null}
-          {password.length > 0 && password.length < 8 ? <div className="text-[10px] text-keep-muted">At least 8 characters.</div> : null}
+          <h2 className="text-sm font-semibold tracking-wide">{t("emailPages.chooseNewPassword")}</h2>
+          <Field label={t("emailPages.newPassword")} value={password} onChange={setPassword} type="password" autoComplete="new-password" />
+          <Field label={t("emailPages.confirmPassword")} value={confirm} onChange={setConfirm} type="password" autoComplete="new-password" />
+          {mismatch ? <div className="text-[10px] text-keep-accent">{t("emailPages.mismatch")}</div> : null}
+          {password.length > 0 && password.length < 8 ? <div className="text-[10px] text-keep-muted">{t("emailPages.minChars")}</div> : null}
           {error ? <div className={errorBox}>{error}</div> : null}
           <button type="submit" disabled={!canSubmit} className={primaryBtn}>
-            {busy ? "Updating..." : "Update password"}
+            {busy ? t("emailPages.updating") : t("emailPages.updatePassword")}
           </button>
         </form>
       )}
@@ -132,6 +135,7 @@ export function ResetPasswordPage({ onNavigate }: { onNavigate: (p: string) => v
 }
 
 export function VerifyEmailPage({ onNavigate }: { onNavigate: (p: string) => void }) {
+  const { t } = useTranslation("marketing");
   const [status, setStatus] = useState<"checking" | "ok" | "fail">("checking");
   const [error, setError] = useState<string | null>(null);
   // StrictMode double-invokes effects in dev; the token is single-use, so a
@@ -144,7 +148,7 @@ export function VerifyEmailPage({ onNavigate }: { onNavigate: (p: string) => voi
     const token = tokenFromUrl();
     if (!token) {
       setStatus("fail");
-      setError("This confirmation link is missing its token.");
+      setError(t("emailPages.verifyMissingToken"));
       return;
     }
     void (async () => {
@@ -156,26 +160,29 @@ export function VerifyEmailPage({ onNavigate }: { onNavigate: (p: string) => voi
         });
         if (!r.ok) {
           const j = await r.json().catch(() => ({}));
-          throw new Error((j as { error?: string }).error || "This confirmation link is invalid or has expired.");
+          throw new Error((j as { error?: string }).error || t("emailPages.verifyInvalid"));
         }
         setStatus("ok");
       } catch (err) {
         setStatus("fail");
-        setError(err instanceof Error ? err.message : "Could not confirm your email.");
+        setError(err instanceof Error ? err.message : t("emailPages.verifyFailed"));
       }
     })();
+    // One-shot by design (triedRef); `t` is intentionally omitted so a
+    // language flip can't re-POST the single-use token.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
-    <SplashShell footer={<button type="button" className={linkBtn} onClick={() => onNavigate("/login")}>Continue to sign in</button>}>
+    <SplashShell footer={<button type="button" className={linkBtn} onClick={() => onNavigate("/login")}>{t("emailPages.continueToSignIn")}</button>}>
       <div className="space-y-3">
-        <h2 className="text-sm font-semibold tracking-wide">Email verification</h2>
+        <h2 className="text-sm font-semibold tracking-wide">{t("emailPages.verifyTitle")}</h2>
         {status === "checking" ? (
-          <div className={noticeBox}>Confirming your email…</div>
+          <div className={noticeBox}>{t("emailPages.confirming")}</div>
         ) : status === "ok" ? (
           <>
-            <div className={noticeBox}>Your email is confirmed. Thanks! You can sign in and start writing.</div>
-            <button type="button" className={primaryBtn} onClick={() => onNavigate("/login")}>Go to sign in</button>
+            <div className={noticeBox}>{t("emailPages.confirmed")}</div>
+            <button type="button" className={primaryBtn} onClick={() => onNavigate("/login")}>{t("emailPages.goToSignIn")}</button>
           </>
         ) : (
           <div className={errorBox}>{error}</div>

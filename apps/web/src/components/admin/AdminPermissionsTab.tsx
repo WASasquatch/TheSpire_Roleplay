@@ -28,6 +28,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   PERMISSION_DESCRIPTIONS,
   PERMISSION_GROUPS,
@@ -38,6 +39,7 @@ import {
   type Role,
 } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { TabBtn as SubtabBtn } from "../shared/TabBtn.js";
 import { useChat } from "../../state/store.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
@@ -45,31 +47,32 @@ import { useReducedMotion } from "../../lib/reducedMotion.js";
 const EDITABLE_ROLES: readonly Role[] = ["user", "trusted", "mod", "admin"] as const;
 const ALL_ROLES: readonly Role[] = ["user", "trusted", "mod", "admin", "masteradmin"] as const;
 
-const ROLE_LABEL: Record<Role, string> = {
-  user: "User",
-  trusted: "Trusted",
-  // Global (site-wide) moderator. Named in full to disambiguate from a
-  // per-room "Room Mod" (room_members.role = "mod"), which is a separate,
-  // local role and never appears in this account-role matrix.
-  mod: "Global Moderator",
-  admin: "Admin",
-  masteradmin: "Owner",
+/** Catalog keys (admin ns) for the account-role display labels; resolve
+ *  with t(). "Global Moderator" is named in full to disambiguate from a
+ *  per-room "Room Mod" (room_members.role = "mod"), which is a separate,
+ *  local role and never appears in this account-role matrix. */
+const ROLE_LABEL_KEY: Record<Role, string> = {
+  user: "permissions.roleLabel.user",
+  trusted: "permissions.roleLabel.trusted",
+  mod: "permissions.roleLabel.mod",
+  admin: "permissions.roleLabel.admin",
+  masteradmin: "permissions.roleLabel.masteradmin",
 };
 
-const GROUP_LABEL: Record<PermissionGroup, string> = {
-  chat_moderation: "Chat moderation",
-  room_admin: "Room admin",
-  arcade: "Spire Arcade",
-  cosmetics: "Cosmetics",
-  user_admin: "User admin",
-  site_admin: "Site admin",
-  content_admin: "Content admin",
-  audit_view: "Audit & reports",
-  admin_panel_tabs: "Admin panel tabs",
-  earning_admin: "Earning admin",
-  backups: "Backups",
-  system: "System",
-  permission_admin: "Permission admin",
+const GROUP_LABEL_KEY: Record<PermissionGroup, string> = {
+  chat_moderation: "permissions.group.chat_moderation",
+  room_admin: "permissions.group.room_admin",
+  arcade: "permissions.group.arcade",
+  cosmetics: "permissions.group.cosmetics",
+  user_admin: "permissions.group.user_admin",
+  site_admin: "permissions.group.site_admin",
+  content_admin: "permissions.group.content_admin",
+  audit_view: "permissions.group.audit_view",
+  admin_panel_tabs: "permissions.group.admin_panel_tabs",
+  earning_admin: "permissions.group.earning_admin",
+  backups: "permissions.group.backups",
+  system: "permissions.group.system",
+  permission_admin: "permissions.group.permission_admin",
 };
 
 interface MatrixSnapshot {
@@ -151,6 +154,7 @@ interface AuditDeepLink {
 }
 
 export function AdminPermissionsTab() {
+  const { t } = useTranslation("admin");
   const [subtab, setSubtab] = useState<"by-role" | "by-user">("by-role");
   const me = useChat((s) => s.me);
   const canEdit = me?.permissions.includes("manage_permissions") ?? false;
@@ -184,21 +188,23 @@ export function AdminPermissionsTab() {
     <section className="space-y-3 text-sm">
       <header className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="font-action text-base">Roles & Permissions</h3>
+          <h3 className="font-action text-base">{t("permissions.title")}</h3>
           <nav className="flex gap-1 text-xs uppercase tracking-widest">
             <SubtabBtn active={subtab === "by-role"} onClick={() => setSubtab("by-role")}>
-              By role
+              {t("permissions.byRole")}
             </SubtabBtn>
             <SubtabBtn active={subtab === "by-user"} onClick={() => setSubtab("by-user")}>
-              By user
+              {t("permissions.byUser")}
             </SubtabBtn>
           </nav>
         </div>
         {!canEdit ? (
           <p className="rounded border border-keep-rule bg-keep-banner/40 p-2 text-xs italic text-keep-muted">
-            Read-only, you can view the matrix but not edit it. Editing requires the
-            <code className="mx-1 rounded bg-keep-bg px-1 font-mono text-[10px]">manage_permissions</code>
-            key.
+            <Trans t={t} i18nKey="permissions.readOnlyNote">
+              {"Read-only, you can view the matrix but not edit it. Editing requires the"}
+              <code className="mx-1 rounded bg-keep-bg px-1 font-mono text-[10px]">manage_permissions</code>
+              {"key."}
+            </Trans>
           </p>
         ) : null}
       </header>
@@ -231,6 +237,7 @@ export function AdminPermissionsTab() {
  * ============================================================= */
 
 function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLink }) {
+  const { t } = useTranslation("admin");
   const [snapshot, setSnapshot] = useState<MatrixSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -239,15 +246,15 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
   // Site-prefixed labels for the staff columns so the SITE-wide roles aren't
   // read as a community server's own owner/admin/mods. Role keys are unchanged.
   const siteName = useChat((s) => s.branding.siteName);
-  const ownerLabel = `${siteName} Owner`;
+  const ownerLabel = t("permissions.siteOwner", { site: siteName });
   const siteRoleLabel = (r: Role): string =>
     r === "masteradmin"
       ? ownerLabel
       : r === "admin"
-      ? `${siteName} Admin`
+      ? t("permissions.siteAdmin", { site: siteName })
       : r === "mod"
-      ? `${siteName} Moderator`
-      : ROLE_LABEL[r];
+      ? t("permissions.siteModerator", { site: siteName })
+      : t(ROLE_LABEL_KEY[r]);
 
   useEffect(() => {
     let cancelled = false;
@@ -259,9 +266,9 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
         return r.json() as Promise<MatrixSnapshot>;
       })
       .then((j) => { if (!cancelled) setSnapshot(j); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : t("loadFailed")); });
     return () => { cancelled = true; };
-  }, [refreshKey]);
+  }, [refreshKey, t]);
 
   // O(1) lookup: which roles hold which key. Built once per snapshot
   // load so the cell render stays cheap.
@@ -306,29 +313,29 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
       });
       if (!res.ok) throw new Error(await readError(res));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("saveFailed"));
       setRefreshKey((k) => k + 1); // re-sync from server on error
     } finally {
       setBusy(null);
     }
-  }, []);
+  }, [t]);
 
   if (error && !snapshot) {
     return <p className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</p>;
   }
   if (!snapshot) {
-    return <p className="italic text-keep-muted">Loading matrix…</p>;
+    return <p className="italic text-keep-muted">{t("permissions.loadingMatrix")}</p>;
   }
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <label className="flex items-center gap-1">
-          <span className="text-keep-muted">Filter:</span>
+          <span className="text-keep-muted">{t("permissions.filterLabel")}</span>
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="kick_user, journal, audit…"
+            placeholder={t("permissions.filterPlaceholder")}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
           />
         </label>
@@ -337,7 +344,7 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
           onClick={() => setRefreshKey((k) => k + 1)}
           className="rounded border border-keep-rule bg-keep-banner/40 px-2 py-0.5 hover:bg-keep-banner"
         >
-          Refresh
+          {t("refresh")}
         </button>
         {error ? (
           <span className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-0.5 text-keep-accent">
@@ -351,17 +358,17 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
           <thead>
             <tr className="border-b border-keep-rule bg-keep-banner/40">
               <th className="sticky left-0 z-10 border-r border-keep-rule bg-keep-banner/40 px-2 py-1 text-left">
-                Permission
+                {t("permissions.colPermission")}
               </th>
               {ALL_ROLES.map((role) => (
                 <th
                   key={role}
                   className="px-2 py-1 text-center"
-                  title={role === "masteradmin" ? `${ownerLabel} holds every permission by definition.` : undefined}
+                  title={role === "masteradmin" ? t("permissions.ownerLockedTitle", { owner: ownerLabel }) : undefined}
                 >
                   {siteRoleLabel(role)}
                   {role === "masteradmin" ? (
-                    <span className="ml-1 text-[10px] uppercase tracking-widest text-keep-muted">(locked)</span>
+                    <span className="ml-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("permissions.locked")}</span>
                   ) : null}
                 </th>
               ))}
@@ -385,11 +392,11 @@ function ByRole({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
       </div>
 
       <p className="text-[11px] italic text-keep-muted">
-        Owner row is locked-on by definition, the bypass is hardcoded in the
-        server. Toggling any cell takes effect immediately; affected users see the new
-        permissions on their next /auth/me poll (within 60 seconds, no re-login).
-        Click the <span className="not-italic">log</span> button next to a permission
-        key to jump to its grant history.
+        <Trans t={t} i18nKey="permissions.footnote">
+          {"Owner row is locked-on by definition, the bypass is hardcoded in the server. Toggling any cell takes effect immediately; affected users see the new permissions on their next /auth/me poll (within 60 seconds, no re-login). Click the "}
+          <span className="not-italic">log</span>
+          {" button next to a permission key to jump to its grant history."}
+        </Trans>
       </p>
     </div>
   );
@@ -412,6 +419,7 @@ function GroupRows({
   onToggle: (role: Role, key: PermissionKey, granted: boolean) => void;
   deepLink: AuditDeepLink;
 }) {
+  const { t } = useTranslation("admin");
   return (
     <>
       <tr className="border-y border-keep-rule bg-keep-banner/60">
@@ -419,7 +427,7 @@ function GroupRows({
           colSpan={ALL_ROLES.length + 1}
           className="px-2 py-1 text-left text-xs uppercase tracking-widest text-keep-muted"
         >
-          {GROUP_LABEL[group]}
+          {t(GROUP_LABEL_KEY[group])}
         </th>
       </tr>
       {keys.map((key) => (
@@ -429,10 +437,10 @@ function GroupRows({
               <code className="font-mono text-[11px]">{key}</code>
               {PRIVACY_SENSITIVE_KEYS.has(key) ? (
                 <span
-                  title="Privacy-sensitive, granting this key reveals other users' private content."
+                  title={t("permissions.privacyTitle")}
                   className="rounded border border-keep-accent/60 bg-keep-accent/15 px-1 text-[9px] uppercase tracking-widest text-keep-accent"
                 >
-                  privacy
+                  {t("permissions.privacyChip")}
                 </span>
               ) : null}
               <button
@@ -443,11 +451,11 @@ function GroupRows({
                   deepLink.setUser("", "");
                   deepLink.focusFeed();
                 }}
-                title={`Show grant history for ${key}`}
+                title={t("permissions.showHistoryFor", { key })}
                 className="ml-auto rounded border border-keep-rule/60 px-1.5 py-0.5 text-[9px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-                aria-label={`Show grant history for ${key}`}
+                aria-label={t("permissions.showHistoryFor", { key })}
               >
-                log
+                {t("permissions.log")}
               </button>
             </div>
             <p className="text-[10px] italic text-keep-muted">{PERMISSION_DESCRIPTIONS[key]}</p>
@@ -482,13 +490,14 @@ function RoleCell({
   disabled: boolean;
   onChange: (next: boolean) => void;
 }) {
+  const { t } = useTranslation("admin");
   return (
     <input
       type="checkbox"
       checked={checked}
       disabled={disabled}
       onChange={(e) => onChange(e.target.checked)}
-      aria-label={`${ROLE_LABEL[role]} can ${permissionKey}`}
+      aria-label={t("permissions.canAria", { role: t(ROLE_LABEL_KEY[role]), key: permissionKey })}
       className="h-4 w-4 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
     />
   );
@@ -499,6 +508,7 @@ function RoleCell({
  * ============================================================= */
 
 function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLink }) {
+  const { t } = useTranslation("admin");
   const me = useChat((s) => s.me);
   const [snapshot, setSnapshot] = useState<MatrixSnapshot | null>(null);
   const [query, setQuery] = useState("");
@@ -517,8 +527,8 @@ function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
         return r.json() as Promise<MatrixSnapshot>;
       })
       .then(setSnapshot)
-      .catch((err) => setError(err instanceof Error ? err.message : "load failed"));
-  }, [refreshKey]);
+      .catch((err) => setError(err instanceof Error ? err.message : t("loadFailed")));
+  }, [refreshKey, t]);
 
   // Debounced typeahead search.
   useEffect(() => {
@@ -535,12 +545,12 @@ function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
           return r.json() as Promise<{ users: UserSearchHit[] }>;
         })
         .then((j) => setSearchResults(j.users))
-        .catch((err) => setError(err instanceof Error ? err.message : "search failed"));
+        .catch((err) => setError(err instanceof Error ? err.message : t("permissions.searchFailed")));
     }, 200);
     return () => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
     };
-  }, [query]);
+  }, [query, t]);
 
   const pickUser = useCallback(async (userId: string) => {
     setError(null);
@@ -552,9 +562,9 @@ function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
       const j = (await res.json()) as UserOverrideDetail;
       setPicked(j);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "load failed");
+      setError(err instanceof Error ? err.message : t("loadFailed"));
     }
-  }, []);
+  }, [t]);
 
   // Resolve the role grants for the picked user's role (so we can render
   // the "from role" state correctly).
@@ -600,13 +610,13 @@ function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
       if (!res.ok) throw new Error(await readError(res));
       setRefreshKey((k) => k + 1); // refresh the active-overrides panel
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("saveFailed"));
       // Reload to re-sync on failure.
       void pickUser(picked.userId);
     } finally {
       setBusy(null);
     }
-  }, [picked, grantedSet, revokedSet, pickUser]);
+  }, [picked, grantedSet, revokedSet, pickUser, t]);
 
   const isSelf = picked?.userId === me?.id;
 
@@ -617,11 +627,11 @@ function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
           as a secondary affordance for browsing the customized set. */}
       <div className="rounded border border-keep-rule bg-keep-bg p-2">
         <label className="block">
-          <span className="block text-xs uppercase tracking-widest text-keep-muted">Find user</span>
+          <span className="block text-xs uppercase tracking-widest text-keep-muted">{t("permissions.findUser")}</span>
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Username prefix…"
+            placeholder={t("permissions.usernamePrefixPlaceholder")}
             className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
           />
         </label>
@@ -636,11 +646,11 @@ function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
                 >
                   <span>
                     <span className="font-action">{u.username}</span>
-                    <span className="ml-1 text-[10px] italic text-keep-muted">{ROLE_LABEL[u.role]}</span>
+                    <span className="ml-1 text-[10px] italic text-keep-muted">{t(ROLE_LABEL_KEY[u.role])}</span>
                   </span>
                   {u.hasOverrides ? (
                     <span className="rounded bg-keep-banner px-1 text-[9px] uppercase tracking-widest text-keep-muted">
-                      has overrides
+                      {t("permissions.hasOverrides")}
                     </span>
                   ) : null}
                 </button>
@@ -653,7 +663,7 @@ function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
       {snapshot && snapshot.userOverrides.length > 0 ? (
         <details className="rounded border border-keep-rule bg-keep-bg p-2">
           <summary className="cursor-pointer text-xs uppercase tracking-widest text-keep-muted">
-            Active overrides ({snapshot.userOverrides.length})
+            {t("permissions.activeOverrides", { count: snapshot.userOverrides.length })}
           </summary>
           <ul className="mt-1 space-y-1 text-xs">
             {snapshot.userOverrides.map((u) => (
@@ -666,10 +676,10 @@ function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
                   >
                     {u.username}
                   </button>
-                  <span className="ml-1 text-[10px] italic text-keep-muted">{ROLE_LABEL[u.role]}</span>
+                  <span className="ml-1 text-[10px] italic text-keep-muted">{t(ROLE_LABEL_KEY[u.role])}</span>
                 </span>
                 <span className="text-[10px] text-keep-muted">
-                  +{u.granted.length} grants / -{u.revoked.length} revokes
+                  {t("permissions.grantsRevokes", { grants: u.granted.length, revokes: u.revoked.length })}
                 </span>
               </li>
             ))}
@@ -692,7 +702,7 @@ function ByUser({ canEdit, deepLink }: { canEdit: boolean; deepLink: AuditDeepLi
           deepLink={deepLink}
         />
       ) : (
-        <p className="italic text-keep-muted">Pick a user above to edit their overrides.</p>
+        <p className="italic text-keep-muted">{t("permissions.pickUserHint")}</p>
       )}
     </div>
   );
@@ -719,6 +729,7 @@ function UserOverridesEditor({
   onCycle: (key: PermissionKey) => void;
   deepLink: AuditDeepLink;
 }) {
+  const { t } = useTranslation("admin");
   const [filter, setFilter] = useState("");
   const filteredGroups = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -737,9 +748,12 @@ function UserOverridesEditor({
         <div>
           <h4 className="font-action text-sm">{user.username}</h4>
           <p className="text-[11px] italic text-keep-muted">
-            Role: <span className="font-action not-italic">{ROLE_LABEL[user.role]}</span>
+            <Trans t={t} i18nKey="permissions.roleLine" values={{ role: t(ROLE_LABEL_KEY[user.role]) }}>
+              {"Role: "}
+              <span className="font-action not-italic">{"{{role}}"}</span>
+            </Trans>
             {" · "}
-            {user.granted.length} grants / {user.revoked.length} revokes
+            {t("permissions.grantsRevokesPlain", { grants: user.granted.length, revokes: user.revoked.length })}
             {" · "}
             <button
               type="button"
@@ -750,32 +764,32 @@ function UserOverridesEditor({
                 deepLink.focusFeed();
               }}
               className="underline-offset-2 hover:underline"
-              title="Show grant history for this user"
+              title={t("permissions.userHistoryTitle")}
             >
-              history
+              {t("permissions.history")}
             </button>
           </p>
         </div>
         <label className="text-xs">
-          <span className="text-keep-muted">Filter:</span>
+          <span className="text-keep-muted">{t("permissions.filterLabel")}</span>
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search keys…"
+            placeholder={t("permissions.searchKeysPlaceholder")}
             className="ml-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5"
           />
         </label>
       </header>
       {isSelf ? (
         <p className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
-          You cannot edit your own overrides. Use a different owner account.
+          {t("permissions.selfNote")}
         </p>
       ) : null}
       <div className="space-y-2">
         {filteredGroups.map(([group, keys]) => (
           <details key={group} open className="rounded border border-keep-rule/60">
             <summary className="cursor-pointer bg-keep-banner/40 px-2 py-1 text-xs uppercase tracking-widest text-keep-muted">
-              {GROUP_LABEL[group]}
+              {t(GROUP_LABEL_KEY[group])}
             </summary>
             <ul className="divide-y divide-keep-rule/40">
               {keys.map((key) => {
@@ -798,7 +812,7 @@ function UserOverridesEditor({
                       type="button"
                       onClick={() => onCycle(key)}
                       disabled={!canEdit || busy === key}
-                      title={describeCycle(state, roleHasIt)}
+                      title={t(describeCycleKey(state, roleHasIt))}
                       className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border text-xs ${cellClass(state)} disabled:cursor-not-allowed disabled:opacity-50`}
                     >
                       {cellLabel(state)}
@@ -808,22 +822,24 @@ function UserOverridesEditor({
                         <code className="font-mono text-[11px]">{key}</code>
                         {PRIVACY_SENSITIVE_KEYS.has(key) ? (
                           <span className="rounded bg-yellow-200 px-1 text-[9px] uppercase tracking-widest text-yellow-900">
-                            privacy
+                            {t("permissions.privacyChip")}
                           </span>
                         ) : null}
                         <span className={`ml-auto text-[10px] uppercase tracking-widest ${
                           effective ? "text-green-700" : "text-keep-muted"
                         }`}>
-                          {effective ? "active" : "inactive"}
+                          {effective ? t("permissions.active") : t("permissions.inactive")}
                         </span>
                       </div>
                       <p className="text-[10px] italic text-keep-muted">{PERMISSION_DESCRIPTIONS[key]}</p>
                       <p className="text-[10px] text-keep-muted">
                         {isFromRole
-                          ? `Inherits from ${ROLE_LABEL[user.role]} (${roleHasIt ? "granted" : "not granted"})`
+                          ? (roleHasIt
+                              ? t("permissions.inheritsGranted", { role: t(ROLE_LABEL_KEY[user.role]) })
+                              : t("permissions.inheritsNotGranted", { role: t(ROLE_LABEL_KEY[user.role]) }))
                           : isGranted
-                            ? "Explicitly granted"
-                            : "Explicitly revoked"}
+                            ? t("permissions.explicitlyGranted")
+                            : t("permissions.explicitlyRevoked")}
                       </p>
                     </div>
                   </li>
@@ -849,14 +865,15 @@ function cellLabel(state: "granted" | "revoked" | "from-role"): string {
   return "·"; // middle dot
 }
 
-function describeCycle(state: "granted" | "revoked" | "from-role", roleHasIt: boolean): string {
+/** i18n key (admin ns) describing the next step of the tri-state cycle. */
+function describeCycleKey(state: "granted" | "revoked" | "from-role", roleHasIt: boolean): string {
   if (state === "from-role") {
     return roleHasIt
-      ? "Currently inheriting GRANT from role. Click → explicitly grant."
-      : "Currently inheriting DENY from role. Click → explicitly grant.";
+      ? "permissions.cycleFromRoleGrant"
+      : "permissions.cycleFromRoleDeny";
   }
-  if (state === "granted") return "Explicitly granted. Click → explicitly revoke.";
-  return "Explicitly revoked. Click → clear (fall back to role).";
+  if (state === "granted") return "permissions.cycleGranted";
+  return "permissions.cycleRevoked";
 }
 
 /* =============================================================
@@ -885,6 +902,7 @@ function PermissionAuditFeed({
   userLabel: string;
   setUser: (userId: string, username: string) => void;
 }) {
+  const { t } = useTranslation("admin");
   const [entries, setEntries] = useState<PermissionAuditEntry[] | null>(null);
   // Username typeahead state. Separate from the actual filter values
   // so the user can browse search results without committing one
@@ -982,11 +1000,11 @@ function PermissionAuditFeed({
       className="rounded border border-keep-rule bg-keep-bg p-2"
     >
       <summary className="cursor-pointer text-xs uppercase tracking-widest text-keep-muted">
-        Recent permission changes ({opened ? (entries === null ? "…" : count) : "click to load"})
+        {t("permissions.recentChanges", { status: opened ? (entries === null ? "…" : String(count)) : t("permissions.clickToLoad") })}
       </summary>
       <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
         <label className="flex items-center gap-1">
-          <span className="text-keep-muted">Key:</span>
+          <span className="text-keep-muted">{t("permissions.keyLabel")}</span>
           <input
             value={keyFilter}
             onChange={(e) => setKeyFilter(e.target.value)}
@@ -995,15 +1013,15 @@ function PermissionAuditFeed({
           />
         </label>
         <label className="flex items-center gap-1">
-          <span className="text-keep-muted">Role:</span>
+          <span className="text-keep-muted">{t("permissions.roleFilterLabel")}</span>
           <select
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5"
           >
-            <option value="">any</option>
+            <option value="">{t("permissions.any")}</option>
             {EDITABLE_ROLES.map((r) => (
-              <option key={r} value={r}>{ROLE_LABEL[r]}</option>
+              <option key={r} value={r}>{t(ROLE_LABEL_KEY[r])}</option>
             ))}
           </select>
         </label>
@@ -1011,7 +1029,7 @@ function PermissionAuditFeed({
             with an × to clear; while no user is picked, the input
             stays available for searching. */}
         <div className="relative flex items-center gap-1">
-          <span className="text-keep-muted">User:</span>
+          <span className="text-keep-muted">{t("permissions.userLabel")}</span>
           {userId && userLabel ? (
             <span className="inline-flex items-center gap-1 rounded border border-keep-rule bg-keep-banner/40 px-2 py-0.5">
               <span className="font-action">{userLabel}</span>
@@ -1019,8 +1037,8 @@ function PermissionAuditFeed({
                 type="button"
                 onClick={() => setUser("", "")}
                 className="text-keep-muted hover:text-keep-text"
-                title="Clear user filter"
-                aria-label="Clear user filter"
+                title={t("permissions.clearUserFilter")}
+                aria-label={t("permissions.clearUserFilter")}
               >
                 ×
               </button>
@@ -1030,7 +1048,7 @@ function PermissionAuditFeed({
               <input
                 value={userQuery}
                 onChange={(e) => setUserQuery(e.target.value)}
-                placeholder="username prefix…"
+                placeholder={t("permissions.usernamePrefixLower")}
                 className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-0.5"
               />
               {userResults.length > 0 ? (
@@ -1043,7 +1061,7 @@ function PermissionAuditFeed({
                         className="flex w-full items-baseline justify-between gap-2 px-2 py-1 text-left text-xs hover:bg-keep-banner/40"
                       >
                         <span className="font-action">{u.username}</span>
-                        <span className="text-[10px] italic text-keep-muted">{ROLE_LABEL[u.role]}</span>
+                        <span className="text-[10px] italic text-keep-muted">{t(ROLE_LABEL_KEY[u.role])}</span>
                       </button>
                     </li>
                   ))}
@@ -1058,28 +1076,33 @@ function PermissionAuditFeed({
             onClick={clearAll}
             className="rounded border border-keep-rule bg-keep-banner/40 px-2 py-0.5 text-keep-muted hover:bg-keep-banner"
           >
-            Clear
+            {t("common:clear")}
           </button>
         ) : null}
       </div>
       {entries === null ? (
-        <p className="mt-2 italic text-keep-muted">Loading…</p>
+        <p className="mt-2 italic text-keep-muted">{t("common:loading")}</p>
       ) : entries.length === 0 ? (
-        <p className="mt-2 italic text-keep-muted">No matching entries.</p>
+        <p className="mt-2 italic text-keep-muted">{t("audit.noMatches")}</p>
       ) : (
         <ul className="mt-2 space-y-1 text-xs">
           {entries.map((e) => (
             <li key={e.id} className="border-b border-keep-rule/40 py-1 last:border-0">
               <span className="text-[10px] text-keep-muted">
-                {new Date(e.createdAt).toLocaleString()}
+                {formatDateTime(e.createdAt)}
               </span>
               {", "}
               <span className="font-action">{e.actorUsername}</span>
               {" "}
               <code className="font-mono text-[10px]">{e.action.replace(/_/g, " ")}</code>
-              {e.targetUsername ? <> on <span className="font-action">{e.targetUsername}</span></> : null}
+              {e.targetUsername ? (
+                <Trans t={t} i18nKey="permissions.onTarget" values={{ name: e.targetUsername }}>
+                  {" on "}
+                  <span className="font-action">{"{{name}}"}</span>
+                </Trans>
+              ) : null}
               {e.metadata ? (
-                <span className="ml-1 text-[10px] text-keep-muted">{describeMetadata(e.metadata)}</span>
+                <span className="ml-1 text-[10px] text-keep-muted">{describeMetadata(e.metadata, t)}</span>
               ) : null}
             </li>
           ))}
@@ -1125,13 +1148,14 @@ interface DiagnosticsResult {
   byGroup: Array<{ group: DiagnosticGroup; run: number; failed: number }>;
 }
 
-const DIAG_GROUP_LABEL: Record<DiagnosticGroup, string> = {
-  ...GROUP_LABEL,
-  "live-state": "Live state integrity",
-  meta: "Meta (catalog coverage)",
+const DIAG_GROUP_LABEL_KEY: Record<DiagnosticGroup, string> = {
+  ...GROUP_LABEL_KEY,
+  "live-state": "permissions.diagGroup.liveState",
+  meta: "permissions.diagGroup.meta",
 };
 
 function DiagnosticsPanel() {
+  const { t } = useTranslation("admin");
   const [result, setResult] = useState<DiagnosticsResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1144,20 +1168,19 @@ function DiagnosticsPanel() {
       if (!r.ok) throw new Error(await readError(r));
       setResult(await r.json() as DiagnosticsResult);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "check failed");
+      setError(err instanceof Error ? err.message : t("permissions.checkFailed"));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [t]);
 
   return (
-    <section className="rounded border border-keep-rule bg-keep-banner/30 p-3 text-xs">
+    <section data-admin-anchor="permissions.integrityTitle" className="rounded border border-keep-rule bg-keep-banner/30 p-3 text-xs">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h4 className="font-action text-sm">Integrity check</h4>
+          <h4 className="font-action text-sm">{t("permissions.integrityTitle")}</h4>
           <p className="text-keep-muted">
-            Runs every safety invariant (resolver precedence, owner-only key leaks,
-            orphan catalog keys, fallback engagement) against the live cache.
+            {t("permissions.integrityDescription")}
           </p>
         </div>
         <button
@@ -1166,7 +1189,7 @@ function DiagnosticsPanel() {
           disabled={busy}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 font-action text-[11px] uppercase tracking-widest hover:bg-keep-banner disabled:cursor-wait disabled:opacity-60"
         >
-          {busy ? "Running…" : result ? "Re-run" : "Run check"}
+          {busy ? t("permissions.running") : result ? t("permissions.reRun") : t("permissions.runCheck")}
         </button>
       </header>
 
@@ -1182,6 +1205,7 @@ function DiagnosticsPanel() {
 }
 
 function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
+  const { t } = useTranslation("admin");
   // Pre-bucket failures by group so the expanded details renders one
   // section per group rather than a flat list, easier to scan when
   // failures cluster in one feature area.
@@ -1198,8 +1222,10 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
   if (result.ok) {
     return (
       <p className="mt-2 rounded border border-emerald-700 bg-emerald-950/40 p-2 text-emerald-200">
-        <span className="font-action">All passed</span>, {result.checksRun} checks across
-        {" "}{result.byGroup.length} groups.
+        <Trans t={t} i18nKey="permissions.allPassed" values={{ checks: result.checksRun, groups: result.byGroup.length }}>
+          <span className="font-action">All passed</span>
+          {", {{checks}} checks across {{groups}} groups."}
+        </Trans>
       </p>
     );
   }
@@ -1207,12 +1233,18 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
   return (
     <div className="mt-2">
       <p className="rounded border border-red-700 bg-red-950/40 p-2 text-red-200">
-        <span className="font-action">{result.failures.length} failed</span>
-        {", "}{result.checksRun - result.failures.length}/{result.checksRun} checks passed.
+        <Trans
+          t={t}
+          i18nKey="permissions.someFailed"
+          values={{ failed: result.failures.length, passed: result.checksRun - result.failures.length, total: result.checksRun }}
+        >
+          <span className="font-action">{"{{failed}} failed"}</span>
+          {", {{passed}}/{{total}} checks passed."}
+        </Trans>
       </p>
       <details className="mt-2 rounded border border-keep-rule bg-keep-bg/60 p-2">
         <summary className="cursor-pointer font-action text-keep-muted">
-          Show failures by group
+          {t("permissions.showFailures")}
         </summary>
         <div className="mt-2 space-y-3">
           {result.byGroup
@@ -1220,9 +1252,9 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
             .map((row) => (
               <div key={row.group}>
                 <h5 className="font-action text-xs text-red-300">
-                  {DIAG_GROUP_LABEL[row.group]}{" "}
+                  {t(DIAG_GROUP_LABEL_KEY[row.group])}{" "}
                   <span className="text-[10px] text-keep-muted">
-                    ({row.failed}/{row.run} failed)
+                    {t("permissions.failedRatio", { failed: row.failed, run: row.run })}
                   </span>
                 </h5>
                 <ul className="mt-1 space-y-1">
@@ -1250,7 +1282,7 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
 
           {/* Per-group rollup (greens included) for context. */}
           <div className="border-t border-keep-rule/40 pt-2 text-[10px] text-keep-muted">
-            <div className="font-action uppercase tracking-widest">Per-group rollup</div>
+            <div className="font-action uppercase tracking-widest">{t("permissions.perGroupRollup")}</div>
             <ul className="mt-1 grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2">
               {result.byGroup.map((row) => (
                 <li key={`r-${row.group}`}>
@@ -1259,7 +1291,7 @@ function DiagnosticsResultView({ result }: { result: DiagnosticsResult }) {
                   ) : (
                     <span className="text-red-300">✗</span>
                   )}{" "}
-                  {DIAG_GROUP_LABEL[row.group]}
+                  {t(DIAG_GROUP_LABEL_KEY[row.group])}
                   {", "}
                   {row.run - row.failed}/{row.run}
                 </li>
@@ -1363,6 +1395,7 @@ function pivotToActors(entries: SensitiveGrantEntry[]): {
 }
 
 function SensitiveGrantsAdvisory() {
+  const { t } = useTranslation("admin");
   const [data, setData] = useState<SensitiveGrantsResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1375,23 +1408,21 @@ function SensitiveGrantsAdvisory() {
       if (!r.ok) throw new Error(await readError(r));
       setData(await r.json() as SensitiveGrantsResponse);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "load failed");
+      setError(err instanceof Error ? err.message : t("loadFailed"));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [t]);
 
   const pivot = useMemo(() => (data ? pivotToActors(data.keys) : null), [data]);
 
   return (
-    <section className="rounded border border-keep-rule bg-keep-banner/30 p-3 text-xs">
+    <section data-admin-anchor="permissions.sensitiveTitle" className="rounded border border-keep-rule bg-keep-banner/30 p-3 text-xs">
       <header className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h4 className="font-action text-sm">Sensitive permission holders</h4>
+          <h4 className="font-action text-sm">{t("permissions.sensitiveTitle")}</h4>
           <p className="text-keep-muted">
-            Informational. Shows what each role and user currently holds across the
-            privacy-sensitive and high-impact key sets, so you can confirm the grants still
-            match your intent.
+            {t("permissions.sensitiveDescription")}
           </p>
         </div>
         <button
@@ -1400,7 +1431,7 @@ function SensitiveGrantsAdvisory() {
           disabled={busy}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 font-action text-[11px] uppercase tracking-widest hover:bg-keep-banner disabled:cursor-wait disabled:opacity-60"
         >
-          {busy ? "Loading…" : data ? "Refresh" : "Show holders"}
+          {busy ? t("common:loading") : data ? t("refresh") : t("permissions.showHolders")}
         </button>
       </header>
 
@@ -1411,27 +1442,29 @@ function SensitiveGrantsAdvisory() {
       {pivot ? (
         <div className="mt-3 space-y-3">
           <p className="rounded border border-keep-rule/60 bg-keep-bg/40 p-2 text-[11px] text-keep-muted">
-            <span className="font-action text-keep-fg">Owner</span> holds every permission by
-            bypass, including all keys listed below, and is not enumerated here.
+            <Trans t={t} i18nKey="permissions.ownerNote">
+              <span className="font-action text-keep-fg">Owner</span>
+              {" holds every permission by bypass, including all keys listed below, and is not enumerated here."}
+            </Trans>
           </p>
 
           {pivot.byRole.length === 0 && pivot.byUser.length === 0 ? (
             <p className="italic text-keep-muted">
-              No role or user currently holds any sensitive key. Only owners have them.
+              {t("permissions.noHolders")}
             </p>
           ) : null}
 
           {pivot.byRole.length > 0 ? (
             <div>
               <h5 className="font-action text-xs uppercase tracking-widest text-keep-muted">
-                By role
+                {t("permissions.byRole")}
               </h5>
               <ul className="mt-1 space-y-2">
                 {pivot.byRole.map((row) => (
                   <ActorCard
                     key={`role-${row.role}`}
-                    title={ROLE_LABEL[row.role]}
-                    subtitle="Role grant"
+                    title={t(ROLE_LABEL_KEY[row.role])}
+                    subtitle={t("permissions.roleGrant")}
                     titleAccent={null}
                     holding={row.holding}
                   />
@@ -1443,18 +1476,17 @@ function SensitiveGrantsAdvisory() {
           {pivot.byUser.length > 0 ? (
             <div>
               <h5 className="font-action text-xs uppercase tracking-widest text-keep-muted">
-                By user (explicit overrides)
+                {t("permissions.byUserOverrides")}
               </h5>
               <p className="text-[10px] italic text-keep-muted">
-                Grants applied to a specific account on top of (or independent of) their role.
-                A user with role-level holdings also appears in the By role section above.
+                {t("permissions.byUserOverridesHelp")}
               </p>
               <ul className="mt-1 space-y-2">
                 {pivot.byUser.map((row) => (
                   <ActorCard
                     key={`user-${row.userId}`}
                     title={row.username}
-                    subtitle={`Override grant · role: ${ROLE_LABEL[row.role]}`}
+                    subtitle={t("permissions.overrideSubtitle", { role: t(ROLE_LABEL_KEY[row.role]) })}
                     titleAccent="amber"
                     holding={row.holding}
                   />
@@ -1483,6 +1515,7 @@ function ActorCard({
   titleAccent: "amber" | null;
   holding: ActorHolding;
 }) {
+  const { t } = useTranslation("admin");
   return (
     <li className="rounded border border-keep-rule/60 bg-keep-banner/40 p-2">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -1501,10 +1534,10 @@ function ActorCard({
       </div>
       <div className="mt-1.5 space-y-1.5">
         {holding.privacy.length > 0 ? (
-          <ActorKeyList label="Privacy-sensitive" entries={holding.privacy} />
+          <ActorKeyList label={t("permissions.privacySensitive")} entries={holding.privacy} />
         ) : null}
         {holding.highImpact.length > 0 ? (
-          <ActorKeyList label="High-impact actions" entries={holding.highImpact} />
+          <ActorKeyList label={t("permissions.highImpact")} entries={holding.highImpact} />
         ) : null}
       </div>
     </li>
@@ -1536,10 +1569,13 @@ function ActorKeyList({
   );
 }
 
-function describeMetadata(metadata: Record<string, unknown>): string {
+function describeMetadata(
+  metadata: Record<string, unknown>,
+  t: (key: string) => string,
+): string {
   const parts: string[] = [];
   if (typeof metadata.role === "string") parts.push(`role=${metadata.role}`);
   if (typeof metadata.permissionKey === "string") parts.push(`key=${metadata.permissionKey}`);
-  if (typeof metadata.granted === "boolean") parts.push(metadata.granted ? "granted" : "revoked");
+  if (typeof metadata.granted === "boolean") parts.push(metadata.granted ? t("permissions.metaGranted") : t("permissions.metaRevoked"));
   return parts.length > 0 ? `(${parts.join(", ")})` : "";
 }

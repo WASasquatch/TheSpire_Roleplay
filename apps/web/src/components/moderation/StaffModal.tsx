@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { AvatarCrop, Role } from "@thekeep/shared";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
@@ -28,15 +30,15 @@ const MAX_BIO = 120;
 const MAX_INTRO = 256;
 
 /** Friendly label + theme color slot per staff role. */
-function roleLabel(role: Role, siteName: string): string {
+function roleLabel(t: TFunction, role: Role, siteName: string): string {
   // Site-wide staff read as "<site> Owner/Admin/Moderator" (e.g. "The Spire
   // Admin") so they're not mistaken for a community server's own owner/staff.
   // The role KEYS (masteradmin/admin/mod) are unchanged.
   return role === "masteradmin"
-    ? `${siteName} Owner`
+    ? t("staff.roles.masteradmin", { siteName })
     : role === "admin"
-    ? `${siteName} Admin`
-    : `${siteName} Moderator`;
+    ? t("staff.roles.admin", { siteName })
+    : t("staff.roles.mod", { siteName });
 }
 function roleClasses(role: Role): string {
   // Tiered tint so the hierarchy reads at a glance: accent (warmest)
@@ -70,6 +72,7 @@ export function StaffModal({
   /** Viewer's own user id, drives the "you" treatment + edit. */
   meId: string | null;
 }) {
+  const { t } = useTranslation("moderation");
   const [cards, setCards] = useState<StaffCard[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const siteName = useChat((s) => s.branding.siteName);
@@ -82,8 +85,9 @@ export function StaffModal({
         return (await r.json()) as { staff: StaffCard[] };
       })
       .then((j) => { if (!cancelled) setCards(j.staff); })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : t("staff.loadFailed")); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot fetch; `t` only feeds the failure fallback
   }, []);
 
   return (
@@ -94,8 +98,8 @@ export function StaffModal({
       >
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-keep-rule bg-keep-banner px-4 py-2">
           <div>
-            <h2 className="font-action text-lg">{siteName} App Staff</h2>
-            <p className="text-[14px] text-keep-muted">This directory lists all of {siteName}'s staff members and their roles. Reach out to them for help with {siteName} itself. If your issue is with a specific community Chat Server or Forum, please contact that community's own staff first, then come to {siteName} staff if it still needs attention.</p>
+            <h2 className="font-action text-lg">{t("staff.title", { siteName })}</h2>
+            <p className="text-[14px] text-keep-muted">{t("staff.description", { siteName })}</p>
           </div>
           <CloseButton onClick={onClose} />
         </header>
@@ -106,9 +110,9 @@ export function StaffModal({
               {error}
             </div>
           ) : cards === null ? (
-            <div className="py-10 text-center text-sm italic text-keep-muted">Loading…</div>
+            <div className="py-10 text-center text-sm italic text-keep-muted">{t("common:loading")}</div>
           ) : cards.length === 0 ? (
-            <div className="py-10 text-center text-sm italic text-keep-muted">No staff to show.</div>
+            <div className="py-10 text-center text-sm italic text-keep-muted">{t("staff.noStaff")}</div>
           ) : (
             <ul className="flex flex-wrap justify-center gap-4">
               {cards.map((c) => (
@@ -151,6 +155,7 @@ function StaffCardView({
   onMessage: () => void;
   onSaved: (bio: string | null, intro: string | null) => void;
 }) {
+  const { t } = useTranslation("moderation");
   const [editing, setEditing] = useState(false);
   const siteName = useChat((s) => s.branding.siteName);
 
@@ -160,7 +165,7 @@ function StaffCardView({
       <span
         className={`mb-3 rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${roleClasses(card.role)}`}
       >
-        {roleLabel(card.role, siteName)}
+        {roleLabel(t, card.role, siteName)}
       </span>
 
       <BorderedAvatar
@@ -194,7 +199,7 @@ function StaffCardView({
         </p>
       ) : (
         <p className="mt-3 min-h-0 flex-1 text-sm italic text-keep-muted/60">
-          {isSelf ? "Add an introduction with “Edit card”." : ""}
+          {isSelf ? t("staff.addIntroHint") : ""}
         </p>
       )}
 
@@ -208,16 +213,16 @@ function StaffCardView({
               onClick={() => setEditing(true)}
               className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs hover:bg-keep-banner"
             >
-              Edit card
+              {t("staff.editCard")}
             </button>
           ) : (
             <button
               type="button"
               onClick={onMessage}
-              title={`Message ${card.username}`}
+              title={t("staff.messageTitle", { name: card.username })}
               className="keep-button rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/20"
             >
-              💬 Message
+              {t("staff.message")}
             </button>
           )}
         </div>
@@ -235,6 +240,7 @@ function StaffCardEditor({
   onClose: () => void;
   onSaved: (bio: string | null, intro: string | null) => void;
 }) {
+  const { t } = useTranslation("moderation");
   const [bio, setBio] = useState(card.bio ?? "");
   const [intro, setIntro] = useState(card.intro ?? "");
   const [busy, setBusy] = useState(false);
@@ -256,7 +262,7 @@ function StaffCardEditor({
       onSaved(j.bio, j.intro);
       onClose();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "save failed");
+      setErr(e instanceof Error ? e.message : t("staff.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -265,25 +271,25 @@ function StaffCardEditor({
   return (
     <div className="mt-4 w-full shrink-0 space-y-2 text-left">
       <label className="block text-[10px] uppercase tracking-widest text-keep-muted">
-        Tagline
+        {t("staff.tagline")}
         <input
           type="text"
           value={bio}
           maxLength={MAX_BIO}
           onChange={(e) => setBio(e.target.value)}
-          placeholder="One line about you"
+          placeholder={t("staff.taglinePlaceholder")}
           className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm normal-case tracking-normal text-keep-text outline-none focus:border-keep-action"
         />
         <span className="mt-0.5 block text-right text-[9px] text-keep-muted">{bio.length}/{MAX_BIO}</span>
       </label>
       <label className="block text-[10px] uppercase tracking-widest text-keep-muted">
-        Introduction
+        {t("staff.introduction")}
         <textarea
           value={intro}
           maxLength={MAX_INTRO}
           rows={3}
           onChange={(e) => setIntro(e.target.value)}
-          placeholder="A short introduction shown on your card"
+          placeholder={t("staff.introductionPlaceholder")}
           className="mt-0.5 w-full resize-none rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm normal-case tracking-normal text-keep-text outline-none focus:border-keep-action"
         />
         <span className="mt-0.5 block text-right text-[9px] text-keep-muted">{intro.length}/{MAX_INTRO}</span>
@@ -296,7 +302,7 @@ function StaffCardEditor({
           disabled={busy}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs hover:bg-keep-banner disabled:opacity-50"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="button"
@@ -304,7 +310,7 @@ function StaffCardEditor({
           disabled={busy}
           className="keep-button rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
         >
-          {busy ? "Saving…" : "Save"}
+          {busy ? t("common:saving") : t("common:save")}
         </button>
       </div>
     </div>

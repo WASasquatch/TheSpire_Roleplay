@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import { Node, mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
@@ -90,6 +91,7 @@ export function RichEditor({
   enableMarginNote,
   toolbarTrailing,
 }: Props) {
+  const { t } = useTranslation("common");
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -104,7 +106,9 @@ export function RichEditor({
         },
       }),
       Placeholder.configure({
-        placeholder: placeholder ?? "Start writing...",
+        // Resolved at editor creation; a live language flip applies on the
+        // next mount (the Tiptap instance isn't rebuilt mid-edit on purpose).
+        placeholder: placeholder ?? t("richEditor.startWriting"),
       }),
       MarginNote,
     ],
@@ -172,10 +176,11 @@ function RichToolbar({
   enableMarginNote: boolean;
   trailing: ReactNode;
 }) {
+  const { t } = useTranslation("common");
   if (!editor) {
     return (
       <div className="flex shrink-0 items-center gap-1 border-b border-keep-rule bg-keep-panel/40 px-2 py-1.5 text-xs text-keep-muted">
-        Loading editor...
+        {t("richEditor.loadingEditor")}
       </div>
     );
   }
@@ -183,96 +188,96 @@ function RichToolbar({
   return (
     <div className="flex flex-wrap items-center gap-0.5 border-b border-keep-rule bg-keep-panel/40 px-2 py-1.5 text-xs">
       <Btn
-        label="B"
-        title="Bold (Ctrl+B)"
+        label={t("richEditor.boldLabel")}
+        title={t("richEditor.boldTitle")}
         bold
         active={editor.isActive("bold")}
         disabled={disabled}
         onClick={() => editor.chain().focus().toggleBold().run()}
       />
       <Btn
-        label="I"
+        label={t("richEditor.italicLabel")}
         italic
-        title="Italic (Ctrl+I)"
+        title={t("richEditor.italicTitle")}
         active={editor.isActive("italic")}
         disabled={disabled}
         onClick={() => editor.chain().focus().toggleItalic().run()}
       />
       <Btn
-        label="U"
+        label={t("richEditor.underlineLabel")}
         underline
-        title="Underline (Ctrl+U)"
+        title={t("richEditor.underlineTitle")}
         active={editor.isActive("underline")}
         disabled={disabled}
         onClick={() => editor.chain().focus().toggleUnderline().run()}
       />
       <Btn
-        label="S"
+        label={t("richEditor.strikeLabel")}
         strike
-        title="Strikethrough"
+        title={t("richEditor.strikeTitle")}
         active={editor.isActive("strike")}
         disabled={disabled}
         onClick={() => editor.chain().focus().toggleStrike().run()}
       />
       <Sep />
       <Btn
-        label="H2"
-        title="Heading 2"
+        label={t("richEditor.h2Label")}
+        title={t("richEditor.h2Title")}
         active={editor.isActive("heading", { level: 2 })}
         disabled={disabled}
         onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
       />
       <Btn
-        label="H3"
-        title="Heading 3"
+        label={t("richEditor.h3Label")}
+        title={t("richEditor.h3Title")}
         active={editor.isActive("heading", { level: 3 })}
         disabled={disabled}
         onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
       />
       <Btn
         label="¶"
-        title="Paragraph"
+        title={t("richEditor.paragraphTitle")}
         active={editor.isActive("paragraph")}
         disabled={disabled}
         onClick={() => editor.chain().focus().setParagraph().run()}
       />
       <Sep />
       <Btn
-        label="• List"
-        title="Bullet list"
+        label={t("richEditor.bulletListLabel")}
+        title={t("richEditor.bulletListTitle")}
         active={editor.isActive("bulletList")}
         disabled={disabled}
         onClick={() => editor.chain().focus().toggleBulletList().run()}
       />
       <Btn
-        label="1. List"
-        title="Numbered list"
+        label={t("richEditor.orderedListLabel")}
+        title={t("richEditor.orderedListTitle")}
         active={editor.isActive("orderedList")}
         disabled={disabled}
         onClick={() => editor.chain().focus().toggleOrderedList().run()}
       />
       <Btn
         label="❝"
-        title="Blockquote"
+        title={t("richEditor.blockquoteTitle")}
         active={editor.isActive("blockquote")}
         disabled={disabled}
         onClick={() => editor.chain().focus().toggleBlockquote().run()}
       />
       <Btn
         label="―"
-        title="Horizontal rule"
+        title={t("richEditor.hrTitle")}
         disabled={disabled}
         onClick={() => editor.chain().focus().setHorizontalRule().run()}
       />
       <Sep />
       <Btn
-        label="Link"
-        title="Add or edit link"
+        label={t("richEditor.linkLabel")}
+        title={t("richEditor.linkTitle")}
         active={editor.isActive("link")}
         disabled={disabled}
         onClick={() => {
           const prev = editor.getAttributes("link").href as string | undefined;
-          const next = window.prompt("Link URL (https://…). Leave blank to remove.", prev ?? "");
+          const next = window.prompt(t("richEditor.linkPrompt"), prev ?? "");
           if (next === null) return;
           if (next === "") {
             editor.chain().focus().extendMarkRange("link").unsetLink().run();
@@ -283,8 +288,8 @@ function RichToolbar({
       />
       {enableMarginNote ? (
         <Btn
-          label="+ Note"
-          title="Insert a margin note, visible to collaborators in drafts; stripped on publish"
+          label={t("richEditor.noteLabel")}
+          title={t("richEditor.noteTitle")}
           disabled={disabled}
           onClick={() => {
             editor
@@ -292,7 +297,7 @@ function RichToolbar({
               .focus()
               .insertContent({
                 type: "marginNote",
-                content: [{ type: "text", text: "your note here" }],
+                content: [{ type: "text", text: t("richEditor.notePlaceholder") }],
               })
               .run();
           }}
@@ -301,13 +306,13 @@ function RichToolbar({
       <Sep />
       <Btn
         label="↶"
-        title="Undo (Ctrl+Z)"
+        title={t("richEditor.undoTitle")}
         disabled={disabled || !editor.can().undo()}
         onClick={() => editor.chain().focus().undo().run()}
       />
       <Btn
         label="↷"
-        title="Redo (Ctrl+Shift+Z)"
+        title={t("richEditor.redoTitle")}
         disabled={disabled || !editor.can().redo()}
         onClick={() => editor.chain().focus().redo().run()}
       />

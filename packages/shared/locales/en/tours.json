@@ -1,0 +1,215 @@
+{
+  "coach": {
+    "skipTour": "Skip the tour",
+    "back": "Back",
+    "skip": "Skip",
+    "next": "Next",
+    "gotIt": "Got it"
+  },
+  "designer": {
+    "welcome": {
+      "title": "Welcome to the Designer",
+      "body": "Build your profile by dragging pieces onto the page. No code needed. Here's a quick tour."
+    },
+    "blocks": {
+      "title": "Your building blocks",
+      "body": "Drag any of these onto the page. The themed templates are ready-made styled sections; the plain blocks let you build your own. Hover one to preview what it is."
+    },
+    "canvas": {
+      "title": "Your profile page",
+      "body": "Drop blocks here, then click any text to type your own. Select a piece to move or restyle it."
+    },
+    "mode": {
+      "title": "Designer or code",
+      "body": "Prefer writing your own HTML and CSS? Switch to Source any time. Your work carries across both ways."
+    },
+    "save": {
+      "title": "Save when you're ready",
+      "body": "Happy with it? Hit Save to publish your profile. You can come back and tweak it whenever you like."
+    }
+  },
+  "site": {
+    "welcome": {
+      "title": "Welcome to The Spire",
+      "body": "Here is a quick tour of the screen so you know where everything is. It takes about a minute, and you can replay it any time from Help."
+    },
+    "identity": {
+      "title": "You and your characters",
+      "body": "This button at the bottom of the rail shows who you are posting as. Click it to switch into a character, create one, or go back to yourself. To open your own profile, use the Menu just below, or type /profile."
+    },
+    "menu": {
+      "title": "The Menu holds everything",
+      "body": "Open the Menu for your profile, worlds, forums, messages, friends, and Help. When you are not sure where something lives, look here first."
+    },
+    "composer": {
+      "title": "Say something",
+      "body": "Type here and press Enter to talk. Start a line with / for commands, @ to mention someone, or : to write an action."
+    },
+    "rooms": {
+      "title": "Move between rooms",
+      "body": "Every room you can join is listed here with its headcount. Click a room's name to hop in. Private rooms ask for a password."
+    },
+    "communities": {
+      "title": "Explore communities",
+      "body": "These icons are the communities you have joined. Use the button at the bottom to discover more, or to apply to start your own."
+    },
+    "forums": {
+      "title": "Forums, and this tour again",
+      "body": "Forums, for writing you want to keep, live in the Menu and above the room list. You can replay this whole tour any time from Help."
+    }
+  },
+  "forumsBrowse": {
+    "welcome": {
+      "title": "Welcome to the Forums",
+      "body": "Forums are for long-form writing you want to keep — boards and topics that stay put instead of scrolling away like chat."
+    },
+    "discover": {
+      "title": "Discover more forums",
+      "body": "Tap the compass to browse other communities' forums and search any of them by name or tag."
+    },
+    "startYourOwn": {
+      "title": "Start your own",
+      "body": "Ready to gather your own community? Look for the Create your Forum button to apply, and a keeper will review it."
+    }
+  },
+  "forumPosting": {
+    "startTopic": {
+      "title": "Start a topic",
+      "body": "Each section on a board has a New Topic button. Click it to open a fresh topic right where you want it."
+    },
+    "giveTitle": {
+      "title": "Give it a title",
+      "body": "When the topic opens, name it at the top, then write your opening post just below."
+    },
+    "tag": {
+      "title": "Tag it",
+      "body": "Add a tag so people can tell at a glance what a topic is about. You'll find the tag picker on the topic once it's open."
+    },
+    "sayOrAct": {
+      "title": "Say or act",
+      "body": "Replies default to speech. Switch a reply to Action to describe what your character does instead of what they say."
+    },
+    "npc": {
+      "title": "Voice an NPC",
+      "body": "If the keeper allows it, switch a reply to NPC to post as one of your saved characters and bring the scene to life."
+    },
+    "post": {
+      "title": "Post it",
+      "body": "When you're happy, send your reply and it joins the topic for everyone to read."
+    }
+  },
+  "forumCreate": {
+    "name": {
+      "title": "Name your forum",
+      "body": "This is what everyone will see in the catalog. Pick something that fits your community."
+    },
+    "address": {
+      "title": "Choose an address",
+      "body": "This is the short link people use to find you. It has to be free, and we'll tell you if it's taken."
+    },
+    "purpose": {
+      "title": "Tell us the purpose",
+      "body": "Explain what your forum gathers and what its boards will hold. Reviewers read this before approving."
+    },
+    "submit": {
+      "title": "Send it in",
+      "body": "Apply when you're ready. A site moderator reviews it, and you'll hear back here and in chat."
+    }
+  },
+  "forumAdmin": {
+    "settings": {
+      "title": "Your forum settings",
+      "body": "Everything you need to run the place lives in these tabs. Pick one to open its tools."
+    },
+    "basics": {
+      "title": "The basics",
+      "body": "Overview sets your forum's name, purpose, and who can join or post. Boards is where you add and reorder the boards inside it."
+    },
+    "team": {
+      "title": "Your team",
+      "body": "In Roles you promote trusted members to moderators and choose exactly what each of them is allowed to do."
+    },
+    "keepOrder": {
+      "title": "Keep order",
+      "body": "Bans lets you remove troublemakers, for a while or for good, and lift a ban later."
+    },
+    "modLog": {
+      "title": "The paper trail",
+      "body": "The Mod log records what your moderators have done, so nothing happens in the dark."
+    }
+  },
+  "serverCreate": {
+    "name": {
+      "title": "Name your server",
+      "body": "Give your community a name people will recognize. You can change how it looks later."
+    },
+    "address": {
+      "title": "Pick an address",
+      "body": "This is the short link people use to reach your server. We check it's free as you type."
+    },
+    "purpose": {
+      "title": "Say what it's for",
+      "body": "Tell our reviewers who your community is for and what its rooms will hold."
+    },
+    "submit": {
+      "title": "Send it in",
+      "body": "Apply and our moderators take it from there. You'll hear back here and in chat once it's decided."
+    }
+  },
+  "serverAdmin": {
+    "controlRoom": {
+      "title": "Your server's control room",
+      "body": "Everything about this community lives behind these tabs. Pick one to work on it, and your changes save right here."
+    },
+    "overview": {
+      "title": "Name and how people join",
+      "body": "The Overview tab sets your server's name, tagline, and whether folks join instantly, apply, or need an invite."
+    },
+    "appearance": {
+      "title": "Make it yours",
+      "body": "The Appearance tab is for your icon, banner, and colors, so members always know which server they're in."
+    },
+    "rooms": {
+      "title": "Add your rooms",
+      "body": "Open the Rooms tab and use New room to add a place to talk. Give it a name and it shows up for your members."
+    },
+    "members": {
+      "title": "Give someone a hand",
+      "body": "In the Members tab, Make mod hands a trusted member the tools to help you run the place."
+    },
+    "roles": {
+      "title": "Decide who can do what",
+      "body": "The Roles tab is where you appoint staff and choose exactly which powers they hold. Grant only what each person needs."
+    },
+    "save": {
+      "title": "Nothing is lost",
+      "body": "Each tab has its own Save button. Make your changes, press Save, and you're done. You can reopen this walkthrough any time from the question mark up top."
+    }
+  },
+  "siteAdmin": {
+    "welcome": {
+      "title": "Welcome to the Admin Panel",
+      "body": "This is your control room for the whole site. Everything is sorted into tabs along the top, grouped by what they do."
+    },
+    "monitor": {
+      "title": "Keep an eye on things",
+      "body": "Overview gives you a live snapshot, and the nearby tabs let you dig into analytics, reports, and the Staff Actions and Mod Cases logs."
+    },
+    "people": {
+      "title": "People and access",
+      "body": "Manage members here, and set what each role is allowed to do over in Roles & Permissions."
+    },
+    "content": {
+      "title": "Content and community",
+      "body": "Oversee community servers, forums, and the Scriptorium. Open a server to manage its own rooms, ranks, and rewards."
+    },
+    "configure": {
+      "title": "Set up the site",
+      "body": "Settings, Branding, and Rules shape how the whole site looks and behaves. Changes here reach everyone, so take your time."
+    },
+    "done": {
+      "title": "You are all set",
+      "body": "You can replay this walkthrough any time from the question mark next to the tabs. Have a look around."
+    }
+  }
+}

@@ -6,6 +6,7 @@ import { callerCanEditRoom } from "../../auth/roomPermissions.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { applyControl, clearTheater, getTheater, parsePlaylist, serializePlaylist, setTheater } from "../../realtime/theaterState.js";
 import { expandPlaylist, fetchVideoTitle, parseYoutubeIds, youtubeConfigured } from "../../lib/youtube.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -51,13 +52,11 @@ function stripYoutubeListParams(url: string): string {
   }
 }
 
-const KIND_LABEL: Record<TheaterSourceKind, string> = {
-  video: "video file",
-  youtube: "YouTube",
-  vimeo: "Vimeo",
-  live: "live stream",
-  embed: "embed (display-only)",
-};
+/** Human label for a source kind, in the recipient's language. The keys
+ *  mirror the old KIND_LABEL map (en values byte-identical). */
+function kindLabel(locale: string | null, kind: TheaterSourceKind): string {
+  return tFor(locale, `commands:theater.kind.${kind}`);
+}
 
 /**
  * /theater - configure a room's synchronized watch-party panel.
@@ -93,7 +92,7 @@ export const theaterCommand: CommandHandler = {
   ],
   async run(ctx) {
     const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
-    if (!room) return notice(ctx, "NO_ROOM", "Room not found.");
+    if (!room) return notice(ctx, "NO_ROOM", tFor(ctx.user.locale, "commands:shared.roomNotFound"));
 
     const verb = (ctx.args[0] ?? "").toLowerCase();
     // Raw text after the verb (preserves spaces/case for URLs + titles).
@@ -103,18 +102,18 @@ export const theaterCommand: CommandHandler = {
     // ---- read-only: show current config (no permission needed) ----------
     if (!verb || verb === "list" || verb === "ls") {
       const head = room.theaterMode
-        ? `Theater is ON (loop: ${room.theaterLoop}).`
-        : "Theater is OFF. Owner/mod: /theater on to enable.";
-      if (playlist.length === 0) return notice(ctx, "THEATER", `${head} Playlist is empty - add a video with /theater add <url>.`);
+        ? tFor(ctx.user.locale, "commands:theater.statusOn", { loop: room.theaterLoop })
+        : tFor(ctx.user.locale, "commands:theater.statusOff");
+      if (playlist.length === 0) return notice(ctx, "THEATER", `${head} ${tFor(ctx.user.locale, "commands:theater.playlistEmpty")}`);
       const lines = playlist
-        .map((s, i) => `${i + 1}. ${s.title ? `${s.title} - ` : ""}${s.url} [${KIND_LABEL[s.kind]}]`)
+        .map((s, i) => `${i + 1}. ${s.title ? `${s.title} - ` : ""}${s.url} [${kindLabel(ctx.user.locale, s.kind)}]`)
         .join("\n");
       return notice(ctx, "THEATER", `${head}\n${lines}`);
     }
 
     // ---- everything below mutates: gate to owner/mod/admin ---------------
     if (!(await callerCanEditRoom(ctx.db, ctx.user, ctx.roomId))) {
-      return notice(ctx, "PERM", "Only the room owner / mod / admin can change theater settings.");
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:theater.permChange"));
     }
 
     const { addMessage, broadcastRoomState, broadcastTheaterSync, persistTheaterCheckpoint } = await import(
@@ -131,13 +130,13 @@ export const theaterCommand: CommandHandler = {
       const url = m?.[1] ?? "";
       const title = (m?.[2] ?? "").trim();
       if (!/^https?:\/\//i.test(url)) {
-        return notice(ctx, "BAD_URL", "Give a full http(s) media URL, e.g. /theater add https://example.com/clip.mp4");
+        return notice(ctx, "BAD_URL", tFor(ctx.user.locale, "commands:theater.badUrl"));
       }
       if (kindOverride === "live" && !/^https:\/\//i.test(url)) {
-        return notice(ctx, "BAD_URL", "Live streams must be an https link (a plain http link won't load on this site). See the Theater streaming guide in Help.");
+        return notice(ctx, "BAD_URL", tFor(ctx.user.locale, "commands:theater.badLiveUrl"));
       }
       if (playlist.length >= 50) {
-        return notice(ctx, "PLAYLIST_FULL", "Playlist is full (50 sources). Remove some with /theater remove <n>.");
+        return notice(ctx, "PLAYLIST_FULL", tFor(ctx.user.locale, "commands:theater.playlistFull"));
       }
 
       // ---- YouTube enrichment (only when a Data API key is configured) -----
@@ -170,8 +169,8 @@ export const theaterCommand: CommandHandler = {
               ctx,
               "THEATER",
               skipped > 0
-                ? `Queued ${queued.length} video${queued.length === 1 ? "" : "s"} from that YouTube playlist (${skipped} skipped - playlist cap is 50).`
-                : `Queued ${queued.length} video${queued.length === 1 ? "" : "s"} from that YouTube playlist.`,
+                ? tFor(ctx.user.locale, "commands:theater.queuedSkipped", { count: queued.length, skipped })
+                : tFor(ctx.user.locale, "commands:theater.queued", { count: queued.length }),
             );
             await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
             if (wasEmpty) {
@@ -194,12 +193,12 @@ export const theaterCommand: CommandHandler = {
           // daily cap; no error at all = a private/empty playlist.
           const detail = error
             ? `YouTube API ${error.httpStatus}${error.apiStatus ? ` ${error.apiStatus}` : ""}${error.reason ? ` (${error.reason})` : ""}${error.message ? `: ${error.message}` : ""}`
-            : "the playlist looks private or empty";
+            : tFor(ctx.user.locale, "commands:theater.playlistPrivateOrEmpty");
           if (videoId) {
-            notice(ctx, "THEATER", `Couldn't expand that YouTube playlist — ${detail}. Queued the single video instead.`);
+            notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.expandFailedQueuedSingle", { detail }));
             return appendSingle(url, title, kindOverride);
           }
-          return notice(ctx, "THEATER", `Couldn't expand that YouTube playlist — ${detail}.`);
+          return notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.expandFailed", { detail }));
         } else if (videoId && sniffKind(url) === "youtube" && !title) {
           // Plain YouTube video with no operator-supplied title → try to
           // fetch the real title so the playlist reads nicely. null → append
@@ -248,8 +247,14 @@ export const theaterCommand: CommandHandler = {
       const source: TheaterSource = { id: nanoid(), url, kind, ...(title ? { title } : {}), ...(live ? { live: true } : {}) };
       const next = [...playlist, source];
       await ctx.db.update(rooms).set({ theaterPlaylist: serializePlaylist(next) }).where(eq(rooms.id, ctx.roomId));
-      const kindLabel = source.live ? `${KIND_LABEL[source.kind]} live` : KIND_LABEL[source.kind];
-      notice(ctx, "THEATER", `Added to the theater playlist (#${next.length}, ${kindLabel}): ${title || url}`);
+      const kindText = source.live
+        ? tFor(ctx.user.locale, "commands:theater.kindLive", { kind: kindLabel(ctx.user.locale, source.kind) })
+        : kindLabel(ctx.user.locale, source.kind);
+      notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.added", {
+        position: next.length,
+        kind: kindText,
+        source: title || url,
+      }));
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
       // First source of an empty playlist: AUTO-START playback (not just snap
       // viewers onto a paused source). The live state otherwise begins
@@ -274,10 +279,10 @@ export const theaterCommand: CommandHandler = {
         return notice(
           ctx,
           "PERM",
-          "You don't have permission to start a theater. Ask an admin for theater access.",
+          tFor(ctx.user.locale, "commands:theater.permStart"),
         );
       }
-      if (room.theaterMode) return notice(ctx, "THEATER", "Theater mode is already on.");
+      if (room.theaterMode) return notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.alreadyOn"));
       await ctx.db.update(rooms).set({ theaterMode: true }).where(eq(rooms.id, ctx.roomId));
       await addMessage(ctx, { kind: "system", body: "Theater mode on - a synchronized video panel now sits above the chat." });
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
@@ -285,7 +290,7 @@ export const theaterCommand: CommandHandler = {
     }
 
     if (verb === "off") {
-      if (!room.theaterMode) return notice(ctx, "THEATER", "Theater mode is already off.");
+      if (!room.theaterMode) return notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.alreadyOff"));
       await ctx.db.update(rooms).set({ theaterMode: false }).where(eq(rooms.id, ctx.roomId));
       clearTheater(ctx.roomId);
       await persistTheaterCheckpoint(ctx.db, ctx.roomId); // clears the persisted checkpoint
@@ -297,9 +302,9 @@ export const theaterCommand: CommandHandler = {
     if (verb === "loop" || verb === "repeat") {
       const mode = rest.toLowerCase() as TheaterLoop;
       if (mode !== "off" && mode !== "one" && mode !== "all") {
-        return notice(ctx, "BAD_LOOP", "Loop must be 'off' (stop at end), 'one' (repeat current), or 'all' (advance + loop the playlist).");
+        return notice(ctx, "BAD_LOOP", tFor(ctx.user.locale, "commands:theater.badLoop"));
       }
-      if (room.theaterLoop === mode) return notice(ctx, "THEATER", `Loop is already ${mode}.`);
+      if (room.theaterLoop === mode) return notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.loopAlready", { mode }));
       await ctx.db.update(rooms).set({ theaterLoop: mode }).where(eq(rooms.id, ctx.roomId));
       await addMessage(ctx, {
         kind: "system",
@@ -327,7 +332,7 @@ export const theaterCommand: CommandHandler = {
     if (verb === "remove" || verb === "rm" || verb === "del") {
       const n = parseInt(rest, 10);
       if (!Number.isFinite(n) || n < 1 || n > playlist.length) {
-        return notice(ctx, "BAD_INDEX", `Give a playlist position between 1 and ${playlist.length}. See /theater list.`);
+        return notice(ctx, "BAD_INDEX", tFor(ctx.user.locale, "commands:theater.badIndex", { max: playlist.length }));
       }
       const removedIdx = n - 1;
       const removed = playlist[removedIdx];
@@ -357,21 +362,21 @@ export const theaterCommand: CommandHandler = {
         // doesn't restore a stale index pointing past the edited playlist.
         await persistTheaterCheckpoint(ctx.db, ctx.roomId);
       }
-      notice(ctx, "THEATER", `Removed from the theater playlist: ${removed?.title || removed?.url}`);
+      notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.removed", { source: removed?.title || removed?.url }));
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
       return;
     }
 
     if (verb === "clear") {
-      if (playlist.length === 0) return notice(ctx, "THEATER", "The playlist is already empty.");
+      if (playlist.length === 0) return notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.alreadyEmpty"));
       await ctx.db.update(rooms).set({ theaterPlaylist: "[]" }).where(eq(rooms.id, ctx.roomId));
       clearTheater(ctx.roomId);
       await persistTheaterCheckpoint(ctx.db, ctx.roomId); // clears the persisted checkpoint
-      notice(ctx, "THEATER", "Theater playlist cleared.");
+      notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.cleared"));
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
       return;
     }
 
-    return notice(ctx, "USAGE", "Usage: /theater on|off | add <url> [title] | remove <n> | clear | loop off|one|all | list");
+    return notice(ctx, "USAGE", tFor(ctx.user.locale, "commands:theater.usage"));
   },
 };

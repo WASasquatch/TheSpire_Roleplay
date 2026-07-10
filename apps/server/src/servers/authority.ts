@@ -39,12 +39,35 @@ import {
   parseServerFeaturePermissions,
   parseServerModPermissions,
 } from "@thekeep/shared";
-import { serverBans, serverMembers, serverUsergroupMembers, serverUsergroups, servers } from "../db/schema.js";
+import { serverBans, serverMembers, serverUsergroupMembers, serverUsergroups, servers, users } from "../db/schema.js";
 import { resolveScopedAuthority, scopedCan, type Caller } from "../auth/scopedAuthority.js";
+import { isAdultUser } from "../auth/ageGate.js";
 import type { Db } from "../db/index.js";
 import { isServerModerationActive } from "./moderation.js";
 
 type ServerRow = typeof servers.$inferSelect;
+
+/**
+ * Callers that already carry age context (SessionUser, getSessionUser
+ * projections) let the 18+ fold below decide without a lookup; a bare
+ * `{ id, role }` caller triggers one indexed read — and only when the
+ * server is actually flagged 18+.
+ */
+export type ServerCaller = Caller & { isAdult?: boolean; birthdate?: string | null };
+
+/** Is this caller an adult? Prefer the in-hand session derivation, then the
+ *  in-hand birthdate, then a DB read. A missing row fails CLOSED (not adult),
+ *  matching the ageGate posture everywhere else. */
+async function callerIsAdult(db: Db, user: ServerCaller): Promise<boolean> {
+  if (user.isAdult !== undefined) return user.isAdult;
+  if (user.birthdate !== undefined) return isAdultUser({ birthdate: user.birthdate });
+  const row = (await db
+    .select({ birthdate: users.birthdate })
+    .from(users)
+    .where(eq(users.id, user.id))
+    .limit(1))[0];
+  return row ? isAdultUser(row) : false;
+}
 
 export interface ServerAuthority {
   server: ServerRow | null;
@@ -93,7 +116,7 @@ export function serverCan(a: ServerAuthority, key: ServerPermission): boolean {
  */
 export async function serverAuthority(
   db: Db,
-  user: Caller | null,
+  user: ServerCaller | null,
   serverId: string,
 ): Promise<ServerAuthority> {
   const core = await resolveScopedAuthority<ServerRow, "owner" | "admin" | "mod" | "member", ServerPermission>(db, user, {
@@ -148,5 +171,17 @@ export async function serverAuthority(
   // Rename the generic `scope` field to the server-specific `server` field so
   // the public ServerAuthority shape (and every call site) is unchanged.
   const { scope, ...rest } = core;
+
+  // HARD age gate (age-restriction plan, Phase 2), folded in beside the
+  // moderation gate so every canParticipate chokepoint — discover, detail,
+  // by-slug, visit, join, room deep-link, socket join — inherits it: an
+  // 18+ server admits NO minor account, whatever its role. Unlike the
+  // moderation gate there is deliberately no owner/staff/mod escape — a
+  // minor server owner (admin DOB correction) keeps authority over the rows
+  // but cannot participate. Roles/permissions are left intact (authority is
+  // not visibility, the mute-scope precedent).
+  if (scope?.isNsfw && rest.canParticipate && !(user && (await callerIsAdult(db, user)))) {
+    return { server: scope, ...rest, canParticipate: false };
+  }
   return { server: scope, ...rest };
 }

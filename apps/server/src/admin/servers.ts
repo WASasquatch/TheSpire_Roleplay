@@ -80,6 +80,7 @@ import { ensureDefaultUsergroup } from "../servers/usergroups.js";
 import { notifyUser, emitServersChanged } from "../servers/notifications.js";
 import { recordAudit } from "../audit.js";
 import { getSettings, areServersEnabled } from "../settings.js";
+import { tFor } from "../i18n.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -162,11 +163,11 @@ export async function registerAdminServerRoutes(app: FastifyInstance, db: Db, io
         const slug = normalizeServerSlug(appRow.requestedSlug) ?? appRow.requestedSlug.toLowerCase();
         const taken = (await db.select({ id: servers.id }).from(servers)
           .where(sql`lower(${servers.slug}) = ${slug}`).limit(1))[0];
-        if (taken) { reply.code(409); return { error: "That slug was claimed since the application was filed. Reject with a note so the applicant can pick another." }; }
+        if (taken) { reply.code(409); return { error: tFor(me.locale, "errors:server.servers.slugClaimedSince") }; }
         const owned = (await db.select({ n: sql<number>`count(*)` }).from(servers)
           .where(and(eq(servers.ownerUserId, appRow.applicantUserId), sql`${servers.status} != 'archived'`, eq(servers.isSystem, false))))[0]?.n ?? 0;
         if (owned >= SERVER_MAX_OWNED_DEFAULT) {
-          reply.code(409); return { error: "The applicant is already at the owned-servers limit." };
+          reply.code(409); return { error: tFor(me.locale, "errors:server.servers.applicantAtLimit") };
         }
       }
 
@@ -262,7 +263,7 @@ export async function registerAdminServerRoutes(app: FastifyInstance, db: Db, io
         reply.code(409); return { error: `application already ${current?.status ?? "decided"}` };
       }
       if (roomNameTaken) {
-        reply.code(409); return { error: "A room already uses this server's starter room name - reject with a note so the applicant picks another slug." };
+        reply.code(409); return { error: tFor(me.locale, "errors:server.servers.starterRoomNameClash") };
       }
 
       // Default usergroup (full FEATURE baseline) so members keep post/create-
@@ -272,19 +273,30 @@ export async function registerAdminServerRoutes(app: FastifyInstance, db: Db, io
         await ensureDefaultUsergroup(db, serverId);
       }
 
+      // Toast + persisted bell row render in the APPLICANT's language (the
+      // reviewer's locale is irrelevant to what the recipient reads).
+      const applicantLocale = (await db
+        .select({ locale: users.locale })
+        .from(users)
+        .where(eq(users.id, appRow.applicantUserId))
+        .limit(1))[0]?.locale ?? null;
       await notifyUser(io, db, appRow.applicantUserId, {
         code: nextStatus === "approved" ? "SERVER_APP_APPROVED" : "SERVER_APP_REJECTED",
         message: nextStatus === "approved"
-          ? `Your server "${appRow.requestedName}" was approved - find it on the server rail!`
-          : `Your server application "${appRow.requestedName}" was declined${body.note ? `: ${body.note}` : "."}`,
+          ? tFor(applicantLocale, "notifications:server.appApprovedMessage", { name: appRow.requestedName })
+          : body.note
+            ? tFor(applicantLocale, "notifications:server.appDeclinedMessageNote", { name: appRow.requestedName, note: body.note })
+            : tFor(applicantLocale, "notifications:server.appDeclinedMessage", { name: appRow.requestedName }),
         persist: {
           category: "server",
           kind: nextStatus === "approved" ? "server_app_approved" : "server_app_rejected",
           serverId: nextStatus === "approved" ? serverId : null,
-          title: nextStatus === "approved" ? `Server approved: ${appRow.requestedName}` : "Server application declined",
+          title: nextStatus === "approved"
+            ? tFor(applicantLocale, "notifications:server.appApprovedTitle", { name: appRow.requestedName })
+            : tFor(applicantLocale, "notifications:server.appDeclinedTitle"),
           snippet: nextStatus === "approved"
-            ? "Find it on the server rail."
-            : (body.note ? body.note : `Your application for "${appRow.requestedName}" was declined.`),
+            ? tFor(applicantLocale, "notifications:server.appApprovedSnippet")
+            : (body.note ? body.note : tFor(applicantLocale, "notifications:server.appDeclinedSnippet", { name: appRow.requestedName })),
           ...(nextStatus === "approved" ? { target: { kind: "server", id: serverId } } : {}),
         },
       });
@@ -379,7 +391,7 @@ export async function registerAdminServerRoutes(app: FastifyInstance, db: Db, io
     const server = (await db.select().from(servers).where(eq(servers.id, req.params.id)).limit(1))[0];
     if (!server) { reply.code(404); return { error: "no server" }; }
     if (server.isSystem && body.status === "archived") {
-      reply.code(409); return { error: "The home server anchors the rail and can't be archived." };
+      reply.code(409); return { error: tFor(me?.locale, "errors:server.servers.homeCantBeArchived") };
     }
     await db.update(servers).set({ status: body.status, updatedAt: new Date() })
       .where(eq(servers.id, server.id));
@@ -423,14 +435,14 @@ export async function registerAdminServerRoutes(app: FastifyInstance, db: Db, io
       // HARD CONSTRAINT #1: the system/home server is sacred — never moderated.
       if (server.isSystem) {
         reply.code(409);
-        return { error: "The home server cannot be suspended, banned, or deleted." };
+        return { error: tFor(me?.locale, "errors:server.servers.homeCantBeModerated") };
       }
 
       // A ban must have a future expiry when one is supplied (a null until =
       // permanent ban is allowed). Suspensions ignore untilMs entirely.
       const untilMs = body.state === "banned" ? (body.untilMs ?? null) : null;
       if (body.state === "banned" && untilMs !== null && untilMs <= Date.now()) {
-        reply.code(400); return { error: "Ban expiry must be in the future." };
+        reply.code(400); return { error: tFor(me?.locale, "errors:server.servers.banExpiryFuture") };
       }
 
       const note = body.state === "none" ? null : (body.note ?? null);
@@ -522,7 +534,7 @@ export async function registerAdminServerRoutes(app: FastifyInstance, db: Db, io
       if (!server) { reply.code(404); return { error: "no server" }; }
       // HARD CONSTRAINT #1: the system/home server is sacred — never deleted.
       if (server.isSystem) {
-        reply.code(409); return { error: "The home server cannot be deleted." };
+        reply.code(409); return { error: tFor(me?.locale, "errors:server.servers.homeCantBeDeleted") };
       }
 
       const sid = server.id;

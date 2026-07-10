@@ -7,6 +7,7 @@
  * launches the floating window.
  */
 import React, { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Monitor } from "lucide-react";
 import { EIDOLON_UNLOCK_COST, URUGAL_UNLOCK_COST, GRIMHOLD_UNLOCK_COST } from "@thekeep/shared";
 import { Modal } from "../cosmetics/Modal";
@@ -45,6 +46,7 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
   onLaunch: (game: "eidolon" | "urugal" | "grimhold") => void;
   onClose: () => void;
 }): React.JSX.Element {
+  const { t } = useTranslation("arcade");
   const [access, setAccess] = useState<Access>("loading");
   const [working, setWorking] = useState(false);
   const [urugalAccess, setUrugalAccess] = useState<Access>("loading");
@@ -89,7 +91,7 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
       onLaunch("eidolon");
       onClose();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Unlock failed.");
+      setErr(e instanceof Error ? e.message : t("arcade.launcher.unlockFailed"));
     } finally {
       setWorking(false);
     }
@@ -105,7 +107,7 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
       onLaunch("urugal");
       onClose();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Unlock failed.");
+      setErr(e instanceof Error ? e.message : t("arcade.launcher.unlockFailed"));
     } finally {
       setUrugalWorking(false);
     }
@@ -133,7 +135,7 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
       onLaunch("grimhold");
       onClose();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Unlock failed.");
+      setErr(e instanceof Error ? e.message : t("arcade.launcher.unlockFailed"));
     } finally {
       setGrimholdWorking(false);
     }
@@ -154,7 +156,7 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4, gap: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 22, letterSpacing: 1 }}>🕹 Spire Arcade</h2>
+          <h2 style={{ margin: 0, fontSize: 22, letterSpacing: 1 }}>{t("arcade.launcher.title")}</h2>
           {/* Coin balance + an explicit close. The X matters most when the
               card fills a phone screen, there the backdrop is barely
               tappable, so without it the modal felt trapping. */}
@@ -164,30 +166,29 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
           </div>
         </div>
         <p style={{ margin: "0 0 16px", fontSize: 13, color: T(0.7) }}>
-          A growing cabinet of games to play between scenes. Each game unlocks once, then it's yours to keep.
+          {t("arcade.launcher.subtitle")}
         </p>
 
         <div className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-3.5 ${cardClass}`}>
           <div className="flex min-w-0 flex-1 items-center gap-3.5">
             <div className="shrink-0" style={{ fontSize: 40, lineHeight: 1 }} aria-hidden>🥚</div>
             <div className="min-w-0 flex-1">
-              <div style={{ fontSize: 16, fontWeight: 700 }}>Eidolon Tamer</div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{t("arcade.games.eidolon")}</div>
               <div style={{ fontSize: 12.5, color: T(0.7), lineHeight: 1.45 }}>
-                Hatch a gothic familiar, one of four eggs, or hatch one of your own pets, then keep it fed, played
-                with, clean, and well. It lives on while you're away. Feed it food from your bag, cure it with a potion.
+                {t("arcade.launcher.eidolonDescription")}
               </div>
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
             {access === "loading" && <span style={{ fontSize: 12, color: T(0.6), textAlign: "center" }}>…</span>}
-            {access === "forbidden" && <span className="text-center sm:max-w-[140px]" style={{ fontSize: 12, color: T(0.6) }}>Unavailable to you right now.</span>}
+            {access === "forbidden" && <span className="text-center sm:max-w-[140px]" style={{ fontSize: 12, color: T(0.6) }}>{t("arcade.launcher.unavailable")}</span>}
             {access === "ok" && (
               <button
                 className="w-full sm:w-auto"
                 style={{ ...ctaBase, background: "rgb(var(--keep-action) / 1)", color: "rgb(var(--keep-bg) / 1)" }}
                 onClick={() => { onLaunch("eidolon"); onClose(); }}
               >
-                ▶ Play
+                {t("arcade.launcher.play")}
               </button>
             )}
             {access === "locked" && (
@@ -196,9 +197,9 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
                 style={{ ...ctaBase, background: canAfford ? "rgb(var(--keep-accent) / .15)" : "transparent", color: T(canAfford ? 1 : 0.45), opacity: working ? 0.6 : 1, cursor: canAfford && !working ? "pointer" : "not-allowed" }}
                 disabled={!canAfford || working}
                 onClick={() => void unlock()}
-                title={canAfford ? "Unlock the Eidolon Tamer" : "Not enough currency"}
+                title={canAfford ? t("arcade.launcher.unlockEidolonTitle") : t("arcade.notEnoughCurrency")}
               >
-                {working ? "Unlocking…" : <>Unlock · <CoinAmount amount={EIDOLON_UNLOCK_COST} /></>}
+                {working ? t("arcade.launcher.unlocking") : <>{t("arcade.launcher.unlock")} · <CoinAmount amount={EIDOLON_UNLOCK_COST} /></>}
               </button>
             )}
           </div>
@@ -213,7 +214,7 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
             <div className="shrink-0" style={{ fontSize: 40, lineHeight: 1 }} aria-hidden>🗡</div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2" style={{ fontSize: 16, fontWeight: 700 }}>
-                <span>Urugal&apos;s Descent</span>
+                <span>{t("arcade.games.urugal")}</span>
                 {/* Always-on tag so the desktop-only nature is clear even on
                     desktop (where the CTA isn't swapped for the note). */}
                 <span
@@ -224,12 +225,11 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
                     padding: "1px 6px", whiteSpace: "nowrap",
                   }}
                 >
-                  <Monitor className="h-3 w-3" aria-hidden="true" /> Desktop only
+                  <Monitor className="h-3 w-3" aria-hidden="true" /> {t("arcade.launcher.desktopOnly")}
                 </span>
               </div>
               <div style={{ fontSize: 12.5, color: T(0.7), lineHeight: 1.45 }}>
-                A gothic roguelike. Pick a class and delve a procedurally-built dungeon: fight, loot,
-                and descend as deep as you dare. Every run is different, and every floor is a fresh gamble.
+                {t("arcade.launcher.urugalDescription")}
               </div>
             </div>
           </div>
@@ -238,17 +238,17 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
               // Desktop-only: the roguelike needs a keyboard and a larger
               // playfield, so the CTA is replaced with a note on phones/small
               // tablets rather than launching an unplayable window.
-              <span className="text-center sm:max-w-[140px]" style={{ fontSize: 12, color: T(0.6) }}>Available on desktop only.</span>
+              <span className="text-center sm:max-w-[140px]" style={{ fontSize: 12, color: T(0.6) }}>{t("arcade.launcher.desktopOnlyNote")}</span>
             ) : (<>
             {urugalAccess === "loading" && <span style={{ fontSize: 12, color: T(0.6), textAlign: "center" }}>…</span>}
-            {urugalAccess === "forbidden" && <span className="text-center sm:max-w-[140px]" style={{ fontSize: 12, color: T(0.6) }}>Unavailable to you right now.</span>}
+            {urugalAccess === "forbidden" && <span className="text-center sm:max-w-[140px]" style={{ fontSize: 12, color: T(0.6) }}>{t("arcade.launcher.unavailable")}</span>}
             {urugalAccess === "ok" && (
               <button
                 className="w-full sm:w-auto"
                 style={{ ...ctaBase, background: "rgb(var(--keep-action) / 1)", color: "rgb(var(--keep-bg) / 1)" }}
                 onClick={() => { onLaunch("urugal"); onClose(); }}
               >
-                ▶ Play
+                {t("arcade.launcher.play")}
               </button>
             )}
             {urugalAccess === "locked" && (
@@ -257,9 +257,9 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
                 style={{ ...ctaBase, background: canAffordUrugal ? "rgb(var(--keep-accent) / .15)" : "transparent", color: T(canAffordUrugal ? 1 : 0.45), opacity: urugalWorking ? 0.6 : 1, cursor: canAffordUrugal && !urugalWorking ? "pointer" : "not-allowed" }}
                 disabled={!canAffordUrugal || urugalWorking}
                 onClick={() => void unlockUrugalGame()}
-                title={canAffordUrugal ? "Unlock Urugal's Descent" : "Not enough currency"}
+                title={canAffordUrugal ? t("arcade.launcher.unlockUrugalTitle") : t("arcade.notEnoughCurrency")}
               >
-                {urugalWorking ? "Unlocking…" : <>Unlock · <CoinAmount amount={URUGAL_UNLOCK_COST} /></>}
+                {urugalWorking ? t("arcade.launcher.unlocking") : <>{t("arcade.launcher.unlock")} · <CoinAmount amount={URUGAL_UNLOCK_COST} /></>}
               </button>
             )}
             </>)}
@@ -273,23 +273,22 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
           <div className="flex min-w-0 flex-1 items-center gap-3.5">
             <div className="shrink-0" style={{ fontSize: 40, lineHeight: 1 }} aria-hidden>🕹</div>
             <div className="min-w-0 flex-1">
-              <div style={{ fontSize: 16, fontWeight: 700 }}>Grimhold</div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{t("arcade.games.grimhold")}</div>
               <div style={{ fontSize: 12.5, color: T(0.7), lineHeight: 1.45 }}>
-                A cabinet of six cursed amusements: Runefall, Loong, Arrowstorm, The Spire,
-                Graveward, and Voidwake. Quick arcade runs that trickle Currency and XP, daily-capped.
+                {t("arcade.launcher.grimholdDescription")}
               </div>
             </div>
           </div>
           <div className="flex shrink-0 flex-col items-stretch gap-1.5 sm:items-end">
             {grimholdAccess === "loading" && <span style={{ fontSize: 12, color: T(0.6), textAlign: "center" }}>…</span>}
-            {grimholdAccess === "forbidden" && <span className="text-center sm:max-w-[140px]" style={{ fontSize: 12, color: T(0.6) }}>Unavailable to you right now.</span>}
+            {grimholdAccess === "forbidden" && <span className="text-center sm:max-w-[140px]" style={{ fontSize: 12, color: T(0.6) }}>{t("arcade.launcher.unavailable")}</span>}
             {grimholdAccess === "ok" && (
               <button
                 className="w-full sm:w-auto"
                 style={{ ...ctaBase, background: "rgb(var(--keep-action) / 1)", color: "rgb(var(--keep-bg) / 1)" }}
                 onClick={() => { onLaunch("grimhold"); onClose(); }}
               >
-                ▶ Play
+                {t("arcade.launcher.play")}
               </button>
             )}
             {grimholdAccess === "locked" && (
@@ -298,9 +297,9 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
                 style={{ ...ctaBase, background: canAffordGrimhold ? "rgb(var(--keep-accent) / .15)" : "transparent", color: T(canAffordGrimhold ? 1 : 0.45), opacity: grimholdWorking ? 0.6 : 1, cursor: canAffordGrimhold && !grimholdWorking ? "pointer" : "not-allowed" }}
                 disabled={!canAffordGrimhold || grimholdWorking}
                 onClick={() => void unlockGrimholdGame()}
-                title={canAffordGrimhold ? "Unlock the Grimhold cabinet" : "Not enough currency"}
+                title={canAffordGrimhold ? t("arcade.launcher.unlockGrimholdTitle") : t("arcade.notEnoughCurrency")}
               >
-                {grimholdWorking ? "Unlocking…" : <>Unlock · <CoinAmount amount={GRIMHOLD_UNLOCK_COST} /></>}
+                {grimholdWorking ? t("arcade.launcher.unlocking") : <>{t("arcade.launcher.unlock")} · <CoinAmount amount={GRIMHOLD_UNLOCK_COST} /></>}
               </button>
             )}
           </div>
@@ -309,8 +308,8 @@ export function ArcadeLauncher({ characterId, onLaunch, onClose }: {
         <div className={`mt-3 flex items-center gap-3.5 opacity-[0.55] ${cardClass}`}>
           <div className="shrink-0" style={{ fontSize: 40, lineHeight: 1 }} aria-hidden>✦</div>
           <div className="min-w-0 flex-1">
-            <div style={{ fontSize: 16, fontWeight: 700 }}>More games</div>
-            <div style={{ fontSize: 12.5, color: T(0.7) }}>Coming soon to the cabinet.</div>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>{t("arcade.launcher.moreGames")}</div>
+            <div style={{ fontSize: 12.5, color: T(0.7) }}>{t("arcade.launcher.comingSoon")}</div>
           </div>
         </div>
       </div>

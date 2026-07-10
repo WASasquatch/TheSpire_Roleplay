@@ -2,13 +2,23 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { createPortal } from "react-dom";
 import { Eye, EyeOff } from "lucide-react";
 import DOMPurify from "dompurify";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { VERSION, isDarkPalette, type Role } from "@thekeep/shared";
 import { useChat, type AuthMe } from "../state/store.js";
 import { setSessionToken } from "../lib/http.js";
 import { markLoginIntent } from "../lib/socket.js";
+import { formatNumber } from "../lib/intlFormat.js";
 import { resolveSplashTheme, splashBgClass, themeStyle } from "../lib/theme.js";
 import { GoogleFinishSignup } from "./GoogleFinishSignup.js";
 import { readReturnForum } from "./forums/ForumPublicLanding.js";
+
+/**
+ * The marketing-namespace `t` shape, for the plain-function helpers below
+ * (they can't use the hook, so callers pass the hook's `t` in). Typed as the
+ * real TFunction so it stays assignable under exactOptionalPropertyTypes.
+ */
+type Translate = TFunction<"marketing">;
 
 const PROJECT_URL = "https://github.com/WASasquatch/TheSpire_Roleplay";
 
@@ -45,6 +55,7 @@ export function SplashShell({
   children: ReactNode;
   footer?: ReactNode;
 }) {
+  const { t } = useTranslation("marketing");
   const branding = useChat((s) => s.branding);
   const [stats, setStats] = useState<SiteStats | null>(null);
 
@@ -67,7 +78,15 @@ export function SplashShell({
     function load() {
       fetch("/stats")
         .then((r) => (r.ok ? (r.json() as Promise<SiteStats>) : null))
-        .then((j) => { if (!cancelled && j) setStats(j); })
+        .then((j) => {
+          // Shape-check before trusting the payload. During a dev boot (and
+          // any proxy hiccup) this fetch can win a race against the API and
+          // resolve with a 200 whose JSON isn't the stats shape; rendering
+          // `rooms.public` off that crashed the whole splash through the
+          // error boundary. Treat a malformed payload like no payload: keep
+          // the placeholder and let the 30s poll heal once the API answers.
+          if (!cancelled && j && j.rooms && typeof j.rooms.public === "number") setStats(j);
+        })
         .catch(() => {});
     }
     load();
@@ -233,7 +252,7 @@ export function SplashShell({
                   )}
                 </h1>
                 <div className="mt-1 text-[10px] uppercase tracking-[0.3em] text-keep-muted">
-                  a chat sanctuary
+                  {t("shell.tagline")}
                 </div>
               </div>
 
@@ -285,7 +304,7 @@ export function SplashShell({
               rel="noopener noreferrer"
               className="hover:text-keep-action"
             >
-              The Spire Roleplay Chat v{VERSION}
+              {t("shell.projectCredit", { version: VERSION })}
             </a>
           </div>
         </div>
@@ -295,6 +314,7 @@ export function SplashShell({
 }
 
 function SplashStats({ stats }: { stats: SiteStats | null }) {
+  const { t } = useTranslation("marketing");
   // Use the admin-configured site name in flavor copy so "the keep" (the
   // codename) doesn't leak through to users on a rebranded install.
   const siteName = useChat((s) => s.branding.siteName);
@@ -313,15 +333,10 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
     return (
       <div className="my-2 flex items-center justify-center gap-2 text-xs text-keep-muted">
         <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-keep-muted/40" />
-        <span>checking {siteName}...</span>
+        <span>{t("shell.checking", { siteName })}</span>
       </div>
     );
   }
-  // When the server reports the registered-account total, render the online
-  // stat with TWO emphasised numbers (e.g. "0 users online out of 2") so the
-  // total matches the bold/tabular-nums styling of the other counts. Falls
-  // back to the single-number Stat helper for older servers without the field.
-  const onlineNoun = stats.online === 1 ? "user online" : "users online";
   // Only surface the 24h count when (a) the admin opted in AND (b) the
   // server populated the field (forward-compat with old servers that
   // didn't ship `messages24h`). A zero value still renders, it's a
@@ -329,6 +344,12 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
   // and the admin already opted into seeing it.
   const renderMessages24h =
     showMessages24h && typeof stats.messages24h === "number";
+  // Belt-and-braces beside the fetch-time shape check: never dereference
+  // `rooms` raw. Every other field here already has a forward-compat guard;
+  // this was the one unguarded read, and it converted a malformed payload
+  // into a full-app error-boundary crash.
+  const publicRooms = stats.rooms?.public ?? 0;
+  const privateRooms = stats.rooms?.private ?? 0;
   return (
     <div className="my-3">
       {renderMessages24h ? (
@@ -342,27 +363,43 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
         >
           {typeof stats.totalRegistered === "number" ? (
             <span className="inline-flex items-baseline gap-1">
-              <span
-                className={`text-base font-semibold tabular-nums ${
-                  stats.online > 0 ? "text-keep-action" : "text-keep-text"
-                }`}
+              {/* When the server reports the registered-account total, render
+                  the online stat with TWO emphasised numbers (e.g. "0 users
+                  online out of 2") so the total matches the bold/tabular-nums
+                  styling of the other counts. Falls back to the single-number
+                  Stat helper for older servers without the field. */}
+              <Trans
+                t={t}
+                i18nKey="shell.stats.onlineOutOf"
+                count={stats.online}
+                values={{ total: stats.totalRegistered }}
               >
-                {stats.online}
-              </span>
-              <span>{onlineNoun} out of</span>
-              <span className="text-base font-semibold tabular-nums text-keep-text">
-                {stats.totalRegistered}
-              </span>
+                <span
+                  className={`text-base font-semibold tabular-nums ${
+                    stats.online > 0 ? "text-keep-action" : "text-keep-text"
+                  }`}
+                >
+                  {"{{count}}"}
+                </span>
+                <span>{"users online out of"}</span>
+                <span className="text-base font-semibold tabular-nums text-keep-text">
+                  {"{{total}}"}
+                </span>
+              </Trans>
             </span>
           ) : (
-            <Stat label={onlineNoun} value={stats.online} emphasised={stats.online > 0} />
+            <Stat
+              label={t("shell.stats.usersOnline", { count: stats.online })}
+              value={stats.online}
+              emphasised={stats.online > 0}
+            />
           )}
           <span aria-hidden className="text-keep-rule">·</span>
-          <Stat label={stats.rooms.public === 1 ? "public room" : "public rooms"} value={stats.rooms.public} />
-          {stats.rooms.private > 0 ? (
+          <Stat label={t("shell.stats.publicRooms", { count: publicRooms })} value={publicRooms} />
+          {privateRooms > 0 ? (
             <>
               <span aria-hidden className="text-keep-rule">·</span>
-              <Stat label={stats.rooms.private === 1 ? "private chamber" : "private chambers"} value={stats.rooms.private} />
+              <Stat label={t("shell.stats.privateChambers", { count: privateRooms })} value={privateRooms} />
             </>
           ) : null}
         </div>
@@ -381,6 +418,7 @@ function SplashStats({ stats }: { stats: SiteStats | null }) {
  * + title above it.
  */
 function Messages24hHero({ count }: { count: number }) {
+  const { t } = useTranslation("marketing");
   return (
     <div className="text-center">
       <div
@@ -388,10 +426,10 @@ function Messages24hHero({ count }: { count: number }) {
           count > 0 ? "text-keep-action" : "text-keep-text"
         }`}
       >
-        {count.toLocaleString()}
+        {formatNumber(count)}
       </div>
       <div className="mt-1.5 text-[10px] uppercase tracking-[0.2em] text-keep-muted">
-        {count === 1 ? "message" : "messages"} in the last 24h
+        {t("stats.messages24hLabel", { count })}
       </div>
     </div>
   );
@@ -402,24 +440,21 @@ function Messages24hHero({ count }: { count: number }) {
  * largest natural unit ("30 days" beats "720 hours") and pluralizes
  * appropriately. 0 maps to "indefinitely" - only meaningful for retention.
  */
-function formatHumanDuration(ms: number): string {
-  if (ms <= 0) return "indefinitely";
+function formatHumanDuration(t: Translate, ms: number): string {
+  if (ms <= 0) return t("duration.indefinitely");
   const day = 86_400_000;
   const hour = 3_600_000;
   const minute = 60_000;
   if (ms % day === 0) {
-    const n = ms / day;
-    return n === 1 ? "1 day" : `${n} days`;
+    return t("duration.days", { count: ms / day });
   }
   if (ms % hour === 0) {
-    const n = ms / hour;
-    return n === 1 ? "1 hour" : `${n} hours`;
+    return t("duration.hours", { count: ms / hour });
   }
   if (ms % minute === 0) {
-    const n = ms / minute;
-    return n === 1 ? "1 minute" : `${n} minutes`;
+    return t("duration.minutes", { count: ms / minute });
   }
-  return `${Math.round(ms / 1000)} seconds`;
+  return t("duration.seconds", { seconds: Math.round(ms / 1000) });
 }
 
 /**
@@ -429,12 +464,13 @@ function formatHumanDuration(ms: number): string {
  * the admin's terse "30d" formatting.
  */
 function SplashMeta() {
+  const { t } = useTranslation("marketing");
   const retentionMs = useChat((s) => s.branding.messageRetentionMs);
   const sessionMs = useChat((s) => s.branding.sessionTtlMs);
   const retentionWord = retentionMs === 0
-    ? "Messages are kept indefinitely"
-    : `Messages are kept for ${formatHumanDuration(retentionMs)}`;
-  const sessionWord = `sessions log out after ${formatHumanDuration(sessionMs)} idle`;
+    ? t("shell.meta.retentionIndefinite")
+    : t("shell.meta.retention", { duration: formatHumanDuration(t, retentionMs) });
+  const sessionWord = t("shell.meta.sessionIdle", { duration: formatHumanDuration(t, sessionMs) });
   return (
     <div className="my-1 text-center text-[10px] text-keep-muted/80">
       {retentionWord} <span aria-hidden className="text-keep-rule">·</span> {sessionWord}
@@ -562,21 +598,22 @@ function GoogleGlyph() {
  * branch its callback.
  */
 export function GoogleAuthButton({ mode }: { mode: "login" | "link" }) {
+  const { t } = useTranslation("marketing");
   return (
     <>
       <div className="my-3 flex items-center gap-3 text-[10px] uppercase tracking-[0.25em] text-keep-muted">
         <span className="h-px flex-1 bg-keep-rule/60" />
-        or
+        {t("auth.or")}
         <span className="h-px flex-1 bg-keep-rule/60" />
       </div>
       <button
         type="button"
         onClick={() => { window.location.href = `/auth/google/start?mode=${mode}`; }}
-        aria-label="Continue with Google"
+        aria-label={t("auth.continueWithGoogle")}
         className="flex w-full items-center justify-center gap-2 rounded border border-keep-border bg-keep-bg py-2 text-sm font-semibold tracking-wide text-keep-text hover:bg-keep-panel"
       >
         <GoogleGlyph />
-        Continue with Google
+        {t("auth.continueWithGoogle")}
       </button>
     </>
   );
@@ -609,6 +646,7 @@ function clearGoogleLandingUrl(): void {
 }
 
 export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "login", onNavigate }: AuthGateProps = {}) {
+  const { t } = useTranslation("marketing");
   const [mode, setMode] = useState<"login" | "register">(initialMode);
   // Keep local mode in sync with `initialMode` so a popstate-driven URL
   // change (back/forward between /login and /register) flips the form
@@ -632,11 +670,21 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
    */
   const [accepted, setAccepted] = useState(false);
   /**
-   * Age + mature-content acknowledgment, register-mode only. Server
-   * enforces a literal `true`; this checkbox is the UX surface. Reset on
-   * mode switch (same posture as the disclaimer checkbox).
+   * Date of birth, register-mode only (replaces the old 18+ checkbox —
+   * age-restriction plan Phase 0). ISO YYYY-MM-DD straight from the native
+   * date input; "" = not entered yet. The server stores it and enforces
+   * the minimum age; the form pre-checks so a too-young date gets a
+   * friendly inline message instead of a round-trip. Reset on mode switch
+   * (same posture as the disclaimer checkbox).
    */
-  const [acceptedAgeMature, setAcceptedAgeMature] = useState(false);
+  const [birthdate, setBirthdate] = useState("");
+  /**
+   * Minor isolation opt-in (age plan Phase 5), revealed only when the
+   * entered date of birth is under 18. Optional; can be changed later in
+   * the profile editor's Privacy tab. Reset with the other register-only
+   * fields on mode switch.
+   */
+  const [isolatePref, setIsolatePref] = useState(false);
   /**
    * In-house basic CAPTCHA: a single-digit math question issued by
    * GET /auth/captcha. The id is single-use server-side; if the user
@@ -700,7 +748,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           );
           const firstIssue = body.issues?.[0];
           throw new Error(
-            (firstIssue ? firstIssue.message : null) ?? body.error ?? "Google sign-in failed. Please try again.",
+            (firstIssue ? firstIssue.message : null) ?? body.error ?? t("auth.googleFailed"),
           );
         }
         const bundle = await res.json();
@@ -713,7 +761,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
       } catch (err) {
         if (cancelled) return;
         clearGoogleLandingUrl();
-        setError(err instanceof Error ? err.message : "Google sign-in failed. Please try again.");
+        setError(err instanceof Error ? err.message : t("auth.googleFailed"));
       }
     })();
     return () => { cancelled = true; };
@@ -750,14 +798,25 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
       setKickReason(null);
       if (mode === "register") {
         if (!accepted) {
-          throw new Error("Please read and agree to the house rules to register.");
+          throw new Error(t("auth.rulesRequired"));
         }
-        if (!acceptedAgeMature) {
-          throw new Error("Please confirm you are 18+ and understand this site may contain mature content.");
+        if (!birthdate) {
+          throw new Error(t("auth.dobRequired"));
+        }
+        // Friendly pre-check so an under-age date gets an inline message
+        // instead of a round-trip. Same copy the server returns; the
+        // server stays authoritative.
+        const minAge = branding.minimumSignupAge ?? 18;
+        const enteredAge = isoAgeUtc(birthdate);
+        if (enteredAge === null || enteredAge < minAge) {
+          throw new Error(t("auth.minAgeError", { minAge }));
         }
         if (!captcha || !captchaAnswer.trim()) {
-          throw new Error("Please answer the verification question.");
+          throw new Error(t("auth.captchaRequired"));
         }
+        // Only under-18 signups carry the isolation opt-in; the checkbox is
+        // only shown to them, and the server clamps it to minors anyway.
+        const registeringAsMinor = enteredAge !== null && enteredAge < 18;
         const res = await fetch("/auth/register", {
           method: "POST",
           credentials: "include",
@@ -767,7 +826,8 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             username,
             password,
             acceptDisclaimer: true,
-            acceptAgeMature: true,
+            birthdate,
+            ...(registeringAsMinor && isolatePref ? { isolateFromAdults: true } : {}),
             captchaId: captcha.id,
             captchaAnswer: captchaAnswer.trim(),
             hp,
@@ -787,7 +847,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           const detail = firstIssue
             ? `${firstIssue.path ? `${firstIssue.path}: ` : ""}${firstIssue.message}`
             : null;
-          throw new Error(detail ?? body.error ?? "register failed");
+          throw new Error(detail ?? body.error ?? t("auth.registerFailed"));
         }
         // Persist the token, mark the login intentional (so the socket
         // fires "X has connected." on its next handshake), and flip `me`.
@@ -806,13 +866,13 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           const detail = firstIssue
             ? `${firstIssue.path ? `${firstIssue.path}: ` : ""}${firstIssue.message}`
             : null;
-          throw new Error(detail ?? body.error ?? "login failed");
+          throw new Error(detail ?? body.error ?? t("auth.loginFailed"));
         }
         // Same token-store + setMe handoff as the register branch above.
         applyAuthBundle(await res.json(), setMe);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "error");
+      setError(err instanceof Error ? err.message : t("errorFallback"));
     } finally {
       setSubmitting(false);
     }
@@ -827,7 +887,8 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
     setShowPassword(false);
     if (next !== "register") {
       setAccepted(false);
-      setAcceptedAgeMature(false);
+      setBirthdate("");
+      setIsolatePref(false);
       setCaptcha(null);
       setCaptchaAnswer("");
       setHp("");
@@ -850,7 +911,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
   const canSubmit = !submitting && (
     mode === "login"
       ? true
-      : accepted && acceptedAgeMature && !!captcha && captchaAnswer.trim() !== ""
+      : accepted && birthdate !== "" && !!captcha && captchaAnswer.trim() !== ""
   );
 
   // "finish" landing: hand off to the dedicated finish-signup screen (it
@@ -882,7 +943,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
       <SplashShell>
         <div className="flex items-center justify-center gap-2 py-6 text-sm text-keep-muted">
           <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-keep-muted/40" />
-          <span>Signing you in with Google…</span>
+          <span>{t("auth.googleSigningIn")}</span>
         </div>
       </SplashShell>
     );
@@ -897,18 +958,18 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             className="w-full text-xs text-keep-muted hover:text-keep-text"
             onClick={() => setModeAndReset(mode === "login" ? "register" : "login")}
           >
-            {mode === "login" ? "Need an account? Register." : "Already have one? Log in."}
+            {mode === "login" ? t("auth.needAccount") : t("auth.alreadyHaveOne")}
           </button>
         ) : (
           <div className="text-center text-xs italic text-keep-muted">
-            Registration is currently closed.
+            {t("auth.registrationClosed")}
           </div>
         )
       }
     >
       <form onSubmit={submit} className="space-y-3">
         <div className="text-center text-[10px] uppercase tracking-[0.25em] text-keep-muted">
-          {mode === "login" ? "enter the spire" : "create a vessel"}
+          {mode === "login" ? t("auth.enterHeading") : t("auth.registerHeading")}
         </div>
 
         {/* Deep-link hint: when the visitor arrived via /p/<username>, tell
@@ -920,23 +981,30 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
         {pendingProfileHint ? (
           <div className="rounded border border-keep-action/40 bg-keep-action/10 px-3 py-2 text-xs text-keep-text/90">
             {pendingProfileHint.isPrivate ? (
-              <>
-                <b>{pendingProfileHint.name}</b>'s profile is <b>private</b>. Please sign in or
-                register to view it.
-              </>
+              <Trans t={t} i18nKey="auth.profilePrivate" values={{ name: pendingProfileHint.name }}>
+                <b>{"{{name}}"}</b>
+                {"'s profile is "}
+                <b>private</b>
+                {". Please sign in or register to view it."}
+              </Trans>
             ) : (
-              <>
-                You're trying to view <b>{pendingProfileHint.name}</b>'s profile. Sign in or
-                register to continue.
-              </>
+              <Trans t={t} i18nKey="auth.profileView" values={{ name: pendingProfileHint.name }}>
+                {"You're trying to view "}
+                <b>{"{{name}}"}</b>
+                {"'s profile. Sign in or register to continue."}
+              </Trans>
             )}
           </div>
         ) : null}
 
         {pendingWorldHint ? (
           <div className="rounded border border-keep-action/40 bg-keep-action/10 px-3 py-2 text-xs text-keep-text/90">
-            <b>{pendingWorldHint.name}</b> is a <b>private</b> world. Please sign in or register
-            to view it.
+            <Trans t={t} i18nKey="auth.worldPrivate" values={{ name: pendingWorldHint.name }}>
+              <b>{"{{name}}"}</b>
+              {" is a "}
+              <b>private</b>
+              {" world. Please sign in or register to view it."}
+            </Trans>
           </div>
         ) : null}
 
@@ -946,7 +1014,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             <button
               type="button"
               onClick={() => setKickReason(null)}
-              aria-label="Dismiss"
+              aria-label={t("dismiss")}
               className="shrink-0 text-keep-muted hover:text-keep-text"
             >
               ✕
@@ -959,16 +1027,30 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
         {returnForum ? (
           <div className="rounded border border-keep-accent/40 bg-keep-accent/10 px-3 py-2 text-xs text-keep-text/90">
             {mode === "register" ? (
-              <>
-                You're creating an account on <b>{branding.siteName || "The Spire"}</b> to access
-                the forum <b>{returnForum.name ?? `/f/${returnForum.slug}`}</b>. Once you've
-                registered, we'll take you straight back to it.
-              </>
+              <Trans
+                t={t}
+                i18nKey="auth.returnForumRegister"
+                values={{
+                  siteName: branding.siteName || "The Spire",
+                  forum: returnForum.name ?? `/f/${returnForum.slug}`,
+                }}
+              >
+                {"You're creating an account on "}
+                <b>{"{{siteName}}"}</b>
+                {" to access the forum "}
+                <b>{"{{forum}}"}</b>
+                {". Once you've registered, we'll take you straight back to it."}
+              </Trans>
             ) : (
-              <>
-                After you sign in, we'll return you to the forum{" "}
-                <b>{returnForum.name ?? `/f/${returnForum.slug}`}</b>.
-              </>
+              <Trans
+                t={t}
+                i18nKey="auth.returnForumLogin"
+                values={{ forum: returnForum.name ?? `/f/${returnForum.slug}` }}
+              >
+                {"After you sign in, we'll return you to the forum "}
+                <b>{"{{forum}}"}</b>
+                {"."}
+              </Trans>
             )}
           </div>
         ) : null}
@@ -976,7 +1058,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
         {mode === "register" ? (
           <>
             <Field
-              label="Email"
+              label={t("auth.email")}
               value={email}
               onChange={setEmail}
               type="email"
@@ -985,18 +1067,18 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
               // open immediately on the register screen.
               autoFocus
             />
-            <Field label="Master username" value={username} onChange={setUsername} autoComplete="username" />
+            <Field label={t("auth.masterUsername")} value={username} onChange={setUsername} autoComplete="username" />
           </>
         ) : (
           <Field
-            label="Email or username"
+            label={t("auth.emailOrUsername")}
             value={email}
             onChange={setEmail}
             autoComplete="username"
           />
         )}
         <Field
-          label="Password"
+          label={t("auth.password")}
           value={password}
           onChange={setPassword}
           type={showPassword ? "text" : "password"}
@@ -1005,8 +1087,8 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             <button
               type="button"
               onClick={() => setShowPassword((v) => !v)}
-              aria-label={showPassword ? "Hide password" : "Show password"}
-              title={showPassword ? "Hide password" : "Show password"}
+              aria-label={showPassword ? t("auth.hidePassword") : t("auth.showPassword")}
+              title={showPassword ? t("auth.hidePassword") : t("auth.showPassword")}
               aria-pressed={showPassword}
               className="absolute inset-y-0 right-0 flex items-center px-2 text-keep-muted hover:text-keep-text"
             >
@@ -1021,7 +1103,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
               className="text-[11px] text-keep-muted underline underline-offset-2 hover:text-keep-action"
               onClick={() => onNavigate?.("/forgot-password")}
             >
-              Forgot password?
+              {t("auth.forgotPassword")}
             </button>
           </div>
         ) : null}
@@ -1033,7 +1115,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             {disclaimerText ? (
               <>
                 <div className="text-[10px] uppercase tracking-[0.25em] text-keep-muted">
-                  before you register
+                  {t("auth.beforeYouRegister")}
                 </div>
                 <div
                   className="prose prose-sm max-h-48 max-w-none overflow-y-auto pr-1 text-xs text-keep-text/90"
@@ -1049,19 +1131,25 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
                 className="mt-0.5 scale-90"
               />
               <span>
-                I have read and agree to the{" "}
-                {/* stopPropagation so opening the rules to REVIEW them doesn't
-                    also toggle the checkbox via the wrapping label. */}
-                <a
-                  href="/rules"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                  className="underline underline-offset-2 hover:text-keep-action"
+                <Trans
+                  t={t}
+                  i18nKey="auth.rulesAgreement"
+                  values={{ siteName: branding.siteName || "The Spire" }}
                 >
-                  house rules
-                </a>
-                {disclaimerText ? " and the disclaimer above" : ""}.
+                  {"I understand {{siteName}} hosts user written stories and roleplay, and some areas are for adults only. I agree to the "}
+                  {/* stopPropagation so opening the rules to REVIEW them doesn't
+                      also toggle the checkbox via the wrapping label. */}
+                  <a
+                    href="/rules"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="underline underline-offset-2 hover:text-keep-action"
+                  >
+                    site rules
+                  </a>
+                  {"."}
+                </Trans>
               </span>
             </label>
           </div>
@@ -1069,33 +1157,59 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
 
         {mode === "register" ? (
           <>
-            {/* Age + mature content acknowledgment. Always required (not
-                admin-toggleable) since it's a baseline content-rating
-                gate, not site-specific policy. */}
-            <label className="flex cursor-pointer items-start gap-2 rounded border border-keep-border/50 bg-keep-bg/25 px-3 py-2 text-[11px] leading-snug text-keep-muted">
-              <input
-                type="checkbox"
-                checked={acceptedAgeMature}
-                onChange={(e) => setAcceptedAgeMature(e.target.checked)}
-                className="mt-0.5 scale-90"
-              />
-              <span>
-                I am <b className="text-keep-text">18 years or older</b>, and I understand this
-                site may contain mature content (in user profiles, room descriptions, and
-                roleplay).
-              </span>
-            </label>
+            {/* Date of birth (replaces the old 18+ checkbox). The server
+                stores it and enforces the minimum; the `max` on the input
+                plus the submit pre-check are courtesy only. */}
+            <Field
+              label={t("auth.dateOfBirth")}
+              value={birthdate}
+              onChange={setBirthdate}
+              type="date"
+              autoComplete="bday"
+              min={earliestAllowedBirthdate()}
+              max={latestAllowedBirthdate(branding.minimumSignupAge ?? 18)}
+              helper={t("auth.dobHelper", {
+                minAge: branding.minimumSignupAge ?? 18,
+                siteName: branding.siteName || "The Spire",
+              })}
+            />
+
+            {/* Minor isolation opt-in (age plan Phase 5): revealed only when
+                the entered birth date is under 18 AND the signup floor
+                actually admits minors — while the floor is 18 an under-18
+                date can't create an account, so the checkbox would tease a
+                state that can't exist right under the "must be at least 18"
+                helper. Optional; the profile editor's Privacy tab can change
+                it later, and the server clamps it to minor accounts anyway. */}
+            {(() => {
+              if ((branding.minimumSignupAge ?? 18) >= 18) return null;
+              const enteredAge = birthdate ? isoAgeUtc(birthdate) : null;
+              if (enteredAge === null || enteredAge >= 18) return null;
+              return (
+                <label className="flex items-start gap-2 rounded border border-keep-border/50 bg-keep-bg/25 px-3 py-2 text-[11px] text-keep-muted">
+                  <input
+                    type="checkbox"
+                    checked={isolatePref}
+                    onChange={(e) => setIsolatePref(e.target.checked)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    {t("auth.minorIsolation")}
+                  </span>
+                </label>
+              );
+            })()}
 
             {/* In-house basic CAPTCHA. The question is server-issued and
                 single-use; if the answer is wrong or stale, we re-fetch
                 automatically on the next render. */}
             <div className="space-y-1 rounded border border-keep-border/50 bg-keep-bg/25 px-3 py-2 text-[11px] text-keep-muted">
               <div className="text-[10px] uppercase tracking-[0.25em] text-keep-muted">
-                Quick check (anti-bot)
+                {t("auth.captchaHeading")}
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-semibold tabular-nums text-keep-text">
-                  {captcha?.question ?? "loading..."}
+                  {captcha?.question ?? t("auth.captchaLoading")}
                 </span>
                 <input
                   type="text"
@@ -1103,7 +1217,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
                   autoComplete="off"
                   value={captchaAnswer}
                   onChange={(e) => setCaptchaAnswer(e.target.value)}
-                  placeholder="answer"
+                  placeholder={t("auth.captchaPlaceholder")}
                   className="w-24 rounded border border-keep-border bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
                   disabled={!captcha}
                 />
@@ -1111,9 +1225,9 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
                   type="button"
                   onClick={refreshCaptcha}
                   className="text-[10px] text-keep-muted underline-offset-2 hover:text-keep-action hover:underline"
-                  title="Get a different question"
+                  title={t("auth.captchaNewTitle")}
                 >
-                  new question
+                  {t("auth.captchaNew")}
                 </button>
               </div>
             </div>
@@ -1145,14 +1259,14 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           disabled={!canSubmit}
           title={
             needsAcceptance && !accepted
-              ? "Tick the box to confirm you agree to the house rules."
+              ? t("auth.tickBoxTitle")
               : undefined
           }
           className="w-full rounded border border-keep-border bg-keep-panel py-2 text-sm font-semibold tracking-wide hover:bg-keep-panel/80 disabled:opacity-50"
         >
           {submitting
-            ? mode === "login" ? "Logging in..." : "Registering..."
-            : mode === "login" ? "Log in" : "Register"}
+            ? mode === "login" ? t("auth.loggingIn") : t("auth.registering")
+            : mode === "login" ? t("auth.logIn") : t("auth.register")}
         </button>
 
         {/* Google sign-in, on BOTH the login and register views when the
@@ -1182,6 +1296,11 @@ export function Field({
    * slide under it.
    */
   trailing,
+  /** Native `min`/`max` attributes (used by the date-of-birth field). */
+  min,
+  max,
+  /** Small muted helper line rendered under the input. */
+  helper,
 }: {
   label: string;
   value: string;
@@ -1190,6 +1309,9 @@ export function Field({
   autoComplete?: string;
   autoFocus?: boolean;
   trailing?: ReactNode;
+  min?: string;
+  max?: string;
+  helper?: string;
 }) {
   return (
     <label className="block text-xs">
@@ -1201,6 +1323,8 @@ export function Field({
           onChange={(e) => onChange(e.target.value)}
           autoComplete={autoComplete}
           autoFocus={autoFocus}
+          min={min}
+          max={max}
           // text-base on mobile prevents iOS auto-zoom (anything <16px triggers
           // a zoom on focus); md+ keeps the compact density.
           className={`w-full rounded border border-keep-border bg-keep-bg px-2 py-2 text-base outline-none focus:border-keep-action md:py-1 md:text-sm ${
@@ -1209,6 +1333,51 @@ export function Field({
         />
         {trailing}
       </div>
+      {helper ? <span className="mt-1 block text-[10px] text-keep-muted">{helper}</span> : null}
     </label>
   );
+}
+
+/**
+ * Full years of age for an ISO YYYY-MM-DD date, date-only in UTC — mirrors
+ * the server's ageGate math so the register forms' courtesy pre-check and
+ * the authoritative server check can never disagree. Null = not a usable
+ * date (the server would reject it too).
+ */
+export function isoAgeUtc(iso: string, now: Date = new Date()): number | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [y, m, d] = iso.split("-").map(Number) as [number, number, number];
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) {
+    return null;
+  }
+  let age = now.getUTCFullYear() - y;
+  if (now.getUTCMonth() + 1 < m || (now.getUTCMonth() + 1 === m && now.getUTCDate() < d)) age -= 1;
+  return age;
+}
+
+/**
+ * The latest birthdate that still satisfies the signup floor (someone born
+ * exactly `minAge` years ago today is old enough), for the date input's
+ * `max`. Courtesy only — the server re-validates. A Feb-29 anniversary in
+ * a common year rolls to Mar 1 via Date.UTC, which is fine for a hint.
+ */
+export function latestAllowedBirthdate(minAge: number, now: Date = new Date()): string {
+  const t = new Date(Date.UTC(now.getUTCFullYear() - minAge, now.getUTCMonth(), now.getUTCDate()));
+  const mm = String(t.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(t.getUTCDate()).padStart(2, "0");
+  return `${t.getUTCFullYear()}-${mm}-${dd}`;
+}
+
+/**
+ * The earliest plausible birthdate (130 years back — the server's
+ * MAX_PLAUSIBLE_AGE ceiling), for the date input's `min`. Courtesy only,
+ * the server re-validates; it exists to catch century typos (1911 for
+ * 2011) before they silently produce an adult-classified account.
+ */
+export function earliestAllowedBirthdate(now: Date = new Date()): string {
+  const t = new Date(Date.UTC(now.getUTCFullYear() - 130, now.getUTCMonth(), now.getUTCDate()));
+  const mm = String(t.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(t.getUTCDate()).padStart(2, "0");
+  return `${t.getUTCFullYear()}-${mm}-${dd}`;
 }

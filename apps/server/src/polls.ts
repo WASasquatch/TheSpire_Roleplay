@@ -20,6 +20,7 @@ import {
 } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { pollVotes, users } from "./db/schema.js";
+import { tFor } from "./i18n.js";
 
 /** Parse a stored pollDataJson; null on anything malformed. */
 export function parsePollData(json: string | null | undefined): PollData | null {
@@ -52,19 +53,21 @@ export function buildPollData(input: {
   showVoters: boolean;
   closesAt: number | null;
   question?: string;
+  /** Author's users.locale — validation copy is author-facing. */
+  locale?: string | null;
 }): { ok: true; json: string; data: PollData } | { ok: false; error: string } {
   if (input.question !== undefined && input.question.trim().length > POLL_QUESTION_MAX) {
-    return { ok: false, error: `Poll question is capped at ${POLL_QUESTION_MAX} characters.` };
+    return { ok: false, error: tFor(input.locale, "errors:server.polls.questionCap", { max: POLL_QUESTION_MAX }) };
   }
   const texts = input.optionTexts.map((t) => t.trim()).filter((t) => t.length > 0);
   if (texts.length < POLL_MIN_OPTIONS) {
-    return { ok: false, error: `A poll needs at least ${POLL_MIN_OPTIONS} options.` };
+    return { ok: false, error: tFor(input.locale, "errors:server.polls.minOptions", { min: POLL_MIN_OPTIONS }) };
   }
   if (texts.length > POLL_MAX_OPTIONS) {
-    return { ok: false, error: `A poll can have at most ${POLL_MAX_OPTIONS} options.` };
+    return { ok: false, error: tFor(input.locale, "errors:server.polls.maxOptions", { max: POLL_MAX_OPTIONS }) };
   }
   if (texts.some((t) => t.length > POLL_OPTION_MAX)) {
-    return { ok: false, error: `Each option is capped at ${POLL_OPTION_MAX} characters.` };
+    return { ok: false, error: tFor(input.locale, "errors:server.polls.optionCap", { max: POLL_OPTION_MAX }) };
   }
   const closesAt = input.closesAt != null && Number.isFinite(input.closesAt) && input.closesAt > Date.now()
     ? Math.round(input.closesAt)

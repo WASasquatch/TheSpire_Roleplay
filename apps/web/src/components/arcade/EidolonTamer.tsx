@@ -17,6 +17,7 @@
  *    value show in the level row, and it can be sold for currency.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { applyDecay, effectiveTraits, eidolonIsDormant, isNightHour, eidolonXpForLevel, streakRewardFor, EIDOLON_SPECIES_IDS, EIDOLON_TRAITS, EIDOLON_VARIANTS } from "@thekeep/shared";
 import type { EidolonHallEntry, EidolonSnapshot, EidolonStats } from "@thekeep/shared";
 import { useEarning } from "../../state/earning";
@@ -61,6 +62,7 @@ function Shell({ children }: { children: React.ReactNode }): React.JSX.Element {
 const noticeStyle: React.CSSProperties = { padding: "48px 24px", textAlign: "center", fontStyle: "italic", lineHeight: 1.5 };
 
 export function EidolonTamer({ characterId }: { characterId: string | null }): React.JSX.Element {
+  const { t } = useTranslation("arcade");
   const [access, setAccess] = useState<ArcadeAccess | "loading">("loading");
   const [snap, setSnap] = useState<EidolonSnapshot | null>(null);
   const [live, setLive] = useState<Live | null>(null);
@@ -132,13 +134,13 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
       // daily loop WANTS this little pop — it's the reward moment.
       if (prevStreakRef.current != null && s.streakCount > prevStreakRef.current) {
         const reward = streakRewardFor(s.streakCount);
-        pushFloat(reward > 0 ? `🔥 ${s.streakCount}-day streak · +${reward}!` : `🔥 ${s.streakCount}-day streak!`, "good", 50);
+        pushFloat(reward > 0 ? t("arcade.eidolon.float.streakReward", { days: s.streakCount, reward }) : t("arcade.eidolon.float.streak", { days: s.streakCount }), "good", 50);
       }
       prevStreakRef.current = s.streakCount;
       // Level-up celebration (a wanted pop for this engagement minigame).
       if (prevLevelRef.current != null && s.level > prevLevelRef.current) {
         flash("levelup", 600);
-        pushFloat(`✦ Level ${s.level} ✦`, "good", 50);
+        pushFloat(t("arcade.eidolon.float.levelUp", { level: s.level }), "good", 50);
       }
       prevLevelRef.current = s.level;
       xpRef.current = s.xp;
@@ -150,7 +152,7 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
       xpRef.current = 0;
       setLive(null);
     }
-  }, [pushFloat, flash]);
+  }, [pushFloat, flash, t]);
 
   /* ---- initial load + periodic / on-focus re-sync ---- */
   const sync = useCallback(async () => {
@@ -226,18 +228,18 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
       // Surface the XP this tend earned (server-authoritative) so the Lv/XP bar
       // visibly pays off. floor-diff so sub-1 passive drift doesn't show a "+0".
       const gainedXp = Math.floor(next.xp) - Math.floor(beforeXp);
-      if (gainedXp >= 1) pushFloat(`+${gainedXp} XP`, "good", 50);
+      if (gainedXp >= 1) pushFloat(t("arcade.eidolon.float.xpGain", { xp: gainedXp }), "good", 50);
       if (opts?.anim) flash(opts.anim);
       if (opts?.float) pushFloat(opts.float[0], opts.float[1]);
       void refreshEarning();
     } catch (e) {
-      const msg = e instanceof ArcadeError && typeof e.body.error === "string" ? e.body.error : "The ritual faltered.";
+      const msg = e instanceof ArcadeError && typeof e.body.error === "string" ? e.body.error : t("arcade.eidolon.float.ritualFaltered");
       pushFloat(msg, "bad", 50);
     } finally {
       inFlight.current = false;
       setBusy(false);
     }
-  }, [anchor, flash, pushFloat, refreshEarning]);
+  }, [anchor, flash, pushFloat, refreshEarning, t]);
 
   const doSquish = useCallback(() => { setSquish(true); setTimeout(() => setSquish(false), 320); }, []);
 
@@ -251,18 +253,18 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
     try {
       const next = await hatchEidolon(characterId, choice);
       anchor(next);
-      if (next.variant) pushFloat(`✦ ${EIDOLON_VARIANTS[next.variant]?.label ?? "Rare"}! ✦`, "good", 50);
-      else if (next.level > 1) pushFloat(`✦ the bloodline endures · Lv ${next.level} ✦`, "good", 50);
-      else pushFloat("✦ hatched ✦", "good", 50);
+      if (next.variant) pushFloat(t("arcade.eidolon.float.variant", { label: EIDOLON_VARIANTS[next.variant] ? t(`arcade.eidolon.variants.${next.variant}`, { defaultValue: EIDOLON_VARIANTS[next.variant].label }) : t("arcade.eidolon.float.rare") }), "good", 50);
+      else if (next.level > 1) pushFloat(t("arcade.eidolon.float.bloodline", { level: next.level }), "good", 50);
+      else pushFloat(t("arcade.eidolon.float.hatched"), "good", 50);
       void refreshEarning();
     } catch (e) {
-      const msg = e instanceof ArcadeError && typeof e.body.error === "string" ? e.body.error : "The ritual faltered.";
+      const msg = e instanceof ArcadeError && typeof e.body.error === "string" ? e.body.error : t("arcade.eidolon.float.ritualFaltered");
       pushFloat(msg, "bad", 50);
     } finally {
       inFlight.current = false;
       setBusy(false);
     }
-  }, [characterId, anchor, pushFloat, refreshEarning]);
+  }, [characterId, anchor, pushFloat, refreshEarning, t]);
 
   /** "Release": delete the dormant familiar server-side, then drop to the
    *  egg-select screen (for a player who'd rather start over than spend a
@@ -276,13 +278,13 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
       await releaseEidolon(characterId);
       anchor(null);
     } catch (e) {
-      const msg = e instanceof ArcadeError && typeof e.body.error === "string" ? e.body.error : "Could not release it.";
+      const msg = e instanceof ArcadeError && typeof e.body.error === "string" ? e.body.error : t("arcade.eidolon.float.releaseFailed");
       pushFloat(msg, "bad", 50);
     } finally {
       inFlight.current = false;
       setBusy(false);
     }
-  }, [characterId, anchor, pushFloat]);
+  }, [characterId, anchor, pushFloat, t]);
 
   /** Sell the living familiar for currency (two-click confirm). */
   const doSell = useCallback(async () => {
@@ -291,17 +293,17 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
     setBusy(true); setSellArm(false);
     try {
       const res = await sellEidolon(characterId);
-      pushFloat(`✦ sold · +${res.value}`, "good", 50);
+      pushFloat(t("arcade.eidolon.float.sold", { value: res.value }), "good", 50);
       anchor(null);
       void refreshEarning();
     } catch (e) {
-      const msg = e instanceof ArcadeError && typeof e.body.error === "string" ? e.body.error : "Sale failed.";
+      const msg = e instanceof ArcadeError && typeof e.body.error === "string" ? e.body.error : t("arcade.eidolon.float.saleFailed");
       pushFloat(msg, "bad", 50);
     } finally {
       inFlight.current = false;
       setBusy(false);
     }
-  }, [snap, characterId, anchor, pushFloat, refreshEarning]);
+  }, [snap, characterId, anchor, pushFloat, refreshEarning, t]);
 
   const onSellClick = useCallback(() => {
     if (sellArm) { if (sellTimer.current) clearTimeout(sellTimer.current); void doSell(); return; }
@@ -320,11 +322,11 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
       if (next && pushSupported()) { try { await enablePush(); } catch { /* denied/unsupported — still record the preference */ } }
       anchor(await setEidolonNudgeOptin(characterId, next));
     } catch {
-      pushFloat("Couldn't update reminders.", "bad", 50);
+      pushFloat(t("arcade.eidolon.float.remindersFailed"), "bad", 50);
     } finally {
       setNudgeBusy(false);
     }
-  }, [snap, nudgeBusy, characterId, anchor, pushFloat]);
+  }, [snap, nudgeBusy, characterId, anchor, pushFloat, t]);
 
   /* ---- owned pets for the egg-select pet-hatch option ---- */
   const ownedPets = useMemo(() => {
@@ -343,13 +345,13 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
   useEffect(() => {
     if (tool === "clean" && grime.length > 0 && grime.every((g) => g.cleaned)) {
       setTool(null); setGrime([]);
-      void runAction(() => eidolonAction(characterId, "clean"), { float: ["✦ cleansed", "good"] });
+      void runAction(() => eidolonAction(characterId, "clean"), { float: [t("arcade.eidolon.float.cleansed"), "good"] });
     }
-  }, [tool, grime, runAction, characterId]);
+  }, [tool, grime, runAction, characterId, t]);
 
-  if (access === "loading") return <Shell><div style={noticeStyle}>Summoning…</div></Shell>;
-  if (access === "forbidden") return <Shell><div style={noticeStyle}>The Arcade is closed to you right now.</div></Shell>;
-  if (access === "locked") return <Shell><div style={noticeStyle}>This game is locked. Unlock the Eidolon Tamer from the Spire Arcade.</div></Shell>;
+  if (access === "loading") return <Shell><div style={noticeStyle}>{t("arcade.eidolon.loading")}</div></Shell>;
+  if (access === "forbidden") return <Shell><div style={noticeStyle}>{t("arcade.eidolon.forbidden")}</div></Shell>;
+  if (access === "locked") return <Shell><div style={noticeStyle}>{t("arcade.eidolon.locked")}</div></Shell>;
 
   const v = live;
   const sp = snap;
@@ -365,10 +367,10 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
   const base = sp && sp.kind === "species" ? speciesBase(sp.speciesId) : ([150, 138, 214] as [number, number, number]);
   const vis = deriveVisual(stats, { asleep, sick, dead }, base);
   const ageH = Math.floor(v?.ageHours ?? 0);
-  const ageStr = ageH >= 24 ? `${Math.floor(ageH / 24)}d ${ageH % 24}h` : `${ageH}h`;
+  const ageStr = ageH >= 24 ? t("arcade.eidolon.age.daysHours", { days: Math.floor(ageH / 24), hours: ageH % 24 }) : t("arcade.eidolon.age.hours", { hours: ageH });
   const busyTool = !sp || dead || asleep || busy;
   const name = sp?.name ?? "??????";
-  const speciesName = sp ? (sp.kind === "pet" ? "Pet" : (SPECIES_VISUAL[sp.speciesId ?? "dragon"]?.name ?? "Eidolon")) : "";
+  const speciesName = sp ? (sp.kind === "pet" ? t("arcade.eidolon.kindPet") : (SPECIES_VISUAL[sp.speciesId ?? "dragon"] ? t(`arcade.eidolon.species.${sp.speciesId ?? "dragon"}.name`) : t("arcade.eidolon.kindEidolon"))) : "";
   const messToShow = sp && stats.hygiene < 30 ? Math.min(3, v?.messCount ?? 0) : 0;
 
   // level / XP bar (from the authoritative snapshot). Defaulted defensively
@@ -385,9 +387,18 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
   const streakMultiplier = sp?.streakMultiplier ?? 1;
   const nudgeOptin = !!sp?.nudgeOptin;
   const growth = growthTier(level); // visual growth stage from level
-  const traitInfo = sp?.trait ? EIDOLON_TRAITS[sp.trait] : null;
+  // Trait/variant display strings resolve through the catalog (localized),
+  // with the shared table's English label/flavor as the defaultValue.
+  const traitInfo = sp?.trait && EIDOLON_TRAITS[sp.trait]
+    ? {
+        label: t(`arcade.eidolon.traits.${sp.trait}.label`, { defaultValue: EIDOLON_TRAITS[sp.trait].label }),
+        flavor: t(`arcade.eidolon.traits.${sp.trait}.flavor`, { defaultValue: EIDOLON_TRAITS[sp.trait].flavor }),
+      }
+    : null;
   const variant = sp?.variant ?? null; // rare variant (e.g. prismatic)
-  const variantLabel = variant ? (EIDOLON_VARIANTS[variant]?.label ?? "") : "";
+  const variantLabel = variant && EIDOLON_VARIANTS[variant]
+    ? t(`arcade.eidolon.variants.${variant}`, { defaultValue: EIDOLON_VARIANTS[variant].label })
+    : "";
 
   /* ---- gesture plumbing ---- */
   const localPos = (e: React.PointerEvent) => {
@@ -478,32 +489,32 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
 
           {!sp ? (
             <div className="select-wrap">
-              <span className="select-title">Choose an egg to summon</span>
+              <span className="select-title">{t("arcade.eidolon.select.title")}</span>
               <div className="select-grid">
                 {EIDOLON_SPECIES_IDS.map((id) => {
                   const s = SPECIES_VISUAL[id]!;
                   return (
                     <button key={id} className="egg-choice" disabled={busy} onClick={() => void doHatch({ kind: "species", speciesId: id })}>
                       <span className="egg-choice-egg"><Egg crack={0} shell={s.shell} accent={s.accent} noRock /></span>
-                      <span className="egg-label">{s.name}</span>
-                      <span className="egg-tag">{s.tagline}</span>
+                      <span className="egg-label">{t(`arcade.eidolon.species.${id}.name`)}</span>
+                      <span className="egg-tag">{t(`arcade.eidolon.species.${id}.tagline`)}</span>
                     </button>
                   );
                 })}
               </div>
-              <span className="select-title" style={{ marginTop: 4 }}>{ownedPets.length ? "- or hatch with a pet -" : "- acquire a pet to hatch one as a familiar -"}</span>
+              <span className="select-title" style={{ marginTop: 4 }}>{ownedPets.length ? t("arcade.eidolon.select.orPet") : t("arcade.eidolon.select.needPet")}</span>
               {ownedPets.length > 0 && (
                 <div className="select-grid">
                   {ownedPets.slice(0, 4).map((p) => (
                     <button key={p.key} className="egg-choice" disabled={busy} onClick={() => void doHatch({ kind: "pet", petItemKey: p.key })}>
                       <span className="egg-choice-pet">{p.iconUrl ? <img src={p.iconUrl} alt={p.name} /> : <span className="egg-label">?</span>}</span>
                       <span className="egg-label">{p.name}</span>
-                      <span className="egg-tag">your pet</span>
+                      <span className="egg-tag">{t("arcade.eidolon.select.yourPet")}</span>
                     </button>
                   ))}
                 </div>
               )}
-              <button className="ei-hall-link" onClick={() => setHallOpen(true)}>📖 The Hall, familiars past</button>
+              <button className="ei-hall-link" onClick={() => setHallOpen(true)}>{t("arcade.eidolon.hall.link")}</button>
             </div>
           ) : (
             <div className={`stage-pet ${growth.tier === "elder" ? "is-elder" : ""} ${variant === "prismatic" ? "is-prismatic" : ""}`} onClick={onStageClick} style={{ transform: `translate(-50%,-50%) translateX(${lean}px) scale(${growth.scale})` }}>
@@ -546,8 +557,8 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
           {sp && (
             <div className="readout">
               {dead ? (<span>{STATUS_LINE.dead!(name)}</span>)
-                : tool === "play" ? (<span><b>Drag the wisp</b> near your familiar, then release.</span>)
-                  : tool === "clean" ? (<span><b>Scrub</b> the grime away.</span>)
+                : tool === "play" ? (<span><Trans t={t} i18nKey="arcade.eidolon.readout.dragWisp"><b>Drag the wisp</b> near your familiar, then release.</Trans></span>)
+                  : tool === "clean" ? (<span><Trans t={t} i18nKey="arcade.eidolon.readout.scrub"><b>Scrub</b> the grime away.</Trans></span>)
                     : (<span>{STATUS_LINE[vis.primary]!(name)}</span>)}
             </div>
           )}
@@ -556,55 +567,55 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
         <div className="nameplate">
           <span className="np-name">{!sp ? "??????" : name}</span>
           <span className="np-meta">
-            {!sp ? "unbound" : `${dead ? "" : growth.label + " "}${variantLabel ? variantLabel + " " : ""}${speciesName} · ${dead ? "dormant" : vis.label} · ${ageStr}`}
-            {sick && !dead && sp && <em className="np-warn"> · afflicted</em>}
+            {!sp ? t("arcade.eidolon.nameplate.unbound") : `${dead ? "" : t(`arcade.eidolon.growth.${growth.tier}`) + " "}${variantLabel ? variantLabel + " " : ""}${speciesName} · ${dead ? t("arcade.eidolon.nameplate.dormant") : vis.label} · ${ageStr}`}
+            {sick && !dead && sp && <em className="np-warn"> · {t("arcade.eidolon.nameplate.afflicted")}</em>}
           </span>
         </div>
 
         {sp && !dead && (
           <div className="ei-levelrow">
-            <span className="ei-level" title={`${Math.floor(xp)} total XP`}>
-              Lv {level}
+            <span className="ei-level" title={t("arcade.eidolon.levelRow.totalXpTitle", { xp: Math.floor(xp) })}>
+              {t("arcade.eidolon.level", { level })}
               {streakCount > 0 && (
-                <span className={`ei-flame ${checkedInToday ? "is-fresh" : ""}`} title={`${checkedInToday ? "Tended today" : "Not tended yet today"} · passive XP ×${streakMultiplier.toFixed(2)}`}> · 🔥{streakCount}</span>
+                <span className={`ei-flame ${checkedInToday ? "is-fresh" : ""}`} title={t("arcade.eidolon.levelRow.streakTitle", { status: checkedInToday ? t("arcade.eidolon.levelRow.tendedToday") : t("arcade.eidolon.levelRow.notTendedToday"), multiplier: streakMultiplier.toFixed(2) })}> · 🔥{streakCount}</span>
               )}
             </span>
             {traitInfo ? <span className="ei-trait" title={traitInfo.flavor}>{traitInfo.label}</span> : null}
-            <div className="ei-xptrack" title={`${Math.floor(intoLevel)} / ${levelSpan} to next level`}><div className="ei-xpfill" style={{ width: xpPct + "%" }} /></div>
-            <button className="ei-bell" onClick={() => setHallOpen(true)} title="The Hall, familiars past" aria-label="Open the Hall">📖</button>
-            <button className={`ei-bell ${nudgeOptin ? "is-on" : ""}`} disabled={nudgeBusy} onClick={() => void toggleNudge()} title={nudgeOptin ? "Daily reminders on" : "Daily reminders off"} aria-label="Toggle daily reminders">
+            <div className="ei-xptrack" title={t("arcade.eidolon.levelRow.xpTrackTitle", { current: Math.floor(intoLevel), total: levelSpan })}><div className="ei-xpfill" style={{ width: xpPct + "%" }} /></div>
+            <button className="ei-bell" onClick={() => setHallOpen(true)} title={t("arcade.eidolon.hall.title")} aria-label={t("arcade.eidolon.hall.openAria")}>📖</button>
+            <button className={`ei-bell ${nudgeOptin ? "is-on" : ""}`} disabled={nudgeBusy} onClick={() => void toggleNudge()} title={nudgeOptin ? t("arcade.eidolon.levelRow.remindersOn") : t("arcade.eidolon.levelRow.remindersOff")} aria-label={t("arcade.eidolon.levelRow.remindersAria")}>
               {nudgeOptin ? "🔔" : "🔕"}
             </button>
-            <button className={`ei-sell ${sellArm ? "is-armed" : ""}`} disabled={busy} onClick={onSellClick} title="Sells for the currency it has earned (an inherited head-start isn't counted), and frees you to tame anew">
-              {sellArm ? <>Confirm sale · <CoinAmount amount={saleValue} /></> : <>Sell · <CoinAmount amount={saleValue} /></>}
+            <button className={`ei-sell ${sellArm ? "is-armed" : ""}`} disabled={busy} onClick={onSellClick} title={t("arcade.eidolon.sell.title")}>
+              {sellArm ? <>{t("arcade.eidolon.sell.confirm")} · <CoinAmount amount={saleValue} /></> : <>{t("arcade.eidolon.sell.sell")} · <CoinAmount amount={saleValue} /></>}
             </button>
           </div>
         )}
 
         <div className="gauges">
-          <Gauge icon={GAUGE_ICON.satiety!} label="Satiety" value={stats.satiety} danger={stats.satiety < 24} />
-          <Gauge icon={GAUGE_ICON.joy!} label="Spirit" value={stats.joy} danger={stats.joy < 24} />
-          <Gauge icon={GAUGE_ICON.vigor!} label="Vigor" value={stats.vigor} danger={stats.vigor < 22} />
-          <Gauge icon={GAUGE_ICON.hygiene!} label="Hygiene" value={stats.hygiene} danger={stats.hygiene < 24} />
-          <Gauge icon={GAUGE_ICON.health!} label="Health" value={stats.health} danger={stats.health < 28} />
+          <Gauge icon={GAUGE_ICON.satiety!} label={t("arcade.eidolon.gauges.satiety")} value={stats.satiety} danger={stats.satiety < 24} />
+          <Gauge icon={GAUGE_ICON.joy!} label={t("arcade.eidolon.gauges.spirit")} value={stats.joy} danger={stats.joy < 24} />
+          <Gauge icon={GAUGE_ICON.vigor!} label={t("arcade.eidolon.gauges.vigor")} value={stats.vigor} danger={stats.vigor < 22} />
+          <Gauge icon={GAUGE_ICON.hygiene!} label={t("arcade.eidolon.gauges.hygiene")} value={stats.hygiene} danger={stats.hygiene < 24} />
+          <Gauge icon={GAUGE_ICON.health!} label={t("arcade.eidolon.gauges.health")} value={stats.health} danger={stats.health < 28} />
         </div>
 
         {dead ? (
           <div className="dead-panel">
-            <p>It has gone dormant. A magical item will wake it.</p>
+            <p>{t("arcade.eidolon.dead.notice")}</p>
             <div className="dead-actions">
-              <button className="resummon" disabled={busy} onClick={() => setDrawer("revive")}>Revive</button>
-              <button className="resummon resummon--ghost" disabled={busy} onClick={() => void resummon()}>Release</button>
+              <button className="resummon" disabled={busy} onClick={() => setDrawer("revive")}>{t("arcade.eidolon.actions.revive")}</button>
+              <button className="resummon resummon--ghost" disabled={busy} onClick={() => void resummon()}>{t("arcade.eidolon.dead.release")}</button>
             </div>
           </div>
         ) : (
           <div className="controls">
-            <Action glyph={G.feed!} name="Feed" onClick={() => setDrawer("food")} disabled={busyTool} />
-            <Action glyph={G.play!} name="Play" onClick={() => armTool("play")} on={tool === "play"} disabled={busyTool} />
-            <Action glyph={G.toy!} name="Toys" onClick={() => setDrawer("toy")} disabled={busyTool} />
-            <Action glyph={G.clean!} name="Cleanse" onClick={() => armTool("clean")} on={tool === "clean"} disabled={busyTool} />
-            <Action glyph={G.cure!} name="Remedy" onClick={() => setDrawer("remedy")} disabled={!sp || dead} />
-            <Action glyph={G.rest!} name={asleep ? "Wake" : "Rest"} onClick={() => { pushFloat(asleep ? "✦ awoken" : "✦ slumber", "neutral"); void runAction(() => eidolonAction(characterId, "rest")); }} disabled={!sp || dead || busy} />
+            <Action glyph={G.feed!} name={t("arcade.eidolon.actions.feed")} onClick={() => setDrawer("food")} disabled={busyTool} />
+            <Action glyph={G.play!} name={t("arcade.eidolon.actions.play")} onClick={() => armTool("play")} on={tool === "play"} disabled={busyTool} />
+            <Action glyph={G.toy!} name={t("arcade.eidolon.actions.toys")} onClick={() => setDrawer("toy")} disabled={busyTool} />
+            <Action glyph={G.clean!} name={t("arcade.eidolon.actions.cleanse")} onClick={() => armTool("clean")} on={tool === "clean"} disabled={busyTool} />
+            <Action glyph={G.cure!} name={t("arcade.eidolon.actions.remedy")} onClick={() => setDrawer("remedy")} disabled={!sp || dead} />
+            <Action glyph={G.rest!} name={asleep ? t("arcade.eidolon.actions.wake") : t("arcade.eidolon.actions.rest")} onClick={() => { pushFloat(asleep ? t("arcade.eidolon.float.awoken") : t("arcade.eidolon.float.slumber"), "neutral"); void runAction(() => eidolonAction(characterId, "rest")); }} disabled={!sp || dead || busy} />
           </div>
         )}
       </div>
@@ -614,15 +625,15 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
           mode={drawer}
           characterId={characterId}
           onClose={() => setDrawer(null)}
-          onFeed={(itemKey) => { setDrawer(null); void runAction(() => feedEidolon(characterId, itemKey), { anim: "chomp", float: ["✦ nom", "good"] }); }}
+          onFeed={(itemKey) => { setDrawer(null); void runAction(() => feedEidolon(characterId, itemKey), { anim: "chomp", float: [t("arcade.eidolon.float.nom"), "good"] }); }}
           onUsePotion={(itemKey) => {
             const m = drawer; // remedy | revive | toy — route the non-food use by mode
             setDrawer(null);
             if (m === "toy") void runAction(() => playToyEidolon(characterId, itemKey), { anim: "excited", float: ["♥", "good"] });
-            else if (m === "revive") void runAction(() => reviveEidolon(characterId, itemKey), { anim: "levelup", float: ["✦ awoken", "good"] });
-            else void runAction(() => remedyEidolon(characterId, itemKey), { float: ["✦ remedy", "good"] });
+            else if (m === "revive") void runAction(() => reviveEidolon(characterId, itemKey), { anim: "levelup", float: [t("arcade.eidolon.float.awoken"), "good"] });
+            else void runAction(() => remedyEidolon(characterId, itemKey), { float: [t("arcade.eidolon.float.remedy"), "good"] });
           }}
-          onBasicHeal={() => { setDrawer(null); void runAction(() => remedyEidolon(characterId), { float: ["+ vitality", "good"] }); }}
+          onBasicHeal={() => { setDrawer(null); void runAction(() => remedyEidolon(characterId), { float: [t("arcade.eidolon.float.vitality"), "good"] }); }}
         />
       )}
 
@@ -635,6 +646,7 @@ export function EidolonTamer({ characterId }: { characterId: string | null }): R
  *  familiars (sold or released), most recent first. Reuses the item-drawer
  *  shell for visual consistency. */
 function HallOverlay({ characterId, onClose }: { characterId: string | null; onClose: () => void }): React.JSX.Element {
+  const { t } = useTranslation("arcade");
   const [entries, setEntries] = useState<EidolonHallEntry[] | null>(null);
   useEffect(() => {
     let alive = true;
@@ -645,25 +657,29 @@ function HallOverlay({ characterId, onClose }: { characterId: string | null; onC
     <div className="ei-drawer-scrim" onClick={onClose} role="presentation">
       <div className="ei-drawer" onClick={(e) => e.stopPropagation()}>
         <div className="ei-drawer-head">
-          <span className="ei-drawer-title">The Hall · familiars past</span>
-          <button className="ei-drawer-x" onClick={onClose} aria-label="Close">✕</button>
+          <span className="ei-drawer-title">{t("arcade.eidolon.hall.header")}</span>
+          <button className="ei-drawer-x" onClick={onClose} aria-label={t("common:close")}>✕</button>
         </div>
         <div className="ei-drawer-list">
           {entries == null ? (
-            <div className="ei-empty">Opening the Hall…</div>
+            <div className="ei-empty">{t("arcade.eidolon.hall.opening")}</div>
           ) : entries.length === 0 ? (
-            <div className="ei-empty">No familiars have departed yet. Those you raise will be remembered here.</div>
+            <div className="ei-empty">{t("arcade.eidolon.hall.empty")}</div>
           ) : entries.map((h) => {
-            const sp = h.kind === "pet" ? "Pet" : (SPECIES_VISUAL[h.speciesId ?? "dragon"]?.name ?? "Eidolon");
-            const trait = h.trait ? EIDOLON_TRAITS[h.trait]?.label : null;
-            const varLabel = h.variant ? EIDOLON_VARIANTS[h.variant]?.label : null;
+            const sp = h.kind === "pet" ? t("arcade.eidolon.kindPet") : (SPECIES_VISUAL[h.speciesId ?? "dragon"] ? t(`arcade.eidolon.species.${h.speciesId ?? "dragon"}.name`) : t("arcade.eidolon.kindEidolon"));
+            const trait = h.trait && EIDOLON_TRAITS[h.trait]
+              ? t(`arcade.eidolon.traits.${h.trait}.label`, { defaultValue: EIDOLON_TRAITS[h.trait].label })
+              : null;
+            const varLabel = h.variant && EIDOLON_VARIANTS[h.variant]
+              ? t(`arcade.eidolon.variants.${h.variant}`, { defaultValue: EIDOLON_VARIANTS[h.variant].label })
+              : null;
             const ageH = Math.floor(h.ageHours);
-            const ageStr = ageH >= 24 ? `${Math.floor(ageH / 24)}d` : `${ageH}h`;
+            const ageStr = ageH >= 24 ? t("arcade.eidolon.age.days", { days: Math.floor(ageH / 24) }) : t("arcade.eidolon.age.hours", { hours: ageH });
             return (
               <div className="ei-hall-row" key={h.id}>
                 <span className="ei-hall-name">{varLabel ? <span className="ei-hall-prism">✦ </span> : null}{h.name}</span>
                 <span className="ei-hall-meta">
-                  Lv {h.peakLevel} · {varLabel ? `${varLabel} ` : ""}{sp}{trait ? ` · ${trait}` : ""} · {ageStr} · {h.departReason === "sold" ? "sold" : "released"}
+                  {t("arcade.eidolon.level", { level: h.peakLevel })} · {varLabel ? `${varLabel} ` : ""}{sp}{trait ? ` · ${trait}` : ""} · {ageStr} · {h.departReason === "sold" ? t("arcade.eidolon.hall.sold") : t("arcade.eidolon.hall.released")}
                 </span>
               </div>
             );

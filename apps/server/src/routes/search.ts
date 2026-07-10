@@ -38,6 +38,11 @@ import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { MessageSearchHit, Role } from "@thekeep/shared";
 import { messages, roomMembers, rooms, servers } from "../db/schema.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
+import { isolationVisibleSql } from "../auth/ageIsolation.js";
+import { canSeeNsfw } from "../auth/ageGate.js";
+import { maskForMinors } from "../realtime/minorLanguageFilter.js";
+import { effectiveRoomNsfwWith, nsfwServerIds } from "../lib/nsfwRooms.js";
+import { nsfwForumIds } from "../forums/nsfw.js";
 import { forumBoardReadGate } from "../forums/authority.js";
 import { serverAuthority } from "../servers/authority.js";
 import { isServerModerationActive } from "../servers/moderation.js";
@@ -73,7 +78,10 @@ interface RoomForSearch {
  */
 async function visibleRoomsForServer(
   db: Db,
-  me: { id: string; role: Role },
+  // NsfwViewer fields (birthdate + hideNsfw) ride along so the room
+  // universe can key on the SOFT tier (canSeeNsfw); the session satisfies
+  // this structurally.
+  me: { id: string; role: Role; isAdult: boolean; birthdate: string | null; hideNsfw: boolean },
   targetServerId: string,
   serversOn: boolean,
 ): Promise<{ rooms: Map<string, RoomForSearch>; lockedCatsByRoom: Map<string, Set<string>> } | null> {
@@ -105,9 +113,23 @@ async function visibleRoomsForServer(
       type: rooms.type,
       forumId: rooms.forumId,
       serverId: rooms.serverId,
+      isNsfw: rooms.isNsfw,
     })
     .from(rooms)
     .where(and(isNull(rooms.archivedAt), serverScope));
+
+  // SOFT-tier universe exclusion (age plan, Phase 2/3): effectively-18+
+  // rooms (own flag OR the server's) and whole 18+ FORUMS' boards fall out
+  // of the searchable universe for every viewer who can't see NSFW —
+  // minors AND adults with "Hide 18+ content" on. The forum tier and
+  // pre-flip rows of 18+ rooms are never message-stamped, so the per-row
+  // `canSeeNsfw` clause in the candidate scan can't catch them: keying the
+  // universe on the SOFT tier is what keeps a hide-pref adult's results
+  // consistent with the catalog/discover/topic lists that same preference
+  // already filters. Direct links (the thread route) still open for them —
+  // the HARD tier is unchanged.
+  const nsfwServers = canSeeNsfw(me) ? null : await nsfwServerIds(db);
+  const nsfwForums = canSeeNsfw(me) ? null : await nsfwForumIds(db);
 
   // The viewer's private-room memberships (one query, not per-room). A private
   // room is searchable ONLY when the viewer holds a members row; site admins
@@ -122,6 +144,8 @@ async function visibleRoomsForServer(
   const lockedCatsByRoom = new Map<string, Set<string>>();
 
   for (const r of candidateRows) {
+    if (nsfwServers && effectiveRoomNsfwWith(r, nsfwServers)) continue;
+    if (nsfwForums && r.forumId && nsfwForums.has(r.forumId)) continue;
     if (r.type === "private" && !myRoomIds.has(r.id)) continue;
 
     if (r.forumId) {
@@ -193,6 +217,16 @@ export async function registerSearchRoutes(app: FastifyInstance, db: Db): Promis
           isNull(messages.deletedAt),
           sql`${messages.kind} != 'system'`,
           sql`${messages.body} LIKE ${like} ESCAPE '\\'`,
+          // SOFT tier (age plan, Phase 2): rows stamped 18+ at write time —
+          // a flipped-back room's 18+ era, and Phase 3's NSFW topic titles/
+          // bodies — are dropped for minors, anonymous never reaches this
+          // route, and adults with "Hide 18+ content" opt out here too.
+          ...(canSeeNsfw(me) ? [] : [eq(messages.isNsfw, false)]),
+          // Isolation (age plan, Phase 5): hits authored by an account the
+          // viewer is isolated with drop in SQL, alongside the in-memory
+          // blocked-author filter below. Undefined for non-isolating
+          // viewer classes, so the common query shape is untouched.
+          isolationVisibleSql(me, messages.userId),
           or(
             sql`${messages.kind} != 'whisper'`,
             eq(messages.userId, me.id),
@@ -272,6 +306,17 @@ export async function registerSearchRoutes(app: FastifyInstance, db: Db): Promis
         ...rest,
         ...(serverName ? { serverName } : {}),
       }));
+
+      // Minor language filter (§J): snippets are raw bodies and titles are
+      // raw topic titles — mask both for an under-18 viewer. Per-viewer
+      // response objects, so in-place replacement is safe; adults skip the
+      // loop entirely (byte-identical).
+      if (!me.isAdult) {
+        for (const h of trimmed) {
+          h.snippet = maskForMinors(h.snippet) ?? h.snippet;
+          if (h.title) h.title = maskForMinors(h.title) ?? h.title;
+        }
+      }
 
       return { hits: trimmed };
     },

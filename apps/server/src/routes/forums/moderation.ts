@@ -69,6 +69,7 @@ import { forumAuthority, forumCan } from "../../forums/authority.js";
 import { ensureDefaultUsergroup } from "../../forums/usergroups.js";
 import { recordAudit } from "../../audit.js";
 import { broadcastPresence, findCanonicalLanding, sendRoomBacklogTo } from "../../realtime/broadcast.js";
+import { tFor } from "../../i18n.js";
 import {
   requireForumPermission as sharedRequireForumPermission,
   resolveForumTarget as sharedResolveForumTarget,
@@ -81,7 +82,7 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
     forumId: string,
     key: ForumModPermission,
   ) => sharedRequireForumPermission(db, req, forumId, key);
-  const resolveForumTarget = (raw: string) => sharedResolveForumTarget(db, raw);
+  const resolveForumTarget = (raw: string, locale?: string | null) => sharedResolveForumTarget(db, raw, locale);
 
   /* =========================================================
    *  Phase 4: Forum Moderators + roles/members/mod-log
@@ -268,11 +269,11 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
   app.delete<{ Params: { id: string; userId: string } }>("/forums/:id/members/:userId", async (req, reply) => {
     const gate = await requireForumPermission(req, req.params.id, "manage_members");
     if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
-    if (req.params.userId === gate.forum.ownerUserId) { reply.code(409); return { error: "The owner can't be removed." }; }
+    if (req.params.userId === gate.forum.ownerUserId) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.common.ownerCantBeRemoved") }; }
     const row = (await db.select().from(forumMembers)
       .where(and(eq(forumMembers.forumId, gate.forum.id), eq(forumMembers.userId, req.params.userId))).limit(1))[0];
     if (!row) { reply.code(404); return { error: "not a member here" }; }
-    if (row.role === "mod") { reply.code(409); return { error: "Demote this moderator from the Roles tab first." }; }
+    if (row.role === "mod") { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.demoteFirst") }; }
     await db.delete(forumMembers)
       .where(and(eq(forumMembers.forumId, gate.forum.id), eq(forumMembers.userId, req.params.userId)));
     await recordAudit(db, {
@@ -298,18 +299,18 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
     if (!me) { reply.code(401); return { error: "auth" }; }
     const a = await forumAuthority(db, me, req.params.id);
     if (!a.forum) { reply.code(404); return { error: "no forum" }; }
-    if (a.ban) { reply.code(403); return { error: "You are banned from this forum." }; }
+    if (a.ban) { reply.code(403); return { error: tFor(me.locale, "errors:server.forums.banned") }; }
     let body: z.infer<typeof reportBody>;
     try { body = reportBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
     const msg = (await db.select().from(messages).where(eq(messages.id, body.messageId)).limit(1))[0];
-    if (!msg || msg.deletedAt) { reply.code(404); return { error: "That post no longer exists." }; }
+    if (!msg || msg.deletedAt) { reply.code(404); return { error: tFor(me.locale, "errors:server.forums.postGone") }; }
     // The post must live on a board of THIS forum.
     const room = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, msg.roomId)).limit(1))[0];
-    if (room?.forumId !== a.forum.id) { reply.code(400); return { error: "That post isn't in this forum." }; }
+    if (room?.forumId !== a.forum.id) { reply.code(400); return { error: tFor(me.locale, "errors:server.forums.postNotInForum") }; }
     // Don't let someone report their own post (use edit/delete), and dedupe
     // an existing OPEN report by this reporter for this post.
-    if (msg.userId === me.id) { reply.code(409); return { error: "You can't report your own post." }; }
+    if (msg.userId === me.id) { reply.code(409); return { error: tFor(me.locale, "errors:server.forums.reportOwnPost") }; }
     const existing = (await db.select({ id: forumReports.id }).from(forumReports)
       .where(and(
         eq(forumReports.forumId, a.forum.id),
@@ -437,7 +438,7 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
     if (!a.forum) return { fail: { code: 404 as const, error: "no forum" } };
     const canManage = forumCan(a, "manage_prefixes");
     const canCustom = !!a.forum.allowCustomTags && forumCan(a, "create_tags");
-    if (!canManage && !canCustom) return { fail: { code: 403 as const, error: "you can't add tags to this forum" } };
+    if (!canManage && !canCustom) return { fail: { code: 403 as const, error: tFor(me.locale, "errors:server.forums.cantAddTags") } };
     return { me, forum: a.forum, authority: a, canManage };
   }
 
@@ -457,7 +458,7 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
     try { body = prefixBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
     const count = Number((await db.select({ n: sql<number>`count(*)` }).from(forumPrefixes).where(eq(forumPrefixes.forumId, gate.forum.id)))[0]?.n ?? 0);
-    if (count >= FORUM_MAX_PREFIXES) { reply.code(409); return { error: `A forum can have at most ${FORUM_MAX_PREFIXES} prefixes.` }; }
+    if (count >= FORUM_MAX_PREFIXES) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.prefixLimit", { max: FORUM_MAX_PREFIXES }) }; }
     // Category scope + staff-only only honored for full curators; a create_tags
     // mint is always a plain, member-assignable global tag.
     const categoryIds = gate.canManage ? await validPrefixCategoryIds(gate.forum.id, body.categoryIds) : [];
@@ -574,7 +575,7 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
     try { body = groupBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
     const count = Number((await db.select({ n: sql<number>`count(*)` }).from(forumUsergroups).where(eq(forumUsergroups.forumId, gate.forum.id)))[0]?.n ?? 0);
-    if (count >= FORUM_MAX_USERGROUPS) { reply.code(409); return { error: `A forum can have at most ${FORUM_MAX_USERGROUPS} usergroups.` }; }
+    if (count >= FORUM_MAX_USERGROUPS) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.usergroupLimit", { max: FORUM_MAX_USERGROUPS }) }; }
     const requested = (body.permissions ?? []).filter(isForumPermission) as ForumPermission[];
     const perms = clampForumPerms(requested, gate.authority.permissions, gate.authority.isOwner);
     const rules = await validAutoRules(gate.forum.id, parseForumAutoRules(JSON.stringify(body.autoRules ?? [])));
@@ -632,7 +633,7 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
     const group = (await db.select().from(forumUsergroups)
       .where(and(eq(forumUsergroups.id, req.params.gid), eq(forumUsergroups.forumId, gate.forum.id))).limit(1))[0];
     if (!group) { reply.code(404); return { error: "no such usergroup" }; }
-    if (group.isDefault) { reply.code(400); return { error: "The default group can't be deleted." }; }
+    if (group.isDefault) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.common.defaultGroupCantDelete") }; }
     await db.delete(forumUsergroups).where(eq(forumUsergroups.id, group.id)); // cascades members
     await recordAudit(db, { actorUserId: gate.me.id, action: "forum_usergroup_change",
       metadata: { forumId: gate.forum.id, slug: gate.forum.slug, op: "delete", group: group.name } });
@@ -665,11 +666,11 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
     const group = (await db.select().from(forumUsergroups)
       .where(and(eq(forumUsergroups.id, req.params.gid), eq(forumUsergroups.forumId, gate.forum.id))).limit(1))[0];
     if (!group) { reply.code(404); return { error: "no such usergroup" }; }
-    if (group.isDefault) { reply.code(400); return { error: "Everyone already belongs to the default group." }; }
+    if (group.isDefault) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.common.everyoneInDefaultGroup") }; }
     let body: z.infer<typeof groupMemberBody>;
     try { body = groupMemberBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const target = await resolveForumTarget(body.target);
+    const target = await resolveForumTarget(body.target, gate.me.locale);
     if (!target.ok) { reply.code(404); return { error: target.error }; }
     await db.insert(forumUsergroupMembers)
       .values({ groupId: group.id, userId: target.userId, addedBy: gate.me.id, isAuto: false })
@@ -685,7 +686,7 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
     const group = (await db.select().from(forumUsergroups)
       .where(and(eq(forumUsergroups.id, req.params.gid), eq(forumUsergroups.forumId, gate.forum.id))).limit(1))[0];
     if (!group) { reply.code(404); return { error: "no such usergroup" }; }
-    if (group.isDefault) { reply.code(400); return { error: "The default group has no removable members." }; }
+    if (group.isDefault) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.common.defaultGroupNoRemovable") }; }
     await db.delete(forumUsergroupMembers)
       .where(and(eq(forumUsergroupMembers.groupId, group.id), eq(forumUsergroupMembers.userId, req.params.userId)));
     await recordAudit(db, { actorUserId: gate.me.id, action: "forum_usergroup_change", targetUserId: req.params.userId,
@@ -721,15 +722,15 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
     let body: z.infer<typeof modBody>;
     try { body = modBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const target = await resolveForumTarget(body.target);
+    const target = await resolveForumTarget(body.target, gate.me.locale);
     if (!target.ok) { reply.code(404); return { error: target.error }; }
     if (target.userId === gate.forum.ownerUserId) {
-      reply.code(409); return { error: "The owner already holds every power - no mod chair needed." };
+      reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.ownerHoldsAllPowers") };
     }
     const ban = (await db.select().from(forumBans)
       .where(and(eq(forumBans.forumId, gate.forum.id), eq(forumBans.userId, target.userId))).limit(1))[0];
     if (ban && (!ban.until || +ban.until > Date.now())) {
-      reply.code(409); return { error: `${target.username} is banned from this forum - lift the ban first.` };
+      reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.targetBanned", { name: target.username }) };
     }
     const requested = body.permissions
       ? (body.permissions.filter(isForumModPermission) as ForumModPermission[])
@@ -849,16 +850,16 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
     let body: z.infer<typeof banBody>;
     try { body = banBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const target = await resolveForumTarget(body.target);
+    const target = await resolveForumTarget(body.target, gate.me.locale);
     if (!target.ok) { reply.code(404); return { error: target.error }; }
-    if (target.userId === gate.me.id) { reply.code(409); return { error: "You can't ban yourself." }; }
-    if (target.userId === gate.forum.ownerUserId) { reply.code(409); return { error: "The forum owner can't be banned from their own forum." }; }
-    const targetUser = (await db.select({ role: users.role }).from(users)
+    if (target.userId === gate.me.id) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.common.cantBanSelf") }; }
+    if (target.userId === gate.forum.ownerUserId) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.ownerCantBeBanned") }; }
+    const targetUser = (await db.select({ role: users.role, locale: users.locale }).from(users)
       .where(eq(users.id, target.userId)).limit(1))[0];
     if (targetUser && isModeratorRole(targetUser.role)) {
       // Mirrors the block feature's posture: site staff can't be walled
       // out of public surfaces they may need to moderate.
-      reply.code(409); return { error: `${target.username} is site staff and can't be forum-banned.` };
+      reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.staffCantBeBanned", { name: target.username }) };
     }
 
     const until = body.hours ? new Date(Date.now() + body.hours * 3_600_000) : null;
@@ -900,7 +901,9 @@ export async function registerForumModerationRoutes(app: FastifyInstance, db: Db
         affectedRooms.add(inRoom);
         s.emit("error:notice", {
           code: "FORUM_BANNED",
-          message: `You have been banned from the "${gate.forum.name}" forum${until ? ` until ${until.toISOString().slice(0, 10)}` : ""}.`,
+          message: until
+            ? tFor(targetUser?.locale ?? null, "errors:server.forums.bannedNoticeUntil", { name: gate.forum.name, date: until.toISOString().slice(0, 10) })
+            : tFor(targetUser?.locale ?? null, "errors:server.forums.bannedNotice", { name: gate.forum.name }),
         });
         if (landing) {
           s.join(`room:${landing.id}`);

@@ -102,6 +102,16 @@ export const users = sqliteTable(
      */
     uiFontScale: text("ui_font_scale"),
     /**
+     * Persisted UI language (migration 0338). A SUPPORTED_LOCALES code
+     * ("en" | "es"; whitelist enforced in PUT /me/profile, not here, so a
+     * new locale is a code change only). Null = "System default": the
+     * client auto-detects (localStorage → navigator.language → en) and
+     * server-side rendering for this user falls back to en. Server
+     * notices/emails resolve the recipient's language from this column
+     * once Phase 3 lands.
+     */
+    locale: text("locale"),
+    /**
      * Desktop notification preference:
      *   "off"      - never show toasts
      *   "mentions" - only whispers + announcements
@@ -235,6 +245,15 @@ export const users = sqliteTable(
       .notNull()
       .default(false),
     storyCwBlocklist: text("story_cw_blocklist").notNull().default(""),
+    /**
+     * Profile language tags (migration 0342). Comma-separated lowercase
+     * keys from the shared `LANGUAGE_TAGS` catalog — the languages this
+     * player knows and roleplays in, in their chosen display order.
+     * Rendered as flag chips in the profile hero (characters show their
+     * owner's tags). '' = none (row hidden). Same parseTagList /
+     * serializeTagList round-trip as storyCwBlocklist.
+     */
+    languages: text("languages").notNull().default(""),
     /**
      * Userlist display preference. When true AND the user has a
      * resolved rank, the rooms-tree row renders the rank sigil in
@@ -373,6 +392,34 @@ export const users = sqliteTable(
      * gate.
      */
     isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Date of birth, ISO YYYY-MM-DD (migration 0329) — the ONLY stored age
+     * signal. NULL = legacy account from before DOB collection; those all
+     * attested 18+ at signup, so `auth/ageGate.ts` derives them as adult.
+     * Adult vs minor is COMPUTED from this at read time (UTC, date-only;
+     * adult ON the 18th birthday) — never stored, so accounts graduate
+     * automatically. Set once at registration; only admins holding
+     * `edit_user_dob` may correct it (audited). Never in any payload other
+     * than the owner's own settings/export and the secure admin directory.
+     */
+    birthdate: text("birthdate"),
+    /**
+     * Adult soft preference "Hide 18+ content" (migration 0329). Feeds
+     * `canSeeNsfw()` for the SOFT tier only (forum topic lists, searches,
+     * discovery/catalog listings). Irrelevant for minors — they can never
+     * see NSFW regardless. Default false so existing adults see today's
+     * exact behavior.
+     */
+    hideNsfw: integer("hide_nsfw", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Minor isolation mode, "only see members under 18 and staff"
+     * (migration 0334). Opt-in, minor-only (rejected server-side for adult
+     * accounts). While the account is under 18 this acts as a virtual
+     * MUTUAL block against every adult non-staff account; site staff stay
+     * visible both ways. The enforcement predicate also checks isMinor, so
+     * the flag goes inert automatically at 18 without a write.
+     */
+    isolateFromAdults: integer("isolate_from_adults", { mode: "boolean" }).notNull().default(false),
     /**
      * Hash of the new-user welcome message this user has acknowledged.
      * Compared against the current site-settings hash on /me/profile to

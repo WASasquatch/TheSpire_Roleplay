@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorldApplicationEntry, WorldDetail } from "@thekeep/shared";
 import { WORLD_APP_ANSWER_MAX_LEN } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
@@ -32,6 +33,7 @@ interface Props {
  * other one-off form in the app.
  */
 export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted }: Props) {
+  const { t } = useTranslation("worlds");
   const [loading, setLoading] = useState(true);
   const [questions, setQuestions] = useState<string[]>([]);
   // Track an existing pending application so we can show "you've
@@ -56,7 +58,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
         if ("private" in detail) {
           // Catalog already filtered for visibility, but if a race
           // makes a private stub land here, surface it cleanly.
-          setError("This world is private, you'd need to sign in or be invited.");
+          setError(t("application.privateWorld"));
           setQuestions([]);
           setAnswers([]);
           return;
@@ -71,9 +73,11 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
           setExistingPending(detail.viewerApplication);
         }
       })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "load failed"); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : t("errors.loadFailed")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
+    // `t` deliberately omitted: a language flip must not refetch the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worldId]);
 
   async function submit() {
@@ -98,7 +102,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
       const body = (await r.json()) as { ok: true; application: WorldApplicationEntry };
       onSubmitted(body.application);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "submit failed");
+      setError(e instanceof Error ? e.message : t("errors.submitFailed"));
     } finally {
       setBusy(false);
     }
@@ -118,7 +122,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
       // shows fresh, the user can re-fill and submit again.
       setExistingPending(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "withdraw failed");
+      setError(e instanceof Error ? e.message : t("errors.withdrawFailed"));
     } finally {
       setBusy(false);
     }
@@ -132,7 +136,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-3 py-2">
           <div>
-            <h2 className="font-action text-sm">Apply to join</h2>
+            <h2 className="font-action text-sm">{t("application.title")}</h2>
             <p className="text-[10px] text-keep-muted">{worldName}</p>
           </div>
           <CloseButton onClick={onClose} />
@@ -146,7 +150,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
           ) : null}
 
           {loading ? (
-            <p className="italic text-keep-muted">Loading questions…</p>
+            <p className="italic text-keep-muted">{t("application.loadingQuestions")}</p>
           ) : existingPending ? (
             // The applicant has a pending application already. Show
             // it read-only with a Withdraw button so they can cancel
@@ -155,19 +159,19 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
             // a time.
             <div className="space-y-2">
               <p className="text-keep-text">
-                You already have a pending application for this world. The owner hasn't reviewed it yet.
+                {t("application.alreadyPending")}
               </p>
               <ul className="space-y-2">
                 {existingPending.questions.map((q, i) => (
                   <li key={i} className="rounded border border-keep-rule bg-keep-banner/30 p-2">
                     <div className="text-keep-muted">{q}</div>
                     <div className="mt-1 whitespace-pre-wrap text-keep-text">
-                      {existingPending.answers[i] || <span className="italic text-keep-muted">(empty)</span>}
+                      {existingPending.answers[i] || <span className="italic text-keep-muted">{t("application.emptyAnswer")}</span>}
                     </div>
                   </li>
                 ))}
                 {existingPending.questions.length === 0 ? (
-                  <li className="italic text-keep-muted">No questions, just intent to join.</li>
+                  <li className="italic text-keep-muted">{t("application.noQuestionsIntent")}</li>
                 ) : null}
               </ul>
               <div className="flex gap-2">
@@ -177,14 +181,14 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
                   disabled={busy}
                   className="rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
                 >
-                  {busy ? "Withdrawing…" : "Withdraw application"}
+                  {busy ? t("application.withdrawing") : t("application.withdraw")}
                 </button>
                 <button
                   type="button"
                   onClick={onClose}
                   className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-keep-muted hover:bg-keep-banner"
                 >
-                  Close
+                  {t("common:close")}
                 </button>
               </div>
             </div>
@@ -192,7 +196,7 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
             <>
               {questions.length === 0 ? (
                 <p className="text-keep-text">
-                  The owner hasn't set any questions, submit to register your interest in joining.
+                  {t("application.noQuestionsSubmit")}
                 </p>
               ) : (
                 <ul className="space-y-2">
@@ -227,14 +231,14 @@ export function ApplicationFormModal({ worldId, worldName, onClose, onSubmitted 
                   disabled={busy}
                   className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
                 >
-                  {busy ? "Submitting…" : "Submit application"}
+                  {busy ? t("application.submitting") : t("application.submit")}
                 </button>
                 <button
                   type="button"
                   onClick={onClose}
                   className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-keep-muted hover:bg-keep-banner"
                 >
-                  Cancel
+                  {t("common:cancel")}
                 </button>
               </div>
             </>

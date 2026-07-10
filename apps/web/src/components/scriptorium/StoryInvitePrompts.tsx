@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { Socket } from "socket.io-client";
 import type {
   ClientToServerEvents,
@@ -26,6 +27,7 @@ interface Props {
  * counterpart).
  */
 export function StoryInvitePrompts({ socket, onError }: Props) {
+  const { t } = useTranslation("scriptorium");
   const [invites, setInvites] = useState<StoryCollaboratorInvite[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
 
@@ -73,17 +75,28 @@ export function StoryInvitePrompts({ socket, onError }: Props) {
         >
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-baseline gap-1.5">
-              <span className="text-keep-muted">
-                {inv.invitedByUsername ?? inv.storyAuthorUsername}
-              </span>
-              <span>invited you to</span>
-              <b>{inv.storyTitle}</b>
+              <Trans
+                t={t}
+                i18nKey="invites.line"
+                values={{
+                  name: inv.invitedByUsername ?? inv.storyAuthorUsername,
+                  title: inv.storyTitle,
+                }}
+                components={[
+                  <span key="0" className="text-keep-muted" />,
+                  <span key="1" />,
+                  <b key="2" />,
+                ]}
+              />
               <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${roleClass(inv.role)}`}>
-                {roleLabel(inv.role)}
+                {t(`roles.${inv.role}`)}
               </span>
             </div>
             <div className="text-[10px] text-keep-muted">
-              by {inv.storyAuthorUsername} · /stories/@{inv.storyAuthorUsername.toLowerCase()}/{inv.storySlug}
+              {t("invites.byLine", {
+                author: inv.storyAuthorUsername,
+                path: `/stories/@${inv.storyAuthorUsername.toLowerCase()}/${inv.storySlug}`,
+              })}
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -93,7 +106,7 @@ export function StoryInvitePrompts({ socket, onError }: Props) {
               disabled={busyId === inv.storyId}
               className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
             >
-              Accept
+              {t("invites.accept")}
             </button>
             <button
               type="button"
@@ -101,7 +114,7 @@ export function StoryInvitePrompts({ socket, onError }: Props) {
               disabled={busyId === inv.storyId}
               className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs text-keep-muted hover:text-keep-text"
             >
-              Decline
+              {t("invites.decline")}
             </button>
           </div>
         </div>
@@ -110,9 +123,6 @@ export function StoryInvitePrompts({ socket, onError }: Props) {
   );
 }
 
-function roleLabel(r: StoryCollaboratorRole): string {
-  return r === "co_author" ? "Co-author" : r.charAt(0).toUpperCase() + r.slice(1);
-}
 function roleClass(r: StoryCollaboratorRole): string {
   switch (r) {
     case "reader":    return "bg-keep-muted/25 text-keep-muted";

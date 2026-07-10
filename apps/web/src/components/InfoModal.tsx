@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import { Modal } from "./cosmetics/Modal.js";
 import { CloseButton } from "./shared/CloseButton.js";
 
@@ -30,6 +31,7 @@ interface Props {
  * `Modal` component).
  */
 export function InfoModal({ title, body, onClose }: Props) {
+  const { t } = useTranslation("common");
   return (
     <Modal onClose={onClose} zIndex={45} variant="centered">
       <div
@@ -44,7 +46,9 @@ export function InfoModal({ title, body, onClose }: Props) {
           {body}
         </pre>
         <div className="shrink-0 border-t border-keep-rule bg-keep-banner/40 px-3 py-1.5 text-[10px] text-keep-muted">
-          Press <kbd className="rounded border border-keep-rule bg-keep-bg px-1">Esc</kbd> or click outside to close.
+          <Trans t={t} i18nKey="infoModal.escHint">
+            Press <kbd className="rounded border border-keep-rule bg-keep-bg px-1">Esc</kbd> or click outside to close.
+          </Trans>
         </div>
       </div>
     </Modal>

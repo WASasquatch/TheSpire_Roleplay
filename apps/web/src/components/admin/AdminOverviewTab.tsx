@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Role } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDate, formatDateTime, formatNumber, formatTime } from "../../lib/intlFormat.js";
 
 /* =============================================================
  * OVERVIEW TAB
@@ -52,6 +54,7 @@ interface AdminOverview {
 }
 
 export function OverviewTab() {
+  const { t } = useTranslation("admin");
   const [data, setData] = useState<AdminOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,94 +73,94 @@ export function OverviewTab() {
         const j = (await r.json()) as AdminOverview;
         if (!cancelled) { setData(j); setError(null); }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "load failed");
+        if (!cancelled) setError(err instanceof Error ? err.message : t("loadFailed"));
       }
     }
     load();
     const id = window.setInterval(load, 30_000);
     return () => { cancelled = true; window.clearInterval(id); };
-  }, []);
+  }, [t]);
 
   if (!data) {
-    return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
+    return <div className="text-keep-muted text-xs">{error ?? t("loading")}</div>;
   }
 
   return (
     <div className="space-y-4">
       <p className="text-xs text-keep-muted">
-        Live snapshot of activity across the site. Auto-refreshes every 30 seconds.
+        {t("overview.description")}
       </p>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <OverviewCard title="Online now" hint="Connected sockets, deduped per user.">
+        <OverviewCard anchor="overview.onlineNow" title={t("overview.onlineNow")} hint={t("overview.onlineNowHint")}>
           <BigStat value={data.online} accent={data.online > 0} />
         </OverviewCard>
 
-        <OverviewCard title="Registered users" hint="Total accounts, excluding the system sentinel.">
+        <OverviewCard anchor="overview.registeredUsers" title={t("overview.registeredUsers")} hint={t("overview.registeredUsersHint")}>
           <BigStat value={data.users.total} />
           <SubStats items={[
-            { label: "new 7d", value: data.users.newLast7d },
-            { label: "new 30d", value: data.users.newLast30d },
+            { label: t("overview.new7d"), value: data.users.newLast7d },
+            { label: t("overview.new30d"), value: data.users.newLast30d },
           ]} />
         </OverviewCard>
 
-        <OverviewCard title="Active users" hint="Distinct logins inside each window. Older buckets undercount if session TTL is shorter than the window.">
+        <OverviewCard anchor="overview.activeUsers" title={t("overview.activeUsers")} hint={t("overview.activeUsersHint")}>
           <SubStats items={[
-            { label: "DAU", value: data.users.dau },
-            { label: "WAU", value: data.users.wau },
-            { label: "MAU", value: data.users.mau },
+            { label: t("overview.dau"), value: data.users.dau },
+            { label: t("overview.wau"), value: data.users.wau },
+            { label: t("overview.mau"), value: data.users.mau },
           ]} />
         </OverviewCard>
 
-        <OverviewCard title="Rooms" hint="Public chambers + private rooms.">
+        <OverviewCard anchor="overview.rooms" title={t("overview.rooms")} hint={t("overview.roomsHint")}>
           <BigStat value={data.rooms.total} />
           <SubStats items={[
-            { label: "public", value: data.rooms.public },
-            { label: "private", value: data.rooms.private },
+            { label: t("overview.public"), value: data.rooms.public },
+            { label: t("overview.private"), value: data.rooms.private },
           ]} />
         </OverviewCard>
 
-        <OverviewCard title="Chat messages" hint="Chat volume, excludes presence/system rows and soft-deleted messages.">
+        <OverviewCard anchor="overview.chatMessages" title={t("overview.chatMessages")} hint={t("overview.chatMessagesHint")}>
           <SubStats items={[
-            { label: "24h", value: data.messages.last24h },
-            { label: "7d", value: data.messages.last7d },
-            { label: "30d", value: data.messages.last30d },
+            { label: t("overview.h24"), value: data.messages.last24h },
+            { label: t("overview.d7"), value: data.messages.last7d },
+            { label: t("overview.d30"), value: data.messages.last30d },
           ]} />
         </OverviewCard>
 
-        <OverviewCard title="Forum activity" hint="Topics and replies across all nested-mode rooms.">
+        <OverviewCard anchor="overview.forumActivity" title={t("overview.forumActivity")} hint={t("overview.forumActivityHint")}>
           <SubStats items={[
-            { label: "topics", value: data.forum.topics },
-            { label: "replies", value: data.forum.replies },
-            { label: "topics 7d", value: data.forum.topicsLast7d },
-            { label: "replies 7d", value: data.forum.repliesLast7d },
+            { label: t("overview.topics"), value: data.forum.topics },
+            { label: t("overview.replies"), value: data.forum.replies },
+            { label: t("overview.topics7d"), value: data.forum.topicsLast7d },
+            { label: t("overview.replies7d"), value: data.forum.repliesLast7d },
           ]} />
         </OverviewCard>
 
-        <OverviewCard title="Content" hint="User-authored material across the site.">
+        <OverviewCard anchor="overview.content" title={t("overview.content")} hint={t("overview.contentHint")}>
           <SubStats items={[
-            { label: "characters", value: data.content.characters },
-            { label: "worlds", value: data.content.worlds },
+            { label: t("overview.characters"), value: data.content.characters },
+            { label: t("overview.worlds"), value: data.content.worlds },
           ]} />
         </OverviewCard>
 
-        <OverviewCard title="Moderation (7d)" hint="Reports filed and audit-log actions in the last week.">
+        <OverviewCard anchor="overview.moderation7d" title={t("overview.moderation7d")} hint={t("overview.moderation7dHint")}>
           <SubStats items={[
-            { label: "reports", value: data.moderation.reportsLast7d },
-            { label: "audit", value: data.moderation.auditLast7d },
+            { label: t("overview.reports"), value: data.moderation.reportsLast7d },
+            { label: t("overview.audit"), value: data.moderation.auditLast7d },
           ]} />
         </OverviewCard>
       </div>
 
       <RecentRegistrationsPanel rows={data.users.recentRegistrations} />
 
-      <fieldset className="rounded border border-keep-rule p-3">
-        <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">This week</legend>
+      <fieldset data-admin-anchor="overview.thisWeek" className="rounded border border-keep-rule p-3">
+        <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">{t("overview.thisWeek")}</legend>
         <div className="space-y-2">
-          <SparklineRow label="Messages" series={data.series.messages} colorClass="bg-keep-action/70" />
-          <SparklineRow label="Topics" series={data.series.topics} colorClass="bg-keep-accent/70" />
-          <SparklineRow label="Logins" series={data.series.logins} colorClass="bg-keep-action/70" />
-          <SparklineRow label="Registrations" series={data.series.registrations} colorClass="bg-keep-accent/70" />
+          <SparklineRow label={t("overview.seriesMessages")} series={data.series.messages} colorClass="bg-keep-action/70" />
+          <SparklineRow label={t("overview.seriesTopics")} series={data.series.topics} colorClass="bg-keep-accent/70" />
+          <SparklineRow label={t("overview.seriesLogins")} series={data.series.logins} colorClass="bg-keep-action/70" />
+          <SparklineRow label={t("overview.seriesRegistrations")} series={data.series.registrations} colorClass="bg-keep-accent/70" />
           <SparklineAxis days={data.series.messages.map((d) => d.day)} />
         </div>
       </fieldset>
@@ -167,9 +170,11 @@ export function OverviewTab() {
   );
 }
 
-function OverviewCard({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+function OverviewCard({ title, hint, anchor, children }: { title: string; hint?: string; anchor?: string; children: React.ReactNode }) {
   return (
-    <fieldset className="rounded border border-keep-rule p-3" title={hint}>
+    // `anchor` is the find-a-setting jump target (adminSearchIndex.ts): the
+    // card's own catalog label key, stamped verbatim as data-admin-anchor.
+    <fieldset {...(anchor ? { "data-admin-anchor": anchor } : {})} className="rounded border border-keep-rule p-3" title={hint}>
       <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">{title}</legend>
       <div className="space-y-2">{children}</div>
     </fieldset>
@@ -184,6 +189,7 @@ function OverviewCard({ title, hint, children }: { title: string; hint?: string;
  * "did anyone sign up yesterday" reads in local time.
  */
 function RecentRegistrationsPanel({ rows }: { rows: AdminOverviewRecentReg[] }) {
+  const { t } = useTranslation("admin");
   const dayKeys: { key: string; label: string; date: Date }[] = [];
   const now = new Date();
   for (let i = 0; i < 5; i++) {
@@ -191,7 +197,7 @@ function RecentRegistrationsPanel({ rows }: { rows: AdminOverviewRecentReg[] }) 
     d.setDate(d.getDate() - i);
     d.setHours(0, 0, 0, 0);
     const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    const label = i === 0 ? "Today" : i === 1 ? "Yesterday" : d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+    const label = i === 0 ? t("overview.today") : i === 1 ? t("overview.yesterday") : formatDate(d.getTime(), { weekday: "short", month: "short", day: "numeric" });
     dayKeys.push({ key, label, date: d });
   }
   const buckets = new Map<string, AdminOverviewRecentReg[]>();
@@ -206,10 +212,10 @@ function RecentRegistrationsPanel({ rows }: { rows: AdminOverviewRecentReg[] }) 
   return (
     <fieldset className="rounded border border-keep-rule p-3">
       <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">
-        Recent registrations · last 5 days · {total} {total === 1 ? "account" : "accounts"}
+        {t("overview.recentRegistrations", { count: total })}
       </legend>
       {total === 0 ? (
-        <p className="text-xs text-keep-muted">No new accounts in the last 5 days.</p>
+        <p className="text-xs text-keep-muted">{t("overview.noNewAccounts")}</p>
       ) : (
         <div className="space-y-2">
           {dayKeys.map(({ key, label }) => {
@@ -218,30 +224,30 @@ function RecentRegistrationsPanel({ rows }: { rows: AdminOverviewRecentReg[] }) 
               <div key={key}>
                 <div className="flex items-baseline gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
                   <span className="font-semibold text-keep-text/80">{label}</span>
-                  <span className="tabular-nums">{dayRows.length} {dayRows.length === 1 ? "signup" : "signups"}</span>
+                  <span className="tabular-nums">{t("overview.signups", { count: dayRows.length })}</span>
                 </div>
                 {dayRows.length === 0 ? (
                   <div className="text-xs text-keep-muted/60 italic">-</div>
                 ) : (
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {dayRows.map((u) => {
-                      const time = new Date(u.createdAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+                      const time = formatTime(u.createdAt, { hour: "2-digit", minute: "2-digit" });
                       const neverLoggedIn = u.lastLoginAt == null;
                       const roleTag = u.role !== "user" ? u.role : null;
                       return (
                         <span
                           key={u.userId}
                           className="inline-flex items-center gap-1 rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-xs"
-                          title={`Registered ${new Date(u.createdAt).toLocaleString()}${u.lastLoginAt ? `\nLast login: ${new Date(u.lastLoginAt).toLocaleString()}` : "\nHasn't logged in since"}`}
+                          title={`${t("overview.registeredTitle", { time: formatDateTime(u.createdAt) })}${u.lastLoginAt ? t("overview.lastLoginLine", { time: formatDateTime(u.lastLoginAt) }) : t("overview.neverLoggedInLine")}`}
                         >
                           <span className="font-semibold">{u.username}</span>
                           {roleTag ? (
                             <span className="rounded bg-keep-accent/20 px-1 text-[9px] uppercase tracking-widest text-keep-accent">
-                              {roleTag === "masteradmin" ? "master" : roleTag}
+                              {t(`overview.role.${roleTag}`)}
                             </span>
                           ) : null}
                           {neverLoggedIn ? (
-                            <span className="text-[10px] text-keep-muted">· never logged in</span>
+                            <span className="text-[10px] text-keep-muted">{t("overview.neverLoggedInChip")}</span>
                           ) : null}
                           <span className="text-[10px] text-keep-muted/70 tabular-nums">· {time}</span>
                         </span>
@@ -261,7 +267,7 @@ function RecentRegistrationsPanel({ rows }: { rows: AdminOverviewRecentReg[] }) 
 function BigStat({ value, accent }: { value: number; accent?: boolean }) {
   return (
     <div className={`text-2xl font-semibold tabular-nums ${accent ? "text-keep-action" : "text-keep-text"}`}>
-      {value.toLocaleString()}
+      {formatNumber(value)}
     </div>
   );
 }
@@ -271,7 +277,7 @@ function SubStats({ items }: { items: { label: string; value: number }[] }) {
     <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs">
       {items.map((it) => (
         <div key={it.label} className="flex items-baseline gap-1.5">
-          <span className="font-semibold tabular-nums text-keep-text">{it.value.toLocaleString()}</span>
+          <span className="font-semibold tabular-nums text-keep-text">{formatNumber(it.value)}</span>
           <span className="text-keep-muted">{it.label}</span>
         </div>
       ))}
@@ -287,13 +293,14 @@ function SubStats({ items }: { items: { label: string; value: number }[] }) {
  * the bottom in `SparklineAxis` rather than under every row.
  */
 function SparklineRow({ label, series, colorClass }: { label: string; series: OverviewDayPoint[]; colorClass: string }) {
+  const { t } = useTranslation("admin");
   if (series.length === 0) return null;
   const max = Math.max(1, ...series.map((d) => d.count));
   const total = series.reduce((s, d) => s + d.count, 0);
   return (
     <div
       className="grid items-center gap-2 text-xs sm:grid-cols-[110px_1fr_64px]"
-      title={`${total.toLocaleString()} this week`}
+      title={t("overview.thisWeekTotal", { total: formatNumber(total) })}
     >
       <span className="uppercase tracking-widest text-keep-muted">{label}</span>
       <div className="flex h-8 items-end gap-1">
@@ -305,7 +312,7 @@ function SparklineRow({ label, series, colorClass }: { label: string; series: Ov
             <div
               key={d.day}
               className="flex flex-1 items-end"
-              title={`${d.day}: ${d.count.toLocaleString()}`}
+              title={t("overview.dayCount", { day: d.day, count: formatNumber(d.count) })}
             >
               <div className={`${colorClass} w-full rounded-sm`} style={{ height: `${h}px` }} />
             </div>
@@ -313,7 +320,7 @@ function SparklineRow({ label, series, colorClass }: { label: string; series: Ov
         })}
       </div>
       <span className="text-right font-semibold tabular-nums text-keep-text">
-        {total.toLocaleString()}
+        {formatNumber(total)}
       </span>
     </div>
   );

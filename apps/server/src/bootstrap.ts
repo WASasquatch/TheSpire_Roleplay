@@ -11,14 +11,60 @@ import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 import { Server as IoServer } from "socket.io";
-import { ZodError } from "zod";
+import { ZodError, type ZodIssue } from "zod";
 import type { Logger } from "pino";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { recordHttpIp } from "./auth/ipLog.js";
 import { isIpBannedCachedSync } from "./auth/ipBan.js";
-import { readBearerToken } from "./routes/auth.js";
+import { parseAcceptLanguage, tFor } from "./i18n.js";
+import { MASTER_USERNAME_RULE_MESSAGE, readBearerToken } from "./routes/auth.js";
 import { recordServerPageView } from "./analytics/recorder.js";
+
+/**
+ * Known server-side zod validation messages → catalog keys
+ * (errors:server.validation.*). The ZodError funnel below otherwise sends
+ * raw English text (zod library defaults plus our custom schema copy)
+ * regardless of the caller's language; mapping the known messages lets the
+ * response localize to the request's Accept-Language. Unknown messages pass
+ * through untranslated, and en output is byte-identical either way because
+ * the en catalog values equal the source strings. Client forms pre-validate
+ * with their own localized copy — this funnel is the backstop for direct
+ * POSTs and client/server drift.
+ */
+const ZOD_MESSAGE_KEYS: Record<string, string> = {
+  Required: "errors:server.validation.required",
+  "Invalid email": "errors:server.validation.invalidEmail",
+  "you must accept the disclaimer to register": "errors:server.validation.acceptDisclaimer",
+  "enter your date of birth": "errors:server.validation.birthdate",
+  [MASTER_USERNAME_RULE_MESSAGE]: "errors:server.validation.usernameRule",
+};
+
+/**
+ * Localize zod's own built-in copy for the string length checks our schemas
+ * lean on (`.min()` / `.max()` — the registration form's password/username
+ * rules hit these on the NORMAL path, since AuthGate doesn't pre-validate
+ * lengths). Matched by ISSUE CODE, not message text, so it can't miss a
+ * zod version's rewording. Only the exact shapes whose en catalog value is
+ * byte-identical to zod's default sentence are mapped (inclusive, non-exact
+ * string bounds); every other builtin (exact/exclusive bounds, arrays,
+ * numbers) passes through untranslated so en output can never drift.
+ */
+function zodBuiltinMessage(issue: ZodIssue, locale: ReturnType<typeof parseAcceptLanguage>): string {
+  if (
+    issue.code === "too_small" && issue.type === "string"
+    && issue.inclusive && !issue.exact
+  ) {
+    return tFor(locale, "errors:server.validation.stringTooShort", { n: Number(issue.minimum) });
+  }
+  if (
+    issue.code === "too_big" && issue.type === "string"
+    && issue.inclusive && !issue.exact
+  ) {
+    return tFor(locale, "errors:server.validation.stringTooLong", { n: Number(issue.maximum) });
+  }
+  return issue.message;
+}
 
 /**
  * Map a request URL to the SPA / document-route TEMPLATE for analytics
@@ -351,13 +397,21 @@ export async function createApp(deps: {
   }
 
   // ZodError → 400 with a readable list of issues. Without this, our routes'
-  // `schema.parse(req.body)` calls bubble up as 500s.
-  app.setErrorHandler((err, _req, reply) => {
+  // `schema.parse(req.body)` calls bubble up as 500s. Known messages localize
+  // to the request's Accept-Language via ZOD_MESSAGE_KEYS (en is byte-identical).
+  app.setErrorHandler((err, req, reply) => {
     if (err instanceof ZodError) {
+      const locale = parseAcceptLanguage(req.headers["accept-language"]);
       reply.code(400);
       return reply.send({
         error: "validation",
-        issues: err.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+        issues: err.issues.map((i) => {
+          const key = ZOD_MESSAGE_KEYS[i.message];
+          return {
+            path: i.path.join("."),
+            message: key ? tFor(locale, key) : zodBuiltinMessage(i, locale),
+          };
+        }),
       });
     }
     throw err;

@@ -1,0 +1,501 @@
+{
+  "appName": "The Spire",
+  "cancel": "Cancelar",
+  "clear": "Quitar",
+  "close": "Cerrar",
+  "copied": "Copiado",
+  "copy": "Copiar",
+  "default": "Predeterminado",
+  "delete": "Eliminar",
+  "loading": "Cargando…",
+  "loadingDots": "Cargando...",
+  "menu": "Menú",
+  "off": "Desactivado",
+  "on": "Activado",
+  "owner": "Propietario",
+  "preview": "Vista previa",
+  "save": "Guardar",
+  "saving": "Guardando…",
+  "savingDots": "Guardando...",
+  "set": "Aplicar",
+  "banner": {
+    "collapseBanner": "Contraer el banner",
+    "showBanner": "Mostrar el banner",
+    "more": "Más",
+    "siteLinks": "Enlaces del sitio",
+    "earning": "Recompensas",
+    "earningTitle": "Tus Recompensas, XP, Monedas, rangos y cosméticos",
+    "scriptorium": "Scriptorium",
+    "scriptoriumTitle": "El Scriptorium. Narrativa larga escrita por la gente que vive aquí",
+    "scriptoriumInvites_one": "{{count}} invitación de colaboración pendiente. Abre el Scriptorium para responderla",
+    "scriptoriumInvites_other": "{{count}} invitaciones de colaboración pendientes. Abre el Scriptorium para responderlas",
+    "scriptoriumInvites_many": "{{count}} invitaciones de colaboración pendientes. Abre el Scriptorium para responderlas",
+    "worlds": "Mundos",
+    "worldsTitle": "Catálogo de mundos. Explora mundos de rol abiertos, lore y wikis",
+    "staff": "Equipo",
+    "staffTitle": "Conoce al equipo, los mods y admins que administran The Spire",
+    "topCommunities": "Mejores comunidades",
+    "topCommunitiesTitle": "Mejores comunidades de RP. Registra la tuya y copia tu enlace de retorno",
+    "arcade": "Arcade",
+    "arcadeTitle": "El Spire Arcade. Juega los juegos del gabinete, como el Eidolon Tamer",
+    "rules": "Reglas",
+    "rulesTitle": "Las reglas de la app y las reglas propias de este servidor",
+    "faq": "FAQ",
+    "faqTitle": "Preguntas frecuentes de este servidor",
+    "serverAdmin": "Admin del servidor",
+    "serverAdminTitle": "Administra este servidor: configuración, salas, miembros, moderación",
+    "globalAdmin": "Admin global",
+    "globalAdminTitle": "Admin global: configuración de la plataforma y supervisión entre comunidades",
+    "exit": "Salir",
+    "exitTitle": "Cierra sesión y vuelve a la pantalla de inicio de sesión",
+    "openMenu": "Abrir menú",
+    "closeMenu": "Cerrar menú"
+  },
+  "toolMenu": {
+    "closeTools": "Cerrar herramientas",
+    "openMenuTitle": "Abrir el menú",
+    "sections": {
+      "worldbuilding": "Creación de mundos",
+      "writing": "Escritura",
+      "roleplay": "Rol",
+      "forums": "Foros",
+      "rooms": "Salas",
+      "myRooms": "Mis salas",
+      "people": "Personas",
+      "display": "Pantalla",
+      "account": "Cuenta"
+    },
+    "worldbuilding": {
+      "myWorlds": "Mis mundos",
+      "myWorldsHint": "Administra tus mundos + páginas",
+      "catalog": "Catálogo de mundos",
+      "catalogHint": "Explora los mundos abiertos"
+    },
+    "writing": {
+      "myStories": "Mis historias",
+      "myStoriesHint": "Borradores + publicadas, abre el editor",
+      "scriptorium": "Scriptorium",
+      "scriptoriumHint": "Explora la biblioteca, lee y escribe"
+    },
+    "roleplay": {
+      "setMood": "Establecer ánimo",
+      "setMoodHint": "Muestra un ánimo junto a tu nombre",
+      "moodPlaceholder": "p. ej. melancólico, agotado, engreído",
+      "setScene": "Establecer escena",
+      "setSceneHint": "Define el título de la escena de la sala",
+      "scenePlaceholder": "p. ej. La guarida del dragón",
+      "endScene": "Terminar escena",
+      "npcsOn": "NPC: Activado",
+      "npcsOnHint": "Activa la voz de NPC en esta sala",
+      "npcsOff": "NPC: Desactivado",
+      "npcsOffHint": "Desactiva la voz de NPC en esta sala"
+    },
+    "forums": {
+      "catalog": "Catálogo de foros",
+      "catalogHint": "Tableros de mensajes de la comunidad",
+      "create": "Crear un foro",
+      "createHint": "Solicita abrir tu propio foro",
+      "openForum": "Abrir {{name}}",
+      "newActivity": "Actividad nueva desde tu última visita"
+    },
+    "rooms": {
+      "find": "Buscar salas",
+      "findHint": "Busca una sala por nombre",
+      "findPlaceholder": "texto de búsqueda (o vacío para todas)",
+      "findSubmit": "Buscar",
+      "list": "Listar salas",
+      "listHint": "Muestra todas las salas públicas",
+      "newPrivate": "Nueva sala privada",
+      "newPrivateHint": "Crea una sala protegida con contraseña",
+      "privateNamePlaceholder": "nombre de la sala",
+      "privatePasswordPlaceholder": "contraseña",
+      "createRoom": "Crear sala"
+    },
+    "myRooms": {
+      "loading": "Cargando tus salas…",
+      "empty": "Aún no hay salas archivadas. Una sala tuya se archiva cuando todos la abandonan, y luego aparece aquí para que puedas recuperarla.",
+      "recreate": "Recrear",
+      "recreateTitle": "Recrear y entrar a {{name}}",
+      "recreatePrivateTitle": "Recrear y entrar a {{name}} (vuelve como privada con su contraseña original)",
+      "hideTitle": "Quita {{name}} de esta lista, no la elimina; recréala cuando quieras con /go",
+      "hideAria": "Quitar {{name}} de tu lista de salas"
+    },
+    "people": {
+      "messages": "Mensajes",
+      "messagesHint": "MD, amigos y solicitudes de amistad, todo en un solo lugar",
+      "allUsers": "Todos los usuarios",
+      "allUsersHint": "Explora el directorio de usuarios",
+      "ignoreList": "Lista de ignorados",
+      "ignoreListHint": "Muestra o vacía tu lista de ignorados"
+    },
+    "display": {
+      "chatColor": "Color de chat",
+      "chatColorHint": "Elige tu color de chat",
+      "fontSize": "Tamaño de letra: {{step}}",
+      "fontSizeHint": "Alterna el tamaño de letra local del chat",
+      "reduceMotion": "Reducir movimiento: {{state}}",
+      "reduceMotionForcedHint": "Activado porque tu dispositivo lo pide",
+      "reduceMotionHint": "Fundidos suaves; detiene el movimiento automático. Ayuda si el movimiento te sienta mal",
+      "reduceCosmetics": "Reducir efectos cosméticos: {{state}}",
+      "reduceCosmeticsUpstreamHint": "Ya está activado por tu configuración de movimiento o rendimiento. Calma las animaciones de estilos de nombre y bordes de avatar",
+      "reduceCosmeticsHint": "Calma las animaciones de estilos de nombre y bordes de avatar para un chat más fluido y ligero",
+      "language": "Idioma: {{language}}",
+      "languageHint": "Elige el idioma de la interfaz",
+      "slowMode": "Modo lento: cada {{seconds}}s",
+      "slowModeHint": "Lista de usuarios y escritura en tiempo real en pausa; se resincroniza según un intervalo",
+      "refresh": "Actualizar",
+      "refreshHint": "Actualiza una vez, o ralentiza las actualizaciones en tiempo real para aliviar la carga en este dispositivo"
+    },
+    "account": {
+      "editProfile": "Editar perfil",
+      "editProfileHint": "Abre el editor de tu perfil",
+      "earning": "Tus Recompensas",
+      "earningHint": "Billetera, rangos, tienda, objetos, colección, mascotas",
+      "bookmarks": "Marcadores",
+      "bookmarksHint": "Tus mensajes de chat guardados",
+      "exportData": "Exportar mis datos",
+      "exportPreparing": "Preparando la exportación…",
+      "exportHint": "Descarga tu perfil, personajes, mundos e historias",
+      "toggleAway": "Alternar ausencia",
+      "toggleAwayHint": "Márcate como ausente"
+    },
+    "arcade": "Spire Arcade",
+    "arcadeTitle": "Juega los juegos del arcade, como el Eidolon Tamer",
+    "tour": "Haz el recorrido",
+    "tourTitle": "Repite el recorrido guiado por el chat y sus barras",
+    "help": "Ayuda / Comandos",
+    "helpTitle": "Explora las guías y todos los comandos",
+    "export": {
+      "success": "Tu exportación de datos se descargó — guárdala en un lugar seguro.",
+      "failure": "No se pudo generar tu exportación en este momento. Intenta de nuevo en un minuto."
+    }
+  },
+  "identity": {
+    "closeMenu": "Cerrar el menú de identidad",
+    "switchHeader": "Cambiar de identidad",
+    "noOthers": "No hay otros personajes en esta cuenta.",
+    "noneYet": "Aún no hay personajes, crea uno abajo.",
+    "create": "Crear personaje",
+    "createTitle": "Crea un personaje nuevo y empieza a configurarlo",
+    "leave": "← Dejar el personaje (OOC)",
+    "leaveTitle": "Deja el personaje activo y vuelve a tu cuenta principal (OOC).",
+    "goIncognito": "Entrar en incógnito",
+    "leaveIncognito": "Salir de incógnito",
+    "incognitoGoTitle": "Desaparece de las listas de usuarios y observa las salas sin que nadie te vea. Solo mods/admins.",
+    "incognitoLeaveTitle": "Revélate, la sala te ve entrar de nuevo.",
+    "switchTitleInCharacter": "Cambia de personaje o vuelve a OOC",
+    "switchTitleOoc": "Cambia a un personaje",
+    "activeCharacter": "Personaje activo",
+    "ooc": "OOC",
+    "oocName": "{{name}} (OOC)"
+  },
+  "messenger": {
+    "unreadDms_one": "{{count}} MD sin leer",
+    "unreadDms_other": "{{count}} MD sin leer",
+    "unreadDms_many": "{{count}} MD sin leer",
+    "friendRequests_one": "{{count}} solicitud de amistad",
+    "friendRequests_other": "{{count}} solicitudes de amistad",
+    "friendRequests_many": "{{count}} solicitudes de amistad",
+    "tooltipBoth": "{{dms}} + {{requests}}, abre Mensajes",
+    "tooltipSummary": "{{summary}}, abre Mensajes",
+    "open": "Abrir Mensajes"
+  },
+  "refresh": {
+    "current": "actualmente cada {{seconds}}s",
+    "description": "Pausa la actualización en tiempo real de la lista de usuarios y del indicador de escritura, y resincroniza según este intervalo — alivia la carga en un dispositivo lento. Los mensajes del chat siguen en vivo.",
+    "presetNow": "Ahora (una sola vez)",
+    "presetEvery10s": "Cada 10s",
+    "presetEvery30s": "Cada 30s",
+    "presetEvery60s": "Cada 60s",
+    "presetEvery5m": "Cada 5m",
+    "secondsPlaceholder": "segundos"
+  },
+  "language": {
+    "description": "Se aplica de inmediato, sin recargar. El predeterminado del sistema sigue el idioma de tu dispositivo.",
+    "systemDefault": "Predeterminado del sistema"
+  },
+  "infoModal": {
+    "escHint": "Presiona <1>Esc</1> o haz clic afuera para cerrar."
+  },
+  "welcome": {
+    "title": "Te damos la bienvenida",
+    "gotIt": "Entendido"
+  },
+  "tagInput": {
+    "removeTag": "Quitar {{tag}}",
+    "addPlaceholder": "Agregar etiqueta…",
+    "examplePlaceholder": "p. ej. alta fantasía, 18+, ciencia ficción",
+    "addAria": "Agregar una etiqueta",
+    "maxTags_one": "Máx. {{count}} etiqueta",
+    "maxTags_other": "Máx. {{count}} etiquetas",
+    "maxTags_many": "Máx. {{count}} etiquetas"
+  },
+  "richEditor": {
+    "loadingEditor": "Cargando el editor...",
+    "startWriting": "Empieza a escribir...",
+    "boldLabel": "B",
+    "boldTitle": "Negrita (Ctrl+B)",
+    "italicLabel": "I",
+    "italicTitle": "Cursiva (Ctrl+I)",
+    "underlineLabel": "U",
+    "underlineTitle": "Subrayado (Ctrl+U)",
+    "strikeLabel": "S",
+    "strikeTitle": "Tachado",
+    "h2Label": "H2",
+    "h2Title": "Encabezado 2",
+    "h3Label": "H3",
+    "h3Title": "Encabezado 3",
+    "paragraphTitle": "Párrafo",
+    "bulletListLabel": "• Lista",
+    "bulletListTitle": "Lista con viñetas",
+    "orderedListLabel": "1. Lista",
+    "orderedListTitle": "Lista numerada",
+    "blockquoteTitle": "Cita",
+    "hrTitle": "Línea horizontal",
+    "linkLabel": "Enlace",
+    "linkTitle": "Agregar o editar enlace",
+    "linkPrompt": "URL del enlace (https://…). Déjala en blanco para quitarlo.",
+    "noteLabel": "+ Nota",
+    "noteTitle": "Inserta una nota al margen, visible para los colaboradores en borradores; se elimina al publicar",
+    "notePlaceholder": "tu nota aquí",
+    "undoTitle": "Deshacer (Ctrl+Z)",
+    "redoTitle": "Rehacer (Ctrl+Shift+Z)"
+  },
+  "formatting": {
+    "bold": "Negrita (**texto**)",
+    "italic": "Cursiva (*texto*)",
+    "underline": "Subrayado",
+    "strike": "Tachado (~~texto~~)",
+    "color": "Colorear el texto seleccionado",
+    "code": "Código en línea (`texto`)",
+    "spoiler": "Spoiler (||texto||, clic para revelar)",
+    "blockquote": "Cita, antepone '> ' a las líneas seleccionadas",
+    "link": "Enlace, [texto](url)",
+    "image": "Imagen, ![alt](url)",
+    "placeholderBold": "negrita",
+    "placeholderItalic": "cursiva",
+    "placeholderUnderline": "subrayado",
+    "placeholderStrike": "tachado",
+    "placeholderCode": "código",
+    "placeholderSpoiler": "spoiler",
+    "placeholderText": "texto",
+    "linkUrlPrompt": "URL del enlace (https://…)",
+    "linkTextPrompt": "Texto del enlace",
+    "imageUrlPrompt": "URL de la imagen (https://… que termine en .png/.jpg/.webp/etc.)",
+    "imageAltPrompt": "Texto alternativo (opcional)",
+    "charCountAria": "Cantidad de caracteres: {{length}} de {{max}}",
+    "charCountTitle": "{{length}} / {{max}} caracteres",
+    "chars": "Caract."
+  },
+  "rating": {
+    "nsfw": "18+",
+    "nsfwTitle": "Solo para adultos. Los miembros menores de 18 no pueden ver esto.",
+    "sfw": "SFW",
+    "sfwTitle": "Seguro para todos."
+  },
+  "themePicker": {
+    "applyPreset": "Aplicar preajuste: {{name}}",
+    "revertTitle": "Volver al predeterminado del sistema",
+    "slots": {
+      "bg": { "label": "Fondo", "hint": "Fondo principal del chat" },
+      "panel": { "label": "Panel", "hint": "Banner, barras laterales, encabezados de ventanas" },
+      "border": { "label": "Borde", "hint": "Líneas divisorias y bordes de los marcos" },
+      "text": { "label": "Texto", "hint": "Texto principal legible" },
+      "muted": { "label": "Atenuado", "hint": "Marcas de tiempo, pistas, texto secundario" },
+      "action": { "label": "Acción", "hint": "Resaltados, sala actual, enlaces" },
+      "accent": { "label": "Acento", "hint": "Llamado a la acción fuerte / botón Salir" },
+      "system": { "label": "Sistema", "hint": "Mensajes del sistema en cursiva" }
+    },
+    "preview": {
+      "caption": "· vista previa",
+      "sampleName": "Sigrid",
+      "sampleMessage": "saludos.",
+      "actionLine": "<0>Sigrid</0> desenvaina su espada.",
+      "sampleSystem": "* Tema establecido: Bienvenidos a The Spire.",
+      "sampleAnnouncement": "📣 ¡Anuncio!"
+    }
+  },
+  "itemZoom": {
+    "fullViewAria": "{{name}}, vista completa",
+    "closeHint": "Toca en cualquier lugar o presiona Esc para cerrar"
+  },
+  "createRoom": {
+    "title": "Crear una sala",
+    "intro": "Elige un nombre. Los espacios se vuelven guiones bajos, así que <1>Oak Tavern</1> se convierte en <3>Oak_Tavern</3>.",
+    "nameLabel": "Nombre de la sala",
+    "namePlaceholder": "p. ej. Oak_Tavern",
+    "privateLabel": "Privada <1>(se requiere contraseña para entrar)</1>",
+    "submit": "Crear",
+    "errorNameRequired": "Escribe un nombre para la sala.",
+    "errorNameInvalid": "Los nombres pueden usar letras, números y _ - ' (hasta 40 caracteres).",
+    "errorPasswordRequired": "Una sala privada necesita una contraseña."
+  },
+  "password": "Contraseña",
+  "roomPassword": {
+    "title": "Sala privada",
+    "prompt": "<0>{{name}}</0> requiere una contraseña para entrar.",
+    "join": "Unirse",
+    "joining": "Entrando…"
+  },
+  "theater": {
+    "videoFrameTitle": "Video del teatro",
+    "noVideoQueued": "No hay ningún video en cola. Agrega uno con <1>/theater add &lt;url&gt;</1>, o transmite el tuyo con <3>/theater live &lt;url&gt;</3>.",
+    "howToStream": "Cómo transmitir tu escritorio →",
+    "hostNotQueued": "El anfitrión aún no ha puesto un video en cola.",
+    "tapToUnmute": "🔇 Toca para activar el sonido",
+    "copyLink": "Copiar enlace",
+    "noSourceSet": "No hay fuente configurada.",
+    "muteTitle": "Silenciar el audio (solo local)",
+    "streamHelp": "Ayuda de transmisión",
+    "streamHelpTitle": "Cómo transmitir tu propio video (VLC / OBS + un túnel)",
+    "reactAria": "Reaccionar {{emoji}}",
+    "liveBadge": "● En vivo",
+    "liveIndicator": "En vivo",
+    "previous": "Anterior",
+    "next": "Siguiente",
+    "pauseEveryone": "Pausar para todos",
+    "playEveryone": "Reproducir para todos",
+    "pauseButton": "⏸ Pausar",
+    "playButton": "▶ Reproducir",
+    "seekAria": "Posición del video",
+    "loopLabel": "loop: {{mode}}",
+    "loopTitle": "Modo de repetición (se configura con /theater loop)",
+    "resizeAria": "Cambiar el tamaño del panel de video"
+  },
+  "stylePicker": {
+    "useSiteDefault": "(usar el predeterminado del sitio)"
+  },
+  "synonyms": {
+    "listAria": "Sinónimos",
+    "headerFor": "Sinónimos de \"{{word}}\""
+  },
+  "nameTag": {
+    "viewProfile": "ver perfil ({{who}})",
+    "whisper": "susurrar a {{name}}",
+    "whisperAway": "susurrar a {{name}} (ausente: {{message}})",
+    "admin": "{{name}} - admin",
+    "adminAway": "{{name}} - admin (ausente: {{message}})",
+    "moodTitle": "ánimo: {{mood}}",
+    "ooc": "(ooc)",
+    "oocTitle": "Habla desde su cuenta principal / OOC, no como personaje",
+    "away": "[ausente]"
+  },
+  "presence": {
+    "online": "en línea"
+  },
+  "relTime": {
+    "justNow": "ahora mismo",
+    "minutesAgo": "hace {{value}}m",
+    "hoursAgo": "hace {{value}}h",
+    "daysAgo": "hace {{value}}d",
+    "dayAtTime": "{{day}} a las {{time}}"
+  },
+  "errorBoundary": {
+    "body": "La app encontró un error inesperado. Recargar suele arreglarlo.",
+    "reload": "Recargar"
+  },
+  "userHtml": {
+    "youtubeTitle": "Video de YouTube"
+  },
+  "linkPreview": {
+    "removeTitle": "Quita esta vista previa para todos (el enlace permanece en tu mensaje)",
+    "removeAria": "Quitar la vista previa del enlace"
+  },
+  "marquee": {
+    "regionAria": "Anuncios del sitio",
+    "sourceLabel": "Anuncios de {{name}}",
+    "showAnnouncement": "Mostrar anuncio {{index}} de {{total}}",
+    "showSource": "Mostrar los anuncios de {{name}}",
+    "dismissAria": "Descartar los anuncios del sitio",
+    "dismissTitle": "Oculta los anuncios por 24 horas (o hasta que un admin los edite). Tráelos de vuelta antes desde la barra de información de la sala."
+  },
+  "gender": {
+    "male": "masculino",
+    "female": "femenino",
+    "nonbinary": "no binario",
+    "other": "otro",
+    "undisclosed": "sin especificar",
+    "options": {
+      "undisclosed": "Sin especificar",
+      "male": "Masculino",
+      "female": "Femenino",
+      "nonbinary": "No binario",
+      "other": "Otro"
+    }
+  },
+  "notify": {
+    "whispers": "{{name}} susurra",
+    "announcementMention": "Anuncio (te menciona)",
+    "announcement": "Anuncio",
+    "nameMention": "{{name}} (te menciona)",
+    "mentionsYou": "{{name}} te menciona",
+    "rolls": "{{name}} tira {{body}}"
+  },
+  "ledger": {
+    "reason": {
+      "messageSay": "Mensaje de chat",
+      "messageAction": "Acción / escena / NPC",
+      "messageWhisper": "Susurro",
+      "forumTopic": "Tema de foro",
+      "forumReply": "Respuesta de foro",
+      "presenceIc": "Presencia (en personaje)",
+      "presenceOoc": "Presencia (OOC)",
+      "currencySendOut": "Monedas enviadas",
+      "currencySendIn": "Monedas recibidas",
+      "backfill": "Ajuste retroactivo",
+      "adminGrant": "Otorgado por un admin",
+      "adminRevoke": "Revocado por un admin",
+      "rollover": "Transferido de un personaje eliminado",
+      "flairProfileBanner": "Compra: Custom Profile Banner",
+      "flairTypingPhrase": "Compra: Custom Typing Phrase",
+      "flairProfileVisitors": "Compra: Profile Visitor Counter",
+      "flairProfileMarquee": "Compra: Profile Quote Marquee",
+      "reactionSheetSubmission": "Envío de hoja de reacciones",
+      "reactionSheetRefund": "Reembolso de hoja de reacciones",
+      "purchase": "Compra: {{item}}",
+      "borderPurchase": "Compra de borde: {{item}}",
+      "itemPurchase": "Compra de objeto: {{item}}"
+    },
+    "unknownItem": "(objeto desconocido)",
+    "gave": "Diste {{item}}",
+    "gaveTo": "Diste {{item}} a {{name}}",
+    "received": "Recibiste {{item}}",
+    "receivedFrom": "Recibiste {{item}} de {{name}}",
+    "threw": "Lanzaste {{item}}",
+    "threwAt": "Lanzaste {{item}} a {{name}}",
+    "dropped": "Soltaste {{item}}",
+    "droppedOn": "Soltaste {{item}} sobre {{name}}"
+  },
+  "flair": {
+    "loadingSettings": "Cargando la configuración de adornos del perfil…",
+    "visitors": {
+      "legend": "Visitantes del perfil",
+      "description": "Visitantes únicos, contados una vez por día. Los miembros son visitantes con sesión iniciada; externo cuenta el tráfico anónimo.",
+      "members": "Miembros",
+      "external": "Externos",
+      "total": "Total",
+      "showToggle": "Mostrar el contador de visitantes en mi perfil público.",
+      "purchase": "Compra el adorno <1>Profile Visitor Counter</1> para registrar y mostrar el número de visitantes."
+    },
+    "marquee": {
+      "legend": "Marquesina de citas",
+      "description": "Hasta {{max}} citas cortas ({{maxLen}} caracteres cada una) que rotan en tu perfil cada ~8 segundos. Compatible con Markdown.",
+      "purchase": "Compra el adorno <1>Profile Quote Marquee</1> para agregar citas rotativas a tu perfil.",
+      "quotePlaceholder": "Una frase corta y memorable…",
+      "saveQuotes": "Guardar citas"
+    },
+    "visitorToggle": {
+      "legend": "Contador de visitantes",
+      "show": "Mostrar el contador de visitantes en mi perfil público.",
+      "note": "Cuando está desactivado, solo tú ves el desglose de miembros / externos en Editar perfil → Adornos."
+    },
+    "quotesRegion": "Citas del perfil",
+    "showQuote": "Mostrar cita {{index}} de {{total}}",
+    "visitorsChip": {
+      "title": "{{members}} miembros + {{external}} externos",
+      "visitors_one": "visitante",
+      "visitors_other": "visitantes",
+      "visitors_many": "visitantes"
+    }
+  }
+}

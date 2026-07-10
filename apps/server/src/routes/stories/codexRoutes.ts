@@ -20,6 +20,7 @@ import {
   users,
 } from "../../db/schema.js";
 import { sanitizeBio } from "../../auth/html.js";
+import { tFor } from "../../i18n.js";
 import { getSessionUser } from "../auth.js";
 import type { Db } from "../../db/index.js";
 import type { Io } from "./shared.js";
@@ -78,7 +79,7 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
       const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
       if (!perm.manageCodex) {
         reply.code(403);
-        return { error: "you need editor or higher access to manage the codex" };
+        return { error: tFor(me.locale, "errors:server.stories.needEditorCodex") };
       }
       let body;
       try { body = createEntityBody.parse(req.body); }
@@ -91,13 +92,13 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
         .where(and(eq(storyEntities.storyId, s.id), eq(storyEntities.kind, body.kind))))[0];
       if ((countRow?.n ?? 0) >= STORY_ENTITY_PER_KIND_CAP) {
         reply.code(409);
-        return { error: `cap of ${STORY_ENTITY_PER_KIND_CAP} ${body.kind} entries reached for this story` };
+        return { error: tFor(me.locale, "errors:server.stories.entityKindCap", { max: STORY_ENTITY_PER_KIND_CAP, kind: body.kind }) };
       }
 
       const slug = (body.slug ?? deriveSlug(body.name)).toLowerCase();
       if (!SLUG_RX.test(slug)) {
         reply.code(400);
-        return { error: "slug must be 1-60 lowercase letters, numbers, hyphens" };
+        return { error: tFor(me.locale, "errors:server.common.slugRule") };
       }
       const dup = (await db
         .select()
@@ -108,7 +109,7 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
           sql`lower(${storyEntities.slug}) = ${slug}`,
         ))
         .limit(1))[0];
-      if (dup) { reply.code(409); return { error: `this story already has a ${body.kind} with that slug` }; }
+      if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.stories.duplicateKindSlug", { kind: body.kind }) }; }
 
       // Sort_order = append at the end within this kind.
       const tail = (await db
@@ -148,7 +149,7 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
       const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
       if (!perm.manageCodex) {
         reply.code(403);
-        return { error: "you need editor or higher access to manage the codex" };
+        return { error: tFor(me.locale, "errors:server.stories.needEditorCodex") };
       }
       const e = (await db
         .select()
@@ -173,7 +174,7 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
         const slug = body.slug.toLowerCase();
         if (!SLUG_RX.test(slug)) {
           reply.code(400);
-          return { error: "slug must be 1-60 lowercase letters, numbers, hyphens" };
+          return { error: tFor(me.locale, "errors:server.common.slugRule") };
         }
         if (slug !== e.slug.toLowerCase()) {
           const dup = (await db
@@ -186,7 +187,7 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
               ne(storyEntities.id, e.id),
             ))
             .limit(1))[0];
-          if (dup) { reply.code(409); return { error: `this story already has a ${e.kind} with that slug` }; }
+          if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.stories.duplicateKindSlug", { kind: e.kind }) }; }
           update.slug = slug;
         }
       }
@@ -207,7 +208,7 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
       const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
       if (!perm.manageCodex) {
         reply.code(403);
-        return { error: "you need editor or higher access to manage the codex" };
+        return { error: tFor(me.locale, "errors:server.stories.needEditorCodex") };
       }
       const e = (await db
         .select()
@@ -288,7 +289,7 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
       const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
       if (!perm.manageCollaborators) {
         reply.code(403);
-        return { error: "only the story owner can invite collaborators" };
+        return { error: tFor(me.locale, "errors:server.stories.inviteOwnerOnly") };
       }
       const schema = z.object({
         username: z.string().min(1).max(40),
@@ -304,10 +305,10 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
         .from(users)
         .where(sql`lower(${users.username}) = ${body.username.toLowerCase()}`)
         .limit(1))[0];
-      if (!recipient) { reply.code(404); return { error: "no user with that username" }; }
+      if (!recipient) { reply.code(404); return { error: tFor(me.locale, "errors:server.stories.noUserWithUsername") }; }
       if (recipient.id === s.authorUserId) {
         reply.code(409);
-        return { error: "the owner can't be a collaborator on their own story" };
+        return { error: tFor(me.locale, "errors:server.stories.ownerCollaborator") };
       }
 
       // Existing row → update role (silently re-invite if previously declined +
@@ -376,7 +377,7 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
       const perm = await effectiveStoryPermissions(db, s, me.id, me.role);
       if (!perm.manageCollaborators) {
         reply.code(403);
-        return { error: "only the story owner can change collaborator roles" };
+        return { error: tFor(me.locale, "errors:server.stories.rolesOwnerOnly") };
       }
       const schema = z.object({
         role: z.enum(STORY_COLLABORATOR_ROLES as unknown as [string, ...string[]]),
@@ -417,7 +418,7 @@ export async function registerStoryCodexRoutes(app: FastifyInstance, db: Db, io:
       // Owner / admin can remove anyone; a collaborator can remove themselves.
       if (!perm.manageCollaborators && req.params.uid !== me.id) {
         reply.code(403);
-        return { error: "you can only remove yourself unless you're the owner" };
+        return { error: tFor(me.locale, "errors:server.stories.removeSelfOnly") };
       }
       await db
         .delete(storyCollaborators)

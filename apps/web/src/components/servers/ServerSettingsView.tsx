@@ -32,8 +32,10 @@
  * own fetch helpers against the documented /servers endpoints rather than
  * widening that module.
  */
-import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
-import { HelpCircle, Settings as SettingsIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { HelpCircle, Search, Settings as SettingsIcon } from "lucide-react";
 import {
   DEFAULT_THEME,
   SERVER_MOD_PERMISSIONS,
@@ -80,13 +82,25 @@ import FaqsTab from "../server-admin/FaqsTab.js";
 import CommandsTitlesTab from "../server-admin/CommandsTitlesTab.js";
 import EarningTab from "../server-admin/EarningTab.js";
 import { StylePicker } from "../admin/AdminPanel.js";
+// Find-a-setting (docs/ADMIN_IA.md §6): the console shares the Global Admin
+// search component (chrome strings live in the admin namespace inside it)
+// and the grouped-tab-strip helpers, so both surfaces read the same way.
+import { FindSetting, afterNextPaint, flashAnchor } from "../admin/FindSetting.js";
+import { groupVisibleTabs, withGroupSeparators } from "../shared/tabGroups.js";
 import { ThemePicker } from "../cosmetics/ThemePicker.js";
 import { useActiveTheme, useScopedRootDesign } from "../../lib/theme.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { recordNav } from "../../lib/nav-metrics.js";
 import { parseDurationMs } from "../../lib/duration.js";
+import { formatDate, formatDateTime } from "../../lib/intlFormat.js";
 import { useChat } from "../../state/store.js";
+import { i18n } from "../../lib/i18n.js";
 import { ImageCropField } from "./ImageCropField.js";
+import {
+  SERVER_CONSOLE_SEARCH_ENTRIES,
+  SERVER_CONSOLE_SEARCH_REDIRECTS,
+  type ServerConsoleSearchEntry,
+} from "./serverConsoleSearchIndex.js";
 
 /* ============================================================
  * Wire shapes (consumed read-only from the documented endpoints).
@@ -121,6 +135,12 @@ interface ServerConsoleDetail {
   joinMode: ServerJoinMode;
   publicBrowsing: boolean;
   applicationPrompt: string | null;
+  /** Owner-set "18+ community" flag (age-restriction plan, Phase 2).
+   *  Optional: absent until the backend populates it = all-ages. */
+  isNsfw?: boolean;
+  /** Public-safe banner variant for an 18+ server (shown to viewers who
+   *  can't see NSFW on discovery/share surfaces). Null/absent = none. */
+  sfwBannerUrl?: string | null;
   ownerUserId: string;
   ownerUsername: string;
   roomCount: number;
@@ -234,6 +254,8 @@ interface RoomListRow {
   messageExpiryMinutes?: number | null;
   /** When true the channel is exempt from the empty-room archival sweep. */
   persistent?: boolean;
+  /** Effective 18+ rating (age-restriction plan, Phase 2); absent = all-ages. */
+  isNsfw?: boolean;
   occupants?: unknown[];
 }
 
@@ -243,7 +265,9 @@ interface RoomListRow {
 
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   const j = (await r.json().catch(() => null)) as ({ error?: string } & T) | null;
-  if (!r.ok) throw new Error(j?.error ?? `Request failed (${r.status}).`);
+  // Module-level fallback (no component t in scope): read the active language's
+  // catalog through the shared i18n instance so the copy still localizes.
+  if (!r.ok) throw new Error(j?.error ?? i18n.t("servers:console.requestFailed", { status: r.status }));
   return j as T;
 }
 
@@ -257,9 +281,10 @@ async function apiPatchServer(id: string, body: Record<string, unknown>): Promis
     method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
   }));
 }
-/** Upload (or clear) the server's round icon / header banner / wordmark logo.
- *  Mirrors the forum image endpoints; POST /servers/:id/logo|banner|horizontal-logo. */
-async function apiSetServerImage(id: string, kind: "logo" | "banner" | "horizontal-logo", imageDataUrl: string | null): Promise<string | null> {
+/** Upload (or clear) the server's round icon / header banner / wordmark logo /
+ *  public-safe banner. Mirrors the forum image endpoints;
+ *  POST /servers/:id/logo|banner|horizontal-logo|sfw-banner. */
+async function apiSetServerImage(id: string, kind: "logo" | "banner" | "horizontal-logo" | "sfw-banner", imageDataUrl: string | null): Promise<string | null> {
   const j = await jsonOrThrow<{ url: string | null }>(await fetch(`/servers/${sid(id)}/${kind}`, {
     method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
     body: JSON.stringify(imageDataUrl ? { imageDataUrl } : { clear: true }),
@@ -407,6 +432,7 @@ function ServerUserPicker({ serverId, placeholder, disabledReason, onSelect }: {
   disabledReason?: (hit: ServerUserHit) => string | null;
   onSelect: (hit: ServerUserHit) => void;
 }) {
+  const { t } = useTranslation("servers");
   const [q, setQ] = useState("");
   const [hits, setHits] = useState<ServerUserHit[] | null>(null);
   const [open, setOpen] = useState(false);
@@ -425,13 +451,13 @@ function ServerUserPicker({ serverId, placeholder, disabledReason, onSelect }: {
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onFocus={() => { if (hits) setOpen(true); }}
-        placeholder={placeholder ?? "Search a username or character…"}
+        placeholder={placeholder ?? t("console.userPicker.placeholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
       />
       {open && hits ? (
         <ul className="absolute z-10 mt-1 max-h-56 w-full overflow-y-auto rounded border border-keep-rule bg-keep-panel shadow-lg">
           {hits.length === 0 ? (
-            <li className="px-2 py-1.5 text-xs italic text-keep-muted">No matches.</li>
+            <li className="px-2 py-1.5 text-xs italic text-keep-muted">{t("console.userPicker.noMatches")}</li>
           ) : hits.map((h) => {
             const reason = disabledReason?.(h) ?? null;
             return (
@@ -463,6 +489,7 @@ function ModPermissionCheckboxes({ value, onChange, grantable, disabled }: {
   grantable: Set<ServerPermission>;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("servers");
   const has = new Set(value);
   return (
     <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
@@ -472,7 +499,7 @@ function ModPermissionCheckboxes({ value, onChange, grantable, disabled }: {
         return (
           <label
             key={key}
-            title={canGrant ? meta.description : "You don't hold this permission yourself, so you can't grant it."}
+            title={canGrant ? meta.description : t("console.perms.cantGrant")}
             className={`flex items-start gap-2 rounded border border-keep-rule/60 px-2 py-1 text-xs ${canGrant ? "" : "opacity-50"}`}
           >
             <input
@@ -503,6 +530,7 @@ function ServerFeatureCheckboxes({ value, onChange, grantable, disabled }: {
   grantable: Set<ServerPermission>;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("servers");
   const has = new Set(value);
   function toggle(key: ServerFeaturePermission, on: boolean) {
     const next = new Set(value);
@@ -517,7 +545,7 @@ function ServerFeatureCheckboxes({ value, onChange, grantable, disabled }: {
         return (
           <label
             key={key}
-            title={canGrant ? meta.description : "You don't hold this permission yourself, so you can't grant it."}
+            title={canGrant ? meta.description : t("console.perms.cantGrant")}
             className={`flex items-start gap-2 rounded border border-keep-rule/60 px-2 py-1 text-xs ${canGrant ? "" : "opacity-50"}`}
           >
             <input type="checkbox" className="mt-0.5" checked={has.has(key)} disabled={disabled || !canGrant}
@@ -542,6 +570,7 @@ function ServerAutoRulesEditor({ rules, onChange, rooms, disabled }: {
   rooms: RoomListRow[];
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("servers");
   const KINDS: ServerAutoRuleKind[] = ["message_count", "posted_in_room", "account_age_days", "member_age_days"];
   function defaultFor(kind: ServerAutoRuleKind): ServerAutoRule {
     if (kind === "posted_in_room") return { kind, roomId: rooms[0]?.id ?? "" };
@@ -551,7 +580,7 @@ function ServerAutoRulesEditor({ rules, onChange, rooms, disabled }: {
   return (
     <div className="space-y-1.5">
       {rules.length === 0 ? (
-        <p className="text-[11px] italic text-keep-muted">No rules. Members only join this group when added by hand.</p>
+        <p className="text-[11px] italic text-keep-muted">{t("console.autoRules.none")}</p>
       ) : null}
       {rules.map((rule, i) => (
         <div key={i} className="flex flex-wrap items-center gap-1.5 rounded border border-keep-rule/60 px-2 py-1.5">
@@ -568,7 +597,7 @@ function ServerAutoRulesEditor({ rules, onChange, rooms, disabled }: {
               onChange={(e) => setRule(i, { kind: "posted_in_room", roomId: e.target.value })}
               className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action"
             >
-              {rooms.length === 0 ? <option value="">(no rooms)</option> : null}
+              {rooms.length === 0 ? <option value="">{t("console.autoRules.noRooms")}</option> : null}
               {rooms.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
             </select>
           ) : (
@@ -582,12 +611,12 @@ function ServerAutoRulesEditor({ rules, onChange, rooms, disabled }: {
             </>
           )}
           <button type="button" disabled={disabled} onClick={() => onChange(rules.filter((_, j) => j !== i))}
-            className="ml-auto shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Remove</button>
+            className="ml-auto shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.remove")}</button>
         </div>
       ))}
       {rules.length < SERVER_MAX_AUTO_RULES ? (
         <button type="button" disabled={disabled} onClick={() => onChange([...rules, defaultFor("message_count")])}
-          className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">+ Add rule</button>
+          className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">{t("console.autoRules.add")}</button>
       ) : null}
     </div>
   );
@@ -607,6 +636,7 @@ function TagsInput({ value, onChange, disabled }: {
   onChange: (next: string[]) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("servers");
   const [draft, setDraft] = useState("");
   const atCap = value.length >= MAX_TAGS_PER_ENTITY;
 
@@ -634,11 +664,11 @@ function TagsInput({ value, onChange, disabled }: {
   return (
     <div className={`rounded border border-keep-rule bg-keep-bg px-2 py-1.5 ${disabled ? "opacity-60" : ""}`}>
       <div className="flex flex-wrap items-center gap-1.5">
-        {value.map((t) => (
-          <span key={t} className="inline-flex items-center gap-1 rounded border border-keep-rule bg-keep-panel/40 px-1.5 py-0.5 text-xs text-keep-text">
-            {t}
-            <button type="button" disabled={disabled} onClick={() => remove(t)}
-              aria-label={`Remove ${t}`} title={`Remove ${t}`}
+        {value.map((tag) => (
+          <span key={tag} className="inline-flex items-center gap-1 rounded border border-keep-rule bg-keep-panel/40 px-1.5 py-0.5 text-xs text-keep-text">
+            {tag}
+            <button type="button" disabled={disabled} onClick={() => remove(tag)}
+              aria-label={t("console.tags.removeTag", { tag })} title={t("console.tags.removeTag", { tag })}
               className="text-keep-muted hover:text-keep-accent disabled:opacity-50">×</button>
           </span>
         ))}
@@ -649,7 +679,7 @@ function TagsInput({ value, onChange, disabled }: {
           onKeyDown={onKeyDown}
           onBlur={() => add(draft)}
           maxLength={32}
-          placeholder={atCap ? "Tag limit reached" : value.length ? "Add another…" : "high fantasy, sci-fi, 18+"}
+          placeholder={atCap ? t("console.tags.limitReached") : value.length ? t("console.tags.addAnother") : t("console.tags.examples")}
           className="min-w-[8rem] flex-1 bg-transparent px-0.5 py-0.5 text-sm outline-none placeholder:text-keep-muted/70 disabled:cursor-not-allowed"
         />
       </div>
@@ -662,6 +692,7 @@ function TagsInput({ value, onChange, disabled }: {
  * ============================================================ */
 
 function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
+  const { t } = useTranslation("servers");
   const [name, setName] = useState(detail.name);
   const [tagline, setTagline] = useState(detail.tagline ?? "");
   const [description, setDescription] = useState(detail.descriptionHtml ?? "");
@@ -669,68 +700,74 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
   const [joinMode, setJoinMode] = useState<ServerJoinMode>(detail.joinMode);
   const [prompt, setPrompt] = useState(detail.applicationPrompt ?? "");
   const [publicBrowsing, setPublicBrowsing] = useState(detail.publicBrowsing);
+  const [isNsfw, setIsNsfw] = useState(detail.isNsfw ?? false);
+  // Under-18 accounts never see the 18+ toggle at all (no dead control); the
+  // server rejects the write regardless. Cosmetic mirror of the server gate.
+  const isAdultViewer = useChat((s) => s.viewerAge.isAdult);
 
   const initialTags = detail.tags ?? [];
   const tagsDirty = tags.length !== initialTags.length || tags.some((t, i) => t !== initialTags[i]);
+  const nsfwDirty = isNsfw !== (detail.isNsfw ?? false);
   const dirty = name !== detail.name
     || tagline !== (detail.tagline ?? "")
     || description !== (detail.descriptionHtml ?? "")
     || tagsDirty
     || joinMode !== detail.joinMode
     || prompt !== (detail.applicationPrompt ?? "")
-    || publicBrowsing !== detail.publicBrowsing;
+    || publicBrowsing !== detail.publicBrowsing
+    || nsfwDirty;
 
   return (
     <div className="max-w-xl space-y-3">
       <label className="block text-sm">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Name</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("console.overview.name")}</span>
         <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       </label>
       <label className="block text-sm">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Tagline</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("console.overview.tagline")}</span>
         <input value={tagline} onChange={(e) => setTagline(e.target.value)} maxLength={200}
-          placeholder="One line under the server's name."
+          placeholder={t("console.overview.taglinePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       </label>
       <label className="block text-sm">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Description</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("console.overview.description")}</span>
         <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={6} maxLength={5000}
-          placeholder="The long-form welcome. Same HTML rules as profile bios; shown on the server's page."
+          placeholder={t("console.overview.descriptionPlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       </label>
       <div className="block text-sm">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Tags</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("console.overview.tags")}</span>
         <TagsInput value={tags} onChange={setTags} disabled={busy} />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          Genres people can search by in Discover (e.g. high fantasy, sci-fi, 18+).
+          {t("console.overview.tagsHint")}
         </span>
       </div>
 
       <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">How people join</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("console.overview.howPeopleJoin")}</span>
         {detail.isSystem ? (
-          <p className="text-xs text-keep-muted">This is the home server. Everyone is a member, so it can't be gated.</p>
+          <p className="text-xs text-keep-muted">{t("console.overview.systemJoinNote")}</p>
         ) : (
           <>
             {(["open", "application", "invite"] as const).map((mode) => (
               <label key={mode} className="mt-1.5 flex items-start gap-2 text-sm">
                 <input type="radio" name="joinMode" checked={joinMode === mode} onChange={() => setJoinMode(mode)} className="mt-0.5" />
                 <span>
-                  <span className="font-semibold capitalize text-keep-text">{mode}</span>
+                  <span className="font-semibold capitalize text-keep-text">{t(`console.overview.mode.${mode}`)}</span>
                   <span className="block text-xs text-keep-muted">
-                    {mode === "open" ? "Anyone signed in can join instantly."
-                      : mode === "application" ? "People apply; you (or your mods) approve them."
-                      : "Hidden: entered only with an invite code."}
+                    {mode === "open" ? t("console.overview.modeOpenHint")
+                      : mode === "application" ? t("console.overview.modeApplicationHint")
+                      : t("console.overview.modeInviteHint")}
                   </span>
                 </span>
               </label>
             ))}
             {joinMode === "application" ? (
               <label className="mt-2 block text-sm">
-                <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Application prompt</span>
+                <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("console.overview.applicationPrompt")}</span>
                 <input value={prompt} onChange={(e) => setPrompt(e.target.value)} maxLength={300}
-                  placeholder="Tell the owner why you'd like to join."
+                  placeholder={t("console.overview.applicationPromptPlaceholder")}
                   className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
               </label>
             ) : null}
@@ -739,38 +776,79 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
       </div>
 
       <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Public browsing</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("console.overview.publicBrowsing")}</span>
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" checked={publicBrowsing} onChange={(e) => setPublicBrowsing(e.target.checked)} className="mt-0.5" />
           <span>
-            <span className="font-semibold text-keep-text">Let anyone read this server</span>
+            <span className="font-semibold text-keep-text">{t("console.overview.publicBrowsingLabel")}</span>
             <span className="block text-xs text-keep-muted">
-              Visitors on /s/{detail.slug} can browse without an account. Posting and joining always require signing in.
+              {t("console.overview.publicBrowsingHint", { slug: detail.slug })}
             </span>
           </span>
         </label>
       </div>
 
-      <p className="text-[11px] text-keep-muted">The address (/s/{detail.slug}) is permanent so shared links never break.</p>
+      {/* 18+ community (age-restriction plan, Phase 2). Hidden entirely from
+          under-18 viewers (never a dead toggle); the home/system server can't
+          be 18+ by invariant, so it shows the explainer instead. The route
+          re-checks adult + rights and rejects the system server regardless. */}
+      {isAdultViewer ? (
+        <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
+          <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("console.overview.ageRating")}</span>
+          {detail.isSystem ? (
+            <p className="text-xs text-keep-muted">{t("console.overview.systemNsfwNote")}</p>
+          ) : (
+            <>
+              <label className="flex items-start gap-2 text-sm">
+                <input type="checkbox" checked={isNsfw} onChange={(e) => setIsNsfw(e.target.checked)} className="mt-0.5" />
+                <span>
+                  <span className="font-semibold text-keep-text">{t("console.overview.nsfwLabel")}</span>
+                  <span className="block text-xs text-keep-muted">
+                    {t("console.overview.nsfwHint")}
+                  </span>
+                </span>
+              </label>
+              {isNsfw ? (
+                <p className="mt-1.5 text-[10px] text-keep-muted">
+                  {t("console.overview.nsfwTip")}
+                </p>
+              ) : null}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      <p className="text-[11px] text-keep-muted">{t("console.overview.permanentAddress", { slug: detail.slug })}</p>
 
       <button
         type="button"
         disabled={!dirty || busy || name.trim().length < 3}
-        onClick={() => void run(async () => {
-          await apiPatchServer(detail.id, {
-            name: name.trim(),
-            tagline: tagline.trim() ? tagline.trim() : null,
-            descriptionHtml: description.trim() ? description : null,
-            tags,
-            ...(detail.isSystem ? {} : { joinMode }),
-            applicationPrompt: prompt.trim() ? prompt.trim() : null,
-            publicBrowsing,
+        onClick={() => {
+          // Flipping a live community 18+ evicts its under-18 members on the
+          // spot (server-side), so make the owner say it out loud first.
+          if (nsfwDirty && isNsfw && !window.confirm(
+            t("console.overview.nsfwConfirm", { name: detail.name }),
+          )) return;
+          void run(async () => {
+            await apiPatchServer(detail.id, {
+              name: name.trim(),
+              tagline: tagline.trim() ? tagline.trim() : null,
+              descriptionHtml: description.trim() ? description : null,
+              tags,
+              ...(detail.isSystem ? {} : { joinMode }),
+              applicationPrompt: prompt.trim() ? prompt.trim() : null,
+              publicBrowsing,
+              // Only on change (and the toggle only renders for adults on
+              // non-system servers), so an untouched save can never trip the
+              // route's adult/system-server rejections.
+              ...(nsfwDirty ? { isNsfw } : {}),
+            });
+            onSaved();
           });
-          onSaved();
-        })}
+        }}
         className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
       >
-        Save
+        {t("shared.save")}
       </button>
     </div>
   );
@@ -781,6 +859,11 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
  * ============================================================ */
 
 function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
+  const { t } = useTranslation("servers");
+  // The public-safe banner slot only matters for an 18+ community (a SFW
+  // server's normal banner must already be safe for everyone), and under-18
+  // viewers never see 18+ controls. Cosmetic mirror; the route re-checks.
+  const isAdultViewer = useChat((s) => s.viewerAge.isAdult);
   const initialTheme = useMemo<Theme | null>(() => {
     if (!detail.themeJson) return null;
     try { return normalizeTheme(JSON.parse(detail.themeJson)); } catch { return null; }
@@ -810,11 +893,11 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
   const colorDirty = iconColor !== (detail.iconColor ?? "");
   const borderDirty = borderColor !== (detail.borderColor ?? "");
 
-  /** Upload an icon/banner/wordmark image (read → POST → refetch); errors via run. */
-  function uploadImage(kind: "logo" | "banner" | "horizontal-logo", dataUrl: string) {
+  /** Upload an icon/banner/wordmark/public-banner image (read → POST → refetch); errors via run. */
+  function uploadImage(kind: "logo" | "banner" | "horizontal-logo" | "sfw-banner", dataUrl: string) {
     void run(async () => { await apiSetServerImage(detail.id, kind, dataUrl); onSaved(); });
   }
-  function clearImage(kind: "logo" | "banner" | "horizontal-logo") {
+  function clearImage(kind: "logo" | "banner" | "horizontal-logo" | "sfw-banner") {
     void run(async () => { await apiSetServerImage(detail.id, kind, null); onSaved(); });
   }
 
@@ -837,11 +920,11 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
   return (
     <div className="max-w-xl space-y-4">
       <section>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Icon</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.appearance.icon")}</p>
         <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
           <ImageCropField
             shape="circle"
-            label="Icon"
+            label={t("console.appearance.icon")}
             url={detail.logoUrl}
             crop={iconCrop}
             maxBytes={512 * 1024}
@@ -852,50 +935,50 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
             cropDirty={iconCropDirty}
             savingCrop={busy}
             onSaveCrop={() => saveCrop("icon")}
-            hint="Shown as a round tile in the server rail."
+            hint={t("console.appearance.iconHint")}
           />
           <div className="flex flex-wrap items-center gap-3 border-t border-keep-rule/60 pt-2">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-widest text-keep-muted">Fallback color</span>
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("console.appearance.fallbackColor")}</span>
               <input type="color" value={iconColor || "#8a66cc"} onChange={(e) => setIconColor(e.target.value)}
-                title="Lettered-tile color" className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
+                title={t("console.appearance.fallbackColorTitle")} className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
               {iconColor ? (
                 <button type="button" onClick={() => setIconColor("")}
-                  className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Clear</button>
+                  className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("console.appearance.clear")}</button>
               ) : null}
               {colorDirty ? (
                 <button type="button" disabled={busy}
                   onClick={() => void run(async () => { await apiPatchServer(detail.id, { iconColor: iconColor.trim() || null }); onSaved(); })}
-                  className="rounded border border-keep-action bg-keep-action px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save color</button>
+                  className="rounded border border-keep-action bg-keep-action px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.appearance.saveColor")}</button>
               ) : null}
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-widest text-keep-muted">Border color</span>
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("console.appearance.borderColor")}</span>
               <input type="color" value={borderColor || "#8a66cc"} onChange={(e) => setBorderColor(e.target.value)}
-                title="Accent ring around the rail icon" className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
+                title={t("console.appearance.borderColorTitle")} className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
               {borderColor ? (
                 <button type="button" onClick={() => setBorderColor("")}
-                  className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Clear</button>
+                  className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("console.appearance.clear")}</button>
               ) : null}
               {borderDirty ? (
                 <button type="button" disabled={busy}
                   onClick={() => void run(async () => { await apiPatchServer(detail.id, { borderColor: borderColor.trim() || null }); onSaved(); })}
-                  className="rounded border border-keep-action bg-keep-action px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save border</button>
+                  className="rounded border border-keep-action bg-keep-action px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.appearance.saveBorder")}</button>
               ) : null}
             </div>
           </div>
-          <p className="text-[10px] text-keep-muted">The fallback color is the lettered tile when no icon is set. The border color is the accent ring around the server's rail icon.</p>
+          <p className="text-[10px] text-keep-muted">{t("console.appearance.colorsHint")}</p>
         </div>
       </section>
 
       <section>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Banner</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.appearance.banner")}</p>
         <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
           <ImageCropField
             shape="rect"
             fullWidth
             aspect={topBarAspect}
-            label="Banner"
+            label={t("console.appearance.banner")}
             url={detail.bannerImageUrl}
             crop={bannerCrop}
             maxBytes={2 * 1024 * 1024}
@@ -906,13 +989,13 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
             cropDirty={bannerCropDirty}
             savingCrop={busy}
             onSaveCrop={() => saveCrop("banner")}
-            hint="This preview matches your top bar (same shape). Position the banner here and it lands the same up top. Discover cards are taller, so they show a bit more."
+            hint={t("console.appearance.bannerHint")}
           />
           {/* Top-bar banner height: tune the band's height in the top bar when
               the default doesn't suit the art. Off = the default responsive height. */}
           <div className="space-y-1 border-t border-keep-rule/60 pt-2">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted">Top-bar height</span>
+              <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted">{t("console.appearance.topBarHeight")}</span>
               <input
                 type="range"
                 min={48}
@@ -923,29 +1006,55 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
                 disabled={busy}
                 className="h-1 min-w-0 flex-1 cursor-pointer accent-keep-action"
               />
-              <span className="shrink-0 tabular-nums text-[10px] text-keep-muted">{bannerHeight == null ? "auto" : `${bannerHeight}px`}</span>
+              <span className="shrink-0 tabular-nums text-[10px] text-keep-muted">{bannerHeight == null ? t("console.appearance.auto") : t("console.appearance.px", { n: bannerHeight })}</span>
               {bannerHeight != null ? (
                 <button type="button" onClick={() => setBannerHeight(null)}
-                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Default</button>
+                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("console.appearance.default")}</button>
               ) : null}
               {bannerHeightDirty ? (
                 <button type="button" disabled={busy}
                   onClick={() => void run(async () => { await apiPatchServer(detail.id, { bannerHeight }); onSaved(); })}
-                  className="shrink-0 rounded border border-keep-action bg-keep-action px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save height</button>
+                  className="shrink-0 rounded border border-keep-action bg-keep-action px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.appearance.saveHeight")}</button>
               ) : null}
             </div>
-            <p className="text-[10px] text-keep-muted">Sets the height of the banner band in the top bar (the rest of the chat is unaffected).</p>
+            <p className="text-[10px] text-keep-muted">{t("console.appearance.topBarHeightHint")}</p>
           </div>
         </div>
       </section>
 
+      {/* Public-safe banner (age-restriction plan, Phase 2, decision #10):
+          only offered on an 18+ community — a SFW server's regular banner
+          must already be safe for everyone — and never shown to under-18
+          viewers. No crop is persisted (mirrors the wordmark slot). */}
+      {isAdultViewer && (detail.isNsfw ?? false) ? (
+        <section>
+          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.appearance.publicBannerSection")}</p>
+          <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
+            <ImageCropField
+              shape="rect"
+              fullWidth
+              aspect={topBarAspect}
+              label={t("console.appearance.publicBanner")}
+              url={detail.sfwBannerUrl ?? null}
+              crop={AVATAR_CROP_DEFAULTS}
+              maxBytes={2 * 1024 * 1024}
+              busy={busy}
+              onPickFile={(dataUrl) => uploadImage("sfw-banner", dataUrl)}
+              onClear={() => clearImage("sfw-banner")}
+              onCropChange={() => { /* no crop persisted for the public banner */ }}
+              hint={t("console.appearance.publicBannerHint")}
+            />
+          </div>
+        </section>
+      ) : null}
+
       <section>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Wordmark logo</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.appearance.wordmark")}</p>
         <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
           <ImageCropField
             shape="rect"
             aspect={5}
-            label="Wordmark logo"
+            label={t("console.appearance.wordmark")}
             url={detail.horizontalLogoUrl}
             crop={AVATAR_CROP_DEFAULTS}
             previewWidth={280}
@@ -954,42 +1063,41 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
             onPickFile={(dataUrl) => uploadImage("horizontal-logo", dataUrl)}
             onClear={() => clearImage("horizontal-logo")}
             onCropChange={() => { /* no crop persisted for the wordmark */ }}
-            hint="Replaces the app logo in the top bar so members know which server they're in."
+            hint={t("console.appearance.wordmarkHint")}
           />
         </div>
       </section>
 
       <section>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Theme</p>
-        <p className="mb-2 text-[11px] text-keep-muted">A palette for this server's pages only. Chat and the userlist are untouched.</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.appearance.theme")}</p>
+        <p className="mb-2 text-[11px] text-keep-muted">{t("console.appearance.themeHint")}</p>
         {theme === null ? (
           <button type="button" onClick={() => setTheme(DEFAULT_THEME)}
-            className="rounded border border-keep-rule bg-keep-banner px-2 py-1 text-xs hover:bg-keep-banner/80">Add a custom theme</button>
+            className="rounded border border-keep-rule bg-keep-banner px-2 py-1 text-xs hover:bg-keep-banner/80">{t("console.appearance.addTheme")}</button>
         ) : (
           <>
-            <ThemePicker theme={theme} onChange={(t) => setTheme(t)} onReset={() => setTheme(DEFAULT_THEME)} />
+            <ThemePicker theme={theme} onChange={(next) => setTheme(next)} onReset={() => setTheme(DEFAULT_THEME)} />
             <button type="button" onClick={() => setTheme(null)}
-              className="mt-2 rounded border border-keep-accent/40 bg-keep-bg px-2 py-1 text-[11px] text-keep-accent hover:bg-keep-accent/10">Remove custom theme</button>
+              className="mt-2 rounded border border-keep-accent/40 bg-keep-bg px-2 py-1 text-[11px] text-keep-accent hover:bg-keep-accent/10">{t("console.appearance.removeTheme")}</button>
           </>
         )}
         {themeDirty ? (
           <button type="button" disabled={busy}
             onClick={() => void run(async () => { await apiPatchServer(detail.id, { themeJson: theme ? JSON.stringify(theme) : null }); onSaved(); })}
-            className="ml-2 mt-2 rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save theme</button>
+            className="ml-2 mt-2 rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.appearance.saveTheme")}</button>
         ) : null}
       </section>
 
       <section>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Design style</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.appearance.designStyle")}</p>
         <p className="mb-2 text-[11px] text-keep-muted">
-          The visual treatment: ornaments, borders, textures. Applies to this server's pages for every visitor.
-          "Use default" follows each visitor's own design.
+          {t("console.appearance.designStyleHint")}
         </p>
         <StylePicker value={styleKey} onChange={setStyleKey} allowInherit />
         {styleDirty ? (
           <button type="button" disabled={busy}
             onClick={() => void run(async () => { await apiPatchServer(detail.id, { themeStyleKey: styleKey }); onSaved(); })}
-            className="mt-2 rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save style</button>
+            className="mt-2 rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.appearance.saveStyle")}</button>
         ) : null}
       </section>
     </div>
@@ -1001,6 +1109,7 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
  * ============================================================ */
 
 function RoomsTab({ detail, busy, run }: TabProps) {
+  const { t } = useTranslation("servers");
   const [rooms, setRooms] = useState<RoomListRow[] | null>(null);
   const [tick, setTick] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1024,12 +1133,11 @@ function RoomsTab({ detail, busy, run }: TabProps) {
     <div className="max-w-xl space-y-3">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] text-keep-muted">
-          Create, rename, retopic, set message expiry, or remove this server's rooms. (Day-to-day room
-          commands like <span className="text-keep-text">/topic</span> still work in chat too.)
+          <Trans t={t} i18nKey="console.rooms.blurb" components={{ cmd: <span className="text-keep-text" /> }} />
         </p>
         <button type="button" data-tour="server-settings-rooms-create" onClick={() => { setCreating((c) => !c); setEditingId(null); }}
           className="shrink-0 rounded border border-keep-action bg-keep-action px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg">
-          {creating ? "Cancel" : "+ New room"}
+          {creating ? t("shared.cancel") : t("console.rooms.newRoom")}
         </button>
       </div>
 
@@ -1039,9 +1147,9 @@ function RoomsTab({ detail, busy, run }: TabProps) {
       ) : null}
 
       {!rooms ? (
-        <p className="text-sm italic text-keep-muted">Loading…</p>
+        <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>
       ) : rooms.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No rooms yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("console.rooms.none")}</p>
       ) : (
         <ul className="space-y-1.5">
           {rooms.map((r) => (
@@ -1049,15 +1157,19 @@ function RoomsTab({ detail, busy, run }: TabProps) {
               <div className="flex items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-sm text-keep-text">
                   {r.name}
-                  {r.type === "private" ? <span className="ml-1.5 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">private</span> : null}
+                  {r.type === "private" ? <span className="ml-1.5 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">{t("console.rooms.privateChip")}</span> : null}
+                  {/* 18+ marker (age-restriction plan, Phase 2) so a flip is
+                      visible in this list the moment it saves. Mirrors the
+                      admin Banned badge red — a warning on every palette. */}
+                  {r.isNsfw ? <span className="ml-1.5 rounded border border-[#e06070] px-1 text-[9px] font-semibold uppercase tracking-widest text-[#e06070]">{t("console.rooms.nsfwChip")}</span> : null}
                 </span>
-                {Array.isArray(r.occupants) ? <span className="shrink-0 text-[10px] text-keep-muted">{r.occupants.length} here</span> : null}
+                {Array.isArray(r.occupants) ? <span className="shrink-0 text-[10px] text-keep-muted">{t("console.rooms.occupantsHere", { count: r.occupants.length })}</span> : null}
                 <button type="button" disabled={busy} onClick={() => { setEditingId((id) => (id === r.id ? null : r.id)); setCreating(false); }}
                   className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">
-                  {editingId === r.id ? "Done" : "Edit"}</button>
+                  {editingId === r.id ? t("console.rooms.done") : t("shared.edit")}</button>
                 <button type="button" disabled={busy}
-                  onClick={() => { if (window.confirm(`Delete "${r.name}"? Anyone inside is moved to the landing room; its messages are removed.`)) void run(async () => { await apiDeleteServerRoom(detail.id, r.id); refresh(); }); }}
-                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Delete</button>
+                  onClick={() => { if (window.confirm(t("console.rooms.deleteConfirm", { name: r.name }))) void run(async () => { await apiDeleteServerRoom(detail.id, r.id); refresh(); }); }}
+                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.delete")}</button>
               </div>
               {editingId === r.id ? (
                 <RoomEditForm detail={detail} room={r} busy={busy} run={run}
@@ -1073,43 +1185,61 @@ function RoomsTab({ detail, busy, run }: TabProps) {
 
 /** Inline "new room" form for the Rooms tab. */
 function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsoleDetail; busy: boolean; run: (fn: () => Promise<void>) => Promise<void>; onCreated: () => void }) {
+  const { t } = useTranslation("servers");
   const [name, setName] = useState("");
   const [type, setType] = useState<"public" | "private">("public");
   const [password, setPassword] = useState("");
   const [topic, setTopic] = useState("");
   const [persistent, setPersistent] = useState(true);
+  const [nsfw, setNsfw] = useState(false);
+  // 18+ room checkbox (age-restriction plan, Phase 2): hidden from under-18
+  // viewers entirely (the route rejects the write regardless), and moot
+  // inside an 18+ community, where every room is 18+ by the server flag.
+  const isAdultViewer = useChat((s) => s.viewerAge.isAdult);
+  const serverIsNsfw = detail.isNsfw ?? false;
   const canSave = name.trim().length >= 1 && (type === "public" || password.length >= 1);
   return (
     <div className="space-y-2 rounded border border-keep-action/40 bg-keep-panel/20 p-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} placeholder="Room name"
+        <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40} placeholder={t("console.rooms.namePlaceholder")}
           className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
         <select value={type} onChange={(e) => setType(e.target.value as "public" | "private")}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
-          <option value="public">Public</option>
-          <option value="private">Private</option>
+          <option value="public">{t("console.rooms.public")}</option>
+          <option value="private">{t("console.rooms.private")}</option>
         </select>
       </div>
       {type === "private" ? (
-        <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={128} placeholder="Password (required for private)"
+        <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={128} placeholder={t("console.rooms.passwordPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       ) : null}
-      <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={200} placeholder="Topic (optional)"
+      <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={200} placeholder={t("console.rooms.topicPlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       <label className="flex items-start gap-2 text-xs text-keep-text">
         <input type="checkbox" className="mt-0.5" checked={persistent} onChange={(e) => setPersistent(e.target.checked)} />
         <span>
-          <span className="block">Keep this room even when empty</span>
-          <span className="block text-[10px] text-keep-muted">On (recommended): the channel stays put. Off: it's removed automatically once everyone leaves.</span>
+          <span className="block">{t("console.rooms.keepWhenEmpty")}</span>
+          <span className="block text-[10px] text-keep-muted">{t("console.rooms.keepWhenEmptyCreateHint")}</span>
         </span>
       </label>
+      {isAdultViewer && !serverIsNsfw ? (
+        <label className="flex items-start gap-2 text-xs text-keep-text">
+          <input type="checkbox" className="mt-0.5" checked={nsfw} onChange={(e) => setNsfw(e.target.checked)} />
+          <span>
+            <span className="block">{t("console.rooms.nsfwRoom")}</span>
+            <span className="block text-[10px] text-keep-muted">{t("console.rooms.nsfwCreateHint")}</span>
+          </span>
+        </label>
+      ) : isAdultViewer && serverIsNsfw ? (
+        <p className="text-[10px] text-keep-muted">{t("console.rooms.allNsfwNote")}</p>
+      ) : null}
       <div className="flex justify-end">
         <button type="button" disabled={busy || !canSave}
           onClick={() => void run(async () => {
-            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}) });
+            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(nsfw ? { isNsfw: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}) });
             onCreated();
           })}
-          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Create room</button>
+          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.rooms.createRoom")}</button>
       </div>
     </div>
   );
@@ -1117,35 +1247,53 @@ function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsol
 
 /** Inline per-room editor (name / topic / message expiry). */
 function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerConsoleDetail; room: RoomListRow; busy: boolean; run: (fn: () => Promise<void>) => Promise<void>; onSaved: () => void }) {
+  const { t } = useTranslation("servers");
   const [name, setName] = useState(room.name);
   const [topic, setTopic] = useState(room.topic ?? "");
   const [expiry, setExpiry] = useState<string>(room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "");
   const [persistent, setPersistent] = useState(room.persistent ?? true);
-  const dirty = name !== room.name || topic !== (room.topic ?? "") || expiry !== (room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "") || persistent !== (room.persistent ?? true);
+  const [nsfw, setNsfw] = useState(room.isNsfw ?? false);
+  // Same gating as the create form: no 18+ control for under-18 viewers,
+  // and none inside an 18+ community (the server flag already covers it).
+  const isAdultViewer = useChat((s) => s.viewerAge.isAdult);
+  const serverIsNsfw = detail.isNsfw ?? false;
+  const nsfwDirty = nsfw !== (room.isNsfw ?? false);
+  const dirty = name !== room.name || topic !== (room.topic ?? "") || expiry !== (room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "") || persistent !== (room.persistent ?? true) || nsfwDirty;
   return (
     <div className="mt-2 space-y-2 border-t border-keep-rule/60 pt-2">
       <label className="block text-xs">
-        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">Name</span>
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.name")}</span>
         <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
       </label>
       <label className="block text-xs">
-        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">Topic</span>
-        <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={200} placeholder="No topic set"
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.topic")}</span>
+        <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={200} placeholder={t("console.rooms.noTopicPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
       </label>
       <label className="block text-xs">
-        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">Message expiry (minutes, blank = server default)</span>
-        <input type="number" min={0} value={expiry} onChange={(e) => setExpiry(e.target.value)} placeholder="default"
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.expiryLabel")}</span>
+        <input type="number" min={0} value={expiry} onChange={(e) => setExpiry(e.target.value)} placeholder={t("console.rooms.defaultPlaceholder")}
           className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
       </label>
       <label className="flex items-start gap-2 text-xs text-keep-text">
         <input type="checkbox" className="mt-0.5" checked={persistent} onChange={(e) => setPersistent(e.target.checked)} />
         <span>
-          <span className="block">Keep this room even when empty</span>
-          <span className="block text-[10px] text-keep-muted">Off: the room is removed automatically once everyone leaves.</span>
+          <span className="block">{t("console.rooms.keepWhenEmpty")}</span>
+          <span className="block text-[10px] text-keep-muted">{t("console.rooms.keepWhenEmptyEditHint")}</span>
         </span>
       </label>
+      {isAdultViewer && !serverIsNsfw ? (
+        <label className="flex items-start gap-2 text-xs text-keep-text">
+          <input type="checkbox" className="mt-0.5" checked={nsfw} onChange={(e) => setNsfw(e.target.checked)} />
+          <span>
+            <span className="block">{t("console.rooms.nsfwRoom")}</span>
+            <span className="block text-[10px] text-keep-muted">{t("console.rooms.nsfwEditHint")}</span>
+          </span>
+        </label>
+      ) : isAdultViewer && serverIsNsfw ? (
+        <p className="text-[10px] text-keep-muted">{t("console.rooms.allNsfwNote")}</p>
+      ) : null}
       <div className="flex justify-end">
         <button type="button" disabled={busy || !dirty}
           onClick={() => void run(async () => {
@@ -1154,10 +1302,13 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
               topic: topic.trim() ? topic.trim() : null,
               messageExpiryMinutes: expiry.trim() === "" ? null : Math.max(0, Number(expiry)),
               persistent,
+              // Only on change, and the control only renders for adults, so a
+              // plain rename can never trip the route's adult-only rejection.
+              ...(nsfwDirty ? { isNsfw: nsfw } : {}),
             });
             onSaved();
           })}
-          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save room</button>
+          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.rooms.saveRoom")}</button>
       </div>
     </div>
   );
@@ -1168,6 +1319,7 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
  * ============================================================ */
 
 function MembersTab({ detail, busy, run }: TabProps) {
+  const { t } = useTranslation("servers");
   const [data, setData] = useState<{ managerPermissions: ServerPermission[]; members: ServerMemberWire[] } | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -1177,44 +1329,44 @@ function MembersTab({ detail, busy, run }: TabProps) {
   }, [detail.id, tick]);
 
   const roleLabel = (m: ServerMemberWire) =>
-    m.role === "owner" ? "Owner"
-      : m.role === "admin" ? "Admin (lieutenant)"
-      : m.role === "mod" ? `Moderator · ${m.permissions.length} ${m.permissions.length === 1 ? "power" : "powers"}`
-      : "Member";
+    m.role === "owner" ? t("console.members.roleOwner")
+      : m.role === "admin" ? t("console.members.roleAdminLieutenant")
+      : m.role === "mod" ? t("console.members.roleModeratorPowers", { count: m.permissions.length })
+      : t("console.members.roleMember");
 
-  if (!data) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+  if (!data) return <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>;
 
   return (
     <div className="max-w-2xl space-y-3">
-      <p className="text-xs uppercase tracking-widest text-keep-muted">Members ({data.members.length})</p>
+      <p className="text-xs uppercase tracking-widest text-keep-muted">{t("console.members.heading", { n: data.members.length })}</p>
       <ul className="space-y-1">
         {data.members.map((m) => (
           <li key={m.userId} className="flex items-center gap-2 rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5">
             <Avatar url={m.avatarUrl} name={m.username} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm text-keep-text">{m.username}</span>
-              <span className="block text-[10px] text-keep-muted">{roleLabel(m)} · joined {new Date(m.joinedAt).toLocaleDateString()}</span>
+              <span className="block text-[10px] text-keep-muted">{t("console.members.roleJoined", { role: roleLabel(m), date: formatDate(m.joinedAt) })}</span>
             </span>
             {m.role === "member" ? (
               <>
                 <button type="button" disabled={busy}
-                  onClick={() => void run(async () => { await apiSetRole(detail.id, m.userId, "mod"); setTick((t) => t + 1); })}
-                  title="Promote to moderator with the default power set (tune it in Roles)"
-                  className="shrink-0 rounded border border-keep-action/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/10">Make mod</button>
+                  onClick={() => void run(async () => { await apiSetRole(detail.id, m.userId, "mod"); setTick((t2) => t2 + 1); })}
+                  title={t("console.members.makeModTitle")}
+                  className="shrink-0 rounded border border-keep-action/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/10">{t("console.members.makeMod")}</button>
                 <button type="button" disabled={busy}
-                  onClick={() => { if (window.confirm(`Remove ${m.username} from ${detail.name}?`)) void run(async () => { await apiRemoveMember(detail.id, m.userId); setTick((t) => t + 1); }); }}
-                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Remove</button>
+                  onClick={() => { if (window.confirm(t("console.members.removeConfirm", { name: m.username, server: detail.name }))) void run(async () => { await apiRemoveMember(detail.id, m.userId); setTick((t2) => t2 + 1); }); }}
+                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.remove")}</button>
               </>
             ) : m.role === "mod" ? (
               <button type="button" disabled={busy}
-                onClick={() => { if (window.confirm(`Remove ${m.username} from ${detail.name}?`)) void run(async () => { await apiRemoveMember(detail.id, m.userId); setTick((t) => t + 1); }); }}
-                className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Remove</button>
+                onClick={() => { if (window.confirm(t("console.members.removeConfirm", { name: m.username, server: detail.name }))) void run(async () => { await apiRemoveMember(detail.id, m.userId); setTick((t2) => t2 + 1); }); }}
+                className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.remove")}</button>
             ) : null}
           </li>
         ))}
       </ul>
       {data.members.length === 1 ? (
-        <p className="text-xs italic text-keep-muted">No members yet beyond you. Approved applicants and people who join appear here.</p>
+        <p className="text-xs italic text-keep-muted">{t("console.members.onlyYou")}</p>
       ) : null}
     </div>
   );
@@ -1232,14 +1384,15 @@ function MembersTab({ detail, busy, run }: TabProps) {
  * ============================================================ */
 
 /** Format a bare hours count as a friendly "2d" / "6h" label for the row copy. */
-function muteRemainingLabel(untilMs: number): string {
+function muteRemainingLabel(t: TFunction<"servers">, untilMs: number): string {
   const ms = Math.max(0, untilMs - Date.now());
-  if (ms >= 86_400_000) return `${Math.round(ms / 86_400_000)}d`;
-  if (ms >= 3_600_000) return `${Math.round(ms / 3_600_000)}h`;
-  return `${Math.max(1, Math.round(ms / 60_000))}m`;
+  if (ms >= 86_400_000) return t("console.users.durationDays", { n: Math.round(ms / 86_400_000) });
+  if (ms >= 3_600_000) return t("console.users.durationHours", { n: Math.round(ms / 3_600_000) });
+  return t("console.users.durationMinutes", { n: Math.max(1, Math.round(ms / 60_000)) });
 }
 
 function UsersTab({ detail, viewer, busy, run }: TabProps) {
+  const { t } = useTranslation("servers");
   // The signed-in account (for the never-act-on-yourself guard). Read-only
   // selector; `me.id` is the canonical viewer identity the routes also key on.
   const me = useChat((s) => s.me);
@@ -1274,16 +1427,16 @@ function UsersTab({ detail, viewer, busy, run }: TabProps) {
     setViewError(null);
     try {
       const r = await fetch(`/profiles/${encodeURIComponent(`@id:${userId}`)}`, { credentials: "include" });
-      if (!r.ok) { setViewError(r.status === 404 ? "That account no longer exists." : `Couldn't load profile (HTTP ${r.status}).`); return; }
+      if (!r.ok) { setViewError(r.status === 404 ? t("console.users.accountGone") : t("console.users.profileLoadHttp", { status: r.status })); return; }
       const j = await r.json();
-      if (j && "private" in j) { setViewError("That profile is restricted."); return; }
+      if (j && "private" in j) { setViewError(t("console.users.profileRestricted")); return; }
       setViewing(j as ProfileView);
     } catch {
-      setViewError("Couldn't load profile.");
+      setViewError(t("console.users.profileLoadError"));
     }
   }
 
-  if (!data) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+  if (!data) return <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>;
 
   const mutedUntil = new Map(mutes.map((m) => [m.userId, m.until]));
   const bannedActive = new Map(bans.filter((b) => !b.expired).map((b) => [b.userId, b] as const));
@@ -1292,31 +1445,29 @@ function UsersTab({ detail, viewer, busy, run }: TabProps) {
   const shown = needle ? data.members.filter((m) => m.username.toLowerCase().includes(needle)) : data.members;
 
   const roleLabel = (m: ServerMemberWire) =>
-    m.role === "owner" ? "Owner"
-      : m.role === "admin" ? "Admin"
-      : m.role === "mod" ? "Moderator"
-      : "Member";
+    m.role === "owner" ? t("console.members.roleOwner")
+      : m.role === "admin" ? t("console.users.roleAdmin")
+      : m.role === "mod" ? t("console.users.roleModerator")
+      : t("console.members.roleMember");
 
   return (
     <div className="max-w-2xl space-y-3">
       <p className="text-[11px] text-keep-muted">
-        Find any member and moderate them here, no need to catch them in a room. Muting silences them across this
-        server; banning blocks its rooms and strips their role; removing drops their membership. Every action is
-        logged in the Mod Log.
+        {t("console.users.blurb")}
       </p>
 
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Search members by username…"
-        aria-label="Search members"
+        placeholder={t("console.users.searchPlaceholder")}
+        aria-label={t("console.users.searchAria")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
       />
 
       {viewError ? <p className="text-xs text-keep-accent">{viewError}</p> : null}
 
       {shown.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">{needle ? "No members match that search." : "No members yet."}</p>
+        <p className="text-xs italic text-keep-muted">{needle ? t("console.users.noSearchMatches") : t("console.users.noMembers")}</p>
       ) : (
         <ul className="space-y-1.5">
           {shown.map((m) => {
@@ -1335,54 +1486,54 @@ function UsersTab({ detail, viewer, busy, run }: TabProps) {
                   <span className="block truncate text-sm text-keep-text">{m.username}</span>
                   <span className="block text-[10px] text-keep-muted">
                     {roleLabel(m)}
-                    {isMuted ? <span className="text-keep-system"> · muted {muteRemainingLabel(muteUntil!)}</span> : null}
-                    {ban ? <span className="text-keep-system"> · banned{ban.until ? ` until ${new Date(ban.until).toLocaleDateString()}` : ""}</span> : null}
+                    {isMuted ? <span className="text-keep-system">{t("console.users.mutedSuffix", { remaining: muteRemainingLabel(t, muteUntil!) })}</span> : null}
+                    {ban ? <span className="text-keep-system">{t("console.users.bannedSuffix")}{ban.until ? t("console.users.bannedUntilSuffix", { date: formatDate(ban.until) }) : ""}</span> : null}
                   </span>
                 </span>
 
                 {/* View profile — always available so a mod can verify who they're acting on. */}
                 <button type="button" disabled={busy}
                   onClick={() => void openProfile(m.userId)}
-                  title={`View ${m.username}'s profile`} aria-label={`View ${m.username}'s profile`}
-                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50">Profile</button>
+                  title={t("console.users.viewProfile", { name: m.username })} aria-label={t("console.users.viewProfile", { name: m.username })}
+                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50">{t("console.users.profile")}</button>
 
                 {protectedRow ? null : (
                   <>
                     {/* Mute / Unmute (server-wide). */}
                     {isMuted && canUnmute ? (
                       <button type="button" disabled={busy}
-                        onClick={() => void run(async () => { await apiUnmute(detail.id, m.userId); setTick((t) => t + 1); })}
-                        className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50">Unmute</button>
+                        onClick={() => void run(async () => { await apiUnmute(detail.id, m.userId); setTick((t2) => t2 + 1); })}
+                        className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text disabled:opacity-50">{t("console.users.unmute")}</button>
                     ) : !isMuted && canMute ? (
                       <span className="flex shrink-0 items-center gap-1">
                         <input type="number" inputMode="numeric" min={1} max={8760} value={hoursStr} disabled={busy}
                           onChange={(e) => setHours((h) => ({ ...h, [m.userId]: e.target.value }))}
-                          aria-label={`Mute ${m.username} for this many hours`} title="Mute duration in hours"
+                          aria-label={t("console.users.muteHoursAria", { name: m.username })} title={t("console.users.muteHoursTitle")}
                           className="w-14 rounded border border-keep-rule bg-keep-bg px-1 py-0.5 text-[11px] outline-none focus:border-keep-action" />
-                        <span className="text-[10px] text-keep-muted">h</span>
+                        <span className="text-[10px] text-keep-muted">{t("console.users.hoursUnit")}</span>
                         <button type="button" disabled={busy}
-                          onClick={() => void run(async () => { await apiMute(detail.id, { target: `@id:${m.userId}`, hours: hoursNum }); setTick((t) => t + 1); })}
-                          title={`Mute ${m.username} across this server for ${hoursNum}h`}
-                          className="rounded border border-keep-system/70 bg-keep-system/15 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-system hover:bg-keep-system/25 disabled:opacity-50">Mute</button>
+                          onClick={() => void run(async () => { await apiMute(detail.id, { target: `@id:${m.userId}`, hours: hoursNum }); setTick((t2) => t2 + 1); })}
+                          title={t("console.users.muteTitle", { name: m.username, hours: hoursNum })}
+                          className="rounded border border-keep-system/70 bg-keep-system/15 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-system hover:bg-keep-system/25 disabled:opacity-50">{t("console.users.mute")}</button>
                       </span>
                     ) : null}
 
                     {/* Ban — reuses the shared BanModal + existing ban route. */}
                     {canBan ? (
                       ban ? (
-                        <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted" title="Lift this ban from the Bans tab">Banned (Bans tab)</span>
+                        <span className="shrink-0 text-[10px] uppercase tracking-widest text-keep-muted" title={t("console.users.bannedChipTitle")}>{t("console.users.bannedChip")}</span>
                       ) : (
                         <button type="button" disabled={busy}
                           onClick={() => setBanTarget(m)}
-                          className="shrink-0 rounded border border-keep-system/70 bg-keep-system/15 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-system hover:bg-keep-system/25 disabled:opacity-50">Ban…</button>
+                          className="shrink-0 rounded border border-keep-system/70 bg-keep-system/15 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-system hover:bg-keep-system/25 disabled:opacity-50">{t("console.users.banEllipsis")}</button>
                       )
                     ) : null}
 
                     {/* Remove from server (the admin-panel "kick"). */}
                     {canRemove ? (
                       <button type="button" disabled={busy}
-                        onClick={() => { if (window.confirm(`Remove ${m.username} from ${detail.name}?`)) void run(async () => { await apiRemoveMember(detail.id, m.userId); setTick((t) => t + 1); }); }}
-                        className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50">Remove</button>
+                        onClick={() => { if (window.confirm(t("console.members.removeConfirm", { name: m.username, server: detail.name }))) void run(async () => { await apiRemoveMember(detail.id, m.userId); setTick((t2) => t2 + 1); }); }}
+                        className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50">{t("shared.remove")}</button>
                     ) : null}
                   </>
                 )}
@@ -1395,12 +1546,12 @@ function UsersTab({ detail, viewer, busy, run }: TabProps) {
       {banTarget ? (
         <BanModal
           targetName={banTarget.username}
-          description={`Blocks ${detail.name}'s rooms only. The rest of the Spire is untouched. A timed ban lifts itself when it expires.`}
+          description={t("console.banModal.description", { server: detail.name })}
           reasonRequired={false}
-          reasonPlaceholder="Reason (shown to them)"
+          reasonPlaceholder={t("console.banModal.reasonPlaceholder")}
           reasonMaxLength={300}
-          purgeScopeLabel="posts here"
-          confirmLabel="Ban from server"
+          purgeScopeLabel={t("console.banModal.purgeScope")}
+          confirmLabel={t("console.banModal.confirm")}
           onClose={() => setBanTarget(null)}
           onConfirm={async (durationMs, reason, purge) => {
             const banHours = durationMs == null ? null : Math.max(1, Math.round(durationMs / 3_600_000));
@@ -1411,7 +1562,7 @@ function UsersTab({ detail, viewer, busy, run }: TabProps) {
                 ...(reason.trim() ? { reason: reason.trim() } : {}),
                 ...(purge != null ? { purgePosts: purge } : {}),
               });
-              setBanTarget(null); setTick((t) => t + 1);
+              setBanTarget(null); setTick((t2) => t2 + 1);
             });
           }}
         />
@@ -1429,6 +1580,7 @@ function UsersTab({ detail, viewer, busy, run }: TabProps) {
  * ============================================================ */
 
 function RolesTab({ detail, viewer, busy, run }: TabProps) {
+  const { t } = useTranslation("servers");
   const [data, setData] = useState<{ managerPermissions: ServerPermission[]; members: ServerMemberWire[] } | null>(null);
   const [tick, setTick] = useState(0);
   const [pendingHit, setPendingHit] = useState<ServerUserHit | null>(null);
@@ -1449,21 +1601,20 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
   return (
     <div className="max-w-2xl space-y-4">
       {!data ? (
-        <p className="text-sm italic text-keep-muted">Loading…</p>
+        <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>
       ) : (
         <>
           <p className="text-sm text-keep-text">
-            <span className="text-xs uppercase tracking-widest text-keep-muted">Owner</span>{" "}
+            <span className="text-xs uppercase tracking-widest text-keep-muted">{t("console.roles.owner")}</span>{" "}
             <span className="font-semibold">{detail.ownerUsername}</span>
-            <span className="ml-1 text-[10px] text-keep-muted">(every power)</span>
+            <span className="ml-1 text-[10px] text-keep-muted">{t("console.roles.everyPower")}</span>
           </p>
 
           <div>
-            <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Moderators &amp; admins ({mods.length})</p>
+            <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.roles.modsHeading", { n: mods.length })}</p>
             {mods.length === 0 ? (
               <p className="text-xs italic text-keep-muted">
-                None yet. Appoint a helper below: pick the Moderator tier for chat moderation, or
-                Admin for full management. Neither can touch the owner's content or change the server's appearance.
+                {t("console.roles.noneYet")}
               </p>
             ) : (
               <ul className="space-y-1.5">
@@ -1472,22 +1623,22 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
                     <div className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-sm text-keep-text">
                         {m.username}
-                        {m.role === "admin" ? <span className="ml-1 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">admin</span> : null}
+                        {m.role === "admin" ? <span className="ml-1 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">{t("console.roles.adminChip")}</span> : null}
                       </span>
                       <span className="shrink-0 text-[10px] text-keep-muted">
-                        {m.role === "admin" ? "all but appearance" : `${m.permissions.length} ${m.permissions.length === 1 ? "power" : "powers"}`}
+                        {m.role === "admin" ? t("console.roles.allButAppearance") : t("console.roles.powers", { count: m.permissions.length })}
                       </span>
                       {m.role === "mod" ? (
                         <button type="button" disabled={busy}
                           onClick={() => setEditingUserId((id) => (id === m.userId ? null : m.userId))}
                           className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">
-                          {editingUserId === m.userId ? "Done" : "Edit"}</button>
+                          {editingUserId === m.userId ? t("console.rooms.done") : t("shared.edit")}</button>
                       ) : null}
                       {/* Removing the admin lieutenant is owner-only (matches appointing). */}
                       {m.role === "mod" || viewer.isOwner ? (
                         <button type="button" disabled={busy}
-                          onClick={() => { if (window.confirm(`Remove ${m.username}'s ${m.role} role?`)) void run(async () => { await apiRemoveMember(detail.id, m.userId); setTick((t) => t + 1); }); }}
-                          className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Remove</button>
+                          onClick={() => { if (window.confirm(t("console.roles.removeRoleConfirm", { name: m.username, role: m.role }))) void run(async () => { await apiRemoveMember(detail.id, m.userId); setTick((t2) => t2 + 1); }); }}
+                          className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.remove")}</button>
                       ) : null}
                     </div>
                     {m.role === "mod" && editingUserId === m.userId ? (
@@ -1506,16 +1657,16 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
 
           {/* Appoint flow — pick a person, then a tier (preset), not a blank grid. */}
           <div data-tour="server-settings-roles-appoint" className="rounded border border-keep-rule p-3">
-            <p className="mb-2 text-xs uppercase tracking-widest text-keep-muted">Appoint staff</p>
+            <p className="mb-2 text-xs uppercase tracking-widest text-keep-muted">{t("console.roles.appointStaff")}</p>
             {!pendingHit ? (
               <ServerUserPicker
                 serverId={detail.id}
-                placeholder="Search a username or character…"
+                placeholder={t("console.userPicker.placeholder")}
                 disabledReason={(hit) =>
-                  hit.serverRole === "owner" ? "the owner"
-                    : hit.serverRole === "mod" ? "already a mod"
-                    : hit.serverRole === "admin" ? "already admin"
-                    : hit.banned ? "banned, lift first"
+                  hit.serverRole === "owner" ? t("console.roles.reasonOwner")
+                    : hit.serverRole === "mod" ? t("console.roles.reasonAlreadyMod")
+                    : hit.serverRole === "admin" ? t("console.roles.reasonAlreadyAdmin")
+                    : hit.banned ? t("console.roles.reasonBanned")
                     : null}
                 onSelect={(hit) => {
                   setPendingHit(hit);
@@ -1526,7 +1677,7 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
               />
             ) : (
               <div className="space-y-2.5">
-                <p className="text-sm text-keep-text">Appoint <span className="font-semibold">{pendingHit.username}</span> as…</p>
+                <p className="text-sm text-keep-text"><Trans t={t} i18nKey="console.roles.appointAs" values={{ name: pendingHit.username }} components={{ user: <span className="font-semibold" /> }} /></p>
 
                 {/* Tier cards */}
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -1535,17 +1686,17 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
                     onClick={() => { setPendingTier("mod"); setShowAdvanced(false); setPendingPerms(SERVER_MOD_DEFAULT_PERMISSIONS.filter((p) => grantable.has(p))); }}
                     className={`rounded border px-2.5 py-2 text-left ${pendingTier === "mod" ? "border-keep-action bg-keep-action/10" : "border-keep-rule hover:border-keep-action/60"}`}
                   >
-                    <span className="block text-sm font-semibold text-keep-text">Moderator</span>
-                    <span className="mt-0.5 block text-[11px] text-keep-muted">Chat moderation: handle reports, kick &amp; mute, tidy others' messages. The everyday helper.</span>
+                    <span className="block text-sm font-semibold text-keep-text">{t("console.roles.moderator")}</span>
+                    <span className="mt-0.5 block text-[11px] text-keep-muted">{t("console.roles.moderatorBlurb")}</span>
                   </button>
                   <button
                     type="button" disabled={busy || !viewer.isOwner}
-                    title={viewer.isOwner ? undefined : "Only the owner can appoint an admin."}
+                    title={viewer.isOwner ? undefined : t("console.roles.adminOwnerOnly")}
                     onClick={() => { setPendingTier("admin"); setShowAdvanced(false); }}
                     className={`rounded border px-2.5 py-2 text-left ${!viewer.isOwner ? "opacity-50" : pendingTier === "admin" ? "border-keep-action bg-keep-action/10" : "border-keep-rule hover:border-keep-action/60"}`}
                   >
-                    <span className="block text-sm font-semibold text-keep-text">Admin</span>
-                    <span className="mt-0.5 block text-[11px] text-keep-muted">Full management: members, rooms, usergroups, earning, everything. Cannot change appearance, transfer, or delete.{viewer.isOwner ? "" : " Owner-only to assign."}</span>
+                    <span className="block text-sm font-semibold text-keep-text">{t("console.roles.admin")}</span>
+                    <span className="mt-0.5 block text-[11px] text-keep-muted">{t("console.roles.adminBlurb")}{viewer.isOwner ? "" : t("console.roles.adminBlurbOwnerOnlySuffix")}</span>
                   </button>
                 </div>
 
@@ -1554,32 +1705,32 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
                   <div>
                     <button type="button" onClick={() => setShowAdvanced((v) => !v)}
                       className="text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-action">
-                      {showAdvanced ? "▾ Hide powers" : "▸ Customize powers"}</button>
+                      {showAdvanced ? t("console.roles.hidePowers") : t("console.roles.customizePowers")}</button>
                     {showAdvanced ? (
                       <div className="mt-1.5">
                         <ModPermissionCheckboxes value={pendingPerms} grantable={grantable} disabled={busy} onChange={setPendingPerms} />
                       </div>
                     ) : (
-                      <p className="mt-1 text-[10px] text-keep-muted">Starts with the chat-moderation preset ({pendingPerms.length} {pendingPerms.length === 1 ? "power" : "powers"}). Customize to add or remove individual powers.</p>
+                      <p className="mt-1 text-[10px] text-keep-muted">{t("console.roles.presetNote", { count: pendingPerms.length })}</p>
                     )}
                   </div>
                 ) : (
-                  <p className="text-[10px] text-keep-muted">Admins hold every moderation power except <span className="text-keep-text">Manage appearance</span> ({SERVER_ADMIN_DEFAULT_PERMISSIONS.length} powers), and can't transfer or delete the server.</p>
+                  <p className="text-[10px] text-keep-muted"><Trans t={t} i18nKey="console.roles.adminPowersNote" values={{ n: SERVER_ADMIN_DEFAULT_PERMISSIONS.length }} components={{ perm: <span className="text-keep-text" /> }} /></p>
                 )}
 
                 <div className="flex justify-end gap-2">
                   <button type="button" disabled={busy} onClick={() => setPendingHit(null)}
-                    className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">Cancel</button>
+                    className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">{t("shared.cancel")}</button>
                   {pendingTier === "admin" ? (
                     <button type="button" disabled={busy || !viewer.isOwner}
-                      onClick={() => void run(async () => { await apiSetRole(detail.id, pendingHit.userId, "admin"); setPendingHit(null); setTick((t) => t + 1); })}
+                      onClick={() => void run(async () => { await apiSetRole(detail.id, pendingHit.userId, "admin"); setPendingHit(null); setTick((t2) => t2 + 1); })}
                       className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
-                      Appoint as admin</button>
+                      {t("console.roles.appointAsAdmin")}</button>
                   ) : (
                     <button type="button" disabled={busy}
-                      onClick={() => void run(async () => { await apiSetRole(detail.id, pendingHit.userId, "mod", pendingPerms); setPendingHit(null); setTick((t) => t + 1); })}
+                      onClick={() => void run(async () => { await apiSetRole(detail.id, pendingHit.userId, "mod", pendingPerms); setPendingHit(null); setTick((t2) => t2 + 1); })}
                       className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
-                      Appoint as moderator</button>
+                      {t("console.roles.appointAsModerator")}</button>
                   )}
                 </div>
               </div>
@@ -1596,29 +1747,29 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
 
 /** Owner-only ownership transfer (§6.2 most-sensitive act). */
 function TransferOwnership({ detail, busy, run }: { detail: ServerConsoleDetail; busy: boolean; run: (fn: () => Promise<void>) => Promise<void> }) {
+  const { t } = useTranslation("servers");
   const [target, setTarget] = useState<ServerUserHit | null>(null);
   return (
     <div className="rounded border border-keep-system/50 bg-keep-system/5 p-3">
-      <p className="mb-1 text-xs uppercase tracking-widest text-keep-system">Transfer ownership</p>
+      <p className="mb-1 text-xs uppercase tracking-widest text-keep-system">{t("console.transfer.title")}</p>
       <p className="mb-2 text-[11px] text-keep-muted">
-        Hand this server to another member. You step down to admin (you keep moderation reach, but lose owner-only acts).
-        This can't be undone by you afterward.
+        {t("console.transfer.blurb")}
       </p>
       {!target ? (
         <ServerUserPicker
           serverId={detail.id}
-          placeholder="Search the new owner…"
-          disabledReason={(hit) => (hit.serverRole === "owner" ? "already owner" : hit.banned ? "banned" : null)}
+          placeholder={t("console.transfer.searchPlaceholder")}
+          disabledReason={(hit) => (hit.serverRole === "owner" ? t("console.transfer.reasonAlreadyOwner") : hit.banned ? t("console.transfer.reasonBanned") : null)}
           onSelect={setTarget}
         />
       ) : (
         <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm text-keep-text">{target.username}</span>
           <button type="button" onClick={() => setTarget(null)}
-            className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Change</button>
+            className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("console.transfer.change")}</button>
           <button type="button" disabled={busy}
-            onClick={() => { if (window.confirm(`Transfer ${detail.name} to ${target.username}? You will step down to admin.`)) void run(async () => { await apiTransfer(detail.id, `@id:${target.userId}`); setTarget(null); }); }}
-            className="shrink-0 rounded border border-keep-system/70 bg-keep-system/15 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-system disabled:opacity-50">Transfer</button>
+            onClick={() => { if (window.confirm(t("console.transfer.confirm", { server: detail.name, name: target.username }))) void run(async () => { await apiTransfer(detail.id, `@id:${target.userId}`); setTarget(null); }); }}
+            className="shrink-0 rounded border border-keep-system/70 bg-keep-system/15 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-system disabled:opacity-50">{t("console.transfer.transfer")}</button>
         </div>
       )}
     </div>
@@ -1630,6 +1781,7 @@ function TransferOwnership({ detail, busy, run }: { detail: ServerConsoleDetail;
  * ============================================================ */
 
 function UsergroupMembersPanel({ detail, group, busy, run }: { detail: ServerConsoleDetail; group: ServerUsergroupWire; busy: boolean; run: (fn: () => Promise<void>) => Promise<void> }) {
+  const { t } = useTranslation("servers");
   const [members, setMembers] = useState<ServerUsergroupMemberWire[] | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -1639,24 +1791,24 @@ function UsergroupMembersPanel({ detail, group, busy, run }: { detail: ServerCon
   }, [detail.id, group.id, tick]);
   return (
     <div className="border-t border-keep-rule/60 pt-3">
-      <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Members ({members?.length ?? "…"})</p>
+      <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.usergroups.membersHeading", { n: members?.length ?? "…" })}</p>
       <div className="mb-2">
-        <ServerUserPicker serverId={detail.id} placeholder="Add a member…"
-          onSelect={(hit) => void run(async () => { await apiAddUsergroupMember(detail.id, group.id, `@id:${hit.userId}`); setTick((t) => t + 1); })} />
+        <ServerUserPicker serverId={detail.id} placeholder={t("console.usergroups.addMemberPlaceholder")}
+          onSelect={(hit) => void run(async () => { await apiAddUsergroupMember(detail.id, group.id, `@id:${hit.userId}`); setTick((t2) => t2 + 1); })} />
       </div>
       {members && members.length > 0 ? (
         <ul className="space-y-1">
           {members.map((m) => (
             <li key={m.userId} className="flex items-center gap-2 rounded border border-keep-rule/60 px-2 py-1 text-xs">
               <span className="min-w-0 flex-1 truncate text-keep-text">{m.username}</span>
-              {m.isAuto ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">auto</span> : null}
+              {m.isAuto ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">{t("console.usergroups.autoChip")}</span> : null}
               <button type="button" disabled={busy}
-                onClick={() => void run(async () => { await apiRemoveUsergroupMember(detail.id, group.id, m.userId); setTick((t) => t + 1); })}
-                className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Remove</button>
+                onClick={() => void run(async () => { await apiRemoveUsergroupMember(detail.id, group.id, m.userId); setTick((t2) => t2 + 1); })}
+                className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.remove")}</button>
             </li>
           ))}
         </ul>
-      ) : members ? <p className="text-[11px] italic text-keep-muted">No members yet.</p> : null}
+      ) : members ? <p className="text-[11px] italic text-keep-muted">{t("console.usergroups.noMembers")}</p> : null}
     </div>
   );
 }
@@ -1670,6 +1822,7 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("servers");
   const isDefault = !!group?.isDefault;
   const [name, setName] = useState(group?.name ?? "");
   const [color, setColor] = useState(group?.color ?? "");
@@ -1708,51 +1861,51 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
   return (
     <div className="max-w-2xl space-y-3">
       <div className="flex items-center gap-2">
-        <button type="button" onClick={onClose} className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">← Back</button>
-        <h3 className="text-sm font-semibold text-keep-text">{group ? (isDefault ? "Default group" : `Edit "${group.name}"`) : "New usergroup"}</h3>
+        <button type="button" onClick={onClose} className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("console.usergroups.back")}</button>
+        <h3 className="text-sm font-semibold text-keep-text">{group ? (isDefault ? t("console.usergroups.defaultGroup") : t("console.usergroups.editGroup", { name: group.name })) : t("console.usergroups.newGroup")}</h3>
       </div>
       {isDefault ? (
-        <p className="text-[11px] text-keep-muted">The default group applies to every participant. Editing its features changes what ungrouped members can do. Leave the boxes on to keep the server fully open.</p>
+        <p className="text-[11px] text-keep-muted">{t("console.usergroups.defaultBlurb")}</p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <input type="color" value={color || "#8a66cc"} onChange={(e) => setColor(e.target.value)} title="Group color" className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
-          <input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder="Group name (e.g. Veterans)" className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+          <input type="color" value={color || "#8a66cc"} onChange={(e) => setColor(e.target.value)} title={t("console.usergroups.groupColor")} className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
+          <input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder={t("console.usergroups.namePlaceholder")} className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
         </div>
       )}
       <div>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Member features</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.usergroups.memberFeatures")}</p>
         <ServerFeatureCheckboxes value={perms} grantable={grantable} disabled={busy} onChange={setPerms} />
       </div>
       {!isDefault ? (
         <div>
-          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Self-service</p>
+          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.usergroups.selfService")}</p>
           <label className="flex items-start gap-2 rounded border border-keep-rule/60 px-2 py-1.5 text-sm">
             <input type="checkbox" className="mt-0.5" checked={memberSelectable} disabled={busy}
               onChange={(e) => setMemberSelectable(e.target.checked)} />
             <span className="min-w-0">
-              <span className="block text-keep-text">Members can pick this</span>
-              <span className="block text-[11px] text-keep-muted">Lets any member add or remove themselves from this group (a self-role). Auto-joined members keep it even if they leave.</span>
+              <span className="block text-keep-text">{t("console.usergroups.selectableLabel")}</span>
+              <span className="block text-[11px] text-keep-muted">{t("console.usergroups.selectableHint")}</span>
             </span>
           </label>
           <label className="mt-2 block text-sm">
-            <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Description</span>
+            <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("console.usergroups.description")}</span>
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} maxLength={500} disabled={busy}
-              placeholder="A short line shown next to the self-role toggle and in onboarding."
+              placeholder={t("console.usergroups.descriptionPlaceholder")}
               className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
           </label>
         </div>
       ) : null}
       {!isDefault ? (
         <div>
-          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Auto-join rules</p>
-          <p className="mb-1.5 text-[11px] text-keep-muted">Members who meet every rule join this group automatically (checked when they next post). You can still add people by hand below.</p>
+          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.usergroups.autoJoinRules")}</p>
+          <p className="mb-1.5 text-[11px] text-keep-muted">{t("console.usergroups.autoJoinHint")}</p>
           <ServerAutoRulesEditor rules={autoRules} onChange={setAutoRules} rooms={rooms} disabled={busy} />
         </div>
       ) : null}
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">Cancel</button>
+        <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">{t("shared.cancel")}</button>
         <button type="button" disabled={busy || (!isDefault && !name.trim())} onClick={save}
-          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{group ? "Save" : "Create"}</button>
+          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{group ? t("shared.save") : t("console.usergroups.create")}</button>
       </div>
       {group && !isDefault ? <UsergroupMembersPanel detail={detail} group={group} busy={busy} run={run} /> : null}
     </div>
@@ -1760,6 +1913,7 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
 }
 
 function UsergroupsTab({ detail, busy, run }: TabProps) {
+  const { t } = useTranslation("servers");
   const [data, setData] = useState<{ managerPermissions: ServerPermission[]; groups: ServerUsergroupWire[] } | null>(null);
   const [tick, setTick] = useState(0);
   const [editing, setEditing] = useState<ServerUsergroupWire | "new" | null>(null);
@@ -1772,7 +1926,7 @@ function UsergroupsTab({ detail, busy, run }: TabProps) {
 
   const grantable = useMemo(() => new Set(data?.managerPermissions ?? []), [data?.managerPermissions]);
 
-  if (!data) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+  if (!data) return <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>;
 
   if (editing) {
     return (
@@ -1784,9 +1938,7 @@ function UsergroupsTab({ detail, busy, run }: TabProps) {
   return (
     <div className="max-w-2xl space-y-3">
       <p className="text-[11px] text-keep-muted">
-        Usergroups bundle member features (posting, images, invites) and a color, and apply them to people.
-        Everyone is in the default group; named groups layer extra features on top, by hand or by auto-join rules.
-        Moderation powers come from the Roles tab, never from a group.
+        {t("console.usergroups.blurb")}
       </p>
       <ul className="space-y-1.5">
         {data.groups.map((g) => (
@@ -1795,27 +1947,27 @@ function UsergroupsTab({ detail, busy, run }: TabProps) {
               <span className="inline-flex min-w-0 flex-1 items-center gap-1.5">
                 {g.color ? <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: g.color }} /> : null}
                 <span className="truncate text-sm font-semibold text-keep-text">{g.name}</span>
-                {g.isDefault ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">default</span> : null}
+                {g.isDefault ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">{t("console.usergroups.defaultChip")}</span> : null}
               </span>
               <span className="shrink-0 text-[10px] text-keep-muted">
-                {g.permissions.length} feature{g.permissions.length === 1 ? "" : "s"}
+                {t("console.usergroups.features", { count: g.permissions.length })}
                 {g.isDefault
-                  ? " · everyone"
-                  : ` · ${g.memberCount} member${g.memberCount === 1 ? "" : "s"}${g.autoRules.length ? ` · ${g.autoRules.length} rule${g.autoRules.length === 1 ? "" : "s"}` : ""}`}
+                  ? t("console.usergroups.everyoneSuffix")
+                  : `${t("console.usergroups.membersSuffix", { count: g.memberCount })}${g.autoRules.length ? t("console.usergroups.rulesSuffix", { count: g.autoRules.length }) : ""}`}
               </span>
               <button type="button" disabled={busy} onClick={() => setEditing(g)}
-                className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">Edit</button>
+                className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">{t("shared.edit")}</button>
               {!g.isDefault ? (
                 <button type="button" disabled={busy}
-                  onClick={() => { if (window.confirm(`Delete the "${g.name}" usergroup? Members lose its permissions.`)) void run(async () => { await apiDeleteUsergroup(detail.id, g.id); setTick((t) => t + 1); }); }}
-                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Delete</button>
+                  onClick={() => { if (window.confirm(t("console.usergroups.deleteConfirm", { name: g.name }))) void run(async () => { await apiDeleteUsergroup(detail.id, g.id); setTick((t2) => t2 + 1); }); }}
+                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.delete")}</button>
               ) : null}
             </div>
           </li>
         ))}
       </ul>
       <button type="button" disabled={busy} onClick={() => setEditing("new")}
-        className="rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">+ New group</button>
+        className="rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">{t("console.usergroups.newGroupButton")}</button>
     </div>
   );
 }
@@ -1825,6 +1977,7 @@ function UsergroupsTab({ detail, busy, run }: TabProps) {
  * ============================================================ */
 
 function ApplicationsTab({ detail, busy, run }: TabProps) {
+  const { t } = useTranslation("servers");
   const [data, setData] = useState<{ pending: ServerMembershipApplicationWire[]; recent: ServerMembershipApplicationWire[] } | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -1840,32 +1993,31 @@ function ApplicationsTab({ detail, busy, run }: TabProps) {
     <div className="max-w-xl space-y-3">
       {detail.joinMode !== "application" ? (
         <p className="rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5 text-xs text-keep-muted">
-          This server isn't in application mode right now. The queue below only fills while "How people join" is set to
-          "application" (Overview tab).
+          {t("console.applications.notInApplicationMode")}
         </p>
       ) : null}
       <div>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Pending {pending ? `(${pending.length})` : ""}</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.applications.pendingLabel")}{pending ? `(${pending.length})` : ""}</p>
         {!pending ? (
-          <p className="text-sm italic text-keep-muted">Loading…</p>
+          <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>
         ) : pending.length === 0 ? (
-          <p className="text-xs italic text-keep-muted">No one is waiting at the gate.</p>
+          <p className="text-xs italic text-keep-muted">{t("console.applications.noneWaiting")}</p>
         ) : (
           <ul className="space-y-1.5">
             {pending.map((a) => (
               <li key={a.id} className="rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="text-sm font-semibold text-keep-text">{a.applicantUsername}</span>
-                  <span className="text-[10px] text-keep-muted">{new Date(a.submittedAt).toLocaleString()}</span>
+                  <span className="text-[10px] text-keep-muted">{formatDateTime(a.submittedAt)}</span>
                 </div>
-                {a.answer ? <p className="mt-1 whitespace-pre-wrap text-xs text-keep-text/90">{a.answer}</p> : <p className="mt-1 text-xs italic text-keep-muted">(no answer given)</p>}
+                {a.answer ? <p className="mt-1 whitespace-pre-wrap text-xs text-keep-text/90">{a.answer}</p> : <p className="mt-1 text-xs italic text-keep-muted">{t("console.applications.noAnswer")}</p>}
                 <div className="mt-1.5 flex gap-2">
                   <button type="button" disabled={busy}
-                    onClick={() => void run(async () => { await apiReviewApplication(detail.id, a.id, "approve"); setTick((t) => t + 1); })}
-                    className="rounded border border-keep-action bg-keep-action/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">Approve</button>
+                    onClick={() => void run(async () => { await apiReviewApplication(detail.id, a.id, "approve"); setTick((t2) => t2 + 1); })}
+                    className="rounded border border-keep-action bg-keep-action/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">{t("console.applications.approve")}</button>
                   <button type="button" disabled={busy}
-                    onClick={() => { const v = window.prompt(`Decline ${a.applicantUsername}? Optional note shown to them:`, ""); if (v === null) return; void run(async () => { await apiReviewApplication(detail.id, a.id, "reject", v.trim() || undefined); setTick((t) => t + 1); }); }}
-                    className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-accent disabled:opacity-50">Decline</button>
+                    onClick={() => { const v = window.prompt(t("console.applications.declinePrompt", { name: a.applicantUsername }), ""); if (v === null) return; void run(async () => { await apiReviewApplication(detail.id, a.id, "reject", v.trim() || undefined); setTick((t2) => t2 + 1); }); }}
+                    className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-accent disabled:opacity-50">{t("console.applications.decline")}</button>
                 </div>
               </li>
             ))}
@@ -1874,14 +2026,14 @@ function ApplicationsTab({ detail, busy, run }: TabProps) {
       </div>
       {recent.length > 0 ? (
         <div>
-          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Recent decisions</p>
+          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.applications.recentDecisions")}</p>
           <ul className="space-y-0.5">
             {recent.map((a) => (
               <li key={a.id} className="flex flex-wrap items-baseline gap-x-2 rounded border border-keep-rule/50 px-2 py-0.5 text-[11px] text-keep-muted">
                 <span className={a.status === "approved" ? "font-semibold uppercase text-keep-action" : "font-semibold uppercase text-keep-accent"}>{a.status}</span>
                 <span className="text-keep-text">{a.applicantUsername}</span>
-                {a.reviewedByUsername ? <span>by {a.reviewedByUsername}</span> : null}
-                {a.reviewedAt ? <span>· {new Date(a.reviewedAt).toLocaleDateString()}</span> : null}
+                {a.reviewedByUsername ? <span>{t("console.applications.byReviewer", { name: a.reviewedByUsername })}</span> : null}
+                {a.reviewedAt ? <span>{t("console.applications.dateSuffix", { date: formatDate(a.reviewedAt) })}</span> : null}
               </li>
             ))}
           </ul>
@@ -1896,6 +2048,7 @@ function ApplicationsTab({ detail, busy, run }: TabProps) {
  * ============================================================ */
 
 function BansTab({ detail, viewer, busy, run }: TabProps) {
+  const { t } = useTranslation("servers");
   const [bans, setBans] = useState<ServerBanWire[] | null>(null);
   const [targetHit, setTargetHit] = useState<ServerUserHit | null>(null);
   const [banOpen, setBanOpen] = useState(false);
@@ -1913,26 +2066,25 @@ function BansTab({ detail, viewer, busy, run }: TabProps) {
   return (
     <div className="max-w-xl space-y-3">
       <p className="text-[11px] text-keep-muted">
-        A server ban blocks this server's rooms only. The rest of the Spire is untouched. Banning strips any role the
-        user held here and evicts them from its rooms.
+        {t("console.bans.blurb")}
       </p>
       {!bans ? (
-        <p className="text-sm italic text-keep-muted">Loading…</p>
+        <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>
       ) : bans.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No bans. May it stay that way.</p>
+        <p className="text-xs italic text-keep-muted">{t("console.bans.none")}</p>
       ) : (
         <ul className="space-y-1">
           {bans.map((b) => (
             <li key={b.userId} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1 text-sm">
               <span className="font-semibold text-keep-text">{b.username}</span>
               <span className={`text-[11px] ${b.expired ? "text-keep-muted line-through" : "text-keep-muted"}`}>
-                {b.until ? `until ${new Date(b.until).toLocaleDateString()}` : "permanent"}{b.expired ? " (expired)" : ""}
+                {b.until ? t("console.bans.until", { date: formatDate(b.until) }) : t("console.bans.permanent")}{b.expired ? t("console.bans.expiredSuffix") : ""}
               </span>
               {b.reason ? <span className="min-w-0 flex-1 truncate text-[11px] italic text-keep-muted">"{b.reason}"</span> : <span className="flex-1" />}
               {canUnban ? (
                 <button type="button" disabled={busy}
-                  onClick={() => void run(async () => { await apiLiftBan(detail.id, b.userId); setTick((t) => t + 1); })}
-                  className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Lift</button>
+                  onClick={() => void run(async () => { await apiLiftBan(detail.id, b.userId); setTick((t2) => t2 + 1); })}
+                  className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("console.bans.lift")}</button>
               ) : null}
             </li>
           ))}
@@ -1941,18 +2093,18 @@ function BansTab({ detail, viewer, busy, run }: TabProps) {
       {canBan ? (
         <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
           {!targetHit ? (
-            <ServerUserPicker serverId={detail.id} placeholder="Search the user to ban…"
-              disabledReason={(hit) => (hit.serverRole === "owner" ? "the owner" : hit.banned ? "already banned" : null)}
+            <ServerUserPicker serverId={detail.id} placeholder={t("console.bans.searchPlaceholder")}
+              disabledReason={(hit) => (hit.serverRole === "owner" ? t("console.roles.reasonOwner") : hit.banned ? t("console.bans.reasonAlreadyBanned") : null)}
               onSelect={setTargetHit} />
           ) : (
             <div className="flex items-center gap-2">
               <div className="flex min-w-0 flex-1 items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
                 <span className="min-w-0 flex-1 truncate text-keep-text">{targetHit.username}</span>
                 <button type="button" onClick={() => setTargetHit(null)}
-                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Change</button>
+                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("console.transfer.change")}</button>
               </div>
               <button type="button" disabled={busy} onClick={() => setBanOpen(true)}
-                className="shrink-0 rounded border border-keep-system/70 bg-keep-system/15 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-system disabled:opacity-50">Ban…</button>
+                className="shrink-0 rounded border border-keep-system/70 bg-keep-system/15 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-system disabled:opacity-50">{t("console.users.banEllipsis")}</button>
             </div>
           )}
         </div>
@@ -1961,12 +2113,12 @@ function BansTab({ detail, viewer, busy, run }: TabProps) {
       {banOpen && targetHit ? (
         <BanModal
           targetName={targetHit.username}
-          description={`Blocks ${detail.name}'s rooms only. The rest of the Spire is untouched. A timed ban lifts itself when it expires.`}
+          description={t("console.banModal.description", { server: detail.name })}
           reasonRequired={false}
-          reasonPlaceholder="Reason (shown to them)"
+          reasonPlaceholder={t("console.banModal.reasonPlaceholder")}
           reasonMaxLength={300}
-          purgeScopeLabel="posts here"
-          confirmLabel="Ban from server"
+          purgeScopeLabel={t("console.banModal.purgeScope")}
+          confirmLabel={t("console.banModal.confirm")}
           onClose={() => setBanOpen(false)}
           onConfirm={async (durationMs, reason, purge) => {
             const hours = durationMs == null ? null : Math.max(1, Math.round(durationMs / 3_600_000));
@@ -1991,25 +2143,26 @@ function BansTab({ detail, viewer, busy, run }: TabProps) {
  * Tab: Mod Log
  * ============================================================ */
 
-function modLogLabel(action: string, meta: Record<string, unknown> | null): { text: string; tone: string } {
+function modLogLabel(t: TFunction<"servers">, action: string, meta: Record<string, unknown> | null): { text: string; tone: string } {
   const m = meta ?? {};
   switch (action) {
-    case "server_appearance_update": return { text: "Updated appearance", tone: "text-keep-muted" };
-    case "server_settings_update": return { text: "Changed settings", tone: "text-keep-muted" };
-    case "server_role_set": return { text: `Set role${m.role ? ` → ${String(m.role)}` : ""}`, tone: "text-keep-action" };
-    case "server_mod_perms": return { text: "Changed mod powers", tone: "text-keep-muted" };
-    case "server_member_remove": return { text: "Removed member", tone: "text-keep-muted" };
-    case "server_usergroup_change": return { text: `Usergroup ${m.op ? String(m.op) : "change"}`, tone: "text-keep-muted" };
-    case "server_ban": return { text: "Banned user", tone: "text-keep-system" };
-    case "server_unban": return { text: "Lifted ban", tone: "text-keep-muted" };
-    case "server_mute": return { text: `Muted user${typeof m.hours === "number" ? ` for ${m.hours}h` : ""}`, tone: "text-keep-system" };
-    case "server_unmute": return { text: "Lifted mute", tone: "text-keep-muted" };
-    case "server_transfer": return { text: "Transferred ownership", tone: "text-keep-system" };
+    case "server_appearance_update": return { text: t("console.modLog.appearanceUpdate"), tone: "text-keep-muted" };
+    case "server_settings_update": return { text: t("console.modLog.settingsUpdate"), tone: "text-keep-muted" };
+    case "server_role_set": return { text: `${t("console.modLog.roleSet")}${m.role ? ` → ${String(m.role)}` : ""}`, tone: "text-keep-action" };
+    case "server_mod_perms": return { text: t("console.modLog.modPerms"), tone: "text-keep-muted" };
+    case "server_member_remove": return { text: t("console.modLog.memberRemove"), tone: "text-keep-muted" };
+    case "server_usergroup_change": return { text: t("console.modLog.usergroupChange", { op: m.op ? String(m.op) : t("console.modLog.usergroupChangeFallback") }), tone: "text-keep-muted" };
+    case "server_ban": return { text: t("console.modLog.ban"), tone: "text-keep-system" };
+    case "server_unban": return { text: t("console.modLog.unban"), tone: "text-keep-muted" };
+    case "server_mute": return { text: `${t("console.modLog.mute")}${typeof m.hours === "number" ? t("console.modLog.muteForSuffix", { hours: m.hours }) : ""}`, tone: "text-keep-system" };
+    case "server_unmute": return { text: t("console.modLog.unmute"), tone: "text-keep-muted" };
+    case "server_transfer": return { text: t("console.modLog.transfer"), tone: "text-keep-system" };
     default: return { text: action.replace(/^server_/, "").replace(/_/g, " "), tone: "text-keep-muted" };
   }
 }
 
 function ModLogTab({ detail }: { detail: ServerConsoleDetail }) {
+  const { t } = useTranslation("servers");
   const [entries, setEntries] = useState<ServerModLogWire[] | null>(null);
   useEffect(() => {
     let alive = true;
@@ -2018,23 +2171,23 @@ function ModLogTab({ detail }: { detail: ServerConsoleDetail }) {
   }, [detail.id]);
   return (
     <div className="max-w-2xl space-y-2">
-      <p className="text-[11px] text-keep-muted">Every moderation action taken on this server, newest first. Shown to the owner and all moderators.</p>
+      <p className="text-[11px] text-keep-muted">{t("console.modLog.blurb")}</p>
       {!entries ? (
-        <p className="text-sm italic text-keep-muted">Loading…</p>
+        <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>
       ) : entries.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">Nothing logged yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("console.modLog.empty")}</p>
       ) : (
         <ul className="space-y-1">
           {entries.map((e) => {
-            const { text, tone } = modLogLabel(e.action, e.metadata);
+            const { text, tone } = modLogLabel(t, e.action, e.metadata);
             return (
               <li key={e.id} className="rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5 text-xs">
                 <div className="flex flex-wrap items-baseline gap-x-2">
                   <span className={`font-semibold ${tone}`}>{text}</span>
                   {e.targetUsername ? <span className="text-keep-muted">→ {e.targetUsername}</span> : null}
-                  <span className="ml-auto text-[10px] text-keep-muted">{new Date(e.createdAt).toLocaleString()}</span>
+                  <span className="ml-auto text-[10px] text-keep-muted">{formatDateTime(e.createdAt)}</span>
                 </div>
-                <div className="text-[10px] text-keep-muted">by {e.actorUsername}{e.reason ? <span> · {e.reason}</span> : null}</div>
+                <div className="text-[10px] text-keep-muted">{t("console.modLog.byActor", { name: e.actorUsername })}{e.reason ? <span> · {e.reason}</span> : null}</div>
               </li>
             );
           })}
@@ -2065,15 +2218,19 @@ function formatMs(ms: number): string {
 /** Inverse of {@link formatMs}. Accepts "5m", "1h30m", "30d", or a bare ms
  *  number; returns null when the (non-blank) text parses to nothing. The caller
  *  treats a blank field as "inherit", so blank is handled before this. */
-/** One number-or-inherit field over the per-server settings row. */
-function NumberSetting({ label, hint, value, onChange, min }: {
-  label: string; hint: string; value: string; onChange: (v: string) => void; min?: number;
+/** One number-or-inherit field over the per-server settings row. `anchor`
+ *  stamps the find-a-setting jump target (data-admin-anchor = the row's
+ *  label catalog key, verbatim) on the wrapping label; purely inert until a
+ *  search entry references it (docs/ADMIN_IA.md §6). */
+function NumberSetting({ label, hint, value, onChange, min, anchor }: {
+  label: string; hint: string; value: string; onChange: (v: string) => void; min?: number; anchor?: string;
 }) {
+  const { t } = useTranslation("servers");
   return (
-    <label className="block text-sm">
+    <label {...(anchor ? { "data-admin-anchor": anchor } : {})} className="block text-sm">
       <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">{label}</span>
       <input type="number" inputMode="numeric" min={min} value={value} onChange={(e) => onChange(e.target.value)}
-        placeholder="(inherit platform default)"
+        placeholder={t("console.settings.inheritPlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       <span className="mt-0.5 block text-[10px] text-keep-muted">{hint}</span>
     </label>
@@ -2083,14 +2240,15 @@ function NumberSetting({ label, hint, value, onChange, min }: {
 /** One duration-or-inherit field (friendly text like "30d" / "5m"), the
  *  per-server analog of the Global Admin duration inputs. Stored as ms on the
  *  wire; blank = inherit the platform default. */
-function DurationSetting({ label, hint, value, onChange, placeholder }: {
-  label: string; hint: string; value: string; onChange: (v: string) => void; placeholder?: string;
+function DurationSetting({ label, hint, value, onChange, placeholder, anchor }: {
+  label: string; hint: string; value: string; onChange: (v: string) => void; placeholder?: string; anchor?: string;
 }) {
+  const { t } = useTranslation("servers");
   return (
-    <label className="block text-sm">
+    <label {...(anchor ? { "data-admin-anchor": anchor } : {})} className="block text-sm">
       <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">{label}</span>
       <input type="text" value={value} onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder ?? "(inherit platform default)"}
+        placeholder={placeholder ?? t("console.settings.inheritPlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 font-mono text-sm outline-none focus:border-keep-action" />
       <span className="mt-0.5 block text-[10px] text-keep-muted">{hint}</span>
     </label>
@@ -2104,6 +2262,7 @@ function DurationSetting({ label, hint, value, onChange, placeholder }: {
  * fields; the PATCH route is partial so the Settings tab's caps are untouched.
  * ------------------------------------------------------------ */
 function RulesTab({ detail, busy, run, onSaved }: TabProps) {
+  const { t } = useTranslation("servers");
   const [loaded, setLoaded] = useState<ServerSettingsWire | null>(null);
   const [welcome, setWelcome] = useState("");
   const [newUserWelcome, setNewUserWelcome] = useState("");
@@ -2123,7 +2282,7 @@ function RulesTab({ detail, busy, run, onSaved }: TabProps) {
     return () => { alive = false; };
   }, [detail.id]);
 
-  if (!loaded) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+  if (!loaded) return <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>;
 
   const htmlOrNull = (s: string): string | null => (s.trim() ? s : null);
 
@@ -2142,34 +2301,34 @@ function RulesTab({ detail, busy, run, onSaved }: TabProps) {
   return (
     <div className="max-w-xl space-y-4">
       <p className="text-[11px] text-keep-muted">
-        Your server's welcome and rules. Leave any field blank to inherit the platform default. HTML copy follows the same rules as profile bios.
+        {t("console.rulesTab.blurb")}
       </p>
       <label className="block text-sm">
-        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">Welcome</span>
+        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">{t("console.rulesTab.welcome")}</span>
         <textarea value={welcome} onChange={(e) => setWelcome(e.target.value)} rows={4} maxLength={200_000}
-          placeholder="Shown to members when they enter the server."
+          placeholder={t("console.rulesTab.welcomePlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       </label>
       <label className="block text-sm">
-        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">New-user welcome</span>
+        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">{t("console.rulesTab.newUserWelcome")}</span>
         <textarea value={newUserWelcome} onChange={(e) => setNewUserWelcome(e.target.value)} rows={4} maxLength={200_000}
-          placeholder="Shown the first time someone joins."
+          placeholder={t("console.rulesTab.newUserWelcomePlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       </label>
       <label className="block text-sm">
-        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">House rules</span>
+        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">{t("console.rulesTab.houseRules")}</span>
         <textarea value={rules} onChange={(e) => setRules(e.target.value)} rows={6} maxLength={200_000}
-          placeholder="The server's rules."
+          placeholder={t("console.rulesTab.houseRulesPlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       </label>
       <label className="block text-sm">
-        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">Security notice</span>
+        <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">{t("console.rulesTab.securityNotice")}</span>
         <textarea value={security} onChange={(e) => setSecurity(e.target.value)} rows={3} maxLength={200_000}
-          placeholder="An optional safety / privacy notice."
+          placeholder={t("console.rulesTab.securityNoticePlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       </label>
       <button type="button" disabled={busy} onClick={save}
-        className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save rules</button>
+        className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.rulesTab.saveRules")}</button>
     </div>
   );
 }
@@ -2181,6 +2340,7 @@ function RulesTab({ detail, busy, run, onSaved }: TabProps) {
  * fields, leaving the Rules tab's copy untouched (partial PATCH).
  * ------------------------------------------------------------ */
 function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
+  const { t } = useTranslation("servers");
   const [loaded, setLoaded] = useState<ServerSettingsWire | null>(null);
   // Local string copies (empty = inherit / clear the override).
   const [retention, setRetention] = useState("");
@@ -2205,7 +2365,7 @@ function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
     return () => { alive = false; };
   }, [detail.id]);
 
-  if (!loaded) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+  if (!loaded) return <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>;
 
   // A number field maps to null when blank (clear the override) or its int value.
   const numOrNull = (s: string): number | null => {
@@ -2222,14 +2382,14 @@ function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
       let messageRetentionMs: number | null = null;
       if (retention.trim()) {
         const ms = parseDurationMs(retention);
-        if (ms === null || ms <= 0) throw new Error("Message retention must be a duration like 30d (leave blank to inherit).");
+        if (ms === null || ms <= 0) throw new Error(t("console.settings.retentionError"));
         messageRetentionMs = ms;
       }
       let editGraceMs: number | null = null;
       if (editGrace.trim()) {
         const ms = parseDurationMs(editGrace);
-        if (ms === null || ms < 0) throw new Error("Edit window must be a duration like 5m, or 0 to disable edits (leave blank to inherit).");
-        if (ms > 7 * 24 * 60 * 60 * 1000) throw new Error("Edit window must be 7 days or less.");
+        if (ms === null || ms < 0) throw new Error(t("console.settings.editWindowError"));
+        if (ms > 7 * 24 * 60 * 60 * 1000) throw new Error(t("console.settings.editWindowMaxError"));
         editGraceMs = ms;
       }
       await apiPatchSettings(detail.id, {
@@ -2246,23 +2406,23 @@ function SettingsTab({ detail, busy, run, onSaved }: TabProps) {
   return (
     <div className="max-w-xl space-y-4">
       <p className="text-[11px] text-keep-muted">
-        Leave any field blank to inherit the platform default. Durations take friendly values like <span className="text-keep-text">30d</span>, <span className="text-keep-text">12h</span>, or <span className="text-keep-text">5m</span>.
+        <Trans t={t} i18nKey="console.settings.blurb" components={{ v: <span className="text-keep-text" /> }} />
       </p>
 
       <section className="space-y-3">
-        <DurationSetting label="Message retention" value={retention} onChange={setRetention}
-          placeholder="e.g. 30d, blank inherits"
-          hint="How long messages are kept before pruning. Use a duration like 90d or 12h." />
-        <NumberSetting label="Max rooms per owner" hint="Cap on rooms a member may open here." value={maxRooms} onChange={setMaxRooms} min={1} />
-        <NumberSetting label="Max message length" hint="Character cap for a chat message." value={maxMsg} onChange={setMaxMsg} min={1} />
-        <DurationSetting label="Edit window" value={editGrace} onChange={setEditGrace}
-          placeholder="e.g. 5m, 0 disables, blank inherits"
-          hint="How long after sending an author can still edit a message. Use a duration like 30s / 5m / 1h, or 0 to disable edits." />
-        <NumberSetting label="Max forum post length" hint="Character cap for a forum post." value={maxForumPost} onChange={setMaxForumPost} min={1} />
+        <DurationSetting label={t("console.settings.retention")} value={retention} onChange={setRetention}
+          placeholder={t("console.settings.retentionPlaceholder")}
+          hint={t("console.settings.retentionHint")} anchor="console.settings.retention" />
+        <NumberSetting label={t("console.settings.maxRooms")} hint={t("console.settings.maxRoomsHint")} value={maxRooms} onChange={setMaxRooms} min={1} anchor="console.settings.maxRooms" />
+        <NumberSetting label={t("console.settings.maxMessage")} hint={t("console.settings.maxMessageHint")} value={maxMsg} onChange={setMaxMsg} min={1} anchor="console.settings.maxMessage" />
+        <DurationSetting label={t("console.settings.editWindow")} value={editGrace} onChange={setEditGrace}
+          placeholder={t("console.settings.editWindowPlaceholder")}
+          hint={t("console.settings.editWindowHint")} anchor="console.settings.editWindow" />
+        <NumberSetting label={t("console.settings.maxForumPost")} hint={t("console.settings.maxForumPostHint")} value={maxForumPost} onChange={setMaxForumPost} min={1} anchor="console.settings.maxForumPost" />
       </section>
 
       <button type="button" disabled={busy} onClick={save}
-        className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save settings</button>
+        className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.settings.saveSettings")}</button>
     </div>
   );
 }
@@ -2283,6 +2443,7 @@ function onbId(): string {
 }
 
 function OnboardingTab({ detail, busy, run, onSaved }: TabProps) {
+  const { t } = useTranslation("servers");
   const [loaded, setLoaded] = useState<ServerSettingsWire | null>(null);
   const [enabled, setEnabled] = useState(false);
   const [prompts, setPrompts] = useState<OnboardingPrompt[]>([]);
@@ -2313,7 +2474,7 @@ function OnboardingTab({ detail, busy, run, onSaved }: TabProps) {
     return () => { alive = false; };
   }, [detail.id]);
 
-  if (!loaded) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+  if (!loaded) return <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>;
 
   const selectable = groups ?? [];
 
@@ -2374,21 +2535,21 @@ function OnboardingTab({ detail, busy, run, onSaved }: TabProps) {
   return (
     <div className="max-w-2xl space-y-4">
       <p className="text-[11px] text-keep-muted">
-        Ask new members a few questions when they join. Each answer can add them to a self-role usergroup, so people land in the right groups from the start.
+        {t("console.onboarding.blurb")}
       </p>
 
       <label className="flex items-start gap-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5 text-sm">
         <input type="checkbox" className="mt-0.5" checked={enabled} disabled={busy}
           onChange={(e) => setEnabled(e.target.checked)} />
         <span>
-          <span className="font-semibold text-keep-text">Show onboarding on join</span>
-          <span className="block text-xs text-keep-muted">When on, new members see these prompts the first time they enter. Editing the flow re-shows it to everyone.</span>
+          <span className="font-semibold text-keep-text">{t("console.onboarding.showOnJoin")}</span>
+          <span className="block text-xs text-keep-muted">{t("console.onboarding.showOnJoinHint")}</span>
         </span>
       </label>
 
       {selectable.length === 0 ? (
         <p className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2.5 py-2 text-[11px] text-keep-accent">
-          No self-role usergroups yet. In the Usergroups tab, edit a group and turn on "Members can pick this" — those groups become the answer options here.
+          {t("console.onboarding.noSelfRoleGroups")}
         </p>
       ) : null}
 
@@ -2396,70 +2557,70 @@ function OnboardingTab({ detail, busy, run, onSaved }: TabProps) {
         {prompts.map((p, pi) => (
           <div key={p.id} className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] uppercase tracking-widest text-keep-muted">Prompt {pi + 1}</span>
+              <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("console.onboarding.promptN", { n: pi + 1 })}</span>
               <span className="ml-auto flex items-center gap-1">
                 <button type="button" disabled={busy || pi === 0} onClick={() => movePrompt(pi, -1)}
-                  aria-label="Move prompt up" title="Move up"
+                  aria-label={t("console.onboarding.movePromptUp")} title={t("console.onboarding.moveUp")}
                   className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] text-keep-muted hover:text-keep-text disabled:opacity-40">↑</button>
                 <button type="button" disabled={busy || pi === prompts.length - 1} onClick={() => movePrompt(pi, 1)}
-                  aria-label="Move prompt down" title="Move down"
+                  aria-label={t("console.onboarding.movePromptDown")} title={t("console.onboarding.moveDown")}
                   className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] text-keep-muted hover:text-keep-text disabled:opacity-40">↓</button>
                 <button type="button" disabled={busy} onClick={() => setPrompts((ps) => ps.filter((_, j) => j !== pi))}
-                  className="rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Remove</button>
+                  className="rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.remove")}</button>
               </span>
             </div>
             <input value={p.label} maxLength={200} disabled={busy}
               onChange={(e) => setPrompt(pi, { ...p, label: e.target.value })}
-              placeholder="Question (e.g. What do you like to play?)"
+              placeholder={t("console.onboarding.questionPlaceholder")}
               className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
             <input value={p.help ?? ""} maxLength={300} disabled={busy}
               onChange={(e) => setPrompt(pi, { ...p, help: e.target.value })}
-              placeholder="Helper text (optional)"
+              placeholder={t("console.onboarding.helperPlaceholder")}
               className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-xs outline-none focus:border-keep-action" />
             <label className="flex items-center gap-2 text-xs text-keep-muted">
-              <span className="uppercase tracking-widest">Answer type</span>
+              <span className="uppercase tracking-widest">{t("console.onboarding.answerType")}</span>
               <select value={p.kind} disabled={busy}
                 onChange={(e) => setPrompt(pi, { ...p, kind: e.target.value === "multi" ? "multi" : "single" })}
                 className="rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action">
-                <option value="single">Pick one</option>
-                <option value="multi">Pick any</option>
+                <option value="single">{t("console.onboarding.pickOne")}</option>
+                <option value="multi">{t("console.onboarding.pickAny")}</option>
               </select>
             </label>
             <div className="space-y-1.5 border-t border-keep-rule/60 pt-2">
-              <p className="text-[10px] uppercase tracking-widest text-keep-muted">Options → usergroup</p>
+              <p className="text-[10px] uppercase tracking-widest text-keep-muted">{t("console.onboarding.optionsHeading")}</p>
               {p.options.length === 0 ? (
-                <p className="text-[11px] italic text-keep-muted">No options yet. Add one below.</p>
+                <p className="text-[11px] italic text-keep-muted">{t("console.onboarding.noOptions")}</p>
               ) : null}
               {p.options.map((o, oi) => (
                 <div key={oi} className="flex flex-wrap items-center gap-1.5">
                   <input value={o.label} maxLength={120} disabled={busy}
                     onChange={(e) => setOption(pi, oi, { ...o, label: e.target.value })}
-                    placeholder="Option label"
+                    placeholder={t("console.onboarding.optionLabelPlaceholder")}
                     className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action" />
                   <select value={o.usergroupId} disabled={busy || selectable.length === 0}
                     onChange={(e) => setOption(pi, oi, { ...o, usergroupId: e.target.value })}
                     className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action">
-                    {selectable.length === 0 ? <option value="">(no self-role groups)</option> : null}
+                    {selectable.length === 0 ? <option value="">{t("console.onboarding.noSelfRoleOption")}</option> : null}
                     {selectable.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                   </select>
                   <button type="button" disabled={busy} onClick={() => removeOption(pi, oi)}
-                    aria-label="Remove option" title="Remove option"
+                    aria-label={t("console.onboarding.removeOption")} title={t("console.onboarding.removeOption")}
                     className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">×</button>
                 </div>
               ))}
               <button type="button" disabled={busy || selectable.length === 0} onClick={() => addOption(pi)}
-                className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action disabled:opacity-40">+ Add option</button>
+                className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action disabled:opacity-40">{t("console.onboarding.addOption")}</button>
             </div>
           </div>
         ))}
       </div>
 
       <button type="button" disabled={busy} onClick={addPrompt}
-        className="rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">+ Add prompt</button>
+        className="rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">{t("console.onboarding.addPrompt")}</button>
 
       <div>
         <button type="button" disabled={busy} onClick={save}
-          className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">Save onboarding</button>
+          className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.onboarding.saveOnboarding")}</button>
       </div>
     </div>
   );
@@ -2469,7 +2630,7 @@ function OnboardingTab({ detail, busy, run, onSaved }: TabProps) {
  * The console shell + tab router
  * ============================================================ */
 
-type ServerSettingsTab = "overview" | "appearance" | "rooms" | "members" | "users" | "roles" | "usergroups" | "applications" | "reports" | "modcases" | "bans" | "modlog" | "emoticons" | "announcements" | "events" | "faqs" | "commands-titles" | "earning" | "rules" | "onboarding" | "settings";
+export type ServerSettingsTab = "overview" | "appearance" | "rooms" | "members" | "users" | "roles" | "usergroups" | "applications" | "reports" | "modcases" | "bans" | "modlog" | "emoticons" | "announcements" | "events" | "faqs" | "commands-titles" | "earning" | "rules" | "onboarding" | "settings";
 
 interface TabProps {
   detail: ServerConsoleDetail;
@@ -2479,63 +2640,229 @@ interface TabProps {
   onSaved: () => void;
 }
 
-const TAB_LABEL: Record<ServerSettingsTab, string> = {
-  overview: "overview", appearance: "appearance", rooms: "rooms", members: "members",
-  users: "users",
-  roles: "roles", usergroups: "usergroups", applications: "applications", reports: "reports",
-  modcases: "mod cases",
-  bans: "bans", modlog: "mod log", emoticons: "emoticons", announcements: "announcements",
-  events: "events",
-  faqs: "faqs", "commands-titles": "commands & titles", earning: "earning", rules: "rules", onboarding: "onboarding", settings: "settings",
+/** Tab label keys in the servers namespace (labels resolve at render time so a
+ *  live language flip re-labels the strip). */
+const TAB_LABEL_KEY: Record<ServerSettingsTab, string> = {
+  overview: "console.tabs.overview", appearance: "console.tabs.appearance", rooms: "console.tabs.rooms", members: "console.tabs.members",
+  users: "console.tabs.users",
+  roles: "console.tabs.roles", usergroups: "console.tabs.usergroups", applications: "console.tabs.applications", reports: "console.tabs.reports",
+  modcases: "console.tabs.modcases",
+  bans: "console.tabs.bans", modlog: "console.tabs.modlog", emoticons: "console.tabs.emoticons", announcements: "console.tabs.announcements",
+  events: "console.tabs.events",
+  faqs: "console.tabs.faqs", "commands-titles": "console.tabs.commandsTitles", earning: "console.tabs.earning", rules: "console.tabs.rules", onboarding: "console.tabs.onboarding", settings: "console.tabs.settings",
 };
+
+/** One-line "what you do here" description keys (docs/ADMIN_IA.md §6),
+ *  rendered by the console shell for EVERY tab — per-tab components never
+ *  add their own duplicate line. Key style follows {@link TAB_LABEL_KEY}
+ *  (camelCase where the label key uses it). */
+const TAB_DESC_KEY: Record<ServerSettingsTab, string> = {
+  overview: "console.tabDesc.overview", appearance: "console.tabDesc.appearance", rooms: "console.tabDesc.rooms", members: "console.tabDesc.members",
+  users: "console.tabDesc.users",
+  roles: "console.tabDesc.roles", usergroups: "console.tabDesc.usergroups", applications: "console.tabDesc.applications", reports: "console.tabDesc.reports",
+  modcases: "console.tabDesc.modcases",
+  bans: "console.tabDesc.bans", modlog: "console.tabDesc.modlog", emoticons: "console.tabDesc.emoticons", announcements: "console.tabDesc.announcements",
+  events: "console.tabDesc.events",
+  faqs: "console.tabDesc.faqs", "commands-titles": "console.tabDesc.commandsTitles", earning: "console.tabDesc.earning", rules: "console.tabDesc.rules", onboarding: "console.tabDesc.onboarding", settings: "console.tabDesc.settings",
+};
+
+/** The five plain-language tab groups (docs/ADMIN_IA.md §6). Display-only:
+ *  group ids are never persisted and never sent on the wire; tab ids,
+ *  permission gates, and recordNav keys are untouched by grouping. */
+type ConsoleTabGroup = "basics" | "people" | "safety" | "activity" | "rewards";
+
+const GROUP_LABEL_KEY: Record<ConsoleTabGroup, string> = {
+  basics: "console.group.basics",
+  people: "console.group.people",
+  safety: "console.group.safety",
+  activity: "console.group.activity",
+  rewards: "console.group.rewards",
+};
+
+interface ConsoleTabItem {
+  id: ServerSettingsTab;
+  group: ConsoleTabGroup;
+}
+
+/** Full tab registry in strip order (docs/ADMIN_IA.md §6). `overview` stays
+ *  the first VISIBLE tab for anyone with manage_appearance, so the
+ *  `tabs[0] ?? "modlog"` default still lands owners on Overview. */
+const CONSOLE_TAB_ITEMS: readonly ConsoleTabItem[] = [
+  // ----- Your community: identity, look, and the copy new members meet -----
+  { id: "overview", group: "basics" },
+  { id: "appearance", group: "basics" },
+  { id: "rules", group: "basics" },
+  { id: "onboarding", group: "basics" },
+  { id: "settings", group: "basics" },
+  // ----- People: who belongs here and what they may do -----
+  { id: "members", group: "people" },
+  { id: "users", group: "people" },
+  { id: "roles", group: "people" },
+  { id: "usergroups", group: "people" },
+  { id: "applications", group: "people" },
+  // ----- Safety: reports, cases, bans, and the paper trail -----
+  { id: "reports", group: "safety" },
+  { id: "modcases", group: "safety" },
+  { id: "bans", group: "safety" },
+  { id: "modlog", group: "safety" },
+  // ----- Rooms & events: the spaces and the calendar -----
+  { id: "rooms", group: "activity" },
+  { id: "announcements", group: "activity" },
+  { id: "events", group: "activity" },
+  { id: "faqs", group: "activity" },
+  // ----- Fun & rewards: the extras members play with -----
+  { id: "emoticons", group: "rewards" },
+  { id: "commands-titles", group: "rewards" },
+  { id: "earning", group: "rewards" },
+];
+
+/** Per-tab visibility. The gates are byte-equivalent to the pre-grouping
+ *  inline list; only the strip ORDER changed (docs/ADMIN_IA.md §6). */
+function consoleTabVisible(id: ServerSettingsTab, can: (k: ServerModPermission) => boolean): boolean {
+  switch (id) {
+    case "overview":
+    case "appearance":
+    // Onboarding writes onboarding_config_json on server_settings, which the
+    // route gates on manage_appearance (same chair as rules/settings), so gate
+    // the tab identically. The option→usergroup targets come from the Usergroups
+    // tab's "Members can pick this" toggle (manage_usergroups).
+    case "rules":
+    case "onboarding":
+    case "settings":
+      return can("manage_appearance");
+    case "members":
+    case "roles":
+      return can("manage_members");
+    // A moderation-focused user finder: search any member and mute/ban/remove
+    // them (or open their profile) without having to catch them in a room.
+    // Shown to anyone holding any one of the moderation grants it exposes.
+    case "users":
+      return can("kick_member") || can("mute_member") || can("ban_member") || can("manage_members");
+    case "usergroups":
+      return can("manage_usergroups");
+    case "applications":
+      return can("manage_applications");
+    case "reports":
+      return can("manage_reports");
+    case "modcases":
+      return can("manage_mod_cases");
+    case "bans":
+      return can("ban_member") || can("unban_member");
+    case "modlog":
+      return can("view_mod_log");
+    case "rooms":
+      return can("manage_rooms");
+    case "announcements":
+      return can("manage_announcements");
+    case "events":
+      return can("manage_events");
+    case "faqs":
+      return can("manage_faqs");
+    case "emoticons":
+      return can("manage_emoticons");
+    case "commands-titles":
+      return can("manage_commands") || can("manage_titles");
+    case "earning":
+      return can("manage_earning");
+  }
+}
+
+/** The viewer's visible `{ id, group }` tab list, in strip order. Tabs are
+ *  gated on the mirrored permission set exactly as before (the routes
+ *  re-check every action); empty groups simply drop out of the strip. */
+function visibleConsoleTabs(viewer: ServerViewerState): ConsoleTabItem[] {
+  const perms = new Set(viewer.permissions);
+  const can = (k: ServerModPermission) => viewer.isOwner || perms.has(k);
+  return CONSOLE_TAB_ITEMS.filter((item) => consoleTabVisible(item.id, can));
+}
+
+/** Tab id → group id, for the search hits' breadcrumb line. Derived from
+ *  the registry so it can never drift. */
+const TAB_GROUP_BY_ID = Object.fromEntries(
+  CONSOLE_TAB_ITEMS.map((item) => [item.id, item.group]),
+) as Record<ServerSettingsTab, ConsoleTabGroup>;
+
+/** The console find-a-setting index: one tab-level entry per registered tab
+ *  (derived, never hand-listed — docs/ADMIN_IA.md §6) plus the curated
+ *  row-level entries from serverConsoleSearchIndex.ts (empty in v1). */
+const CONSOLE_SEARCH_ENTRIES: readonly ServerConsoleSearchEntry[] = [
+  ...CONSOLE_TAB_ITEMS.map((item) => ({
+    key: TAB_LABEL_KEY[item.id],
+    tab: item.id,
+    also: [TAB_DESC_KEY[item.id]],
+  })),
+  ...SERVER_CONSOLE_SEARCH_ENTRIES,
+];
 
 /**
  * The owner-console body once the server detail has loaded. Tabs are gated on
  * the viewer's mirrored permission set exactly as ForumSettingsView gates on
  * forum perms; the routes re-check every action.
  */
-function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsoleDetail; viewer: ServerViewerState; onSaved: () => void }) {
-  const perms = new Set(viewer.permissions);
-  const can = (k: ServerModPermission) => viewer.isOwner || perms.has(k);
-
-  const tabs: ServerSettingsTab[] = [
-    ...(can("manage_appearance") ? (["overview", "appearance"] as const) : []),
-    ...(can("manage_rooms") ? (["rooms"] as const) : []),
-    ...(can("manage_members") ? (["members", "roles"] as const) : []),
-    // A moderation-focused user finder: search any member and mute/ban/remove
-    // them (or open their profile) without having to catch them in a room.
-    // Shown to anyone holding any one of the moderation grants it exposes.
-    ...(can("kick_member") || can("mute_member") || can("ban_member") || can("manage_members") ? (["users"] as const) : []),
-    ...(can("manage_usergroups") ? (["usergroups"] as const) : []),
-    ...(can("manage_applications") ? (["applications"] as const) : []),
-    ...(can("manage_reports") ? (["reports"] as const) : []),
-    ...(can("manage_mod_cases") ? (["modcases"] as const) : []),
-    ...(can("ban_member") || can("unban_member") ? (["bans"] as const) : []),
-    ...(can("view_mod_log") ? (["modlog"] as const) : []),
-    ...(can("manage_emoticons") ? (["emoticons"] as const) : []),
-    ...(can("manage_announcements") ? (["announcements"] as const) : []),
-    ...(can("manage_events") ? (["events"] as const) : []),
-    ...(can("manage_faqs") ? (["faqs"] as const) : []),
-    ...(can("manage_commands") || can("manage_titles") ? (["commands-titles"] as const) : []),
-    ...(can("manage_earning") ? (["earning"] as const) : []),
-    // Onboarding writes onboarding_config_json on server_settings, which the
-    // route gates on manage_appearance (same chair as rules/settings), so gate
-    // the tab identically. The option→usergroup targets come from the Usergroups
-    // tab's "Members can pick this" toggle (manage_usergroups).
-    ...(can("manage_appearance") ? (["onboarding", "rules", "settings"] as const) : []),
-  ];
-  const [tab, setTab] = useState<ServerSettingsTab>(tabs[0] ?? "modlog");
+function ServerSettingsBody({ detail, viewer, onSaved, findRequest, onFindHandled }: {
+  detail: ServerConsoleDetail;
+  viewer: ServerViewerState;
+  onSaved: () => void;
+  /** Armed find-a-setting pick from the header search (the view owns the
+   *  input, this body owns the tab state — docs/ADMIN_IA.md §6). */
+  findRequest?: { tab: ServerSettingsTab; anchor: string } | null;
+  onFindHandled?: () => void;
+}) {
+  const { t } = useTranslation("servers");
+  // Visible tabs in the grouped strip order; gates unchanged (the routes
+  // re-check every action regardless).
+  const tabs = visibleConsoleTabs(viewer);
+  const [tab, setTab] = useState<ServerSettingsTab>(tabs[0]?.id ?? "modlog");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Calm mode: ease the active tab's body in with a soft fade on each tab
   // change. Key + class applied ONLY when Reduce Motion is on; off-path is
   // unchanged.
   const reduceMotion = useReducedMotion();
+  // Armed find-a-setting jump: after the picked tab's body mounts, scroll to
+  // its data-admin-anchor and pulse the flash class, then disarm. Tab-level
+  // hits never arm this (they stop at the tab switch).
+  const [pendingFind, setPendingFind] = useState<{ tab: ServerSettingsTab; anchor: string } | null>(null);
+
+  // Both nav pickers (and search picks) route through one helper so the
+  // recordNav choke point stays single: same `server-settings:<tab>` key,
+  // recorded only on an actual change, exactly as before.
+  const changeTab = (next: ServerSettingsTab) => {
+    if (next !== tab) recordNav("tab", `server-settings:${next}`);
+    // A plain tab hop abandons any armed jump so a stale anchor can't
+    // scroll/flash the next time that tab renders. The findRequest effect
+    // re-arms AFTER calling this (same batch), so search jumps still land.
+    setPendingFind(null);
+    setTab(next);
+  };
+
+  // Apply a header-search pick. Reuses changeTab (same recordNav key, same
+  // silent-drop of unsaved edits as a plain tab click). Tab-level hits
+  // (console.tabs.*) stop at the switch; row-level hits arm the jump.
+  useEffect(() => {
+    if (!findRequest) return;
+    changeTab(findRequest.tab);
+    if (!findRequest.anchor.startsWith("console.tabs.")) {
+      setPendingFind({ tab: findRequest.tab, anchor: findRequest.anchor });
+    }
+    onFindHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findRequest]);
+  // Wait two frames so the freshly-switched tab body has mounted, then
+  // scroll + flash. A missing anchor is silently fine — the user still
+  // lands on the right tab.
+  useEffect(() => {
+    if (!pendingFind || pendingFind.tab !== tab) return;
+    return afterNextPaint(() => {
+      flashAnchor(pendingFind.anchor, reduceMotion);
+      setPendingFind(null);
+    });
+  }, [pendingFind, tab, reduceMotion]);
 
   async function run(fn: () => Promise<void>) {
     setBusy(true); setErr(null);
     try { await fn(); }
-    catch (e) { setErr(e instanceof Error ? e.message : "save failed"); }
+    catch (e) { setErr(e instanceof Error ? e.message : t("shared.saveFailed")); }
     finally { setBusy(false); }
   }
 
@@ -2545,26 +2872,46 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
     <div className="px-4 py-3">
       {/* Tab nav: a horizontally-scrollable strip on desktop (one tidy row
           instead of tabs wrapping into several scrunched rows), collapsed to a
-          dropdown on mobile. Both feed the same setTab; the desktop strip
-          carries the tour anchors. */}
+          dropdown on mobile. Both feed the same changeTab; the desktop strip
+          carries the tour anchors. Tabs cluster into the five plain-language
+          groups from docs/ADMIN_IA.md §6 — <optgroup>s on the dropdown,
+          hairline separators on the strip — so an owner scans five buckets
+          instead of twenty-one labels. */}
       <div className="mb-3">
         <select
           value={tab}
-          onChange={(e) => { const t = e.target.value as ServerSettingsTab; if (t !== tab) recordNav("tab", `server-settings:${t}`); setTab(t); }}
-          aria-label="Settings section"
+          onChange={(e) => changeTab(e.target.value as ServerSettingsTab)}
+          aria-label={t("console.shell.sectionAria")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm md:hidden"
         >
-          {tabs.map((t) => <option key={t} value={t}>{TAB_LABEL[t]}</option>)}
+          {groupVisibleTabs(tabs).map(([group, items]) => (
+            <optgroup key={group} label={t(GROUP_LABEL_KEY[group])}>
+              {items.map((item) => <option key={item.id} value={item.id}>{t(TAB_LABEL_KEY[item.id])}</option>)}
+            </optgroup>
+          ))}
         </select>
         <div data-tour="server-settings-tab-strip" className="keep-scroll-strip hidden min-w-0 items-center gap-1 overflow-x-auto md:flex">
-          {tabs.map((t) => (
-            <button key={t} type="button" data-tour={`server-settings-tab-${t}`} onClick={() => { if (t !== tab) recordNav("tab", `server-settings:${t}`); setTab(t); }}
-              className={`shrink-0 rounded border px-2.5 py-1 text-xs uppercase tracking-widest ${tab === t ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}>
-              {TAB_LABEL[t]}
-            </button>
-          ))}
+          {withGroupSeparators(tabs).map((entry) =>
+            entry.kind === "separator" ? (
+              <span
+                key={`sep:${entry.afterGroup}`}
+                aria-hidden
+                className="mx-1 h-4 w-px shrink-0 self-center bg-keep-rule/60"
+                title={t(GROUP_LABEL_KEY[entry.afterGroup])}
+              />
+            ) : (
+              <button key={entry.tab.id} type="button" data-tour={`server-settings-tab-${entry.tab.id}`} onClick={() => changeTab(entry.tab.id)}
+                className={`shrink-0 rounded border px-2.5 py-1 text-xs uppercase tracking-widest ${tab === entry.tab.id ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}>
+                {t(TAB_LABEL_KEY[entry.tab.id])}
+              </button>
+            ),
+          )}
         </div>
       </div>
+      {/* One-line "what you do here" for the active tab, rendered by the
+          shell for every tab (one code path, no per-tab edits). Same
+          treatment on mobile and desktop. */}
+      <p className="mb-3 text-[11px] text-keep-muted">{t(TAB_DESC_KEY[tab])}</p>
       {err ? <p className="mb-2 text-xs text-keep-accent">{err}</p> : null}
       {(() => {
         const body = tab === "overview" ? <OverviewTab {...props} />
@@ -2605,6 +2952,10 @@ function ServerSettingsBody({ detail, viewer, onSaved }: { detail: ServerConsole
  * open (CSP-nonce path), and renders the tabbed body.
  */
 export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId: string; onClose: () => void; onChanged?: () => void }) {
+  const { t } = useTranslation("servers");
+  // Search CHROME strings (icon title etc.) live in the admin namespace so
+  // both admin surfaces share one set (docs/ADMIN_IA.md §6).
+  const { t: tAdmin } = useTranslation("admin");
   const [state, setState] = useState<{ detail: ServerConsoleDetail; viewer: ServerViewerState } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -2620,9 +2971,10 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
   useEffect(() => {
     let alive = true;
     apiGetServer(serverId)
-      .then((r) => { if (!alive) return; if (!r.viewer) { setErr("You don't manage this server."); return; } setState({ detail: r.server, viewer: r.viewer }); })
-      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "Couldn't load that server."); });
+      .then((r) => { if (!alive) return; if (!r.viewer) { setErr(t("console.shell.notManager")); return; } setState({ detail: r.server, viewer: r.viewer }); })
+      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : t("console.shell.loadError")); });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId, tick]);
 
   // Per-server theme/design while the console is open — routed through the
@@ -2643,37 +2995,128 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
     return SERVER_MOD_PERMISSIONS.some((k) => perms.has(k));
   }, [state?.viewer]);
 
+  // ----- Find-a-setting search (docs/ADMIN_IA.md §6) -----
+  // The view owns the header-mounted input; the tabbed body owns the tab
+  // state, so a pick travels down as `findRequest` and is cleared through
+  // onFindHandled once the body has switched (and, for future row-level
+  // entries, scrolled + flashed the data-admin-anchor).
+  const searchReady = !!state && !err && allowed;
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [findRequest, setFindRequest] = useState<{ tab: ServerSettingsTab; anchor: string } | null>(null);
+  const desktopSearchRef = useRef<HTMLInputElement>(null);
+  // Permission-visible tab ids: hits on tabs the viewer can't open never
+  // surface (same visibleConsoleTabs gates the strip uses).
+  const searchTabIds = useMemo(
+    () => new Set<string>(state && allowed ? visibleConsoleTabs(state.viewer).map((item) => item.id) : []),
+    [state, allowed],
+  );
+  // Breadcrumb pieces for a hit: group › tab. All already-translated;
+  // FindSetting adds the aria-hidden separators.
+  const searchBreadcrumb = useCallback(
+    (entry: ServerConsoleSearchEntry): readonly string[] => [
+      t(GROUP_LABEL_KEY[TAB_GROUP_BY_ID[entry.tab]]),
+      t(TAB_LABEL_KEY[entry.tab]),
+    ],
+    [t],
+  );
+  const pickFind = useCallback((entry: ServerConsoleSearchEntry) => {
+    setFindRequest({ tab: entry.tab, anchor: entry.key });
+  }, []);
+  const onFindHandled = useCallback(() => setFindRequest(null), []);
+  // Ctrl/Cmd+K anywhere inside the console focuses the search (desktop) or
+  // opens the mobile search row, which autofocuses. Same hook as the
+  // Global Admin shell.
+  const onShellKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!searchReady) return;
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      const el = desktopSearchRef.current;
+      if (el && el.offsetParent !== null) el.focus();
+      else setMobileSearchOpen(true);
+    }
+  };
+
   return (
     <Modal onClose={onClose} variant="mobile-fullscreen">
       {/* Stop inner clicks (tabs, buttons, inputs) from bubbling to the shared
           Modal backdrop, whose onClick fires onClose with no target guard. */}
       <div
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={onShellKeyDown}
         className="flex h-full w-full flex-col overflow-hidden bg-keep-bg text-keep-text lg:h-[90vh] lg:max-h-[90vh] lg:w-[75vw] lg:max-w-[2400px] lg:rounded-lg lg:border lg:border-keep-rule lg:shadow-2xl"
       >
         <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule px-4 py-3">
-          <SettingsIcon className="h-5 w-5 text-keep-action" aria-hidden="true" />
-          <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-keep-text">
-            {state ? state.detail.name : "Server settings"}
-            <span className="ml-2 text-xs font-normal text-keep-muted">Server settings</span>
-          </h2>
-          {state && state.viewer.isOwner ? (
-            <button type="button" onClick={() => setForcedTourId("server-admin")} title="Show me around" aria-label="Show me around"
-              className="shrink-0 rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text">
-              <HelpCircle className="h-4 w-4" aria-hidden="true" />
-            </button>
+          {searchReady && mobileSearchOpen ? (
+            /* Find-a-setting, mobile: the search row swaps in over the
+               normal header content; picking a hit or tapping the X swaps
+               it back. The input autofocuses. md:hidden so a viewport grown
+               to desktop falls back to the normal row (inline search). */
+            <div className="min-w-0 flex-1 md:hidden">
+              <FindSetting
+                layout="mobile"
+                entries={CONSOLE_SEARCH_ENTRIES}
+                redirects={SERVER_CONSOLE_SEARCH_REDIRECTS}
+                resolve={t}
+                breadcrumb={searchBreadcrumb}
+                visibleTabIds={searchTabIds}
+                onPick={pickFind}
+                onClose={() => setMobileSearchOpen(false)}
+              />
+            </div>
           ) : null}
-          <IconCloseButton onClick={onClose} shrink />
+          <div className={`${searchReady && mobileSearchOpen ? "hidden md:flex" : "flex"} min-w-0 flex-1 items-center gap-2`}>
+            <SettingsIcon className="h-5 w-5 text-keep-action" aria-hidden="true" />
+            <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-keep-text">
+              {state ? state.detail.name : t("console.shell.title")}
+              <span className="ml-2 text-xs font-normal text-keep-muted">{t("console.shell.title")}</span>
+            </h2>
+            {searchReady ? (
+              <>
+                {/* Find-a-setting, desktop: type what you're looking for and
+                    jump straight to the tab that owns it. Results pop over
+                    the body, anchored under the input. Ctrl/Cmd+K focuses
+                    it from anywhere in the console. */}
+                <div className="hidden md:block">
+                  <FindSetting
+                    layout="desktop"
+                    entries={CONSOLE_SEARCH_ENTRIES}
+                    redirects={SERVER_CONSOLE_SEARCH_REDIRECTS}
+                    resolve={t}
+                    breadcrumb={searchBreadcrumb}
+                    visibleTabIds={searchTabIds}
+                    onPick={pickFind}
+                    inputRef={desktopSearchRef}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setMobileSearchOpen(true)}
+                  title={tAdmin("panel.search.open")}
+                  aria-label={tAdmin("panel.search.open")}
+                  className="shrink-0 rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text md:hidden"
+                >
+                  <Search className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </>
+            ) : null}
+            {state && state.viewer.isOwner ? (
+              <button type="button" onClick={() => setForcedTourId("server-admin")} title={t("discover.form.tourTitle")} aria-label={t("discover.form.tourTitle")}
+                className="shrink-0 rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text">
+                <HelpCircle className="h-4 w-4" aria-hidden="true" />
+              </button>
+            ) : null}
+            <IconCloseButton onClick={onClose} shrink />
+          </div>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {err ? (
             <p className="m-4 rounded border border-keep-accent/50 bg-keep-accent/10 px-3 py-2 text-sm text-keep-accent">{err}</p>
           ) : !state ? (
-            <p className="m-4 text-sm italic text-keep-muted">Loading…</p>
+            <p className="m-4 text-sm italic text-keep-muted">{t("shared.loading")}</p>
           ) : !allowed ? (
-            <p className="m-4 text-sm italic text-keep-muted">You don't have any management powers on this server.</p>
+            <p className="m-4 text-sm italic text-keep-muted">{t("console.shell.noPowers")}</p>
           ) : (
-            <ServerSettingsBody detail={state.detail} viewer={state.viewer} onSaved={() => { setTick((t) => t + 1); onChanged?.(); }} />
+            <ServerSettingsBody detail={state.detail} viewer={state.viewer} onSaved={() => { setTick((t) => t + 1); onChanged?.(); }} findRequest={findRequest} onFindHandled={onFindHandled} />
           )}
         </div>
         {/* First-run walkthrough of the console — OWNER-only. Its steps tour the

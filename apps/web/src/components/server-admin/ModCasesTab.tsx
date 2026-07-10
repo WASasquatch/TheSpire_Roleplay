@@ -20,8 +20,11 @@
  * (lib/servers.ts is a shared do-not-touch module, so we carry our own here).
  */
 import { useEffect, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type { ProfileView, ServerViewerState } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { ProfileModal } from "../profile/ProfileModal.js";
 
 /* ============================================================
@@ -89,28 +92,36 @@ interface FormState {
 
 const EMPTY_FORM: FormState = { nature: "", kind: "case", reporter: "", subject: "", complaintBody: "", resolution: "", status: "open", evidenceMessageIds: "" };
 
-/** Suggested complaint categories for the nature datalist (still freehand). */
-const NATURE_SUGGESTIONS = ["Spam", "NSFW", "Harassment", "OOC dispute", "Ban evasion", "Underage content", "Impersonation", "Advertising / poaching", "Threats", "Consent / boundary", "Other"];
+/** Suggested complaint categories for the nature datalist (still freehand).
+ *  Catalog keys; resolved at render so the suggestions follow the language. */
+const NATURE_SUGGESTION_KEYS = [
+  "modCasesTab.nature.spam", "modCasesTab.nature.nsfw", "modCasesTab.nature.harassment",
+  "modCasesTab.nature.oocDispute", "modCasesTab.nature.banEvasion", "modCasesTab.nature.underage",
+  "modCasesTab.nature.impersonation", "modCasesTab.nature.advertising", "modCasesTab.nature.threats",
+  "modCasesTab.nature.consent", "modCasesTab.nature.other",
+];
 
 type FilterTab = "all" | "open" | "in_progress" | "resolved" | "notes";
-const TABS: { key: FilterTab; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "open", label: "Open" },
-  { key: "in_progress", label: "In progress" },
-  { key: "resolved", label: "Resolved" },
-  { key: "notes", label: "Notes" },
+const TABS: { key: FilterTab; labelKey: string }[] = [
+  { key: "all", labelKey: "modCasesTab.tabAll" },
+  { key: "open", labelKey: "modCasesTab.statusOpen" },
+  { key: "in_progress", labelKey: "modCasesTab.statusInProgress" },
+  { key: "resolved", labelKey: "modCasesTab.statusResolved" },
+  { key: "notes", labelKey: "modCasesTab.tabNotes" },
 ];
 type Sort = "newest" | "oldest" | "updated" | "reporter" | "subject" | "nature";
-const SORTS: { key: Sort; label: string }[] = [
-  { key: "newest", label: "Newest" },
-  { key: "oldest", label: "Oldest" },
-  { key: "updated", label: "Recently updated" },
-  { key: "reporter", label: "Reporter A–Z" },
-  { key: "subject", label: "Subject A–Z" },
-  { key: "nature", label: "Category A–Z" },
+const SORTS: { key: Sort; labelKey: string }[] = [
+  { key: "newest", labelKey: "modCasesTab.sortNewest" },
+  { key: "oldest", labelKey: "modCasesTab.sortOldest" },
+  { key: "updated", labelKey: "modCasesTab.sortUpdated" },
+  { key: "reporter", labelKey: "modCasesTab.sortReporter" },
+  { key: "subject", labelKey: "modCasesTab.sortSubject" },
+  { key: "nature", labelKey: "modCasesTab.sortNature" },
 ];
 
-const STATUS_LABEL: Record<CaseStatus, string> = { open: "Open", in_progress: "In progress", resolved: "Resolved" };
+const STATUS_LABEL_KEY: Record<CaseStatus, string> = { open: "modCasesTab.statusOpen", in_progress: "modCasesTab.statusInProgress", resolved: "modCasesTab.statusResolved" };
+/** Status display label through the active language. */
+function statusLabel(t: TFunction<"servers">, s: CaseStatus): string { return t(STATUS_LABEL_KEY[s]); }
 const STATUS_BADGE: Record<CaseStatus, string> = {
   open: "bg-keep-accent/15 text-keep-accent",
   in_progress: "bg-keep-action/15 text-keep-action",
@@ -139,16 +150,17 @@ function Party({
   isCharacter: boolean;
   onOpen: () => void;
 }) {
+  const { t } = useTranslation("servers");
   if (linked && label) {
     return (
       <button
         type="button"
         onClick={onOpen}
         className="inline-flex items-center gap-1 rounded border border-keep-action/40 bg-keep-action/10 px-1.5 py-0.5 text-[11px] font-semibold text-keep-action hover:bg-keep-action/20"
-        title={`Open ${isCharacter ? "character" : "OOC"} profile`}
+        title={isCharacter ? t("modCasesTab.openCharProfile") : t("modCasesTab.openOocProfile")}
       >
         {label}
-        <span className="text-[8px] uppercase tracking-widest opacity-70">{isCharacter ? "char" : "ooc"}</span>
+        <span className="text-[8px] uppercase tracking-widest opacity-70">{isCharacter ? t("modCasesTab.charChip") : t("modCasesTab.oocChip")}</span>
       </button>
     );
   }
@@ -172,6 +184,7 @@ function CaseCard({
   onOpenParty: (p: { userId: string | null; characterId: string | null; fallbackLabel: string | null }) => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("servers");
   const [upBody, setUpBody] = useState("");
   const [upStatus, setUpStatus] = useState<CaseStatus | "">("");
   const isNote = c.kind === "note";
@@ -200,7 +213,7 @@ function CaseCard({
   const delEvidence = (eid: string) =>
     call(`/servers/${sid(serverId)}/mod-cases/${sid(c.id)}/evidence/${sid(eid)}`, { method: "DELETE" });
   function remove() {
-    if (!window.confirm(`Delete this ${isNote ? "note" : "case"}? This cannot be undone (its updates and backed-up evidence go too).`)) return;
+    if (!window.confirm(isNote ? t("modCasesTab.deleteNoteConfirm") : t("modCasesTab.deleteCaseConfirm"))) return;
     void call(`/servers/${sid(serverId)}/mod-cases/${sid(c.id)}`, { method: "DELETE" });
   }
 
@@ -208,40 +221,40 @@ function CaseCard({
     <li className="rounded border border-keep-rule bg-keep-panel/30 p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         {isNote ? (
-          <span className="rounded bg-keep-action/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-keep-muted">Note</span>
+          <span className="rounded bg-keep-action/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-keep-muted">{t("modCasesTab.noteChip")}</span>
         ) : (
-          <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${STATUS_BADGE[c.status]}`}>{STATUS_LABEL[c.status]}</span>
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${STATUS_BADGE[c.status]}`}>{statusLabel(t, c.status)}</span>
         )}
         <span className="font-semibold text-keep-text">{c.nature}</span>
-        <span className="ml-auto text-[11px] text-keep-muted" title={c.createdByName ? `Logged by ${c.createdByName}` : undefined}>
-          {new Date(c.createdAt).toLocaleString()}{c.createdByName ? ` · ${c.createdByName}` : ""}
+        <span className="ml-auto text-[11px] text-keep-muted" title={c.createdByName ? t("modCasesTab.loggedBy", { name: c.createdByName }) : undefined}>
+          {formatDateTime(c.createdAt)}{c.createdByName ? ` · ${c.createdByName}` : ""}
         </span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-keep-muted">
-        <span>From: <Party label={c.reporterLabel} text={c.reporterText} linked={!!c.reporterUserId} isCharacter={!!c.reporterCharacterId} onOpen={() => onOpenParty({ userId: c.reporterUserId, characterId: c.reporterCharacterId, fallbackLabel: c.reporterLabel })} /></span>
-        <span>About: <Party label={c.subjectLabel} text={c.subjectText} linked={!!c.subjectUserId} isCharacter={!!c.subjectCharacterId} onOpen={() => onOpenParty({ userId: c.subjectUserId, characterId: c.subjectCharacterId, fallbackLabel: c.subjectLabel })} /></span>
+        <span>{t("modCasesTab.fromLabel")}<Party label={c.reporterLabel} text={c.reporterText} linked={!!c.reporterUserId} isCharacter={!!c.reporterCharacterId} onOpen={() => onOpenParty({ userId: c.reporterUserId, characterId: c.reporterCharacterId, fallbackLabel: c.reporterLabel })} /></span>
+        <span>{t("modCasesTab.aboutLabel")}<Party label={c.subjectLabel} text={c.subjectText} linked={!!c.subjectUserId} isCharacter={!!c.subjectCharacterId} onOpen={() => onOpenParty({ userId: c.subjectUserId, characterId: c.subjectCharacterId, fallbackLabel: c.subjectLabel })} /></span>
       </div>
       <p className="mt-2 whitespace-pre-wrap text-keep-text">{c.complaintBody}</p>
       {c.resolution ? (
         <p className="mt-2 whitespace-pre-wrap border-l-2 border-keep-action/40 pl-2 text-keep-muted">
-          <span className="font-semibold text-keep-text">Resolution: </span>{c.resolution}
+          <span className="font-semibold text-keep-text">{t("modCasesTab.resolutionLabel")}</span>{c.resolution}
         </p>
       ) : null}
 
       {/* Backed-up message evidence (survives the janitor). */}
       {c.evidence.length > 0 ? (
         <div className="mt-2 space-y-1">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-keep-muted">Backed-up messages ({c.evidence.length})</p>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-keep-muted">{t("modCasesTab.backedUpHeading", { n: c.evidence.length })}</p>
           {c.evidence.map((e) => (
             <div key={e.id} className="rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1 text-xs">
               <div className="flex items-center gap-2 text-[10px] text-keep-muted">
-                <span className="font-semibold text-keep-text">{e.authorLabel ?? "unknown"}</span>
-                {e.roomName ? <span>in {e.roomName}</span> : null}
-                {e.originalCreatedAt ? <span>· {new Date(e.originalCreatedAt).toLocaleString()}</span> : null}
+                <span className="font-semibold text-keep-text">{e.authorLabel ?? t("modCasesTab.unknownAuthor")}</span>
+                {e.roomName ? <span>{t("modCasesTab.inRoom", { room: e.roomName })}</span> : null}
+                {e.originalCreatedAt ? <span>· {formatDateTime(e.originalCreatedAt)}</span> : null}
                 {e.kind && e.kind !== "say" ? <span className="uppercase tracking-widest">· {e.kind}</span> : null}
-                {canManage ? <button type="button" disabled={busy} onClick={() => void delEvidence(e.id)} className="ml-auto text-keep-accent hover:underline">remove</button> : null}
+                {canManage ? <button type="button" disabled={busy} onClick={() => void delEvidence(e.id)} className="ml-auto text-keep-accent hover:underline">{t("modCasesTab.removeLower")}</button> : null}
               </div>
-              <p className="mt-0.5 whitespace-pre-wrap text-keep-text">{e.body ?? <span className="italic text-keep-muted">(empty)</span>}</p>
+              <p className="mt-0.5 whitespace-pre-wrap text-keep-text">{e.body ?? <span className="italic text-keep-muted">{t("modCasesTab.emptyBody")}</span>}</p>
             </div>
           ))}
         </div>
@@ -250,14 +263,14 @@ function CaseCard({
       {/* Update timeline (append-only). */}
       {c.updates.length > 0 ? (
         <div className="mt-2 space-y-1 border-l-2 border-keep-rule/60 pl-2">
-          <p className="text-[10px] font-semibold uppercase tracking-widest text-keep-muted">Updates</p>
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-keep-muted">{t("modCasesTab.updatesHeading")}</p>
           {c.updates.map((u) => (
             <div key={u.id} className="text-xs">
               <div className="flex items-center gap-2 text-[10px] text-keep-muted">
-                <span className="font-semibold text-keep-text">{u.authorName ?? "staff"}</span>
-                <span>{new Date(u.createdAt).toLocaleString()}</span>
-                {u.statusChange ? <span className={`rounded px-1 py-0 text-[9px] font-semibold uppercase ${STATUS_BADGE[u.statusChange]}`}>→ {STATUS_LABEL[u.statusChange]}</span> : null}
-                {canManage ? <button type="button" disabled={busy} onClick={() => void delUpdate(u.id)} className="ml-auto text-keep-accent hover:underline">remove</button> : null}
+                <span className="font-semibold text-keep-text">{u.authorName ?? t("modCasesTab.staffFallback")}</span>
+                <span>{formatDateTime(u.createdAt)}</span>
+                {u.statusChange ? <span className={`rounded px-1 py-0 text-[9px] font-semibold uppercase ${STATUS_BADGE[u.statusChange]}`}>→ {statusLabel(t, u.statusChange)}</span> : null}
+                {canManage ? <button type="button" disabled={busy} onClick={() => void delUpdate(u.id)} className="ml-auto text-keep-accent hover:underline">{t("modCasesTab.removeLower")}</button> : null}
               </div>
               <p className="mt-0.5 whitespace-pre-wrap text-keep-text">{u.body}</p>
             </div>
@@ -270,27 +283,27 @@ function CaseCard({
           {/* Add-update composer */}
           <div className="flex flex-col gap-1.5 sm:flex-row sm:items-end">
             <label className="flex-1 text-[10px] uppercase tracking-widest text-keep-muted">
-              Add update
-              <textarea className={`${inputClass} mt-0.5 min-h-[2.5rem]`} value={upBody} onChange={(e) => setUpBody(e.target.value)} placeholder="Progress note, contact made, outcome…" maxLength={8000} />
+              {t("modCasesTab.addUpdateLabel")}
+              <textarea className={`${inputClass} mt-0.5 min-h-[2.5rem]`} value={upBody} onChange={(e) => setUpBody(e.target.value)} placeholder={t("modCasesTab.updatePlaceholder")} maxLength={8000} />
             </label>
             {!isNote ? (
-              <select className={`${inputClass} sm:w-36`} value={upStatus} onChange={(e) => setUpStatus(e.target.value as CaseStatus | "")} title="Optionally change status with this update">
-                <option value="">Keep status</option>
-                {(["open", "in_progress", "resolved"] as const).map((s) => <option key={s} value={s}>Set {STATUS_LABEL[s]}</option>)}
+              <select className={`${inputClass} sm:w-36`} value={upStatus} onChange={(e) => setUpStatus(e.target.value as CaseStatus | "")} title={t("modCasesTab.statusSelectTitle")}>
+                <option value="">{t("modCasesTab.keepStatus")}</option>
+                {(["open", "in_progress", "resolved"] as const).map((s) => <option key={s} value={s}>{t("modCasesTab.setStatus", { status: statusLabel(t, s) })}</option>)}
               </select>
             ) : null}
-            <button type="button" disabled={busy || !upBody.trim()} onClick={() => void addUpdate()} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50">Add</button>
+            <button type="button" disabled={busy || !upBody.trim()} onClick={() => void addUpdate()} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50">{t("modCasesTab.add")}</button>
           </div>
           {/* Quick status + edit/delete */}
           <div className="flex flex-wrap items-center gap-2">
             {!isNote ? (["open", "in_progress", "resolved"] as const).map((s) => (
               <button key={s} type="button" disabled={busy || c.status === s} onClick={() => void setStatus(s)}
                 className={`rounded px-2 py-0.5 text-xs ${c.status === s ? STATUS_BADGE[s] + " font-semibold" : "border border-keep-rule text-keep-muted hover:text-keep-text"}`}>
-                {STATUS_LABEL[s]}
+                {statusLabel(t, s)}
               </button>
             )) : null}
-            <button type="button" onClick={onEdit} className={`${btnClass} ml-auto`}>Edit</button>
-            <button type="button" onClick={remove} className="rounded border border-keep-accent/40 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/10">Delete</button>
+            <button type="button" onClick={onEdit} className={`${btnClass} ml-auto`}>{t("shared.edit")}</button>
+            <button type="button" onClick={remove} className="rounded border border-keep-accent/40 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/10">{t("shared.delete")}</button>
           </div>
         </div>
       ) : null}
@@ -315,6 +328,7 @@ export default function ModCasesTab({
   run: (fn: () => Promise<void>) => Promise<void>;
   onSaved: () => void;
 }): React.ReactElement {
+  const { t } = useTranslation("servers");
   // Gate the action UI on the mirrored permission, exactly like the routes
   // re-check; owner implies the key.
   const canManage = viewer.isOwner || viewer.permissions.includes("manage_mod_cases");
@@ -341,15 +355,15 @@ export default function ModCasesTab({
   async function openParty(p: { userId: string | null; characterId: string | null; fallbackLabel: string | null }) {
     setViewError(null);
     const target = p.characterId ? `@cid:${p.characterId}` : p.userId ? `@id:${p.userId}` : p.fallbackLabel;
-    if (!target) { setViewError("Couldn't resolve that identity."); return; }
+    if (!target) { setViewError(t("modCasesTab.identityUnresolved")); return; }
     try {
       const r = await fetch(`/profiles/${encodeURIComponent(target)}`, { credentials: "include" });
-      if (!r.ok) { setViewError(r.status === 404 ? "That identity no longer exists (renamed away or deleted)." : `Couldn't load profile (HTTP ${r.status}).`); return; }
+      if (!r.ok) { setViewError(r.status === 404 ? t("modCasesTab.identityGone") : t("console.users.profileLoadHttp", { status: r.status })); return; }
       const j = await r.json();
-      if (j && "private" in j) { setViewError("That profile is restricted."); return; }
+      if (j && "private" in j) { setViewError(t("console.users.profileRestricted")); return; }
       setViewing(j as ProfileView);
     } catch {
-      setViewError("Couldn't load profile.");
+      setViewError(t("console.users.profileLoadError"));
     }
   }
 
@@ -369,8 +383,9 @@ export default function ModCasesTab({
         return (await r.json()) as { cases: ModCase[] };
       })
       .then((j) => { if (alive) setCases(j.cases); })
-      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (alive) setError(e instanceof Error ? e.message : t("shared.loadFailed")); });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverId, tab, sort, debouncedSearch, tick]);
 
   // After any change, refetch this tab AND let the console refresh shared state
@@ -425,13 +440,13 @@ export default function ModCasesTab({
       const requested = payload.evidenceMessageIds ? payload.evidenceMessageIds.split(/[\s,]+/).filter(Boolean).length : 0;
       if (requested > 0) {
         const found = j.evidenceSnapshotted ?? 0;
-        setInfo(found < requested ? `Backed up ${found} of ${requested} messages (${requested - found} skipped: not found, or from another server's room).` : `Backed up ${found} message${found === 1 ? "" : "s"}.`);
+        setInfo(found < requested ? t("modCasesTab.backedUpPartial", { found, requested, skipped: requested - found }) : t("modCasesTab.backedUpAll", { count: found }));
       }
       setEditing(null);
       setForm(EMPTY_FORM);
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "save failed");
+      setError(e instanceof Error ? e.message : t("shared.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -442,40 +457,37 @@ export default function ModCasesTab({
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="mb-1 text-xs font-semibold uppercase tracking-widest text-keep-muted">Moderation case log</h2>
+        <h2 className="mb-1 text-xs font-semibold uppercase tracking-widest text-keep-muted">{t("modCasesTab.heading")}</h2>
         <p className="text-[11px] text-keep-muted">
-          A record of complaints, disputes, and notes your team handled on this server: who complained, about whom or what,
-          and how it was resolved. Reporter and subject accept a plain name or an <code>@id:</code>/<code>@cid:</code> token
-          to link the exact identity. Banning a member happens on the Bans tab; this log records the outcome. This is separate
-          from the read-only Mod Log audit feed.
+          <Trans t={t} i18nKey="modCasesTab.blurb" values={{ id: "@id:", cid: "@cid:" }} components={{ code: <code /> }} />
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1 text-xs">
-          {TABS.map((t) => (
+          {TABS.map((tb) => (
             <button
-              key={t.key}
+              key={tb.key}
               type="button"
-              onClick={() => setTab(t.key)}
-              className={`rounded px-2 py-0.5 ${tab === t.key ? "bg-keep-action/15 text-keep-action" : "text-keep-muted hover:text-keep-text"}`}
+              onClick={() => setTab(tb.key)}
+              className={`rounded px-2 py-0.5 ${tab === tb.key ? "bg-keep-action/15 text-keep-action" : "text-keep-muted hover:text-keep-text"}`}
             >
-              {t.label}
+              {t(tb.labelKey)}
             </button>
           ))}
         </div>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search reporter, subject, category, text…"
+          placeholder={t("modCasesTab.searchPlaceholder")}
           className={`${inputClass} h-7 max-w-[16rem] flex-1`}
         />
-        <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className={`${inputClass} h-7 w-auto`} title="Sort order">
-          {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} className={`${inputClass} h-7 w-auto`} title={t("modCasesTab.sortTitle")}>
+          {SORTS.map((s) => <option key={s.key} value={s.key}>{t(s.labelKey)}</option>)}
         </select>
         {canManage && editing === null ? (
           <button type="button" onClick={startNew} className="rounded border border-keep-action/50 bg-keep-action/10 px-2 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/20">
-            + New
+            {t("modCasesTab.newButton")}
           </button>
         ) : null}
       </div>
@@ -487,64 +499,64 @@ export default function ModCasesTab({
         <form onSubmit={submit} className="space-y-2 rounded border border-keep-action/40 bg-keep-bg/40 p-3">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="text-xs text-keep-muted">
-              Type
+              {t("modCasesTab.typeLabel")}
               <select className={inputClass} value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as CaseKind })}>
-                <option value="case">Case (infraction / dispute)</option>
-                <option value="note">Note (informational only)</option>
+                <option value="case">{t("modCasesTab.kindCase")}</option>
+                <option value="note">{t("modCasesTab.kindNote")}</option>
               </select>
             </label>
             <label className="text-xs text-keep-muted">
-              Category
-              <input className={inputClass} list="server-modcase-natures" value={form.nature} onChange={(e) => setForm({ ...form, nature: e.target.value })} placeholder="e.g. Harassment, Spam, NSFW" maxLength={80} required />
-              <datalist id="server-modcase-natures">{NATURE_SUGGESTIONS.map((n) => <option key={n} value={n} />)}</datalist>
+              {t("modCasesTab.categoryLabel")}
+              <input className={inputClass} list="server-modcase-natures" value={form.nature} onChange={(e) => setForm({ ...form, nature: e.target.value })} placeholder={t("modCasesTab.categoryPlaceholder")} maxLength={80} required />
+              <datalist id="server-modcase-natures">{NATURE_SUGGESTION_KEYS.map((k) => { const n = t(k); return <option key={n} value={n} />; })}</datalist>
             </label>
             <label className="text-xs text-keep-muted">
-              Who complained
-              <input className={inputClass} value={form.reporter} onChange={(e) => setForm({ ...form, reporter: e.target.value })} placeholder="name, @id:…, @cid:…, or freehand" maxLength={120} />
+              {t("modCasesTab.reporterLabel")}
+              <input className={inputClass} value={form.reporter} onChange={(e) => setForm({ ...form, reporter: e.target.value })} placeholder={t("modCasesTab.identityPlaceholder")} maxLength={120} />
             </label>
             <label className="text-xs text-keep-muted">
-              About whom / what
-              <input className={inputClass} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="name, @id:…, @cid:…, or freehand" maxLength={120} />
+              {t("modCasesTab.subjectLabel")}
+              <input className={inputClass} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder={t("modCasesTab.identityPlaceholder")} maxLength={120} />
             </label>
             {!isNoteForm ? (
               <label className="text-xs text-keep-muted">
-                Status
+                {t("modCasesTab.statusLabel")}
                 <select className={inputClass} value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as CaseStatus })}>
-                  <option value="open">Open</option>
-                  <option value="in_progress">In progress</option>
-                  <option value="resolved">Resolved</option>
+                  <option value="open">{t("modCasesTab.statusOpen")}</option>
+                  <option value="in_progress">{t("modCasesTab.statusInProgress")}</option>
+                  <option value="resolved">{t("modCasesTab.statusResolved")}</option>
                 </select>
               </label>
             ) : null}
           </div>
           <label className="block text-xs text-keep-muted">
-            {isNoteForm ? "Note" : "Complaint / details"}
+            {isNoteForm ? t("modCasesTab.noteChip") : t("modCasesTab.complaintLabel")}
             <textarea className={`${inputClass} min-h-[5rem]`} value={form.complaintBody} onChange={(e) => setForm({ ...form, complaintBody: e.target.value })} maxLength={8000} required />
           </label>
           {!isNoteForm ? (
             <label className="block text-xs text-keep-muted">
-              Resolution / action taken
-              <textarea className={`${inputClass} min-h-[3rem]`} value={form.resolution} onChange={(e) => setForm({ ...form, resolution: e.target.value })} placeholder="Leave blank while open; add progress via Updates after saving" maxLength={8000} />
+              {t("modCasesTab.resolutionFieldLabel")}
+              <textarea className={`${inputClass} min-h-[3rem]`} value={form.resolution} onChange={(e) => setForm({ ...form, resolution: e.target.value })} placeholder={t("modCasesTab.resolutionPlaceholder")} maxLength={8000} />
             </label>
           ) : null}
           <label className="block text-xs text-keep-muted">
-            Back up message IDs <span className="opacity-70">(comma-separated, the IDs you'd /reply to)</span>
-            <input className={inputClass} value={form.evidenceMessageIds} onChange={(e) => setForm({ ...form, evidenceMessageIds: e.target.value })} placeholder="msg_abc, msg_def …" maxLength={4000} />
-            <span className="mt-0.5 block text-[10px] text-keep-muted/80">Snapshots those chat messages onto the case so they survive cleanup. Only messages from this server's rooms can be attached.</span>
+            {t("modCasesTab.evidenceLabel")} <span className="opacity-70">{t("modCasesTab.evidenceHintInline")}</span>
+            <input className={inputClass} value={form.evidenceMessageIds} onChange={(e) => setForm({ ...form, evidenceMessageIds: e.target.value })} placeholder={t("modCasesTab.evidencePlaceholder")} maxLength={4000} />
+            <span className="mt-0.5 block text-[10px] text-keep-muted/80">{t("modCasesTab.evidenceHintBlock")}</span>
           </label>
           <div className="flex gap-2">
             <button type="submit" disabled={saving} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50">
-              {saving ? "Saving…" : editing === "new" ? (isNoteForm ? "Create note" : "Create case") : "Save changes"}
+              {saving ? t("shared.saving") : editing === "new" ? (isNoteForm ? t("modCasesTab.createNote") : t("modCasesTab.createCase")) : t("announceTab.saveChanges")}
             </button>
-            <button type="button" onClick={() => { setEditing(null); setForm(EMPTY_FORM); }} className={btnClass}>Cancel</button>
+            <button type="button" onClick={() => { setEditing(null); setForm(EMPTY_FORM); }} className={btnClass}>{t("shared.cancel")}</button>
           </div>
         </form>
       ) : null}
 
       {cases === null ? (
-        <p className="text-xs italic text-keep-muted">Loading…</p>
+        <p className="text-xs italic text-keep-muted">{t("shared.loading")}</p>
       ) : cases.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">{debouncedSearch.trim() ? "No cases match your search." : "No cases logged yet."}</p>
+        <p className="text-xs italic text-keep-muted">{debouncedSearch.trim() ? t("modCasesTab.noSearchMatches") : t("modCasesTab.noCases")}</p>
       ) : (
         <ul className="space-y-2">
           {cases.map((c) => (

@@ -9,6 +9,7 @@
  * socket-driven store also keeps live.
  */
 import React, { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { EIDOLON_BASIC_HEAL_COST, eidolonFoodEffect, eidolonToyEffect } from "@thekeep/shared";
 import { buyItem } from "../../lib/earning";
 import type { ItemCatalogRow } from "../../lib/earning";
@@ -28,6 +29,7 @@ interface Props {
 }
 
 export function ItemDrawer({ mode, characterId, onClose, onFeed, onUsePotion, onBasicHeal }: Props): React.JSX.Element {
+  const { t } = useTranslation("arcade");
   const earning = useEarning((s) => s.snapshot);
   const refresh = useEarning((s) => s.refresh);
   // Multi-Server Lift: buy against the SAME server the drawer's wallet /
@@ -65,9 +67,9 @@ export function ItemDrawer({ mode, characterId, onClose, onFeed, onUsePotion, on
   }, [earning, wantCategory, ownedByKey]);
 
   const use = (key: string) => (mode === "food" ? onFeed(key) : onUsePotion(key));
-  const title = mode === "food" ? "Feed your familiar" : mode === "revive" ? "Wake your familiar" : mode === "toy" ? "Play with a toy" : "Tend its ailment";
-  const useLabel = mode === "food" ? "Feed" : mode === "revive" ? "Revive" : mode === "toy" ? "Play" : "Use";
-  const emptyMsg = mode === "food" ? "No food in the shop yet." : mode === "revive" ? "You need a magical item to wake it." : mode === "toy" ? "No toys in the shop yet." : "No curatives in the shop yet.";
+  const title = mode === "food" ? t("arcade.eidolon.drawer.feedTitle") : mode === "revive" ? t("arcade.eidolon.drawer.wakeTitle") : mode === "toy" ? t("arcade.eidolon.drawer.toyTitle") : t("arcade.eidolon.drawer.remedyTitle");
+  const useLabel = mode === "food" ? t("arcade.eidolon.actions.feed") : mode === "revive" ? t("arcade.eidolon.actions.revive") : mode === "toy" ? t("arcade.eidolon.actions.play") : t("arcade.eidolon.actions.use");
+  const emptyMsg = mode === "food" ? t("arcade.eidolon.drawer.emptyFood") : mode === "revive" ? t("arcade.eidolon.drawer.emptyRevive") : mode === "toy" ? t("arcade.eidolon.drawer.emptyToy") : t("arcade.eidolon.drawer.emptyRemedy");
 
   // What an item does, so the shop isn't a guessing game. Food + toys have
   // concrete stat deltas (from the shared engine); the gauge "Spirit" is `joy`.
@@ -75,12 +77,12 @@ export function ItemDrawer({ mode, characterId, onClose, onFeed, onUsePotion, on
   const effectHint = (key: string, price: number): string | null => {
     if (mode === "food") {
       const e = eidolonFoodEffect({ key, price });
-      return [["Satiety", e.satiety], ["Spirit", e.joy], ["Vigor", e.vigor], ["Hygiene", e.hygiene]]
+      return [[t("arcade.eidolon.gauges.satiety"), e.satiety], [t("arcade.eidolon.gauges.spirit"), e.joy], [t("arcade.eidolon.gauges.vigor"), e.vigor], [t("arcade.eidolon.gauges.hygiene"), e.hygiene]]
         .filter(([, v]) => (v as number) !== 0).map(([l, v]) => fmtDelta(l as string, v as number)).join(" · ") || null;
     }
     if (mode === "toy") {
       const e = eidolonToyEffect(key);
-      return [["Spirit", e.joy], ["Vigor", e.vigor], ["Hygiene", e.hygiene]]
+      return [[t("arcade.eidolon.gauges.spirit"), e.joy], [t("arcade.eidolon.gauges.vigor"), e.vigor], [t("arcade.eidolon.gauges.hygiene"), e.hygiene]]
         .filter(([, v]) => (v as number) !== 0).map(([l, v]) => fmtDelta(l as string, v as number)).join(" · ") || null;
     }
     return null; // remedy/revive: the per-mode copy already explains
@@ -93,7 +95,7 @@ export function ItemDrawer({ mode, characterId, onClose, onFeed, onUsePotion, on
       await buyItem(key, 1, characterId, currentServerId);
       await refresh();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Purchase failed.");
+      setErr(e instanceof Error ? e.message : t("arcade.eidolon.drawer.purchaseFailed"));
     } finally {
       setBuyingKey(null);
     }
@@ -104,12 +106,12 @@ export function ItemDrawer({ mode, characterId, onClose, onFeed, onUsePotion, on
       <div className="ei-drawer" onClick={(e) => e.stopPropagation()}>
         <div className="ei-drawer-head">
           <span className="ei-drawer-title">{title}</span>
-          <span className="ei-wallet" title="Your currency"><CoinAmount amount={currency} size="md" /></span>
-          <button className="ei-drawer-x" onClick={onClose} aria-label="Close">✕</button>
+          <span className="ei-wallet" title={t("arcade.eidolon.drawer.walletTitle")}><CoinAmount amount={currency} size="md" /></span>
+          <button className="ei-drawer-x" onClick={onClose} aria-label={t("common:close")}>✕</button>
         </div>
 
         {mode === "revive" && (
-          <div className="ei-revive-note">Your familiar lies dormant. A magical item will wake it to a fragile second life.</div>
+          <div className="ei-revive-note">{t("arcade.eidolon.drawer.reviveNote")}</div>
         )}
 
         {mode === "remedy" && (
@@ -117,10 +119,10 @@ export function ItemDrawer({ mode, characterId, onClose, onFeed, onUsePotion, on
             className="ei-heal-basic"
             disabled={currency < EIDOLON_BASIC_HEAL_COST}
             onClick={onBasicHeal}
-            title={currency < EIDOLON_BASIC_HEAL_COST ? "Not enough currency" : "Spend currency on a basic heal"}
+            title={currency < EIDOLON_BASIC_HEAL_COST ? t("arcade.notEnoughCurrency") : t("arcade.eidolon.drawer.basicHealTitle")}
           >
-            <span className="ei-heal-line">Basic heal · −<CoinAmount amount={EIDOLON_BASIC_HEAL_COST} /></span>
-            <small>a little vitality, no cure</small>
+            <span className="ei-heal-line">{t("arcade.eidolon.drawer.basicHeal")}<CoinAmount amount={EIDOLON_BASIC_HEAL_COST} /></span>
+            <small>{t("arcade.eidolon.drawer.basicHealNote")}</small>
           </button>
         )}
 
@@ -133,7 +135,7 @@ export function ItemDrawer({ mode, characterId, onClose, onFeed, onUsePotion, on
           {rows.map((it) => {
             const owned = ownedByKey.get(it.key) ?? 0;
             const hint = effectHint(it.key, it.price);
-            const ownedStr = owned > 0 ? `${owned} owned` : "none owned";
+            const ownedStr = owned > 0 ? t("arcade.eidolon.drawer.owned", { count: owned }) : t("arcade.eidolon.drawer.noneOwned");
             // Toys are reusable — once you own one, buying more is pointless, so
             // hide Buy. Food/curatives are consumed, so keep Buy regardless.
             const showBuy = it.purchasable && !(mode === "toy" && owned > 0);
@@ -156,9 +158,9 @@ export function ItemDrawer({ mode, characterId, onClose, onFeed, onUsePotion, on
                     className="ei-item-buy"
                     disabled={currency < it.price || buyingKey != null}
                     onClick={() => void buy(it.key)}
-                    title={currency < it.price ? "Not enough currency" : `Buy one for ${it.price}`}
+                    title={currency < it.price ? t("arcade.notEnoughCurrency") : t("arcade.eidolon.drawer.buyOneFor", { price: it.price })}
                   >
-                    {buyingKey === it.key ? "…" : <>Buy · <CoinAmount amount={it.price} /></>}
+                    {buyingKey === it.key ? "…" : <>{t("arcade.eidolon.drawer.buy")} · <CoinAmount amount={it.price} /></>}
                   </button>
                 )}
               </div>

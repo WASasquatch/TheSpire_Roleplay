@@ -5,6 +5,7 @@
  * one is selected, else the master/OOC pool — passed as `characterId`.
  */
 import { withIdentityQuery } from "./http.js";
+import { i18n } from "./i18n.js";
 
 export interface StoryCopyState {
   owned: boolean;
@@ -25,7 +26,7 @@ async function readError(r: Response): Promise<string> {
     const j = await r.json();
     if (j && typeof j.error === "string") return j.error;
   } catch { /* fall through */ }
-  return `Request failed (${r.status})`;
+  return i18n.t("errors:requestFailedBare", { status: r.status });
 }
 
 export async function fetchStoryCopyState(storyId: string, characterId: string | null): Promise<StoryCopyState> {

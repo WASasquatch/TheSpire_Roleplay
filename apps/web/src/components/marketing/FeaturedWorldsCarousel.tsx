@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorldCatalogEntry, WorldGenre } from "@thekeep/shared";
 import { useChat } from "../../state/store.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
@@ -46,15 +47,17 @@ const GENRE_MOTION: Record<WorldGenre, Motion> = {
   other: "motes",
 };
 
-const EYEBROW_BY_GENRE: Record<WorldGenre, string> = {
-  fantasy: "A realm of",
-  scifi: "A future of",
-  modern: "A city of",
-  horror: "A nightmare of",
-  western: "A frontier of",
-  steampunk: "A foundry of",
-  mythological: "A myth of",
-  other: "A world of",
+/** Catalog keys (marketing ns) for the per-genre eyebrow line; resolved with
+ *  t() at render so the copy follows the active language. */
+const EYEBROW_KEY_BY_GENRE: Record<WorldGenre, string> = {
+  fantasy: "featuredWorlds.eyebrow.fantasy",
+  scifi: "featuredWorlds.eyebrow.scifi",
+  modern: "featuredWorlds.eyebrow.modern",
+  horror: "featuredWorlds.eyebrow.horror",
+  western: "featuredWorlds.eyebrow.western",
+  steampunk: "featuredWorlds.eyebrow.steampunk",
+  mythological: "featuredWorlds.eyebrow.mythological",
+  other: "featuredWorlds.eyebrow.other",
 };
 
 /** Read a `--keep-*` CSS var (space-separated RGB triple) as [r, g, b]. */
@@ -106,6 +109,7 @@ interface Particle {
 }
 
 export function FeaturedWorldsCarousel({ onNavigate }: Props) {
+  const { t } = useTranslation("marketing");
   const [items, setItems] = useState<WorldCatalogEntry[] | null>(null);
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -532,12 +536,13 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
     else window.location.href = path;
   }
 
-  const eyebrow = EYEBROW_BY_GENRE[active.genre];
+  const eyebrowKey = EYEBROW_KEY_BY_GENRE[active.genre];
+  const eyebrow = eyebrowKey ? t(eyebrowKey) : undefined;
   const fadingCls = fading ? " orb-text-fading" : "";
 
   return (
     <section
-      aria-label="Featured worlds"
+      aria-label={t("featuredWorlds.sectionAria")}
       className="orb-section select-none"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
@@ -564,15 +569,15 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
           <span className="diamond" />
           <span className="line" />
         </div>
-        <h3 className="orb-section-title font-action">Worlds to Peer Into</h3>
-        <p className="orb-section-subtitle">scry through the crystal at each realm</p>
+        <h3 className="orb-section-title font-action">{t("featuredWorlds.orbTitle")}</h3>
+        <p className="orb-section-subtitle">{t("featuredWorlds.orbSubtitle")}</p>
       </header>
 
       <div className="orb-stage">
         {items.length > 1 ? (
           <button
             type="button"
-            aria-label="Previous world"
+            aria-label={t("featuredWorlds.previous")}
             className="orb-arrow orb-arrow-left"
             onClick={() => advance(-1)}
           >
@@ -591,7 +596,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
           className="orb-wrap"
           role="button"
           tabIndex={0}
-          aria-label={`Enter ${active.name}`}
+          aria-label={t("featuredWorlds.enterAria", { name: active.name })}
           onClick={enter}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
@@ -611,12 +616,12 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
             <p className={`orb-text orb-eyebrow${fadingCls}`}>{eyebrow}</p>
             <h3 className={`orb-text orb-title font-action${fadingCls}`}>{active.name}</h3>
             <p className={`orb-text orb-desc${fadingCls}`}>
-              {active.description ?? `A world told in ${active.pageCount} ${active.pageCount === 1 ? "page" : "pages"}.`}
+              {active.description ?? t("featuredWorlds.toldInPages", { count: active.pageCount })}
             </p>
             <p className={`orb-text orb-meta${fadingCls}`}>
-              {active.pageCount} {active.pageCount === 1 ? "page" : "pages"} · by {active.ownerUsername}
+              {t("featuredWorlds.pagesBy", { count: active.pageCount, name: active.ownerUsername })}
               {activityFeedsEnabled && active.memberCount > 0 ? (
-                <> · {active.memberCount} {active.memberCount === 1 ? "member" : "members"}</>
+                <> · {t("featuredWorlds.members", { count: active.memberCount })}</>
               ) : null}
             </p>
           </div>
@@ -625,7 +630,7 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
         {items.length > 1 ? (
           <button
             type="button"
-            aria-label="Next world"
+            aria-label={t("featuredWorlds.next")}
             className="orb-arrow orb-arrow-right"
             onClick={() => advance(1)}
           >
@@ -635,14 +640,14 @@ export function FeaturedWorldsCarousel({ onNavigate }: Props) {
       </div>
 
       {items.length > 1 ? (
-        <div className="orb-indicators" role="tablist" aria-label="Featured worlds carousel controls">
+        <div className="orb-indicators" role="tablist" aria-label={t("featuredWorlds.controlsAria")}>
           {items.map((it, i) => (
             <button
               key={it.id}
               type="button"
               role="tab"
               aria-selected={i === index}
-              aria-label={`World ${i + 1} of ${items.length}: ${it.name}`}
+              aria-label={t("featuredWorlds.dotAria", { index: i + 1, total: items.length, name: it.name })}
               onClick={() => { setIndex(i); restartRef.current += 1; }}
               className={`orb-dot${i === index ? " orb-dot-active" : ""}`}
             />

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   StoryDetail,
   StoryEntity,
@@ -32,6 +33,7 @@ interface Props {
  * StoryEditorModal doesn't have to thread entity state through.
  */
 export function StoryCodexTab({ detail }: Props) {
+  const { t } = useTranslation("scriptorium");
   const storyId = detail.story.id;
   const linkedWorldId = detail.story.linkedWorld?.id ?? null;
   const [entities, setEntities] = useState<StoryEntity[] | null>(null);
@@ -50,7 +52,7 @@ export function StoryCodexTab({ detail }: Props) {
         setSelectedId(null);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storyId]);
@@ -73,14 +75,14 @@ export function StoryCodexTab({ detail }: Props) {
     : null;
 
   async function deleteEntity(e: StoryEntity) {
-    if (!window.confirm(`Delete ${e.kind} "${e.name}"? Cannot be undone.`)) return;
+    if (!window.confirm(t("codex.confirmDelete", { kind: e.kind, name: e.name }))) return;
     try {
       const r = await fetch(`/stories/${storyId}/codex/${e.id}`, { method: "DELETE" });
       if (!r.ok) throw new Error(await readError(r));
       if (selectedId === e.id) setSelectedId(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "delete failed");
+      setError(err instanceof Error ? err.message : t("errors.deleteFailed"));
     }
   }
 
@@ -130,8 +132,8 @@ export function StoryCodexTab({ detail }: Props) {
         ) : (
           <div className="flex h-full items-center justify-center p-8 text-center text-sm text-keep-muted">
             {entities && entities.length === 0
-              ? "No codex entries yet. Add a character, location, or plot point on the left."
-              : "Pick an entity on the left to edit."}
+              ? t("codex.emptyNoEntries")
+              : t("codex.pickEntity")}
           </div>
         )}
       </section>
@@ -158,21 +160,22 @@ function KindSection({
   onAdd: () => void;
   onDelete: (e: StoryEntity) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   return (
     <div className="border-b border-keep-rule/40">
       <div className="flex items-center justify-between border-b border-keep-rule/40 bg-keep-banner/40 px-3 py-1.5 text-xs">
-        <span className="uppercase tracking-widest text-keep-muted">{labelForKind(kind)}</span>
+        <span className="uppercase tracking-widest text-keep-muted">{t(`codex.kinds.${kind}`)}</span>
         <button
           type="button"
           onClick={onAdd}
           className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-[11px] hover:bg-keep-banner"
-          title={`Add a ${kind}`}
+          title={t(`codex.addTitle.${kind}`)}
         >
-          + {kind === "plot" ? "Point" : kind}
+          {t(`codex.addButton.${kind}`)}
         </button>
       </div>
       {entities.length === 0 ? (
-        <p className="px-3 py-2 text-[11px] italic text-keep-muted">No {kind === "plot" ? "plot points" : `${kind}s`} yet.</p>
+        <p className="px-3 py-2 text-[11px] italic text-keep-muted">{t(`codex.noneYet.${kind}`)}</p>
       ) : (
         <ul>
           {entities.map((e) => {
@@ -197,14 +200,14 @@ function KindSection({
                     </span>
                   ) : null}
                   {e.isPublic ? (
-                    <span className="ml-1 text-[9px] uppercase tracking-widest text-keep-action/70" title="Surfaces in the reader's Cast & Places appendix">pub</span>
+                    <span className="ml-1 text-[9px] uppercase tracking-widest text-keep-action/70" title={t("codex.pubChipTitle")}>{t("codex.pubChip")}</span>
                   ) : null}
                 </button>
                 <button
                   type="button"
                   onClick={() => onDelete(e)}
                   className="rounded border border-keep-accent/40 px-1 text-[10px] text-keep-accent opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
-                  title="Delete"
+                  title={t("common:delete")}
                 >
                   ×
                 </button>
@@ -222,6 +225,7 @@ function KindSection({
  * their own lore without leaving the editor.
  */
 function LinkedWorldPanel({ worldId }: { worldId: string }) {
+  const { t } = useTranslation("scriptorium");
   const [detail, setDetail] = useState<WorldDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [openPageId, setOpenPageId] = useState<string | null>(null);
@@ -231,8 +235,9 @@ function LinkedWorldPanel({ worldId }: { worldId: string }) {
     fetch(`/worlds/${worldId}`, { credentials: "include" })
       .then(async (r) => (r.ok ? ((await r.json()) as WorldDetail) : null))
       .then((j) => { if (!cancelled && j && "world" in j) setDetail(j); })
-      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (!cancelled) setErr(e instanceof Error ? e.message : t("errors.loadFailed")); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worldId]);
 
   const openPage = openPageId ? detail?.pages.find((p) => p.id === openPageId) ?? null : null;
@@ -240,16 +245,15 @@ function LinkedWorldPanel({ worldId }: { worldId: string }) {
   return (
     <div className="border-b border-keep-rule/40">
       <div className="border-b border-keep-rule/40 bg-keep-banner/40 px-3 py-1.5 text-xs">
-        <span className="uppercase tracking-widest text-keep-muted">Linked World (read-only)</span>
+        <span className="uppercase tracking-widest text-keep-muted">{t("codex.linkedWorld.header")}</span>
       </div>
       {err ? <p className="px-3 py-1 text-[11px] text-keep-accent">{err}</p> : null}
       {detail === null ? (
-        <p className="px-3 py-2 text-[11px] italic text-keep-muted">Loading world…</p>
+        <p className="px-3 py-2 text-[11px] italic text-keep-muted">{t("codex.linkedWorld.loading")}</p>
       ) : (
         <>
           <p className="px-3 py-2 text-[11px] text-keep-muted">
-            <span className="text-keep-text">{detail.world.name}</span>, {detail.world.pageCount}{" "}
-            {detail.world.pageCount === 1 ? "page" : "pages"}
+            <span className="text-keep-text">{detail.world.name}</span>, {t("codex.linkedWorld.pages", { count: detail.world.pageCount })}
           </p>
           <ul>
             {detail.pages.slice(0, 30).map((p) => (
@@ -265,10 +269,16 @@ function LinkedWorldPanel({ worldId }: { worldId: string }) {
                 </button>
                 {openPageId === p.id && openPage ? (
                   <div className="border-t border-keep-rule/30 bg-keep-bg/30 px-3 py-2 text-[11px]">
-                    <div
-                      className="prose prose-sm max-w-none text-keep-text/85"
-                      dangerouslySetInnerHTML={{ __html: openPage.bodyHtml || "<p><i>(empty page)</i></p>" }}
-                    />
+                    {openPage.bodyHtml ? (
+                      <div
+                        className="prose prose-sm max-w-none text-keep-text/85"
+                        dangerouslySetInnerHTML={{ __html: openPage.bodyHtml }}
+                      />
+                    ) : (
+                      <div className="prose prose-sm max-w-none text-keep-text/85">
+                        <p><i>{t("codex.linkedWorld.emptyPage")}</i></p>
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </li>
@@ -276,7 +286,7 @@ function LinkedWorldPanel({ worldId }: { worldId: string }) {
           </ul>
           {detail.pages.length > 30 ? (
             <p className="px-3 py-1 text-[10px] italic text-keep-muted">
-              + {detail.pages.length - 30} more pages, open in World viewer for the full tree.
+              {t("codex.linkedWorld.morePages", { count: detail.pages.length - 30 })}
             </p>
           ) : null}
         </>
@@ -300,6 +310,7 @@ function NewEntityForm({
   onCancel: () => void;
   onCreated: (e: StoryEntity) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [name, setName] = useState("");
   const [summary, setSummary] = useState("");
   const [busy, setBusy] = useState(false);
@@ -327,7 +338,7 @@ function NewEntityForm({
       const entity = (await r.json()) as StoryEntity;
       onCreated(entity);
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "create failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.createFailed"));
     } finally {
       setBusy(false);
     }
@@ -335,10 +346,10 @@ function NewEntityForm({
 
   return (
     <form onSubmit={submit} className="space-y-3 p-4">
-      <h3 className="font-action text-base">New {labelForKind(kind).slice(0, -1)}</h3>
+      <h3 className="font-action text-base">{t(`codex.newEntity.${kind}`)}</h3>
       {err ? <p className="text-xs text-keep-accent">{err}</p> : null}
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Name</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("codex.nameLabel")}</label>
         <input
           autoFocus
           value={name}
@@ -348,23 +359,23 @@ function NewEntityForm({
         />
       </div>
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">One-liner</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("codex.oneLinerLabel")}</label>
         <input
           value={summary}
           onChange={(e) => setSummary(e.target.value)}
           maxLength={500}
-          placeholder={placeholderFor(kind)}
+          placeholder={t(`codex.oneLinerPlaceholder.${kind}`)}
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm"
         />
       </div>
       <div className="flex items-center justify-end gap-2 pt-2">
         <button type="button" onClick={onCancel}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm text-keep-muted hover:text-keep-text">
-          Cancel
+          {t("common:cancel")}
         </button>
         <button type="submit" disabled={busy || !name.trim()}
           className="rounded border border-keep-action bg-keep-action px-4 py-1 text-sm font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
-          {busy ? "Creating…" : "Create"}
+          {busy ? t("codex.creating") : t("codex.create")}
         </button>
       </div>
     </form>
@@ -380,6 +391,7 @@ function EntityEditor({
   entity: StoryEntity;
   onSaved: () => Promise<void> | void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const [name, setName] = useState(entity.name);
   const [slug, setSlug] = useState(entity.slug);
   const [summary, setSummary] = useState(entity.summary);
@@ -415,7 +427,7 @@ function EntityEditor({
       setSavedAt(Date.now());
       await onSaved();
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "save failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -427,35 +439,35 @@ function EntityEditor({
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div>
-          <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Name</label>
+          <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("codex.nameLabel")}</label>
           <input value={name} onChange={(e) => setName(e.target.value)} maxLength={120}
             className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5" />
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Slug</label>
+          <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("codex.slugLabel")}</label>
           <input value={slug} onChange={(e) => setSlug(e.target.value)} maxLength={60}
             className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 font-mono text-sm" />
         </div>
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">One-liner</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("codex.oneLinerLabel")}</label>
         <input value={summary} onChange={(e) => setSummary(e.target.value)} maxLength={500}
-          placeholder={placeholderFor(entity.kind)}
+          placeholder={t(`codex.oneLinerPlaceholder.${entity.kind}`)}
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm" />
       </div>
 
       <div>
         <label className="block text-[10px] uppercase tracking-widest text-keep-muted">
-          Long description (HTML allowed; sanitized)
+          {t("codex.longDescriptionLabel")}
         </label>
         <textarea value={bodyHtml} onChange={(e) => setBodyHtml(e.target.value)} maxLength={STORY_ENTITY_BODY_MAX} rows={8}
-          placeholder={bodyPlaceholderFor(entity.kind)}
+          placeholder={t(`codex.bodyPlaceholder.${entity.kind}`)}
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 font-mono text-xs" />
       </div>
 
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Image URL (https only)</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("codex.imageUrlLabel")}</label>
         <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://..."
           className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm" />
         {imageUrl ? (
@@ -471,17 +483,17 @@ function EntityEditor({
       <label className="flex items-center gap-2 text-sm">
         <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
         <span>
-          Public, surfaces in the story's reader Cast &amp; Places appendix.
+          {t("codex.publicLabel")}
           {" "}
-          <span className="text-keep-muted">Default off (continuity notes stay author-only).</span>
+          <span className="text-keep-muted">{t("codex.publicHint")}</span>
         </span>
       </label>
 
       <div className="flex items-center justify-end gap-3 border-t border-keep-rule pt-3">
-        {savedAt ? <span className="text-[11px] italic text-keep-muted">Saved</span> : null}
+        {savedAt ? <span className="text-[11px] italic text-keep-muted">{t("saved")}</span> : null}
         <button type="submit" disabled={busy}
           className="rounded border border-keep-action bg-keep-action px-4 py-1 text-sm font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
-          {busy ? "Saving…" : "Save"}
+          {busy ? t("common:saving") : t("common:save")}
         </button>
       </div>
     </form>
@@ -497,11 +509,12 @@ function EntityStatsRow({
   stats: Record<string, string>;
   setStats: (next: Record<string, string>) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   if (kind === "plot") {
     const status = (stats.status as StoryPlotStatus | undefined) ?? "planned";
     return (
       <div>
-        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Plot status</label>
+        <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("codex.plotStatusLabel")}</label>
         <div className="mt-1 flex flex-wrap gap-1">
           {STORY_PLOT_STATUSES.map((s) => (
             <button
@@ -534,6 +547,7 @@ function FreeformStats({
   setStats: (next: Record<string, string>) => void;
   kind: StoryEntityKind;
 }) {
+  const { t } = useTranslation("scriptorium");
   // Drop the reserved `status` key from the user-editable view; plot
   // status has its own controlled chip above (this branch only runs
   // for character + location). Keeps the freeform table from
@@ -559,11 +573,11 @@ function FreeformStats({
     setStats(next);
   }
 
-  const hint = kind === "character" ? "e.g. age, race, gender, alignment" : "e.g. region, climate, population";
+  const hint = kind === "character" ? t("codex.statsHint.character") : t("codex.statsHint.location");
 
   return (
     <div>
-      <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Stats</label>
+      <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("codex.statsLabel")}</label>
       <p className="mt-0.5 text-[10px] text-keep-muted">{hint}</p>
       {entries.length > 0 ? (
         <ul className="mt-2 space-y-1">
@@ -583,21 +597,21 @@ function FreeformStats({
         <input
           value={draftKey}
           onChange={(e) => setDraftKey(e.target.value)}
-          placeholder="key"
+          placeholder={t("codex.statKeyPlaceholder")}
           maxLength={50}
           className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs font-mono"
         />
         <input
           value={draftVal}
           onChange={(e) => setDraftVal(e.target.value)}
-          placeholder="value"
+          placeholder={t("codex.statValuePlaceholder")}
           maxLength={500}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
           className="flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
         />
         <button type="button" onClick={add} disabled={!draftKey.trim()}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-[11px] text-keep-muted hover:text-keep-text disabled:opacity-40">
-          Add
+          {t("codex.addStat")}
         </button>
       </div>
     </div>
@@ -607,26 +621,6 @@ function FreeformStats({
 /* =============================================================
  *  Display helpers
  * ============================================================= */
-
-function labelForKind(k: StoryEntityKind): string {
-  return k === "character" ? "Characters" : k === "location" ? "Locations" : "Plot points";
-}
-
-function placeholderFor(k: StoryEntityKind): string {
-  return k === "character"
-    ? "a one-line who-are-they"
-    : k === "location"
-      ? "a one-line where-is-it"
-      : "a one-line what-pays-off";
-}
-
-function bodyPlaceholderFor(k: StoryEntityKind): string {
-  return k === "character"
-    ? "Long-form bio, backstory, motivations, voice notes…"
-    : k === "location"
-      ? "Long-form description, geography, history, atmosphere…"
-      : "Outline notes, setup beats, payoff beats, character impact…";
-}
 
 function plotStatusClass(s: StoryPlotStatus): string {
   switch (s) {

@@ -23,6 +23,7 @@ import { recordAudit } from "../audit.js";
 import { hasPermission } from "../auth/permissions.js";
 import { originFromRequest } from "../seo.js";
 import type { Db } from "../db/index.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 /* ---------- zod bodies ---------- */
@@ -391,12 +392,12 @@ export async function registerAffiliateRoutes(app: FastifyInstance, db: Db): Pro
       .where(eq(affiliates.ownerUserId, me.id));
     if (mine.length >= AFFILIATE_LIMITS.maxPerUser) {
       reply.code(429);
-      return { error: `You can list up to ${AFFILIATE_LIMITS.maxPerUser} communities.` };
+      return { error: tFor(me.locale, "errors:server.affiliates.listLimit", { max: AFFILIATE_LIMITS.maxPerUser }) };
     }
     const pending = mine.filter((r) => r.status === "pending").length;
     if (pending >= AFFILIATE_LIMITS.maxPendingPerUser) {
       reply.code(429);
-      return { error: `You already have ${AFFILIATE_LIMITS.maxPendingPerUser} submissions awaiting review.` };
+      return { error: tFor(me.locale, "errors:server.affiliates.pendingLimit", { max: AFFILIATE_LIMITS.maxPendingPerUser }) };
     }
 
     const id = nanoid();

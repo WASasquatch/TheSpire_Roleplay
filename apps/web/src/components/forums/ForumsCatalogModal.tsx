@@ -16,6 +16,7 @@
  * Forum-to-forum switches play the viewer's equipped room transition.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import DOMPurify from "dompurify";
 import { ArrowDown, ArrowLeft, ArrowUp, BarChart3, Bell, Compass, FolderOpen, Globe, HelpCircle, Landmark, Lock, MessagesSquare, Plus, Search, Settings as SettingsIcon, Star, Users, X } from "lucide-react";
 import {
@@ -106,6 +107,7 @@ import {
   updateNpc,
   deleteNpc,
   setTopicPrefix,
+  setTopicNsfw,
   setDefaultForum,
   createForumPrefix,
   updateForumPrefix,
@@ -137,6 +139,7 @@ import {
   type SlugCheck,
 } from "../../lib/forums.js";
 import { listServers, type ServerSummary } from "../../lib/servers.js";
+import { formatDate, formatDateTime, formatNumber } from "../../lib/intlFormat.js";
 import { forumBannerInk, inkClass, isDarkSurface, themeStyle, useActiveTheme, useImageAverageColor, useScopedRootDesign } from "../../lib/theme.js";
 import { ForumReportContext } from "../../lib/forumReportContext.js";
 import { ForumTopicAdminContext } from "../../lib/forumTopicAdminContext.js";
@@ -146,6 +149,7 @@ import { Modal } from "../cosmetics/Modal.js";
 import { UserLookupPicker } from "../moderation/UserLookupPicker.js";
 import { StylePicker } from "../admin/AdminPanel.js";
 import { CloseButton } from "../shared/CloseButton.js";
+import { RatingChip } from "../shared/RatingChip.js";
 import { ContextualTour } from "../tours/ContextualTour.js";
 import { FormattingToolbar } from "../shared/FormattingToolbar.js";
 import { MessageList } from "../chat/MessageList.js";
@@ -188,6 +192,7 @@ interface Props {
 }
 
 export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, onClose, onOpenWorld, onIconClick, onNameClick, onMentionClick, onWorldMentionClick, selfNames, fontStep }: Props) {
+  const { t } = useTranslation("forums");
   const me = useChat((s) => s.me);
   const setForcedTourId = useChat((s) => s.setForcedTourId);
   const toursToShow = useChat((s) => s.toursToShow);
@@ -209,8 +214,18 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
   const [detailErr, setDetailErr] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   // The topic the forum view should land on: seeded by the deep-link
-  // prop, retargeted by notification clicks.
-  const [navTopic, setNavTopic] = useState<{ boardId: string; topicId: string; postId?: string } | null>(initialTopic ?? null);
+  // prop, retargeted by notification clicks. `forumId` (known on the
+  // notification path) holds the target back until the RIGHT forum's
+  // detail is on screen — without it, a cross-forum jump briefly hands
+  // the old forum a board it doesn't have and the "topic isn't
+  // available" notice flashes during the switch.
+  const [navTopic, setNavTopic] = useState<{ boardId: string; topicId: string; postId?: string; forumId?: string; nonce?: number } | null>(initialTopic ?? null);
+  // Monotonic click counter riding navTopic. The consumer effects key on
+  // primitive ids, and navTopic is never cleared after consumption — so
+  // without the nonce, clicking a SECOND notification about the SAME topic
+  // (five replies to your topic = five rows with one topicId) set state to
+  // identical dep values and nothing re-fired: the click was silently dead.
+  const navNonceRef = useRef(0);
   const [notifOpen, setNotifOpen] = useState(false);
   // Mobile: the forum list lives in a slide-out drawer (the rail is desktop-
   // only) toggled from the toolbar. Closed by default, like the chat tools.
@@ -245,7 +260,7 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
   function openNotification(n: ForumNotificationWire) {
     setNotifOpen(false);
     // postId = the exact post that triggered the notice — flashes it.
-    setNavTopic({ boardId: n.boardRoomId, topicId: n.topicId, postId: n.messageId });
+    setNavTopic({ boardId: n.boardRoomId, topicId: n.topicId, postId: n.messageId, forumId: n.forumId, nonce: ++navNonceRef.current });
     if (n.forumId !== selected || view.kind !== "forum") navigateToForum(n.forumId);
   }
 
@@ -278,7 +293,7 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
           if (target) setSelected(target.id);
         }
       })
-      .catch((e) => { if (alive) setListErr(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (alive) setListErr(e instanceof Error ? e.message : t("shared.loadFailed")); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -300,8 +315,9 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
     setDetailErr(null);
     fetchForumDetail(selected)
       .then((d) => { if (alive) setDetail(d); })
-      .catch((e) => { if (alive) setDetailErr(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (alive) setDetailErr(e instanceof Error ? e.message : t("shared.loadFailed")); });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected, detailTick]);
 
   // Visit marker: selecting a forum stamps "seen" server-side and clears
@@ -331,6 +347,24 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
     const key = permitted ? myActiveTransitionKey : null;
     void playRoomTransition(key, { wrapperEl: bodyRef.current, swap, isReady });
   }
+
+  // Replay chaining: the rail's Help icon replays the BROWSE tour, but the
+  // owner's mental model is "replay THE forums tour" — browse then posting.
+  // Contextual tours are one-shot (tour_seen), so once the posting tour has
+  // been consumed it never re-fires on its own and a browse replay ends
+  // after three tips with nothing following — which reads as the tour being
+  // broken. When a FORCED browse replay is dismissed while a forum is still
+  // on screen, queue the posting tour next. Organic first-runs sequence
+  // themselves via the toursToShow gate on the posting tour's `active` and
+  // never enter this path (forcedTourId stays null for them).
+  const prevForcedTourRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevForcedTourRef.current;
+    prevForcedTourRef.current = forcedTourId;
+    if (prev === "forums-browse" && forcedTourId === null && view.kind === "forum" && detail && detail.boards.length > 0) {
+      setForcedTourId("forum-posting");
+    }
+  }, [forcedTourId, view.kind, detail, setForcedTourId]);
 
   function navigateToForum(forumId: string) {
     if (forumId === selected && view.kind === "forum") return;
@@ -426,7 +460,7 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                         <span className="max-w-[12rem] truncate">{detail.name}</span>
                       </button>
                       <span className="text-keep-rule">›</span>
-                      <span className="min-w-0 truncate text-keep-text">Settings</span>
+                      <span className="min-w-0 truncate text-keep-text">{t("chrome.settingsCrumb")}</span>
                     </>
                   ) : view.kind === "discover" ? (
                     <>
@@ -441,11 +475,11 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                         </button>
                       ) : null}
                       {detail ? <span className="text-keep-rule">›</span> : null}
-                      <span className="min-w-0 truncate font-action text-sm text-keep-text">Discover</span>
+                      <span className="min-w-0 truncate font-action text-sm text-keep-text">{t("chrome.discover")}</span>
                     </>
                   ) : (
                     <span className="min-w-0 truncate font-action text-sm text-keep-text">
-                      {detail?.name ?? "Forums"}
+                      {detail?.name ?? t("chrome.forums")}
                     </span>
                   )}
                 </nav>
@@ -455,8 +489,8 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                   <button
                     type="button"
                     onClick={() => setDrawerOpen(true)}
-                    title="Browse forums"
-                    aria-label="Browse forums"
+                    title={t("chrome.browseForums")}
+                    aria-label={t("chrome.browseForums")}
                     className="rounded border border-keep-rule bg-keep-bg/70 p-1.5 text-keep-muted hover:border-keep-action hover:text-keep-action lg:hidden"
                   >
                     <MessagesSquare className="h-4 w-4" aria-hidden="true" />
@@ -470,8 +504,8 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     type="button"
                     data-tour="forums-chrome-discover-btn"
                     onClick={() => navigateView(view.kind === "discover" ? { kind: "forum" } : { kind: "discover" })}
-                    title="Discover forums - search by name or tag"
-                    aria-label="Discover forums"
+                    title={t("chrome.discoverTitle")}
+                    aria-label={t("chrome.discoverAria")}
                     aria-pressed={view.kind === "discover"}
                     className={`rounded border p-1.5 ${view.kind === "discover" ? "border-keep-action/60 bg-keep-action/10 text-keep-action" : "border-keep-rule bg-keep-bg/70 text-keep-muted hover:border-keep-action hover:text-keep-action"}`}
                   >
@@ -482,8 +516,8 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     <button
                       type="button"
                       onClick={toggleDefaultForum}
-                      title={isDefaultForum ? "Your default forum: opens here. Click to unset." : "Set as your default forum (opens here next time)"}
-                      aria-label={isDefaultForum ? "Unset default forum" : "Set as default forum"}
+                      title={isDefaultForum ? t("chrome.defaultSetTitle") : t("chrome.defaultUnsetTitle")}
+                      aria-label={isDefaultForum ? t("chrome.defaultUnsetAria") : t("chrome.defaultSetAria")}
                       aria-pressed={isDefaultForum}
                       className={`rounded border p-1.5 ${isDefaultForum ? "border-keep-action/60 bg-keep-action/10 text-keep-action" : "border-keep-rule bg-keep-bg/70 text-keep-muted hover:border-keep-action hover:text-keep-action"}`}
                     >
@@ -494,8 +528,8 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     <button
                       type="button"
                       onClick={() => navigateView({ kind: "settings" })}
-                      title="Forum settings & moderation tools"
-                      aria-label="Forum settings"
+                      title={t("chrome.settingsTitle")}
+                      aria-label={t("chrome.settingsAria")}
                       className="rounded border border-keep-rule bg-keep-bg/70 p-1.5 text-keep-muted hover:border-keep-action hover:text-keep-action"
                     >
                       <SettingsIcon className="h-4 w-4" aria-hidden="true" />
@@ -505,8 +539,8 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     <button
                       type="button"
                       onClick={() => setForcedTourId("forum-posting")}
-                      title="Replay the posting tour - how to start topics and reply"
-                      aria-label="Replay the posting tour"
+                      title={t("chrome.postingTourTitle")}
+                      aria-label={t("chrome.postingTourAria")}
                       className="rounded border border-keep-rule bg-keep-bg/70 p-1.5 text-keep-muted hover:border-keep-action hover:text-keep-action"
                     >
                       <HelpCircle className="h-4 w-4" aria-hidden="true" />
@@ -515,8 +549,8 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                   <button
                     type="button"
                     onClick={() => setNotifOpen((o) => !o)}
-                    title="Forum notifications - replies to your topics, quotes, watched topics"
-                    aria-label={`Forum notifications${forumNotifUnread > 0 ? ` (${forumNotifUnread} unread)` : ""}`}
+                    title={t("chrome.notifTitle")}
+                    aria-label={forumNotifUnread > 0 ? t("chrome.notifAriaUnread", { count: forumNotifUnread }) : t("chrome.notifAria")}
                     className="flex items-center gap-1 rounded border border-keep-rule bg-keep-bg/70 p-1.5 text-keep-muted hover:border-keep-action hover:text-keep-action"
                   >
                     <Bell className="h-4 w-4" aria-hidden="true" />
@@ -540,13 +574,15 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                 {detailErr ? (
                   <p className="px-4 py-6 text-sm text-keep-accent">{detailErr}</p>
                 ) : !detail ? (
-                  <p className="px-4 py-6 text-sm italic text-keep-muted">Opening the boards…</p>
+                  <p className="px-4 py-6 text-sm italic text-keep-muted">{t("chrome.openingBoards")}</p>
                 ) : (
                   <ForumContent
                     detail={detail}
                     asCharacterId={activeCharacterId}
                     chrome={chrome}
-                    initialTopic={navTopic}
+                    // Hold a cross-forum jump target back until ITS forum is
+                    // the one rendered (see the navTopic comment above).
+                    initialTopic={navTopic && (!navTopic.forumId || navTopic.forumId === detail.id) ? navTopic : null}
                     onChanged={() => setDetailTick((t) => t + 1)}
                     {...(onOpenWorld ? { onOpenWorld } : {})}
                     onActiveTopicChange={setUrlTopicId}
@@ -569,7 +605,7 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     onBoardArchived={() => setDetailTick((t) => t + 1)}
                   />
                 ) : (
-                  <p className="px-4 py-6 text-sm italic text-keep-muted">Loading…</p>
+                  <p className="px-4 py-6 text-sm italic text-keep-muted">{t("common:loading")}</p>
                 )}
               </div>
             )}
@@ -580,13 +616,13 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
           <aside className="hidden shrink-0 lg:order-2 lg:flex lg:min-h-0 lg:w-64 lg:flex-col lg:border-l lg:border-keep-rule lg:bg-keep-banner/20">
             <div className="flex items-center justify-between px-3 py-1.5">
               <span className="text-xs uppercase tracking-widest text-keep-muted">
-                Forums <span className="text-keep-rule">({list?.length ?? "…"})</span>
+                {t("chrome.forums")} <span className="text-keep-rule">({list?.length ?? "…"})</span>
               </span>
               <button
                 type="button"
                 onClick={() => { navigateView({ kind: "forum" }); setForcedTourId("forums-browse"); }}
-                title="Replay the browse-forums tour"
-                aria-label="Replay the browse-forums tour"
+                title={t("chrome.browseTourTitle")}
+                aria-label={t("chrome.browseTourTitle")}
                 className="rounded p-1 text-keep-muted hover:bg-keep-panel hover:text-keep-action"
               >
                 <HelpCircle className="h-4 w-4" aria-hidden="true" />
@@ -612,19 +648,19 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
           <div className="absolute inset-0 z-40 flex lg:hidden">
             <button
               type="button"
-              aria-label="Close forum list"
+              aria-label={t("chrome.closeForumList")}
               onClick={() => setDrawerOpen(false)}
               className="absolute inset-0 bg-black/40"
             />
             <aside className="relative ml-auto flex h-full w-72 max-w-[85%] flex-col border-l border-keep-rule bg-keep-bg shadow-2xl">
               <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/30 px-3 py-2">
                 <span className="text-xs uppercase tracking-widest text-keep-muted">
-                  Forums <span className="text-keep-rule">({list?.length ?? "…"})</span>
+                  {t("chrome.forums")} <span className="text-keep-rule">({list?.length ?? "…"})</span>
                 </span>
                 <button
                   type="button"
                   onClick={() => setDrawerOpen(false)}
-                  aria-label="Close forum list"
+                  aria-label={t("chrome.closeForumList")}
                   className="rounded border border-keep-rule bg-keep-bg/70 p-1 text-keep-muted hover:border-keep-action hover:text-keep-action"
                 >
                   <X className="h-4 w-4" aria-hidden="true" />
@@ -653,6 +689,11 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
         tourId="forum-posting"
         active={
           view.kind === "forum" && !!detail && !createOpen &&
+          // A boardless forum has no New Topic button, no composer, nothing —
+          // narrating the posting flow into that void reads as a broken tour.
+          // The boot backfill furnishes bare forums, so this mostly guards the
+          // window before a restart (and keepers who deleted every board).
+          detail.boards.length > 0 &&
           // Let the browse (overview) tour finish first; both share the forum
           // surface, so gating here keeps them from stacking two overlays.
           !(toursToShow.includes("forums-browse") || forcedTourId === "forums-browse")
@@ -673,6 +714,7 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
  * replaced by its status; a recent rejection shows the review note.
  */
 function CreateForumModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation("forums");
   const setForcedTourId = useChat((s) => s.setForcedTourId);
   const [mine, setMine] = useState<ForumCreationApplicationWire[] | null>(null);
   const [name, setName] = useState("");
@@ -740,7 +782,7 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
       });
       setSubmitted(true);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Submit failed.");
+      setErr(e instanceof Error ? e.message : t("create.submitFailed"));
     } finally {
       setBusy(false);
     }
@@ -749,12 +791,12 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
   const slugNote = !slugCheck || slug.length < 3
     ? null
     : slugCheck.ok
-      ? { text: "available", tone: "text-keep-action" }
+      ? { text: t("create.slugAvailable"), tone: "text-keep-action" }
       : {
-          text: slugCheck.reason === "taken" ? "already a forum"
-            : slugCheck.reason === "pending" ? "claimed by a pending application"
-            : slugCheck.reason === "reserved" ? "reserved word"
-            : "lowercase letters, numbers, _ only (3-40)",
+          text: slugCheck.reason === "taken" ? t("create.slugTaken")
+            : slugCheck.reason === "pending" ? t("create.slugPending")
+            : slugCheck.reason === "reserved" ? t("create.slugReserved")
+            : t("create.slugInvalid"),
           tone: "text-keep-accent",
         };
   const purposeLen = purpose.trim().length;
@@ -773,13 +815,13 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-action text-lg text-keep-text">Create your Forum</h3>
+          <h3 className="font-action text-lg text-keep-text">{t("create.title")}</h3>
           <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => setForcedTourId("forum-create")}
-              title="Replay the create-a-forum tour"
-              aria-label="Replay the create-a-forum tour"
+              title={t("create.tourTitle")}
+              aria-label={t("create.tourTitle")}
               className="rounded p-1 text-keep-muted hover:bg-keep-panel hover:text-keep-action"
             >
               <HelpCircle className="h-4 w-4" aria-hidden="true" />
@@ -793,42 +835,45 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
 
 
         {mine === null ? (
-          <p className="text-sm italic text-keep-muted">Checking your applications…</p>
+          <p className="text-sm italic text-keep-muted">{t("create.checking")}</p>
         ) : submitted ? (
           <div className="space-y-2 text-sm text-keep-text">
-            <p><strong>Application sent.</strong> The site's moderators will review it; you'll get a notice here and in chat when it's decided.</p>
-            <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-panel">Close</button>
+            <p><Trans t={t} i18nKey="create.sent" components={{ b: <strong /> }} /></p>
+            <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-panel">{t("common:close")}</button>
           </div>
         ) : pending ? (
           <div className="space-y-2 text-sm text-keep-text">
             <p>
-              Your application for <strong>{pending.requestedName}</strong>
-              <span className="text-keep-muted"> (/f/{pending.requestedSlug})</span> is
-              <span className="text-keep-action"> pending review</span>.
+              <Trans
+                t={t}
+                i18nKey="create.pendingLine"
+                values={{ name: pending.requestedName, slug: pending.requestedSlug }}
+                components={{ b: <strong />, muted: <span className="text-keep-muted" />, action: <span className="text-keep-action" /> }}
+              />
             </p>
-            <p className="text-xs text-keep-muted">One application at a time - you can apply again once it's decided.</p>
+            <p className="text-xs text-keep-muted">{t("create.oneAtATime")}</p>
           </div>
         ) : (
           <div className="space-y-3">
             {lastRejected?.reviewNote ? (
               <p className="rounded border border-keep-rule bg-keep-panel/40 px-2 py-1.5 text-xs text-keep-muted">
-                Your last application was declined{lastRejected.reviewNote ? `: "${lastRejected.reviewNote}"` : "."}
+                {t("create.declinedNote", { note: lastRejected.reviewNote })}
               </p>
             ) : null}
             <label className="block text-sm">
-              <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Forum name</span>
+              <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("create.nameLabel")}</span>
               <input
                 data-tour="forum-create-name-input"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 maxLength={FORUM_NAME_MAX}
-                placeholder="Shadows of Darkness"
+                placeholder={t("create.namePlaceholder")}
                 className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
               />
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">
-                Address <span className="normal-case text-keep-rule">/f/</span>
+                {t("create.addressLabel")} <span className="normal-case text-keep-rule">/f/</span>
                 {slugNote ? <span className={`ml-2 normal-case ${slugNote.tone}`}>{slugNote.text}</span> : null}
               </span>
               <input
@@ -836,15 +881,15 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
                 value={slug}
                 onChange={(e) => { setSlugTouched(true); setSlug(e.target.value.toLowerCase()); }}
                 maxLength={40}
-                placeholder="shadows_of_darkness"
+                placeholder={t("create.slugPlaceholder")}
                 className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 font-mono text-sm outline-none focus:border-keep-action"
               />
             </label>
             <label className="block text-sm">
               <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">
-                What is your forum for?
+                {t("create.purposeLabel")}
                 <span className={`ml-2 normal-case tabular-nums ${purposeLen > 0 && purposeLen < FORUM_PURPOSE_MIN ? "text-keep-accent" : "text-keep-rule"}`}>
-                  {purposeLen}/{FORUM_PURPOSE_MAX}{purposeLen < FORUM_PURPOSE_MIN ? ` (min ${FORUM_PURPOSE_MIN})` : ""}
+                  {purposeLen}/{FORUM_PURPOSE_MAX}{purposeLen < FORUM_PURPOSE_MIN ? t("create.minSuffix", { min: FORUM_PURPOSE_MIN }) : ""}
                 </span>
               </span>
               <textarea
@@ -853,7 +898,7 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
                 onChange={(e) => setPurpose(e.target.value)}
                 maxLength={FORUM_PURPOSE_MAX}
                 rows={4}
-                placeholder="Tell the reviewers what community this forum gathers and what its boards will hold."
+                placeholder={t("create.purposePlaceholder")}
                 className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
               />
             </label>
@@ -861,7 +906,7 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
                 them before applying. Only shown when rules are posted. */}
             {hasRules ? (
               <div className="space-y-2">
-                <span className="block text-xs uppercase tracking-widest text-keep-muted">Forum registration rules</span>
+                <span className="block text-xs uppercase tracking-widest text-keep-muted">{t("create.rulesLabel")}</span>
                 <div
                   className="prose prose-sm max-h-48 max-w-none overflow-y-auto rounded border border-keep-rule bg-keep-panel/30 p-2.5 text-keep-text"
                   dangerouslySetInnerHTML={{ __html: sanitizedRules }}
@@ -873,13 +918,13 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
                     onChange={(e) => setAgreed(e.target.checked)}
                     className="mt-0.5"
                   />
-                  <span>I agree to these rules</span>
+                  <span>{t("create.agree")}</span>
                 </label>
               </div>
             ) : null}
             {err ? <p className="text-xs text-keep-accent">{err}</p> : null}
             <div className="flex items-center justify-between gap-2">
-              <p className="text-[11px] text-keep-muted">Reviewed by the site's moderators. Approved forums appear in the catalog with you as Keeper.</p>
+              <p className="text-[11px] text-keep-muted">{t("create.reviewNote")}</p>
               <button
                 type="button"
                 data-tour="forum-create-submit"
@@ -887,7 +932,7 @@ function CreateForumModal({ onClose }: { onClose: () => void }) {
                 disabled={!canSubmit}
                 className="shrink-0 rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
               >
-                {busy ? "…" : "Apply"}
+                {busy ? "…" : t("create.apply")}
               </button>
             </div>
           </div>
@@ -914,6 +959,7 @@ function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, disc
   onCreate: () => void;
   onSelect: (id: string) => void;
 }) {
+  const { t } = useTranslation("forums");
   // null = follow the default: Explore is collapsed once you have forums of
   // your own, and auto-open when "mine" is empty so a newcomer sees something.
   const [exploreOpen, setExploreOpen] = useState<boolean | null>(null);
@@ -928,7 +974,7 @@ function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, disc
           type="button"
           data-tour="forums-discover-button"
           onClick={onDiscover}
-          title="Search and browse all forums by name or tag"
+          title={t("rail.discoverRailTitle")}
           aria-pressed={discoverActive}
           className={`flex w-full items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-xs font-semibold uppercase tracking-widest transition-colors ${
             discoverActive
@@ -937,7 +983,7 @@ function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, disc
           }`}
         >
           <Compass className="h-3.5 w-3.5" aria-hidden="true" />
-          Discover
+          {t("chrome.discover")}
         </button>
       </div>
       {canApply ? (
@@ -946,18 +992,18 @@ function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, disc
             type="button"
             data-tour="forums-create-button"
             onClick={onCreate}
-            title="Apply to create your own forum - reviewed by the site's moderators"
+            title={t("rail.createForumTitle")}
             className="flex w-full items-center justify-center gap-1.5 rounded border border-keep-action/60 bg-keep-action/10 px-2 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action transition-colors hover:bg-keep-action/20"
           >
             <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-            Create your Forum
+            {t("create.title")}
           </button>
         </div>
       ) : null}
       {listErr ? (
         <p className="px-3 py-2 text-xs text-keep-accent">{listErr}</p>
       ) : !list ? (
-        <p className="px-3 py-2 text-xs italic text-keep-muted">Loading…</p>
+        <p className="px-3 py-2 text-xs italic text-keep-muted">{t("common:loading")}</p>
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 py-2">
           {mine.length > 0 ? (
@@ -974,10 +1020,10 @@ function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, disc
                 onClick={() => setExploreOpen(!exploreShown)}
                 aria-expanded={exploreShown}
                 className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-muted hover:text-keep-text"
-                title="Forums you haven't joined"
+                title={t("rail.exploreTitle")}
               >
                 <Globe className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                <span className="flex-1 text-left">Explore</span>
+                <span className="flex-1 text-left">{t("rail.explore")}</span>
                 <span className="text-keep-rule">{explore.length}</span>
                 <span aria-hidden>{exploreShown ? "▾" : "▸"}</span>
               </button>
@@ -991,7 +1037,7 @@ function ForumRailList({ list, listErr, activeId, defaultForumId, canApply, disc
             </div>
           ) : null}
           {mine.length === 0 && explore.length === 0 ? (
-            <p className="px-1 py-2 text-xs italic text-keep-muted">No forums yet.</p>
+            <p className="px-1 py-2 text-xs italic text-keep-muted">{t("rail.noForums")}</p>
           ) : null}
         </div>
       )}
@@ -1006,6 +1052,7 @@ function ForumRailRow({ forum, active, isDefault = false, onClick }: {
   isDefault?: boolean;
   onClick: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const pulse = relTime(forum.lastActivityAt);
   return (
     <li className="shrink-0">
@@ -1035,19 +1082,24 @@ function ForumRailRow({ forum, active, isDefault = false, onClick }: {
             ) : forum.status === "featured" ? (
               <Star className="h-3 w-3 shrink-0 text-keep-accent" aria-hidden="true" />
             ) : null}
+            {/* 18+ forum marker (age plan Phase 3). Rows with the flag only
+                ever reach viewers who can see NSFW (the server excludes them
+                for everyone else), so no muted SFW twin here — all-ages
+                forums are the unmarked default. */}
+            {forum.isNsfw ? <RatingChip nsfw className="self-center" /> : null}
             {forum.unseen ? (
               <span
                 className="h-1.5 w-1.5 shrink-0 rounded-full bg-keep-action"
-                title="New activity since your last visit"
-                aria-label="New activity"
+                title={t("rail.newActivityTitle")}
+                aria-label={t("rail.newActivityAria")}
               />
             ) : null}
             {isDefault ? (
-              <Star className="h-3 w-3 shrink-0 text-keep-action" fill="currentColor" aria-label="Your default forum" />
+              <Star className="h-3 w-3 shrink-0 text-keep-action" fill="currentColor" aria-label={t("rail.defaultForumAria")} />
             ) : null}
           </span>
           <span className="block truncate text-[10px] text-keep-muted">
-            {forum.boardCount} board{forum.boardCount === 1 ? "" : "s"}
+            {t("rail.boardCount", { count: forum.boardCount })}
             {pulse ? ` · ${pulse}` : ""}
           </span>
         </span>
@@ -1069,6 +1121,7 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
   activeId: string | null;
   onOpenForum: (id: string) => void;
 }) {
+  const { t } = useTranslation("forums");
   const [discover, setDiscover] = useState<{ popular: ForumSummary[]; new: ForumSummary[] } | null>(null);
   const [discoverErr, setDiscoverErr] = useState<string | null>(null);
   const [tags, setTags] = useState<{ tag: string; count: number }[]>([]);
@@ -1088,11 +1141,12 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
     let alive = true;
     fetchForumDiscover()
       .then((d) => { if (alive) setDiscover(d); })
-      .catch((e) => { if (alive) setDiscoverErr(e instanceof Error ? e.message : "Couldn't load discovery."); });
+      .catch((e) => { if (alive) setDiscoverErr(e instanceof Error ? e.message : t("discoverView.loadFailed")); });
     fetchForumTags()
-      .then((t) => { if (alive) setTags(t); })
+      .then((rows) => { if (alive) setTags(rows); })
       .catch(() => { if (alive) setTags([]); });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Debounce the typed query (~250ms) so each keystroke doesn't fire a search.
@@ -1109,8 +1163,9 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
     setSearchErr(null);
     searchForums(debouncedQuery, activeTag)
       .then((items) => { if (alive) setResults(items); })
-      .catch((e) => { if (alive) { setResults([]); setSearchErr(e instanceof Error ? e.message : "Search failed."); } });
+      .catch((e) => { if (alive) { setResults([]); setSearchErr(e instanceof Error ? e.message : t("discoverView.searchFailed")); } });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQuery, activeTag, searching]);
 
   function clearSearch() {
@@ -1131,8 +1186,8 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
           data-tour="forums-search-input"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name or tag…"
-          aria-label="Search forums by name or tag"
+          placeholder={t("discoverView.searchPlaceholder")}
+          aria-label={t("discoverView.searchAria")}
           className="w-full rounded border border-keep-rule bg-keep-bg py-2 pl-9 pr-3 text-sm outline-none focus:border-keep-action"
         />
       </div>
@@ -1171,7 +1226,7 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
               <button
                 type="button"
                 onClick={() => setActiveTag(null)}
-                aria-label={`Remove the ${activeTag} tag filter`}
+                aria-label={t("discoverView.removeTagFilterAria", { tag: activeTag })}
                 className="rounded-full hover:text-keep-text"
               >
                 <X className="h-3 w-3" aria-hidden="true" />
@@ -1184,7 +1239,7 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
             className="inline-flex items-center gap-1 rounded border border-keep-rule px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action"
           >
             <ArrowLeft className="h-3 w-3" aria-hidden="true" />
-            Back to browse
+            {t("discoverView.backToBrowse")}
           </button>
         </div>
       ) : null}
@@ -1199,16 +1254,16 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
           <section>
             <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">
               <Search className="h-3.5 w-3.5" aria-hidden="true" />
-              Results
+              {t("discoverView.results")}
               {results ? <span className="text-keep-rule">({results.length})</span> : null}
             </p>
             {searchErr ? (
               <p className="rounded border border-keep-rule bg-keep-panel/40 px-3 py-2 text-sm text-keep-accent">{searchErr}</p>
             ) : !results ? (
-              <p className="py-6 text-center text-sm italic text-keep-muted">Searching…</p>
+              <p className="py-6 text-center text-sm italic text-keep-muted">{t("discoverView.searching")}</p>
             ) : results.length === 0 ? (
               <p className="rounded border border-dashed border-keep-rule px-3 py-4 text-center text-sm italic text-keep-muted">
-                No forums match your search.
+                {t("discoverView.noMatches")}
               </p>
             ) : (
               <ul className="space-y-1">
@@ -1221,25 +1276,25 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
         ) : discoverErr ? (
           <p className="rounded border border-keep-rule bg-keep-panel/40 px-3 py-2 text-sm text-keep-accent">{discoverErr}</p>
         ) : !discover ? (
-          <p className="py-6 text-center text-sm italic text-keep-muted">Gathering the forums…</p>
+          <p className="py-6 text-center text-sm italic text-keep-muted">{t("discoverView.gathering")}</p>
         ) : (
           /* ── Default browse: Popular / New, side-by-side on desktop ── */
           <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
             <ForumDiscoverColumn
               icon={<Star className="h-3.5 w-3.5" aria-hidden="true" />}
-              title="Popular"
+              title={t("discoverView.popular")}
               forums={discover.popular}
               activeId={activeId}
               onOpenForum={onOpenForum}
-              emptyText="No popular forums yet."
+              emptyText={t("discoverView.noPopular")}
             />
             <ForumDiscoverColumn
               icon={<Plus className="h-3.5 w-3.5" aria-hidden="true" />}
-              title="New"
+              title={t("discoverView.new")}
               forums={discover.new}
               activeId={activeId}
               onOpenForum={onOpenForum}
-              emptyText="No new forums yet."
+              emptyText={t("discoverView.noNew")}
             />
           </div>
         )}
@@ -1288,8 +1343,9 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
    *  step, the viewer's names for self-mention highlighting. */
   chrome: ForumChrome;
   /** Deep-link / notification target: open this board with the topic
-   *  active (and optionally one post flashed). */
-  initialTopic?: { boardId: string; topicId: string; postId?: string } | null;
+   *  active (and optionally one post flashed). `nonce` distinguishes
+   *  repeat clicks on the same target (see navNonceRef). */
+  initialTopic?: { boardId: string; topicId: string; postId?: string; nonce?: number } | null;
   /** Refetch the detail after apply/withdraw/leave so the viewer state
    *  (pending chip, member count) stays honest. */
   onChanged: () => void;
@@ -1297,6 +1353,14 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
   /** URL mirroring: reports the active topic id (null = none open). */
   onActiveTopicChange?: (topicId: string | null) => void;
 }) {
+  const { t } = useTranslation("forums");
+  // 18+ forum, under-18 account (age plan, Phase 3): the server already
+  // hands this viewer only the teaser detail (no boards, no description),
+  // and it keeps `isNsfw` on the payload precisely so we can SAY the forum
+  // is adults-only instead of leaving a dead entrance — no Apply button
+  // for a forum this account can never read (the server 403s it anyway).
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
+  const adultsOnly = detail.isNsfw && !viewerIsAdult;
   // Surface sampling for the header band: image banners are dark by
   // construction (scrim); otherwise the FORUM's palette (the one that
   // actually paints this header) decides — not the viewer's.
@@ -1320,11 +1384,16 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
   const bannerColor = useImageAverageColor(hasBanner ? detail.bannerImageUrl! : null);
   const bannerInk = hasBanner ? forumBannerInk(headerPalette, bannerColor) : null;
 
-  const banStrip = detail.viewer?.ban ? (
+  const ban = detail.viewer?.ban;
+  const banStrip = ban ? (
     <div className="border-b border-keep-rule bg-keep-system/10 px-4 py-2 text-sm text-keep-system">
-      You are banned from this forum
-      {detail.viewer.ban.until ? ` until ${new Date(detail.viewer.ban.until).toLocaleDateString()}` : ""}
-      {detail.viewer.ban.reason ? `: ${detail.viewer.ban.reason}` : ""}.
+      {ban.until
+        ? ban.reason
+          ? t("content.bannedUntilReason", { date: formatDate(ban.until), reason: ban.reason })
+          : t("content.bannedUntil", { date: formatDate(ban.until) })
+        : ban.reason
+          ? t("content.bannedReason", { reason: ban.reason })
+          : t("content.bannedPlain")}
     </div>
   ) : null;
 
@@ -1370,21 +1439,24 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
               className={`mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] md:text-xs ${bannerInk ? "" : inkClass.meta(headerDark)}`}
               style={bannerInk?.meta}
             >
-              <span>kept by <span className={bannerInk ? "" : inkClass.strong(headerDark)} style={bannerInk?.strong}>{detail.ownerUsername}</span></span>
+              <span><Trans t={t} i18nKey="shared.keptBy" values={{ name: detail.ownerUsername }} components={{ v: <span className={bannerInk ? "" : inkClass.strong(headerDark)} style={bannerInk?.strong} /> }} /></span>
+              {/* 18+ forum chip (age plan Phase 3): adults see which side of
+                  the partition they're in; minors never receive the forum. */}
+              {detail.isNsfw ? <RatingChip nsfw /> : null}
               {detail.viewer?.role === "mod" ? (
                 <span
-                  title="You moderate this forum: sticky, lock, and tidy topics (the owner's posts and settings stay theirs)."
+                  title={t("content.forumModTitle")}
                   className="rounded border border-keep-system/60 bg-keep-system/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-system"
                 >
-                  Forum Mod
+                  {t("content.forumModChip")}
                 </span>
               ) : null}
               <span className="inline-flex items-center gap-1">
                 <Users className="h-3 w-3" aria-hidden="true" />
-                {detail.memberCount > 0 ? `${detail.memberCount} member${detail.memberCount === 1 ? "" : "s"}` : "open to all"}
+                {detail.memberCount > 0 ? t("shared.memberCount", { count: detail.memberCount }) : t("shared.openToAll")}
               </span>
-              {detail.linkedWorld ? <span>world: {detail.linkedWorld.name}</span> : null}
-              <span>founded {new Date(detail.createdAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</span>
+              {detail.linkedWorld ? <span>{t("content.worldMeta", { name: detail.linkedWorld.name })}</span> : null}
+              <span>{t("shared.foundedDate", { date: formatDate(detail.createdAt, { year: "numeric", month: "long", day: "numeric" }) })}</span>
             </p>
           </div>
         </div>
@@ -1397,7 +1469,7 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
           <Globe className="h-4 w-4 shrink-0 text-keep-accent" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <span className="text-sm font-semibold text-keep-text">{detail.linkedWorld.name}</span>
-            <span className="ml-2 text-[11px] text-keep-muted">a world by {detail.linkedWorld.ownerUsername}</span>
+            <span className="ml-2 text-[11px] text-keep-muted">{t("content.worldBy", { name: detail.linkedWorld.ownerUsername })}</span>
             {detail.linkedWorld.description ? (
               <span className="block truncate text-xs text-keep-muted">{detail.linkedWorld.description}</span>
             ) : null}
@@ -1406,16 +1478,22 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
             <button
               type="button"
               onClick={() => onOpenWorld(detail.linkedWorld!.id)}
-              title="Open this world - join or apply from its page"
+              title={t("content.viewWorldTitle")}
               className="shrink-0 rounded border border-keep-accent/60 bg-keep-accent/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-accent hover:bg-keep-accent/20"
             >
-              View World
+              {t("content.viewWorld")}
             </button>
           ) : null}
         </div>
       ) : null}
       {banStrip}
-      <MembershipStrip detail={detail} onChanged={onChanged} />
+      {adultsOnly ? (
+        <div className="border-b border-keep-rule bg-keep-system/10 px-4 py-2 text-sm text-keep-system">
+          {t("content.adultsOnly")}
+        </div>
+      ) : (
+        <MembershipStrip detail={detail} onChanged={onChanged} />
+      )}
 
       {/* Boards — rendered by the REAL forum renderer (MessageList's
           nested mode), the same component the deployed in-chat forums
@@ -1427,7 +1505,9 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
           forum:post, and the store's forumActionTick refetches after
           toolbar mutations since the socket echo can't reach us. */}
       {detail.boards.length === 0 ? (
-        <p className="px-4 py-3 text-sm italic text-keep-muted">No boards yet. The owner hasn't raised any.</p>
+        adultsOnly ? null : (
+          <p className="px-4 py-3 text-sm italic text-keep-muted">{t("content.noBoards")}</p>
+        )
       ) : (
         <ForumBoards
           detail={detail}
@@ -1451,7 +1531,8 @@ function ForumContent({ detail, asCharacterId, chrome, initialTopic, onChanged, 
  * since boards carry no live presence by design.
  */
 function ForumFooter({ detail }: { detail: ForumDetail }) {
-  const siteName = useChat((st) => st.branding.siteName) || "The Spire";
+  const { t } = useTranslation("forums");
+  const siteName = useChat((st) => st.branding.siteName) || t("common:appName");
   const s = detail.stats;
   if (!s) return null;
   const onlineTotal = s.online.publicNames.length + s.online.hiddenCount;
@@ -1462,42 +1543,46 @@ function ForumFooter({ detail }: { detail: ForumDetail }) {
           user's "footer takes too much room on mobile" report); the stats row
           already carries the online count. Everything returns at `md`. */}
       <div className="hidden truncate border-b border-keep-rule/50 pb-1.5 md:block">
-        <span className="font-semibold uppercase tracking-widest">Who's online</span>{" "}
+        <span className="font-semibold uppercase tracking-widest">{t("footer.whosOnline")}</span>{" "}
         {onlineTotal === 0 ? (
-          <span className="italic">The halls are quiet right now.</span>
+          <span className="italic">{t("footer.quiet")}</span>
         ) : (
           <>
             {s.online.publicNames.length > 0 ? (
               <span className="text-keep-text">{s.online.publicNames.join(", ")}</span>
             ) : null}
             {s.online.hiddenCount > 0
-              ? `${s.online.publicNames.length > 0 ? " and " : ""}${s.online.hiddenCount} keeping to the shadows`
+              ? t(s.online.publicNames.length > 0 ? "footer.hiddenAfterNames" : "footer.hidden", { count: s.online.hiddenCount })
               : ""}
             {s.online.browsingRecently > 0
-              ? ` · ${s.online.browsingRecently} browsing this forum right now`
+              ? t("footer.browsing", { count: s.online.browsingRecently })
               : ""}
           </>
         )}
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-keep-rule/50 py-1.5 md:border-b">
-        <span className="font-semibold uppercase tracking-widest">Board statistics</span>
-        <span><b className="tabular-nums text-keep-text">{s.topics.toLocaleString()}</b> topics</span>
-        <span><b className="tabular-nums text-keep-text">{s.replies.toLocaleString()}</b> replies</span>
-        <span><b className="tabular-nums text-keep-text">{s.writers.toLocaleString()}</b> writers</span>
+        <span className="font-semibold uppercase tracking-widest">{t("footer.boardStatistics")}</span>
+        <span><Trans t={t} i18nKey="footer.statTopics" values={{ value: formatNumber(s.topics) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
+        <span><Trans t={t} i18nKey="footer.statReplies" values={{ value: formatNumber(s.replies) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
+        <span><Trans t={t} i18nKey="footer.statWriters" values={{ value: formatNumber(s.writers) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
         <span>
-          <b className="tabular-nums text-keep-text">{detail.memberCount > 0 ? detail.memberCount.toLocaleString() : "-"}</b>{" "}
-          {detail.memberCount > 0 ? "members" : "open to all"}
+          <Trans
+            t={t}
+            i18nKey={detail.memberCount > 0 ? "footer.statMembers" : "footer.statOpenToAll"}
+            values={{ value: detail.memberCount > 0 ? formatNumber(detail.memberCount) : "-" }}
+            components={{ n: <b className="tabular-nums text-keep-text" /> }}
+          />
         </span>
-        <span><b className="tabular-nums text-keep-text">{onlineTotal.toLocaleString()}</b> online now</span>
+        <span><Trans t={t} i18nKey="footer.statOnline" values={{ value: formatNumber(onlineTotal) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
       </div>
       <div className="hidden flex-wrap items-center gap-x-4 gap-y-0.5 pt-1.5 md:flex">
-        <span>Posting: <span className="text-keep-text">{detail.postingMode === "application" ? "by application" : "open to all"}</span></span>
-        <span>Keeper: <span className="text-keep-text">{detail.ownerUsername}</span></span>
+        <span>{t("footer.posting")} <span className="text-keep-text">{detail.postingMode === "application" ? t("footer.byApplication") : t("shared.openToAll")}</span></span>
+        <span>{t("footer.keeperLabel")} <span className="text-keep-text">{detail.ownerUsername}</span></span>
         {detail.linkedWorld ? (
-          <span>World: <span className="text-keep-text">{detail.linkedWorld.name}</span></span>
+          <span>{t("footer.worldLabel")} <span className="text-keep-text">{detail.linkedWorld.name}</span></span>
         ) : null}
-        <span>Founded: <span className="text-keep-text">{new Date(detail.createdAt).toLocaleDateString()}</span></span>
-        <span className="ml-auto">Hosted by <span className="text-keep-text">{siteName}</span></span>
+        <span>{t("footer.foundedLabel")} <span className="text-keep-text">{formatDate(detail.createdAt)}</span></span>
+        <span className="ml-auto"><Trans t={t} i18nKey="footer.hostedBy" values={{ siteName }} components={{ v: <span className="text-keep-text" /> }} /></span>
       </div>
     </footer>
   );
@@ -1524,25 +1609,28 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
   detail: ForumDetail;
   asCharacterId: string | null;
   chrome: ForumChrome;
-  initialTopic: { boardId: string; topicId: string; postId?: string } | null;
+  initialTopic: { boardId: string; topicId: string; postId?: string; nonce?: number } | null;
   /** Refetch the forum detail (e.g. after a prefix is created inline) so the
    *  prefix catalog the chips resolve against stays current. */
   onForumChanged: () => void;
   onActiveTopicChange?: (topicId: string | null) => void;
 }) {
+  const { t } = useTranslation("forums");
   const [boardId, setBoardId] = useState<string>(
     initialTopic?.boardId && detail.boards.some((b) => b.roomId === initialTopic.boardId)
       ? initialTopic.boardId
       : detail.boards[0]!.roomId,
   );
   // Notification / deep-link retarget: when the requested topic changes
-  // after mount, follow its board too.
+  // after mount, follow its board too. `nonce` rides the deps so a repeat
+  // click on a notification for the SAME topic still re-navigates (the
+  // ids alone would compare equal and drop the click).
   useEffect(() => {
     if (initialTopic?.boardId && detail.boards.some((b) => b.roomId === initialTopic.boardId)) {
       setBoardId(initialTopic.boardId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialTopic?.boardId, initialTopic?.topicId]);
+  }, [initialTopic?.boardId, initialTopic?.topicId, initialTopic?.nonce]);
   const active = detail.boards.find((b) => b.roomId === boardId) ?? detail.boards[0]!;
 
   // Cross-board move / merge. Provided to topic cards via context only when
@@ -1564,19 +1652,34 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
   // to everyone; the assign affordance gates per-card on author/manage_prefixes.
   const canManagePrefixes = !!detail.viewer && (detail.viewer.canManage || detail.viewer.permissions.includes("manage_prefixes"));
   const canCreateCustom = detail.allowCustomTags && !!detail.viewer && (detail.viewer.canManage || detail.viewer.permissions.includes("create_tags"));
-  const [prefixAssign, setPrefixAssign] = useState<{ topicId: string; currentPrefixId: string | null; topicCategoryId: string | null } | null>(null);
+  const [prefixAssign, setPrefixAssign] = useState<{
+    topicId: string; currentPrefixId: string | null; topicCategoryId: string | null;
+    /** NSFW re-tag section state (age plan Phase 3): the topic's current
+     *  tag + author, so the picker can mirror the server's write gate. */
+    nsfwCurrent: boolean; authorUserId: string;
+  } | null>(null);
   const prefixValue = useMemo(
     () => ({
       byId: new Map(detail.prefixes.map((p) => [p.id, p])),
       all: detail.prefixes,
       canManagePrefixes,
       canCreateCustom,
-      onAssign: (topicId: string, currentPrefixId: string | null, topicCategoryId: string | null) => setPrefixAssign({ topicId, currentPrefixId, topicCategoryId }),
+      onAssign: (topicId: string, currentPrefixId: string | null, topicCategoryId: string | null, nsfw: { current: boolean; authorUserId: string }) =>
+        setPrefixAssign({ topicId, currentPrefixId, topicCategoryId, nsfwCurrent: nsfw.current, authorUserId: nsfw.authorUserId }),
     }),
     [detail.prefixes, canManagePrefixes, canCreateCustom],
   );
+  // Deep link / notification pointing at a board this viewer doesn't have
+  // (an 18+ board hidden from the account, or one since archived): we fall
+  // back to the first board, so say why the promised topic isn't on screen
+  // instead of leaving a silent nothing. Dismiss is remembered per target.
+  const [boardGoneDismissed, setBoardGoneDismissed] = useState<string | null>(null);
+  const targetBoardMissing = !!initialTopic && !detail.boards.some((b) => b.roomId === initialTopic.boardId);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {targetBoardMissing && boardGoneDismissed !== initialTopic!.topicId ? (
+        <TopicUnavailableNotice onDismiss={() => setBoardGoneDismissed(initialTopic!.topicId)} />
+      ) : null}
       {detail.boards.length > 1 ? (
         <div className="flex flex-wrap gap-1 border-b border-keep-rule bg-keep-banner/20 px-3 py-1.5">
           {detail.boards.map((b) => (
@@ -1584,14 +1687,14 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
               key={b.roomId}
               type="button"
               onClick={() => setBoardId(b.roomId)}
-              title={b.locked ? `${b.name} (members only)` : (b.topic ?? b.name)}
+              title={b.locked ? t("shared.boardMembersOnlyTitle", { name: b.name }) : (b.topic ?? b.name)}
               className={`inline-flex items-center gap-1 rounded border px-2.5 py-1 text-xs ${
                 b.roomId === active.roomId
                   ? "border-keep-action text-keep-action"
                   : "border-keep-rule text-keep-muted hover:text-keep-text"
               }`}
             >
-              {b.locked ? <Lock className="h-3 w-3 shrink-0" aria-label="Members only" /> : null}
+              {b.locked ? <Lock className="h-3 w-3 shrink-0" aria-label={t("shared.membersOnly")} /> : null}
               {b.name}
               <span className="ml-0.5 text-[10px] text-keep-rule">{b.topicCount}</span>
             </button>
@@ -1612,11 +1715,11 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
           // so the post toolbar's forum-report button hides itself.
           detail.viewer && !detail.viewer.ban
             ? (messageId, authorName) => {
-                const reason = window.prompt(`Report ${authorName}'s post to the moderators of ${detail.name}. What's wrong with it?`);
+                const reason = window.prompt(t("boards.reportPrompt", { author: authorName, forum: detail.name }));
                 if (!reason || !reason.trim()) return;
                 void reportForumPost(detail.id, messageId, reason.trim())
-                  .then(() => window.alert("Reported. The forum's moderators will review it."))
-                  .catch((e) => window.alert(e instanceof Error ? e.message : "Report failed."));
+                  .then(() => window.alert(t("boards.reported")))
+                  .catch((e) => window.alert(e instanceof Error ? e.message : t("boards.reportFailed")));
               }
             : null
         }>
@@ -1637,6 +1740,7 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
           chrome={chrome}
           initialTopicId={initialTopic?.boardId === active.roomId ? initialTopic.topicId : null}
           initialPostId={initialTopic?.boardId === active.roomId ? initialTopic.postId ?? null : null}
+          initialNonce={initialTopic?.boardId === active.roomId ? initialTopic.nonce ?? null : null}
           {...(onActiveTopicChange ? { onActiveTopicChange } : {})}
         />
         </ForumReportContext.Provider>
@@ -1647,6 +1751,8 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
             topicId={prefixAssign.topicId}
             current={prefixAssign.currentPrefixId}
             topicCategoryId={prefixAssign.topicCategoryId}
+            nsfwCurrent={prefixAssign.nsfwCurrent}
+            authorUserId={prefixAssign.authorUserId}
             onForumChanged={onForumChanged}
             onClose={() => setPrefixAssign(null)}
             onDone={() => { setPrefixAssign(null); useChat.getState().bumpForumActionTick(); }}
@@ -1663,22 +1769,48 @@ function ForumBoards({ detail, asCharacterId, chrome, initialTopic, onForumChang
  *  allows custom tags, a viewer holding create_tags (or owner/staff) can also
  *  mint a new global tag inline; otherwise an empty list points managers at
  *  the settings tab and tells members the keeper curates the list. */
-function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumChanged, onClose, onDone }: {
+function PrefixAssignModal({ detail, topicId, current, topicCategoryId, nsfwCurrent, authorUserId, onForumChanged, onClose, onDone }: {
   detail: ForumDetail;
   topicId: string;
   current: string | null;
   topicCategoryId: string | null;
+  /** The topic's current NSFW tag (seeds the re-tag toggle's state). */
+  nsfwCurrent: boolean;
+  /** The topic's author — the author may re-tag their own topic (adults). */
+  authorUserId: string;
   onForumChanged: () => void;
   onClose: () => void;
   onDone: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState("");
   const [newColor, setNewColor] = useState("#8a66cc");
   const themeBg = useActiveTheme().bg;
+  const me = useChat((s) => s.me);
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
   const canManagePrefixes = !!detail.viewer && (detail.viewer.canManage || detail.viewer.permissions.includes("manage_prefixes"));
   const canCreateCustom = detail.allowCustomTags && !!detail.viewer && (detail.viewer.canManage || detail.viewer.permissions.includes("create_tags"));
+  // Prefix rights mirror TopicPrefix's gate: managers always; the author
+  // unless the current tag is staff-only (manager-controlled). A viewer here
+  // on NSFW rights alone sees no prefix picker at all — no dead buttons.
+  const currentIsStaffOnly = !!(current && detail.prefixes.find((p) => p.id === current)?.staffOnly);
+  const isAuthor = !!me && me.id === authorUserId;
+  const canAssignPrefix = canManagePrefixes || (isAuthor && !currentIsStaffOnly);
+  // NSFW re-tag (age plan Phase 3): adult author / owner / manage_prefixes.
+  // Cosmetic mirror — the PATCH route re-checks all of it.
+  const canTagNsfw = viewerIsAdult && (canManagePrefixes || isAuthor);
+  // Applied immediately on toggle (like the prefix picks); the modal stays
+  // open and the card behind it refreshes via the action tick, so the flip
+  // is visible the moment it lands. State only advances on server success.
+  const [nsfw, setNsfw] = useState(nsfwCurrent);
+  function toggleNsfw(next: boolean) {
+    setBusy(true); setError(null);
+    setTopicNsfw(topicId, next)
+      .then(() => { setNsfw(next); setBusy(false); useChat.getState().bumpForumActionTick(); })
+      .catch((e) => { setError(e instanceof Error ? e.message : t("shared.failedDot")); setBusy(false); });
+  }
   // Only tags this category can be given. The currently-assigned tag is kept
   // visible even if it's now out of scope (so you can see + clear it).
   // Staff-only tags are hidden from non-managers — they can't apply them, and
@@ -1688,7 +1820,7 @@ function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumC
 
   function assign(prefixId: string | null) {
     setBusy(true); setError(null);
-    setTopicPrefix(topicId, prefixId).then(onDone).catch((e) => { setError(e instanceof Error ? e.message : "Failed."); setBusy(false); });
+    setTopicPrefix(topicId, prefixId).then(onDone).catch((e) => { setError(e instanceof Error ? e.message : t("shared.failedDot")); setBusy(false); });
   }
   // Mint a new (global) tag AND apply it in one step, then refetch the forum
   // detail so the new chip resolves against the catalog.
@@ -1701,56 +1833,108 @@ function PrefixAssignModal({ detail, topicId, current, topicCategoryId, onForumC
       await setTopicPrefix(topicId, id);
       onForumChanged();
       onDone();
-    } catch (e) { setError(e instanceof Error ? e.message : "Failed."); setBusy(false); }
+    } catch (e) { setError(e instanceof Error ? e.message : t("shared.failedDot")); setBusy(false); }
   }
 
   return (
     <Modal onClose={onClose} zIndex={60}>
       <div onClick={(e) => e.stopPropagation()} data-tour="forum-topic-prefix-selector" className="keep-frame w-full rounded bg-keep-bg p-5 text-keep-text md:w-[min(440px,84vw)]">
-        <h2 className="font-action text-lg">Topic tag</h2>
-        {applicable.length === 0 ? (
-          <p className="mt-2 text-xs italic text-keep-muted">
-            {canCreateCustom
-              ? "No tags for this category yet. Add one below."
-              : canManagePrefixes
-                ? "No tags for this category yet. Add or scope tags in forum settings → Prefixes."
-                : "No tags are available here yet. The keeper curates the list."}
-          </p>
-        ) : (
-          <ul className="mt-3 flex flex-wrap gap-2">
-            <li>
-              <button type="button" disabled={busy} onClick={() => assign(null)}
-                className={`rounded border px-2 py-1 text-xs ${current === null ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}>None</button>
-            </li>
-            {applicable.map((p) => (
-              <li key={p.id}>
-                <button type="button" disabled={busy} onClick={() => assign(p.id)} title={p.staffOnly ? `${p.tooltip ? p.tooltip + " - " : ""}Staff only` : (p.tooltip ?? undefined)}
-                  className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-bold uppercase tracking-wide"
-                  style={{ backgroundColor: `${p.color}22`, color: resolveMessageColor(p.color, themeBg) ?? p.color, border: `1px solid ${current === p.id ? p.color : `${p.color}66`}` }}>
-                  {p.staffOnly ? <Lock className="h-3 w-3" aria-hidden /> : null}{p.label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+        <h2 className="font-action text-lg">{t("prefixPicker.title")}</h2>
+        {canAssignPrefix ? (
+          <>
+            {applicable.length === 0 ? (
+              <p className="mt-2 text-xs italic text-keep-muted">
+                {canCreateCustom
+                  ? t("prefixPicker.emptyCustom")
+                  : canManagePrefixes
+                    ? t("prefixPicker.emptyManager")
+                    : t("prefixPicker.emptyMember")}
+              </p>
+            ) : (
+              <ul className="mt-3 flex flex-wrap gap-2">
+                <li>
+                  <button type="button" disabled={busy} onClick={() => assign(null)}
+                    className={`rounded border px-2 py-1 text-xs ${current === null ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}>{t("shared.none")}</button>
+                </li>
+                {applicable.map((p) => (
+                  <li key={p.id}>
+                    <button type="button" disabled={busy} onClick={() => assign(p.id)} title={p.staffOnly ? (p.tooltip ? t("prefixPicker.staffOnlyWithTooltip", { tooltip: p.tooltip }) : t("shared.staffOnly")) : (p.tooltip ?? undefined)}
+                      className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-bold uppercase tracking-wide"
+                      style={{ backgroundColor: `${p.color}22`, color: resolveMessageColor(p.color, themeBg) ?? p.color, border: `1px solid ${current === p.id ? p.color : `${p.color}66`}` }}>
+                      {p.staffOnly ? <Lock className="h-3 w-3" aria-hidden /> : null}{p.label}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-        {/* Inline custom-tag mint — only when the forum allows it AND the
-            viewer holds create_tags (owner/staff included). New tag is global. */}
-        {canCreateCustom ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-keep-rule/60 pt-3">
-            <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" title="Chip color" />
-            <input value={newLabel} maxLength={24} onChange={(e) => setNewLabel(e.target.value)} placeholder="New tag (e.g. Guide)" className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
-            <button type="button" disabled={busy || !newLabel.trim()} onClick={() => void createAndApply()}
-              className="rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">Add & apply</button>
+            {/* Inline custom-tag mint — only when the forum allows it AND the
+                viewer holds create_tags (owner/staff included). New tag is global. */}
+            {canCreateCustom ? (
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-keep-rule/60 pt-3">
+                <input type="color" value={newColor} onChange={(e) => setNewColor(e.target.value)} className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" title={t("shared.chipColor")} />
+                <input value={newLabel} maxLength={24} onChange={(e) => setNewLabel(e.target.value)} placeholder={t("prefixPicker.newTagPlaceholder")} className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
+                <button type="button" disabled={busy || !newLabel.trim()} onClick={() => void createAndApply()}
+                  className="rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">{t("prefixPicker.addAndApply")}</button>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+
+        {/* NSFW re-tag (age plan Phase 3): the built-in system tag, beside
+            the owner-prefix picker. Applies immediately on toggle; hidden
+            from anyone the server would refuse (minors, non-authors without
+            manage_prefixes) so nobody meets a dead control. */}
+        {canTagNsfw ? (
+          <div className={`mt-3 ${canAssignPrefix ? "border-t border-keep-rule/60 pt-3" : ""}`}>
+            <label className="flex items-start gap-2 text-sm">
+              <input type="checkbox" checked={nsfw} disabled={busy} onChange={(e) => toggleNsfw(e.target.checked)} className="mt-0.5" />
+              <span>
+                <span className="font-semibold text-keep-text">{t("nsfw.markLabel")}</span>
+                <span className="block text-xs text-keep-muted">
+                  {t("nsfw.markDesc")}
+                </span>
+              </span>
+            </label>
           </div>
         ) : null}
 
         {error ? <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">{error}</div> : null}
         <div className="mt-4 flex justify-end">
-          <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">Close</button>
+          <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">{t("common:close")}</button>
         </div>
       </div>
     </Modal>
+  );
+}
+
+/**
+ * A deep link (permalink, notification, bookmark) promised a topic the
+ * server won't hand this account — removed, or held behind a gate the
+ * viewer doesn't pass (an NSFW topic for an under-18 account, a members-
+ * only board). The board still renders normally underneath; this strip
+ * says plainly why the promised topic isn't on screen, with no teaser
+ * (no title, no snippet) and no dead spinner. Copy stays generic on
+ * purpose: "removed or can't view" covers every case without labeling
+ * the content for someone who can't open it anyway.
+ */
+function TopicUnavailableNotice({ onDismiss }: { onDismiss: () => void }) {
+  const { t } = useTranslation("forums");
+  return (
+    <div className="flex items-start gap-2 border-b border-keep-rule bg-keep-panel/40 px-3 py-2">
+      <p className="min-w-0 flex-1 text-xs text-keep-muted">
+        <Trans t={t} i18nKey="boards.unavailable" components={{ b: <span className="font-semibold text-keep-text" /> }} />
+      </p>
+      <button
+        type="button"
+        onClick={onDismiss}
+        title={t("boards.dismissTitle")}
+        aria-label={t("boards.dismissAria")}
+        className="shrink-0 rounded p-0.5 text-keep-muted hover:text-keep-text"
+      >
+        <X className="h-3.5 w-3.5" aria-hidden="true" />
+      </button>
+    </div>
   );
 }
 
@@ -1766,6 +1950,7 @@ function LockedSection({ kind, canApply, signedIn }: {
   canApply: boolean;
   signedIn: boolean;
 }) {
+  const { t } = useTranslation("forums");
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 py-12 text-center">
       <div
@@ -1775,14 +1960,14 @@ function LockedSection({ kind, canApply, signedIn }: {
         <Lock className="h-6 w-6 text-keep-accent" aria-hidden="true" />
       </div>
       <p className="text-sm font-semibold text-keep-text">
-        This {kind} is for members only
+        {kind === "board" ? t("boards.lockedBoard") : t("boards.lockedCategory")}
       </p>
       <p className="max-w-sm text-xs text-keep-muted">
         {signedIn
           ? canApply
-            ? "Apply to join this forum from its front page, and the keeper can give you access."
-            : "Only the forum's members can read it. Ask the keeper about joining."
-          : "Sign in to read it, and if the forum takes applications, apply to join from its front page."}
+            ? t("boards.lockedApplyHint")
+            : t("boards.lockedMemberHint")
+          : t("boards.lockedSignInHint")}
       </p>
     </div>
   );
@@ -1801,7 +1986,7 @@ function LockedSection({ kind, canApply, signedIn }: {
  * The composer underneath posts over forum:post (new topic or reply to
  * the active topic) — boards are never joined as rooms.
  */
-function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, canAdminEdit, canUseNpc, asCharacterId, chrome, initialTopicId, initialPostId, onActiveTopicChange }: {
+function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, canAdminEdit, canUseNpc, asCharacterId, chrome, initialTopicId, initialPostId, initialNonce, onActiveTopicChange }: {
   boardId: string;
   /** For permalink building: /f/<slug>/t/<topicId>#p-<postId>. */
   forumSlug: string;
@@ -1817,9 +2002,13 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, ca
   initialTopicId: string | null;
   /** Optional: one post inside the initial topic to flash after opening. */
   initialPostId: string | null;
+  /** Bumps on every notification click so a repeat click on the SAME
+   *  topic still re-opens it (ids alone compare equal in the deps). */
+  initialNonce: number | null;
   /** Reports the active topic so the modal can mirror it into the URL. */
   onActiveTopicChange?: (topicId: string | null) => void;
 }) {
+  const { t } = useTranslation("forums");
   const me = useChat((s) => s.me);
   const messages = useChat((s) => s.messagesByRoom[boardId]) ?? NO_MESSAGES;
   const setMessages = useChat((s) => s.setMessages);
@@ -1902,8 +2091,10 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, ca
 
   /** Pull a topic's full thread into the room buffer so the expanded
    *  card's reply chain renders. Dedupes by id; fresh rows win so an
-   *  edit/lock from the toolbar reflects after the action-tick refetch. */
-  const hydrateThread = useCallback(async (topicId: string) => {
+   *  edit/lock from the toolbar reflects after the action-tick refetch.
+   *  Resolves false when the server won't hand us the thread (deleted,
+   *  or gated away from this account) so deep links can say so. */
+  const hydrateThread = useCallback(async (topicId: string): Promise<boolean> => {
     try {
       const t = await fetchTopicThread(boardId, topicId);
       const cur = useChat.getState().messagesByRoom[boardId] ?? [];
@@ -1914,8 +2105,14 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, ca
         ...fresh.values(),
       ].sort((a, b) => a.createdAt - b.createdAt);
       setMessages(boardId, merged);
-    } catch { /* topic may have been deleted; refetch paths handle it */ }
+      return true;
+    } catch { /* topic may have been deleted; refetch paths handle it */ return false; }
   }, [boardId, setMessages]);
+
+  // Deep link promised a topic the server withheld (removed, or an NSFW
+  // topic this account can't view). Cleared on the next deep-link attempt
+  // or by its dismiss button; the board renders normally underneath.
+  const [unavailableTopicId, setUnavailableTopicId] = useState<string | null>(null);
 
   // Deep-link / notification navigation: respond to initialTopicId
   // CHANGES too (the notification panel retargets an already-mounted
@@ -1923,15 +2120,25 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, ca
   // flash it once the thread has hydrated.
   useEffect(() => {
     if (!initialTopicId) return;
+    setUnavailableTopicId(null);
     setComposerCat(undefined);
     setActiveTopicId(initialTopicId);
     markTopicRead(initialTopicId);
     setUnreadTopics((prev) => { const n = new Set(prev); n.delete(initialTopicId); return n; });
-    void hydrateThread(initialTopicId).then(() => {
+    void hydrateThread(initialTopicId).then((ok) => {
+      if (!ok) {
+        // No spinner, no silent nothing: tell the viewer the link's
+        // target isn't reachable from their account (sane-path rule).
+        setActiveTopicId(null);
+        setUnavailableTopicId(initialTopicId);
+        return;
+      }
       if (!initialPostId) return;
       requestAnimationFrame(() => requestAnimationFrame(() => setHighlightId(initialPostId)));
     });
-  }, [initialTopicId, initialPostId, hydrateThread]);
+    // `initialNonce` rides the deps so a REPEAT notification click on the
+    // same topic re-opens it (same-id clicks were silently dropped).
+  }, [initialTopicId, initialPostId, initialNonce, hydrateThread]);
 
   // Quote-reference jumps: the `[wrote:](msg:<id>)` chips in post bodies
   // dispatch a DOM event (the markdown renderer is pure). Resolve the
@@ -2034,8 +2241,11 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, ca
 
   /** Ghost topic submit: persists, refreshes the section's first page,
    *  and opens the freshly-raised topic. */
-  async function submitTopic(title: string, text: string, poll?: PollDraft) {
+  async function submitTopic(title: string, text: string, poll?: PollDraft, nsfw?: boolean) {
     const categoryId = composerCat ?? null;
+    // Compose-time NSFW tag rides the forum:post payload itself so the
+    // topic row is stamped at insert (age plan Phase 3: tagging is atomic
+    // at compose — no untagged window for minors' lists/notifications).
     const messageId = await postToBoard({
       roomId: boardId,
       text,
@@ -2043,6 +2253,7 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, ca
       threadTitle: title,
       ...(categoryId ? { threadCategoryId: categoryId } : {}),
       ...(poll ? { poll } : {}),
+      ...(nsfw ? { nsfw: true } : {}),
     });
     setComposerCat(undefined);
     await loadBucketPage(categoryId ?? "_uncat", 1);
@@ -2051,6 +2262,9 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, ca
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {unavailableTopicId ? (
+        <TopicUnavailableNotice onDismiss={() => setUnavailableTopicId(null)} />
+      ) : null}
       <MessageList
         messages={messages}
         occupants={NO_OCCUPANTS}
@@ -2089,6 +2303,10 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, ca
         unreadTopicIds={unreadTopics}
         watchedTopicIds={watchedTopics}
         onToggleTopicWatch={toggleTopicWatch}
+        // The forum-posting tour runs inside THIS modal; only this render
+        // site stamps its New Topic anchor (chat's MessageList stays
+        // mounted behind the modal and would win the querySelector).
+        forumTourAnchors
         postPermalink={postPermalink}
         highlightMessageId={highlightId}
         onHighlightDone={() => setHighlightId(null)}
@@ -2097,7 +2315,7 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, ca
           if (!canParticipate) {
             return (
               <p className="rounded border border-keep-rule bg-keep-panel/20 px-3 py-1.5 text-xs italic text-keep-muted">
-                Posting here needs the keeper's approval - apply from the forum's front page.
+                {t("boards.needsApproval")}
               </p>
             );
           }
@@ -2116,13 +2334,13 @@ function BoardHost({ boardId, forumSlug, canParticipate, canModerate, canPin, ca
           if (!canParticipate) {
             return (
               <p className="rounded border border-keep-rule bg-keep-panel/20 px-3 py-1.5 text-xs italic text-keep-muted">
-                Posting here needs the keeper's approval - apply from the forum's front page.
+                {t("boards.needsApproval")}
               </p>
             );
           }
           return (
             <GhostTopicComposer
-              onSubmit={(title, text, poll) => submitTopic(title, text, poll)}
+              onSubmit={(title, text, poll, nsfw) => submitTopic(title, text, poll, nsfw)}
               onCancel={() => setComposerCat(undefined)}
             />
           );
@@ -2145,6 +2363,7 @@ function GhostReplyComposer({ topicId, quoteSeed, canUseNpc, onSubmit }: {
   canUseNpc: boolean;
   onSubmit: (text: string, opts?: { format?: ReplyFormat; npcId?: string }) => Promise<void>;
 }) {
+  const { t } = useTranslation("forums");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -2173,26 +2392,26 @@ function GhostReplyComposer({ topicId, quoteSeed, canUseNpc, onSubmit }: {
   useEffect(() => { if (format === "npc" && npcs === null) refreshNpcs(); }, [format, npcs, refreshNpcs]);
 
   async function go() {
-    if (format === "npc" && !npcId) { setErr("Pick an NPC to voice (or add one)."); return; }
+    if (format === "npc" && !npcId) { setErr(t("composer.pickNpc")); return; }
     setBusy(true); setErr(null);
     try {
       await onSubmit(draft, format === "say" ? undefined : { format, ...(format === "npc" && npcId ? { npcId } : {}) });
       setDraft("");
-    } catch (e) { setErr(e instanceof Error ? e.message : "post failed"); }
+    } catch (e) { setErr(e instanceof Error ? e.message : t("shared.postFailed")); }
     finally { setBusy(false); }
   }
 
   const FMT: Array<{ k: ReplyFormat; label: string }> = [
-    { k: "say", label: "Say" },
-    { k: "action", label: "Action" },
-    ...(canUseNpc ? ([{ k: "npc" as const, label: "NPC" }]) : []),
+    { k: "say", label: t("composer.say") },
+    { k: "action", label: t("composer.action") },
+    ...(canUseNpc ? ([{ k: "npc" as const, label: t("composer.npc") }]) : []),
   ];
-  const placeholder = format === "action" ? "Describe the action…" : format === "npc" ? "What does the NPC say or do?" : "Write your reply…";
+  const placeholder = format === "action" ? t("composer.actionPlaceholder") : format === "npc" ? t("composer.npcPlaceholder") : t("composer.replyPlaceholder");
 
   return (
     <div className="rounded border border-dashed border-keep-action/40 bg-keep-bg/40 p-2">
       <div className="mb-1 flex flex-wrap items-center gap-1">
-        <p className="mr-1 text-[10px] font-semibold uppercase tracking-widest text-keep-muted">Reply as</p>
+        <p className="mr-1 text-[10px] font-semibold uppercase tracking-widest text-keep-muted">{t("composer.replyAs")}</p>
         {FMT.map((f) => (
           <button
             key={f.k} type="button" onClick={() => setFormat(f.k)}
@@ -2207,9 +2426,9 @@ function GhostReplyComposer({ topicId, quoteSeed, canUseNpc, onSubmit }: {
               onChange={(e) => setNpcId(e.target.value || null)}
               className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-xs outline-none focus:border-keep-action"
             >
-              {npcs === null ? <option>Loading…</option> : npcs.length === 0 ? <option value="">No NPCs yet</option> : npcs.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
+              {npcs === null ? <option>{t("common:loading")}</option> : npcs.length === 0 ? <option value="">{t("composer.noNpcsOption")}</option> : npcs.map((n) => <option key={n.id} value={n.id}>{n.name}</option>)}
             </select>
-            <button type="button" onClick={() => setManagerOpen(true)} className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Manage</button>
+            <button type="button" onClick={() => setManagerOpen(true)} className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("composer.manage")}</button>
           </span>
         ) : null}
       </div>
@@ -2231,7 +2450,7 @@ function GhostReplyComposer({ topicId, quoteSeed, canUseNpc, onSubmit }: {
           onClick={() => void go()}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          {busy ? "…" : format === "npc" ? "Post as NPC" : format === "action" ? "Post action" : "Reply"}
+          {busy ? "…" : format === "npc" ? t("composer.postAsNpc") : format === "action" ? t("composer.postAction") : t("composer.reply")}
         </button>
       </div>
       {managerOpen ? (
@@ -2250,6 +2469,7 @@ function GhostReplyComposer({ topicId, quoteSeed, canUseNpc, onSubmit }: {
  * lines (HP: 30, AC: 15…). Changes call back so the composer's picker refreshes.
  */
 function NpcManagerModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const { t } = useTranslation("forums");
   const [npcs, setNpcs] = useState<UserNpcWire[] | null>(null);
   const [editing, setEditing] = useState<{ id: string | null; name: string; stats: NpcStat[] } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -2259,56 +2479,56 @@ function NpcManagerModal({ onClose, onChanged }: { onClose: () => void; onChange
   useEffect(() => { load(); }, [load]);
 
   async function save() {
-    if (!editing || !editing.name.trim()) { setErr("Name required."); return; }
+    if (!editing || !editing.name.trim()) { setErr(t("npc.nameRequired")); return; }
     setBusy(true); setErr(null);
     const cleanStats = editing.stats.filter((s) => s.label.trim());
     try {
       if (editing.id) await updateNpc(editing.id, { name: editing.name.trim(), stats: cleanStats });
       else await createNpc({ name: editing.name.trim(), stats: cleanStats });
       setEditing(null); load(); onChanged();
-    } catch (e) { setErr(e instanceof Error ? e.message : "save failed"); }
+    } catch (e) { setErr(e instanceof Error ? e.message : t("shared.saveFailed")); }
     finally { setBusy(false); }
   }
   async function remove(id: string) {
-    if (!window.confirm("Delete this NPC? Existing posts keep their snapshot.")) return;
+    if (!window.confirm(t("npc.deleteConfirm"))) return;
     setBusy(true); setErr(null);
     try { await deleteNpc(id); load(); onChanged(); }
-    catch (e) { setErr(e instanceof Error ? e.message : "delete failed"); }
+    catch (e) { setErr(e instanceof Error ? e.message : t("npc.deleteFailed")); }
     finally { setBusy(false); }
   }
 
   return (
     <Modal onClose={onClose} zIndex={70}>
       <div onClick={(e) => e.stopPropagation()} className="keep-frame w-full rounded bg-keep-bg p-5 text-keep-text md:w-[min(480px,86vw)]">
-        <h2 className="font-action text-lg">Your NPCs</h2>
-        <p className="mt-1 text-xs text-keep-muted">Saved across every forum. Re-select one to voice it again; its stats restore.</p>
+        <h2 className="font-action text-lg">{t("npc.title")}</h2>
+        <p className="mt-1 text-xs text-keep-muted">{t("npc.intro")}</p>
 
         {editing ? (
           <div className="mt-3 space-y-2 rounded border border-keep-rule p-2">
-            <input value={editing.name} maxLength={40} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder="NPC name" className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
-            <p className="text-[10px] uppercase tracking-widest text-keep-muted">Stats (optional)</p>
+            <input value={editing.name} maxLength={40} onChange={(e) => setEditing({ ...editing, name: e.target.value })} placeholder={t("npc.namePlaceholder")} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
+            <p className="text-[10px] uppercase tracking-widest text-keep-muted">{t("npc.statsLabel")}</p>
             {editing.stats.map((s, i) => (
               <div key={i} className="flex gap-1">
-                <input value={s.label} maxLength={24} onChange={(e) => { const next = [...editing.stats]; next[i] = { ...s, label: e.target.value }; setEditing({ ...editing, stats: next }); }} placeholder="Label (HP)" className="w-1/3 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action" />
-                <input value={s.value} maxLength={40} onChange={(e) => { const next = [...editing.stats]; next[i] = { ...s, value: e.target.value }; setEditing({ ...editing, stats: next }); }} placeholder="Value (30/30)" className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action" />
+                <input value={s.label} maxLength={24} onChange={(e) => { const next = [...editing.stats]; next[i] = { ...s, label: e.target.value }; setEditing({ ...editing, stats: next }); }} placeholder={t("npc.statLabelPlaceholder")} className="w-1/3 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action" />
+                <input value={s.value} maxLength={40} onChange={(e) => { const next = [...editing.stats]; next[i] = { ...s, value: e.target.value }; setEditing({ ...editing, stats: next }); }} placeholder={t("npc.statValuePlaceholder")} className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action" />
                 <button type="button" onClick={() => setEditing({ ...editing, stats: editing.stats.filter((_, j) => j !== i) })} className="shrink-0 rounded border border-keep-rule px-1.5 text-[10px] text-keep-muted hover:text-keep-text">✕</button>
               </div>
             ))}
             {editing.stats.length < 12 ? (
-              <button type="button" onClick={() => setEditing({ ...editing, stats: [...editing.stats, { label: "", value: "" }] })} className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">+ Stat</button>
+              <button type="button" onClick={() => setEditing({ ...editing, stats: [...editing.stats, { label: "", value: "" }] })} className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("npc.addStat")}</button>
             ) : null}
             {err ? <p className="text-xs text-keep-accent">{err}</p> : null}
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => { setEditing(null); setErr(null); }} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">Cancel</button>
-              <button type="button" disabled={busy} onClick={() => void save()} className="rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-sm font-semibold text-keep-action disabled:opacity-50">Save</button>
+              <button type="button" onClick={() => { setEditing(null); setErr(null); }} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">{t("common:cancel")}</button>
+              <button type="button" disabled={busy} onClick={() => void save()} className="rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-sm font-semibold text-keep-action disabled:opacity-50">{t("common:save")}</button>
             </div>
           </div>
         ) : (
           <>
             {!npcs ? (
-              <p className="mt-3 text-sm italic text-keep-muted">Loading…</p>
+              <p className="mt-3 text-sm italic text-keep-muted">{t("common:loading")}</p>
             ) : npcs.length === 0 ? (
-              <p className="mt-3 text-xs italic text-keep-muted">No NPCs yet.</p>
+              <p className="mt-3 text-xs italic text-keep-muted">{t("npc.none")}</p>
             ) : (
               <ul className="mt-3 space-y-1">
                 {npcs.map((n) => (
@@ -2317,15 +2537,15 @@ function NpcManagerModal({ onClose, onChanged }: { onClose: () => void; onChange
                       <span className="block truncate text-sm text-keep-text">{n.name}</span>
                       {n.stats.length > 0 ? <span className="block truncate text-[10px] text-keep-muted">{n.stats.map((s) => `${s.label} ${s.value}`).join(" · ")}</span> : null}
                     </span>
-                    <button type="button" onClick={() => setEditing({ id: n.id, name: n.name, stats: n.stats })} className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">Edit</button>
-                    <button type="button" disabled={busy} onClick={() => void remove(n.id)} className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Delete</button>
+                    <button type="button" onClick={() => setEditing({ id: n.id, name: n.name, stats: n.stats })} className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("shared.edit")}</button>
+                    <button type="button" disabled={busy} onClick={() => void remove(n.id)} className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("common:delete")}</button>
                   </li>
                 ))}
               </ul>
             )}
             <div className="mt-3 flex justify-between">
-              <button type="button" onClick={() => setEditing({ id: null, name: "", stats: [] })} className="rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action">+ New NPC</button>
-              <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">Close</button>
+              <button type="button" onClick={() => setEditing({ id: null, name: "", stats: [] })} className="rounded border border-keep-action bg-keep-action/10 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-action">{t("npc.new")}</button>
+              <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-sm hover:bg-keep-banner">{t("common:close")}</button>
             </div>
           </>
         )}
@@ -2344,15 +2564,22 @@ function NpcManagerModal({ onClose, onChanged }: { onClose: () => void; onChange
 type PollDraft = { optionTexts: string[]; allowMultiple: boolean; showVoters: boolean; closesAt: number | null };
 
 function GhostTopicComposer({ onSubmit, onCancel }: {
-  onSubmit: (title: string, text: string, poll?: PollDraft) => Promise<void>;
+  onSubmit: (title: string, text: string, poll?: PollDraft, nsfw?: boolean) => Promise<void>;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const [title, setTitle] = useState("");
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+
+  // NSFW tag at compose time (age plan Phase 3). The checkbox renders for
+  // adult accounts only — under-18 accounts can never set the tag, so they
+  // get no dead control (the server refuses the write regardless).
+  const isAdultViewer = useChat((s) => s.viewerAge.isAdult);
+  const [markNsfw, setMarkNsfw] = useState(false);
 
   // Poll mode: the title becomes the question and the body is an optional
   // intro, so the body requirement is relaxed while polling.
@@ -2382,20 +2609,20 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
     try {
       let poll: PollDraft | undefined;
       if (isPoll) {
-        if (cleanOptions.length < POLL_MIN_OPTIONS) { setErr(`Add at least ${POLL_MIN_OPTIONS} options.`); setBusy(false); return; }
+        if (cleanOptions.length < POLL_MIN_OPTIONS) { setErr(t("composer.minOptions", { count: POLL_MIN_OPTIONS })); setBusy(false); return; }
         const hrs = deadlineHours.trim() ? parseFloat(deadlineHours) : NaN;
         const closesAt = Number.isFinite(hrs) && hrs > 0 ? Date.now() + hrs * 3_600_000 : null;
         poll = { optionTexts: cleanOptions, allowMultiple, showVoters, closesAt };
       }
-      await onSubmit(title.trim(), draft, poll);
-    } catch (e) { setErr(e instanceof Error ? e.message : "post failed"); setBusy(false); }
+      await onSubmit(title.trim(), draft, poll, isAdultViewer && markNsfw);
+    } catch (e) { setErr(e instanceof Error ? e.message : t("shared.postFailed")); setBusy(false); }
   }
 
   return (
     <div className="keep-frame rounded border border-dashed border-keep-action/50 bg-keep-banner/40 p-2.5">
       <div className="mb-1.5 flex items-center justify-between">
         <p className="text-[10px] font-semibold uppercase tracking-widest text-keep-muted">
-          {isPoll ? "New poll" : "New topic"}
+          {isPoll ? t("composer.newPoll") : t("composer.newTopic")}
         </p>
         <button
           type="button"
@@ -2405,7 +2632,7 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
             isPoll ? "border-keep-accent text-keep-accent" : "border-keep-rule text-keep-muted hover:text-keep-text"
           }`}
         >
-          <BarChart3 className="h-3 w-3" aria-hidden="true" /> Poll
+          <BarChart3 className="h-3 w-3" aria-hidden="true" /> {t("composer.poll")}
         </button>
       </div>
       <input
@@ -2414,7 +2641,7 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
         value={title}
         onChange={(e) => setTitle(e.target.value)}
         maxLength={isPoll ? POLL_QUESTION_MAX : 120}
-        placeholder={isPoll ? "Ask a question…" : "Topic title"}
+        placeholder={isPoll ? t("composer.askQuestion") : t("composer.topicTitle")}
         className="mb-1.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm font-semibold outline-none focus:border-keep-action"
       />
 
@@ -2426,15 +2653,15 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
                 value={o}
                 onChange={(e) => setOption(i, e.target.value)}
                 maxLength={POLL_OPTION_MAX}
-                placeholder={`Option ${i + 1}`}
+                placeholder={t("composer.optionPlaceholder", { number: i + 1 })}
                 className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
               />
               <button
                 type="button"
                 onClick={() => removeOption(i)}
                 disabled={options.length <= 2}
-                title="Remove option"
-                aria-label={`Remove option ${i + 1}`}
+                title={t("composer.removeOption")}
+                aria-label={t("composer.removeOptionAria", { number: i + 1 })}
                 className="rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text disabled:opacity-30"
               >
                 <X className="h-3 w-3" aria-hidden="true" />
@@ -2447,20 +2674,20 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
               onClick={addOption}
               className="inline-flex items-center gap-1 rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
             >
-              <Plus className="h-3 w-3" aria-hidden="true" /> Add option
+              <Plus className="h-3 w-3" aria-hidden="true" /> {t("composer.addOption")}
             </button>
           ) : null}
           <div className="flex flex-wrap gap-3 pt-1 text-xs text-keep-text">
             <label className="flex items-center gap-1.5">
               <input type="checkbox" checked={allowMultiple} onChange={(e) => setAllowMultiple(e.target.checked)} />
-              Allow multiple
+              {t("composer.allowMultiple")}
             </label>
             <label className="flex items-center gap-1.5">
               <input type="checkbox" checked={showVoters} onChange={(e) => setShowVoters(e.target.checked)} />
-              Show who voted
+              {t("composer.showVoters")}
             </label>
             <label className="flex items-center gap-1.5">
-              Close after
+              {t("composer.closeAfter")}
               <input
                 value={deadlineHours}
                 onChange={(e) => setDeadlineHours(e.target.value.replace(/[^\d.]/g, ""))}
@@ -2468,7 +2695,7 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
                 inputMode="decimal"
                 className="w-12 rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5 text-center outline-none focus:border-keep-action"
               />
-              hrs
+              {t("composer.hrs")}
             </label>
           </div>
         </div>
@@ -2480,9 +2707,28 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         rows={isPoll ? 2 : 4}
-        placeholder={isPoll ? "Optional intro…" : "The opening post…"}
+        placeholder={isPoll ? t("composer.introPlaceholder") : t("composer.openingPost")}
         className="mt-1 w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
       />
+      {/* NSFW tag (age plan Phase 3) — adult accounts only; under-18
+          accounts never see the control at all. */}
+      {isAdultViewer ? (
+        <label data-tour="forum-composer-tag" className="mt-1.5 flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={markNsfw}
+            disabled={busy}
+            onChange={(e) => setMarkNsfw(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="font-semibold text-keep-text">{t("nsfw.markLabel")}</span>
+            <span className="block text-xs text-keep-muted">
+              {t("nsfw.markDesc")}
+            </span>
+          </span>
+        </label>
+      ) : null}
       {err ? <p className="mt-1 text-xs text-keep-accent">{err}</p> : null}
       <div className="mt-1.5 flex justify-end gap-2">
         <button
@@ -2490,15 +2736,16 @@ function GhostTopicComposer({ onSubmit, onCancel }: {
           onClick={onCancel}
           className="rounded border border-keep-rule px-3 py-1 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="button"
+          data-tour="forum-composer-post"
           disabled={busy || !title.trim() || !pollReady || (!isPoll && !draft.trim())}
           onClick={() => void go()}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          {busy ? "…" : isPoll ? "Post poll" : "Post topic"}
+          {busy ? "…" : isPoll ? t("composer.postPoll") : t("composer.postTopic")}
         </button>
       </div>
     </div>
@@ -2516,6 +2763,7 @@ function ForumNotifPanel({ onOpen, onClose }: {
   onOpen: (n: ForumNotificationWire) => void;
   onClose: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const setForumNotifUnread = useChat((s) => s.setForumNotifUnread);
   const [rows, setRows] = useState<ForumNotificationWire[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -2531,14 +2779,15 @@ function ForumNotifPanel({ onOpen, onClose }: {
         setRows(r.notifications);
         setForumNotifUnread(r.unread);
       })
-      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : t("shared.loadFailed")); });
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setForumNotifUnread]);
 
-  function verb(kind: ForumNotificationWire["kind"]): string {
-    if (kind === "reply") return "replied to your topic";
-    if (kind === "quote") return "quoted you in";
-    return "posted in";
+  function lineKey(kind: ForumNotificationWire["kind"]): string {
+    if (kind === "reply") return "notif.replyLine";
+    if (kind === "quote") return "notif.quoteLine";
+    return "notif.postLine";
   }
   function glyph(kind: ForumNotificationWire["kind"]): string {
     if (kind === "reply") return "↩";
@@ -2570,23 +2819,23 @@ function ForumNotifPanel({ onOpen, onClose }: {
       <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
       <div className={`absolute right-2 top-full z-50 mt-1 w-[22rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border border-keep-rule bg-keep-bg shadow-2xl${reduceMotion ? " tk-slide-down-in" : ""}`}>
         <div className="flex items-center justify-between border-b border-keep-rule bg-keep-banner/40 px-3 py-1.5">
-          <span className="text-xs uppercase tracking-widest text-keep-muted">Notifications</span>
+          <span className="text-xs uppercase tracking-widest text-keep-muted">{t("notif.title")}</span>
           <button
             type="button"
             onClick={() => void markAll()}
             className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
           >
-            Mark all read
+            {t("notif.markAllRead")}
           </button>
         </div>
         <div className="max-h-[60vh] overflow-y-auto">
           {err ? (
             <p className="px-3 py-4 text-xs text-keep-accent">{err}</p>
           ) : !rows ? (
-            <p className="px-3 py-4 text-xs italic text-keep-muted">Checking…</p>
+            <p className="px-3 py-4 text-xs italic text-keep-muted">{t("notif.checking")}</p>
           ) : rows.length === 0 ? (
             <p className="px-3 py-4 text-xs italic text-keep-muted">
-              Nothing yet - replies to your topics, quotes of your posts, and watched topics land here.
+              {t("notif.empty")}
             </p>
           ) : (
             <ul>
@@ -2602,12 +2851,25 @@ function ForumNotifPanel({ onOpen, onClose }: {
                     <span aria-hidden className="mt-0.5 shrink-0 text-keep-accent">{glyph(n.kind)}</span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-xs text-keep-text">
-                        <b>{n.actorName}</b> {verb(n.kind)} <b className="break-words">{n.topicTitle}</b>
+                        <Trans
+                          t={t}
+                          i18nKey={lineKey(n.kind)}
+                          values={{ actor: n.actorName, title: n.topicTitle }}
+                          components={{ actor: <b />, topic: <b className="break-words" /> }}
+                        />
                       </span>
                       {n.snippet ? (
                         <span className="block truncate text-[11px] text-keep-muted">{n.snippet}</span>
                       ) : null}
-                      <span className="block text-[10px] text-keep-muted">{relTime(n.createdAt)}</span>
+                      <span className="block text-[10px] text-keep-muted">
+                        {relTime(n.createdAt)}
+                        {/* Live forum · board context so the reader knows WHERE
+                            the notice lives before clicking; absent when the
+                            board was since deleted (snapshot title remains). */}
+                        {n.forumName && n.boardName
+                          ? <> · {t("notif.context", { forum: n.forumName, board: n.boardName })}</>
+                          : null}
+                      </span>
                     </span>
                     {!n.read ? (
                       <span aria-hidden className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-keep-accent" />
@@ -2633,6 +2895,7 @@ function MembershipStrip({ detail, onChanged }: {
   detail: ForumDetail;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const v = detail.viewer;
   const [open, setOpen] = useState(false);
   const [answer, setAnswer] = useState("");
@@ -2644,7 +2907,7 @@ function MembershipStrip({ detail, onChanged }: {
   async function act(fn: () => Promise<void>) {
     setBusy(true); setErr(null);
     try { await fn(); onChanged(); }
-    catch (e) { setErr(e instanceof Error ? e.message : "failed"); }
+    catch (e) { setErr(e instanceof Error ? e.message : t("shared.failed")); }
     finally { setBusy(false); }
   }
 
@@ -2653,18 +2916,21 @@ function MembershipStrip({ detail, onChanged }: {
     return (
       <div className="flex items-center justify-between gap-2 border-b border-keep-rule bg-keep-panel/20 px-4 py-1.5 text-xs text-keep-muted">
         <span>
-          You're a {v.role === "mod" ? "moderator" : "member"} of this forum.
+          {v.role === "mod" ? t("membership.youAreModerator") : t("membership.youAreMember")}
         </span>
         <button
           type="button"
           disabled={busy}
           onClick={() => {
-            if (!window.confirm(`Leave ${detail.name}?${v.role === "mod" ? " You'll also give up your mod chair." : ""}${detail.postingMode === "application" ? " You'd need to re-apply to return." : ""}`)) return;
+            const parts = [t("membership.leaveConfirm", { name: detail.name })];
+            if (v.role === "mod") parts.push(t("membership.leaveModNote"));
+            if (detail.postingMode === "application") parts.push(t("membership.leaveReapplyNote"));
+            if (!window.confirm(parts.join(" "))) return;
             void act(() => leaveForum(detail.id));
           }}
           className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest hover:text-keep-text"
         >
-          Leave
+          {t("membership.leave")}
         </button>
       </div>
     );
@@ -2681,7 +2947,7 @@ function MembershipStrip({ detail, onChanged }: {
     return (
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-keep-rule bg-keep-panel/20 px-4 py-1.5 text-xs">
         <span className="text-keep-muted">
-          Join {detail.name} to post in its members-only sections.
+          {t("membership.joinPrompt", { name: detail.name })}
         </span>
         <div className="flex items-center gap-2">
           {err ? <span className="text-keep-accent">{err}</span> : null}
@@ -2691,7 +2957,7 @@ function MembershipStrip({ detail, onChanged }: {
             onClick={() => void act(() => joinForum(detail.id))}
             className="rounded border border-keep-action bg-keep-action/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
           >
-            Join
+            {t("membership.join")}
           </button>
         </div>
       </div>
@@ -2703,14 +2969,14 @@ function MembershipStrip({ detail, onChanged }: {
   if (v.membershipPending) {
     return (
       <div className="flex items-center justify-between gap-2 border-b border-keep-rule bg-keep-action/5 px-4 py-1.5 text-xs">
-        <span className="text-keep-action">Your application is pending the keeper's review.</span>
+        <span className="text-keep-action">{t("membership.pendingReview")}</span>
         <button
           type="button"
           disabled={busy}
           onClick={() => void act(() => withdrawForumMembership(detail.id))}
           className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
         >
-          Withdraw
+          {t("membership.withdraw")}
         </button>
       </div>
     );
@@ -2721,27 +2987,27 @@ function MembershipStrip({ detail, onChanged }: {
       {!open ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-keep-muted">
-            This forum accepts posts from approved members. You can read everything meanwhile.
+            {t("membership.applyIntro")}
           </p>
           <button
             type="button"
             onClick={() => setOpen(true)}
             className="rounded border border-keep-action bg-keep-action/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
           >
-            Apply to join
+            {t("membership.applyToJoin")}
           </button>
         </div>
       ) : (
         <div className="space-y-2">
           <p className="text-xs text-keep-muted">
-            {detail.applicationPrompt?.trim() || "Tell the keeper why you'd like to join."}
+            {detail.applicationPrompt?.trim() || t("membership.defaultPrompt")}
           </p>
           <textarea
             value={answer}
             onChange={(e) => setAnswer(e.target.value)}
             rows={3}
             maxLength={500}
-            placeholder="Your answer (optional but persuasive)"
+            placeholder={t("membership.answerPlaceholder")}
             className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
           />
           {err ? <p className="text-xs text-keep-accent">{err}</p> : null}
@@ -2752,14 +3018,14 @@ function MembershipStrip({ detail, onChanged }: {
               onClick={() => void act(async () => { await applyForumMembership(detail.id, answer); setOpen(false); setAnswer(""); })}
               className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
             >
-              {busy ? "…" : "Submit"}
+              {busy ? "…" : t("membership.submit")}
             </button>
             <button
               type="button"
               onClick={() => setOpen(false)}
               className="rounded border border-keep-rule px-3 py-1 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
             >
-              Cancel
+              {t("common:cancel")}
             </button>
           </div>
         </div>
@@ -2784,6 +3050,7 @@ function ForumSettingsView({ detail, onSaved, onBoardArchived }: {
   // appearance); the moderation tabs surface to a Forum Mod holding the
   // matching granular grant — roles←manage_members, applications←
   // review_applications, bans←ban_users. The server re-checks each action.
+  const { t } = useTranslation("forums");
   const setForcedTourId = useChat((s) => s.setForcedTourId);
   const canManage = !!detail.viewer?.canManage;
   const isMod = canManage || detail.viewer?.role === "mod";
@@ -2810,31 +3077,31 @@ function ForumSettingsView({ detail, onSaved, onBoardArchived }: {
   async function run(fn: () => Promise<void>) {
     setBusy(true); setErr(null);
     try { await fn(); }
-    catch (e) { setErr(e instanceof Error ? e.message : "save failed"); }
+    catch (e) { setErr(e instanceof Error ? e.message : t("shared.saveFailed")); }
     finally { setBusy(false); }
   }
 
   return (
     <div className="px-4 py-3">
       <div className="mb-3 flex flex-wrap items-center gap-1" data-tour="forum-settings-tab-strip">
-        {tabs.map((t) => (
+        {tabs.map((tabKey) => (
           <button
-            key={t}
+            key={tabKey}
             type="button"
-            data-tour={`forum-settings-tab-${t}`}
-            onClick={() => setTab(t)}
+            data-tour={`forum-settings-tab-${tabKey}`}
+            onClick={() => setTab(tabKey)}
             className={`rounded border px-2.5 py-1 text-xs uppercase tracking-widest ${
-              tab === t ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"
+              tab === tabKey ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"
             }`}
           >
-            {t}
+            {t(`settings.tabs.${tabKey}`)}
           </button>
         ))}
         <button
           type="button"
           onClick={() => setForcedTourId("forum-admin")}
-          title="Replay the forum settings tour"
-          aria-label="Replay the forum settings tour"
+          title={t("settings.replayTour")}
+          aria-label={t("settings.replayTour")}
           className="ml-auto rounded p-1 text-keep-muted hover:bg-keep-panel hover:text-keep-action"
         >
           <HelpCircle className="h-4 w-4" aria-hidden="true" />
@@ -2889,6 +3156,7 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
   run: (fn: () => Promise<void>) => Promise<void>;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const initialTheme = useMemo<Theme | null>(() => {
     if (!detail.themeJson) return null;
     try { return normalizeTheme(JSON.parse(detail.themeJson)); } catch { return null; }
@@ -2925,7 +3193,7 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
     return () => { alive = false; };
   }, [detail.affiliatedServer?.id]);
 
-  async function pickImage(kind: "logo" | "banner", file: File) {
+  async function pickImage(kind: "logo" | "banner" | "sfw-banner", file: File) {
     const maxBytes = kind === "logo" ? 512 * 1024 : 2 * 1024 * 1024;
     await run(async () => {
       const dataUrl = await readImageFile(file, maxBytes);
@@ -2933,6 +3201,10 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
       onSaved();
     });
   }
+  // The public-safe banner slot only matters for an 18+ forum (a SFW forum's
+  // regular banner must already be safe for everyone), and under-18 viewers
+  // never see 18+ controls. Cosmetic mirror; the route re-checks.
+  const isAdultViewer = useChat((s) => s.viewerAge.isAdult);
 
   const themeDirty = JSON.stringify(theme) !== JSON.stringify(initialTheme);
   const styleDirty = styleKey !== detail.themeStyleKey;
@@ -2943,20 +3215,20 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
   return (
     <div className="max-w-xl space-y-4">
       <section>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Images</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("appearance.images")}</p>
         <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
           {(["logo", "banner"] as const).map((kind) => {
             const current = kind === "logo" ? detail.logoUrl : detail.bannerImageUrl;
             return (
               <div key={kind} className="flex flex-wrap items-center gap-2">
-                <span className="w-16 text-xs uppercase tracking-widest text-keep-muted">{kind}</span>
+                <span className="w-16 text-xs uppercase tracking-widest text-keep-muted">{t(`appearance.imageKind.${kind}`)}</span>
                 {current ? (
                   <img src={current} alt="" className={kind === "logo" ? "h-8 w-8 rounded border border-keep-rule object-cover" : "h-8 w-20 rounded border border-keep-rule object-cover"} />
                 ) : (
-                  <span className="text-xs italic text-keep-muted">none</span>
+                  <span className="text-xs italic text-keep-muted">{t("shared.noneLower")}</span>
                 )}
                 <label className="cursor-pointer rounded border border-keep-rule px-2 py-1 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text">
-                  Upload
+                  {t("shared.upload")}
                   <input
                     type="file"
                     accept="image/png,image/jpeg,image/webp,image/gif"
@@ -2974,9 +3246,9 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
                     type="button" disabled={busy}
                     onClick={() => void run(async () => { await setForumImage(detail.id, kind, null); onSaved(); })}
                     className="rounded border border-keep-accent/60 px-2 py-1 text-[11px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10"
-                  >Clear</button>
+                  >{t("common:clear")}</button>
                 ) : null}
-                <span className="text-[10px] text-keep-muted">{kind === "logo" ? "square, ≤512KB" : "wide, ≤2MB"}</span>
+                <span className="text-[10px] text-keep-muted">{kind === "logo" ? t("appearance.logoSize") : t("appearance.bannerSize")}</span>
               </div>
             );
           })}
@@ -2994,7 +3266,7 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
                 aria-hidden
               />
               <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase tracking-widest text-keep-muted">Focus</span>
+                <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("appearance.focus")}</span>
                 <input
                   type="range"
                   min={0}
@@ -3003,7 +3275,7 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
                   onChange={(e) => setBannerFocus(Number(e.target.value))}
                   disabled={busy}
                   className="min-w-0 flex-1 accent-[rgb(var(--keep-action))]"
-                  aria-label="Banner vertical focus"
+                  aria-label={t("appearance.focusAria")}
                 />
                 <span className="w-8 text-right text-[10px] tabular-nums text-keep-muted">{bannerFocus}%</span>
                 {focusDirty ? (
@@ -3016,22 +3288,66 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
                     })}
                     className="rounded border border-keep-action bg-keep-action px-2.5 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
                   >
-                    Save
+                    {t("common:save")}
                   </button>
                 ) : null}
               </div>
               <p className="text-[10px] text-keep-muted">
-                Slide to choose which part of the banner shows - 0% keeps the top, 100% the bottom.
+                {t("appearance.focusHint")}
               </p>
             </div>
           ) : null}
         </div>
       </section>
 
+      {/* Public-safe banner (age plan Phase 3, decision #10): only offered
+          on an 18+ forum — a SFW forum's regular banner must already be safe
+          for everyone — and never shown to under-18 viewers. Same slot the
+          18+ servers carry, riding the forum image upload pipeline. */}
+      {isAdultViewer && (detail.isNsfw ?? false) ? (
+        <section>
+          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("appearance.publicBanner")}</p>
+          <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              {detail.sfwBannerUrl ? (
+                <img src={detail.sfwBannerUrl} alt="" className="h-8 w-20 rounded border border-keep-rule object-cover" />
+              ) : (
+                <span className="text-xs italic text-keep-muted">{t("shared.noneLower")}</span>
+              )}
+              <label className="cursor-pointer rounded border border-keep-rule px-2 py-1 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text">
+                {t("shared.upload")}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  className="hidden"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    e.target.value = "";
+                    if (f) void pickImage("sfw-banner", f);
+                  }}
+                />
+              </label>
+              {detail.sfwBannerUrl ? (
+                <button
+                  type="button" disabled={busy}
+                  onClick={() => void run(async () => { await setForumImage(detail.id, "sfw-banner", null); onSaved(); })}
+                  className="rounded border border-keep-accent/60 px-2 py-1 text-[11px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10"
+                >{t("common:clear")}</button>
+              ) : null}
+              <span className="text-[10px] text-keep-muted">{t("appearance.bannerSize")}</span>
+            </div>
+            <p className="text-[10px] text-keep-muted">
+              {t("appearance.publicBannerHint")}
+            </p>
+          </div>
+        </section>
+      ) : null}
+
       <section>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Theme</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("appearance.theme")}</p>
         <p className="mb-2 text-[11px] text-keep-muted">
-          A palette for this forum's pages only - chat and the userlist are untouched.
+          {t("appearance.themeHint")}
         </p>
         {theme === null ? (
           <button
@@ -3039,17 +3355,17 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
             onClick={() => setTheme(DEFAULT_THEME)}
             className="rounded border border-keep-rule bg-keep-banner px-2 py-1 text-xs hover:bg-keep-banner/80"
           >
-            Add a custom theme
+            {t("appearance.addTheme")}
           </button>
         ) : (
           <>
-            <ThemePicker theme={theme} onChange={(t) => setTheme(t)} onReset={() => setTheme(DEFAULT_THEME)} />
+            <ThemePicker theme={theme} onChange={(next) => setTheme(next)} onReset={() => setTheme(DEFAULT_THEME)} />
             <button
               type="button"
               onClick={() => setTheme(null)}
               className="mt-2 rounded border border-keep-accent/40 bg-keep-bg px-2 py-1 text-[11px] text-keep-accent hover:bg-keep-accent/10"
             >
-              Remove custom theme
+              {t("appearance.removeTheme")}
             </button>
           </>
         )}
@@ -3063,17 +3379,15 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
             })}
             className="ml-2 mt-2 rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
           >
-            Save theme
+            {t("appearance.saveTheme")}
           </button>
         ) : null}
       </section>
 
       <section>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Design style</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("appearance.designStyle")}</p>
         <p className="mb-2 text-[11px] text-keep-muted">
-          The visual treatment - ornaments, borders, textures (Glass, etc.). Orthogonal to the
-          palette above; applies to this forum's pages for every visitor. "Use default" follows
-          each visitor's own design.
+          {t("appearance.designStyleHint")}
         </p>
         <StylePicker
           value={styleKey}
@@ -3090,16 +3404,15 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
             })}
             className="mt-2 rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
           >
-            Save style
+            {t("appearance.saveStyle")}
           </button>
         ) : null}
       </section>
 
       <section>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Linked world</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("appearance.linkedWorld")}</p>
         <p className="mb-2 text-[11px] text-keep-muted">
-          Show one of your worlds on the forum's header - visitors can view it and join or
-          apply from its page. Private worlds can't be linked.
+          {t("appearance.linkedWorldHint")}
         </p>
         <div className="flex gap-2">
           <select
@@ -3108,7 +3421,7 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
             disabled={!worlds}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
           >
-            <option value="">(no world)</option>
+            <option value="">{t("appearance.noWorld")}</option>
             {(worlds ?? []).map((w) => (
               <option key={w.id} value={w.id}>{w.name}</option>
             ))}
@@ -3122,17 +3435,15 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
             })}
             className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
           >
-            Save
+            {t("common:save")}
           </button>
         </div>
       </section>
 
       <section>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Affiliated server</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("appearance.affiliatedServer")}</p>
         <p className="mb-2 text-[11px] text-keep-muted">
-          Tie this forum to one of your chat servers so topic cards show each author's
-          rank, border, and name style as earned on that server. Pick "None" to show
-          plain author names instead. Only servers you own or help run appear here.
+          {t("appearance.affiliatedServerHint")}
         </p>
         <div className="flex gap-2">
           <select
@@ -3141,7 +3452,7 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
             disabled={!servers}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
           >
-            <option value="">None</option>
+            <option value="">{t("shared.none")}</option>
             {(servers ?? []).map((s) => (
               <option key={s.id} value={s.id}>{s.name}</option>
             ))}
@@ -3155,7 +3466,7 @@ function AppearanceSettings({ detail, busy, run, onSaved }: {
             })}
             className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
           >
-            Save
+            {t("common:save")}
           </button>
         </div>
       </section>
@@ -3173,6 +3484,7 @@ function ApplicationsSettings({ detail, busy, run }: {
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
 }) {
+  const { t } = useTranslation("forums");
   const [pending, setPending] = useState<ForumMembershipApplicationWire[] | null>(null);
   const [recent, setRecent] = useState<ForumMembershipApplicationWire[]>([]);
   const [tick, setTick] = useState(0);
@@ -3189,30 +3501,29 @@ function ApplicationsSettings({ detail, busy, run }: {
     <div className="max-w-xl space-y-3">
       {detail.postingMode !== "application" ? (
         <p className="rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5 text-xs text-keep-muted">
-          This forum is currently open - everyone may post without applying. The queue below
-          only fills while posting is set to "application" (Overview tab).
+          {t("applications.openNote")}
         </p>
       ) : null}
       <div>
         <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">
-          Pending {pending ? `(${pending.length})` : ""}
+          {t("applications.pending")} {pending ? `(${pending.length})` : ""}
         </p>
         {!pending ? (
-          <p className="text-sm italic text-keep-muted">Loading…</p>
+          <p className="text-sm italic text-keep-muted">{t("common:loading")}</p>
         ) : pending.length === 0 ? (
-          <p className="text-xs italic text-keep-muted">No one is waiting at the gate.</p>
+          <p className="text-xs italic text-keep-muted">{t("applications.noneWaiting")}</p>
         ) : (
           <ul className="space-y-1.5">
             {pending.map((a) => (
               <li key={a.id} className="rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <span className="text-sm font-semibold text-keep-text">{a.applicantUsername}</span>
-                  <span className="text-[10px] text-keep-muted">{new Date(a.submittedAt).toLocaleString()}</span>
+                  <span className="text-[10px] text-keep-muted">{formatDateTime(a.submittedAt)}</span>
                 </div>
                 {a.answer ? (
                   <p className="mt-1 whitespace-pre-wrap text-xs text-keep-text/90">{a.answer}</p>
                 ) : (
-                  <p className="mt-1 text-xs italic text-keep-muted">(no answer given)</p>
+                  <p className="mt-1 text-xs italic text-keep-muted">{t("applications.noAnswer")}</p>
                 )}
                 <div className="mt-1.5 flex gap-2">
                   <button
@@ -3222,19 +3533,19 @@ function ApplicationsSettings({ detail, busy, run }: {
                       setTick((t) => t + 1);
                     })}
                     className="rounded border border-keep-action bg-keep-action/15 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50"
-                  >Approve</button>
+                  >{t("applications.approve")}</button>
                   <button
                     type="button" disabled={busy}
                     onClick={() => {
-                      const v = window.prompt(`Decline ${a.applicantUsername}? Optional note shown to them:`, "");
+                      const v = window.prompt(t("applications.declinePrompt", { name: a.applicantUsername }), "");
                       if (v === null) return;
                       void run(async () => {
                         await reviewForumMembershipApplication(detail.id, a.id, "reject", v.trim() || undefined);
-                        setTick((t) => t + 1);
+                        setTick((n) => n + 1);
                       });
                     }}
                     className="rounded border border-keep-accent/60 bg-keep-accent/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-accent disabled:opacity-50"
-                  >Decline</button>
+                  >{t("applications.decline")}</button>
                 </div>
               </li>
             ))}
@@ -3243,14 +3554,14 @@ function ApplicationsSettings({ detail, busy, run }: {
       </div>
       {recent.length > 0 ? (
         <div>
-          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Recent decisions</p>
+          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("applications.recentDecisions")}</p>
           <ul className="space-y-0.5">
             {recent.map((a) => (
               <li key={a.id} className="flex flex-wrap items-baseline gap-x-2 rounded border border-keep-rule/50 px-2 py-0.5 text-[11px] text-keep-muted">
                 <span className={a.status === "approved" ? "font-semibold uppercase text-keep-action" : "font-semibold uppercase text-keep-accent"}>{a.status}</span>
                 <span className="text-keep-text">{a.applicantUsername}</span>
-                {a.reviewedByUsername ? <span>by {a.reviewedByUsername}</span> : null}
-                {a.reviewedAt ? <span>· {new Date(a.reviewedAt).toLocaleDateString()}</span> : null}
+                {a.reviewedByUsername ? <span>{t("shared.byName", { name: a.reviewedByUsername })}</span> : null}
+                {a.reviewedAt ? <span>· {formatDate(a.reviewedAt)}</span> : null}
               </li>
             ))}
           </ul>
@@ -3276,6 +3587,7 @@ function PermissionCheckboxes({ value, onChange, grantable, disabled }: {
   grantable: Set<ForumModPermission>;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("forums");
   const has = new Set(value);
   return (
     <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
@@ -3285,7 +3597,7 @@ function PermissionCheckboxes({ value, onChange, grantable, disabled }: {
         return (
           <label
             key={key}
-            title={canGrant ? meta.description : "You don't hold this permission yourself, so you can't grant it."}
+            title={canGrant ? meta.description : t("permGrid.cantGrant")}
             className={`flex items-start gap-2 rounded border border-keep-rule/60 px-2 py-1 text-xs ${canGrant ? "" : "opacity-50"}`}
           >
             <input
@@ -3318,10 +3630,11 @@ function ForumPermissionCheckboxes({ value, onChange, grantable, disabled }: {
   grantable: Set<ForumPermission>;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("forums");
   const has = new Set(value);
   const sections: { title: string; keys: ForumPermission[] }[] = [
-    { title: "Member features", keys: FORUM_PERMISSIONS.filter((k) => forumPermissionCategory(k) === "feature") },
-    { title: "Moderation", keys: FORUM_PERMISSIONS.filter((k) => forumPermissionCategory(k) === "moderation") },
+    { title: t("permGrid.memberFeatures"), keys: FORUM_PERMISSIONS.filter((k) => forumPermissionCategory(k) === "feature") },
+    { title: t("permGrid.moderation"), keys: FORUM_PERMISSIONS.filter((k) => forumPermissionCategory(k) === "moderation") },
   ];
   function toggle(key: ForumPermission, on: boolean) {
     const next = new Set(value);
@@ -3340,7 +3653,7 @@ function ForumPermissionCheckboxes({ value, onChange, grantable, disabled }: {
               return (
                 <label
                   key={key}
-                  title={canGrant ? meta.description : "You don't hold this permission yourself, so you can't grant it."}
+                  title={canGrant ? meta.description : t("permGrid.cantGrant")}
                   className={`flex items-start gap-2 rounded border border-keep-rule/60 px-2 py-1 text-xs ${canGrant ? "" : "opacity-50"}`}
                 >
                   <input type="checkbox" className="mt-0.5" checked={has.has(key)} disabled={disabled || !canGrant}
@@ -3366,6 +3679,7 @@ function AutoRulesEditor({ detail, rules, onChange, disabled }: {
   onChange: (next: ForumAutoRule[]) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation("forums");
   const kinds: ForumAutoRuleKind[] = ["post_count", "topic_count", "posted_in_category", "account_age_days", "member_age_days"];
   function update(i: number, rule: ForumAutoRule) { const next = rules.slice(); next[i] = rule; onChange(next); }
   function changeKind(i: number, kind: ForumAutoRuleKind, prev: ForumAutoRule) {
@@ -3383,7 +3697,7 @@ function AutoRulesEditor({ detail, rules, onChange, disabled }: {
           {r.kind === "posted_in_category" ? (
             <select value={r.categoryId} disabled={disabled} onChange={(e) => update(i, { kind: "posted_in_category", categoryId: e.target.value })}
               className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-1.5 py-1 text-xs outline-none focus:border-keep-action">
-              {detail.categories.length === 0 ? <option value="">(no categories yet)</option> :
+              {detail.categories.length === 0 ? <option value="">{t("autoRules.noCategories")}</option> :
                 detail.categories.map((c) => <option key={c.id} value={c.id}>{detail.boards.length > 1 ? `${c.boardName} / ` : ""}{c.name}</option>)}
             </select>
           ) : (
@@ -3395,12 +3709,12 @@ function AutoRulesEditor({ detail, rules, onChange, disabled }: {
             </>
           )}
           <button type="button" disabled={disabled} onClick={() => onChange(rules.filter((_, j) => j !== i))}
-            className="ml-auto shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Remove</button>
+            className="ml-auto shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.remove")}</button>
         </div>
       ))}
       <button type="button" disabled={disabled || rules.length >= FORUM_MAX_AUTO_RULES}
         onClick={() => onChange([...rules, { kind: "post_count", min: 10 }])}
-        className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action disabled:opacity-50">+ Add rule</button>
+        className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action disabled:opacity-50">{t("autoRules.addRule")}</button>
     </div>
   );
 }
@@ -3412,6 +3726,7 @@ function UsergroupMembers({ detail, group, busy, run }: {
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
 }) {
+  const { t } = useTranslation("forums");
   const [members, setMembers] = useState<ForumUsergroupMemberWire[] | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -3421,12 +3736,12 @@ function UsergroupMembers({ detail, group, busy, run }: {
   }, [detail.id, group.id, tick]);
   return (
     <div className="border-t border-keep-rule/60 pt-3">
-      <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Members ({members?.length ?? "…"})</p>
-      <p className="mb-2 text-[10px] text-keep-muted">Add people by hand; auto-joined members are tagged "auto".</p>
+      <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("usergroups.membersHeading")} ({members?.length ?? "…"})</p>
+      <p className="mb-2 text-[10px] text-keep-muted">{t("usergroups.addByHand")}</p>
       <div className="mb-2">
         <UserLookupPicker
           forumId={detail.id}
-          placeholder="Add a member…"
+          placeholder={t("usergroups.addMemberPlaceholder")}
           onSelect={(hit) => void run(async () => { await addForumUsergroupMember(detail.id, group.id, `@id:${hit.userId}`); setTick((t) => t + 1); })}
         />
       </div>
@@ -3435,14 +3750,14 @@ function UsergroupMembers({ detail, group, busy, run }: {
           {members.map((m) => (
             <li key={m.userId} className="flex items-center gap-2 rounded border border-keep-rule/60 px-2 py-1 text-xs">
               <span className="min-w-0 flex-1 truncate text-keep-text">{m.username}</span>
-              {m.isAuto ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">auto</span> : null}
+              {m.isAuto ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">{t("usergroups.autoChip")}</span> : null}
               <button type="button" disabled={busy}
-                onClick={() => void run(async () => { await removeForumUsergroupMember(detail.id, group.id, m.userId); setTick((t) => t + 1); })}
-                className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Remove</button>
+                onClick={() => void run(async () => { await removeForumUsergroupMember(detail.id, group.id, m.userId); setTick((n) => n + 1); })}
+                className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.remove")}</button>
             </li>
           ))}
         </ul>
-      ) : members ? <p className="text-[11px] italic text-keep-muted">No manual or auto members yet.</p> : null}
+      ) : members ? <p className="text-[11px] italic text-keep-muted">{t("usergroups.noMembers")}</p> : null}
     </div>
   );
 }
@@ -3458,6 +3773,7 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const isDefault = !!group?.isDefault;
   const [name, setName] = useState(group?.name ?? "");
   const [color, setColor] = useState(group?.color ?? "");
@@ -3476,36 +3792,36 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
   return (
     <div className="max-w-2xl space-y-3">
       <div className="flex items-center gap-2">
-        <button type="button" onClick={onClose} className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">← Back</button>
-        <h3 className="text-sm font-semibold text-keep-text">{group ? (isDefault ? "Default group" : `Edit "${group.name}"`) : "New usergroup"}</h3>
+        <button type="button" onClick={onClose} className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text">{t("usergroups.back")}</button>
+        <h3 className="text-sm font-semibold text-keep-text">{group ? (isDefault ? t("usergroups.defaultGroup") : t("usergroups.editGroup", { name: group.name })) : t("usergroups.newGroup")}</h3>
       </div>
 
       {isDefault ? (
-        <p className="text-[11px] text-keep-muted">The default group applies to every participant. Editing its permissions changes what ungrouped members can do. Leave the feature boxes on to keep the forum fully open.</p>
+        <p className="text-[11px] text-keep-muted">{t("usergroups.defaultHint")}</p>
       ) : (
         <div className="flex flex-wrap items-center gap-2">
-          <input type="color" value={color || "#8a66cc"} onChange={(e) => setColor(e.target.value)} title="Group color" className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
-          <input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder="Group name (e.g. Veterans)" className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+          <input type="color" value={color || "#8a66cc"} onChange={(e) => setColor(e.target.value)} title={t("usergroups.groupColor")} className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" />
+          <input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} placeholder={t("usergroups.groupNamePlaceholder")} className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
         </div>
       )}
 
       <div>
-        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Permissions</p>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("usergroups.permissions")}</p>
         <ForumPermissionCheckboxes value={perms} grantable={grantable} disabled={busy} onChange={setPerms} />
       </div>
 
       {!isDefault ? (
         <div>
-          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">Auto-join rules</p>
-          <p className="mb-1 text-[10px] text-keep-muted">Members who meet EVERY rule join automatically (re-checked as they post).</p>
+          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("usergroups.autoJoinRules")}</p>
+          <p className="mb-1 text-[10px] text-keep-muted">{t("usergroups.autoJoinHint")}</p>
           <AutoRulesEditor detail={detail} rules={rules} disabled={busy} onChange={setRules} />
         </div>
       ) : null}
 
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">Cancel</button>
+        <button type="button" onClick={onClose} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">{t("common:cancel")}</button>
         <button type="button" disabled={busy || (!isDefault && !name.trim())} onClick={save}
-          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{group ? "Save" : "Create"}</button>
+          className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{group ? t("common:save") : t("shared.create")}</button>
       </div>
 
       {group && !isDefault ? <UsergroupMembers detail={detail} group={group} busy={busy} run={run} /> : null}
@@ -3518,6 +3834,7 @@ function UsergroupsSettings({ detail, busy, run }: {
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
 }) {
+  const { t } = useTranslation("forums");
   const [data, setData] = useState<ForumUsergroupsResponse | null>(null);
   const [tick, setTick] = useState(0);
   const [editing, setEditing] = useState<ForumUsergroupWire | "new" | null>(null);
@@ -3530,7 +3847,7 @@ function UsergroupsSettings({ detail, busy, run }: {
 
   const grantable = useMemo(() => new Set(data?.managerPermissions ?? []), [data?.managerPermissions]);
 
-  if (!data) return <p className="text-sm italic text-keep-muted">Loading…</p>;
+  if (!data) return <p className="text-sm italic text-keep-muted">{t("common:loading")}</p>;
 
   if (editing) {
     return (
@@ -3549,9 +3866,7 @@ function UsergroupsSettings({ detail, busy, run }: {
   return (
     <div className="max-w-2xl space-y-3">
       <p className="text-[11px] text-keep-muted">
-        Usergroups bundle forum permissions, both moderation powers and member features (posting,
-        images, polls), and apply them to people. Everyone is in the default group; add more groups
-        and fill them by hand or with auto-join rules (post count, age, posting in a category…).
+        {t("usergroups.intro")}
       </p>
       <ul className="space-y-1.5">
         {data.groups.map((g) => (
@@ -3560,27 +3875,27 @@ function UsergroupsSettings({ detail, busy, run }: {
               <span className="inline-flex min-w-0 flex-1 items-center gap-1.5">
                 {g.color ? <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: g.color }} /> : null}
                 <span className="truncate text-sm font-semibold text-keep-text">{g.name}</span>
-                {g.isDefault ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">default</span> : null}
+                {g.isDefault ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">{t("usergroups.defaultChip")}</span> : null}
               </span>
               <span className="shrink-0 text-[10px] text-keep-muted">
-                {g.permissions.length} perm{g.permissions.length === 1 ? "" : "s"}
+                {t("usergroups.permCount", { count: g.permissions.length })}
                 {g.isDefault
-                  ? " · everyone"
-                  : ` · ${g.memberCount} member${g.memberCount === 1 ? "" : "s"}${g.autoRules.length ? ` · ${g.autoRules.length} rule${g.autoRules.length === 1 ? "" : "s"}` : ""}`}
+                  ? ` · ${t("usergroups.everyone")}`
+                  : ` · ${t("shared.memberCount", { count: g.memberCount })}${g.autoRules.length ? ` · ${t("usergroups.ruleCount", { count: g.autoRules.length })}` : ""}`}
               </span>
               <button type="button" disabled={busy} onClick={() => setEditing(g)}
-                className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">Edit</button>
+                className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">{t("shared.edit")}</button>
               {!g.isDefault ? (
                 <button type="button" disabled={busy}
-                  onClick={() => { if (window.confirm(`Delete the "${g.name}" usergroup? Members lose its permissions.`)) void run(async () => { await deleteForumUsergroup(detail.id, g.id); setTick((t) => t + 1); }); }}
-                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">Delete</button>
+                  onClick={() => { if (window.confirm(t("usergroups.deleteConfirm", { name: g.name }))) void run(async () => { await deleteForumUsergroup(detail.id, g.id); setTick((n) => n + 1); }); }}
+                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("common:delete")}</button>
               ) : null}
             </div>
           </li>
         ))}
       </ul>
       <button type="button" disabled={busy} onClick={() => setEditing("new")}
-        className="rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">+ New group</button>
+        className="rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">{t("usergroups.newGroupButton")}</button>
     </div>
   );
 }
@@ -3590,6 +3905,7 @@ function RolesSettings({ detail, busy, run }: {
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
 }) {
+  const { t } = useTranslation("forums");
   const [roles, setRoles] = useState<ForumRoles | null>(null);
   const [tick, setTick] = useState(0);
   // Selected user from the picker, awaiting permission choices + Appoint.
@@ -3612,23 +3928,22 @@ function RolesSettings({ detail, busy, run }: {
   return (
     <div className="max-w-2xl space-y-4">
       {!roles ? (
-        <p className="text-sm italic text-keep-muted">Loading…</p>
+        <p className="text-sm italic text-keep-muted">{t("common:loading")}</p>
       ) : (
         <>
           <p className="text-sm text-keep-text">
-            <span className="text-xs uppercase tracking-widest text-keep-muted">Keeper</span>{" "}
+            <span className="text-xs uppercase tracking-widest text-keep-muted">{t("shared.keeper")}</span>{" "}
             <span className="font-semibold">{roles.owner.username}</span>
-            <span className="ml-1 text-[10px] text-keep-muted">(every power)</span>
+            <span className="ml-1 text-[10px] text-keep-muted">{t("roles.everyPower")}</span>
           </p>
 
           <div>
             <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">
-              Forum Moderators ({roles.mods.length})
+              {t("roles.forumModerators")} ({roles.mods.length})
             </p>
             {roles.mods.length === 0 ? (
               <p className="text-xs italic text-keep-muted">
-                None yet. Appoint a helper below and pick exactly which powers they get.
-                Mods can never touch your posts, categories, or settings.
+                {t("roles.noneYet")}
               </p>
             ) : (
               <ul className="space-y-1.5">
@@ -3637,21 +3952,21 @@ function RolesSettings({ detail, busy, run }: {
                     <div className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-sm text-keep-text">{m.username}</span>
                       <span className="shrink-0 text-[10px] text-keep-muted">
-                        {m.permissions.length} {m.permissions.length === 1 ? "power" : "powers"} · since {new Date(m.since).toLocaleDateString()}
+                        {t("roles.powerCount", { count: m.permissions.length })} · {t("roles.sinceDate", { date: formatDate(m.since) })}
                       </span>
                       <button
                         type="button" disabled={busy}
                         onClick={() => setEditingUserId((id) => (id === m.userId ? null : m.userId))}
                         className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action"
-                      >{editingUserId === m.userId ? "Done" : "Edit"}</button>
+                      >{editingUserId === m.userId ? t("roles.done") : t("shared.edit")}</button>
                       <button
                         type="button" disabled={busy}
                         onClick={() => {
-                          if (!window.confirm(`Remove ${m.username} as Forum Moderator?`)) return;
-                          void run(async () => { await revokeForumMod(detail.id, m.userId); setTick((t) => t + 1); });
+                          if (!window.confirm(t("roles.removeModConfirm", { name: m.username }))) return;
+                          void run(async () => { await revokeForumMod(detail.id, m.userId); setTick((n) => n + 1); });
                         }}
                         className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10"
-                      >Remove</button>
+                      >{t("shared.remove")}</button>
                     </div>
                     {editingUserId === m.userId ? (
                       <div className="mt-2 border-t border-keep-rule/60 pt-2">
@@ -3674,15 +3989,15 @@ function RolesSettings({ detail, busy, run }: {
 
           {/* Appoint flow: pick a user, choose powers, confirm. */}
           <div className="rounded border border-keep-rule p-3">
-            <p className="mb-2 text-xs uppercase tracking-widest text-keep-muted">Appoint a moderator</p>
+            <p className="mb-2 text-xs uppercase tracking-widest text-keep-muted">{t("roles.appointHeading")}</p>
             {!pendingHit ? (
               <UserLookupPicker
                 forumId={detail.id}
-                placeholder="Search a username or character…"
+                placeholder={t("roles.searchPlaceholder")}
                 disabledReason={(hit) =>
-                  hit.forumRole === "owner" ? "the keeper"
-                    : hit.forumRole === "mod" ? "already a mod"
-                    : hit.banned ? "banned, lift first"
+                  hit.forumRole === "owner" ? t("shared.theKeeper")
+                    : hit.forumRole === "mod" ? t("roles.reasonAlreadyMod")
+                    : hit.banned ? t("roles.reasonBanned")
                     : null}
                 onSelect={(hit) => {
                   setPendingHit(hit);
@@ -3693,7 +4008,7 @@ function RolesSettings({ detail, busy, run }: {
             ) : (
               <div className="space-y-2">
                 <p className="text-sm text-keep-text">
-                  Appoint <span className="font-semibold">{pendingHit.username}</span>
+                  <Trans t={t} i18nKey="roles.appointName" values={{ name: pendingHit.username }} components={{ b: <span className="font-semibold" /> }} />
                   {pendingHit.characterNames.length > 0 ? (
                     <span className="text-[10px] text-keep-muted"> ({pendingHit.characterNames.join(", ")})</span>
                   ) : null}
@@ -3704,16 +4019,16 @@ function RolesSettings({ detail, busy, run }: {
                     type="button" disabled={busy}
                     onClick={() => setPendingHit(null)}
                     className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner"
-                  >Cancel</button>
+                  >{t("common:cancel")}</button>
                   <button
                     type="button" disabled={busy}
                     onClick={() => void run(async () => {
                       await grantForumMod(detail.id, `@id:${pendingHit.userId}`, pendingPerms);
                       setPendingHit(null);
-                      setTick((t) => t + 1);
+                      setTick((n) => n + 1);
                     })}
                     className="rounded border border-keep-action bg-keep-action px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
-                  >Appoint</button>
+                  >{t("roles.appoint")}</button>
                 </div>
               </div>
             )}
@@ -3734,6 +4049,7 @@ function BansSettings({ detail, busy, run }: {
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
 }) {
+  const { t } = useTranslation("forums");
   const [bans, setBans] = useState<ForumBanRow[] | null>(null);
   const [targetHit, setTargetHit] = useState<ForumUserSearchHit | null>(null);
   const [hours, setHours] = useState<string>("168");
@@ -3749,28 +4065,27 @@ function BansSettings({ detail, busy, run }: {
   return (
     <div className="max-w-xl space-y-3">
       <p className="text-[11px] text-keep-muted">
-        A forum ban blocks this forum's boards only - the rest of the Spire is untouched.
-        Banned users still see the forum in the catalog with a clear notice.
+        {t("bans.intro")}
       </p>
       {!bans ? (
-        <p className="text-sm italic text-keep-muted">Loading…</p>
+        <p className="text-sm italic text-keep-muted">{t("common:loading")}</p>
       ) : bans.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No bans. May it stay that way.</p>
+        <p className="text-xs italic text-keep-muted">{t("bans.noBans")}</p>
       ) : (
         <ul className="space-y-1">
           {bans.map((b) => (
             <li key={b.userId} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1 text-sm">
               <span className="font-semibold text-keep-text">{b.username}</span>
               <span className={`text-[11px] ${b.expired ? "text-keep-muted line-through" : "text-keep-muted"}`}>
-                {b.until ? `until ${new Date(b.until).toLocaleDateString()}` : "permanent"}
-                {b.expired ? " (expired)" : ""}
+                {b.until ? t("bans.untilDate", { date: formatDate(b.until) }) : t("bans.permanentLower")}
+                {b.expired ? t("bans.expiredSuffix") : ""}
               </span>
               {b.reason ? <span className="min-w-0 flex-1 truncate text-[11px] italic text-keep-muted">"{b.reason}"</span> : <span className="flex-1" />}
               <button
                 type="button" disabled={busy}
-                onClick={() => void run(async () => { await liftForumBan(detail.id, b.userId); setTick((t) => t + 1); })}
+                onClick={() => void run(async () => { await liftForumBan(detail.id, b.userId); setTick((n) => n + 1); })}
                 className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              >Lift</button>
+              >{t("shared.lift")}</button>
             </li>
           ))}
         </ul>
@@ -3779,10 +4094,10 @@ function BansSettings({ detail, busy, run }: {
         {!targetHit ? (
           <UserLookupPicker
             forumId={detail.id}
-            placeholder="Search the user to ban…"
+            placeholder={t("bans.searchPlaceholder")}
             disabledReason={(hit) =>
-              hit.forumRole === "owner" ? "the keeper"
-                : hit.banned ? "already banned"
+              hit.forumRole === "owner" ? t("shared.theKeeper")
+                : hit.banned ? t("bans.reasonAlreadyBanned")
                 : null}
             onSelect={setTargetHit}
           />
@@ -3798,7 +4113,7 @@ function BansSettings({ detail, busy, run }: {
               type="button"
               onClick={() => setTargetHit(null)}
               className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-            >Change</button>
+            >{t("shared.change")}</button>
           </div>
         )}
         <div className="flex flex-wrap gap-2">
@@ -3807,16 +4122,16 @@ function BansSettings({ detail, busy, run }: {
             onChange={(e) => setHours(e.target.value)}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
           >
-            <option value="24">1 day</option>
-            <option value="168">7 days</option>
-            <option value="720">30 days</option>
-            <option value="perm">Permanent</option>
+            <option value="24">{t("duration.day1")}</option>
+            <option value="168">{t("duration.days7")}</option>
+            <option value="720">{t("duration.days30")}</option>
+            <option value="perm">{t("duration.permanent")}</option>
           </select>
           <input
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             maxLength={300}
-            placeholder="Reason (shown to them)"
+            placeholder={t("shared.reasonPlaceholder")}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
           />
           <button
@@ -3824,8 +4139,14 @@ function BansSettings({ detail, busy, run }: {
             disabled={busy || !targetHit}
             onClick={() => {
               if (!targetHit) return;
-              const label = hours === "perm" ? "permanently" : `for ${hours === "24" ? "1 day" : hours === "168" ? "7 days" : "30 days"}`;
-              if (!window.confirm(`Ban ${targetHit.username} from ${detail.name} ${label}?`)) return;
+              const confirmText = hours === "perm"
+                ? t("bans.confirmPermanent", { name: targetHit.username, forum: detail.name })
+                : t("bans.confirmTimed", {
+                    name: targetHit.username,
+                    forum: detail.name,
+                    duration: hours === "24" ? t("duration.day1") : hours === "168" ? t("duration.days7") : t("duration.days30"),
+                  });
+              if (!window.confirm(confirmText)) return;
               void run(async () => {
                 await banFromForum(detail.id, {
                   target: `@id:${targetHit.userId}`,
@@ -3833,12 +4154,12 @@ function BansSettings({ detail, busy, run }: {
                   ...(reason.trim() ? { reason: reason.trim() } : {}),
                 });
                 setTargetHit(null); setReason("");
-                setTick((t) => t + 1);
+                setTick((n) => n + 1);
               });
             }}
             className="rounded border border-keep-system/70 bg-keep-system/15 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-system disabled:opacity-50"
           >
-            Ban
+            {t("shared.ban")}
           </button>
         </div>
       </div>
@@ -3856,6 +4177,7 @@ function MembersSettings({ detail, busy, run }: {
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
 }) {
+  const { t } = useTranslation("forums");
   const [members, setMembers] = useState<ForumMemberEntry[] | null>(null);
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -3865,17 +4187,17 @@ function MembersSettings({ detail, busy, run }: {
   }, [detail.id, tick]);
 
   const roleLabel = (m: ForumMemberEntry) =>
-    m.role === "owner" ? "Keeper"
-      : m.role === "mod" ? `Moderator · ${m.permissions.length} ${m.permissions.length === 1 ? "power" : "powers"}`
-      : "Member";
+    m.role === "owner" ? t("shared.keeper")
+      : m.role === "mod" ? t("roles.moderatorPowers", { count: m.permissions.length })
+      : t("shared.member");
 
   return (
     <div className="max-w-2xl space-y-3">
       {!members ? (
-        <p className="text-sm italic text-keep-muted">Loading…</p>
+        <p className="text-sm italic text-keep-muted">{t("common:loading")}</p>
       ) : (
         <>
-          <p className="text-xs uppercase tracking-widest text-keep-muted">Members ({members.length})</p>
+          <p className="text-xs uppercase tracking-widest text-keep-muted">{t("usergroups.membersHeading")} ({members.length})</p>
           <ul className="space-y-1">
             {members.map((m) => (
               <li key={m.userId} className="flex items-center gap-2 rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5">
@@ -3886,7 +4208,7 @@ function MembersSettings({ detail, busy, run }: {
                 )}
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-keep-text">{m.username}</span>
-                  <span className="block text-[10px] text-keep-muted">{roleLabel(m)} · joined {new Date(m.joinedAt).toLocaleDateString()}</span>
+                  <span className="block text-[10px] text-keep-muted">{roleLabel(m)} · {t("members.joinedDate", { date: formatDate(m.joinedAt) })}</span>
                 </span>
                 {m.role === "member" ? (
                   <>
@@ -3894,19 +4216,19 @@ function MembersSettings({ detail, busy, run }: {
                       type="button" disabled={busy}
                       onClick={() => void run(async () => {
                         await grantForumMod(detail.id, `@id:${m.userId}`);
-                        setTick((t) => t + 1);
+                        setTick((n) => n + 1);
                       })}
-                      title="Promote to moderator with the default power set (tune it in Roles)"
+                      title={t("members.makeModTitle")}
                       className="shrink-0 rounded border border-keep-action/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/10"
-                    >Make mod</button>
+                    >{t("members.makeMod")}</button>
                     <button
                       type="button" disabled={busy}
                       onClick={() => {
-                        if (!window.confirm(`Remove ${m.username} from ${detail.name}?`)) return;
-                        void run(async () => { await removeForumMember(detail.id, m.userId); setTick((t) => t + 1); });
+                        if (!window.confirm(t("members.removeConfirm", { name: m.username, forum: detail.name }))) return;
+                        void run(async () => { await removeForumMember(detail.id, m.userId); setTick((n) => n + 1); });
                       }}
                       className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10"
-                    >Remove</button>
+                    >{t("shared.remove")}</button>
                   </>
                 ) : null}
               </li>
@@ -3914,8 +4236,7 @@ function MembersSettings({ detail, busy, run }: {
           </ul>
           {members.length === 1 ? (
             <p className="text-xs italic text-keep-muted">
-              No members yet beyond you. On application forums, approved applicants appear here; on open forums,
-              people who join to unlock members-only sections show up too.
+              {t("members.emptyBeyondYou")}
             </p>
           ) : null}
         </>
@@ -3925,27 +4246,28 @@ function MembersSettings({ detail, busy, run }: {
 }
 
 /** Human label + tint for a Mod Log action. */
-function modLogLabel(action: string, meta: Record<string, unknown> | null): { text: string; tone: string } {
+function modLogLabel(action: string, meta: Record<string, unknown> | null, t: (key: string) => string): { text: string; tone: string } {
   const m = meta ?? {};
   switch (action) {
-    case "forum_topic_lock": return { text: m.locked ? "Locked topic" : "Unlocked topic", tone: "text-keep-system" };
-    case "forum_topic_sticky": return { text: m.sticky ? "Pinned topic" : "Unpinned topic", tone: "text-keep-accent" };
-    case "forum_topic_move": return { text: "Moved topic", tone: "text-keep-muted" };
-    case "forum_post_delete": return { text: m.isTopic ? "Deleted topic" : "Deleted post", tone: "text-keep-accent" };
-    case "forum_ban": return { text: "Banned user", tone: "text-keep-system" };
-    case "forum_unban": return { text: "Lifted ban", tone: "text-keep-muted" };
-    case "forum_mod_grant": return { text: "Appointed moderator", tone: "text-keep-action" };
-    case "forum_mod_revoke": return { text: "Removed moderator", tone: "text-keep-muted" };
-    case "forum_mod_perms": return { text: "Changed mod powers", tone: "text-keep-muted" };
-    case "forum_member_remove": return { text: "Removed member", tone: "text-keep-muted" };
-    case "forum_board_create": return { text: "Created board", tone: "text-keep-action" };
-    case "forum_board_archive": return { text: "Archived board", tone: "text-keep-muted" };
+    case "forum_topic_lock": return { text: m.locked ? t("modlog.lockedTopic") : t("modlog.unlockedTopic"), tone: "text-keep-system" };
+    case "forum_topic_sticky": return { text: m.sticky ? t("modlog.pinnedTopic") : t("modlog.unpinnedTopic"), tone: "text-keep-accent" };
+    case "forum_topic_move": return { text: t("modlog.movedTopic"), tone: "text-keep-muted" };
+    case "forum_post_delete": return { text: m.isTopic ? t("modlog.deletedTopic") : t("modlog.deletedPost"), tone: "text-keep-accent" };
+    case "forum_ban": return { text: t("modlog.bannedUser"), tone: "text-keep-system" };
+    case "forum_unban": return { text: t("modlog.liftedBan"), tone: "text-keep-muted" };
+    case "forum_mod_grant": return { text: t("modlog.appointedMod"), tone: "text-keep-action" };
+    case "forum_mod_revoke": return { text: t("modlog.removedMod"), tone: "text-keep-muted" };
+    case "forum_mod_perms": return { text: t("modlog.changedModPowers"), tone: "text-keep-muted" };
+    case "forum_member_remove": return { text: t("modlog.removedMember"), tone: "text-keep-muted" };
+    case "forum_board_create": return { text: t("modlog.createdBoard"), tone: "text-keep-action" };
+    case "forum_board_archive": return { text: t("modlog.archivedBoard"), tone: "text-keep-muted" };
     default: return { text: action.replace(/^forum_/, "").replace(/_/g, " "), tone: "text-keep-muted" };
   }
 }
 
 /** Read-only moderation history for the forum (owner + any mod). */
 function ModLogSettings({ detail }: { detail: ForumDetail }) {
+  const { t } = useTranslation("forums");
   const [entries, setEntries] = useState<ForumModLogEntry[] | null>(null);
   useEffect(() => {
     let alive = true;
@@ -3956,26 +4278,26 @@ function ModLogSettings({ detail }: { detail: ForumDetail }) {
   return (
     <div className="max-w-2xl space-y-2">
       <p className="text-[11px] text-keep-muted">
-        Every moderation action taken in this forum, newest first. Shown to the keeper and all moderators.
+        {t("modlog.intro")}
       </p>
       {!entries ? (
-        <p className="text-sm italic text-keep-muted">Loading…</p>
+        <p className="text-sm italic text-keep-muted">{t("common:loading")}</p>
       ) : entries.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">Nothing logged yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("modlog.empty")}</p>
       ) : (
         <ul className="space-y-1">
           {entries.map((e) => {
-            const { text, tone } = modLogLabel(e.action, e.metadata);
+            const { text, tone } = modLogLabel(e.action, e.metadata, t);
             const title = typeof e.metadata?.title === "string" ? e.metadata.title : null;
             return (
               <li key={e.id} className="rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5 text-xs">
                 <div className="flex flex-wrap items-baseline gap-x-2">
                   <span className={`font-semibold ${tone}`}>{text}</span>
                   {e.targetUsername ? <span className="text-keep-muted">→ {e.targetUsername}</span> : null}
-                  <span className="ml-auto text-[10px] text-keep-muted">{new Date(e.createdAt).toLocaleString()}</span>
+                  <span className="ml-auto text-[10px] text-keep-muted">{formatDateTime(e.createdAt)}</span>
                 </div>
                 <div className="text-[10px] text-keep-muted">
-                  by {e.actorUsername}
+                  {t("shared.byName", { name: e.actorUsername })}
                   {title ? <span> · "{title}"</span> : null}
                   {e.reason ? <span> · {e.reason}</span> : null}
                 </div>
@@ -3998,6 +4320,7 @@ function ReportsSettings({ detail, busy, run }: {
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
 }) {
+  const { t } = useTranslation("forums");
   const [status, setStatus] = useState<"open" | "resolved" | "dismissed">("open");
   const [reports, setReports] = useState<ForumReportWire[] | null>(null);
   const [tick, setTick] = useState(0);
@@ -4017,42 +4340,42 @@ function ReportsSettings({ detail, busy, run }: {
             type="button"
             onClick={() => setStatus(s)}
             className={`rounded border px-2 py-0.5 text-[10px] uppercase tracking-widest ${status === s ? "border-keep-action bg-keep-action/10 text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}
-          >{s}</button>
+          >{t(`reports.status.${s}`)}</button>
         ))}
       </div>
       {!reports ? (
-        <p className="text-sm italic text-keep-muted">Loading…</p>
+        <p className="text-sm italic text-keep-muted">{t("common:loading")}</p>
       ) : reports.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">{status === "open" ? "No open reports. All quiet." : `No ${status} reports.`}</p>
+        <p className="text-xs italic text-keep-muted">{status === "open" ? t("reports.noneOpen") : status === "resolved" ? t("reports.noneResolved") : t("reports.noneDismissed")}</p>
       ) : (
         <ul className="space-y-2">
           {reports.map((r) => (
             <li key={r.id} className="rounded border border-keep-rule bg-keep-panel/30 p-2.5 text-xs">
               <div className="flex flex-wrap items-baseline gap-x-2">
-                <span className="font-semibold text-keep-text">{r.reportedAuthorName}'s post</span>
-                {r.topicTitle ? <span className="text-keep-muted">in "{r.topicTitle}"</span> : null}
-                <span className="ml-auto text-[10px] text-keep-muted">{new Date(r.createdAt).toLocaleString()}</span>
+                <span className="font-semibold text-keep-text">{t("reports.authorsPost", { name: r.reportedAuthorName })}</span>
+                {r.topicTitle ? <span className="text-keep-muted">{t("reports.inTopic", { title: r.topicTitle })}</span> : null}
+                <span className="ml-auto text-[10px] text-keep-muted">{formatDateTime(r.createdAt)}</span>
               </div>
               <p className="mt-1 line-clamp-2 rounded bg-keep-bg/50 px-2 py-1 text-[11px] italic text-keep-muted">{r.reportedSnippet}</p>
               <p className="mt-1 text-[11px] text-keep-text">
-                <span className="text-keep-muted">Reported by {r.reporterUsername}:</span> {r.reason}
+                <span className="text-keep-muted">{t("reports.reportedBy", { name: r.reporterUsername })}</span> {r.reason}
               </p>
               {r.status === "open" ? (
                 <div className="mt-2 flex justify-end gap-2">
                   <button
                     type="button" disabled={busy}
-                    onClick={() => void run(async () => { await resolveForumReport(detail.id, r.id, "dismiss"); setTick((t) => t + 1); })}
+                    onClick={() => void run(async () => { await resolveForumReport(detail.id, r.id, "dismiss"); setTick((n) => n + 1); })}
                     className="rounded border border-keep-rule px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-                  >Dismiss</button>
+                  >{t("reports.dismiss")}</button>
                   <button
                     type="button" disabled={busy}
-                    onClick={() => void run(async () => { await resolveForumReport(detail.id, r.id, "resolve"); setTick((t) => t + 1); })}
+                    onClick={() => void run(async () => { await resolveForumReport(detail.id, r.id, "resolve"); setTick((n) => n + 1); })}
                     className="rounded border border-keep-action bg-keep-action/10 px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
-                  >Resolve</button>
+                  >{t("reports.resolve")}</button>
                 </div>
               ) : (
                 <p className="mt-1 text-[10px] text-keep-muted">
-                  {r.status} by {r.resolvedByUsername ?? "-"}{r.resolvedAt ? ` · ${new Date(r.resolvedAt).toLocaleDateString()}` : ""}
+                  {t("reports.statusBy", { status: r.status, name: r.resolvedByUsername ?? "-" })}{r.resolvedAt ? ` · ${formatDate(r.resolvedAt)}` : ""}
                 </p>
               )}
             </li>
@@ -4074,6 +4397,7 @@ function PrefixesSettings({ detail, busy, run, onSaved }: {
   run: (fn: () => Promise<void>) => Promise<void>;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const [label, setLabel] = useState("");
   const [color, setColor] = useState("#8a66cc");
   const [tooltip, setTooltip] = useState("");
@@ -4081,8 +4405,7 @@ function PrefixesSettings({ detail, busy, run, onSaved }: {
   return (
     <div className="max-w-xl space-y-3">
       <p className="text-[11px] text-keep-muted">
-        Tags are little colored labels (like [Guide] or [Event]) on topics. A topic carries one;
-        it shows as a chip on the topic list. The author or a mod with the right grant attaches one.
+        {t("prefixes.intro")}
       </p>
 
       {/* Master switch: custom tags on the fly. */}
@@ -4093,16 +4416,15 @@ function PrefixesSettings({ detail, busy, run, onSaved }: {
           className="mt-0.5"
         />
         <span>
-          <span className="font-semibold text-keep-text">Allow custom tags</span>
+          <span className="font-semibold text-keep-text">{t("prefixes.allowCustom")}</span>
           <span className="block text-xs text-keep-muted">
-            On: a mod you grant "Create tags on the fly" can mint a new tag right from a topic. Off:
-            only the tags below are offered, filtered to each topic's category.
+            {t("prefixes.allowCustomHint")}
           </span>
         </span>
       </label>
 
       {detail.prefixes.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No tags yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("prefixes.noTags")}</p>
       ) : (
         <ul className="space-y-1">
           {detail.prefixes.map((p) => (
@@ -4112,23 +4434,23 @@ function PrefixesSettings({ detail, busy, run, onSaved }: {
       )}
       <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
         <div className="flex flex-wrap items-center gap-2">
-          <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" title="Chip color" />
-          <input value={label} onChange={(e) => setLabel(e.target.value.slice(0, 24))} placeholder="Label (e.g. Guide)" className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+          <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-7 w-9 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent" title={t("shared.chipColor")} />
+          <input value={label} onChange={(e) => setLabel(e.target.value.slice(0, 24))} placeholder={t("prefixes.labelPlaceholder")} className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
           <button
             type="button"
             disabled={busy || !label.trim()}
             onClick={() => void run(async () => { await createForumPrefix(detail.id, { label: label.trim(), color, tooltip: tooltip.trim() || null, staffOnly }); setLabel(""); setTooltip(""); setStaffOnly(false); onSaved(); })}
             className="rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50"
-          >Add</button>
+          >{t("prefixes.add")}</button>
         </div>
         <input
           value={tooltip} maxLength={FORUM_PREFIX_TOOLTIP_MAX} onChange={(e) => setTooltip(e.target.value)}
-          placeholder="Tooltip: short hover explanation (optional)"
+          placeholder={t("shared.tooltipPlaceholder")}
           className="mt-2 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action"
         />
         <label className="mt-2 flex items-center gap-2 text-xs text-keep-muted">
           <input type="checkbox" checked={staffOnly} disabled={busy} onChange={(e) => setStaffOnly(e.target.checked)} />
-          <span><span className="font-semibold text-keep-text">Staff only</span>: only mods/owners can put this tag on a topic (members can't self-apply it). Good for "Announcement", "Official", etc.</span>
+          <span><Trans t={t} i18nKey="prefixes.staffOnlyExplainer" components={{ b: <span className="font-semibold text-keep-text" /> }} /></span>
         </label>
       </div>
     </div>
@@ -4145,6 +4467,7 @@ function PrefixRow({ detail, prefix: p, busy, run, onSaved }: {
   run: (fn: () => Promise<void>) => Promise<void>;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const [open, setOpen] = useState(false);
   const [tip, setTip] = useState(p.tooltip ?? "");
   const themeBg = useActiveTheme().bg;
@@ -4157,8 +4480,8 @@ function PrefixRow({ detail, prefix: p, busy, run, onSaved }: {
     void run(async () => { await updateForumPrefix(detail.id, p.id, { tooltip: next || null }); onSaved(); });
   }
   const scopeLabel = p.categoryIds.length === 0
-    ? "All categories"
-    : `${p.categoryIds.length} categor${p.categoryIds.length === 1 ? "y" : "ies"}`;
+    ? t("prefixes.allCategories")
+    : t("prefixes.categoryCount", { count: p.categoryIds.length });
   // Group the forum's categories by board for the picker.
   const byBoard = new Map<string, ForumDetail["categories"]>();
   for (const c of detail.categories) {
@@ -4177,42 +4500,42 @@ function PrefixRow({ detail, prefix: p, busy, run, onSaved }: {
           type="color" value={p.color} disabled={busy}
           onChange={(e) => void run(async () => { await updateForumPrefix(detail.id, p.id, { color: e.target.value }); onSaved(); })}
           className="h-6 w-8 shrink-0 cursor-pointer rounded border border-keep-rule bg-transparent"
-          title="Chip color"
+          title={t("shared.chipColor")}
         />
         <span className="rounded px-1.5 py-0 text-[10px] font-bold uppercase tracking-wide" style={{ backgroundColor: `${p.color}22`, color: resolveMessageColor(p.color, themeBg) ?? p.color, border: `1px solid ${p.color}66` }} title={p.tooltip ?? undefined}>{p.label}</span>
         <span className="min-w-0 flex-1 truncate text-sm text-keep-text">
           {p.label}
-          {p.staffOnly ? <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] uppercase tracking-widest text-keep-muted" title="Staff only: members can't put this tag on a topic"><Lock className="h-2.5 w-2.5" aria-hidden /> staff</span> : null}
+          {p.staffOnly ? <span className="ml-1.5 inline-flex items-center gap-0.5 align-middle text-[10px] uppercase tracking-widest text-keep-muted" title={t("prefixes.staffChipTitle")}><Lock className="h-2.5 w-2.5" aria-hidden /> {t("prefixes.staffWord")}</span> : null}
         </span>
         <button
           type="button" disabled={busy} onClick={() => void run(async () => { await updateForumPrefix(detail.id, p.id, { staffOnly: !p.staffOnly }); onSaved(); })}
           className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${p.staffOnly ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}
-          title={p.staffOnly ? "Staff only, click to let members apply it too" : "Anyone can apply this tag, click to make it staff only"}
-        >Staff only</button>
+          title={p.staffOnly ? t("prefixes.staffOnlyOnTitle") : t("prefixes.staffOnlyOffTitle")}
+        >{t("shared.staffOnly")}</button>
         {hasCategories ? (
           <button
             type="button" disabled={busy} onClick={() => setOpen((o) => !o)}
             className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-            title="Which categories offer this tag"
+            title={t("prefixes.scopeTitle")}
           >{scopeLabel}</button>
         ) : null}
         <button
           type="button" disabled={busy}
-          onClick={() => { if (window.confirm(`Delete the "${p.label}" tag? It'll be cleared off any topics using it.`)) void run(async () => { await deleteForumPrefix(detail.id, p.id); onSaved(); }); }}
+          onClick={() => { if (window.confirm(t("prefixes.deleteConfirm", { label: p.label }))) void run(async () => { await deleteForumPrefix(detail.id, p.id); onSaved(); }); }}
           className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10"
-        >Delete</button>
+        >{t("common:delete")}</button>
       </div>
       <div className="px-2.5 pb-1.5">
         <input
           value={tip} maxLength={FORUM_PREFIX_TOOLTIP_MAX} disabled={busy}
           onChange={(e) => setTip(e.target.value)} onBlur={saveTip}
-          placeholder="Tooltip: short hover explanation (optional)"
+          placeholder={t("shared.tooltipPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action"
         />
       </div>
       {open && hasCategories ? (
         <div className="space-y-2 border-t border-keep-rule/60 px-2.5 py-2">
-          <p className="text-[11px] text-keep-muted">Offer this tag only in these categories. None selected = every category.</p>
+          <p className="text-[11px] text-keep-muted">{t("prefixes.scopeHint")}</p>
           {[...byBoard.entries()].map(([boardName, cats]) => (
             <div key={boardName}>
               {multiBoard ? <div className="mb-0.5 text-[10px] uppercase tracking-widest text-keep-muted">{boardName}</div> : null}
@@ -4238,12 +4561,19 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
   run: (fn: () => Promise<void>) => Promise<void>;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const [name, setName] = useState(detail.name);
   const [tagline, setTagline] = useState(detail.tagline ?? "");
   const [description, setDescription] = useState(detail.descriptionHtml ?? "");
   const [postingMode, setPostingMode] = useState<"open" | "application">(detail.postingMode);
   const [prompt, setPrompt] = useState(detail.applicationPrompt ?? "");
   const [publicBrowsing, setPublicBrowsing] = useState(detail.publicBrowsing);
+  // Whole-forum 18+ flag (age plan Phase 3). Under-18 accounts never see
+  // the toggle at all (no dead control); the route re-checks adult + owner
+  // and rejects regardless. Cosmetic mirror of the server gate.
+  const [isNsfw, setIsNsfw] = useState(detail.isNsfw ?? false);
+  const isAdultViewer = useChat((s) => s.viewerAge.isAdult);
+  const nsfwDirty = isNsfw !== (detail.isNsfw ?? false);
   // Discovery genre tags — seeded from the forum's current tags, edited as
   // chips, saved with the rest of the overview via the forum-update PATCH.
   const [tags, setTags] = useState<string[]>(detail.tags);
@@ -4275,11 +4605,12 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
     || postingMode !== detail.postingMode
     || prompt !== (detail.applicationPrompt ?? "")
     || publicBrowsing !== detail.publicBrowsing
+    || nsfwDirty
     || tagsDirty;
   return (
     <div className="max-w-xl space-y-3">
       <label className="block text-sm">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Name</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("overview.name")}</span>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -4288,38 +4619,38 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
         />
       </label>
       <label className="block text-sm">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Tagline</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("overview.tagline")}</span>
         <input
           value={tagline}
           onChange={(e) => setTagline(e.target.value)}
           maxLength={200}
-          placeholder="One line under the forum's name."
+          placeholder={t("overview.taglinePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
         />
       </label>
       <label className="block text-sm">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Description</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("overview.description")}</span>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           rows={6}
           maxLength={5000}
-          placeholder="The long-form welcome. Same HTML rules as profile bios; shown on the forum's front page."
+          placeholder={t("overview.descriptionPlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
         />
       </label>
       <div className="block text-sm">
         <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">
-          Tags <span className="normal-case text-keep-rule">({tags.length}/{MAX_TAGS_PER_ENTITY})</span>
+          {t("overview.tags")} <span className="normal-case text-keep-rule">({tags.length}/{MAX_TAGS_PER_ENTITY})</span>
         </span>
         <div className="flex flex-wrap items-center gap-1.5 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 focus-within:border-keep-action">
-          {tags.map((t) => (
-            <span key={t} className="inline-flex items-center gap-1 rounded-full border border-keep-action/40 bg-keep-action/10 px-2 py-0.5 text-[11px] text-keep-action">
-              {t}
+          {tags.map((tag) => (
+            <span key={tag} className="inline-flex items-center gap-1 rounded-full border border-keep-action/40 bg-keep-action/10 px-2 py-0.5 text-[11px] text-keep-action">
+              {tag}
               <button
                 type="button"
-                onClick={() => removeTag(t)}
-                aria-label={`Remove the ${t} tag`}
+                onClick={() => removeTag(tag)}
+                aria-label={t("overview.removeTagAria", { tag })}
                 className="rounded-full hover:text-keep-text"
               >
                 <X className="h-3 w-3" aria-hidden="true" />
@@ -4338,17 +4669,17 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
                 }
               }}
               onBlur={commitTagDraft}
-              placeholder={tags.length === 0 ? "high fantasy, sci-fi, 18+" : "Add a tag…"}
+              placeholder={tags.length === 0 ? t("overview.tagExamplesPlaceholder") : t("overview.addTagPlaceholder")}
               className="min-w-[8rem] flex-1 bg-transparent text-sm outline-none"
             />
           ) : null}
         </div>
         <p className="mt-1 text-[11px] text-keep-muted">
-          Genres people can search by in Discover (e.g. high fantasy, sci-fi, 18+).
+          {t("overview.tagsHint")}
         </p>
       </div>
       <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Who may post</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("overview.whoMayPost")}</span>
         <label className="flex items-start gap-2 text-sm">
           <input
             type="radio"
@@ -4357,8 +4688,8 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
             onChange={() => setPostingMode("open")}
             className="mt-0.5"
           />
-          <span><span className="font-semibold text-keep-text">Open</span>
-            <span className="block text-xs text-keep-muted">Any signed-in user can enter the boards and post.</span></span>
+          <span><span className="font-semibold text-keep-text">{t("overview.open")}</span>
+            <span className="block text-xs text-keep-muted">{t("overview.openHint")}</span></span>
         </label>
         <label className="mt-1.5 flex items-start gap-2 text-sm">
           <input
@@ -4368,24 +4699,24 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
             onChange={() => setPostingMode("application")}
             className="mt-0.5"
           />
-          <span><span className="font-semibold text-keep-text">Application</span>
-            <span className="block text-xs text-keep-muted">Everyone can read; posting requires your (or your mods') approval. Existing members keep their seats.</span></span>
+          <span><span className="font-semibold text-keep-text">{t("overview.application")}</span>
+            <span className="block text-xs text-keep-muted">{t("overview.applicationHint")}</span></span>
         </label>
         {postingMode === "application" ? (
           <label className="mt-2 block text-sm">
-            <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Application prompt</span>
+            <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("overview.applicationPrompt")}</span>
             <input
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               maxLength={300}
-              placeholder="Tell the keeper why you'd like to join."
+              placeholder={t("membership.defaultPrompt")}
               className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
             />
           </label>
         ) : null}
       </div>
       <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
-        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">Public browsing</span>
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("overview.publicBrowsing")}</span>
         <label className="flex items-start gap-2 text-sm">
           <input
             type="checkbox"
@@ -4394,22 +4725,53 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
             className="mt-0.5"
           />
           <span>
-            <span className="font-semibold text-keep-text">Let anyone read this forum</span>
+            <span className="font-semibold text-keep-text">{t("overview.publicBrowsingLabel")}</span>
             <span className="block text-xs text-keep-muted">
-              Visitors on /f/{detail.slug} can browse the boards, topics, and replies without an
-              account. Posting and joining always require signing in. Off = visitors see the front
-              page only.
+              {t("overview.publicBrowsingHint", { slug: detail.slug })}
             </span>
           </span>
         </label>
       </div>
+      {/* 18+ forum (age plan Phase 3) — the forum-side mirror of the server
+          "18+ community" toggle. Hidden entirely from under-18 viewers
+          (never a dead toggle); the route re-checks adult + owner. */}
+      {isAdultViewer ? (
+        <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
+          <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("overview.ageRating")}</span>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={isNsfw}
+              onChange={(e) => setIsNsfw(e.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              <span className="font-semibold text-keep-text">{t("overview.nsfwForum")}</span>
+              <span className="block text-xs text-keep-muted">
+                {t("overview.nsfwForumHint")}
+              </span>
+            </span>
+          </label>
+          {isNsfw ? (
+            <p className="mt-1.5 text-[10px] text-keep-muted">
+              {t("overview.nsfwTip")}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       <p className="text-[11px] text-keep-muted">
-        The address (/f/{detail.slug}) is permanent so shared links never break.
+        {t("overview.addressPermanent", { slug: detail.slug })}
       </p>
       <button
         type="button"
         disabled={!dirty || busy || name.trim().length < FORUM_NAME_MIN}
-        onClick={() => void run(async () => {
+        onClick={() => {
+          // Flipping a forum 18+ hides it from every under-18 member on the
+          // spot (server-side), so make the owner say it out loud first.
+          if (nsfwDirty && isNsfw && !window.confirm(
+            t("overview.nsfwConfirm", { name: detail.name }),
+          )) return;
+          void run(async () => {
           // Fold any half-typed tag in the input into the saved set (clicking
           // Save blurs the chip input, but that state update may not have
           // landed yet) — clean + dedupe + cap, same rules as commitTagDraft.
@@ -4427,12 +4789,16 @@ function OverviewSettings({ detail, busy, run, onSaved }: {
             applicationPrompt: prompt.trim() ? prompt.trim() : null,
             publicBrowsing,
             tags: finalTags,
+            // Only on change (and the toggle only renders for adults), so an
+            // untouched save can never trip the route's adult-only rejection.
+            ...(nsfwDirty ? { isNsfw } : {}),
           });
           onSaved();
-        })}
+          });
+        }}
         className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
       >
-        {busy ? "…" : "Save"}
+        {busy ? "…" : t("common:save")}
       </button>
     </div>
   );
@@ -4445,6 +4811,7 @@ function BoardsSettings({ detail, busy, run, onSaved, onBoardArchived }: {
   onSaved: () => void;
   onBoardArchived: (roomId: string) => void;
 }) {
+  const { t } = useTranslation("forums");
   const [newName, setNewName] = useState("");
   const [newTopic, setNewTopic] = useState("");
   // Category editors open by DEFAULT — every board shows its category
@@ -4480,51 +4847,51 @@ function BoardsSettings({ detail, busy, run, onSaved, onBoardArchived }: {
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-1.5 text-sm font-semibold text-keep-text">
-                  {b.membersOnly ? <Lock className="h-3 w-3 shrink-0 text-keep-accent" aria-label="Members only" /> : null}
+                  {b.membersOnly ? <Lock className="h-3 w-3 shrink-0 text-keep-accent" aria-label={t("shared.membersOnly")} /> : null}
                   <span className="truncate">{b.name}</span>
                 </span>
-                <span className="block truncate text-xs text-keep-muted">{b.topic ?? "no topic line"}</span>
+                <span className="block truncate text-xs text-keep-muted">{b.topic ?? t("boardsAdmin.noTopicLine")}</span>
               </span>
               <span className="flex shrink-0 items-center gap-1">
                 <button
                   type="button" disabled={busy || i === 0} onClick={() => move(b.roomId, -1)}
-                  title="Move up" aria-label={`Move ${b.name} up`}
+                  title={t("shared.moveUp")} aria-label={t("shared.moveNameUp", { name: b.name })}
                   className="rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text disabled:opacity-30"
                 ><ArrowUp className="h-3 w-3" aria-hidden="true" /></button>
                 <button
                   type="button" disabled={busy || i === detail.boards.length - 1} onClick={() => move(b.roomId, 1)}
-                  title="Move down" aria-label={`Move ${b.name} down`}
+                  title={t("shared.moveDown")} aria-label={t("shared.moveNameDown", { name: b.name })}
                   className="rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text disabled:opacity-30"
                 ><ArrowDown className="h-3 w-3" aria-hidden="true" /></button>
                 <button
                   type="button" disabled={busy}
                   onClick={() => {
-                    const v = window.prompt(`Rename "${b.name}" (board names are site-wide):`, b.name);
+                    const v = window.prompt(t("boardsAdmin.renamePrompt", { name: b.name }), b.name);
                     if (v === null || !v.trim() || v.trim() === b.name) return;
                     void run(async () => { await updateBoard(detail.id, b.roomId, { name: v.trim() }); onSaved(); });
                   }}
                   className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-                >Rename</button>
+                >{t("boardsAdmin.rename")}</button>
                 <button
                   type="button" disabled={busy}
                   onClick={() => {
-                    const v = window.prompt(`Topic line for "${b.name}" (blank clears):`, b.topic ?? "");
+                    const v = window.prompt(t("boardsAdmin.topicPrompt", { name: b.name }), b.topic ?? "");
                     if (v === null) return;
                     void run(async () => { await updateBoard(detail.id, b.roomId, { topic: v.trim() ? v.trim() : null }); onSaved(); });
                   }}
                   className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-                >Topic</button>
+                >{t("boardsAdmin.topicButton")}</button>
                 <button
                   type="button" disabled={busy}
                   onClick={() => void run(async () => { await updateBoard(detail.id, b.roomId, { membersOnly: !b.membersOnly }); onSaved(); })}
-                  title={b.membersOnly ? "Private board (members only), click to make it public" : "Public board, click to make it members only"}
+                  title={b.membersOnly ? t("boardsAdmin.privateOnTitle") : t("boardsAdmin.privateOffTitle")}
                   aria-pressed={b.membersOnly}
                   className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${
                     b.membersOnly
                       ? "border-keep-accent text-keep-accent"
                       : "border-keep-rule text-keep-muted hover:text-keep-text"
                   }`}
-                >Private</button>
+                >{t("boardsAdmin.privateButton")}</button>
                 <button
                   type="button"
                   onClick={() => toggleCats(b.roomId)}
@@ -4534,15 +4901,15 @@ function BoardsSettings({ detail, busy, run, onSaved, onBoardArchived }: {
                       ? "border-keep-action text-keep-action"
                       : "border-keep-rule text-keep-muted hover:text-keep-text"
                   }`}
-                >Categories</button>
+                >{t("boardsAdmin.categoriesButton")}</button>
                 <button
                   type="button" disabled={busy}
                   onClick={() => {
-                    if (!window.confirm(`Archive "${b.name}"? Its ${b.topicCount} topic${b.topicCount === 1 ? "" : "s"} are kept but the board leaves the forum. Site admins can restore it.`)) return;
+                    if (!window.confirm(t("boardsAdmin.archiveConfirm", { name: b.name, count: b.topicCount }))) return;
                     void run(async () => { await archiveBoard(detail.id, b.roomId); onBoardArchived(b.roomId); });
                   }}
                   className="rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10"
-                >Archive</button>
+                >{t("boardsAdmin.archive")}</button>
               </span>
             </div>
             {catsOpen(b.roomId) ? (
@@ -4555,21 +4922,21 @@ function BoardsSettings({ detail, busy, run, onSaved, onBoardArchived }: {
       </ul>
       <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
         <p className="mb-1.5 text-xs uppercase tracking-widest text-keep-muted">
-          Raise a board {atCap ? <span className="text-keep-accent">(at the 10-board limit)</span> : `(${detail.boards.length}/10)`}
+          {t("boardsAdmin.raiseBoard")} {atCap ? <span className="text-keep-accent">{t("boardsAdmin.atCap")}</span> : `(${detail.boards.length}/10)`}
         </p>
         <div className="flex flex-wrap gap-2">
           <input
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             maxLength={40}
-            placeholder="Board name (site-wide unique)"
+            placeholder={t("boardsAdmin.boardNamePlaceholder")}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
           />
           <input
             value={newTopic}
             onChange={(e) => setNewTopic(e.target.value)}
             maxLength={200}
-            placeholder="Topic line (optional)"
+            placeholder={t("boardsAdmin.topicLinePlaceholder")}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
           />
           <button
@@ -4585,7 +4952,7 @@ function BoardsSettings({ detail, busy, run, onSaved, onBoardArchived }: {
             })}
             className="rounded border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
           >
-            Raise
+            {t("boardsAdmin.raise")}
           </button>
         </div>
       </div>
@@ -4607,6 +4974,7 @@ function BoardCategoriesEditor({ detail, boardId, busy, run }: {
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
 }) {
+  const { t } = useTranslation("forums");
   const [cats, setCats] = useState<ThreadCategory[] | null>(null);
   const [tick, setTick] = useState(0);
   // One inline panel open at a time: editing an existing category, or
@@ -4649,7 +5017,7 @@ function BoardCategoriesEditor({ detail, boardId, busy, run }: {
     });
   }
 
-  if (!cats) return <p className="text-sm italic text-keep-muted">Loading categories…</p>;
+  if (!cats) return <p className="text-sm italic text-keep-muted">{t("categories.loading")}</p>;
 
   const renderRow = (c: ThreadCategory, isSub: boolean) => {
     const siblings = isSub ? subsOf(c.parentId!) : topLevel;
@@ -4673,26 +5041,26 @@ function BoardCategoriesEditor({ detail, boardId, busy, run }: {
             {c.subtitle ? <span className="block truncate text-[11px] text-keep-muted">{c.subtitle}</span> : null}
           </span>
           {!isSub && hasChildren(c.id) ? (
-            <span className="shrink-0 text-[10px] tabular-nums text-keep-muted">{subsOf(c.id).length} sub</span>
+            <span className="shrink-0 text-[10px] tabular-nums text-keep-muted">{t("categories.subCount", { count: subsOf(c.id).length })}</span>
           ) : null}
           <span className="flex shrink-0 items-center gap-1">
             <button
               type="button" disabled={busy || si <= 0} onClick={() => moveSibling(c, -1)}
-              title="Move up" aria-label={`Move ${c.name} up`}
+              title={t("shared.moveUp")} aria-label={t("shared.moveNameUp", { name: c.name })}
               className="rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text disabled:opacity-30"
             ><ArrowUp className="h-3 w-3" aria-hidden="true" /></button>
             <button
               type="button" disabled={busy || si === siblings.length - 1} onClick={() => moveSibling(c, 1)}
-              title="Move down" aria-label={`Move ${c.name} down`}
+              title={t("shared.moveDown")} aria-label={t("shared.moveNameDown", { name: c.name })}
               className="rounded border border-keep-rule p-1 text-keep-muted hover:text-keep-text disabled:opacity-30"
             ><ArrowDown className="h-3 w-3" aria-hidden="true" /></button>
             {!isSub ? (
               <button
                 type="button" disabled={busy}
                 onClick={() => setPanel({ kind: "add", parentId: c.id })}
-                title={`Add a subcategory under ${c.name}`}
+                title={t("categories.addSubTitle", { name: c.name })}
                 className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              >+ Sub</button>
+              >{t("categories.addSub")}</button>
             ) : null}
             <button
               type="button"
@@ -4701,7 +5069,7 @@ function BoardCategoriesEditor({ detail, boardId, busy, run }: {
               className={`rounded border px-2 py-0.5 text-[10px] uppercase tracking-widest ${
                 editingHere ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"
               }`}
-            >Edit</button>
+            >{t("shared.edit")}</button>
           </span>
         </div>
         {editingHere ? (
@@ -4741,7 +5109,7 @@ function BoardCategoriesEditor({ detail, boardId, busy, run }: {
     <div className="space-y-2">
       {all.length === 0 ? (
         <p className="text-xs italic text-keep-muted">
-          No categories yet. Topics land in one flat list. Add one to group them into sections.
+          {t("categories.empty")}
         </p>
       ) : (
         <div className="space-y-1.5">
@@ -4773,7 +5141,7 @@ function BoardCategoriesEditor({ detail, boardId, busy, run }: {
           className="flex items-center gap-1.5 rounded border border-keep-action/60 bg-keep-action/10 px-2.5 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
         >
           <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-          Add category
+          {t("categories.addCategory")}
         </button>
       )}
     </div>
@@ -4800,6 +5168,7 @@ function CategoryForm({ forumId, boardId, run, existing, defaultParentId = null,
   onDone: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation("forums");
   const [name, setName] = useState(existing?.name ?? "");
   const [subtitle, setSubtitle] = useState(existing?.subtitle ?? "");
   const [parentId, setParentId] = useState<string>(existing?.parentId ?? defaultParentId ?? "");
@@ -4827,7 +5196,7 @@ function CategoryForm({ forumId, boardId, run, existing, defaultParentId = null,
       }
       onDone();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "save failed");
+      setErr(e instanceof Error ? e.message : t("shared.saveFailed"));
       setBusy(false);
     }
   }
@@ -4835,40 +5204,40 @@ function CategoryForm({ forumId, boardId, run, existing, defaultParentId = null,
   return (
     <div className="space-y-2 rounded border border-dashed border-keep-action/50 bg-keep-bg/60 p-2.5">
       <p className="text-[10px] font-semibold uppercase tracking-widest text-keep-muted">
-        {existing ? "Edit category" : defaultParentId ? "New subcategory" : "New category"}
+        {existing ? t("categories.editCategory") : defaultParentId ? t("categories.newSubcategory") : t("categories.newCategory")}
       </p>
       <label className="block text-xs">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Name</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("overview.name")}</span>
         <input
           ref={nameRef}
           value={name}
           onChange={(e) => setName(e.target.value)}
           maxLength={40}
-          placeholder="Category name"
+          placeholder={t("categories.namePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
         />
       </label>
       <label className="block text-xs">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Subtitle <span className="normal-case text-keep-rule">(what belongs here, optional)</span></span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("categories.subtitle")} <span className="normal-case text-keep-rule">{t("categories.subtitleHint")}</span></span>
         <input
           value={subtitle}
           onChange={(e) => setSubtitle(e.target.value)}
           maxLength={140}
-          placeholder="Shown under the category name on the board"
+          placeholder={t("categories.subtitlePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
         />
       </label>
       {canReparent ? (
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Section</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("categories.section")}</span>
           <select
             value={parentId}
             onChange={(e) => setParentId(e.target.value)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
           >
-            <option value="">Top level (its own section)</option>
-            {parentOptions.map((t) => (
-              <option key={t.id} value={t.id}>Under {t.name}</option>
+            <option value="">{t("categories.topLevel")}</option>
+            {parentOptions.map((opt) => (
+              <option key={opt.id} value={opt.id}>{t("categories.underName", { name: opt.name })}</option>
             ))}
           </select>
         </label>
@@ -4882,10 +5251,9 @@ function CategoryForm({ forumId, boardId, run, existing, defaultParentId = null,
           className="mt-0.5"
         />
         <span>
-          <span className="font-semibold text-keep-text">Members only</span>
+          <span className="font-semibold text-keep-text">{t("shared.membersOnly")}</span>
           <span className="block text-[11px] text-keep-muted">
-            Hide this category's topics from guests and non-members. They still see the
-            name, locked.
+            {t("categories.membersOnlyHint")}
           </span>
         </span>
       </label>
@@ -4893,14 +5261,14 @@ function CategoryForm({ forumId, boardId, run, existing, defaultParentId = null,
       {/* Icon + delete only make sense for an existing category. */}
       {existing ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-keep-rule/50 pt-2">
-          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Icon</span>
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("categories.icon")}</span>
           {existing.iconUrl ? (
             <img src={existing.iconUrl} alt="" className="h-5 w-5 rounded-sm object-contain" />
           ) : (
             <FolderOpen className="h-4 w-4 text-keep-accent/70" aria-hidden="true" />
           )}
           <label className={`cursor-pointer rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text ${busy ? "opacity-50" : ""}`}>
-            Upload
+            {t("shared.upload")}
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp,image/gif"
@@ -4923,17 +5291,17 @@ function CategoryForm({ forumId, boardId, run, existing, defaultParentId = null,
               type="button" disabled={busy}
               onClick={() => void run(async () => { await setCategoryIcon(forumId, boardId, existing.id, null); onDone(); })}
               className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-            >Clear</button>
+            >{t("common:clear")}</button>
           ) : null}
-          <span className="text-[10px] text-keep-rule">square, ≤128KB</span>
+          <span className="text-[10px] text-keep-rule">{t("categories.iconSize")}</span>
           <button
             type="button" disabled={busy}
             onClick={() => {
-              if (!window.confirm(`Delete "${existing.name}"? Its topics fall back to the uncategorized list.`)) return;
+              if (!window.confirm(t("categories.deleteConfirm", { name: existing.name }))) return;
               void run(async () => { await deleteRoomCategory(boardId, existing.id); onDone(); });
             }}
             className="ml-auto rounded border border-keep-accent/60 px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10"
-          >Delete</button>
+          >{t("common:delete")}</button>
         </div>
       ) : null}
 
@@ -4943,13 +5311,13 @@ function CategoryForm({ forumId, boardId, run, existing, defaultParentId = null,
           type="button"
           onClick={onCancel}
           className="rounded border border-keep-rule px-3 py-1 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-        >Cancel</button>
+        >{t("common:cancel")}</button>
         <button
           type="button"
           disabled={busy || !name.trim()}
           onClick={() => void save()}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
-        >{busy ? "…" : existing ? "Save" : "Create"}</button>
+        >{busy ? "…" : existing ? t("common:save") : t("shared.create")}</button>
       </div>
     </div>
   );

@@ -5,6 +5,9 @@ import { z } from "zod";
 import type { Bookmark, BookmarkedMessage } from "@thekeep/shared";
 import { bookmarks, messages, roomMembers, rooms } from "../db/schema.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
+import { isolationHiddenSetFor } from "../auth/ageIsolation.js";
+import { boardAgeDenied } from "../forums/nsfw.js";
+import { maskForMinors } from "../realtime/minorLanguageFilter.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
 
@@ -23,23 +26,28 @@ const patchBody = z.object({
  * Validate the caller can see (and therefore bookmark) the message:
  *   - Whispers: caller must be sender or recipient.
  *   - Private rooms: caller must be a member of the room.
+ *   - 18+ (age plan, Phase 2): a minor can't bookmark a row stamped 18+ at
+ *     write time, nor anything in an effectively-18+ room.
  *   - Public rooms: anyone authenticated.
  *
  * Returns the message row on success, null on any failure. Failure cases
  * are merged (404 / 403 indistinguishable to the caller) so we don't
  * leak whether a private-room message exists.
  */
-async function canCallerSeeMessage(db: Db, userId: string, messageId: string) {
+async function canCallerSeeMessage(db: Db, viewer: { id: string; isAdult: boolean }, messageId: string) {
   const m = (await db.select().from(messages).where(eq(messages.id, messageId)).limit(1))[0];
   if (!m) return null;
-  if (m.kind === "whisper" && m.userId !== userId && m.toUserId !== userId) return null;
+  if (m.kind === "whisper" && m.userId !== viewer.id && m.toUserId !== viewer.id) return null;
+  if (m.isNsfw && !viewer.isAdult) return null;
   const room = (await db.select().from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
   if (!room) return null;
+  // Board-aware (Phase 3): a board of an 18+ FORUM denies like an 18+ room.
+  if (await boardAgeDenied(db, viewer, room)) return null;
   if (room.type === "private") {
     const member = (await db
       .select()
       .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, userId)))
+      .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, viewer.id)))
       .limit(1))[0];
     if (!member) return null;
   }
@@ -120,7 +128,27 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
     // One block-graph read for the whole list. A bookmarked line whose
     // author is now blocked by (or blocking) the viewer must NOT surface,
     // neither live nor from the frozen snapshot; it reads as removed.
+    // Isolated-pair authors (age plan, Phase 5) fold into the same set —
+    // live rows AND archived snapshots read as removed while the mode is
+    // active, and come back when it ends (keep-but-hide).
     const blocked = await blockedUserIdsFor(db, me.id);
+    for (const hiddenId of await isolationHiddenSetFor(db, me, [
+      ...msgRows.map((m) => m.userId),
+      ...rows.map((r) => r.snapshotAuthorUserId).filter((v): v is string => !!v),
+    ])) {
+      blocked.add(hiddenId);
+    }
+
+    // Minor language filter (age plan Phase 7, plan_ext.md §J): bookmark
+    // reads serve chat bodies — live rows AND frozen snapshots — so an
+    // under-18 viewer gets them masked exactly like the backlog they were
+    // saved from (a minor can bookmark a line they only ever saw masked;
+    // the snapshot stores the RAW body at save time). One matcher scan per
+    // row, only for minor viewers; adults return the body untouched, and
+    // stored rows are never modified. `bodyHtml` stays unmasked, mirroring
+    // maskMessageForMinors's documented exclusion.
+    const maskBody = (body: string): string =>
+      me.isAdult ? body : maskForMinors(body) ?? body;
 
     // A removed row that we can't safely expose. Keeps the row in the list
     // (so the user can delete it) but leaks nothing about its content.
@@ -146,7 +174,7 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
         roomName: r.snapshotRoomName ?? "(expired room)",
         displayName: r.snapshotDisplayName ?? "",
         kind: (r.snapshotKind as BookmarkedMessage["kind"]) ?? "say",
-        body: r.snapshotBody ?? REMOVED,
+        body: maskBody(r.snapshotBody ?? REMOVED),
         createdAt: r.snapshotMsgCreatedAt ?? +r.createdAt,
         replyToId: r.snapshotReplyToId ?? null,
         archived: true,
@@ -168,7 +196,16 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
         // never falls through to the snapshot, a mod-deleted line must
         // stay gone even though we still hold a copy.
         const room = roomById.get(m.roomId);
-        if (m.deletedAt || blocked.has(m.userId)) {
+        // 18+-stamped rows read as removed for minors (age plan, Phase 2):
+        // a bookmark made before a DOB correction, or before the room
+        // flipped, must not keep serving the body. LIVE rows consult the
+        // authoritative `messages.isNsfw` here; once retention expires the
+        // source, the archived branch below consults the row's own
+        // `snapshot_is_nsfw` copy the janitor froze at archive time
+        // (migration 0341). A minor's own bookmarks are already
+        // create-path age-gated, so this mainly covers adult-created
+        // bookmarks on an account an admin later corrects to minor.
+        if (m.deletedAt || blocked.has(m.userId) || (m.isNsfw && !me.isAdult)) {
           message = removedMessage(room?.name ?? r.snapshotRoomName ?? "(deleted room)");
         } else {
           // Whisper privacy: even your own bookmark of a whisper you were
@@ -181,7 +218,7 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
             roomName: room?.name ?? "(deleted room)",
             displayName: m.displayName,
             kind: m.kind,
-            body: m.body,
+            body: maskBody(m.body),
             createdAt: +m.createdAt,
             replyToId: m.replyToId ?? null,
             // Snapshot color + cmd-css so the bookmark preview paints the
@@ -199,11 +236,17 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
       } else if (r.archivedAt && r.snapshotBody != null) {
         // The message row is GONE and the retention janitor stamped
         // archivedAt (its ONLY writer). This is a clean expiry, so serve
-        // the frozen snapshot, unless the snapshot author is now
-        // block-hidden from the viewer.
-        message = (r.snapshotAuthorUserId && blocked.has(r.snapshotAuthorUserId))
-          ? removedMessage(r.snapshotRoomName ?? "(expired room)")
-          : archivedMessage(r);
+        // the frozen snapshot — unless the snapshot author is now
+        // block-hidden from the viewer, or the janitor's archive-time
+        // `snapshot_is_nsfw` stamp (migration 0341) marks it 18+ and the
+        // viewer is (now) a minor: same [removed] posture as the live
+        // branch, so a DOB downgrade can't keep reading an 18+-era body
+        // out of the frozen copy.
+        message =
+          (r.snapshotAuthorUserId && blocked.has(r.snapshotAuthorUserId)) ||
+          (r.snapshotIsNsfw && !me.isAdult)
+            ? removedMessage(r.snapshotRoomName ?? "(expired room)")
+            : archivedMessage(r);
       } else {
         // GONE with no archive stamp: a /trash hard-delete, ban-purge, or
         // account-delete cascade (none of those touch archivedAt). We may
@@ -229,7 +272,7 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
     try { body = createBody.parse(req.body); }
     catch (err) { reply.code(400); return { error: err instanceof Error ? err.message : "invalid body" }; }
 
-    const seen = await canCallerSeeMessage(db, me.id, body.messageId);
+    const seen = await canCallerSeeMessage(db, me, body.messageId);
     if (!seen) { reply.code(404); return { error: "message not found or not visible" }; }
 
     const category = (body.category ?? "").trim();

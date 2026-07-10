@@ -1,5 +1,6 @@
 import { broadcastPresence } from "../../realtime/broadcast.js";
 import { clearMood, setMood } from "../../realtime/moodState.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const MAX_MOOD_LEN = 32;
@@ -50,7 +51,7 @@ export const moodCommand: CommandHandler = {
     } else {
       next = normalizeMood(raw);
       if (!next) {
-        notice(ctx, "MOOD_EMPTY", "Mood cannot be empty (use /mood clear to remove).");
+        notice(ctx, "MOOD_EMPTY", tFor(ctx.user.locale, "commands:mood.empty"));
         return;
       }
     }

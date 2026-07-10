@@ -1,0 +1,29 @@
+{
+  "passwordReset": {
+    "subject": "Reset your {{siteName}} password",
+    "heading": "Reset your password",
+    "greeting": "Hi {{username}},",
+    "body": "We got a request to reset the password on your {{siteName}} account. Choose a new one with the button below.",
+    "cta": "Reset password",
+    "footnote": "This link expires in 1 hour. If you didn't ask for this, you can ignore this email. Your password won't change."
+  },
+  "verify": {
+    "subject": "Confirm your email for {{siteName}}",
+    "heading": "Confirm your email",
+    "greeting": "Welcome, {{username}}!",
+    "body": "Confirm this email address to finish setting up your {{siteName}} account.",
+    "cta": "Confirm email",
+    "footnote": "This link expires in 24 hours."
+  },
+  "layout": {
+    "unsubscribeLabeled": "Don't want {{label}} emails? {{link}}. This won't affect your other emails.",
+    "unsubscribeGeneric": "Don't want these emails? {{link}}. This won't affect your other emails.",
+    "unsubscribeAction": "Unsubscribe"
+  },
+  "category": {
+    "announcements": "Announcements",
+    "newsletter": "Newsletter",
+    "events": "Events",
+    "promotions": "Offers & promotions"
+  }
+}

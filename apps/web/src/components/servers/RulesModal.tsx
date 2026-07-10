@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
 import { sanitizeUserHtml, sweepOrphanedUserBioStyles, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
@@ -53,6 +54,7 @@ type RulesTab = "app" | "server";
  * users see.
  */
 export function RulesModal({ onClose }: Props) {
+  const { t } = useTranslation("servers");
   // Which server's rules are we resolving? Same source the earning
   // dashboard reads `/earning/me` with. Null (flag-off / no active
   // server) sends no `serverId`, so the backend returns appRules only
@@ -80,12 +82,13 @@ export function RulesModal({ onClose }: Props) {
       : "/api/rules";
     fetch(url, { credentials: "include" })
       .then(async (r) => {
-        if (!r.ok) throw new Error(`status ${r.status}`);
+        if (!r.ok) throw new Error(t("shared.httpStatus", { status: r.status }));
         return r.json() as Promise<RulesPayload>;
       })
       .then((j) => { if (!cancelled) setData(j); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "load failed"); });
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : t("shared.loadFailed")); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentServerId]);
 
   // Sweep any orphaned scoped <style> blocks when the modal unmounts (same
@@ -104,7 +107,7 @@ export function RulesModal({ onClose }: Props) {
         className={`${MODAL_CARD_CONTENT} keep-frame rounded bg-keep-bg`}
       >
         <div className="flex shrink-0 items-center justify-between border-b border-keep-border bg-keep-panel px-4 py-2">
-          <h2 className="font-action text-lg">Rules</h2>
+          <h2 className="font-action text-lg">{t("rules.title")}</h2>
           <CloseButton onClick={onClose} />
         </div>
 
@@ -112,7 +115,7 @@ export function RulesModal({ onClose }: Props) {
           {error ? (
             <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
           ) : !data ? (
-            <div className="text-keep-muted">loading...</div>
+            <div className="text-keep-muted">{t("rules.loading")}</div>
           ) : (
             <div className="space-y-4">
               {data.securityNoticeHtml.trim() ? (
@@ -138,7 +141,7 @@ export function RulesModal({ onClose }: Props) {
                         : "border-transparent text-keep-muted hover:text-keep-text"
                     }`}
                   >
-                    App Rules
+                    {t("rules.appTab")}
                   </button>
                   <button
                     type="button"
@@ -151,7 +154,7 @@ export function RulesModal({ onClose }: Props) {
                         : "border-transparent text-keep-muted hover:text-keep-text"
                     }`}
                   >
-                    Server Rules
+                    {t("rules.serverTab")}
                   </button>
                 </div>
               ) : null}
@@ -166,8 +169,8 @@ export function RulesModal({ onClose }: Props) {
               ) : (
                 <p className="italic text-keep-muted">
                   {activeTab === "server"
-                    ? "This server has not posted its own rules."
-                    : "No rules have been posted yet."}
+                    ? t("rules.serverNone")
+                    : t("rules.none")}
                 </p>
               )}
             </div>
@@ -175,7 +178,7 @@ export function RulesModal({ onClose }: Props) {
         </div>
 
         <div className="shrink-0 border-t border-keep-border bg-keep-panel/40 px-4 py-2 text-[10px] text-keep-muted">
-          Press <kbd className="rounded border border-keep-border bg-keep-bg px-1">Esc</kbd> to close.
+          <Trans t={t} i18nKey="rules.escClose" components={{ kbd: <kbd className="rounded border border-keep-border bg-keep-bg px-1" /> }} />
         </div>
       </div>
     </Modal>

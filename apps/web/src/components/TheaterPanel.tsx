@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import ReactPlayer from "react-player";
 import type { Socket } from "socket.io-client";
 import type { ClientToServerEvents, RoomSummary, ServerToClientEvents } from "@thekeep/shared";
@@ -99,6 +100,7 @@ function fmtTime(sec: number): string {
 }
 
 export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGuide }: Props) {
+  const { t } = useTranslation("common");
   const playlist = room.theaterPlaylist;
   const sync = useChat((s) => s.theaterSyncByRoom[roomId]);
   const reactions = useChat((s) => s.theaterReactions);
@@ -175,6 +177,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
   // All seeks route through here so we can stamp the time (for the
   // post-seek cooldown) and never seek to a negative position.
   const lastSeekAtRef = useRef(0);
+  const lastSeekTargetRef = useRef<number | null>(null);
   const seekTo = useCallback((sec: number) => {
     const p = playerRef.current;
     if (!p) return;
@@ -186,9 +189,29 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
     // console view, so this is silent for normal users.
     // eslint-disable-next-line no-console
     console.debug("[theater] seek", { to: Math.round(sec), kind: currentRef.current?.kind, live: !!currentRef.current?.live });
-    p.seekTo(Math.max(0, sec), "seconds");
+    const target = Math.max(0, sec);
+    p.seekTo(target, "seconds");
     lastSeekAtRef.current = Date.now();
+    lastSeekTargetRef.current = target;
+    // Reflect the seek on the bar immediately. `played` otherwise only moves
+    // via the isPlaying-gated poll / onProgress, so a seek landing while
+    // PAUSED (joining a paused room, a mod seeking a paused video) left the
+    // bar stuck on the stale pre-seek time until playback resumed.
+    setPlayed(target);
   }, []);
+
+  // True while a just-issued seek is still landing: the player (YouTube
+  // especially) keeps reporting the OLD position for a beat after seekTo().
+  // Writing those readings into `played` would snap the bar back to the
+  // pre-seek spot and then jump it forward again. Once the player reports a
+  // position near the target (or the cooldown lapses), live readings win.
+  const seekStillLanding = useCallback(
+    (cur: number): boolean =>
+      Date.now() - lastSeekAtRef.current < SEEK_COOLDOWN_MS &&
+      lastSeekTargetRef.current != null &&
+      Math.abs(cur - lastSeekTargetRef.current) > DRIFT_TOLERANCE_SEC,
+    [],
+  );
 
   // Stable config identity. A fresh object here on every render (and the
   // panel re-renders ~once/sec from onProgress + reactions) made
@@ -311,7 +334,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
       if (!p) return;
       const cur = p.getCurrentTime();
       if (typeof cur === "number" && Number.isFinite(cur) && cur >= 0) {
-        setPlayed(cur);
+        if (!seekStillLanding(cur)) setPlayed(cur);
         if (cur > 0.1) startedRef.current = true;
       }
       // Backstop for a missed onDuration so the bar's track + readout aren't
@@ -322,7 +345,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
       }
     }, 500);
     return () => window.clearInterval(id);
-  }, [isPlaying, ready, isEmbed, isLive]);
+  }, [isPlaying, ready, isEmbed, isLive, seekStillLanding]);
 
   // Live-edge tracking — RAW-HLS live only (`kind: "live"`, hls.js backend).
   // A live source has no position anchor; instead we pin the player to the
@@ -413,6 +436,23 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
     emitControl(isPlaying ? "pause" : "play", { positionSec });
   };
 
+  // Releasing the scrub thumb commits the seek. `played` is stamped with the
+  // chosen spot right away so the bar holds there while the control round-
+  // trips and the player finishes seeking — it otherwise snapped back to the
+  // stale pre-scrub time (indefinitely so on a paused video, where the poll
+  // that would eventually correct it isn't running).
+  const commitScrub = () => {
+    if (scrub == null) return;
+    // Mark the seek as in flight NOW, not when the echoed control lands: the
+    // local player only seeks after the server sync round-trips, and a poll
+    // tick in that window would count as a live reading and snap the bar back.
+    lastSeekAtRef.current = Date.now();
+    lastSeekTargetRef.current = scrub;
+    setPlayed(scrub);
+    emitControl("seek", { positionSec: scrub });
+    setScrub(null);
+  };
+
   const react = (emoji: string) => socket.emit("theater:react", { roomId, emoji });
 
   const copyUrl = () => {
@@ -462,7 +502,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
             <iframe
               key={current.url}
               src={current.url}
-              title={current.title || "Theater video"}
+              title={current.title || t("theater.videoFrameTitle")}
               className="h-full w-full border-0"
               allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
               allowFullScreen
@@ -483,7 +523,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
                 onReady={() => setReady(true)}
                 onDuration={(d) => setDuration(d)}
                 onProgress={(st) => {
-                  setPlayed(st.playedSeconds);
+                  if (!seekStillLanding(st.playedSeconds)) setPlayed(st.playedSeconds);
                   // Real playback happened → this source isn't dead.
                   if (st.playedSeconds > 0.1) startedRef.current = true;
                 }}
@@ -530,8 +570,10 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
             {canControl ? (
               <>
                 <span>
-                  No video queued. Add one with <span className="font-mono">/theater add &lt;url&gt;</span>, or stream
-                  your own with <span className="font-mono">/theater live &lt;url&gt;</span>.
+                  <Trans t={t} i18nKey="theater.noVideoQueued" shouldUnescape>
+                    No video queued. Add one with <span className="font-mono">/theater add &lt;url&gt;</span>, or
+                    stream your own with <span className="font-mono">/theater live &lt;url&gt;</span>.
+                  </Trans>
                 </span>
                 {onShowStreamGuide && canSeeStreamGuide ? (
                   <button
@@ -539,12 +581,12 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
                     onClick={onShowStreamGuide}
                     className="text-keep-action underline-offset-2 hover:underline"
                   >
-                    How to stream your desktop →
+                    {t("theater.howToStream")}
                   </button>
                 ) : null}
               </>
             ) : (
-              "The host hasn't queued a video yet."
+              t("theater.hostNotQueued")
             )}
           </div>
         )}
@@ -596,7 +638,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
             }}
             className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-black/70 px-4 py-1.5 text-sm font-medium text-white shadow-lg ring-1 ring-white/20 hover:bg-black/85"
           >
-            🔇 Tap to unmute
+            {t("theater.tapToUnmute")}
           </button>
         ) : null}
       </div>
@@ -610,7 +652,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
         ) : null}
         {isLive ? (
           <span className="shrink-0 rounded bg-red-600/90 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white">
-            ● Live
+            {t("theater.liveBadge")}
           </span>
         ) : null}
         {current ? (
@@ -624,18 +666,18 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
               onClick={copyUrl}
               className="shrink-0 rounded border border-keep-border/60 px-2 py-0.5 text-keep-action hover:bg-keep-action/10"
             >
-              {copied ? "Copied" : "Copy link"}
+              {copied ? t("copied") : t("theater.copyLink")}
             </button>
           </>
         ) : (
-          <span className="flex-1 text-keep-muted">No source set.</span>
+          <span className="flex-1 text-keep-muted">{t("theater.noSourceSet")}</span>
         )}
         {!muted && current && !isEmbed ? (
           <button
             type="button"
             onClick={() => setMuted(true)}
             className="shrink-0 rounded border border-keep-border/60 px-2 py-0.5 text-keep-muted hover:bg-keep-action/10"
-            title="Mute audio (local only)"
+            title={t("theater.muteTitle")}
           >
             🔊
           </button>
@@ -645,9 +687,9 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
             type="button"
             onClick={onShowStreamGuide}
             className="shrink-0 rounded border border-keep-border/60 px-2 py-0.5 text-keep-muted hover:bg-keep-action/10"
-            title="How to stream your own video (VLC / OBS + a tunnel)"
+            title={t("theater.streamHelpTitle")}
           >
-            Stream help
+            {t("theater.streamHelp")}
           </button>
         ) : null}
 
@@ -659,7 +701,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
               type="button"
               onClick={() => react(emoji)}
               className="rounded px-1 text-base leading-none hover:scale-125 hover:bg-keep-action/10 transition-transform"
-              aria-label={`React ${emoji}`}
+              aria-label={t("theater.reactAria", { emoji })}
             >
               {emoji}
             </button>
@@ -675,7 +717,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
             onClick={() => emitControl("prev")}
             disabled={playlist.length < 2}
             className="rounded px-1.5 py-0.5 text-sm hover:bg-keep-action/10 disabled:opacity-40"
-            title="Previous"
+            title={t("theater.previous")}
           >
             ⏮
           </button>
@@ -684,16 +726,16 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
             onClick={togglePlay}
             disabled={isEmbed}
             className="rounded px-2 py-0.5 text-sm hover:bg-keep-action/10 disabled:opacity-40"
-            title={isPlaying ? "Pause for everyone" : "Play for everyone"}
+            title={isPlaying ? t("theater.pauseEveryone") : t("theater.playEveryone")}
           >
-            {isPlaying ? "⏸ Pause" : "▶ Play"}
+            {isPlaying ? t("theater.pauseButton") : t("theater.playButton")}
           </button>
           <button
             type="button"
             onClick={() => emitControl("next")}
             disabled={playlist.length < 2}
             className="rounded px-1.5 py-0.5 text-sm hover:bg-keep-action/10 disabled:opacity-40"
-            title="Next"
+            title={t("theater.next")}
           >
             ⏭
           </button>
@@ -701,7 +743,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
             // Live has no timeline: no seek bar, just a live-edge indicator.
             <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-red-400">
               <span className="inline-block h-2 w-2 shrink-0 animate-pulse rounded-full bg-red-500" />
-              Live
+              {t("theater.liveIndicator")}
             </span>
           ) : (
             <>
@@ -716,25 +758,15 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
                 value={sliderValue}
                 disabled={isEmbed || sliderMax === 0}
                 onChange={(e) => setScrub(Number(e.target.value))}
-                onPointerUp={() => {
-                  if (scrub != null) {
-                    emitControl("seek", { positionSec: scrub });
-                    setScrub(null);
-                  }
-                }}
-                onMouseUp={() => {
-                  if (scrub != null) {
-                    emitControl("seek", { positionSec: scrub });
-                    setScrub(null);
-                  }
-                }}
+                onPointerUp={commitScrub}
+                onMouseUp={commitScrub}
                 className="min-w-0 flex-1 accent-keep-action disabled:opacity-40"
-                aria-label="Seek"
+                aria-label={t("theater.seekAria")}
               />
             </>
           )}
-          <span className="shrink-0 text-[11px] uppercase tracking-wide text-keep-muted" title="Loop mode (set with /theater loop)">
-            loop: {room.theaterLoop}
+          <span className="shrink-0 text-[11px] uppercase tracking-wide text-keep-muted" title={t("theater.loopTitle")}>
+            {t("theater.loopLabel", { mode: room.theaterLoop })}
           </span>
         </div>
       ) : null}
@@ -766,7 +798,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
         onPointerUp={onHandleUp}
         role="separator"
         aria-orientation="horizontal"
-        aria-label="Resize video panel"
+        aria-label={t("theater.resizeAria")}
       >
         <div className="theater-resize-grip h-0.5 w-10 rounded-full bg-keep-border/70" />
       </div>

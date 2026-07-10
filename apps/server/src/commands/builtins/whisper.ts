@@ -4,8 +4,12 @@ import type { ChatMessage } from "@thekeep/shared";
 import { characters, ignores, messages, users } from "../../db/schema.js";
 import { pushTriggers } from "../../realtime/broadcast.js";
 import { isBlockedBetween } from "../../auth/blocks.js";
+import { isAdultUser } from "../../auth/ageGate.js";
+import { isIsolatedBetween } from "../../auth/ageIsolation.js";
+import { maskForMinors } from "../../realtime/minorLanguageFilter.js";
 import { stripFirstToken } from "../parser.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -37,7 +41,7 @@ export const whisperCommand: CommandHandler = {
   async run(ctx) {
     const args = ctx.args;
     if (args.length < 2) {
-      notice(ctx, "WHISPER_USAGE", "Usage: /whisper <username> <text>");
+      notice(ctx, "WHISPER_USAGE", tFor(ctx.user.locale, "commands:whisper.usage"));
       return;
     }
     const targetName = args[0]!;
@@ -46,7 +50,7 @@ export const whisperCommand: CommandHandler = {
     // with an Alt+0160 keeps its full name as a single token.
     const body = stripFirstToken(ctx.argsText).trim();
     if (!body) {
-      notice(ctx, "WHISPER_EMPTY", "Whisper body is empty.");
+      notice(ctx, "WHISPER_EMPTY", tFor(ctx.user.locale, "commands:whisper.empty"));
       return;
     }
 
@@ -58,7 +62,7 @@ export const whisperCommand: CommandHandler = {
     // tokens so the user can re-run with the right one.
     const resolution = await resolveIdentityArg(ctx.db, targetName);
     if (resolution.kind === "none") {
-      notice(ctx, "WHISPER_NO_USER", `No user named "${targetName}".`);
+      notice(ctx, "WHISPER_NO_USER", tFor(ctx.user.locale, "commands:shared.noUserNamed", { name: targetName }));
       return;
     }
     if (resolution.kind === "ambiguous") {
@@ -67,13 +71,13 @@ export const whisperCommand: CommandHandler = {
     }
     const targetUserId = resolution.target.userId;
     if (targetUserId === ctx.user.id) {
-      notice(ctx, "WHISPER_SELF", "Whispering yourself isn't useful.");
+      notice(ctx, "WHISPER_SELF", tFor(ctx.user.locale, "commands:whisper.self"));
       return;
     }
     // A block hides the target entirely (mutual): behave as if no such user
     // exists, never reveal the block to either side.
     if (await isBlockedBetween(ctx.db, ctx.user.id, targetUserId)) {
-      notice(ctx, "WHISPER_NO_USER", `No user named "${targetName}".`);
+      notice(ctx, "WHISPER_NO_USER", tFor(ctx.user.locale, "commands:shared.noUserNamed", { name: targetName }));
       return;
     }
     // Fetch the full target row for downstream needs (activeCharacterId
@@ -86,7 +90,16 @@ export const whisperCommand: CommandHandler = {
     if (!target) {
       // Resolver said unique but the row vanished between resolve and
       // fetch, exceedingly rare race (admin disable mid-command).
-      notice(ctx, "WHISPER_NO_USER", `No user named "${targetName}".`);
+      notice(ctx, "WHISPER_NO_USER", tFor(ctx.user.locale, "commands:shared.noUserNamed", { name: targetName }));
+      return;
+    }
+    // Minor isolation (age plan, Phase 5): same posture as a block — the
+    // pair behave as if the other doesn't exist, so the refusal is the
+    // exact "no such user" line, never a hint that isolation is on. Both
+    // rows are already in hand (session + the fetch above), so the check
+    // is pure in-memory.
+    if (isIsolatedBetween(ctx.user, target)) {
+      notice(ctx, "WHISPER_NO_USER", tFor(ctx.user.locale, "commands:shared.noUserNamed", { name: targetName }));
       return;
     }
 
@@ -175,14 +188,32 @@ export const whisperCommand: CommandHandler = {
     // per-socket rewrite is purely for live rendering. Scrollback in
     // every room overlays party-to-me whispers via sendRoomBacklogTo /
     // GET /rooms/:id/messages.
+    //
+    // Minor language filter (age plan Phase 7, plan_ext.md §J): a minor
+    // PARTY to the whisper — recipient, or the sender's own echo — reads
+    // it masked; an adult party reads the original. Both parties' rows are
+    // in hand (session + target fetch), so this is decided per side with
+    // ONE mask compute when any side is a minor, and zero work when both
+    // are adults. The stored row keeps what the author wrote.
+    const senderIsMinor = !ctx.user.isAdult;
+    const targetIsMinor = !isAdultUser(target);
+    const masked = senderIsMinor || targetIsMinor ? maskForMinors(body) : null;
     const sockets = await ctx.io.fetchSockets();
     for (const s of sockets) {
       const uid = (s.data as { userId?: string }).userId;
       const tabRoom = (s.data as { roomId?: string }).roomId ?? ctx.roomId;
       if (uid === ctx.user.id) {
-        s.emit("message:new", { ...out, roomId: tabRoom });
+        s.emit("message:new", {
+          ...out,
+          roomId: tabRoom,
+          ...(masked !== null && senderIsMinor ? { body: masked } : {}),
+        });
       } else if (!blocked && uid === target.id) {
-        s.emit("message:new", { ...out, roomId: tabRoom });
+        s.emit("message:new", {
+          ...out,
+          roomId: tabRoom,
+          ...(masked !== null && targetIsMinor ? { body: masked } : {}),
+        });
       }
     }
     if (blocked) return;

@@ -1,0 +1,29 @@
+{
+  "passwordReset": {
+    "subject": "Restablece tu contraseña de {{siteName}}",
+    "heading": "Restablece tu contraseña",
+    "greeting": "Hola, {{username}},",
+    "body": "Recibimos una solicitud para restablecer la contraseña de tu cuenta de {{siteName}}. Elige una nueva con el botón de abajo.",
+    "cta": "Restablecer contraseña",
+    "footnote": "Este enlace vence en 1 hora. Si no lo solicitaste, puedes ignorar este correo. Tu contraseña no cambiará."
+  },
+  "verify": {
+    "subject": "Confirma tu correo para {{siteName}}",
+    "heading": "Confirma tu correo",
+    "greeting": "¡Te damos la bienvenida, {{username}}!",
+    "body": "Confirma esta dirección de correo para terminar de configurar tu cuenta de {{siteName}}.",
+    "cta": "Confirmar correo",
+    "footnote": "Este enlace vence en 24 horas."
+  },
+  "layout": {
+    "unsubscribeLabeled": "¿No quieres correos de {{label}}? {{link}}. Esto no afectará tus otros correos.",
+    "unsubscribeGeneric": "¿No quieres estos correos? {{link}}. Esto no afectará tus otros correos.",
+    "unsubscribeAction": "Cancelar suscripción"
+  },
+  "category": {
+    "announcements": "Anuncios",
+    "newsletter": "Boletín",
+    "events": "Eventos",
+    "promotions": "Ofertas y promociones"
+  }
+}

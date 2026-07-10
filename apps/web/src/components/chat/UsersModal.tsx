@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Gender } from "../../lib/gender.js";
 import { genderGlyph } from "../../lib/gender.js";
+import { formatDate, formatNumber } from "../../lib/intlFormat.js";
 import { useEarning } from "../../state/earning.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
@@ -47,6 +49,7 @@ interface Props {
  * a session, so the directory isn't exposed to the public internet.
  */
 export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
+  const { t } = useTranslation("chat");
   const [rows, setRows] = useState<UserRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [q, setQ] = useState(initialQuery ?? "");
@@ -71,13 +74,13 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
       const url = qs ? `/users?${qs}` : "/users";
       fetch(url, { credentials: "include", signal: controller.signal })
         .then(async (r) => {
-          if (!r.ok) throw new Error(`status ${r.status}`);
+          if (!r.ok) throw new Error(t("users.statusError", { status: r.status }));
           return r.json() as Promise<{ users: UserRow[] }>;
         })
         .then((j) => { if (!cancelled) { setRows(j.users); setError(null); } })
         .catch((err) => {
           if (cancelled || err?.name === "AbortError") return;
-          setError(err instanceof Error ? err.message : "load failed");
+          setError(err instanceof Error ? err.message : t("users.loadFailed"));
         });
     }, 200); // debounce search keystrokes
     return () => { cancelled = true; controller.abort(); window.clearTimeout(handle); };
@@ -100,15 +103,15 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
         <div className="flex shrink-0 flex-col gap-2 border-b border-keep-border bg-keep-panel px-4 py-2">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-baseline gap-2">
-              <h2 className="font-action text-lg">Users</h2>
+              <h2 className="font-action text-lg">{t("users.title")}</h2>
               <span className="text-xs text-keep-muted">
-                {counts.online} online · {counts.total} shown
+                {t("users.counts", { online: counts.online, shown: counts.total })}
               </span>
             </div>
             <input
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="Search master or character names..."
+              placeholder={t("users.searchPlaceholder")}
               autoFocus
               className="flex-1 rounded border border-keep-border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
             />
@@ -119,29 +122,29 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
               and the user can still sort/search). */}
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <label className="flex items-center gap-1 text-keep-muted">
-              <span className="uppercase tracking-widest">Rank</span>
+              <span className="uppercase tracking-widest">{t("users.rank")}</span>
               <select
                 value={rankFilter}
                 onChange={(e) => setRankFilter(e.target.value)}
                 className="rounded border border-keep-border bg-keep-bg px-1.5 py-0.5 text-keep-text outline-none focus:border-keep-action"
               >
-                <option value="">Any rank</option>
+                <option value="">{t("users.anyRank")}</option>
                 {ranks.map((r) => (
                   <option key={r.key} value={r.key}>{r.name}</option>
                 ))}
               </select>
             </label>
             <label className="flex items-center gap-1 text-keep-muted">
-              <span className="uppercase tracking-widest">Sort</span>
+              <span className="uppercase tracking-widest">{t("users.sort")}</span>
               <select
                 value={sortMode}
                 onChange={(e) => setSortMode(e.target.value as SortMode)}
                 className="rounded border border-keep-border bg-keep-bg px-1.5 py-0.5 text-keep-text outline-none focus:border-keep-action"
               >
-                <option value="online">Online first</option>
-                <option value="messages">Most active</option>
-                <option value="joined">Newest</option>
-                <option value="name">Name (A–Z)</option>
+                <option value="online">{t("users.sortOnline")}</option>
+                <option value="messages">{t("users.sortMessages")}</option>
+                <option value="joined">{t("users.sortJoined")}</option>
+                <option value="name">{t("users.sortName")}</option>
               </select>
             </label>
           </div>
@@ -151,9 +154,9 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
           {error ? (
             <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{error}</div>
           ) : !rows ? (
-            <div className="text-keep-muted">loading...</div>
+            <div className="text-keep-muted">{t("users.loading")}</div>
           ) : rows.length === 0 ? (
-            <div className="text-keep-muted">No matches.</div>
+            <div className="text-keep-muted">{t("users.noMatches")}</div>
           ) : (
             <ul className="space-y-2">
               {rows.map((u) => (
@@ -163,7 +166,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
                       type="button"
                       onClick={() => onOpenName(u.username)}
                       className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 py-0.5 text-left hover:bg-keep-panel"
-                      title={`View ${u.username}'s profile`}
+                      title={t("actions.viewProfile", { name: u.username })}
                     >
                       {/* Rank gem replaces the gender icon when the
                           user has a rank, matching the in-chat rule.
@@ -181,16 +184,16 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
                         {u.username}
                       </span>
                       {u.online ? (
-                        <span className="ml-1 inline-block h-2 w-2 shrink-0 rounded-full bg-keep-action" title="online" />
+                        <span className="ml-1 inline-block h-2 w-2 shrink-0 rounded-full bg-keep-action" title={t("users.online")} />
                       ) : (
-                        <span className="ml-1 inline-block h-2 w-2 shrink-0 rounded-full bg-keep-muted/40" title="offline" />
+                        <span className="ml-1 inline-block h-2 w-2 shrink-0 rounded-full bg-keep-muted/40" title={t("users.offline")} />
                       )}
                       {u.away ? (
                         <span
                           className="ml-1 shrink-0 rounded bg-keep-system/15 px-1 text-[10px] uppercase tracking-widest text-keep-system"
                           title={u.awayMessage ?? ""}
                         >
-                          away
+                          {t("users.away")}
                         </span>
                       ) : null}
                     </button>
@@ -198,14 +201,14 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
                       {/* Lifetime visible-post count. "0" still shows
                           (it IS information: this user has signed up
                           but never posted). */}
-                      <span title={u.messageCount === null ? "Posts hidden by user" : "Lifetime posts (chat + forum)"}>
-                        {u.messageCount === null ? "private" : `${u.messageCount.toLocaleString()} posts`}
+                      <span title={u.messageCount === null ? t("users.postsHidden") : t("users.postsLifetime")}>
+                        {u.messageCount === null ? t("users.private") : t("users.postCount", { n: formatNumber(u.messageCount) })}
                       </span>
                       <span aria-hidden className="text-keep-rule">·</span>
                       <span>
                         {u.lastLoginAt
-                          ? `seen ${new Date(u.lastLoginAt).toLocaleDateString()}`
-                          : `joined ${new Date(u.createdAt).toLocaleDateString()}`}
+                          ? t("users.seen", { date: formatDate(u.lastLoginAt) })
+                          : t("users.joined", { date: formatDate(u.createdAt) })}
                       </span>
                     </div>
                   </div>
@@ -223,14 +226,14 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
                             }`}
                             title={
                               c.id === u.activeCharacterId
-                                ? `${c.name} (currently active)`
+                                ? t("users.characterActive", { name: c.name })
                                 : `${c.name}`
                             }
                           >
                             {c.name}
                           </button>
                           {c.id === u.activeCharacterId ? (
-                            <span className="text-[10px] uppercase tracking-widest text-keep-action">active</span>
+                            <span className="text-[10px] uppercase tracking-widest text-keep-action">{t("users.active")}</span>
                           ) : null}
                         </li>
                       ))}
@@ -243,9 +246,7 @@ export function UsersModal({ onClose, onOpenName, initialQuery }: Props) {
         </div>
 
         <div className="shrink-0 border-t border-keep-border bg-keep-panel/40 p-2 text-[10px] text-keep-muted">
-          Click a name to open their profile. Active characters open the
-          character profile; inactive characters and master accounts open the
-          master profile.
+          {t("users.footer")}
         </div>
       </div>
     </Modal>

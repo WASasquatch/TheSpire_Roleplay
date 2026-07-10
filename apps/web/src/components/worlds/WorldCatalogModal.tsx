@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type {
   WorldCatalogEntry,
   WorldCatalogPage,
@@ -21,20 +22,10 @@ interface Props {
 }
 
 /**
- * Genre presentation labels. Kept in sync with shared `WorldGenre`; the
- * underscore between definition and display is fine here because the
- * filter chips and dropdowns share the same source of truth.
+ * Genre presentation order. Labels live in the worlds i18n catalog under
+ * `genre.<key>` (kept in sync with shared `WorldGenre`); the filter chips
+ * and dropdowns share that same source of truth.
  */
-const GENRE_LABEL: Record<WorldGenre, string> = {
-  fantasy: "Fantasy",
-  modern: "Modern",
-  scifi: "Sci-Fi",
-  horror: "Horror",
-  western: "Western",
-  steampunk: "Steampunk",
-  mythological: "Mythological",
-  other: "Other",
-};
 const GENRE_ORDER: WorldGenre[] = [
   "fantasy", "modern", "scifi", "horror",
   "western", "steampunk", "mythological", "other",
@@ -55,6 +46,7 @@ const PAGE_SIZE = 24;
  * actions (Join, Use in this room) sit in a small footer row.
  */
 export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Props) {
+  const { t } = useTranslation("worlds");
   // Viewer's own username so owner-of-this-card detection can skip
   // the join/apply button (owners are implicit members of their own
   // worlds, clicking Join would be a no-op, clicking Apply would
@@ -168,11 +160,13 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
             .map((m) => m.worldId),
         ));
       })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "load failed"); })
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : t("errors.loadFailed")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
     // Re-fetch on identity switch so the Joined pills retarget to
-    // the new face's memberships.
+    // the new face's memberships. `t` deliberately omitted: a language
+    // flip must not refetch the whole catalog page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryString, activeCharId]);
 
   function toggleTag(t: string) {
@@ -212,7 +206,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
       if (!r.ok) throw new Error(await readError(r));
       setMemberWorldIds((s) => new Set(s).add(worldId));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "join failed");
+      setError(e instanceof Error ? e.message : t("errors.joinFailed"));
     } finally {
       setJoining(null);
     }
@@ -233,7 +227,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
       setLinkedFlash(worldId);
       window.setTimeout(() => setLinkedFlash(null), 2400);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "link failed");
+      setError(e instanceof Error ? e.message : t("errors.linkFailed"));
     } finally {
       setLinking(null);
     }
@@ -246,7 +240,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">World catalog</h2>
+          <h2 className="font-action text-lg">{t("catalog.title")}</h2>
           <CloseButton onClick={onClose} />
         </header>
 
@@ -259,7 +253,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
               type="search"
               value={q}
               onChange={(e) => setQ(e.target.value)}
-              placeholder="search name, description, tags..."
+              placeholder={t("catalog.searchPlaceholder")}
               className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 outline-none focus:border-keep-action"
             />
             <select
@@ -267,9 +261,9 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
               onChange={(e) => setGenre(e.target.value as WorldGenre | "")}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
             >
-              <option value="">All genres</option>
+              <option value="">{t("catalog.allGenres")}</option>
               {GENRE_ORDER.map((g) => (
-                <option key={g} value={g}>{GENRE_LABEL[g]}</option>
+                <option key={g} value={g}>{t(`genre.${g}`)}</option>
               ))}
             </select>
             {anyFilter ? (
@@ -278,12 +272,12 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                 onClick={clearFilters}
                 className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:bg-keep-banner hover:text-keep-text"
               >
-                clear filters
+                {t("catalog.clearFilters")}
               </button>
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-1">
-            <span className="text-[10px] uppercase tracking-widest text-keep-muted">Tags:</span>
+            <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("catalog.tagsLabel")}</span>
             {CANONICAL_TAGS.map((t) => (
               <button
                 key={t}
@@ -311,7 +305,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
               onClick={() => setVibeOpen((v) => !v)}
               className="text-[10px] uppercase tracking-widest text-keep-muted hover:text-keep-action"
             >
-              {vibeOpen ? "▾" : "▸"} Vibe filters{anyVibeFilter ? ` (${Object.keys(vibeRanges).length})` : ""}
+              {vibeOpen ? "▾" : "▸"} {t("catalog.vibeFilters")}{anyVibeFilter ? ` (${Object.keys(vibeRanges).length})` : ""}
             </button>
             {vibeOpen ? (
               <div className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">
@@ -328,7 +322,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                           : "border-keep-rule bg-keep-bg")
                       }
                     >
-                      <span className="w-16 shrink-0 text-keep-text" title={axis.desc}>{axis.label}</span>
+                      <span className="w-16 shrink-0 text-keep-text" title={t(`vibeAxes.${axis.key}.desc`)}>{t(`vibeAxes.${axis.key}.label`)}</span>
                       <input
                         type="number"
                         min={0}
@@ -339,7 +333,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                           setVibeRange(axis.key, min, r?.max ?? 100);
                         }}
                         className="w-14 rounded border border-keep-rule bg-keep-bg px-1 py-0 text-right tabular-nums"
-                        aria-label={`${axis.label} minimum`}
+                        aria-label={t("catalog.axisMinAria", { axis: t(`vibeAxes.${axis.key}.label`) })}
                       />
                       <span className="text-keep-muted">–</span>
                       <input
@@ -352,14 +346,14 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                           setVibeRange(axis.key, r?.min ?? 0, max);
                         }}
                         className="w-14 rounded border border-keep-rule bg-keep-bg px-1 py-0 text-right tabular-nums"
-                        aria-label={`${axis.label} maximum`}
+                        aria-label={t("catalog.axisMaxAria", { axis: t(`vibeAxes.${axis.key}.label`) })}
                       />
                       {active ? (
                         <button
                           type="button"
                           onClick={() => clearVibeRange(axis.key)}
                           className="ml-auto rounded border border-keep-rule px-1 text-[10px] text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-                          title="Clear filter for this axis"
+                          title={t("catalog.clearAxisTitle")}
                         >
                           ×
                         </button>
@@ -371,13 +365,13 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
             ) : null}
           </div>
           <div className="flex flex-wrap items-center gap-1">
-            <span className="text-[10px] uppercase tracking-widest text-keep-muted">Hide:</span>
+            <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("catalog.hideLabel")}</span>
             {CONTENT_WARNINGS.map((c) => (
               <button
                 key={c}
                 type="button"
                 onClick={() => toggleExclude(c)}
-                title={`Exclude worlds tagged "${c}"`}
+                title={t("catalog.excludeTitle", { tag: c })}
                 className={
                   "rounded border px-1.5 py-0 text-[11px] " +
                   (excludeSel.includes(c)
@@ -400,17 +394,17 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
             </div>
           ) : null}
           {loading && entries.length === 0 ? (
-            <p className="italic text-keep-muted">Loading...</p>
+            <p className="italic text-keep-muted">{t("common:loadingDots")}</p>
           ) : entries.length === 0 ? (
             <p className="italic text-keep-muted">
               {anyFilter
-                ? "No worlds match the current filters."
-                : "No open worlds yet. Be the first, mark one of yours as “open” in its settings."}
+                ? t("catalog.noMatches")
+                : t("catalog.noOpenWorlds")}
             </p>
           ) : (
             <>
               <div className="mb-3 text-[10px] uppercase tracking-widest text-keep-muted">
-                {total} {total === 1 ? "world" : "worlds"}
+                {t("catalog.worldCount", { count: total })}
               </div>
               <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {entries.map((e) => (
@@ -423,12 +417,12 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                       type="button"
                       onClick={() => onOpenViewer(e.id)}
                       className="relative block aspect-[3/2] w-full overflow-hidden bg-keep-banner/40 text-left hover:opacity-90"
-                      title="Open in viewer"
+                      title={t("catalog.openInViewer")}
                     >
                       {e.coverImageUrl ? (
                         <img
                           src={e.coverImageUrl}
-                          alt={`${e.name} cover`}
+                          alt={t("catalog.coverAlt", { name: e.name })}
                           loading="lazy"
                           referrerPolicy="no-referrer"
                           className="absolute inset-0 h-full w-full object-cover"
@@ -440,7 +434,15 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                       )}
                       {e.status === "featured" ? (
                         <span className="absolute right-1 top-1 rounded bg-keep-action/90 px-1.5 py-0 text-[10px] uppercase tracking-widest text-keep-bg">
-                          featured
+                          {t("catalog.featured")}
+                        </span>
+                      ) : null}
+                      {/* Server-filtered: only viewers allowed to see
+                          18+ worlds ever receive these rows, so the
+                          chip is a heads-up, not a gate. */}
+                      {e.isNsfw ? (
+                        <span className="absolute left-1 top-1 rounded bg-keep-accent/90 px-1.5 py-0 text-[10px] font-semibold uppercase tracking-widest text-keep-bg">
+                          {t("common:rating.nsfw")}
                         </span>
                       ) : null}
                     </button>
@@ -449,15 +451,20 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                       <div className="flex items-baseline justify-between gap-2">
                         <span className="truncate font-semibold">{e.name}</span>
                         <span className="shrink-0 rounded border border-keep-rule bg-keep-banner/60 px-1.5 py-0 text-[10px] text-keep-muted">
-                          {GENRE_LABEL[e.genre]}
+                          {t(`genre.${e.genre}`)}
                         </span>
                       </div>
                       <div className="text-[10px] text-keep-muted">
-                        by <span className="text-keep-text/80">{e.ownerUsername}</span>
+                        <Trans
+                          t={t}
+                          i18nKey="catalog.byOwner"
+                          values={{ name: e.ownerUsername }}
+                          components={{ 1: <span className="text-keep-text/80" /> }}
+                        />
                         <span className="mx-1">·</span>
-                        {e.memberCount} {e.memberCount === 1 ? "member" : "members"}
+                        {t("catalog.memberCount", { count: e.memberCount })}
                         <span className="mx-1">·</span>
-                        {e.pageCount} {e.pageCount === 1 ? "page" : "pages"}
+                        {t("pageCount", { count: e.pageCount })}
                       </div>
                       {e.description ? (
                         <p className="line-clamp-3 text-xs text-keep-text/80">{e.description}</p>
@@ -481,9 +488,9 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                       {e.contentWarnings.length > 0 ? (
                         <div
                           className="flex flex-wrap gap-1"
-                          title="Content warnings"
+                          title={t("catalog.contentWarningsTitle")}
                         >
-                          <span className="text-[10px] uppercase tracking-widest text-keep-accent">CW:</span>
+                          <span className="text-[10px] uppercase tracking-widest text-keep-accent">{t("catalog.cwLabel")}</span>
                           {e.contentWarnings.map((c) => (
                             <span
                               key={c}
@@ -496,7 +503,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                       ) : null}
                       <div className="mt-auto flex flex-wrap items-center justify-end gap-1 pt-2 text-xs">
                         {linkedFlash === e.id ? (
-                          <span className="text-[11px] text-keep-action">linked</span>
+                          <span className="text-[11px] text-keep-action">{t("catalog.linked")}</span>
                         ) : null}
                         {memberWorldIds.has(e.id) || e.ownerUsername === meUsername ? (
                           // Owners are implicit members of their own
@@ -507,35 +514,35 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                           // click still opens the viewer.
                           <span
                             className="rounded border border-keep-action/40 bg-keep-action/10 px-2 py-0.5 text-keep-action"
-                            title="You're a member of this world. Manage from My Worlds."
+                            title={t("catalog.joinedTitle")}
                           >
-                            Joined
+                            {t("catalog.joined")}
                           </span>
                         ) : e.joinMode === "invite-only" ? (
                           <span
                             className="rounded border border-keep-rule bg-keep-bg/60 px-2 py-0.5 text-keep-muted"
-                            title="The owner adds members directly, no public Join."
+                            title={t("catalog.inviteOnlyTitle")}
                           >
-                            Invite only
+                            {t("catalog.inviteOnly")}
                           </span>
                         ) : e.joinMode === "application" ? (
                           <button
                             type="button"
                             onClick={() => setApplyingTo(e)}
-                            title="Submit an application to join, the owner reviews it."
+                            title={t("catalog.applyTitle")}
                             className="rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-keep-action hover:bg-keep-action/20"
                           >
-                            Apply
+                            {t("actions.apply")}
                           </button>
                         ) : (
                           <button
                             type="button"
                             onClick={() => joinWorld(e.id)}
                             disabled={joining === e.id}
-                            title="Join this world to declare an affiliation. Doesn't affect room access."
+                            title={t("catalog.joinTitle")}
                             className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner disabled:opacity-50"
                           >
-                            {joining === e.id ? "Joining..." : "Join"}
+                            {joining === e.id ? t("catalog.joining") : t("actions.join")}
                           </button>
                         )}
                         {currentRoomId ? (
@@ -544,9 +551,9 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                             onClick={() => linkToRoom(e.id)}
                             disabled={linking === e.id}
                             className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
-                            title="Attach this world to the room you're currently in (owner/mod only)"
+                            title={t("catalog.useInRoomTitle")}
                           >
-                            {linking === e.id ? "..." : "Use in this room"}
+                            {linking === e.id ? "..." : t("catalog.useInRoom")}
                           </button>
                         ) : null}
                       </div>
@@ -562,7 +569,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
                     disabled={loading}
                     className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs hover:bg-keep-banner disabled:opacity-50"
                   >
-                    {loading ? "Loading..." : "Load more"}
+                    {loading ? t("common:loadingDots") : t("catalog.loadMore")}
                   </button>
                 </div>
               ) : null}
@@ -599,6 +606,7 @@ export function WorldCatalogModal({ currentRoomId, onClose, onOpenViewer }: Prop
  * advert-screenshot layout (Magic 60% / Combat 70% / etc.).
  */
 function VibeBars({ stats }: { stats: WorldVibeStats }) {
+  const { t } = useTranslation("worlds");
   // If every axis is null, render nothing at all, a card with no
   // tuned stats shouldn't waste vertical space on eight dashes.
   const anyTuned = WORLD_VIBE_AXES.some((a) => stats[a.key] !== null);
@@ -608,8 +616,8 @@ function VibeBars({ stats }: { stats: WorldVibeStats }) {
       {WORLD_VIBE_AXES.map((axis) => {
         const v = stats[axis.key];
         return (
-          <li key={axis.key} className="flex items-center gap-1.5" title={axis.desc}>
-            <span className="w-14 shrink-0 truncate text-keep-muted">{axis.label}</span>
+          <li key={axis.key} className="flex items-center gap-1.5" title={t(`vibeAxes.${axis.key}.desc`)}>
+            <span className="w-14 shrink-0 truncate text-keep-muted">{t(`vibeAxes.${axis.key}.label`)}</span>
             {v === null ? (
               <span className="text-keep-muted/60">-</span>
             ) : (

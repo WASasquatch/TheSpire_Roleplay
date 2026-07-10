@@ -4,6 +4,7 @@ import { persistTargetedSystemMessageToActiveRooms } from "../../realtime/target
 import { characters, friends, users } from "../../db/schema.js";
 import { eqIdentity, type Identity } from "../../auth/identity.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../identityArg.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 /**
@@ -23,7 +24,7 @@ async function resolveIdentityByName(
 ): Promise<Identity | null> {
   const resolution = await resolveIdentityArg(ctx.db, raw);
   if (resolution.kind === "none") {
-    notice(ctx, "NO_USER", `No user or character named "${raw}".`);
+    notice(ctx, "NO_USER", tFor(ctx.user.locale, "commands:shared.noUserOrCharacter", { name: raw }));
     return null;
   }
   if (resolution.kind === "ambiguous") {
@@ -112,14 +113,14 @@ export const friendCommand: CommandHandler = {
     "Send a friend request. The friendship is tied to whoever's active right now, if you're in-character, the request comes from that character; the other party never sees your OOC handle through this request.",
   async run(ctx) {
     const targetName = ctx.argsText.trim();
-    if (!targetName) return notice(ctx, "FRIEND_USAGE", "Usage: /friend <name>");
+    if (!targetName) return notice(ctx, "FRIEND_USAGE", tFor(ctx.user.locale, "commands:friend.usage"));
 
     const target = await resolveIdentityByName(ctx, targetName);
     if (!target) return;  // resolver emitted the appropriate notice.
 
     const me = meIdentity(ctx);
     if (target.userId === me.userId && target.characterId === me.characterId) {
-      return notice(ctx, "SELF", "Friending yourself isn't useful.");
+      return notice(ctx, "SELF", tFor(ctx.user.locale, "commands:friend.self"));
     }
 
     // Idempotency over the IDENTITY PAIR. Two characters of mine can
@@ -137,11 +138,11 @@ export const friendCommand: CommandHandler = {
       .limit(1))[0];
     if (existing) {
       if (existing.status === "accepted") {
-        return whisperToSelf(ctx, `You and ${targetName} are already friends.`);
+        return whisperToSelf(ctx, tFor(ctx.user.locale, "commands:friend.alreadyFriends", { name: targetName }));
       }
       if (existing.frienderUserId === me.userId
           && (existing.frienderCharacterId ?? null) === me.characterId) {
-        return whisperToSelf(ctx, `Friend request to ${targetName} is still pending, wait for them to /accept.`);
+        return whisperToSelf(ctx, tFor(ctx.user.locale, "commands:friend.pending", { name: targetName }));
       }
       // Existing pending request from THEM to us; calling /friend on
       // them is the natural way to accept.
@@ -152,7 +153,7 @@ export const friendCommand: CommandHandler = {
           eqIdentity(friends.frienderUserId, friends.frienderCharacterId, target),
           eqIdentity(friends.friendedUserId, friends.friendedCharacterId, me),
         ));
-      await whisperToSelf(ctx, `Accepted ${targetName}'s friend request.`);
+      await whisperToSelf(ctx, tFor(ctx.user.locale, "commands:friend.acceptedTheirs", { name: targetName }));
       await emitFriendRequestTo(ctx, target.userId);
       return;
     }
@@ -166,7 +167,7 @@ export const friendCommand: CommandHandler = {
         friendedCharacterId: target.characterId,
         status: "pending",
       });
-    await whisperToSelf(ctx, `Friend request sent to ${targetName}.`);
+    await whisperToSelf(ctx, tFor(ctx.user.locale, "commands:friend.requestSent", { name: targetName }));
     await emitFriendRequestTo(ctx, target.userId);
     // Persist the recipient's "X sent you a friend request" line so it
     // survives a refetch. Only on a genuinely NEW request (not the accept
@@ -189,7 +190,7 @@ export const acceptFriendCommand: CommandHandler = {
   description: "Accept a pending friend request from this user or character.",
   async run(ctx) {
     const targetName = ctx.argsText.trim();
-    if (!targetName) return notice(ctx, "ACCEPT_USAGE", "Usage: /accept <name>");
+    if (!targetName) return notice(ctx, "ACCEPT_USAGE", tFor(ctx.user.locale, "commands:accept.usage"));
 
     const target = await resolveIdentityByName(ctx, targetName);
     if (!target) return;  // resolver emitted the appropriate notice.
@@ -204,9 +205,9 @@ export const acceptFriendCommand: CommandHandler = {
         eq(friends.status, "pending"),
       ));
     if (r.changes === 0) {
-      return notice(ctx, "NO_REQUEST", `No pending friend request from ${targetName}.`);
+      return notice(ctx, "NO_REQUEST", tFor(ctx.user.locale, "commands:friend.noRequest", { name: targetName }));
     }
-    await whisperToSelf(ctx, `You and ${targetName} are now friends.`);
+    await whisperToSelf(ctx, tFor(ctx.user.locale, "commands:accept.done", { name: targetName }));
     // Tell the original sender so their inbox + friends-rail refresh.
     await emitFriendRequestTo(ctx, target.userId);
   },
@@ -219,7 +220,7 @@ export const declineFriendCommand: CommandHandler = {
   description: "Decline a pending friend request. The sender isn't notified.",
   async run(ctx) {
     const targetName = ctx.argsText.trim();
-    if (!targetName) return notice(ctx, "DECLINE_USAGE", "Usage: /decline <name>");
+    if (!targetName) return notice(ctx, "DECLINE_USAGE", tFor(ctx.user.locale, "commands:decline.usage"));
 
     const target = await resolveIdentityByName(ctx, targetName);
     if (!target) return;  // resolver emitted the appropriate notice.
@@ -233,9 +234,9 @@ export const declineFriendCommand: CommandHandler = {
         eq(friends.status, "pending"),
       ));
     if (r.changes === 0) {
-      return notice(ctx, "NO_REQUEST", `No pending friend request from ${targetName}.`);
+      return notice(ctx, "NO_REQUEST", tFor(ctx.user.locale, "commands:friend.noRequest", { name: targetName }));
     }
-    await whisperToSelf(ctx, `Declined ${targetName}'s friend request.`);
+    await whisperToSelf(ctx, tFor(ctx.user.locale, "commands:decline.done", { name: targetName }));
   },
 };
 
@@ -246,7 +247,7 @@ export const unfriendCommand: CommandHandler = {
   description: "End a friendship OR cancel a pending request, in either direction. Operates on your active identity only.",
   async run(ctx) {
     const targetName = ctx.argsText.trim();
-    if (!targetName) return notice(ctx, "UNFRIEND_USAGE", "Usage: /unfriend <name>");
+    if (!targetName) return notice(ctx, "UNFRIEND_USAGE", tFor(ctx.user.locale, "commands:unfriend.usage"));
 
     const target = await resolveIdentityByName(ctx, targetName);
     if (!target) return;  // resolver emitted the appropriate notice.
@@ -264,9 +265,9 @@ export const unfriendCommand: CommandHandler = {
             eqIdentity(friends.friendedUserId, friends.friendedCharacterId, me)),
       ));
     if (r.changes === 0) {
-      return notice(ctx, "NOT_FRIENDED", `${targetName} isn't on your friends list or in your inbox.`);
+      return notice(ctx, "NOT_FRIENDED", tFor(ctx.user.locale, "commands:unfriend.notFriended", { name: targetName }));
     }
-    await whisperToSelf(ctx, `Removed ${targetName} from your friends list.`);
+    await whisperToSelf(ctx, tFor(ctx.user.locale, "commands:unfriend.done", { name: targetName }));
     await emitFriendRequestTo(ctx, target.userId);
   },
 };
@@ -295,7 +296,7 @@ export const friendsCommand: CommandHandler = {
         eq(friends.status, "accepted"),
       ));
     if (rows.length === 0) {
-      return whisperToSelf(ctx, "Friends list is empty for this identity. Use /friend <name> to send a request.");
+      return whisperToSelf(ctx, tFor(ctx.user.locale, "commands:friends.empty"));
     }
     // Resolve each other-side identity to a human-readable name,
     // character name if the friendship was tagged to a character,
@@ -306,9 +307,9 @@ export const friendsCommand: CommandHandler = {
         if (c) return c.name;
       }
       const u = (await ctx.db.select({ username: users.username }).from(users).where(eq(users.id, r.otherUserId)).limit(1))[0];
-      return u?.username ?? "(unknown)";
+      return u?.username ?? tFor(ctx.user.locale, "commands:friends.unknown");
     }));
-    return whisperToSelf(ctx, `Friends: ${names.join(", ")}`);
+    return whisperToSelf(ctx, tFor(ctx.user.locale, "commands:friends.list", { names: names.join(", ") }));
   },
 };
 

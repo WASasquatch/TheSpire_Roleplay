@@ -19,6 +19,7 @@ import { recordAudit } from "../audit.js";
 import { addMessage, addMessageDirect, exitIncognitoOnCharSwitch } from "./broadcast.js";
 import { evaluateAntiSpam } from "./antiSpam.js";
 import { applyFilters, AUTOMOD_DEFAULT_MUTE_MS, getCompiledRuleset } from "./automod.js";
+import { tFor } from "../i18n.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -117,7 +118,7 @@ export async function dispatchChatInput(args: {
   // resolved.
   const earlyCap = Math.max(maxMessageLength, maxForumPostLength);
   if (trimmed.length > earlyCap) {
-    socket.emit("error:notice", { code: "TOO_LONG", message: `Messages capped at ${earlyCap} chars.` });
+    socket.emit("error:notice", { code: "TOO_LONG", message: tFor(user.locale, "errors:server.realtime.messagesCapped", { max: earlyCap }) });
     return;
   }
 
@@ -137,7 +138,7 @@ export async function dispatchChatInput(args: {
     if (!rate.ok) {
       socket.emit("error:notice", {
         code: "RATE_LIMIT",
-        message: `Slow down - try again in ${Math.ceil(rate.retryMs / 1000)}s.`,
+        message: tFor(user.locale, "errors:server.realtime.rateLimit", { seconds: Math.ceil(rate.retryMs / 1000) }),
       });
       return;
     }
@@ -150,7 +151,7 @@ export async function dispatchChatInput(args: {
   if (!socket.rooms.has(`room:${roomId}`)) {
     socket.emit("error:notice", {
       code: "WRONG_ROOM",
-      message: "You aren't in that room. Try /go <room> to switch.",
+      message: tFor(user.locale, "errors:server.realtime.wrongRoom"),
     });
     return;
   }
@@ -231,7 +232,7 @@ export async function dispatchChatInput(args: {
   if (mutedFor !== null && isSpeechCommand(parsed.command)) {
     socket.emit("error:notice", {
       code: "MUTED",
-      message: `You're muted in this room for another ${formatDuration(mutedFor)}.`,
+      message: tFor(user.locale, "errors:server.realtime.mutedInRoom", { duration: formatDuration(mutedFor) }),
     });
     return;
   }
@@ -259,14 +260,14 @@ export async function dispatchChatInput(args: {
     if (verdict.action === "blocked") {
       socket.emit("error:notice", {
         code: "RATE_LIMIT",
-        message: `You're going too fast. Wait ${Math.ceil(verdict.retryMs / 1000)}s.`,
+        message: tFor(user.locale, "errors:server.realtime.tooFast", { seconds: Math.ceil(verdict.retryMs / 1000) }),
       });
       return;
     }
     if (verdict.action === "warn") {
       socket.emit("error:notice", {
         code: "SPAM_WARNING",
-        message: `Slow down - that's rapid-fire spam. Warning ${verdict.warning} of ${verdict.limit}; keep it up and you'll be muted.`,
+        message: tFor(user.locale, "errors:server.realtime.spamWarning", { warning: verdict.warning, limit: verdict.limit }),
       });
       return;
     }
@@ -281,7 +282,7 @@ export async function dispatchChatInput(args: {
         });
       socket.emit("error:notice", {
         code: "MUTED",
-        message: `You've been muted for ${formatDuration(verdict.muteMs)} for spamming. Continued spam makes this longer.`,
+        message: tFor(user.locale, "errors:server.realtime.mutedForSpam", { duration: formatDuration(verdict.muteMs) }),
       });
       // Public system line so returning mods can see the auto-action in backlog.
       await addMessageDirect({
@@ -350,7 +351,7 @@ export async function dispatchChatInput(args: {
       if (verdict.action === "warn") {
         socket.emit("error:notice", {
           code: "SPAM_WARNING",
-          message: "That message was blocked by an auto-moderation rule. Please reword it.",
+          message: tFor(user.locale, "errors:server.realtime.automodReword"),
         });
         return;
       }
@@ -359,7 +360,7 @@ export async function dispatchChatInput(args: {
         // generic acknowledgement so the sender isn't left wondering.
         socket.emit("error:notice", {
           code: "BLOCKED",
-          message: "That message couldn't be posted.",
+          message: tFor(user.locale, "errors:server.realtime.automodBlocked"),
         });
         return;
       }
@@ -375,7 +376,7 @@ export async function dispatchChatInput(args: {
           });
         socket.emit("error:notice", {
           code: "MUTED",
-          message: `You've been muted for ${formatDuration(muteMs)} by an auto-moderation rule.`,
+          message: tFor(user.locale, "errors:server.realtime.automodMuted", { duration: formatDuration(muteMs) }),
         });
         // Public system line so returning mods see the auto-action in backlog.
         await addMessageDirect({
@@ -411,8 +412,8 @@ export async function dispatchChatInput(args: {
       socket.emit("error:notice", {
         code: "TOO_LONG",
         message: isForum
-          ? `Forum posts capped at ${effectiveCap} chars.`
-          : `Messages capped at ${effectiveCap} chars.`,
+          ? tFor(user.locale, "errors:server.realtime.forumPostsCapped", { max: effectiveCap })
+          : tFor(user.locale, "errors:server.realtime.messagesCapped", { max: effectiveCap }),
       });
       return;
     }
@@ -431,7 +432,7 @@ export async function dispatchChatInput(args: {
         if (!cappedTitle) {
           socket.emit("error:notice", {
             code: "EMPTY_TITLE",
-            message: "Topic title can't be empty.",
+            message: tFor(user.locale, "errors:server.realtime.emptyTitle"),
           });
           return;
         }
@@ -453,14 +454,14 @@ export async function dispatchChatInput(args: {
         if (!parent || parent.roomId !== roomId) {
           socket.emit("error:notice", {
             code: "BAD_TOPIC",
-            message: "That topic isn't in this room (or has been removed).",
+            message: tFor(user.locale, "errors:server.realtime.badTopic"),
           });
           return;
         }
         if (parent.replyToId) {
           socket.emit("error:notice", {
             code: "NOT_A_TOPIC",
-            message: "Replies attach to topics, not to other replies.",
+            message: tFor(user.locale, "errors:server.realtime.notATopic"),
           });
           return;
         }
@@ -471,7 +472,7 @@ export async function dispatchChatInput(args: {
         if (parent.deletedAt) {
           socket.emit("error:notice", {
             code: "BAD_TOPIC",
-            message: "That topic isn't in this room (or has been removed).",
+            message: tFor(user.locale, "errors:server.realtime.badTopic"),
           });
           return;
         }
@@ -483,7 +484,7 @@ export async function dispatchChatInput(args: {
         if (parent.lockedAt && !(await hasPermission(user, "bypass_topic_lock", db))) {
           socket.emit("error:notice", {
             code: "TOPIC_LOCKED",
-            message: "This topic is locked and isn't accepting new replies.",
+            message: tFor(user.locale, "errors:server.realtime.topicLocked"),
           });
           return;
         }
@@ -502,7 +503,7 @@ export async function dispatchChatInput(args: {
       // is the server's belt-and-suspenders.
       socket.emit("error:notice", {
         code: "FORUM_NEEDS_TOPIC",
-        message: "This room is a forum. Pick a topic to reply to, or start a new one.",
+        message: tFor(user.locale, "errors:server.realtime.forumNeedsTopic"),
       });
       return;
     }
@@ -521,10 +522,14 @@ export async function dispatchChatInput(args: {
   const handler = registry.resolve(parsed.command, (socket.data as { serverId?: string }).serverId);
   if (!handler) {
     const suggestions = registry.suggest(parsed.command);
-    const tail = suggestions.length ? ` Did you mean ${suggestions.map((s) => `/${s}`).join(", ")}?` : "";
     socket.emit("error:notice", {
       code: "UNKNOWN_CMD",
-      message: `Unknown command /${parsed.command}.${tail}`,
+      message: suggestions.length
+        ? tFor(user.locale, "errors:server.realtime.unknownCommandSuggest", {
+            command: parsed.command,
+            suggestions: suggestions.map((s) => `/${s}`).join(", "),
+          })
+        : tFor(user.locale, "errors:server.realtime.unknownCommand", { command: parsed.command }),
     });
     return;
   }
@@ -546,7 +551,7 @@ export async function dispatchChatInput(args: {
       serverOk = !!a.server && !a.server.isSystem && serverCan(a, handler.serverPermission);
     }
     if (!serverOk) {
-      socket.emit("error:notice", { code: "PERM", message: "You don't have permission to use that command." });
+      socket.emit("error:notice", { code: "PERM", message: tFor(user.locale, "errors:server.realtime.noCommandPermission") });
       return;
     }
   }
@@ -616,7 +621,7 @@ export async function dispatchChatInput(args: {
   } catch (err) {
     socket.emit("error:notice", {
       code: "CMD_ERROR",
-      message: err instanceof Error ? err.message : "Command failed.",
+      message: err instanceof Error ? err.message : tFor(user.locale, "errors:server.realtime.commandFailed"),
     });
   }
 

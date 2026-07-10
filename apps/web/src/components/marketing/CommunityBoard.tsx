@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import type { PublicAffiliateCard } from "../../lib/affiliates.js";
 import { AffiliateCard, type AffiliateCardSize } from "./AffiliateCard.js";
 
 type SortKey = "traffic" | "in" | "out" | "az";
 
-const SORTS: { key: SortKey; label: string }[] = [
-  { key: "traffic", label: "Most active" },
-  { key: "in", label: "Most sent to us" },
-  { key: "out", label: "Most sent out" },
-  { key: "az", label: "A to Z" },
+/** Sort options; the user-facing labels live in the marketing catalog and are
+ *  resolved with t() at render so the dropdown follows the active language. */
+const SORTS: { key: SortKey; labelKey: string }[] = [
+  { key: "traffic", labelKey: "board.sortTraffic" },
+  { key: "in", labelKey: "board.sortIn" },
+  { key: "out", labelKey: "board.sortOut" },
+  { key: "az", labelKey: "board.sortAz" },
 ];
 
 /** How many listings show per page (topsite pagination). */
@@ -28,12 +31,14 @@ const PAGE_SIZE = 8;
 export function CommunityBoard({
   cards,
   size = "large",
-  emptyText = "No communities match your search.",
+  emptyText,
 }: {
   cards: PublicAffiliateCard[];
   size?: AffiliateCardSize;
+  /** Empty-state copy; defaults to the localized "no matches" line. */
   emptyText?: string;
 }) {
+  const { t } = useTranslation("marketing");
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("traffic");
   const [activeTag, setActiveTag] = useState<string | null>(null);
@@ -95,15 +100,15 @@ export function CommunityBoard({
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name or tag…"
-            aria-label="Search communities by name or tag"
+            placeholder={t("board.searchPlaceholder")}
+            aria-label={t("board.searchAria")}
             className="w-full rounded-lg border border-keep-rule bg-keep-bg/70 py-2 pl-9 pr-9 text-sm shadow-inner outline-none transition focus:border-keep-action focus:ring-1 focus:ring-keep-action/30"
           />
           {query ? (
             <button
               type="button"
               onClick={() => setQuery("")}
-              aria-label="Clear search text"
+              aria-label={t("board.clearSearch")}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-keep-muted hover:text-keep-text"
             >
               <X className="h-4 w-4" aria-hidden="true" />
@@ -111,15 +116,15 @@ export function CommunityBoard({
           ) : null}
         </div>
         <label className="flex items-center gap-1.5 text-xs text-keep-muted">
-          <span className="whitespace-nowrap">Sort</span>
+          <span className="whitespace-nowrap">{t("board.sortLabel")}</span>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
-            aria-label="Sort communities"
+            aria-label={t("board.sortAria")}
             className="rounded-lg border border-keep-rule bg-keep-bg/70 px-2.5 py-2 text-sm text-keep-text shadow-inner outline-none transition focus:border-keep-action"
           >
             {SORTS.map((s) => (
-              <option key={s.key} value={s.key}>{s.label}</option>
+              <option key={s.key} value={s.key}>{t(s.labelKey)}</option>
             ))}
           </select>
         </label>
@@ -152,7 +157,7 @@ export function CommunityBoard({
               onClick={() => setActiveTag(null)}
               className="rounded-full px-2.5 py-1 text-xs text-keep-muted hover:text-keep-text"
             >
-              Clear tag
+              {t("board.clearTag")}
             </button>
           ) : null}
         </div>
@@ -161,7 +166,7 @@ export function CommunityBoard({
       {/* Grid. */}
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-keep-rule bg-keep-panel/30 px-4 py-10 text-center text-sm text-keep-muted">
-          {emptyText}
+          {emptyText ?? t("board.emptyDefault")}
         </div>
       ) : (
         <div className={gridClass}>
@@ -175,24 +180,28 @@ export function CommunityBoard({
       {pageCount > 1 ? (
         <div className="flex items-center justify-between gap-3 pt-1 text-xs text-keep-muted">
           <span>
-            Showing {start + 1}&ndash;{Math.min(start + PAGE_SIZE, filtered.length)} of {filtered.length}
+            {t("board.showing", {
+              from: start + 1,
+              to: Math.min(start + PAGE_SIZE, filtered.length),
+              total: filtered.length,
+            })}
           </span>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={() => setPage((p) => Math.max(0, p - 1))}
               disabled={current === 0}
-              aria-label="Previous page"
+              aria-label={t("board.prevPage")}
               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-keep-rule text-keep-text transition hover:border-keep-action hover:text-keep-action disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </button>
-            <span className="tabular-nums">Page {current + 1} of {pageCount}</span>
+            <span className="tabular-nums">{t("board.pageOf", { page: current + 1, total: pageCount })}</span>
             <button
               type="button"
               onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
               disabled={current >= pageCount - 1}
-              aria-label="Next page"
+              aria-label={t("board.nextPage")}
               className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-keep-rule text-keep-text transition hover:border-keep-action hover:text-keep-action disabled:cursor-not-allowed disabled:opacity-40"
             >
               <ChevronRight className="h-4 w-4" aria-hidden="true" />

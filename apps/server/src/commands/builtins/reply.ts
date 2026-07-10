@@ -2,6 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { messages } from "../../db/schema.js";
 import { addMessage } from "../../realtime/broadcast.js";
 import { hasPermission } from "../../auth/permissions.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const SNIPPET_LEN = 80;
@@ -37,13 +38,13 @@ export const replyCommand: CommandHandler = {
     "Reply to a specific message. The reply renders with a small quote of the original above it. Click a message's timestamp to pre-fill this command.",
   async run(ctx) {
     if (ctx.args.length < 2) {
-      notice(ctx, "REPLY_USAGE", "Usage: /reply <message-id> <text>");
+      notice(ctx, "REPLY_USAGE", tFor(ctx.user.locale, "commands:reply.usage"));
       return;
     }
     const targetId = ctx.args[0]!;
     const body = ctx.argsText.replace(/^\S+\s*/, "").trim();
     if (!body) {
-      notice(ctx, "REPLY_EMPTY", "Reply body is empty.");
+      notice(ctx, "REPLY_EMPTY", tFor(ctx.user.locale, "commands:reply.empty"));
       return;
     }
 
@@ -53,11 +54,11 @@ export const replyCommand: CommandHandler = {
       .where(and(eq(messages.id, targetId), eq(messages.roomId, ctx.roomId)))
       .limit(1))[0];
     if (!parent) {
-      notice(ctx, "REPLY_NO_MSG", "That message is no longer available to reply to.");
+      notice(ctx, "REPLY_NO_MSG", tFor(ctx.user.locale, "commands:reply.notAvailable"));
       return;
     }
     if (!REPLYABLE_KINDS.has(parent.kind)) {
-      notice(ctx, "REPLY_BAD_KIND", "You can only reply to chat messages.");
+      notice(ctx, "REPLY_BAD_KIND", tFor(ctx.user.locale, "commands:reply.badKind"));
       return;
     }
     // Soft-deleted parents (forum topics or chat lines) are not reply
@@ -65,7 +66,7 @@ export const replyCommand: CommandHandler = {
     // reply would look like an orphan quoting nothing. Mirrors the
     // plain-say reply gate in `dispatch.ts`.
     if (parent.deletedAt) {
-      notice(ctx, "REPLY_NO_MSG", "That message is no longer available to reply to.");
+      notice(ctx, "REPLY_NO_MSG", tFor(ctx.user.locale, "commands:reply.notAvailable"));
       return;
     }
     // Locked forum topics reject new replies, except holders of
@@ -73,7 +74,7 @@ export const replyCommand: CommandHandler = {
     // post in the thread to leave a notice / verdict. Mirrors the
     // plain-say path in dispatch.ts.
     if (parent.lockedAt && !(await hasPermission(ctx.user, "bypass_topic_lock", ctx.db))) {
-      notice(ctx, "TOPIC_LOCKED", "This topic is locked and isn't accepting new replies.");
+      notice(ctx, "TOPIC_LOCKED", tFor(ctx.user.locale, "commands:reply.topicLocked"));
       return;
     }
 

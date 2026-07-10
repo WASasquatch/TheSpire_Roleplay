@@ -1,4 +1,5 @@
 import { useEffect, useState, type MouseEvent } from "react";
+import { useTranslation } from "react-i18next";
 import { ArrowUpRight, LogIn, Menu, UserPlus, X } from "lucide-react";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 
@@ -30,6 +31,7 @@ export function SplashNav({
   tabs: SplashTab[];
   onNavigate: (path: string) => void;
 }) {
+  const { t } = useTranslation("marketing");
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState<string | null>(null);
   const reduce = useReducedMotion();
@@ -85,7 +87,7 @@ export function SplashNav({
 
   return (
     <nav
-      aria-label="Page sections"
+      aria-label={t("splashNav.sectionsAria")}
       className="sticky top-0 z-20 border-b border-keep-border/60 bg-keep-bg/85 backdrop-blur-md"
     >
       <div className="flex items-center gap-2 px-3 py-2 sm:px-4">
@@ -98,7 +100,7 @@ export function SplashNav({
         </ul>
 
         <span className="text-[11px] font-semibold uppercase tracking-[0.3em] text-keep-muted md:hidden">
-          Explore
+          {t("splashNav.explore")}
         </span>
 
         {/* Persistent conversion cluster: pinned right, always visible on scroll.
@@ -111,7 +113,7 @@ export function SplashNav({
             className="hidden whitespace-nowrap rounded px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-muted transition-colors hover:bg-keep-panel/50 hover:text-keep-text md:inline-flex md:items-center md:gap-1"
           >
             <LogIn className="h-3.5 w-3.5 opacity-80" aria-hidden />
-            Log in
+            {t("auth.logIn")}
           </a>
           <a
             href="/register"
@@ -119,7 +121,7 @@ export function SplashNav({
             className="inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-keep-action bg-keep-action px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg shadow-[0_4px_14px_-4px_rgba(0,0,0,0.45)] transition hover:brightness-110 active:brightness-95 sm:px-4"
           >
             <UserPlus className="h-4 w-4" aria-hidden />
-            Sign up
+            {t("splashNav.signUp")}
           </a>
         </div>
 
@@ -127,7 +129,7 @@ export function SplashNav({
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          aria-label={open ? "Close section menu" : "Open section menu"}
+          aria-label={open ? t("splashNav.closeMenu") : t("splashNav.openMenu")}
           className="inline-flex h-9 w-9 items-center justify-center rounded border border-keep-border/60 text-keep-text transition hover:border-keep-action hover:text-keep-action md:hidden"
         >
           {open ? <X className="h-5 w-5" aria-hidden /> : <Menu className="h-5 w-5" aria-hidden />}
@@ -160,7 +162,7 @@ export function SplashNav({
                 className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-semibold text-keep-action transition-colors hover:bg-keep-panel/60"
               >
                 <UserPlus className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="flex-1">Sign up</span>
+                <span className="flex-1">{t("splashNav.signUp")}</span>
               </button>
             </li>
             <li>
@@ -170,7 +172,7 @@ export function SplashNav({
                 className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm text-keep-text transition-colors hover:bg-keep-panel/60"
               >
                 <LogIn className="h-4 w-4 shrink-0 text-keep-muted" aria-hidden />
-                <span className="flex-1">Log in</span>
+                <span className="flex-1">{t("auth.logIn")}</span>
               </button>
             </li>
           </ul>

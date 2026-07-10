@@ -28,11 +28,13 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { type Role } from "@thekeep/shared";
 import { oauthAccounts, serverMembers, users } from "../db/schema.js";
+import { exceedsMaximumPlausibleAge, isAdultUser, meetsMinimumAge, minimumSignupAge } from "../auth/ageGate.js";
 import { hashPassword } from "../auth/passwords.js";
 import { permissionsFor } from "../auth/permissions.js";
 import { getSettings } from "../settings.js";
 import { createEmailToken } from "../email/tokens.js";
 import { sendVerificationEmail } from "../email/templates.js";
+import { parseAcceptLanguage, tFor } from "../i18n.js";
 import {
   buildConsentUrl,
   exchangeCodeForIdentity,
@@ -235,16 +237,28 @@ const usernameSchema = z
 const finishBody = z.object({
   code: z.string().min(1).max(256),
   username: usernameSchema,
-  // Same defense-in-depth as /auth/register: prove the disclaimer + age/mature
-  // acknowledgments server-side (literal true rejects coerced truthy values), so
-  // the Google-signup path can't skip the gate a direct POST would otherwise
-  // bypass.
+  // Same defense-in-depth as /auth/register: prove the disclaimer server-side
+  // (literal true rejects coerced truthy values), so the Google-signup path
+  // can't skip the gate a direct POST would otherwise bypass.
   acceptDisclaimer: z.literal(true, {
     errorMap: () => ({ message: "you must accept the disclaimer to register" }),
   }),
-  acceptAgeMature: z.literal(true, {
-    errorMap: () => ({ message: "you must confirm you are 18+ and understand this site may contain mature content" }),
+  /**
+   * Date of birth, ISO YYYY-MM-DD — same collected-and-stored age signal as
+   * /auth/register (Google birthday import was considered and dropped; the
+   * sign-in scopes stay openid/email/profile, so the user types it here).
+   * Shape only; calendar validity + the minimum age are checked in the
+   * handler where settings are in hand.
+   */
+  birthdate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, {
+    message: "enter your date of birth",
   }),
+  /**
+   * Optional signup-time minor isolation opt-in (age plan, Phase 5), shown
+   * by the form only when the entered birth date is under 18. Persisted
+   * only when the account derives minor, mirroring /auth/register.
+   */
+  isolateFromAdults: z.boolean().optional(),
 });
 
 export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Promise<void> {
@@ -273,7 +287,7 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
       const me = await getSessionUser(req, db);
       if (!me) {
         reply.code(401);
-        return { error: "sign in first to link Google" };
+        return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.google.signInFirstToLink") };
       }
       uid = me.id;
     }
@@ -410,12 +424,12 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
     const entry = takeHandoff(body.code);
     if (!entry || entry.kind !== "session") {
       reply.code(400);
-      return { error: "This sign-in link is invalid or has expired. Please try again." };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.google.signInLinkInvalid") };
     }
     const u = (await db.select().from(users).where(eq(users.id, entry.userId)).limit(1))[0];
     if (!u || u.disabledAt) {
       reply.code(400);
-      return { error: "This sign-in link is invalid or has expired. Please try again." };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.google.signInLinkInvalid") };
     }
     const permissions = await permissionsFor({ id: u.id, role: u.role }, db);
     const settings = await getSettings(db);
@@ -447,14 +461,30 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
     const settings = await getSettings(db);
     if (!settings.registrationOpen) {
       reply.code(503);
-      return { error: "registration is closed" };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.registrationClosed") };
     }
     const body = finishBody.parse(req.body);
+
+    // Age floor — identical rule + copy to /auth/register, checked BEFORE
+    // the handoff code is consumed so an under-age rejection doesn't burn
+    // the single-use code (the user can fix a typo'd date and resubmit).
+    const minAge = minimumSignupAge(settings);
+    if (!meetsMinimumAge(body.birthdate, minAge)) {
+      reply.code(400);
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.minAge", { minAge }) };
+    }
+    // Plausibility ceiling — identical rule + copy to /auth/register: a
+    // century-typo date (1911 for 2011) would silently derive an adult
+    // account with every minor gate off. Also before the code is consumed.
+    if (exceedsMaximumPlausibleAge(body.birthdate)) {
+      reply.code(400);
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.implausibleBirthdate") };
+    }
 
     const entry = takeHandoff(body.code);
     if (!entry || entry.kind !== "pending") {
       reply.code(400);
-      return { error: "This sign-up link is invalid or has expired. Please try again." };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.google.signUpLinkInvalid") };
     }
 
     // Guard against a race where this Google account got linked (via another
@@ -462,7 +492,7 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
     const already = await findLinkByProviderUid(db, entry.sub);
     if (already) {
       reply.code(409);
-      return { error: "This Google account is already connected to an account. Try signing in instead." };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.google.alreadyConnected") };
     }
 
     // Username uniqueness — same generic 409 wording as /auth/register so an
@@ -474,7 +504,7 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
       .limit(1))[0];
     if (usernameTaken) {
       reply.code(409);
-      return { error: "registration conflict - try a different username" };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.registrationConflictUsername") };
     }
 
     // Same per-email account cap /auth/register enforces (users.email is not
@@ -486,7 +516,7 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
       .where(sql`lower(${users.email}) = ${entry.email.toLowerCase()}`))[0];
     if ((emailCountRow?.n ?? 0) >= settings.maxAccountsPerEmail) {
       reply.code(409);
-      return { error: "registration conflict - try a different email or username" };
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.registrationConflict") };
     }
 
     // Provision the account. The password hash is over 32 random bytes and is
@@ -508,6 +538,11 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
       passwordHash: unusablePassword,
       hasPassword: false,
       role,
+      // The stored age signal — same posture as /auth/register.
+      birthdate: body.birthdate,
+      // Minor isolation opt-in from the finish form (minors only, same
+      // clamp as /auth/register).
+      isolateFromAdults: (body.isolateFromAdults ?? false) && !isAdultUser({ birthdate: body.birthdate }),
       emailVerifiedAt: verifyOn ? null : new Date(),
       lastLoginAt: new Date(),
     });
@@ -534,7 +569,9 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
     if (verifyOn) {
       try {
         const token = await createEmailToken(db, id, "email_verify", VERIFY_TTL_MS);
-        void sendVerificationEmail(db, entry.email, body.username, token);
+        // Brand-new account (no saved users.locale): the finish-signup
+        // request's Accept-Language pick is the recipient-language signal.
+        void sendVerificationEmail(db, entry.email, body.username, token, parseAcceptLanguage(req.headers["accept-language"]));
       } catch (err) {
         req.log.error({ err }, "verification email send failed");
       }
@@ -618,7 +655,7 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
     if (!u.hasPassword && otherProviders === 0) {
       reply.code(409);
       return {
-        error: "Set a password first (in your profile under Privacy → Password) before unlinking Google, or you'll be locked out.",
+        error: tFor(me.locale, "errors:server.google.setPasswordBeforeUnlink"),
       };
     }
     await db

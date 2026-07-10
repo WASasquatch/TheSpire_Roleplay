@@ -22,6 +22,7 @@
  *     plumbing the console owns.
  */
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { type ServerViewerState } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
 
@@ -106,17 +107,16 @@ const primaryBtn = "rounded border border-keep-action bg-keep-action/15 px-3 py-
 const sid = (id: string) => encodeURIComponent(id);
 
 export default function EarningTab({ serverId, viewer, busy, run, onSaved }: EarningTabProps) {
+  const { t } = useTranslation("servers");
   const canManage = viewer.isOwner || viewer.permissions.includes("manage_earning");
   const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="max-w-2xl space-y-6">
       <header className="space-y-1">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-keep-muted">Earning</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-keep-muted">{t("earningTab.heading")}</h2>
         <p className="text-[11px] text-keep-muted">
-          Tune this server's earning faucet and sinks, and grant, revoke, or claw back awards and cosmetics.
-          XP, Currency, ranks and cosmetics are tracked separately per server, so everything here affects this server only.
-          The shared rank, item, name-style and border designs and their prices are set once in the platform admin panel and apply everywhere.
+          {t("earningTab.blurb")}
         </p>
       </header>
 
@@ -150,6 +150,7 @@ interface CatalogSectionProps {
 function SubsystemToggle({ label, value, onChange, disabled }: {
   label: string; value: boolean | null; onChange: (v: boolean | null) => void; disabled?: boolean;
 }) {
+  const { t } = useTranslation("servers");
   const sel = value === null ? "inherit" : value ? "on" : "off";
   return (
     <label className="flex items-center justify-between gap-2 text-[11px] text-keep-muted">
@@ -160,9 +161,9 @@ function SubsystemToggle({ label, value, onChange, disabled }: {
         value={sel}
         onChange={(e) => onChange(e.target.value === "inherit" ? null : e.target.value === "on")}
       >
-        <option value="inherit">Inherit</option>
-        <option value="on">On</option>
-        <option value="off">Off</option>
+        <option value="inherit">{t("earningTab.inheritOption")}</option>
+        <option value="on">{t("earningTab.onOption")}</option>
+        <option value="off">{t("earningTab.offOption")}</option>
       </select>
     </label>
   );
@@ -182,6 +183,7 @@ function ConfigSection({
   onSaved: () => void;
   setError: (e: string | null) => void;
 }) {
+  const { t } = useTranslation("servers");
   const [data, setData] = useState<ConfigResponse | null>(null);
   const [config, setConfig] = useState<EarningConfig | null>(null);
   const [flashSale, setFlashSale] = useState(false);
@@ -201,9 +203,9 @@ function ConfigSection({
       setSubsystems({ ...j.subsystems });
       setDirty(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("shared.loadFailed"));
     }
-  }, [serverId, setError]);
+  }, [serverId, setError, t]);
   useEffect(() => { void load(); }, [load]);
 
   function edit(mut: (c: EarningConfig) => void) {
@@ -224,14 +226,14 @@ function ConfigSection({
       await load();
       onSaved();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "save failed");
+      setError(e instanceof Error ? e.message : t("shared.saveFailed"));
     } finally {
       setSaving(false);
     }
   }
 
   async function clearOverride() {
-    if (!window.confirm("Stop overriding the economy on this server and inherit the platform defaults?")) return;
+    if (!window.confirm(t("earningTab.clearOverrideConfirm"))) return;
     await run(async () => {
       const r = await fetch(`/servers/${sid(serverId)}/earning/config`, { method: "DELETE", credentials: "include" });
       if (!r.ok) throw new Error(await readError(r));
@@ -246,18 +248,18 @@ function ConfigSection({
     setDirty(true);
   }
 
-  if (!config || !data) return <p className="text-xs italic text-keep-muted">Loading…</p>;
+  if (!config || !data) return <p className="text-xs italic text-keep-muted">{t("shared.loading")}</p>;
 
-  const amountRow = (label: string, a: AwardAmount) => (
+  const amountRow = (kind: string, a: AwardAmount) => (
     <div className="flex items-center gap-2">
-      <span className="w-28 text-[11px] text-keep-muted">{label}</span>
-      <label className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-keep-muted">XP
+      <span className="w-28 text-[11px] text-keep-muted">{t(`earningTab.awardKind.${kind}`)}</span>
+      <label className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("earningTab.xp")}
         <input type="number" min={0} disabled={!canManage} className={numClass} value={a.xp}
-          onChange={(e) => edit((c) => setAmount(c, label, { ...a, xp: Math.max(0, Number(e.target.value) || 0) }))} />
+          onChange={(e) => edit((c) => setAmount(c, kind, { ...a, xp: Math.max(0, Number(e.target.value) || 0) }))} />
       </label>
-      <label className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-keep-muted">Currency
+      <label className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("earningTab.currency")}
         <input type="number" min={0} disabled={!canManage} className={numClass} value={a.currency}
-          onChange={(e) => edit((c) => setAmount(c, label, { ...a, currency: Math.max(0, Number(e.target.value) || 0) }))} />
+          onChange={(e) => edit((c) => setAmount(c, kind, { ...a, currency: Math.max(0, Number(e.target.value) || 0) }))} />
       </label>
     </div>
   );
@@ -266,86 +268,86 @@ function ConfigSection({
     <section className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h3 className="text-sm font-semibold text-keep-text">Faucet and sinks</h3>
+          <h3 className="text-sm font-semibold text-keep-text">{t("earningTab.faucetHeading")}</h3>
           <p className="text-[11px] text-keep-muted">
             {data.inheriting
-              ? "This server currently inherits the platform default economy. Saving any change below starts a per-server override."
-              : "This server has its own economy override. Clear it to go back to inheriting the platform default."}
+              ? t("earningTab.inheritingNote")
+              : t("earningTab.overrideNote")}
           </p>
         </div>
         {!data.inheriting && canManage ? (
-          <button type="button" onClick={() => void clearOverride()} disabled={busy} className={`${btnClass} shrink-0`}>Inherit defaults</button>
+          <button type="button" onClick={() => void clearOverride()} disabled={busy} className={`${btnClass} shrink-0`}>{t("earningTab.inheritDefaults")}</button>
         ) : null}
       </div>
 
       <label className="flex items-center gap-2 text-xs text-keep-text">
         <input type="checkbox" disabled={!canManage} checked={config.enabled} onChange={(e) => edit((c) => { c.enabled = e.target.checked; })} />
-        Earning enabled on this server (master switch: off means nothing earns here)
+        {t("earningTab.masterSwitch")}
       </label>
 
       <div className="space-y-2">
-        <div className="text-[10px] uppercase tracking-widest text-keep-muted">Per-message awards</div>
+        <div className="text-[10px] uppercase tracking-widest text-keep-muted">{t("earningTab.perMessageAwards")}</div>
         {amountRow("say", config.awards.message.say)}
         {amountRow("action", config.awards.message.action)}
         {amountRow("whisper", config.awards.message.whisper)}
-        <div className="text-[10px] uppercase tracking-widest text-keep-muted">Forum awards</div>
+        <div className="text-[10px] uppercase tracking-widest text-keep-muted">{t("earningTab.forumAwards")}</div>
         {amountRow("topic", config.awards.forum.topic)}
         {amountRow("reply", config.awards.forum.reply)}
-        <div className="text-[10px] uppercase tracking-widest text-keep-muted">Presence award</div>
+        <div className="text-[10px] uppercase tracking-widest text-keep-muted">{t("earningTab.presenceAward")}</div>
         {amountRow("perBlock", config.awards.presence.perBlock)}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <NumberField label="Body floor (chars)" value={config.bodyFloorChars} disabled={!canManage} onChange={(v) => edit((c) => { c.bodyFloorChars = v; })} />
-        <NumberField label="Presence block (min)" value={config.presenceBlockMinutes} min={1} disabled={!canManage} onChange={(v) => edit((c) => { c.presenceBlockMinutes = v; })} />
-        <NumberField label="Presence daily cap" value={config.presenceDailyBlockCap} disabled={!canManage} onChange={(v) => edit((c) => { c.presenceDailyBlockCap = v; })} />
+        <NumberField label={t("earningTab.bodyFloor")} value={config.bodyFloorChars} disabled={!canManage} onChange={(v) => edit((c) => { c.bodyFloorChars = v; })} />
+        <NumberField label={t("earningTab.presenceBlock")} value={config.presenceBlockMinutes} min={1} disabled={!canManage} onChange={(v) => edit((c) => { c.presenceBlockMinutes = v; })} />
+        <NumberField label={t("earningTab.presenceDailyCap")} value={config.presenceDailyBlockCap} disabled={!canManage} onChange={(v) => edit((c) => { c.presenceDailyBlockCap = v; })} />
       </div>
 
       <div className="space-y-1">
-        <div className="text-[10px] uppercase tracking-widest text-keep-muted">Source toggles (off = that pool earns 0 from that source)</div>
+        <div className="text-[10px] uppercase tracking-widest text-keep-muted">{t("earningTab.sourceToggles")}</div>
         {(["message", "forum", "presence"] as const).map((src) => (
           <div key={src} className="flex items-center gap-3">
-            <span className="w-20 text-[11px] text-keep-muted">{src}</span>
+            <span className="w-20 text-[11px] text-keep-muted">{t(`earningTab.source.${src}`)}</span>
             <label className="flex items-center gap-1 text-[11px] text-keep-muted">
-              <input type="checkbox" disabled={!canManage} checked={config.enabledSources[src].xp} onChange={(e) => edit((c) => { c.enabledSources[src].xp = e.target.checked; })} /> XP
+              <input type="checkbox" disabled={!canManage} checked={config.enabledSources[src].xp} onChange={(e) => edit((c) => { c.enabledSources[src].xp = e.target.checked; })} /> {t("earningTab.xp")}
             </label>
             <label className="flex items-center gap-1 text-[11px] text-keep-muted">
-              <input type="checkbox" disabled={!canManage} checked={config.enabledSources[src].currency} onChange={(e) => edit((c) => { c.enabledSources[src].currency = e.target.checked; })} /> Currency
+              <input type="checkbox" disabled={!canManage} checked={config.enabledSources[src].currency} onChange={(e) => edit((c) => { c.enabledSources[src].currency = e.target.checked; })} /> {t("earningTab.currency")}
             </label>
           </div>
         ))}
       </div>
 
       <details className="rounded border border-keep-rule/60 bg-keep-panel/20 p-2">
-        <summary className="cursor-pointer text-[11px] uppercase tracking-widest text-keep-muted">Currency transfer limits</summary>
+        <summary className="cursor-pointer text-[11px] uppercase tracking-widest text-keep-muted">{t("earningTab.transferLimits")}</summary>
         <div className="mt-2 space-y-2">
           <label className="flex items-center gap-2 text-xs text-keep-text">
             <input type="checkbox" disabled={!canManage} checked={config.currencyTransfer.enabled} onChange={(e) => edit((c) => { c.currencyTransfer.enabled = e.target.checked; })} />
-            Allow members to send each other Currency on this server
+            {t("earningTab.allowTransfers")}
           </label>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            <NumberField label="Daily send cap" value={config.currencyTransfer.dailySendCap} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.dailySendCap = v; })} />
-            <NumberField label="Daily receive cap" value={config.currencyTransfer.dailyReceiveCap} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.dailyReceiveCap = v; })} />
-            <NumberField label="Min transfer" value={config.currencyTransfer.minTransferAmount} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.minTransferAmount = v; })} />
-            <NumberField label="Max transfer" value={config.currencyTransfer.maxTransferAmount} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.maxTransferAmount = v; })} />
-            <NumberField label="Sender min age (days)" value={config.currencyTransfer.minSenderAccountAgeDays} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.minSenderAccountAgeDays = v; })} />
-            <NumberField label="Recipient min age (days)" value={config.currencyTransfer.minRecipientAccountAgeDays} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.minRecipientAccountAgeDays = v; })} />
+            <NumberField label={t("earningTab.dailySendCap")} value={config.currencyTransfer.dailySendCap} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.dailySendCap = v; })} />
+            <NumberField label={t("earningTab.dailyReceiveCap")} value={config.currencyTransfer.dailyReceiveCap} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.dailyReceiveCap = v; })} />
+            <NumberField label={t("earningTab.minTransfer")} value={config.currencyTransfer.minTransferAmount} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.minTransferAmount = v; })} />
+            <NumberField label={t("earningTab.maxTransfer")} value={config.currencyTransfer.maxTransferAmount} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.maxTransferAmount = v; })} />
+            <NumberField label={t("earningTab.senderMinAge")} value={config.currencyTransfer.minSenderAccountAgeDays} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.minSenderAccountAgeDays = v; })} />
+            <NumberField label={t("earningTab.recipientMinAge")} value={config.currencyTransfer.minRecipientAccountAgeDays} disabled={!canManage} onChange={(v) => edit((c) => { c.currencyTransfer.minRecipientAccountAgeDays = v; })} />
           </div>
         </div>
       </details>
 
       <label className="flex items-center gap-2 text-xs text-keep-text">
         <input type="checkbox" disabled={!canManage} checked={flashSale} onChange={(e) => { setFlashSale(e.target.checked); setDirty(true); }} />
-        Flash sales enabled on this server
+        {t("earningTab.flashSalesEnabled")}
       </label>
 
       {subsystems ? (
         <div className="space-y-1">
-          <div className="text-[10px] uppercase tracking-widest text-keep-muted">Subsystems (Inherit keeps the platform default; On/Off pins this server)</div>
+          <div className="text-[10px] uppercase tracking-widest text-keep-muted">{t("earningTab.subsystems")}</div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 sm:grid-cols-3">
             {([
-              ["shop", "Shop"], ["ranks", "Ranks"], ["nameStyles", "Name styles"],
-              ["borders", "Borders"], ["roomTransitions", "Room transitions"], ["cosmetics", "Cosmetics"],
+              ["shop", t("earningTab.subsystem.shop")], ["ranks", t("earningTab.subsystem.ranks")], ["nameStyles", t("earningTab.subsystem.nameStyles")],
+              ["borders", t("earningTab.subsystem.borders")], ["roomTransitions", t("earningTab.subsystem.roomTransitions")], ["cosmetics", t("earningTab.subsystem.cosmetics")],
             ] as const).map(([key, label]) => (
               <SubsystemToggle key={key} label={label} disabled={!canManage} value={subsystems[key]}
                 onChange={(v) => { setSubsystems((prev) => (prev ? { ...prev, [key]: v } : prev)); setDirty(true); }} />
@@ -357,10 +359,10 @@ function ConfigSection({
       {canManage ? (
         <div className="flex items-center gap-2">
           <button type="button" onClick={() => void save()} disabled={saving || busy || !dirty} className={primaryBtn}>
-            {saving ? "Saving…" : "Save economy"}
+            {saving ? t("shared.saving") : t("earningTab.saveEconomy")}
           </button>
-          <button type="button" onClick={resetToDefaults} disabled={saving || busy} className={btnClass}>Reset to platform defaults</button>
-          {dirty ? <span className="text-[11px] text-keep-muted">Unsaved changes.</span> : null}
+          <button type="button" onClick={resetToDefaults} disabled={saving || busy} className={btnClass}>{t("earningTab.resetToDefaults")}</button>
+          {dirty ? <span className="text-[11px] text-keep-muted">{t("earningTab.unsavedChanges")}</span> : null}
         </div>
       ) : null}
     </section>
@@ -404,12 +406,13 @@ function GrantsSection({
   onSaved: () => void;
   setError: (e: string | null) => void;
 }) {
+  const { t } = useTranslation("servers");
   const [username, setUsername] = useState("");
   const [flash, setFlash] = useState<string | null>(null);
 
   function need(): string | null {
     const u = username.trim();
-    if (!u) { setError("Enter a target username first."); return null; }
+    if (!u) { setError(t("earningTab.needUsername")); return null; }
     return u;
   }
 
@@ -422,7 +425,7 @@ function GrantsSection({
         body: JSON.stringify({ username: u, ...body }),
       });
       if (!r.ok) throw new Error(await readError(r));
-      setFlash(`${label} done.`);
+      setFlash(t("earningTab.doneFlash", { label }));
       window.setTimeout(() => setFlash(null), 1800);
       onSaved();
     });
@@ -431,51 +434,51 @@ function GrantsSection({
   return (
     <section className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
       <div>
-        <h3 className="text-sm font-semibold text-keep-text">Grant and revoke</h3>
+        <h3 className="text-sm font-semibold text-keep-text">{t("earningTab.grantHeading")}</h3>
         <p className="text-[11px] text-keep-muted">
-          Awards land on this server only. Cosmetic keys (style / border / item / rank) are the shared catalog keys from the platform admin panel:
-          enter the exact key; an unknown key is rejected.
+          {t("earningTab.grantBlurb")}
         </p>
       </div>
 
       <label className="block text-xs text-keep-muted">
-        Target account (username)
-        <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="search by exact username" />
+        {t("earningTab.targetAccount")}
+        <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t("earningTab.usernamePlaceholder")} />
       </label>
       {flash ? <div className="text-[11px] text-keep-system">{flash}</div> : null}
 
-      <AmountGrantRow label="XP" help="Positive credits, negative debits. Rank/tier recompute after the credit." busy={busy}
-        onSubmit={(amount) => void post("grant-xp", { amount }, `${amount >= 0 ? "Grant" : "Debit"} ${Math.abs(amount)} XP`)} />
-      <AmountGrantRow label="Currency" help="Positive credits, negative debits." busy={busy}
-        onSubmit={(amount) => void post("grant-currency", { amount }, `${amount >= 0 ? "Grant" : "Debit"} ${Math.abs(amount)} Currency`)} />
+      <AmountGrantRow label={t("earningTab.xp")} help={t("earningTab.xpHelp")} busy={busy}
+        onSubmit={(amount) => void post("grant-xp", { amount }, amount >= 0 ? t("earningTab.grantXpLabel", { n: Math.abs(amount) }) : t("earningTab.debitXpLabel", { n: Math.abs(amount) }))} />
+      <AmountGrantRow label={t("earningTab.currency")} help={t("earningTab.currencyHelp")} busy={busy}
+        onSubmit={(amount) => void post("grant-currency", { amount }, amount >= 0 ? t("earningTab.grantCurrencyLabel", { n: Math.abs(amount) }) : t("earningTab.debitCurrencyLabel", { n: Math.abs(amount) }))} />
 
-      <KeyGrantRow label="Rank / tier" placeholder="rank key" busy={busy} extraNumber="tier"
-        onSubmit={(rankKey, tier) => void post("set-rank", { rankKey, tier }, `Set rank ${rankKey} ${tier}`)}
-        onClear={() => void post("set-rank", { rankKey: null, tier: null }, "Clear rank override")} />
+      <KeyGrantRow label={t("earningTab.rankTier")} placeholder={t("earningTab.rankKeyPlaceholder")} busy={busy} extraNumber={t("earningTab.tierExtra")}
+        onSubmit={(rankKey, tier) => void post("set-rank", { rankKey, tier }, t("earningTab.setRankLabel", { key: rankKey, tier }))}
+        onClear={() => void post("set-rank", { rankKey: null, tier: null }, t("earningTab.clearRankLabel"))} />
 
-      <KeyGrantRow label="Name style" placeholder="style key" busy={busy}
-        onSubmit={(styleKey) => void post("grant-style", { styleKey }, `Grant style ${styleKey}`)} />
+      <KeyGrantRow label={t("earningTab.nameStyle")} placeholder={t("earningTab.styleKeyPlaceholder")} busy={busy}
+        onSubmit={(styleKey) => void post("grant-style", { styleKey }, t("earningTab.grantStyleLabel", { key: styleKey }))} />
 
-      <KeyGrantRow label="Rank border" placeholder="rank key" busy={busy}
-        onSubmit={(rankKey) => void post("grant-border", { rankKey }, `Grant border ${rankKey}`)} />
+      <KeyGrantRow label={t("earningTab.rankBorder")} placeholder={t("earningTab.rankKeyPlaceholder")} busy={busy}
+        onSubmit={(rankKey) => void post("grant-border", { rankKey }, t("earningTab.grantBorderLabel", { key: rankKey }))} />
 
-      <KeyGrantRow label="Free-form border" placeholder="border key" busy={busy}
-        onSubmit={(borderKey) => void post("grant-freeform-border", { borderKey }, `Grant border ${borderKey}`)} />
+      <KeyGrantRow label={t("earningTab.freeformBorder")} placeholder={t("earningTab.borderKeyPlaceholder")} busy={busy}
+        onSubmit={(borderKey) => void post("grant-freeform-border", { borderKey }, t("earningTab.grantBorderLabel", { key: borderKey }))} />
 
       <ItemGrantRow busy={busy}
-        onSubmit={(itemKey, quantity) => void post("grant-item", { itemKey, quantity }, `${quantity > 0 ? "Grant" : "Revoke"} ${Math.abs(quantity)} ${itemKey}`)} />
+        onSubmit={(itemKey, quantity) => void post("grant-item", { itemKey, quantity }, quantity > 0 ? t("earningTab.grantItemLabel", { n: Math.abs(quantity), key: itemKey }) : t("earningTab.revokeItemLabel", { n: Math.abs(quantity), key: itemKey }))} />
     </section>
   );
 }
 
 function AmountGrantRow({ label, help, busy, onSubmit }: { label: string; help: string; busy: boolean; onSubmit: (amount: number) => void }) {
+  const { t } = useTranslation("servers");
   const [amount, setAmount] = useState(0);
   return (
     <div className="rounded border border-keep-rule/60 bg-keep-panel/20 p-2">
       <div className="flex items-center gap-2">
         <span className="w-20 text-xs font-semibold text-keep-text">{label}</span>
         <input type="number" className={numClass} value={amount} onChange={(e) => setAmount(Math.trunc(Number(e.target.value) || 0))} />
-        <button type="button" disabled={busy || amount === 0} className={primaryBtn} onClick={() => onSubmit(amount)}>Apply</button>
+        <button type="button" disabled={busy || amount === 0} className={primaryBtn} onClick={() => onSubmit(amount)}>{t("earningTab.apply")}</button>
       </div>
       <p className="mt-1 text-[10px] text-keep-muted">{help}</p>
     </div>
@@ -492,6 +495,7 @@ function KeyGrantRow({
   onSubmit: (key: string, num: number) => void;
   onClear?: () => void;
 }) {
+  const { t } = useTranslation("servers");
   const [key, setKey] = useState("");
   const [num, setNum] = useState(1);
   return (
@@ -504,27 +508,28 @@ function KeyGrantRow({
             <input type="number" min={1} max={20} className={numClass} value={num} onChange={(e) => setNum(Math.max(1, Number(e.target.value) || 1))} />
           </label>
         ) : null}
-        <button type="button" disabled={busy || !key.trim()} className={primaryBtn} onClick={() => onSubmit(key.trim(), num)}>Grant</button>
-        {onClear ? <button type="button" disabled={busy} className={btnClass} onClick={onClear}>Clear override</button> : null}
+        <button type="button" disabled={busy || !key.trim()} className={primaryBtn} onClick={() => onSubmit(key.trim(), num)}>{t("earningTab.grant")}</button>
+        {onClear ? <button type="button" disabled={busy} className={btnClass} onClick={onClear}>{t("earningTab.clearOverride")}</button> : null}
       </div>
     </div>
   );
 }
 
 function ItemGrantRow({ busy, onSubmit }: { busy: boolean; onSubmit: (itemKey: string, quantity: number) => void }) {
+  const { t } = useTranslation("servers");
   const [itemKey, setItemKey] = useState("");
   const [quantity, setQuantity] = useState(1);
   return (
     <div className="rounded border border-keep-rule/60 bg-keep-panel/20 p-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="w-28 text-xs font-semibold text-keep-text">Item</span>
-        <input className={`${inputClass} max-w-[12rem] flex-1`} value={itemKey} onChange={(e) => setItemKey(e.target.value)} placeholder="item key" />
-        <label className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-keep-muted">qty
+        <span className="w-28 text-xs font-semibold text-keep-text">{t("earningTab.item")}</span>
+        <input className={`${inputClass} max-w-[12rem] flex-1`} value={itemKey} onChange={(e) => setItemKey(e.target.value)} placeholder={t("earningTab.itemKeyPlaceholder")} />
+        <label className="flex items-center gap-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("earningTab.qty")}
           <input type="number" className={numClass} value={quantity} onChange={(e) => setQuantity(Math.trunc(Number(e.target.value) || 0))} />
         </label>
-        <button type="button" disabled={busy || !itemKey.trim() || quantity === 0} className={primaryBtn} onClick={() => onSubmit(itemKey.trim(), quantity)}>Apply</button>
+        <button type="button" disabled={busy || !itemKey.trim() || quantity === 0} className={primaryBtn} onClick={() => onSubmit(itemKey.trim(), quantity)}>{t("earningTab.apply")}</button>
       </div>
-      <p className="mt-1 text-[10px] text-keep-muted">Positive deposits into the target's OOC inventory on this server, negative revokes. Bypasses shop/sale gates.</p>
+      <p className="mt-1 text-[10px] text-keep-muted">{t("earningTab.itemHelp")}</p>
     </div>
   );
 }
@@ -542,6 +547,7 @@ function ClawbackSection({
   onSaved: () => void;
   setError: (e: string | null) => void;
 }) {
+  const { t } = useTranslation("servers");
   const [username, setUsername] = useState("");
   const [data, setData] = useState<OwnershipResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -549,7 +555,7 @@ function ClawbackSection({
   async function lookup(e?: FormEvent) {
     e?.preventDefault();
     const u = username.trim();
-    if (!u) { setError("Enter a username to look up."); return; }
+    if (!u) { setError(t("earningTab.needLookupUsername")); return; }
     setLoading(true); setError(null);
     try {
       const r = await fetch(`/servers/${sid(serverId)}/earning/user-ownership?username=${encodeURIComponent(u)}`, { credentials: "include" });
@@ -557,7 +563,7 @@ function ClawbackSection({
       setData((await r.json()) as OwnershipResponse);
     } catch (err) {
       setData(null);
-      setError(err instanceof Error ? err.message : "lookup failed");
+      setError(err instanceof Error ? err.message : t("earningTab.lookupFailed"));
     } finally {
       setLoading(false);
     }
@@ -581,7 +587,7 @@ function ClawbackSection({
 
   async function resetUser() {
     if (!data) return;
-    if (!window.confirm(`Reset ALL of ${data.username}'s earning state on this server (XP, Currency, ranks, owned cosmetics, equipped cosmetics)? This server only. Other servers are untouched.`)) return;
+    if (!window.confirm(t("earningTab.resetUserConfirm", { name: data.username }))) return;
     await run(async () => {
       const r = await fetch(`/servers/${sid(serverId)}/earning/reset-user`, {
         method: "POST", credentials: "include",
@@ -597,15 +603,15 @@ function ClawbackSection({
   return (
     <section className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
       <div>
-        <h3 className="text-sm font-semibold text-keep-text">Claw back</h3>
+        <h3 className="text-sm font-semibold text-keep-text">{t("earningTab.clawbackHeading")}</h3>
         <p className="text-[11px] text-keep-muted">
-          Look up a member to see and revoke what they own on this server. Claw-backs and resets affect this server only.
+          {t("earningTab.clawbackBlurb")}
         </p>
       </div>
 
       <form onSubmit={lookup} className="flex items-center gap-2">
-        <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="username" />
-        <button type="submit" disabled={loading || busy} className={`${primaryBtn} shrink-0`}>{loading ? "…" : "Look up"}</button>
+        <input className={inputClass} value={username} onChange={(e) => setUsername(e.target.value)} placeholder={t("earningTab.usernameOnlyPlaceholder")} />
+        <button type="submit" disabled={loading || busy} className={`${primaryBtn} shrink-0`}>{loading ? "…" : t("earningTab.lookUp")}</button>
       </form>
 
       {data ? (
@@ -613,26 +619,26 @@ function ClawbackSection({
           <div className="text-keep-text">
             <span className="font-semibold">{data.username}</span>
             {data.pool ? (
-              <span className="ml-2 text-keep-muted">{data.pool.xp} XP · {data.pool.currency} Currency{data.pool.rankKey ? ` · ${data.pool.rankKey} ${data.pool.tier ?? ""}` : ""}</span>
-            ) : <span className="ml-2 text-keep-muted">no pool on this server yet</span>}
+              <span className="ml-2 text-keep-muted">{t("earningTab.poolLine", { xp: data.pool.xp, currency: data.pool.currency })}{data.pool.rankKey ? ` · ${data.pool.rankKey} ${data.pool.tier ?? ""}` : ""}</span>
+            ) : <span className="ml-2 text-keep-muted">{t("earningTab.noPool")}</span>}
           </div>
 
-          <OwnedList title="Name styles" keys={data.ownedStyles} busy={busy}
+          <OwnedList title={t("earningTab.nameStylesTitle")} keys={data.ownedStyles} busy={busy}
             onRevoke={(k) => void revoke("revoke-style", { styleKey: k })} />
-          <OwnedList title="Rank borders" keys={data.ownedBorders} busy={busy}
+          <OwnedList title={t("earningTab.rankBordersTitle")} keys={data.ownedBorders} busy={busy}
             onRevoke={(k) => void revoke("revoke-border", { rankKey: k })} />
-          <OwnedList title="Free-form borders (OOC)" keys={data.ownedFreeformBorders} busy={busy}
+          <OwnedList title={t("earningTab.freeformBordersTitle")} keys={data.ownedFreeformBorders} busy={busy}
             onRevoke={(k) => void revoke("revoke-freeform-border", { borderKey: k })} />
 
           {data.inventory.length > 0 ? (
             <div>
-              <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">OOC inventory</div>
+              <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("earningTab.oocInventory")}</div>
               <ul className="space-y-1">
                 {data.inventory.map((it) => (
                   <li key={it.itemKey} className="flex items-center justify-between gap-2">
                     <span className="text-keep-text">{it.itemKey} ×{it.quantity}</span>
                     <button type="button" disabled={busy} className="rounded border border-keep-accent/40 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
-                      onClick={() => void revoke("grant-item", { itemKey: it.itemKey, quantity: -it.quantity })}>Remove all</button>
+                      onClick={() => void revoke("grant-item", { itemKey: it.itemKey, quantity: -it.quantity })}>{t("earningTab.removeAll")}</button>
                   </li>
                 ))}
               </ul>
@@ -642,7 +648,7 @@ function ClawbackSection({
           <div className="border-t border-keep-rule/40 pt-2">
             <button type="button" disabled={busy} onClick={() => void resetUser()}
               className="rounded border border-keep-accent/50 bg-keep-accent/10 px-3 py-1 text-xs font-semibold text-keep-accent hover:bg-keep-accent/20">
-              Reset all earning on this server
+              {t("earningTab.resetAll")}
             </button>
           </div>
         </div>
@@ -652,6 +658,7 @@ function ClawbackSection({
 }
 
 function OwnedList({ title, keys, busy, onRevoke }: { title: string; keys: string[]; busy: boolean; onRevoke: (key: string) => void }) {
+  const { t } = useTranslation("servers");
   if (keys.length === 0) return null;
   return (
     <div>
@@ -660,7 +667,7 @@ function OwnedList({ title, keys, busy, onRevoke }: { title: string; keys: strin
         {keys.map((k) => (
           <li key={k} className="flex items-center justify-between gap-2">
             <span className="text-keep-text">{k}</span>
-            <button type="button" disabled={busy} className="rounded border border-keep-accent/40 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10" onClick={() => onRevoke(k)}>Revoke</button>
+            <button type="button" disabled={busy} className="rounded border border-keep-accent/40 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10" onClick={() => onRevoke(k)}>{t("earningTab.revoke")}</button>
           </li>
         ))}
       </ul>
@@ -689,6 +696,7 @@ function CatalogShell<T>({
   path: string;
   render: (data: T, reload: () => Promise<void>) => ReactNode;
 }) {
+  const { t } = useTranslation("servers");
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(false);
@@ -700,11 +708,11 @@ function CatalogShell<T>({
       if (!r.ok) throw new Error(await readError(r));
       setData((await r.json()) as T);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "load failed");
+      setErr(e instanceof Error ? e.message : t("shared.loadFailed"));
     } finally {
       setLoading(false);
     }
-  }, [serverId, path]);
+  }, [serverId, path, t]);
   useEffect(() => { if (open && data === null) void reload(); }, [open, data, reload]);
   return (
     <section className="rounded border border-keep-rule bg-keep-bg/40">
@@ -719,7 +727,7 @@ function CatalogShell<T>({
       {open ? (
         <div className="space-y-3 border-t border-keep-rule/60 p-3">
           {err ? <div className="text-[11px] text-keep-accent">{err}</div> : null}
-          {loading && data === null ? <p className="text-xs italic text-keep-muted">Loading…</p>
+          {loading && data === null ? <p className="text-xs italic text-keep-muted">{t("shared.loading")}</p>
             : data ? render(data, reload) : null}
         </div>
       ) : null}
@@ -764,6 +772,7 @@ type ImportScope =
 interface ImportResponse { ok: boolean; scope: ImportScope; counts: Record<string, ImportCount>; totals: ImportCount }
 
 function ImportBuiltinsSection({ serverId, busy, run, onSaved, setError }: CatalogSectionProps) {
+  const { t } = useTranslation("servers");
   const [flash, setFlash] = useState<string | null>(null);
   const [running, setRunning] = useState<ImportScope | null>(null);
 
@@ -778,11 +787,11 @@ function ImportBuiltinsSection({ serverId, busy, run, onSaved, setError }: Catal
         });
         if (!r.ok) throw new Error(await readError(r));
         const j = (await r.json()) as ImportResponse;
-        setFlash(`${label}: imported ${j.totals.imported}, skipped ${j.totals.skipped} (already present).`);
+        setFlash(t("earningTab.importFlash", { label, imported: j.totals.imported, skipped: j.totals.skipped }));
         // Reload so the freshly-seeded rows show up in the catalog editors below.
         onSaved();
       } catch (e) {
-        setError(e instanceof Error ? e.message : "import failed");
+        setError(e instanceof Error ? e.message : t("earningTab.importFailed"));
       } finally {
         setRunning(null);
       }
@@ -792,42 +801,41 @@ function ImportBuiltinsSection({ serverId, busy, run, onSaved, setError }: Catal
   const importBtn = (scope: ImportScope, label: string) => (
     <button type="button" disabled={busy || running !== null} className={btnClass}
       onClick={() => void importScope(scope, label)}>
-      {running === scope ? "Importing…" : label}
+      {running === scope ? t("earningTab.importing") : label}
     </button>
   );
 
   return (
     <section className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
       <div>
-        <h3 className="text-sm font-semibold text-keep-text">Import Spire built-ins</h3>
+        <h3 className="text-sm font-semibold text-keep-text">{t("earningTab.importHeading")}</h3>
         <p className="text-[11px] text-keep-muted">
-          This server's catalog starts empty. Seed it from the Spire built-ins, then tune the copies below.
-          Importing again only fills gaps, it never overwrites a row you have already edited.
+          {t("earningTab.importBlurb")}
         </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" disabled={busy || running !== null} className={primaryBtn}
-          onClick={() => void importScope("all", "All built-ins")}>
-          {running === "all" ? "Importing…" : "Import all built-ins"}
+          onClick={() => void importScope("all", t("earningTab.allBuiltinsLabel"))}>
+          {running === "all" ? t("earningTab.importing") : t("earningTab.importAll")}
         </button>
         <button type="button" disabled={busy || running !== null} className={primaryBtn}
-          onClick={() => void importScope("arcade", "Arcade items")}>
-          {running === "arcade" ? "Importing…" : "Import Arcade items (Eidolon)"}
+          onClick={() => void importScope("arcade", t("earningTab.arcadeItemsLabel"))}>
+          {running === "arcade" ? t("earningTab.importing") : t("earningTab.importArcade")}
         </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        {importBtn("ranks", "Ranks + tiers")}
-        {importBtn("name-styles", "Name styles")}
-        {importBtn("freeform-borders", "Free-form borders")}
-        {importBtn("items", "Items (shop)")}
-        {importBtn("cosmetics", "Cosmetics")}
-        {importBtn("room-transitions", "Room transitions")}
+        {importBtn("ranks", t("earningTab.scopeRanks"))}
+        {importBtn("name-styles", t("earningTab.scopeNameStyles"))}
+        {importBtn("freeform-borders", t("earningTab.scopeFreeformBorders"))}
+        {importBtn("items", t("earningTab.scopeItems"))}
+        {importBtn("cosmetics", t("earningTab.scopeCosmetics"))}
+        {importBtn("room-transitions", t("earningTab.scopeRoomTransitions"))}
       </div>
 
       <p className="text-[10px] text-keep-muted">
-        Arcade items copies only the Eidolon Tamer's pets, food, toys, and potions plus its unlock flair, not the whole shop.
+        {t("earningTab.arcadeNote")}
       </p>
       {flash ? <div className="text-[11px] text-keep-system">{flash}</div> : null}
     </section>
@@ -841,14 +849,16 @@ interface TierRow { id: string; rankKey: string; tier: number; label: string; xp
 interface RanksData { ranks: RankRow[]; tiers: TierRow[] }
 
 function RanksSection(p: CatalogSectionProps) {
+  const { t } = useTranslation("servers");
   return (
-    <CatalogShell<RanksData> title="Ranks and tiers" serverId={p.serverId} path="ranks"
-      blurb="Define this server's rank ladder, tier thresholds, and uploadable rank images."
+    <CatalogShell<RanksData> title={t("earningTab.ranksTitle")} serverId={p.serverId} path="ranks"
+      blurb={t("earningTab.ranksBlurb")}
       render={(data, reload) => <RanksEditor {...p} data={data} reload={reload} />} />
   );
 }
 
 function RanksEditor({ serverId, busy, run, onSaved, setError, data, reload }: CatalogSectionProps & { data: RanksData; reload: () => Promise<void> }) {
+  const { t } = useTranslation("servers");
   const [newKey, setNewKey] = useState("");
   const [newName, setNewName] = useState("");
   const mut = (path: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown> | null) =>
@@ -857,15 +867,15 @@ function RanksEditor({ serverId, busy, run, onSaved, setError, data, reload }: C
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-2">
-        <label className={`block ${labelCell}`}>Key
+        <label className={`block ${labelCell}`}>{t("earningTab.keyLabel")}
           <input className={`${inputClass} mt-0.5 max-w-[10rem]`} value={newKey} onChange={(e) => setNewKey(e.target.value)} placeholder="new_arrival" />
         </label>
-        <label className={`block ${labelCell}`}>Name
-          <input className={`${inputClass} mt-0.5 max-w-[12rem]`} value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="New Arrival" />
+        <label className={`block ${labelCell}`}>{t("earningTab.nameLabel")}
+          <input className={`${inputClass} mt-0.5 max-w-[12rem]`} value={newName} onChange={(e) => setNewName(e.target.value)} placeholder={t("earningTab.rankNamePlaceholder")} />
         </label>
         <button type="button" disabled={busy || !newKey.trim() || !newName.trim()} className={primaryBtn}
           onClick={() => void mut("ranks", "POST", { key: newKey.trim(), name: newName.trim() }).then(() => { setNewKey(""); setNewName(""); })}>
-          Add rank
+          {t("earningTab.addRank")}
         </button>
       </div>
 
@@ -877,16 +887,16 @@ function RanksEditor({ serverId, busy, run, onSaved, setError, data, reload }: C
             <div className="flex flex-wrap items-center gap-2">
               <input className={`${inputClass} max-w-[12rem]`} defaultValue={rk.name}
                 onBlur={(e) => { if (e.target.value !== rk.name) void mut(`ranks/${encodeURIComponent(rk.key)}`, "PATCH", { name: e.target.value }); }} />
-              <span className={labelCell}>order</span>
+              <span className={labelCell}>{t("earningTab.orderLower")}</span>
               <input type="number" className={numClass} defaultValue={rk.order}
                 onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== rk.order) void mut(`ranks/${encodeURIComponent(rk.key)}`, "PATCH", { order: v }); }} />
               <label className="flex items-center gap-1 text-[11px] text-keep-muted">
-                <input type="checkbox" checked={rk.enabled} onChange={(e) => void mut(`ranks/${encodeURIComponent(rk.key)}`, "PATCH", { enabled: e.target.checked })} /> enabled
+                <input type="checkbox" checked={rk.enabled} onChange={(e) => void mut(`ranks/${encodeURIComponent(rk.key)}`, "PATCH", { enabled: e.target.checked })} /> {t("earningTab.enabledLower")}
               </label>
-              <span className="text-[10px] text-keep-muted">{rk.key} · {rk.users + rk.characters} holders</span>
-              <button type="button" disabled={busy || inUse} title={inUse ? "Disable instead: holders on this rank" : "Delete rank"}
+              <span className="text-[10px] text-keep-muted">{t("earningTab.holdersLine", { key: rk.key, n: rk.users + rk.characters })}</span>
+              <button type="button" disabled={busy || inUse} title={inUse ? t("earningTab.disableInstead") : t("earningTab.deleteRankTitle")}
                 className={`${btnClass} ml-auto`}
-                onClick={() => { if (window.confirm(`Delete rank ${rk.key}?`)) void mut(`ranks/${encodeURIComponent(rk.key)}`, "DELETE", null); }}>Delete</button>
+                onClick={() => { if (window.confirm(t("earningTab.deleteRankConfirm", { key: rk.key }))) void mut(`ranks/${encodeURIComponent(rk.key)}`, "DELETE", null); }}>{t("shared.delete")}</button>
             </div>
 
             <div className="mt-2 space-y-1 pl-2">
@@ -898,7 +908,7 @@ function RanksEditor({ serverId, busy, run, onSaved, setError, data, reload }: C
           </div>
         );
       })}
-      {data.ranks.length === 0 ? <p className="text-[11px] italic text-keep-muted">No ranks yet on this server.</p> : null}
+      {data.ranks.length === 0 ? <p className="text-[11px] italic text-keep-muted">{t("earningTab.noRanks")}</p> : null}
     </div>
   );
 }
@@ -907,29 +917,30 @@ function TierRowEditor({ serverId, tier, busy, mut }: {
   serverId: string; tier: TierRow; busy: boolean;
   mut: (path: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown> | null) => Promise<void>;
 }) {
+  const { t } = useTranslation("servers");
   const path = `rank-tiers/${encodeURIComponent(tier.id)}`;
   return (
     <div className="flex flex-wrap items-center gap-2 rounded border border-keep-rule/40 p-1">
-      <span className="w-8 text-center text-[10px] text-keep-muted">T{tier.tier}</span>
+      <span className="w-8 text-center text-[10px] text-keep-muted">{t("earningTab.tierShort", { n: tier.tier })}</span>
       <input className={`${inputClass} max-w-[8rem]`} defaultValue={tier.label}
         onBlur={(e) => { if (e.target.value !== tier.label) void mut(path, "PATCH", { label: e.target.value }); }} />
-      <label className="flex items-center gap-1 text-[10px] text-keep-muted">XP≥
+      <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.xpThreshold")}
         <input type="number" min={0} className={numClass} defaultValue={tier.xpThreshold}
           onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== tier.xpThreshold) void mut(path, "PATCH", { xpThreshold: v }); }} />
       </label>
-      <RankImageField serverId={serverId} label="sigil" url={tier.sigilImageUrl}
+      <RankImageField serverId={serverId} label={t("earningTab.sigilLabel")} url={tier.sigilImageUrl}
         onUploaded={(url) => void mut(path, "PATCH", { sigilImageUrl: url })} />
-      <RankImageField serverId={serverId} label="border" url={tier.borderImageUrl ?? ""}
+      <RankImageField serverId={serverId} label={t("earningTab.borderLabel")} url={tier.borderImageUrl ?? ""}
         onUploaded={(url) => void mut(path, "PATCH", { borderImageUrl: url })} />
-      <label className="flex items-center gap-1 text-[10px] text-keep-muted">cost
+      <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.costLower")}
         <input type="number" min={0} className={numClass} defaultValue={tier.borderCost ?? 0}
           onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== (tier.borderCost ?? 0)) void mut(path, "PATCH", { borderCost: v }); }} />
       </label>
       <label className="flex items-center gap-1 text-[10px] text-keep-muted">
-        <input type="checkbox" checked={tier.enabled} onChange={(e) => void mut(path, "PATCH", { enabled: e.target.checked })} /> on
+        <input type="checkbox" checked={tier.enabled} onChange={(e) => void mut(path, "PATCH", { enabled: e.target.checked })} /> {t("earningTab.onLower")}
       </label>
       <button type="button" disabled={busy} className={btnClass}
-        onClick={() => { if (window.confirm(`Delete tier ${tier.tier}?`)) void mut(path, "DELETE", null); }}>×</button>
+        onClick={() => { if (window.confirm(t("earningTab.deleteTierConfirm", { n: tier.tier }))) void mut(path, "DELETE", null); }}>×</button>
     </div>
   );
 }
@@ -938,21 +949,22 @@ function AddTierRow({ rankKey, busy, mut }: {
   rankKey: string; busy: boolean;
   mut: (path: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown> | null) => Promise<void>;
 }) {
+  const { t } = useTranslation("servers");
   const [tier, setTier] = useState(5);
   const [label, setLabel] = useState("");
   const [xp, setXp] = useState(0);
   return (
     <div className="flex flex-wrap items-center gap-2 pt-1">
-      <label className="flex items-center gap-1 text-[10px] text-keep-muted">tier
+      <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.tierLower")}
         <input type="number" min={1} max={20} className={numClass} value={tier} onChange={(e) => setTier(Math.max(1, Number(e.target.value) || 1))} />
       </label>
-      <input className={`${inputClass} max-w-[8rem]`} value={label} onChange={(e) => setLabel(e.target.value)} placeholder="label" />
-      <label className="flex items-center gap-1 text-[10px] text-keep-muted">XP≥
+      <input className={`${inputClass} max-w-[8rem]`} value={label} onChange={(e) => setLabel(e.target.value)} placeholder={t("earningTab.labelPlaceholder")} />
+      <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.xpThreshold")}
         <input type="number" min={0} className={numClass} value={xp} onChange={(e) => setXp(Math.max(0, Number(e.target.value) || 0))} />
       </label>
       <button type="button" disabled={busy || !label.trim()} className={btnClass}
         onClick={() => void mut(`ranks/${encodeURIComponent(rankKey)}/tiers`, "POST", { tier, label: label.trim(), xpThreshold: xp }).then(() => setLabel(""))}>
-        Add tier
+        {t("earningTab.addTier")}
       </button>
     </div>
   );
@@ -964,6 +976,7 @@ function AddTierRow({ rankKey, busy, mut }: {
 function RankImageField({ serverId, label, url, onUploaded }: {
   serverId: string; label: string; url: string; onUploaded: (url: string) => void;
 }) {
+  const { t } = useTranslation("servers");
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   async function onFile(file: File) {
@@ -972,7 +985,7 @@ function RankImageField({ serverId, label, url, onUploaded }: {
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const fr = new FileReader();
         fr.onload = () => resolve(String(fr.result));
-        fr.onerror = () => reject(new Error("read failed"));
+        fr.onerror = () => reject(new Error(t("earningTab.readFailed")));
         fr.readAsDataURL(file);
       });
       const r = await fetch(`/servers/${sid(serverId)}/earning/ranks/assets/upload`, {
@@ -984,7 +997,7 @@ function RankImageField({ serverId, label, url, onUploaded }: {
       const j = (await r.json()) as { url: string };
       onUploaded(j.url);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "upload failed");
+      setErr(e instanceof Error ? e.message : t("earningTab.uploadFailed"));
     } finally {
       setUploading(false);
     }
@@ -994,7 +1007,7 @@ function RankImageField({ serverId, label, url, onUploaded }: {
       {url ? <img src={url} alt="" className="h-5 w-5 rounded object-contain" /> : <span className="text-keep-muted">{label}</span>}
       <input type="file" accept="image/png" className="hidden" disabled={uploading}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); e.currentTarget.value = ""; }} />
-      <span className="cursor-pointer rounded border border-keep-rule px-1 hover:text-keep-text">{uploading ? "…" : url ? "↻" : "PNG"}</span>
+      <span className="cursor-pointer rounded border border-keep-rule px-1 hover:text-keep-text">{uploading ? "…" : url ? "↻" : t("earningTab.pngButton")}</span>
     </label>
   );
 }
@@ -1004,14 +1017,16 @@ function RankImageField({ serverId, label, url, onUploaded }: {
 interface StyleRow { key: string; name: string; description: string; template: string; styleCss: string; cost: number; enabled: boolean; isBuiltin: boolean; order: number; owners: number }
 
 function NameStylesSection(p: CatalogSectionProps) {
+  const { t } = useTranslation("servers");
   return (
-    <CatalogShell<{ styles: StyleRow[] }> title="Name styles" serverId={p.serverId} path="name-styles"
-      blurb="HTML + CSS name templates members can buy and equip on this server."
+    <CatalogShell<{ styles: StyleRow[] }> title={t("earningTab.nameStylesSection")} serverId={p.serverId} path="name-styles"
+      blurb={t("earningTab.nameStylesBlurb")}
       render={(data, reload) => <NameStylesEditor {...p} rows={data.styles} reload={reload} />} />
   );
 }
 
 function NameStylesEditor({ serverId, busy, run, onSaved, setError, rows, reload }: CatalogSectionProps & { rows: StyleRow[]; reload: () => Promise<void> }) {
+  const { t } = useTranslation("servers");
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
   const [template, setTemplate] = useState("<span>{username}</span>");
@@ -1021,32 +1036,32 @@ function NameStylesEditor({ serverId, busy, run, onSaved, setError, rows, reload
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
         <input className={`${inputClass} max-w-[9rem]`} value={key} onChange={(e) => setKey(e.target.value)} placeholder="style_key" />
-        <input className={`${inputClass} max-w-[10rem]`} value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name" />
+        <input className={`${inputClass} max-w-[10rem]`} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("earningTab.displayNamePlaceholder")} />
         <input className={`${inputClass} max-w-[14rem] flex-1`} value={template} onChange={(e) => setTemplate(e.target.value)} placeholder="<span>{username}</span>" />
         <button type="button" disabled={busy || !key.trim() || !name.trim() || !template.trim()} className={primaryBtn}
-          onClick={() => void mut("name-styles", "POST", { key: key.trim(), name: name.trim(), template }).then(() => { setKey(""); setName(""); })}>Add</button>
+          onClick={() => void mut("name-styles", "POST", { key: key.trim(), name: name.trim(), template }).then(() => { setKey(""); setName(""); })}>{t("earningTab.add")}</button>
       </div>
       {rows.map((s) => (
         <div key={s.key} className="space-y-1 rounded border border-keep-rule/60 bg-keep-panel/20 p-2">
           <div className="flex flex-wrap items-center gap-2">
             <input className={`${inputClass} max-w-[10rem]`} defaultValue={s.name}
               onBlur={(e) => { if (e.target.value !== s.name) void mut(`name-styles/${encodeURIComponent(s.key)}`, "PATCH", { name: e.target.value }); }} />
-            <label className="flex items-center gap-1 text-[10px] text-keep-muted">cost
+            <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.costLower")}
               <input type="number" min={0} className={numClass} defaultValue={s.cost}
                 onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== s.cost) void mut(`name-styles/${encodeURIComponent(s.key)}`, "PATCH", { cost: v }); }} />
             </label>
             <label className="flex items-center gap-1 text-[10px] text-keep-muted">
-              <input type="checkbox" checked={s.enabled} onChange={(e) => void mut(`name-styles/${encodeURIComponent(s.key)}`, "PATCH", { enabled: e.target.checked })} /> on
+              <input type="checkbox" checked={s.enabled} onChange={(e) => void mut(`name-styles/${encodeURIComponent(s.key)}`, "PATCH", { enabled: e.target.checked })} /> {t("earningTab.onLower")}
             </label>
-            <span className="text-[10px] text-keep-muted">{s.key}{s.isBuiltin ? " · seed" : ""} · {s.owners} owners</span>
+            <span className="text-[10px] text-keep-muted">{s.key}{s.isBuiltin ? t("earningTab.seedSuffix") : ""}{t("earningTab.ownersSuffix", { n: s.owners })}</span>
             {!s.isBuiltin ? (
               <button type="button" disabled={busy} className={`${btnClass} ml-auto`}
-                onClick={() => { if (window.confirm(`Delete style ${s.key}?`)) void mut(`name-styles/${encodeURIComponent(s.key)}`, "DELETE", null); }}>Delete</button>
+                onClick={() => { if (window.confirm(t("earningTab.deleteStyleConfirm", { key: s.key }))) void mut(`name-styles/${encodeURIComponent(s.key)}`, "DELETE", null); }}>{t("shared.delete")}</button>
             ) : null}
           </div>
           <textarea className={`${inputClass} font-mono text-[11px]`} rows={2} defaultValue={s.template}
             onBlur={(e) => { if (e.target.value !== s.template) void mut(`name-styles/${encodeURIComponent(s.key)}`, "PATCH", { template: e.target.value }); }} />
-          <textarea className={`${inputClass} font-mono text-[11px]`} rows={2} defaultValue={s.styleCss} placeholder="scoped CSS"
+          <textarea className={`${inputClass} font-mono text-[11px]`} rows={2} defaultValue={s.styleCss} placeholder={t("earningTab.scopedCssPlaceholder")}
             onBlur={(e) => { if (e.target.value !== s.styleCss) void mut(`name-styles/${encodeURIComponent(s.key)}`, "PATCH", { styleCss: e.target.value }); }} />
         </div>
       ))}
@@ -1059,14 +1074,16 @@ function NameStylesEditor({ serverId, busy, run, onSaved, setError, rows, reload
 interface FreeformBorderRow { key: string; name: string; description: string; imageUrl: string | null; template: string | null; styleCss: string | null; rarity: string; cost: number; enabled: boolean; isBuiltin: boolean; order: number; owners: number }
 
 function FreeformBordersSection(p: CatalogSectionProps) {
+  const { t } = useTranslation("servers");
   return (
-    <CatalogShell<{ borders: FreeformBorderRow[] }> title="Free-form borders" serverId={p.serverId} path="freeform-borders"
-      blurb="OOC avatar borders (image-URL or template). Members buy and equip these on this server."
+    <CatalogShell<{ borders: FreeformBorderRow[] }> title={t("earningTab.freeformSection")} serverId={p.serverId} path="freeform-borders"
+      blurb={t("earningTab.freeformBlurb")}
       render={(data, reload) => <FreeformBordersEditor {...p} rows={data.borders} reload={reload} />} />
   );
 }
 
 function FreeformBordersEditor({ serverId, busy, run, onSaved, setError, rows, reload }: CatalogSectionProps & { rows: FreeformBorderRow[]; reload: () => Promise<void> }) {
+  const { t } = useTranslation("servers");
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
   const [imageUrl, setImageUrl] = useState("");
@@ -1076,30 +1093,30 @@ function FreeformBordersEditor({ serverId, busy, run, onSaved, setError, rows, r
     <div className="space-y-3">
       <div className="flex flex-wrap items-end gap-2">
         <input className={`${inputClass} max-w-[9rem]`} value={key} onChange={(e) => setKey(e.target.value)} placeholder="border-key" />
-        <input className={`${inputClass} max-w-[10rem]`} value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name" />
-        <input className={`${inputClass} max-w-[14rem] flex-1`} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="image URL" />
+        <input className={`${inputClass} max-w-[10rem]`} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("earningTab.displayNamePlaceholder")} />
+        <input className={`${inputClass} max-w-[14rem] flex-1`} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder={t("earningTab.imageUrlPlaceholder")} />
         <button type="button" disabled={busy || !key.trim() || !name.trim() || !imageUrl.trim()} className={primaryBtn}
-          onClick={() => void mut("freeform-borders", "POST", { key: key.trim(), name: name.trim(), imageUrl: imageUrl.trim() }).then(() => { setKey(""); setName(""); setImageUrl(""); })}>Add</button>
+          onClick={() => void mut("freeform-borders", "POST", { key: key.trim(), name: name.trim(), imageUrl: imageUrl.trim() }).then(() => { setKey(""); setName(""); setImageUrl(""); })}>{t("earningTab.add")}</button>
       </div>
-      <p className="text-[10px] text-keep-muted">New rows are created in image-URL mode. Template-mode borders are managed in the platform admin panel.</p>
+      <p className="text-[10px] text-keep-muted">{t("earningTab.freeformNote")}</p>
       {rows.map((b) => (
         <div key={b.key} className="flex flex-wrap items-center gap-2 rounded border border-keep-rule/60 bg-keep-panel/20 p-2">
-          {b.imageUrl ? <img src={b.imageUrl} alt="" className="h-7 w-7 rounded object-contain" /> : <span className="text-[10px] text-keep-muted">tmpl</span>}
+          {b.imageUrl ? <img src={b.imageUrl} alt="" className="h-7 w-7 rounded object-contain" /> : <span className="text-[10px] text-keep-muted">{t("earningTab.tmplChip")}</span>}
           <input className={`${inputClass} max-w-[10rem]`} defaultValue={b.name}
             onBlur={(e) => { if (e.target.value !== b.name) void mut(`freeform-borders/${encodeURIComponent(b.key)}`, "PATCH", { name: e.target.value }); }} />
           <input className={`${inputClass} max-w-[6rem]`} defaultValue={b.rarity}
             onBlur={(e) => { if (e.target.value !== b.rarity) void mut(`freeform-borders/${encodeURIComponent(b.key)}`, "PATCH", { rarity: e.target.value }); }} />
-          <label className="flex items-center gap-1 text-[10px] text-keep-muted">cost
+          <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.costLower")}
             <input type="number" min={0} className={numClass} defaultValue={b.cost}
               onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== b.cost) void mut(`freeform-borders/${encodeURIComponent(b.key)}`, "PATCH", { cost: v }); }} />
           </label>
           <label className="flex items-center gap-1 text-[10px] text-keep-muted">
-            <input type="checkbox" checked={b.enabled} onChange={(e) => void mut(`freeform-borders/${encodeURIComponent(b.key)}`, "PATCH", { enabled: e.target.checked })} /> on
+            <input type="checkbox" checked={b.enabled} onChange={(e) => void mut(`freeform-borders/${encodeURIComponent(b.key)}`, "PATCH", { enabled: e.target.checked })} /> {t("earningTab.onLower")}
           </label>
-          <span className="text-[10px] text-keep-muted">{b.key}{b.isBuiltin ? " · seed" : ""} · {b.owners} owners</span>
+          <span className="text-[10px] text-keep-muted">{b.key}{b.isBuiltin ? t("earningTab.seedSuffix") : ""}{t("earningTab.ownersSuffix", { n: b.owners })}</span>
           {!b.isBuiltin ? (
             <button type="button" disabled={busy} className={`${btnClass} ml-auto`}
-              onClick={() => { if (window.confirm(`Delete border ${b.key}?`)) void mut(`freeform-borders/${encodeURIComponent(b.key)}`, "DELETE", null); }}>Delete</button>
+              onClick={() => { if (window.confirm(t("earningTab.deleteBorderConfirm", { key: b.key }))) void mut(`freeform-borders/${encodeURIComponent(b.key)}`, "DELETE", null); }}>{t("shared.delete")}</button>
           ) : null}
         </div>
       ))}
@@ -1112,28 +1129,30 @@ function FreeformBordersEditor({ serverId, busy, run, onSaved, setError, rows, r
 interface CosmeticRow { key: string; name: string; description: string; cost: number; enabled: boolean; configJson: string | null }
 
 function CosmeticsSection(p: CatalogSectionProps) {
+  const { t } = useTranslation("servers");
   return (
-    <CatalogShell<{ cosmetics: CosmeticRow[] }> title="Cosmetics" serverId={p.serverId} path="cosmetics"
-      blurb="Toggle and price this server's feature cosmetics (rows are seed-defined)."
+    <CatalogShell<{ cosmetics: CosmeticRow[] }> title={t("earningTab.cosmeticsSection")} serverId={p.serverId} path="cosmetics"
+      blurb={t("earningTab.cosmeticsBlurb")}
       render={(data, reload) => <CosmeticsEditor {...p} rows={data.cosmetics} reload={reload} />} />
   );
 }
 
 function CosmeticsEditor({ serverId, busy, run, onSaved, setError, rows, reload }: CatalogSectionProps & { rows: CosmeticRow[]; reload: () => Promise<void> }) {
+  const { t } = useTranslation("servers");
   const mut = (path: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown> | null) =>
     catalogMutate(serverId, path, method, body, run, reload, onSaved, setError);
-  if (rows.length === 0) return <p className="text-[11px] italic text-keep-muted">No cosmetics on this server.</p>;
+  if (rows.length === 0) return <p className="text-[11px] italic text-keep-muted">{t("earningTab.noCosmetics")}</p>;
   return (
     <div className="space-y-2">
       {rows.map((c) => (
         <div key={c.key} className="flex flex-wrap items-center gap-2 rounded border border-keep-rule/60 bg-keep-panel/20 p-2">
           <span className="w-40 text-xs text-keep-text">{c.name} <span className="text-[10px] text-keep-muted">({c.key})</span></span>
-          <label className="flex items-center gap-1 text-[10px] text-keep-muted">cost
+          <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.costLower")}
             <input type="number" min={0} className={numClass} defaultValue={c.cost}
               onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== c.cost) void mut(`cosmetics/${encodeURIComponent(c.key)}`, "PATCH", { cost: v }); }} />
           </label>
           <label className="flex items-center gap-1 text-[10px] text-keep-muted">
-            <input type="checkbox" checked={c.enabled} onChange={(e) => void mut(`cosmetics/${encodeURIComponent(c.key)}`, "PATCH", { enabled: e.target.checked })} /> on
+            <input type="checkbox" checked={c.enabled} onChange={(e) => void mut(`cosmetics/${encodeURIComponent(c.key)}`, "PATCH", { enabled: e.target.checked })} /> {t("earningTab.onLower")}
           </label>
         </div>
       ))}
@@ -1146,14 +1165,16 @@ function CosmeticsEditor({ serverId, busy, run, onSaved, setError, rows, reload 
 interface ItemRow { key: string; name: string; namePlural: string | null; description: string; iconUrl: string | null; price: number; category: string; enabled: boolean; forSale: boolean; order: number; isBuiltin: boolean; owners: number }
 
 function ItemsSection(p: CatalogSectionProps) {
+  const { t } = useTranslation("servers");
   return (
-    <CatalogShell<{ items: ItemRow[] }> title="Items (shop)" serverId={p.serverId} path="items"
-      blurb="This server's purchasable item catalog. Toggle, price, and pull from sale."
+    <CatalogShell<{ items: ItemRow[] }> title={t("earningTab.itemsSection")} serverId={p.serverId} path="items"
+      blurb={t("earningTab.itemsBlurb")}
       render={(data, reload) => <ItemsEditor {...p} rows={data.items} reload={reload} />} />
   );
 }
 
 function ItemsEditor({ serverId, busy, run, onSaved, setError, rows, reload }: CatalogSectionProps & { rows: ItemRow[]; reload: () => Promise<void> }) {
+  const { t } = useTranslation("servers");
   const [key, setKey] = useState("");
   const [name, setName] = useState("");
   const mut = (path: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown> | null) =>
@@ -1162,29 +1183,29 @@ function ItemsEditor({ serverId, busy, run, onSaved, setError, rows, reload }: C
     <div className="space-y-2">
       <div className="flex flex-wrap items-end gap-2">
         <input className={`${inputClass} max-w-[9rem]`} value={key} onChange={(e) => setKey(e.target.value)} placeholder="item_key" />
-        <input className={`${inputClass} max-w-[11rem]`} value={name} onChange={(e) => setName(e.target.value)} placeholder="Display name" />
+        <input className={`${inputClass} max-w-[11rem]`} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("earningTab.displayNamePlaceholder")} />
         <button type="button" disabled={busy || !key.trim() || !name.trim()} className={primaryBtn}
-          onClick={() => void mut("items", "POST", { key: key.trim(), name: name.trim() }).then(() => { setKey(""); setName(""); })}>Add</button>
+          onClick={() => void mut("items", "POST", { key: key.trim(), name: name.trim() }).then(() => { setKey(""); setName(""); })}>{t("earningTab.add")}</button>
       </div>
       {rows.map((it) => (
         <div key={it.key} className="flex flex-wrap items-center gap-2 rounded border border-keep-rule/60 bg-keep-panel/20 p-2">
           {it.iconUrl ? <img src={it.iconUrl} alt="" className="h-6 w-6 object-contain" /> : null}
           <input className={`${inputClass} max-w-[10rem]`} defaultValue={it.name}
             onBlur={(e) => { if (e.target.value !== it.name) void mut(`items/${encodeURIComponent(it.key)}`, "PATCH", { name: e.target.value }); }} />
-          <label className="flex items-center gap-1 text-[10px] text-keep-muted">price
+          <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.priceLower")}
             <input type="number" min={0} className={numClass} defaultValue={it.price}
               onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== it.price) void mut(`items/${encodeURIComponent(it.key)}`, "PATCH", { price: v }); }} />
           </label>
           <label className="flex items-center gap-1 text-[10px] text-keep-muted">
-            <input type="checkbox" checked={it.enabled} onChange={(e) => void mut(`items/${encodeURIComponent(it.key)}`, "PATCH", { enabled: e.target.checked })} /> on
+            <input type="checkbox" checked={it.enabled} onChange={(e) => void mut(`items/${encodeURIComponent(it.key)}`, "PATCH", { enabled: e.target.checked })} /> {t("earningTab.onLower")}
           </label>
           <label className="flex items-center gap-1 text-[10px] text-keep-muted">
-            <input type="checkbox" checked={it.forSale} onChange={(e) => void mut(`items/${encodeURIComponent(it.key)}`, "PATCH", { forSale: e.target.checked })} /> for sale
+            <input type="checkbox" checked={it.forSale} onChange={(e) => void mut(`items/${encodeURIComponent(it.key)}`, "PATCH", { forSale: e.target.checked })} /> {t("earningTab.forSaleLower")}
           </label>
-          <span className="text-[10px] text-keep-muted">{it.key}{it.isBuiltin ? " · seed" : ""} · {it.owners} hold</span>
+          <span className="text-[10px] text-keep-muted">{it.key}{it.isBuiltin ? t("earningTab.seedSuffix") : ""}{t("earningTab.holdSuffix", { n: it.owners })}</span>
           {!it.isBuiltin ? (
             <button type="button" disabled={busy} className={`${btnClass} ml-auto`}
-              onClick={() => { if (window.confirm(`Delete item ${it.key}?`)) void mut(`items/${encodeURIComponent(it.key)}`, "DELETE", null); }}>Delete</button>
+              onClick={() => { if (window.confirm(t("earningTab.deleteItemConfirm", { key: it.key }))) void mut(`items/${encodeURIComponent(it.key)}`, "DELETE", null); }}>{t("shared.delete")}</button>
           ) : null}
         </div>
       ))}
@@ -1197,31 +1218,33 @@ function ItemsEditor({ serverId, busy, run, onSaved, setError, rows, reload }: C
 interface RoomTransitionRow { key: string; label: string; description: string; cost: number; enabled: boolean; sortOrder: number }
 
 function RoomTransitionsSection(p: CatalogSectionProps) {
+  const { t } = useTranslation("servers");
   return (
-    <CatalogShell<{ transitions: RoomTransitionRow[] }> title="Room transitions" serverId={p.serverId} path="room-transitions"
-      blurb="Re-price, disable, or reorder this server's room-switch animations. The animation set is fixed."
+    <CatalogShell<{ transitions: RoomTransitionRow[] }> title={t("earningTab.transitionsSection")} serverId={p.serverId} path="room-transitions"
+      blurb={t("earningTab.transitionsBlurb")}
       render={(data, reload) => <RoomTransitionsEditor {...p} rows={data.transitions} reload={reload} />} />
   );
 }
 
 function RoomTransitionsEditor({ serverId, busy, run, onSaved, setError, rows, reload }: CatalogSectionProps & { rows: RoomTransitionRow[]; reload: () => Promise<void> }) {
+  const { t } = useTranslation("servers");
   const mut = (path: string, method: "POST" | "PATCH" | "DELETE", body: Record<string, unknown> | null) =>
     catalogMutate(serverId, path, method, body, run, reload, onSaved, setError);
   return (
     <div className="space-y-1">
-      {rows.map((t) => (
-        <div key={t.key} className="flex flex-wrap items-center gap-2 rounded border border-keep-rule/60 bg-keep-panel/20 p-2">
-          <span className="w-40 text-xs text-keep-text" title={t.description}>{t.label} <span className="text-[10px] text-keep-muted">({t.key})</span></span>
-          <label className="flex items-center gap-1 text-[10px] text-keep-muted">cost
-            <input type="number" min={0} className={numClass} defaultValue={t.cost}
-              onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== t.cost) void mut(`room-transitions/${encodeURIComponent(t.key)}`, "PATCH", { cost: v }); }} />
+      {rows.map((row) => (
+        <div key={row.key} className="flex flex-wrap items-center gap-2 rounded border border-keep-rule/60 bg-keep-panel/20 p-2">
+          <span className="w-40 text-xs text-keep-text" title={row.description}>{row.label} <span className="text-[10px] text-keep-muted">({row.key})</span></span>
+          <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.costLower")}
+            <input type="number" min={0} className={numClass} defaultValue={row.cost}
+              onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== row.cost) void mut(`room-transitions/${encodeURIComponent(row.key)}`, "PATCH", { cost: v }); }} />
           </label>
-          <label className="flex items-center gap-1 text-[10px] text-keep-muted">order
-            <input type="number" className={numClass} defaultValue={t.sortOrder}
-              onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== t.sortOrder) void mut(`room-transitions/${encodeURIComponent(t.key)}`, "PATCH", { sortOrder: v }); }} />
+          <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.orderLower")}
+            <input type="number" className={numClass} defaultValue={row.sortOrder}
+              onBlur={(e) => { const v = Number(e.target.value) || 0; if (v !== row.sortOrder) void mut(`room-transitions/${encodeURIComponent(row.key)}`, "PATCH", { sortOrder: v }); }} />
           </label>
           <label className="flex items-center gap-1 text-[10px] text-keep-muted">
-            <input type="checkbox" checked={t.enabled} onChange={(e) => void mut(`room-transitions/${encodeURIComponent(t.key)}`, "PATCH", { enabled: e.target.checked })} /> on
+            <input type="checkbox" checked={row.enabled} onChange={(e) => void mut(`room-transitions/${encodeURIComponent(row.key)}`, "PATCH", { enabled: e.target.checked })} /> {t("earningTab.onLower")}
           </label>
         </div>
       ))}
@@ -1234,14 +1257,16 @@ function RoomTransitionsEditor({ serverId, busy, run, onSaved, setError, rows, r
 interface FlashSaleData { tomorrow: string; flashSaleEnabled: boolean; overrides: { category: string; forDate: string; targetKey: string; discountPct: number | null }[] }
 
 function FlashSaleSection(p: CatalogSectionProps) {
+  const { t } = useTranslation("servers");
   return (
-    <CatalogShell<FlashSaleData> title="Flash sales" serverId={p.serverId} path="flash-sale"
-      blurb="Queue a specific discounted pick for a future date on this server."
+    <CatalogShell<FlashSaleData> title={t("earningTab.flashSaleSection")} serverId={p.serverId} path="flash-sale"
+      blurb={t("earningTab.flashSaleBlurb")}
       render={(data, reload) => <FlashSaleEditor {...p} data={data} reload={reload} />} />
   );
 }
 
 function FlashSaleEditor({ serverId, busy, run, onSaved, setError, data, reload }: CatalogSectionProps & { data: FlashSaleData; reload: () => Promise<void> }) {
+  const { t } = useTranslation("servers");
   const [category, setCategory] = useState<"name_style" | "item" | "cosmetic" | "freeform_border">("item");
   const [forDate, setForDate] = useState(data.tomorrow);
   const [targetKey, setTargetKey] = useState("");
@@ -1263,20 +1288,20 @@ function FlashSaleEditor({ serverId, busy, run, onSaved, setError, data, reload 
   }
   return (
     <div className="space-y-3">
-      {!data.flashSaleEnabled ? <p className="text-[11px] text-keep-muted">Flash sales are currently off for this server (toggle them on under Faucet and sinks). You can still queue picks for when they're enabled.</p> : null}
+      {!data.flashSaleEnabled ? <p className="text-[11px] text-keep-muted">{t("earningTab.flashSaleOffNote")}</p> : null}
       <div className="flex flex-wrap items-end gap-2">
         <select className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm text-keep-text" value={category} onChange={(e) => setCategory(e.target.value as typeof category)}>
-          <option value="item">Item</option>
-          <option value="name_style">Name style</option>
-          <option value="cosmetic">Cosmetic</option>
-          <option value="freeform_border">Free-form border</option>
+          <option value="item">{t("earningTab.categoryItem")}</option>
+          <option value="name_style">{t("earningTab.categoryNameStyle")}</option>
+          <option value="cosmetic">{t("earningTab.categoryCosmetic")}</option>
+          <option value="freeform_border">{t("earningTab.categoryFreeformBorder")}</option>
         </select>
         <input type="date" className={`${inputClass} max-w-[10rem]`} value={forDate} min={data.tomorrow} onChange={(e) => setForDate(e.target.value)} />
-        <input className={`${inputClass} max-w-[10rem]`} value={targetKey} onChange={(e) => setTargetKey(e.target.value)} placeholder="catalog key" />
-        <label className="flex items-center gap-1 text-[10px] text-keep-muted">disc%
-          <input type="number" min={1} max={99} className={numClass} value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder="def" />
+        <input className={`${inputClass} max-w-[10rem]`} value={targetKey} onChange={(e) => setTargetKey(e.target.value)} placeholder={t("earningTab.catalogKeyPlaceholder")} />
+        <label className="flex items-center gap-1 text-[10px] text-keep-muted">{t("earningTab.discountLabel")}
+          <input type="number" min={1} max={99} className={numClass} value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder={t("earningTab.defPlaceholder")} />
         </label>
-        <button type="button" disabled={busy || !targetKey.trim()} className={primaryBtn} onClick={() => void queue(false)}>Queue</button>
+        <button type="button" disabled={busy || !targetKey.trim()} className={primaryBtn} onClick={() => void queue(false)}>{t("earningTab.queue")}</button>
       </div>
       {data.overrides.length > 0 ? (
         <ul className="space-y-1">
@@ -1284,11 +1309,11 @@ function FlashSaleEditor({ serverId, busy, run, onSaved, setError, data, reload 
             <li key={`${o.category}-${o.forDate}`} className="flex items-center justify-between gap-2 text-[11px]">
               <span className="text-keep-text">{o.forDate} · {o.category} → {o.targetKey}{o.discountPct ? ` (${o.discountPct}%)` : ""}</span>
               <button type="button" disabled={busy} className={btnClass}
-                onClick={() => { setCategory(o.category as typeof category); setForDate(o.forDate); void queue(true); }}>Remove</button>
+                onClick={() => { setCategory(o.category as typeof category); setForDate(o.forDate); void queue(true); }}>{t("shared.remove")}</button>
             </li>
           ))}
         </ul>
-      ) : <p className="text-[11px] italic text-keep-muted">No queued sales.</p>}
+      ) : <p className="text-[11px] italic text-keep-muted">{t("earningTab.noQueuedSales")}</p>}
     </div>
   );
 }

@@ -52,6 +52,7 @@ import type { Db } from "../db/index.js";
 import { getSessionUser } from "../routes/auth.js";
 import { areServersEnabled, getServerSettings, getSettings } from "../settings.js";
 import { serverAuthority } from "./authority.js";
+import { tFor } from "../i18n.js";
 
 /**
  * Stable short hash of an onboarding config, matching settings.ts' hashWelcome
@@ -121,7 +122,7 @@ async function gate(
   reply: FastifyReply,
   db: Db,
   serverId: string,
-): Promise<{ meId: string; serverId: string } | null> {
+): Promise<{ meId: string; serverId: string; locale: string | null } | null> {
   if (!areServersEnabled(await getSettings(db))) {
     reply.code(404);
     return null;
@@ -140,7 +141,7 @@ async function gate(
     reply.code(403);
     return null;
   }
-  return { meId: me.id, serverId: a.server.id };
+  return { meId: me.id, serverId: a.server.id, locale: me.locale };
 }
 
 /**
@@ -226,7 +227,7 @@ export async function registerSelfRolesRoutes(app: FastifyInstance, db: Db): Pro
     const group = await selectableGroup(db, g.serverId, req.params.gid);
     if (!group) {
       reply.code(404);
-      return { error: "That role can't be self-selected." };
+      return { error: tFor(g.locale, "errors:server.servers.roleNotSelfSelectable") };
     }
 
     // isAuto false = a self-picked membership. onConflictDoNothing keeps this
@@ -248,7 +249,7 @@ export async function registerSelfRolesRoutes(app: FastifyInstance, db: Db): Pro
     const group = await selectableGroup(db, g.serverId, req.params.gid);
     if (!group) {
       reply.code(404);
-      return { error: "That role can't be self-selected." };
+      return { error: tFor(g.locale, "errors:server.servers.roleNotSelfSelectable") };
     }
 
     // Only delete a MANUAL row. An auto membership (isAuto = 1) is earned and

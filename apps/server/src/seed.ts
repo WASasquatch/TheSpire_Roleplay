@@ -33,6 +33,7 @@ import { schedulePresenceSweep } from "./earning/sweeps.js";
 import { scheduleEidolonNudgeSweep } from "./earning/eidolonNudge.js";
 import { pruneSnapshots } from "./backup/snapshots.js";
 import { archiveDoomedBookmarks } from "./retention/archiveBookmarks.js";
+import { ensureForumStarterBoards } from "./forums/starter.js";
 
 /**
  * Default system rooms shipped on every fresh install. Each one is a
@@ -209,6 +210,13 @@ export async function ensureSystemSeeds(db: Db): Promise<void> {
   // server-scoped rows. Always-on + idempotent (adopts orphans, seeds only when
   // empty) — ungated by SKIP_DEFAULT_SEED like the other ensure* helpers.
   await ensureDefaultFaqs(db);
+
+  // Bare-forum repair: forums provisioned before the approve path seeded
+  // starter furniture (or later emptied of every board) are dead ends — no
+  // board means no New Topic affordance and nothing for the posting tour to
+  // point at. Idempotent (only fires on zero-live-board forums); shares the
+  // exact seeder the approve path uses.
+  await ensureForumStarterBoards(db);
 
   // Force-reseed the `{icon}` placeholder on item-message templates
   // when the deploy script (remote-deploy.sh) staged the flag. Always
@@ -512,6 +520,25 @@ function assertServerInvariants(db: Db): void {
     }
   } catch (err) {
     warn(`could not check system-server invariant: ${(err as Error).message}`);
+  }
+
+  // (3b) The system DEFAULT server stays SFW (age plan, Phase 2). The
+  // flagship partition puts the adult side in a SIBLING "NSFW" server; the
+  // home server 18+ would strand minors with no landing anywhere. The
+  // settings route refuses the write — this catches a manual DB edit. Like
+  // every invariant here it WARNS and self-heals rather than crashing:
+  // clearing the flag is always the safe direction (it only widens access
+  // back to the documented state).
+  try {
+    const row = sqliteHandle
+      .prepare("SELECT is_nsfw AS isNsfw FROM servers WHERE id = 'server_spire_system'")
+      .get() as { isNsfw: number } | undefined;
+    if (row && row.isNsfw === 1) {
+      warn("server_spire_system was flagged is_nsfw=1 — the home server must stay SFW; clearing it");
+      sqliteHandle.prepare("UPDATE servers SET is_nsfw = 0 WHERE id = 'server_spire_system'").run();
+    }
+  } catch (err) {
+    warn(`could not check system-server SFW invariant: ${(err as Error).message}`);
   }
 
   // (4) Every 0278 discriminator column present (the §9.3 baseline-trap guard).

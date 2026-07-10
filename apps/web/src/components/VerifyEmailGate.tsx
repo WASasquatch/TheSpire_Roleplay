@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { useChat } from "../state/store.js";
 import { clearSessionToken } from "../lib/http.js";
 import { isEmailBlockGate } from "../lib/emailGate.js";
@@ -13,6 +14,7 @@ import { isEmailBlockGate } from "../lib/emailGate.js";
  * (block mode); this is the UX layer.
  */
 export function VerifyEmailGate() {
+  const { t } = useTranslation("marketing");
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
   const [dismissed, setDismissed] = useState(false);
@@ -34,10 +36,10 @@ export function VerifyEmailGate() {
     setError(null);
     try {
       const r = await fetch("/auth/resend-verification", { method: "POST" });
-      if (!r.ok) throw new Error("Couldn't send right now. Try again in a minute.");
+      if (!r.ok) throw new Error(t("verifyGate.sendFailed"));
       setSent(true);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Try again in a minute.");
+      setError(e instanceof Error ? e.message : t("verifyGate.tryLater"));
     } finally {
       setSending(false);
     }
@@ -83,8 +85,16 @@ export function VerifyEmailGate() {
     window.location.href = "/register";
   }
 
+  // The control's LABEL travels through the sentence keys as {{resendLabel}}
+  // so the surrounding copy can be reworded per-locale around it; the element
+  // itself (span once sent, button otherwise) is cloned in place by <Trans>.
+  const resendLabel = sent
+    ? t("verifyGate.sent")
+    : sending
+      ? t("verifyGate.sending")
+      : t("verifyGate.resend");
   const resendControl = sent ? (
-    <span className="text-keep-muted">Sent! Check your inbox (and spam).</span>
+    <span className="text-keep-muted">{"{{resendLabel}}"}</span>
   ) : (
     <button
       type="button"
@@ -92,7 +102,7 @@ export function VerifyEmailGate() {
       disabled={sending}
       className="font-semibold underline underline-offset-2 hover:text-keep-action disabled:opacity-50"
     >
-      {sending ? "Sending…" : "Resend verification email"}
+      {"{{resendLabel}}"}
     </button>
   );
 
@@ -109,32 +119,48 @@ export function VerifyEmailGate() {
       <span className="min-w-0">
         {isBlock ? (
           <>
-            <b>Verify your email to chat.</b> Click the link we sent, then{" "}
-            <button
-              type="button"
-              onClick={recheck}
-              disabled={checking}
-              className="font-semibold underline underline-offset-2 hover:text-keep-action disabled:opacity-50"
+            <Trans
+              t={t}
+              i18nKey="verifyGate.block"
+              values={{
+                refreshLabel: checking ? t("verifyGate.checking") : t("verifyGate.refreshCta"),
+                resendLabel,
+              }}
             >
-              {checking ? "Checking…" : "I've verified — refresh"}
-            </button>
-            . Don't see it? Check your <b>spam</b> folder, then {resendControl}
-            {" · "}
-            <button
-              type="button"
-              onClick={signOut}
-              className="underline underline-offset-2 hover:text-keep-action"
-            >
-              wrong email?
-            </button>
+              <b>Verify your email to chat.</b>
+              {" Click the link we sent, then "}
+              <button
+                type="button"
+                onClick={recheck}
+                disabled={checking}
+                className="font-semibold underline underline-offset-2 hover:text-keep-action disabled:opacity-50"
+              >
+                {"{{refreshLabel}}"}
+              </button>
+              {". Don't see it? Check your "}
+              <b>spam</b>
+              {" folder, then "}
+              {resendControl}
+              {" · "}
+              <button
+                type="button"
+                onClick={signOut}
+                className="underline underline-offset-2 hover:text-keep-action"
+              >
+                wrong email?
+              </button>
+            </Trans>
             {notYet ? (
               <span className="ml-2 text-keep-accent">
-                Not verified yet — open the link in your email, then try again.
+                {t("verifyGate.notYet")}
               </span>
             ) : null}
           </>
         ) : (
-          <>Please verify your email to secure your account. {resendControl}</>
+          <Trans t={t} i18nKey="verifyGate.nudge" values={{ resendLabel }}>
+            {"Please verify your email to secure your account. "}
+            {resendControl}
+          </Trans>
         )}
         {error ? <span className="ml-2 text-keep-accent">{error}</span> : null}
       </span>
@@ -143,8 +169,8 @@ export function VerifyEmailGate() {
           type="button"
           onClick={() => setDismissed(true)}
           className="shrink-0 rounded px-2 py-0.5 text-keep-muted hover:text-keep-text"
-          aria-label="Dismiss"
-          title="Dismiss"
+          aria-label={t("dismiss")}
+          title={t("dismiss")}
         >
           ✕
         </button>

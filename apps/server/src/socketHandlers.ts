@@ -56,7 +56,9 @@ import {
 } from "./realtime/broadcast.js";
 import { clearAllAwayForUser } from "./realtime/awayState.js";
 import { applyControl, parsePlaylist } from "./realtime/theaterState.js";
-import { callerCanEditRoom } from "./auth/roomPermissions.js";
+import { anyConnectedRoomController, callerCanEditRoom } from "./auth/roomPermissions.js";
+import { effectiveRoomNsfw } from "./lib/nsfwRooms.js";
+import { effectiveBoardNsfw } from "./forums/nsfw.js";
 import { clearAllMoodForUser } from "./realtime/moodState.js";
 import { clearTyperEverywhere, clearTyperFromRoom, markTyping } from "./realtime/typing.js";
 import { lookupProfile } from "./commands/builtins/profile.js";
@@ -65,6 +67,7 @@ import { extendSession, loadSessionUser, resolveDisplayName } from "./auth/sessi
 import { recordSocketIp, extractSocketIp } from "./auth/ipLog.js";
 import { slugToUsername } from "./routes/auth.js";
 import { getServerSettings, getSettings, areServersEnabled } from "./settings.js";
+import { tFor } from "./i18n.js";
 
 /**
  * Wire every per-connection socket handler onto `io`. Called once at boot,
@@ -132,6 +135,12 @@ export function wireSocketHandlers(
       // the boot join hit joinRoom's FORUM_BOARD refusal and greeted the
       // user with an error notice right after login/registration.
       if (room.forumId) return null;
+      // Age gate (age plan, Phase 2): a remembered room that is now 18+
+      // (the room flipped, or its server did, or the account's DOB was
+      // corrected) silently degrades to the next tier for a minor —
+      // greeting a fresh login with an AGE_RESTRICTED error would strand
+      // them roomless.
+      if (!user.isAdult && (await effectiveRoomNsfw(db, room))) return null;
       const ban = (await db
         .select()
         .from(bans)
@@ -234,9 +243,17 @@ export function wireSocketHandlers(
       // Flag-off keeps the exact canonical resolver; flag-on with a known
       // target server scopes the landing to that server, falling back to
       // the canonical landing when the server has no joinable system room.
-      const landing = serversEnabled && targetServerId
+      let landing = serversEnabled && targetServerId
         ? (await findServerLanding(db, targetServerId)) ?? (await findCanonicalLanding(db))
         : await findCanonicalLanding(db);
+      // Landing selection skips 18+ rooms for minors (age plan §E, the
+      // belt-and-braces behind the landing-room write rejection): a minor
+      // aimed at an 18+ server's landing falls back to the canonical one,
+      // which is SFW by the system-server invariant.
+      if (landing && !user.isAdult && (await effectiveRoomNsfw(db, landing))) {
+        const canonical = await findCanonicalLanding(db);
+        landing = canonical && !(await effectiveRoomNsfw(db, canonical)) ? canonical : null;
+      }
       if (landing) initialRoomId = landing.id;
     }
     if (initialRoomId) await joinRoom(io, db, socket, user, initialRoomId);
@@ -273,13 +290,13 @@ export function wireSocketHandlers(
     socket.on("chat:input", async (payload, ack) => {
       try {
         if (!(await checkAndExtendSession())) {
-          ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+          ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpiredLogin") });
           return;
         }
         const fresh = await loadSessionUser(db, user.id);
         if (!fresh) {
           socket.emit("auth:expired");
-          ack?.({ ok: false, code: "AUTH", message: "Session expired." });
+          ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpired") });
           socket.disconnect(true);
           return;
         }
@@ -292,7 +309,7 @@ export function wireSocketHandlers(
         // never be locked out of the Email settings that turn block mode
         // off. They still see the nudge banner client-side.
         if (await emailContentBlocked(user, db)) {
-          ack?.({ ok: false, code: "EMAIL_UNVERIFIED", message: "Please verify your email to chat." });
+          ack?.({ ok: false, code: "EMAIL_UNVERIFIED", message: tFor(user.locale, "errors:server.realtime.verifyEmailToChat") });
           return;
         }
         // Identity resolution for this send, in priority order:
@@ -409,13 +426,13 @@ export function wireSocketHandlers(
     socket.on("forum:post", async (payload, ack) => {
       try {
         if (!(await checkAndExtendSession())) {
-          ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+          ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpiredLogin") });
           return;
         }
         const fresh = await loadSessionUser(db, user.id);
         if (!fresh) {
           socket.emit("auth:expired");
-          ack?.({ ok: false, code: "AUTH", message: "Session expired." });
+          ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpired") });
           socket.disconnect(true);
           return;
         }
@@ -424,7 +441,7 @@ export function wireSocketHandlers(
         // a blocked (unverified, non-staff) user can't create/reply here
         // either. Mirrors the authed /forums HTTP guard.
         if (await emailContentBlocked(user, db)) {
-          ack?.({ ok: false, code: "EMAIL_UNVERIFIED", message: "Verify your email to access the forums." });
+          ack?.({ ok: false, code: "EMAIL_UNVERIFIED", message: tFor(user.locale, "errors:server.realtime.verifyEmailForums") });
           return;
         }
         // Per-send identity claim, same resolution order as chat:input
@@ -459,7 +476,15 @@ export function wireSocketHandlers(
         // (ban, members-only posting) decide access.
         const board = (await db.select().from(rooms).where(eq(rooms.id, payload.roomId)).limit(1))[0];
         if (!board || !board.forumId || board.archivedAt || board.replyMode !== "nested") {
-          ack?.({ ok: false, code: "NO_BOARD", message: "That board doesn't exist." });
+          ack?.({ ok: false, code: "NO_BOARD", message: tFor(user.locale, "errors:server.messages.boardMissing") });
+          return;
+        }
+        // HARD age gate (age plan, Phase 3): an 18+ board — by its room
+        // flag, its server's, or its whole FORUM's — takes no posts from
+        // minors. The read routes already hide these boards from them;
+        // this covers a crafted payload or a stale client.
+        if (!user.isAdult && (await effectiveBoardNsfw(db, board))) {
+          ack?.({ ok: false, code: "AGE_RESTRICTED", message: tFor(user.locale, "errors:server.forums.adultsOnly") });
           return;
         }
         const { forumGateForBoard, forumCan } = await import("./forums/authority.js");
@@ -473,12 +498,12 @@ export function wireSocketHandlers(
         // Poll topics carry their content in the options, so an empty intro
         // body is fine; every other post needs prose.
         const isPollTopic = !!payload.poll && !!payload.threadTitle?.trim() && !payload.replyToId;
-        if (!text && !isPollTopic) { ack?.({ ok: false, code: "EMPTY", message: "Write something first." }); return; }
+        if (!text && !isPollTopic) { ack?.({ ok: false, code: "EMPTY", message: tFor(user.locale, "errors:server.realtime.writeSomethingFirst") }); return; }
         if (text.startsWith("/")) {
           ack?.({
             ok: false,
             code: "NO_COMMANDS",
-            message: "Chat commands like /me don't work on the forums. Just write your post as plain text.",
+            message: tFor(user.locale, "errors:server.realtime.noCommandsOnForums"),
           });
           return;
         }
@@ -490,14 +515,14 @@ export function wireSocketHandlers(
         const { maxForumPostLength } = await getServerSettings(db, board.serverId ?? DEFAULT_SERVER_ID);
         const { maxForumTopicTitleLength } = await getSettings(db);
         if (text.length > maxForumPostLength) {
-          ack?.({ ok: false, code: "TOO_LONG", message: `Forum posts are capped at ${maxForumPostLength} chars.` });
+          ack?.({ ok: false, code: "TOO_LONG", message: tFor(user.locale, "errors:server.realtime.forumPostTooLong", { max: maxForumPostLength }) });
           return;
         }
         // Usergroup FEATURE gates (re-checked server-side; the client also
         // hides what you can't do). Image embeds are detected from the
         // ![alt](url) markup the composer inserts.
         if (/!\[[^\]]*\]\([^)]+\)/.test(text) && !forumCan(gate.authority, "upload_images")) {
-          ack?.({ ok: false, code: "NO_IMAGES", message: "You don't have permission to embed images in this forum." });
+          ack?.({ ok: false, code: "NO_IMAGES", message: tFor(user.locale, "errors:server.realtime.noEmbedImages") });
           return;
         }
 
@@ -524,7 +549,7 @@ export function wireSocketHandlers(
               ack?.({
                 ok: false,
                 code: "FORUM_BOARD_MEMBERS_ONLY",
-                message: "That category is for forum members only. Join the forum first to post here.",
+                message: tFor(user.locale, "errors:server.realtime.categoryMembersOnlyJoin"),
               });
               return;
             }
@@ -549,7 +574,17 @@ export function wireSocketHandlers(
         // New topic (title XOR reply — dispatch parity).
         if (threadTitle && !replyToId) {
           if (!forumCan(gate.authority, "post_topics")) {
-            ack?.({ ok: false, code: "NO_TOPICS", message: "You don't have permission to start topics in this forum." });
+            ack?.({ ok: false, code: "NO_TOPICS", message: tFor(user.locale, "errors:server.realtime.noStartTopics") });
+            return;
+          }
+          // Compose-time NSFW tag (age plan, Phase 3). Not in the frozen
+          // shared payload type yet, so it's read via a safe cast — old
+          // bundles that never send it are unaffected. Adults only: a
+          // minor can neither set nor unset any NSFW flag, whatever their
+          // forum role (there is deliberately no bypass).
+          const wantsNsfw = (payload as { nsfw?: unknown }).nsfw === true;
+          if (wantsNsfw && !user.isAdult) {
+            ack?.({ ok: false, code: "AGE_RESTRICTED", message: tFor(user.locale, "errors:server.realtime.nsfwTopicAdultsOnly") });
             return;
           }
           const cappedTitle = threadTitle.slice(0, maxForumTopicTitleLength);
@@ -559,7 +594,7 @@ export function wireSocketHandlers(
           let pollDataJson: string | null = null;
           if (payload.poll) {
             if (!forumCan(gate.authority, "create_polls")) {
-              ack?.({ ok: false, code: "NO_POLLS", message: "You don't have permission to create polls in this forum." });
+              ack?.({ ok: false, code: "NO_POLLS", message: tFor(user.locale, "errors:server.realtime.noCreatePolls") });
               return;
             }
             const { buildPollData } = await import("./polls.js");
@@ -569,6 +604,7 @@ export function wireSocketHandlers(
               showVoters: !!payload.poll.showVoters,
               closesAt: payload.poll.closesAt ?? null,
               question: cappedTitle,
+              locale: user.locale,
             });
             if (!built.ok) { ack?.({ ok: false, code: "POLL_INVALID", message: built.error }); return; }
             pollDataJson = built.json;
@@ -579,6 +615,7 @@ export function wireSocketHandlers(
             title: cappedTitle,
             ...(threadCategoryId ? { threadCategoryId } : {}),
             ...(pollDataJson ? { pollDataJson } : {}),
+            ...(wantsNsfw ? { isNsfw: true } : {}),
           });
           if (messageId) {
             // Authors watch their own topics (reply notifications).
@@ -594,20 +631,27 @@ export function wireSocketHandlers(
         // Reply under an existing topic.
         if (replyToId && !threadTitle) {
           if (!forumCan(gate.authority, "post_replies")) {
-            ack?.({ ok: false, code: "NO_REPLIES", message: "You don't have permission to reply in this forum." });
+            ack?.({ ok: false, code: "NO_REPLIES", message: tFor(user.locale, "errors:server.realtime.noReplyForum") });
             return;
           }
           const parent = (await db.select().from(messages).where(eq(messages.id, replyToId)).limit(1))[0];
           if (!parent || parent.roomId !== board.id || parent.deletedAt) {
-            ack?.({ ok: false, code: "BAD_TOPIC", message: "That topic isn't on this board (or has been removed)." });
+            ack?.({ ok: false, code: "BAD_TOPIC", message: tFor(user.locale, "errors:server.realtime.badTopicBoard") });
             return;
           }
           if (parent.replyToId) {
-            ack?.({ ok: false, code: "NOT_A_TOPIC", message: "Replies attach to topics, not to other replies." });
+            ack?.({ ok: false, code: "NOT_A_TOPIC", message: tFor(user.locale, "errors:server.realtime.notATopic") });
+            return;
+          }
+          // HARD age gate (age plan, Phase 3): an NSFW-tagged topic takes
+          // no replies from minors — its thread already 404s for them, so
+          // this only fires from a composer left open across a re-tag.
+          if (parent.isNsfw && !user.isAdult) {
+            ack?.({ ok: false, code: "AGE_RESTRICTED", message: tFor(user.locale, "errors:server.realtime.topicAdultsOnly") });
             return;
           }
           if (parent.lockedAt && !(await hasPermission(user, "bypass_topic_lock", db))) {
-            ack?.({ ok: false, code: "TOPIC_LOCKED", message: "This topic is locked and isn't accepting new replies." });
+            ack?.({ ok: false, code: "TOPIC_LOCKED", message: tFor(user.locale, "errors:server.realtime.topicLocked") });
             return;
           }
           const snippet = parent.body.length > 120 ? `${parent.body.slice(0, 120)}…` : parent.body;
@@ -618,19 +662,19 @@ export function wireSocketHandlers(
           let npcFields: { displayNameOverride?: string; npcVoicedBy?: string; npcStatsJson?: string | null } = {};
           if (payload.format === "action") {
             if (!forumCan(gate.authority, "post_actions")) {
-              ack?.({ ok: false, code: "NO_ACTIONS", message: "You don't have permission to post Action-format replies in this forum." });
+              ack?.({ ok: false, code: "NO_ACTIONS", message: tFor(user.locale, "errors:server.realtime.noActionReplies") });
               return;
             }
             fmtKind = "me";
           } else if (payload.format === "npc") {
             if (!forumCan(gate.authority, "use_npc")) {
-              ack?.({ ok: false, code: "NPC_FORBIDDEN", message: "You don't have permission to voice NPCs in this forum." });
+              ack?.({ ok: false, code: "NPC_FORBIDDEN", message: tFor(user.locale, "errors:server.realtime.noVoiceNpcs") });
               return;
             }
             const npc = payload.npcId
               ? (await db.select().from(userNpcs).where(and(eq(userNpcs.id, payload.npcId), eq(userNpcs.userId, user.id))).limit(1))[0]
               : undefined;
-            if (!npc) { ack?.({ ok: false, code: "NPC_NOT_FOUND", message: "Pick one of your saved NPCs to voice." }); return; }
+            if (!npc) { ack?.({ ok: false, code: "NPC_NOT_FOUND", message: tFor(user.locale, "errors:server.realtime.pickSavedNpc") }); return; }
             fmtKind = "npc";
             npcFields = { displayNameOverride: npc.name, npcVoicedBy: user.displayName, npcStatsJson: npc.statsJson };
           }
@@ -664,7 +708,7 @@ export function wireSocketHandlers(
           ack?.({ ok: true, messageId });
           return;
         }
-        ack?.({ ok: false, code: "FORUM_NEEDS_TOPIC", message: "Start a new topic with a title, or reply to an existing one." });
+        ack?.({ ok: false, code: "FORUM_NEEDS_TOPIC", message: tFor(user.locale, "errors:server.realtime.startTopicOrReply") });
       } catch (err) {
         log.error({ err }, "forum:post error");
         ack?.({ ok: false, code: "ERR", message: err instanceof Error ? err.message : "error" });
@@ -683,25 +727,38 @@ export function wireSocketHandlers(
     > {
       const msg = (await db.select().from(messages).where(eq(messages.id, messageId)).limit(1))[0];
       if (!msg || msg.kind !== "poll" || msg.deletedAt) {
-        return { ok: false, code: "NO_POLL", message: "That poll doesn't exist anymore." };
+        return { ok: false, code: "NO_POLL", message: tFor(user.locale, "errors:server.realtime.pollGone") };
+      }
+      // HARD age gate (age plan, Phase 3): NSFW-stamped rows — an NSFW-
+      // tagged poll topic, or a flipped-back room's 18+-era poll — take no
+      // votes or closes from minors. Same "doesn't exist" posture as the
+      // read routes so the row's existence never leaks.
+      if (msg.isNsfw && !user.isAdult) {
+        return { ok: false, code: "NO_POLL", message: tFor(user.locale, "errors:server.realtime.pollGone") };
       }
       const { parsePollData } = await import("./polls.js");
       const data = parsePollData(msg.pollDataJson);
-      if (!data) return { ok: false, code: "NO_POLL", message: "That poll is malformed." };
+      if (!data) return { ok: false, code: "NO_POLL", message: tFor(user.locale, "errors:server.realtime.pollMalformed") };
       const room = (await db.select().from(rooms).where(eq(rooms.id, msg.roomId)).limit(1))[0];
-      if (!room) return { ok: false, code: "NO_ROOM", message: "That room is gone." };
+      if (!room) return { ok: false, code: "NO_ROOM", message: tFor(user.locale, "errors:server.realtime.roomGone") };
+      // ...and polls living in an 18+ SPACE (room flag, server's, or the
+      // whole forum's) are equally out of a minor's reach, even when the
+      // row itself predates the flip and carries no stamp.
+      if (!user.isAdult && (await effectiveBoardNsfw(db, room))) {
+        return { ok: false, code: "NO_POLL", message: tFor(user.locale, "errors:server.realtime.pollGone") };
+      }
       if (room.forumId) {
         const { forumGateForBoard, forumBoardReadGate } = await import("./forums/authority.js");
         const g = await forumGateForBoard(db, user, room.forumId);
         if (!g.ok) return { ok: false, code: g.code, message: g.message };
         const rg = await forumBoardReadGate(db, user, room.id);
         if (rg.boardLocked || (msg.threadCategoryId && rg.lockedCatIds.has(msg.threadCategoryId))) {
-          return { ok: false, code: "FORUM_BOARD_MEMBERS_ONLY", message: "This is a members-only section of the forum." };
+          return { ok: false, code: "FORUM_BOARD_MEMBERS_ONLY", message: tFor(user.locale, "errors:server.forums.membersOnlySection") };
         }
       } else if (room.type === "private") {
         const member = (await db.select().from(roomMembers)
           .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, user.id))).limit(1))[0];
-        if (!member) return { ok: false, code: "NOT_MEMBER", message: "You're not in that room." };
+        if (!member) return { ok: false, code: "NOT_MEMBER", message: tFor(user.locale, "errors:server.realtime.notInRoom") };
       }
       return { ok: true, msg, room, data };
     }
@@ -721,15 +778,15 @@ export function wireSocketHandlers(
     socket.on("poll:vote", async (payload, ack) => {
       try {
         if (!(await checkAndExtendSession())) {
-          ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+          ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpiredLogin") });
           return;
         }
         const fresh = await loadSessionUser(db, user.id);
-        if (!fresh) { socket.emit("auth:expired"); ack?.({ ok: false, code: "AUTH", message: "Session expired." }); socket.disconnect(true); return; }
+        if (!fresh) { socket.emit("auth:expired"); ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpired") }); socket.disconnect(true); return; }
         Object.assign(user, fresh);
 
         if (!payload?.messageId || !Array.isArray(payload.optionIds)) {
-          ack?.({ ok: false, code: "BAD_INPUT", message: "Malformed vote." });
+          ack?.({ ok: false, code: "BAD_INPUT", message: tFor(user.locale, "errors:server.realtime.malformedVote") });
           return;
         }
         const gate = await gatePollAccess(payload.messageId);
@@ -737,13 +794,13 @@ export function wireSocketHandlers(
         const { msg, room, data } = gate;
 
         if (data.closedAt != null || (data.closesAt != null && Date.now() >= data.closesAt)) {
-          ack?.({ ok: false, code: "POLL_CLOSED", message: "This poll is closed." });
+          ack?.({ ok: false, code: "POLL_CLOSED", message: tFor(user.locale, "errors:server.realtime.pollClosed") });
           return;
         }
         const validIds = new Set(data.options.map((o) => o.id));
         const chosen = [...new Set(payload.optionIds)].filter((id) => validIds.has(id));
         if (!data.allowMultiple && chosen.length > 1) {
-          ack?.({ ok: false, code: "SINGLE_ONLY", message: "This poll only allows one choice." });
+          ack?.({ ok: false, code: "SINGLE_ONLY", message: tFor(user.locale, "errors:server.realtime.pollSingleChoice") });
           return;
         }
         const { pollVotes } = await import("./db/schema.js");
@@ -765,14 +822,14 @@ export function wireSocketHandlers(
     socket.on("poll:close", async (payload, ack) => {
       try {
         if (!(await checkAndExtendSession())) {
-          ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+          ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpiredLogin") });
           return;
         }
         const fresh = await loadSessionUser(db, user.id);
-        if (!fresh) { socket.emit("auth:expired"); ack?.({ ok: false, code: "AUTH", message: "Session expired." }); socket.disconnect(true); return; }
+        if (!fresh) { socket.emit("auth:expired"); ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpired") }); socket.disconnect(true); return; }
         Object.assign(user, fresh);
 
-        if (!payload?.messageId) { ack?.({ ok: false, code: "BAD_INPUT", message: "Malformed request." }); return; }
+        if (!payload?.messageId) { ack?.({ ok: false, code: "BAD_INPUT", message: tFor(user.locale, "errors:server.realtime.malformedRequest") }); return; }
         const gate = await gatePollAccess(payload.messageId);
         if (!gate.ok) { ack?.({ ok: false, code: gate.code, message: gate.message }); return; }
         const { msg, room, data } = gate;
@@ -785,7 +842,7 @@ export function wireSocketHandlers(
           const a = await forumAuthority(db, user, room.forumId);
           canClose = a.isMod;
         }
-        if (!canClose) { ack?.({ ok: false, code: "FORBIDDEN", message: "Only the poll's author or a moderator can close it." }); return; }
+        if (!canClose) { ack?.({ ok: false, code: "FORBIDDEN", message: tFor(user.locale, "errors:server.realtime.pollCloseForbidden") }); return; }
 
         if (data.closedAt == null) {
           data.closedAt = Date.now();
@@ -869,7 +926,7 @@ export function wireSocketHandlers(
     socket.on("room:join", async (payload, ack) => {
       try {
         if (!(await checkAndExtendSession())) {
-          ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+          ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpiredLogin") });
           return;
         }
         // Brute-force guard. argon2.verify is intentionally slow (~300ms)
@@ -882,13 +939,13 @@ export function wireSocketHandlers(
           ack?.({
             ok: false,
             code: "RATE_LIMIT",
-            message: `Too many failed password attempts. Try again in ${Math.ceil(passwordCooldown / 1000)}s.`,
+            message: tFor(user.locale, "errors:server.realtime.tooManyPasswordAttempts", { seconds: Math.ceil(passwordCooldown / 1000) }),
           });
           return;
         }
         const room = (await db.select().from(rooms).where(eq(rooms.id, payload.roomId)).limit(1))[0];
         if (!room) {
-          ack?.({ ok: false, code: "NO_ROOM", message: "Room not found." });
+          ack?.({ ok: false, code: "NO_ROOM", message: tFor(user.locale, "errors:server.realtime.roomNotFound") });
           return;
         }
         let passwordOk = false;
@@ -896,7 +953,7 @@ export function wireSocketHandlers(
           passwordOk = await argon2.verify(room.passwordHash, payload.password).catch(() => false);
           if (!passwordOk) {
             recordRoomPwFailure(user.id, Date.now());
-            ack?.({ ok: false, code: "BAD_PASSWORD", message: "Incorrect password." });
+            ack?.({ ok: false, code: "BAD_PASSWORD", message: tFor(user.locale, "commands:room.badPassword") });
             return;
           }
         }
@@ -935,27 +992,43 @@ export function wireSocketHandlers(
      */
     socket.on("theater:control", async (payload, ack) => {
       if (!(await checkAndExtendSession())) {
-        ack?.({ ok: false, code: "AUTH", message: "Session expired. Please log in again." });
+        ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpiredLogin") });
         return;
       }
       const { roomId, action } = payload;
       if (!socket.rooms.has(`room:${roomId}`)) {
-        ack?.({ ok: false, code: "NO_ROOM", message: "You are not in that room." });
+        ack?.({ ok: false, code: "NO_ROOM", message: tFor(user.locale, "errors:server.realtime.notInRoomTheater") });
         return;
       }
       const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
       if (!room || !room.theaterMode) {
-        ack?.({ ok: false, code: "NO_THEATER", message: "Theater mode is not on in this room." });
+        ack?.({ ok: false, code: "NO_THEATER", message: tFor(user.locale, "errors:server.realtime.theaterNotOn") });
         return;
       }
-      // `ended` / `error` are PASSIVE end-of-source signals any viewer's
-      // player emits; allowing them from non-controllers is what keeps the
+      // `ended` / `error` are PASSIVE end-of-source signals a viewer's
+      // player emits; honoring them from non-controllers is what keeps the
       // playlist advancing (and skipping dead sources) when no mod is around.
-      // ACTIVE controls still require the room-edit gate.
+      // ACTIVE controls always require the room-edit gate.
       const isPassive = action === "ended" || action === "error";
-      if (!isPassive && !(await callerCanEditRoom(db, user, roomId))) {
-        ack?.({ ok: false, code: "PERM", message: "Only the room owner or a mod can control playback." });
-        return;
+      if (!(await callerCanEditRoom(db, user, roomId))) {
+        if (!isPassive) {
+          ack?.({ ok: false, code: "PERM", message: tFor(user.locale, "errors:server.realtime.theaterControlPerm") });
+          return;
+        }
+        // A plain viewer's passive report only counts while NO controller-
+        // capable user is connected to the room: when an owner/mod is here,
+        // their own player reports the genuine end-of-source, and a crafted
+        // `ended`/`error` was the one remaining way a non-controller could
+        // still skip/restart the video for everyone. Dropped reports ack ok
+        // (silent no-op) — the real client fires these blind and there is
+        // nothing for a viewer to fix. The real client also always stamps
+        // the source index on passive reports; requiring it keeps a crafted
+        // index-less report from dodging the stale-index validation inside
+        // `applyControl`.
+        if (!Number.isFinite(payload.index) || (await anyConnectedRoomController(io, db, roomId, user.id))) {
+          ack?.({ ok: true });
+          return;
+        }
       }
       const playlist = parsePlaylist(room.theaterPlaylist);
       applyControl(roomId, action, {
@@ -1012,13 +1085,13 @@ export function wireSocketHandlers(
     let profileFetchTimes: number[] = [];
     socket.on("profile:fetch", async (payload, ack) => {
       if (!(await checkAndExtendSession())) {
-        ack({ ok: false, code: "AUTH", message: "Session expired." });
+        ack({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpired") });
         return;
       }
       const now = Date.now();
       profileFetchTimes = profileFetchTimes.filter((t) => t > now - 10_000);
       if (profileFetchTimes.length >= 30) {
-        ack({ ok: false, code: "RATE_LIMIT", message: "Slow down - too many profile lookups." });
+        ack({ ok: false, code: "RATE_LIMIT", message: tFor(user.locale, "errors:server.realtime.profileLookupRateLimit") });
         return;
       }
       profileFetchTimes.push(now);
@@ -1030,7 +1103,7 @@ export function wireSocketHandlers(
       // their own profile bypasses the hide-count redaction.
       const viewerId = (socket.data as { userId?: string }).userId;
       const profile = await lookupProfile(db, slugToUsername(payload.username), viewerId);
-      if (!profile) ack({ ok: false, code: "NO_USER", message: "Not found." });
+      if (!profile) ack({ ok: false, code: "NO_USER", message: tFor(user.locale, "errors:server.realtime.profileNotFound") });
       else ack({ ok: true, profile });
     });
 
@@ -1085,7 +1158,7 @@ export function wireSocketHandlers(
     socket.on("me:switch-character", async (payload, ack) => {
       try {
         if (!(await checkAndExtendSession())) {
-          ack?.({ ok: false, code: "AUTH", message: "Session expired." });
+          ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpired") });
           return;
         }
         const requested = payload.characterId;
@@ -1096,7 +1169,7 @@ export function wireSocketHandlers(
             .where(eq(characters.id, requested))
             .limit(1))[0];
           if (!c || c.deletedAt || c.userId !== user.id) {
-            ack?.({ ok: false, code: "NO_CHAR", message: "Character not found." });
+            ack?.({ ok: false, code: "NO_CHAR", message: tFor(user.locale, "errors:server.realtime.characterNotFound") });
             return;
           }
         }
@@ -1135,12 +1208,12 @@ export function wireSocketHandlers(
 
     socket.on("mutual:respond", async (payload, ack) => {
       if (!(await checkAndExtendSession())) {
-        ack?.({ ok: false, code: "AUTH", message: "Session expired." });
+        ack?.({ ok: false, code: "AUTH", message: tFor(user.locale, "errors:server.realtime.sessionExpired") });
         return;
       }
-      const result = await respondToPrompt(db, user.id, payload.id, payload.accept);
+      const result = await respondToPrompt(db, user.id, payload.id, payload.accept, user.locale);
       if (!result.ok) {
-        ack?.({ ok: false, code: result.code ?? "RESPOND_FAILED", message: result.message ?? "Could not respond." });
+        ack?.({ ok: false, code: result.code ?? "RESPOND_FAILED", message: result.message ?? tFor(user.locale, "errors:server.realtime.couldNotRespond") });
         return;
       }
       if (result.affectedUserIds) {

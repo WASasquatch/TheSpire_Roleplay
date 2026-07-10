@@ -1,3 +1,4 @@
+import type { TFunction } from "i18next";
 import type { CoachStep } from "../../components/tours/CoachTour.js";
 
 /**
@@ -11,18 +12,21 @@ import type { CoachStep } from "../../components/tours/CoachTour.js";
  * anchor would measure as a zero-size box). The welcome and "start your own"
  * steps are centered narration.
  */
-export const steps: CoachStep[] = [
+export const steps = (t: TFunction<"tours">): CoachStep[] => [
   {
-    title: "Welcome to the Forums",
-    body: "Forums are for long-form writing you want to keep — boards and topics that stay put instead of scrolling away like chat.",
+    title: t("forumsBrowse.welcome.title"),
+    body: t("forumsBrowse.welcome.body"),
   },
   {
-    title: "Discover more forums",
-    body: "Tap the compass to browse other communities' forums and search any of them by name or tag.",
+    title: t("forumsBrowse.discover.title"),
+    body: t("forumsBrowse.discover.body"),
     targets: ['[data-tour="forums-chrome-discover-btn"]'],
   },
   {
-    title: "Start your own",
-    body: "Ready to gather your own community? Look for the Create your Forum button to apply, and a keeper will review it.",
+    title: t("forumsBrowse.startYourOwn.title"),
+    body: t("forumsBrowse.startYourOwn.body"),
+    // The rail's Create-your-Forum button — renders only for members who
+    // can apply, so ineligible viewers get the centered-card fallback.
+    targets: ['[data-tour="forums-create-button"]'],
   },
 ];

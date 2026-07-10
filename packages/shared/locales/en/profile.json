@@ -1,0 +1,670 @@
+{
+  "saved": "Saved.",
+  "errors": {
+    "loadFailed": "load failed",
+    "saveFailed": "save failed",
+    "saveFailedShort": "Save failed",
+    "createFailed": "create failed",
+    "deleteFailed": "delete failed",
+    "addFailed": "add failed",
+    "reorderFailed": "reorder failed",
+    "switchFailed": "switch failed",
+    "failedToSave": "Failed to save",
+    "failedToLoad": "Failed to load",
+    "failedToRemove": "Failed to remove",
+    "failedToUnlink": "Failed to unlink",
+    "failedToUpdate": "Failed to update.",
+    "passwordSaveFailed": "Couldn't save your password",
+    "enableFailed": "enable failed",
+    "disableFailed": "disable failed"
+  },
+  "fields": {
+    "characterName": "Character name"
+  },
+  "gender": {
+    "glyph": {
+      "male": "male",
+      "female": "female",
+      "nonbinary": "nonbinary",
+      "other": "other",
+      "undisclosed": "undisclosed"
+    },
+    "options": {
+      "undisclosed": "Undisclosed",
+      "male": "Male",
+      "female": "Female",
+      "nonbinary": "Non-binary",
+      "other": "Other"
+    }
+  },
+  "vibe": {
+    "combat": { "low": "Pacifist", "high": "Combat" },
+    "cunning": { "low": "Honest", "high": "Cunning" },
+    "warmth": { "low": "Cold", "high": "Warm" },
+    "order": { "low": "Chaos", "high": "Order" },
+    "caution": { "low": "Reckless", "high": "Cautious" },
+    "outlook": { "low": "Cynical", "high": "Idealistic" },
+    "social": { "low": "Reserved", "high": "Outgoing" },
+    "boldness": { "low": "Modest", "high": "Risqué" }
+  },
+  "statFields": {
+    "age": "Age",
+    "race": "Race",
+    "gender": "Gender",
+    "height": "Height",
+    "weight": "Weight",
+    "alignment": "Alignment",
+    "occupation": "Occupation"
+  },
+  "birthDate": {
+    "title": "Birth date",
+    "notSet": "Not set",
+    "hint": "Your birth date is set when you create your account and is only visible to you. If it needs to be corrected, contact staff."
+  },
+  "createCharacter": {
+    "title": "New character",
+    "namePlaceholder": "e.g. John_Smith",
+    "nameRules": "1-40 chars: letters, numbers, _ - ' or a non-breaking space (Alt+0160). Character names can't be changed, choose wisely.",
+    "spaceWarning": "A normal space isn't allowed, it breaks chat commands like <cmd>/whisper</cmd>. Use an underscore (<mono>_</mono>) or a non-breaking space (<key>Alt+0160</key>) instead.",
+    "replaceSpaces": "Replace spaces with _",
+    "creating": "Creating...",
+    "create": "Create"
+  },
+  "displayPrivacy": {
+    "legend": "Display & metric privacy",
+    "intro": "Per-surface controls for what other users see on your rows and profile. Saved as you toggle.",
+    "rankUserlist": {
+      "label": "Show my rank icon in the userlist",
+      "hint": "When off, your row shows the gender glyph instead of the rank gem. Takes effect immediately for every viewer."
+    },
+    "rankChat": {
+      "label": "Show my rank icon on chat messages",
+      "hint": "When off, future messages you send omit the rank gem on the line. Past messages keep whatever rank was shown at the time."
+    },
+    "countersIntro": "Hide individual activity counters on your public profile. Each is independent.",
+    "hideChat": "Hide my chat message count",
+    "hideTopics": "Hide my forum topic count",
+    "hideReplies": "Hide my forum reply count",
+    "rendersPrivate": "Profile renders \"private\" instead of the number."
+  },
+  "editBio": {
+    "title": "Edit Bio",
+    "sourcePlaceholder": "<p>Bio HTML…</p>",
+    "saveBio": "Save Bio"
+  },
+  "bioMode": {
+    "designer": "Designer",
+    "source": "Source",
+    "loadingDesigner": "Loading the designer…"
+  },
+  "designer": {
+    "categories": {
+      "text": "Text",
+      "cards": "Cards",
+      "layout": "Layout",
+      "media": "Media"
+    },
+    "blocks": {
+      "heading": "Heading",
+      "paragraph": "Paragraph",
+      "quote": "Quote",
+      "divider": "Divider",
+      "spacer": "Spacer",
+      "card": "Card",
+      "labeledField": "Labeled field",
+      "listCard": "List card",
+      "bioContainer": "Bio container",
+      "twoColumns": "Two columns",
+      "image": "Image",
+      "youtube": "YouTube"
+    },
+    "seed": {
+      "sectionHeading": "Section Heading",
+      "storyPlaceholder": "Write your story here…",
+      "quote": "A line worth quoting.",
+      "cardTitle": "Card title",
+      "cardBody": "Card body text.",
+      "label": "Label",
+      "value": "Value",
+      "traits": "Traits",
+      "firstTrait": "First trait",
+      "secondTrait": "Second trait",
+      "thirdTrait": "Third trait",
+      "columnOne": "Column one",
+      "columnTwo": "Column two",
+      "name": "Name",
+      "yourName": "Your name",
+      "about": "About",
+      "aboutBody": "Write a few lines about yourself or your character here.",
+      "section": "Section",
+      "firstParagraph": "First paragraph.",
+      "secondParagraph": "Second paragraph."
+    },
+    "templates": {
+      "ml": "Moonlit",
+      "pg": "Parchment",
+      "nt": "Neon terminal",
+      "rs": "Rose",
+      "cg": "Crimson",
+      "gr": "Grove",
+      "mn": "Minimal"
+    },
+    "templateBlocks": {
+      "dossier": "{{name}} dossier",
+      "label": "{{name}} label",
+      "section": "{{name}} section",
+      "list": "{{name}} list"
+    }
+  },
+  "modal": {
+    "hero": {
+      "experienceTitle": "Experience",
+      "currencyTitle": "Currency",
+      "xp": "XP"
+    },
+    "meta": {
+      "character": "Character",
+      "masterAccount": "Master account",
+      "joined": "joined {{date}}"
+    },
+    "languages": {
+      "aria": "Languages spoken"
+    },
+    "role": {
+      "admin": "Admin",
+      "globalModerator": "Global Moderator",
+      "trusted": "Trusted",
+      "trustedTitle": "Trusted account - elevated rate limits earned through participation."
+    },
+    "scriptorium": {
+      "publishedTitle_one": "{{count}} story published in the Scriptorium",
+      "publishedTitle_other": "{{count}} stories published in the Scriptorium"
+    },
+    "scriptoriumTier": {
+      "author": "Author",
+      "storyteller": "Storyteller",
+      "loremaster": "Loremaster"
+    },
+    "mod": {
+      "badge": "Mod",
+      "visibleToModsOnly": "Visible to moderators only.",
+      "ownedBy": "Owned by",
+      "openMasterProfile": "Open {{name}}'s master profile",
+      "userIdLabel": "user id",
+      "charIdLabel": "char id",
+      "editBioTitle": "Edit {{name}}'s bio"
+    },
+    "copy": {
+      "copied": "copied!",
+      "tokenPrompt": "Copy this token:",
+      "linkPrompt": "Copy this link:",
+      "idPrompt": "Copy this id:",
+      "tokenTitle": "Copy {{token}}. Paste into /whisper, /currency send, /friend, /title, etc.",
+      "valueTitle": "Copy {{value}}"
+    },
+    "actions": {
+      "switchIdentityTitle": "Change your active identity - chat name and theme update immediately.",
+      "message": "Message",
+      "messageTitle": "Open a direct message thread with this user.",
+      "whisper": "Whisper",
+      "whisperTitle": "Send a one-off private message in chat.",
+      "ignore": "Ignore",
+      "ignoreTitle": "Hide this user's messages from you (one-way, reversible).",
+      "ignoreConfirm": "Ignore {{name}}? You won't see their messages until you /unignore.",
+      "block": "Block",
+      "blockTitle": "Block: you and this user become invisible to each other everywhere.",
+      "blockConfirm": "Block {{name}}? You won't see each other anywhere - chat, userlist, whispers, DMs, friends, or search. Undo later in Profile -> Privacy.",
+      "report": "Report profile",
+      "reportTitle": "Report this profile for moderator review"
+    },
+    "sections": {
+      "bonds": "Bonds",
+      "familiar": "Familiar",
+      "worlds": "Worlds",
+      "stats": "Stats",
+      "activity": "Activity",
+      "disposition": "Disposition",
+      "attributes": "Attributes",
+      "links": "Links",
+      "collection": "Collection",
+      "pets": "Pets",
+      "library": "Library",
+      "bio": "Bio",
+      "journal": "Journal"
+    },
+    "bonds": {
+      "viewProfileTitle": "View {{name}}'s profile"
+    },
+    "familiar": {
+      "prismatic": "Prismatic",
+      "careStreak_one": "{{count}}-day care streak",
+      "careStreak_other": "{{count}}-day care streak",
+      "level": "Lv {{level}}",
+      "dormant": "dormant",
+      "pet": "pet",
+      "patTitle": "Pat this familiar, a little joy, once a day",
+      "pat": "Pat ♥",
+      "patted": "Patted ♥",
+      "pattedToday": "Patted today"
+    },
+    "statKeys": {
+      "age": "age",
+      "race": "race",
+      "gender": "gender",
+      "height": "height",
+      "weight": "weight",
+      "alignment": "alignment",
+      "occupation": "occupation"
+    },
+    "activity": {
+      "chatMessages": "Chat messages",
+      "forumTopics": "Forum topics",
+      "forumReplies": "Forum replies",
+      "hiddenByUser": "{{label}} hidden by user",
+      "private": "private"
+    },
+    "vibe": {
+      "dotAria": "{{value}} between {{low}} and {{high}}"
+    },
+    "worlds": {
+      "openTitle": "Open {{world}} (by {{owner}})",
+      "byOwner": "by {{owner}}"
+    },
+    "bio": {
+      "empty": "{{name}} hasn't written a bio yet."
+    },
+    "journal": {
+      "untitled": "untitled"
+    },
+    "library": {
+      "pinTitle": "{{title}}, by {{author}}",
+      "byAuthor": "by {{author}}"
+    },
+    "avatar": {
+      "noImageTitle": "{{name}} hasn't set a main profile image yet."
+    },
+    "gallery": {
+      "empty": "No additional portraits yet. Owners can add more via the profile editor's Gallery tab.",
+      "portraitFallback": "Portrait",
+      "portraitAlt": "{{name}} portrait",
+      "censoredTitleNsfw": "{{label}} (NSFW, click to reveal)",
+      "censoredTitleHidden": "{{label}} (hidden, click to reveal)",
+      "nsfw": "NSFW",
+      "hidden": "Hidden",
+      "clickToReveal": "click to reveal",
+      "censorForYou": "Censor this image for you",
+      "censorForYouTitle": "Censor this image for you (stays hidden when you view this profile again)",
+      "markNsfw": "Mark NSFW",
+      "markNsfwTitle": "Mark this image NSFW (blurs it for viewers)",
+      "unmarkNsfw": "Unmark NSFW",
+      "unmarkNsfwTitle": "Clear the NSFW flag on this image"
+    },
+    "lightbox": {
+      "fullSizeAria": "{{name}}, full size",
+      "closeTitle": "Close (Esc)",
+      "closeAria": "Close full-size view"
+    },
+    "nsfwGate": {
+      "heading": "NSFW Profile",
+      "bodyCharacter": "{{name}}'s character profile contains content marked <b>NSFW</b>. Do you want to proceed? Closing this modal and re-opening will prompt again.",
+      "bodyMaster": "{{name}}'s profile contains content marked <b>NSFW</b>. Do you want to proceed? Closing this modal and re-opening will prompt again.",
+      "goBack": "Go back",
+      "proceed": "Proceed"
+    },
+    "ageRestricted": {
+      "body": "This profile is marked 18+ and can't be viewed from your account."
+    },
+    "report": {
+      "heading": "Report {{name}}",
+      "thanks": "Thank you. This profile has been sent to the moderators for review.",
+      "hint": "Flag this profile for moderator review (e.g. explicit imagery or rule-breaking content). Tell us what's wrong, optional but helpful.",
+      "placeholder": "What's wrong with this profile?",
+      "reporting": "Reporting…",
+      "submit": "Submit report",
+      "failed": "Report failed."
+    },
+    "hiddenFromOthers": {
+      "label": "Hidden from others",
+      "title": "You can see this because it's your profile. It's hidden from everyone else."
+    },
+    "empty": {
+      "character": "{{name}} hasn't filled out their character profile yet.",
+      "master": "{{name}} hasn't filled out their master profile yet.",
+      "characterHint": "They could add stats, a bio, and a main profile image to bring this character to life."
+    }
+  },
+  "editor": {
+    "loadingLower": "loading...",
+    "enable": "Enable",
+    "disable": "Disable",
+    "header": {
+      "title": "Edit profile",
+      "masterOoc": "Master OOC",
+      "masterOocWithName": "Master OOC - {{name}}",
+      "adminEditTitle": "Editing as admin: {{name}} (owned by {{owner}})",
+      "adminEditPrefix": "admin edit:",
+      "ownedBy": "(owned by {{owner}})",
+      "loadingWord": "loading",
+      "newCharacter": "+ New",
+      "newCharacterTitle": "Create a new character under your account",
+      "switch": "Switch",
+      "switching": "Switching...",
+      "switchTitle": "Switch to this character - your chat name and theme update immediately.",
+      "deleting": "Deleting...",
+      "deleteTitle": "Delete this character. Past message history keeps the snapshotted name.",
+      "deleteConfirm": "Delete \"{{name}}\"? Past chat history keeps the name; the character can't be restored.",
+      "thisCharacterFallback": "this character"
+    },
+    "tabs": {
+      "description": "Description",
+      "profile": "Profile",
+      "appearance": "Appearance",
+      "privacy": "Privacy",
+      "links": "Links",
+      "gallery": "Gallery",
+      "flair": "Flair",
+      "journal": "Journal",
+      "sectionAria": "Profile editor section"
+    },
+    "description": {
+      "characterBio": "Character bio",
+      "oocBio": "OOC bio",
+      "showTour": "Show the Designer tour",
+      "htmlHint": "Full HTML and CSS supported. See Help → Formatting for tags, theme colors, and the <youtube> shortcut.",
+      "characterPlaceholder": "<p>A weather-beaten mercenary from the Reach...</p>",
+      "oocPlaceholder": "<p>Time-zone, contact preferences, RP boundaries, anything OOC.</p>"
+    },
+    "profileTab": {
+      "masterUsername": "Master username",
+      "renameBlockedHint": "Renaming is blocked - message history snapshots the name at send time.",
+      "setAtRegistration": "Set at registration.",
+      "genderOoc": "Gender (OOC)",
+      "genderHint": "Renders as an icon next to your username when no character is active.",
+      "languages": "Languages",
+      "languagesAdd": "Add a language…",
+      "languagesRemove": "Remove {{language}}",
+      "languagesMax": "You can add up to {{max}} languages.",
+      "languagesHint": "The languages you know and roleplay in. They show as flag tags at the top of your profile and your characters' profiles.",
+      "mainImageLabel": "Main Profile Image URL",
+      "imageUrlPlaceholder": "https://example.com/portrait.png",
+      "mainImageHint": "Drives the userlist icon and the modal hero.",
+      "includeInGallery": "Include in Gallery",
+      "includeInGalleryHint": "Show this image as the first tile in your profile gallery alongside any other portraits you've added. Requires a Main Profile Image URL above."
+    },
+    "statsSection": {
+      "hint": "Click the eye next to a field to hide it on your public profile. The value stays saved either way."
+    },
+    "crop": {
+      "title": "Avatar position",
+      "dragToPan": "Drag to pan",
+      "loadError": "Couldn't load that image, check the URL above.",
+      "needUrl": "Paste a Main Profile Image URL above to crop.",
+      "zoom": "Zoom",
+      "zoomValue": "{{value}}x",
+      "reset": "Reset crop",
+      "resetTitle": "Restore centered, no-zoom default"
+    },
+    "visibilityToggle": {
+      "showTitle": "Show \"{{label}}\" on your profile",
+      "hideTitle": "Hide \"{{label}}\" from your profile (value stays saved)",
+      "showAria": "Show {{label}}",
+      "hideAria": "Hide {{label}}"
+    },
+    "vibe": {
+      "hint": "Where does your character sit on each of these traits? Drag a slider to set the axis; unset axes don't show on your profile.",
+      "notSet": "Not set",
+      "rangeAria": "{{low}} to {{high}}",
+      "clearAxis": "Clear axis",
+      "setAxis": "Set this axis"
+    },
+    "attributes": {
+      "hint": "Numeric stat block, D&D ability scores (\"STR 14\"), HP, or any custom attributes you want next to your profile. Each row sets its own min / max so different stat systems can live side by side.",
+      "empty": "No attributes yet. Add one to start a stat block.",
+      "label": "Label",
+      "labelPlaceholder": "e.g. STR",
+      "min": "Min",
+      "value": "Value",
+      "max": "Max",
+      "moveUpTitle": "Move this attribute up",
+      "moveUpAria": "Move {{label}} up",
+      "moveDownTitle": "Move this attribute down",
+      "moveDownAria": "Move {{label}} down",
+      "removeTitle": "Remove this attribute",
+      "removeAria": "Remove {{label}}",
+      "rowFallback": "row",
+      "add": "+ Add attribute",
+      "addMax": "(max {{max}})"
+    },
+    "chatColor": {
+      "legend": "Chat color",
+      "masterHint": "Drives your OOC messages and acts as the fallback for any character without its own color.",
+      "characterHint": "Locks this character's messages to this color, regardless of the tab's /color state. Leave on \"inherit\" to use your OOC color.",
+      "defaultPlaceholder": "(default)",
+      "inheritPlaceholder": "(inherit OOC)",
+      "useDefault": "Use default",
+      "useDefaultTitle": "Revert to the system default color",
+      "inheritOoc": "Inherit OOC",
+      "inheritTitle": "Inherit the master / OOC color",
+      "sample": "The quick brown fox jumps."
+    },
+    "appearance": {
+      "characterTheme": "Character theme",
+      "oocTheme": "OOC theme",
+      "characterThemeHint": "Switching to this character applies this theme to your chat. Others viewing this character's profile see it themed this way.",
+      "oocThemeHint": "Applied to your chat when no character is active, and to your master profile modal.",
+      "usingDefault": "Currently using the system default - change a color or pick a preset to start customizing.",
+      "themeStyle": "Theme style",
+      "themeStyleCharacterHint": "Visual treatment, ornaments, borders, textures, applied when this character is active. Leave on \"use default\" to inherit your master account, then the theme's pinned design, then the site default.",
+      "themeStyleOocHint": "Visual treatment, ornaments, borders, textures. Orthogonal to the palette above; the same style works with any colors. Leave on \"use default\" to follow the theme's pinned design (admin-configured per palette) and finally the site default."
+    },
+    "bg": {
+      "legend": "Public profile background",
+      "characterHint": "Image painted behind this character's profile modal for any viewer. Leave the URL empty to use the default backdrop. Per-character, each character can carry its own scene.",
+      "oocHint": "Image painted behind your master / OOC profile modal for any viewer. Leave the URL empty to use the default backdrop.",
+      "imageUrl": "Image URL",
+      "urlPlaceholder": "https://… (leave blank for default)",
+      "displayMode": "Display mode",
+      "modeCover": "Cover, fill viewport, crop to fit",
+      "modeContain": "Contain, fit inside viewport, letterbox",
+      "modeTile": "Tile, repeat across viewport",
+      "modeStretch": "Stretch, fill exact dimensions"
+    },
+    "banner": {
+      "legend": "Profile banner",
+      "hint": "Wide images look best. Anything taller than about 220 pixels gets trimmed down to fit.",
+      "imageLink": "Image link",
+      "urlPlaceholder": "https://… (leave blank to clear)",
+      "save": "Save banner"
+    },
+    "fonts": {
+      "legend": "Reading & accessibility",
+      "hint": "Pick a font and a size to override the defaults if the regular interface is hard to read. The Google web fonts load automatically; the rest are system fonts every OS ships with. Leave on \"Default\" to follow the site's built-in font.",
+      "family": "Font family",
+      "defaultSiteFont": "Default (site font)",
+      "groupSans": "Sans-serif (Google)",
+      "groupSerif": "Serif (Google)",
+      "groupAccessibility": "Accessibility",
+      "groupSystem": "System fonts",
+      "comicSans": "Comic Sans (dyslexia-friendly)",
+      "systemSans": "System sans-serif",
+      "size": "Font size",
+      "sizeDefault": "Default (medium)",
+      "sizeSmall": "Small (14px desktop / 12px mobile)",
+      "sizeMedium": "Medium (16px desktop / 14px mobile)",
+      "sizeLarge": "Large (18px desktop / 16px mobile)",
+      "sizeXl": "Extra large (20px desktop / 18px mobile)"
+    },
+    "language": {
+      "legend": "Language",
+      "hint": "Applies right away and follows your account on every device - no save needed. \"System default\" follows your device's language. What other members wrote stays in the language they wrote it in.",
+      "interfaceLanguage": "Interface language"
+    },
+    "visibilityRow": {
+      "legend": "Visibility",
+      "public": "Public",
+      "publicHintMaster": "Anyone (including logged-out visitors) can view your master profile via <code>{{path}}</code>. Uncheck to require login.",
+      "publicHintCharacter": "Anyone (including logged-out visitors) can view this character's profile via <code>{{path}}</code>. Uncheck to require login.",
+      "minorNsfwNote": "A moderator marked this profile 18+, so it can't be public. Contact staff if you think this is a mistake.",
+      "nsfwLabel": "NSFW (whole profile)",
+      "nsfwHint": "Forces non-public to anonymous viewers, and shows a warning splash with a \"View Profile\" button to logged-in viewers before the content renders. Use when the profile itself is explicit (independent of marking individual gallery images NSFW)."
+    },
+    "dm": {
+      "legend": "Direct Messenger",
+      "label": "Reachable as this character",
+      "hint": "When on, other players can friend-request this character by name and start a DM thread with this identity. When off, this character is hidden from friend lookup and DM recipient pickers; existing friends and conversation history stay untouched, but new messages can't reach this character until you re-enable it."
+    },
+    "notifications": {
+      "legend": "Desktop notifications",
+      "hint": "Toasts appear when this tab is hidden - minimized, on another tab, or in another app.",
+      "notifyMe": "Notify me",
+      "off": "Off - never",
+      "mentions": "Whispers & announcements only",
+      "all": "All messages in rooms I'm in",
+      "permissionLabel": "Browser permission:",
+      "unsupported": "unsupported",
+      "denied": "Denied - re-enable in your browser's site permissions."
+    },
+    "push": {
+      "unsupported": "Browser push isn't available in this browser.",
+      "title": "Browser push (offline)",
+      "hint": "Pings even when this tab is closed. Privacy: payloads carry no message body, just \"whisper waiting\" / \"mention waiting\".",
+      "denied": "Permission denied"
+    },
+    "sounds": {
+      "legend": "Sound effects",
+      "hint": "Per-event audio cues. Saved with the rest of your profile.",
+      "dm": "Direct messages (ping)",
+      "dmHint": "Plays when someone DMs you, anywhere in the app.",
+      "whisper": "Whispers (whisper)",
+      "whisperHint": "Plays when someone whispers to you in chat. Distinct from DMs so an in-room whisper sounds different from a cross-room ping.",
+      "chat": "Chat messages (tap)",
+      "chatHint": "Plays on incoming room messages and /me actions.",
+      "alert": "Announcements (alert)",
+      "alertHint": "Plays on admin announcements and other system events."
+    },
+    "input": {
+      "legend": "Input behavior",
+      "hint": "Quiet down composer features you don't want to see while typing.",
+      "history": "Disable command and message history",
+      "historyHint": "Turns off the ArrowUp / ArrowDown recall of recently sent messages and commands in the chat composer.",
+      "thesaurus": "Disable synonym popup on highlighted words",
+      "thesaurusHint": "Stops the thesaurus list from appearing when you select a word inside the composer."
+    },
+    "flair": {
+      "legend": "Visual flair",
+      "hint": "Turn off other people's animated cosmetics for a smoother, lighter experience on older devices. This only changes what you see; everyone else still shows their flair.",
+      "nameStyles": "Disable name styles",
+      "nameStylesHint": "Show everyone's name as plain text instead of their gradient, glow, or animated styles.",
+      "borders": "Disable avatar borders",
+      "bordersHint": "Drop the decorative frames around avatars. The avatar still shows, just without the border.",
+      "inlineAvatars": "Disable inline avatars",
+      "inlineAvatarsHint": "Show the gender or rank icon next to names in chat and the userlist instead of avatar thumbnails."
+    },
+    "earning": {
+      "legend": "Earning",
+      "unranked": "Unranked",
+      "hint": "Rank, tier, and sigil are always visible on your profile. XP and Currency totals can be hidden independently.",
+      "hideCurrency": "Hide my Currency total from other users",
+      "hideCurrencyHint": "Other users see \"private\" instead of your balance in /currency lookups and on your public profile.",
+      "hideXp": "Hide my XP total from other users",
+      "hideXpHint": "Other users see \"private\" instead of your XP on your profile and in /exp lookups."
+    },
+    "nsfwPref": {
+      "legend": "18+ content",
+      "label": "Hide 18+ content",
+      "hint": "Hides 18+ forum topics and search results, and keeps 18+ worlds, forums, and communities out of the catalogs. You can change this any time."
+    },
+    "isolation": {
+      "legend": "Under 18",
+      "label": "Only see members under 18 and staff",
+      "hint": "Hides adult members from you, and hides you from them. This covers chat, profiles, direct messages, friends, forums, and search. Staff can always see you and help you. Rooms may look much quieter with this on. It turns off by itself when you turn 18."
+    },
+    "blocked": {
+      "legend": "Blocked users",
+      "hint": "Blocking is mutual and global: you and a blocked user (and all of both your characters) can't see each other anywhere - chat, the userlist, whispers, DMs, friends, or search. Remove a block here to restore visibility.",
+      "empty": "You haven't blocked anyone.",
+      "remove": "Remove"
+    },
+    "password": {
+      "legend": "Password",
+      "setLegend": "Set a password",
+      "oauthOnly": "You sign in with Google and don't have a password yet. Set one now so you can still get in if you ever lose access to your Google account — right now it's your only way in.",
+      "changeHint": "Change the password you sign in with. You'll stay signed in here; anywhere else will need the new password.",
+      "saved": "Password saved.",
+      "currentPlaceholder": "Current password",
+      "newPlaceholder": "New password (at least 8 characters)",
+      "confirmPlaceholder": "Confirm new password",
+      "set": "Set password",
+      "change": "Change password",
+      "tooShort": "Your new password must be at least 8 characters.",
+      "mismatch": "The new passwords don't match.",
+      "needCurrent": "Enter your current password."
+    },
+    "connected": {
+      "legend": "Connected accounts",
+      "hint": "Link Google to sign in with one tap. Linking doesn't change your account's email or password, it's just another way in.",
+      "linkedFallback": "linked",
+      "notLinked": "not linked",
+      "unlink": "Unlink",
+      "link": "Link Google account"
+    },
+    "links": {
+      "legend": "Profile links",
+      "hint": "Up to {{max}} external links rendered as styled chips on this profile. Useful for cross-site character profiles, world docs, refs. They open in a new tab.",
+      "empty": "No links yet.",
+      "removeConfirm": "Remove this link?",
+      "removeLink": "Remove link",
+      "titlePlaceholder": "Title (e.g. 'F-List profile')",
+      "urlPlaceholder": "https://example.com/your-profile",
+      "customizeColors": "Customize chip colors",
+      "border": "Border",
+      "background": "Background",
+      "text": "Text",
+      "previewLabel": "Preview:",
+      "sampleLink": "Sample link",
+      "adding": "Adding...",
+      "add": "Add",
+      "addLink": "+ Add link",
+      "limitTitle": "Limit of {{max}} links per profile."
+    },
+    "gallery": {
+      "hint": "Portraits shown on this profile below the pinned Collection and Bio. The Main Profile Image above drives the userlist icon and the modal hero; tick \"Include in Gallery\" on the Profile tab to also surface the avatar as the first tile here without duplicating its URL. Mark a card NSFW to blur it for viewers; drag the ⠿ handle or use the ↑ ↓ buttons to reorder. Up to {{max}} portraits.",
+      "full": "Gallery is full ({{max}} portraits). Remove one to add another.",
+      "removeConfirm": "Remove this portrait from the gallery?",
+      "portraitAltFallback": "portrait",
+      "wontLoad": "won't load",
+      "previewPlaceholder": "preview",
+      "dragToReorder": "Drag to reorder",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "removePortrait": "Remove portrait",
+      "labelPlaceholder": "Label (optional, e.g. 'transformed')",
+      "nsfwLabel": "NSFW (viewers see this blurred until they reveal)",
+      "imgError": "This image won't load, either the URL is broken, the host blocks hotlinking, or it requires a referrer the browser strips. Try a direct CDN link.",
+      "draftUrlPlaceholder": "Paste an image URL to add a portrait…",
+      "draftLabelPlaceholder": "Label (optional)",
+      "draftImgError": "Preview won't load. The portrait will still save, but viewers may not see it either, try a direct CDN link."
+    },
+    "journal": {
+      "hint": "Solo writing attached to this character. Backstory, in-world diary, world notes. Public entries surface on the profile chronologically. Private entries are only visible to you.",
+      "deleteConfirm": "Delete this journal entry?",
+      "loadingEntries": "Loading entries...",
+      "noEntries": "No entries yet.",
+      "privacyChip": {
+        "public": "public",
+        "private": "private"
+      },
+      "edit": "Edit",
+      "addEntry": "+ Add entry",
+      "titlePlaceholder": "Title (optional)",
+      "bodyPlaceholder": "<p>Write your entry here. The same HTML allow-list as your bio applies (b, i, em, p, ul/ol/li, blockquote, h3-h6, etc.).</p>",
+      "visibilityLabel": "Visibility:",
+      "publicOption": "Public (on profile)",
+      "privateOption": "Private (only you)"
+    },
+    "footer": {
+      "viewProfile": "View profile",
+      "viewProfileTitle": "Preview this profile as other users will see it (uses your unsaved edits)."
+    }
+  }
+}

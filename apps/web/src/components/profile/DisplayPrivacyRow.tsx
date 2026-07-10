@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 /**
  * Display + per-metric privacy toggles. Five self-saving checkboxes
@@ -31,6 +32,7 @@ import { useEffect, useState } from "react";
  * propagates to both surfaces and they can't drift apart.
  */
 export function DisplayPrivacyRow() {
+  const { t } = useTranslation("profile");
   const [loaded, setLoaded] = useState(false);
   const [showRankInUserlist, setShowRankInUserlist] = useState(true);
   const [showRankInChat, setShowRankInChat] = useState(true);
@@ -51,7 +53,7 @@ export function DisplayPrivacyRow() {
     void (async () => {
       try {
         const r = await fetch("/me/profile", { credentials: "include" });
-        if (!r.ok) throw new Error("load failed");
+        if (!r.ok) throw new Error(t("errors.loadFailed"));
         const j = await r.json() as {
           showRankInUserlist?: boolean;
           showRankInChat?: boolean;
@@ -67,10 +69,11 @@ export function DisplayPrivacyRow() {
         setHideReplies(j.hideForumReplyCount ?? false);
         setLoaded(true);
       } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : "load failed");
+        if (!cancelled) setErr(e instanceof Error ? e.message : t("errors.loadFailed"));
       }
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot fetch on mount; `t` only shapes error copy
   }, []);
 
   // One save helper for all five toggles. Takes the field name + new
@@ -100,7 +103,7 @@ export function DisplayPrivacyRow() {
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to save");
+      setErr(e instanceof Error ? e.message : t("errors.failedToSave"));
       setter(prev);
     } finally {
       setSavingKey(null);
@@ -134,51 +137,51 @@ export function DisplayPrivacyRow() {
 
   return (
     <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Display &amp; metric privacy</legend>
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("displayPrivacy.legend")}</legend>
       <p className="mb-2 text-[10px] text-keep-muted">
-        Per-surface controls for what other users see on your rows and profile. Saved as you toggle.
+        {t("displayPrivacy.intro")}
       </p>
       {row(
         "rank-userlist",
         "showRankInUserlist",
-        "Show my rank icon in the userlist",
-        "When off, your row shows the gender glyph instead of the rank gem. Takes effect immediately for every viewer.",
+        t("displayPrivacy.rankUserlist.label"),
+        t("displayPrivacy.rankUserlist.hint"),
         showRankInUserlist,
         setShowRankInUserlist,
       )}
       {row(
         "rank-chat",
         "showRankInChat",
-        "Show my rank icon on chat messages",
-        "When off, future messages you send omit the rank gem on the line. Past messages keep whatever rank was shown at the time.",
+        t("displayPrivacy.rankChat.label"),
+        t("displayPrivacy.rankChat.hint"),
         showRankInChat,
         setShowRankInChat,
       )}
       <div className="mt-3 border-t border-keep-rule/40 pt-2">
         <p className="mb-2 text-[10px] text-keep-muted">
-          Hide individual activity counters on your public profile. Each is independent.
+          {t("displayPrivacy.countersIntro")}
         </p>
         {row(
           "hide-chat",
           "hideChatMessageCount",
-          "Hide my chat message count",
-          "Profile renders \"private\" instead of the number.",
+          t("displayPrivacy.hideChat"),
+          t("displayPrivacy.rendersPrivate"),
           hideChat,
           setHideChat,
         )}
         {row(
           "hide-topics",
           "hideForumTopicCount",
-          "Hide my forum topic count",
-          "Profile renders \"private\" instead of the number.",
+          t("displayPrivacy.hideTopics"),
+          t("displayPrivacy.rendersPrivate"),
           hideTopics,
           setHideTopics,
         )}
         {row(
           "hide-replies",
           "hideForumReplyCount",
-          "Hide my forum reply count",
-          "Profile renders \"private\" instead of the number.",
+          t("displayPrivacy.hideReplies"),
+          t("displayPrivacy.rendersPrivate"),
           hideReplies,
           setHideReplies,
         )}
@@ -187,7 +190,7 @@ export function DisplayPrivacyRow() {
         <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-[10px] text-keep-accent">{err}</div>
       ) : null}
       {savedFlash ? (
-        <div className="mt-1 text-[10px] text-keep-system">Saved.</div>
+        <div className="mt-1 text-[10px] text-keep-system">{t("saved")}</div>
       ) : null}
     </fieldset>
   );

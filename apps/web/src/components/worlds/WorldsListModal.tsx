@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorldMembership, WorldSummary, WorldVisibility } from "@thekeep/shared";
 import { deriveSlug } from "../../lib/worlds.js";
+import { formatDate } from "../../lib/intlFormat.js";
 import { readError } from "../../lib/http.js";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal.js";
 import { CloseButton } from "../shared/CloseButton.js";
@@ -19,6 +21,7 @@ interface Props {
  * affiliation, used to group them in chat userlists.
  */
 export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCatalog }: Props) {
+  const { t } = useTranslation("worlds");
   const [worlds, setWorlds] = useState<WorldSummary[] | null>(null);
   const [memberships, setMemberships] = useState<WorldMembership[] | null>(null);
   const [creating, setCreating] = useState(false);
@@ -38,7 +41,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
       setWorlds(wJ.worlds);
       setMemberships(mJ.memberships);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     }
   }
   useEffect(() => { load(); }, []);
@@ -48,7 +51,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
   // a "headline affiliation" meaningful.
 
   async function leave(worldId: string, name: string) {
-    if (!window.confirm(`Leave "${name}"? You can re-join from the world catalog any time.`)) return;
+    if (!window.confirm(t("myWorlds.confirmLeave", { name }))) return;
     setError(null);
     try {
       const r = await fetch(`/worlds/${worldId}/members`, {
@@ -58,7 +61,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "leave failed");
+      setError(e instanceof Error ? e.message : t("errors.leaveFailed"));
     }
   }
 
@@ -69,15 +72,13 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
   const joinedOnly = (memberships ?? []).filter((m) => !ownedIds.has(m.worldId));
 
   async function remove(w: WorldSummary) {
-    if (!window.confirm(
-      `Delete "${w.name}"? This cascades to all ${w.pageCount} pages and removes any room links. Cannot be undone.`,
-    )) return;
+    if (!window.confirm(t("confirmDeleteWorld", { name: w.name, pages: w.pageCount }))) return;
     try {
       const r = await fetch(`/worlds/${w.id}`, { method: "DELETE", credentials: "include" });
       if (!r.ok) throw new Error(await readError(r));
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "delete failed");
+      setError(e instanceof Error ? e.message : t("errors.deleteFailed"));
     }
   }
 
@@ -88,22 +89,22 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center justify-between border-b border-keep-rule bg-keep-banner px-4 py-2">
-          <h2 className="font-action text-lg">Your worlds</h2>
+          <h2 className="font-action text-lg">{t("myWorlds.title")}</h2>
           <div className="flex gap-2">
             <button
               type="button"
               onClick={onOpenCatalog}
               className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
-              title="Browse open worlds you can use in your rooms"
+              title={t("myWorlds.browseCatalogTitle")}
             >
-              Browse catalog
+              {t("myWorlds.browseCatalog")}
             </button>
             <button
               type="button"
               onClick={() => setCreating(true)}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-sm hover:bg-keep-banner"
             >
-              + New world
+              {t("myWorlds.newWorld")}
             </button>
             <CloseButton onClick={onClose} />
           </div>
@@ -122,9 +123,9 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
             />
           ) : null}
           {worlds === null ? (
-            <p className="italic text-keep-muted">Loading...</p>
+            <p className="italic text-keep-muted">{t("common:loadingDots")}</p>
           ) : worlds.length === 0 ? (
-            <p className="italic text-keep-muted">No worlds yet. Click "+ New world" to start one.</p>
+            <p className="italic text-keep-muted">{t("myWorlds.noWorlds")}</p>
           ) : (
             <ul className="space-y-2">
               {worlds.map((w) => (
@@ -142,11 +143,19 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
                               : "bg-keep-rule/30 text-keep-muted"
                         }`}
                       >
-                        {w.visibility}
+                        {t(`visibilityValue.${w.visibility}`)}
                       </span>
+                      {w.isNsfw ? (
+                        <span
+                          className="ml-1 rounded bg-keep-accent/20 px-1 text-[10px] font-semibold uppercase tracking-widest text-keep-accent"
+                          title={t("nsfwChipTitle")}
+                        >
+                          {t("common:rating.nsfw")}
+                        </span>
+                      ) : null}
                     </div>
                     <div className="shrink-0 text-[10px] text-keep-muted">
-                      {w.pageCount} {w.pageCount === 1 ? "page" : "pages"}
+                      {t("pageCount", { count: w.pageCount })}
                     </div>
                   </header>
                   {w.description ? (
@@ -158,21 +167,21 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
                       onClick={() => onOpenViewer(w.id)}
                       className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
                     >
-                      View
+                      {t("actions.view")}
                     </button>
                     <button
                       type="button"
                       onClick={() => onOpenEditor(w.id)}
                       className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80"
                     >
-                      Edit
+                      {t("actions.edit")}
                     </button>
                     <button
                       type="button"
                       onClick={() => remove(w)}
                       className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
                     >
-                      Delete
+                      {t("common:delete")}
                     </button>
                   </div>
                 </li>
@@ -185,7 +194,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
           {joinedOnly.length > 0 ? (
             <>
               <h3 className="mb-2 mt-5 font-action text-sm uppercase tracking-widest text-keep-muted">
-                Worlds I've joined
+                {t("myWorlds.joinedHeading")}
               </h3>
               <ul className="space-y-2">
                 {joinedOnly.map((m) => (
@@ -197,7 +206,7 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
                       <div className="min-w-0">
                         <span className="font-semibold">{m.worldName}</span>
                         <span className="ml-2 text-[11px] text-keep-muted">/{m.worldSlug}</span>
-                        <span className="ml-2 text-[11px] text-keep-muted">by {m.ownerUsername}</span>
+                        <span className="ml-2 text-[11px] text-keep-muted">{t("byOwner", { name: m.ownerUsername })}</span>
                         {/* Identity badge, characters and OOC each
                             join independently per migration 0187, so
                             the same world can appear twice (or more)
@@ -206,14 +215,14 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
                         <span
                           className="ml-2 rounded border border-keep-rule bg-keep-banner/60 px-1 text-[10px] uppercase tracking-widest text-keep-muted"
                           title={m.characterId !== null
-                            ? `Joined as your character ${m.identityDisplayName}`
-                            : "Joined as OOC (your master account)"}
+                            ? t("myWorlds.joinedAsCharacterTitle", { name: m.identityDisplayName })
+                            : t("myWorlds.joinedAsOocTitle")}
                         >
-                          as {m.characterId !== null ? m.identityDisplayName : "OOC"}
+                          {t("myWorlds.asIdentity", { name: m.characterId !== null ? m.identityDisplayName : t("common:identity.ooc") })}
                         </span>
                       </div>
                       <div className="shrink-0 text-[10px] text-keep-muted">
-                        joined {new Date(m.joinedAt).toLocaleDateString()}
+                        {t("myWorlds.joinedDate", { date: formatDate(m.joinedAt) })}
                       </div>
                     </header>
                     <div className="mt-2 flex justify-end gap-2 text-xs">
@@ -222,14 +231,14 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
                         onClick={() => onOpenViewer(m.worldId)}
                         className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
                       >
-                        View
+                        {t("actions.view")}
                       </button>
                       <button
                         type="button"
                         onClick={() => leave(m.worldId, m.worldName)}
                         className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
                       >
-                        Leave
+                        {t("actions.leave")}
                       </button>
                     </div>
                   </li>
@@ -250,6 +259,7 @@ function NewWorldForm({
   onCancel: () => void;
   onCreated: (w: WorldSummary) => void;
 }) {
+  const { t } = useTranslation("worlds");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
@@ -279,7 +289,7 @@ function NewWorldForm({
       const w = (await r.json()) as WorldSummary;
       onCreated(w);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "create failed");
+      setErr(e instanceof Error ? e.message : t("errors.createFailed"));
     } finally {
       setBusy(false);
     }
@@ -289,9 +299,9 @@ function NewWorldForm({
 
   return (
     <form onSubmit={submit} className="mb-3 rounded border border-keep-action/40 bg-keep-bg p-3 text-xs">
-      <h3 className="mb-2 font-action text-sm">New world</h3>
+      <h3 className="mb-2 font-action text-sm">{t("newWorld.heading")}</h3>
       <label className="mb-1 block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Name</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.name")}</span>
         <input
           // eslint-disable-next-line jsx-a11y/no-autofocus
           autoFocus
@@ -303,20 +313,20 @@ function NewWorldForm({
         />
       </label>
       <label className="mb-1 block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Slug (optional)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("newWorld.slugOptional")}</span>
         <input
           type="text"
           value={slug}
           onChange={(e) => setSlug(e.target.value)}
-          placeholder={previewSlug || "e.g. darkrealm"}
+          placeholder={previewSlug || t("newWorld.slugPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono outline-none focus:border-keep-action"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          Used in URLs and the /world link slash command. Auto-derived from the name if blank.
+          {t("newWorld.slugHint")}
         </span>
       </label>
       <label className="mb-1 block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Description (optional)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("newWorld.descriptionOptional")}</span>
         <textarea
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -326,15 +336,15 @@ function NewWorldForm({
         />
       </label>
       <label className="mb-2 block">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Visibility</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("fields.visibility")}</span>
         <select
           value={visibility}
           onChange={(e) => setVisibility(e.target.value as WorldVisibility)}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
         >
-          <option value="private">Private (only you)</option>
-          <option value="public">Public (anyone with the link)</option>
-          <option value="open">Open (catalog-listed, others can link to their rooms)</option>
+          <option value="private">{t("visibilityOption.private")}</option>
+          <option value="public">{t("visibilityOption.public")}</option>
+          <option value="open">{t("visibilityOption.open")}</option>
         </select>
       </label>
       {err ? <div className="mb-1 text-[10px] text-keep-accent">{err}</div> : null}
@@ -344,14 +354,14 @@ function NewWorldForm({
           onClick={onCancel}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           disabled={busy || !name.trim()}
           className="keep-button rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80 disabled:opacity-50"
         >
-          {busy ? "Creating..." : "Create"}
+          {busy ? t("creating") : t("actions.create")}
         </button>
       </div>
     </form>

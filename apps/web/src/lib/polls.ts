@@ -3,6 +3,7 @@
  * Both resolve on the server ack; the live tally arrives separately via the
  * `poll:update` event (handled in App.tsx → store.applyPollUpdate).
  */
+import { i18n } from "./i18n.js";
 import { getSocket } from "./socket.js";
 
 function emitWithAck(
@@ -11,13 +12,13 @@ function emitWithAck(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const socket = getSocket();
-    if (!socket) { reject(new Error("Not connected.")); return; }
+    if (!socket) { reject(new Error(i18n.t("errors:notConnected"))); return; }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (socket.emit as any)(event, payload, (res: { ok: true } | { ok: false; message?: string } | undefined) => {
       if (res && "ok" in res && res.ok) resolve();
-      else reject(new Error(res && "message" in res && res.message ? res.message : "That didn't go through."));
+      else reject(new Error(res && "message" in res && res.message ? res.message : i18n.t("errors:polls.failed")));
     });
-    setTimeout(() => reject(new Error("The poll timed out, check your connection.")), 12_000);
+    setTimeout(() => reject(new Error(i18n.t("errors:polls.timeout"))), 12_000);
   });
 }
 

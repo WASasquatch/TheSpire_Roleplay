@@ -5,6 +5,7 @@ import { z } from "zod";
 import { characters, profileLinks } from "../db/schema.js";
 import { hasPermission } from "../auth/permissions.js";
 import type { Db } from "../db/index.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 /** Hard cap matching the editor UX ("up to 6 links per profile"). */
@@ -54,7 +55,7 @@ type Scope = ScopeMaster | ScopeCharacter;
  * the rest of the character-edit endpoints).
  */
 type ResolveResult =
-  | { ok: true; scope: Scope }
+  | { ok: true; scope: Scope; locale: string | null }
   | { ok: false; statusCode: 401 | 403 | 404; error: string };
 
 async function resolveScope(
@@ -65,14 +66,14 @@ async function resolveScope(
   const me = await getSessionUser(req, db);
   if (!me) return { ok: false, statusCode: 401, error: "auth" };
   if (characterId === null) {
-    return { ok: true, scope: { kind: "master", userId: me.id } };
+    return { ok: true, scope: { kind: "master", userId: me.id }, locale: me.locale };
   }
   const c = (await db.select().from(characters).where(eq(characters.id, characterId)).limit(1))[0];
   if (!c || c.deletedAt) return { ok: false, statusCode: 404, error: "not found" };
   if (c.userId !== me.id && !(await hasPermission(me, "edit_others_character", db))) {
     return { ok: false, statusCode: 403, error: "not yours" };
   }
-  return { ok: true, scope: { kind: "character", userId: c.userId, characterId: c.id } };
+  return { ok: true, scope: { kind: "character", userId: c.userId, characterId: c.id }, locale: me.locale };
 }
 
 /**
@@ -91,7 +92,7 @@ export async function registerLinkRoutes(app: FastifyInstance, db: Db): Promise<
   app.post<{ Body: unknown }>("/me/links", async (req, reply) => {
     const r = await resolveScope(db, req, null);
     if (!r.ok) { reply.code(r.statusCode); return { error: r.error }; }
-    return create(db, reply, r.scope, req.body);
+    return create(db, reply, r.scope, req.body, r.locale);
   });
 
   app.patch<{ Params: { linkId: string }; Body: unknown }>("/me/links/:linkId", async (req, reply) => {
@@ -116,7 +117,7 @@ export async function registerLinkRoutes(app: FastifyInstance, db: Db): Promise<
   app.post<{ Params: { id: string }; Body: unknown }>("/characters/:id/links", async (req, reply) => {
     const r = await resolveScope(db, req, req.params.id);
     if (!r.ok) { reply.code(r.statusCode); return { error: r.error }; }
-    return create(db, reply, r.scope, req.body);
+    return create(db, reply, r.scope, req.body, r.locale);
   });
 
   app.patch<{ Params: { id: string; linkId: string }; Body: unknown }>(
@@ -157,7 +158,7 @@ async function list(db: Db, scope: Scope) {
   return { links: rows };
 }
 
-async function create(db: Db, reply: { code: (n: number) => unknown }, scope: Scope, body: unknown) {
+async function create(db: Db, reply: { code: (n: number) => unknown }, scope: Scope, body: unknown, locale?: string | null) {
   let parsed;
   try { parsed = createLinkBody.parse(body); }
   catch { reply.code(400); return { error: "invalid body" }; }
@@ -169,7 +170,7 @@ async function create(db: Db, reply: { code: (n: number) => unknown }, scope: Sc
   const count = countRows[0]?.n ?? 0;
   if (count >= MAX_LINKS_PER_PROFILE) {
     reply.code(429);
-    return { error: `Limit of ${MAX_LINKS_PER_PROFILE} links per profile.` };
+    return { error: tFor(locale ?? null, "errors:server.profile.linkLimit", { max: MAX_LINKS_PER_PROFILE }) };
   }
 
   // Find the current max sortOrder so the new one slots after the rest.

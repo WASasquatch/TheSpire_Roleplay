@@ -26,7 +26,11 @@ import {
 } from "@thekeep/shared";
 import { forums, messages, rooms, users, worlds } from "../../db/schema.js";
 import type { Db } from "../../db/index.js";
+import { canSeeNsfw } from "../../auth/ageGate.js";
+import { isolationVisibleSql } from "../../auth/ageIsolation.js";
+import { maskForMinors } from "../../realtime/minorLanguageFilter.js";
 import { getSessionUser } from "../auth.js";
+import { tFor } from "../../i18n.js";
 import { serverAuthority } from "../../servers/authority.js";
 import { recordAudit } from "../../audit.js";
 import { emitTreeChanged } from "../../realtime/broadcast.js";
@@ -42,8 +46,8 @@ import {
 export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io: Io, forumsDir: string): Promise<void> {
   const requireForumOwner = (req: Parameters<typeof getSessionUser>[0], forumId: string) =>
     sharedRequireForumOwner(db, req, forumId);
-  const writeForumImage = (prefix: string, dataUrl: string, maxBytes: number) =>
-    sharedWriteForumImage(forumsDir, prefix, dataUrl, maxBytes);
+  const writeForumImage = (prefix: string, dataUrl: string, maxBytes: number, locale?: string | null) =>
+    sharedWriteForumImage(forumsDir, prefix, dataUrl, maxBytes, locale);
   const unlinkForumImage = (url: string | null | undefined) => sharedUnlinkForumImage(forumsDir, url);
 
   /* =========================================================
@@ -66,6 +70,11 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
     if (!me) { reply.code(401); return { error: "auth" }; }
     const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.roomId)).limit(1))[0];
     if (!room || !room.forumId || room.archivedAt) { reply.code(404); return { error: "no board" }; }
+    // HARD age gate (age plan, Phase 3): an 18+ board — by its room flag,
+    // its server's, or its whole FORUM's — doesn't exist for minors. 404
+    // (not 403) so its existence never leaks, mirroring the /rooms routes.
+    const { boardAgeDenied } = await import("../../forums/nsfw.js");
+    if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no board" }; }
     const { forumGateForBoard } = await import("../../forums/authority.js");
     const gate = await forumGateForBoard(db, me, room.forumId);
     if (!gate.ok) { reply.code(403); return { error: gate.message, code: gate.code }; }
@@ -75,7 +84,7 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
     // refuses its contents so the client renders the lock state.
     if (room.forumMembersOnly && !isMember) {
       reply.code(403);
-      return { error: "This board is for forum members only.", code: "FORUM_BOARD_MEMBERS_ONLY" };
+      return { error: tFor(me.locale, "errors:server.rooms.boardMembersOnly"), code: "FORUM_BOARD_MEMBERS_ONLY" };
     }
 
     const before = req.query.before ? parseInt(req.query.before, 10) : NaN;
@@ -92,10 +101,20 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
     for (const b of await blockedUserIdsFor(db, me.id)) hidden.add(b);
 
     const activityExpr = sql<number>`coalesce(${messages.lastActivityAt}, ${messages.createdAt})`;
+    // Isolation (age plan, Phase 5): topics authored by an account the
+    // viewer is isolated with drop in SQL — the hide set above can't carry
+    // them (an isolated minor's hidden side is "all adults", unbounded).
+    const isolationClause = isolationVisibleSql(me, messages.userId);
     const baseWhere = and(
       eq(messages.roomId, room.id),
       isNotNull(messages.title),
       isNull(messages.deletedAt),
+      // SOFT tier (age plan, Phase 3): NSFW-tagged topics leave the list for
+      // viewers who can't see NSFW — minors and hide-pref adults (anonymous
+      // never reaches this authed route). The thread reader gates on the
+      // HARD tier, so a hide-pref adult can still open a direct link.
+      ...(canSeeNsfw(me) ? [] : [eq(messages.isNsfw, false)]),
+      ...(isolationClause ? [isolationClause] : []),
     );
 
     // Stickies ride the FIRST page only (capped; they're furniture, not a
@@ -167,10 +186,18 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
         // the resolved per-server flair (values may individually be null
         // for an author who hasn't earned/equipped that cosmetic there).
         const flair = flairByIdentity?.get(`${m.userId}::${m.characterId ?? ""}`) ?? null;
+        // Minor language filter (§J): an under-18 viewer's topic cards mask
+        // the title and the body-derived snippet (masked on the RAW body,
+        // BEFORE the 200-char cut, so a term split at the boundary can't
+        // leak its unmasked head — masking is length-preserving). Adults
+        // keep byte-identical cards; the stored row is never touched.
+        const title = m.title ?? "";
+        const cardTitle = me.isAdult ? title : (maskForMinors(title) ?? title);
+        const cardBody = me.isAdult ? m.body : (maskForMinors(m.body) ?? m.body);
         return {
           id: m.id,
-          title: m.title ?? "",
-          snippet: m.body.replace(/\s+/g, " ").slice(0, 200),
+          title: cardTitle,
+          snippet: cardBody.replace(/\s+/g, " ").slice(0, 200),
           authorUserId: m.userId,
           authorDisplayName: m.displayName,
           authorAvatarUrl: m.avatarUrl ?? null,
@@ -180,6 +207,9 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
           prefixId: m.prefixId ?? null,
           isSticky: !!m.isSticky,
           locked: !!m.lockedAt,
+          // NSFW tag (age plan, Phase 3): rows carrying it only ever reach
+          // viewers who can see NSFW (the baseWhere filter above).
+          ...(m.isNsfw ? { isNsfw: true } : {}),
           replyCount: repliesBy.get(m.id) ?? 0,
           createdAt: +m.createdAt,
           lastActivityAt: +(m.lastActivityAt ?? m.createdAt),
@@ -217,6 +247,10 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
     applicationPrompt: z.string().trim().max(300).nullable().optional(),
     /** Anonymous read access on /f/<slug> (posting still needs login). */
     publicBrowsing: z.boolean().optional(),
+    /** Whole-forum "18+ community" flag (age plan, Phase 3). Adult owners
+     *  only; hidden from the catalog/discover for viewers who can't see
+     *  NSFW, and every board inherits the gate. */
+    isNsfw: z.boolean().optional(),
     /** Allow mods with create_tags to mint tags on the fly while tagging. */
     allowCustomTags: z.boolean().optional(),
     /** Owner-set discovery tags (genre/category). Round-tripped through
@@ -266,6 +300,15 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
     }
     if (body.postingMode !== undefined) update.postingMode = body.postingMode;
     if (body.publicBrowsing !== undefined) update.publicBrowsing = body.publicBrowsing;
+    if (body.isNsfw !== undefined && body.isNsfw !== gate.forum.isNsfw) {
+      // Adults only, with deliberately NO staff bypass: a minor account can
+      // never set or clear any 18+ flag, whatever role it holds.
+      if (!gate.me.isAdult) {
+        reply.code(403);
+        return { error: tFor(gate.me.locale, "errors:server.common.nsfwSettingAdultsOnly") };
+      }
+      update.isNsfw = body.isNsfw;
+    }
     if (body.allowCustomTags !== undefined) update.allowCustomTags = body.allowCustomTags;
     if (body.tags !== undefined) update.tagsJson = serializeTags(body.tags);
     if (body.applicationPrompt !== undefined) {
@@ -280,7 +323,7 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
         try {
           update.themeJson = JSON.stringify(normalizeTheme(JSON.parse(body.themeJson)));
         } catch {
-          reply.code(400); return { error: "themeJson must be a JSON theme object" };
+          reply.code(400); return { error: tFor(gate.me.locale, "errors:server.common.themeJsonInvalid") };
         }
       }
     }
@@ -301,10 +344,10 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
         const w = (await db.select({ id: worlds.id, ownerUserId: worlds.ownerUserId, visibility: worlds.visibility })
           .from(worlds).where(eq(worlds.id, body.linkedWorldId)).limit(1))[0];
         if (!w || w.ownerUserId !== gate.forum.ownerUserId) {
-          reply.code(404); return { error: "That world isn't one of the forum owner's." };
+          reply.code(404); return { error: tFor(gate.me.locale, "errors:server.forums.worldNotOwners") };
         }
         if (w.visibility === "private") {
-          reply.code(409); return { error: "Private worlds can't be linked - the strip would expose them." };
+          reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.privateWorldLink") };
         }
         update.linkedWorldId = w.id;
       }
@@ -326,12 +369,24 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
         if (!sa.server) { reply.code(404); return { error: "no such server" }; }
         if (!sa.isOwner) {
           reply.code(403);
-          return { error: "You can only affiliate this forum to a server you own or manage." };
+          return { error: tFor(gate.me.locale, "errors:server.forums.affiliateOwnOnly") };
         }
         update.serverId = sa.server.id;
       }
     }
     await db.update(forums).set(update).where(eq(forums.id, gate.forum.id));
+    // The 18+ flip is a moderation-relevant event (it re-scopes who can see
+    // the whole forum), so it gets an audit row like the room/server flips.
+    // Forums have no live occupancy, so there is no eviction loop to run:
+    // the catalog/board/thread gates take effect on the next read, and the
+    // notification write-skip + read-time re-filter cover watchers.
+    if (update.isNsfw !== undefined) {
+      await recordAudit(db, {
+        actorUserId: gate.me.id,
+        action: "forum_nsfw_update",
+        metadata: { forumId: gate.forum.id, slug: gate.forum.slug, forumName: gate.forum.name, isNsfw: update.isNsfw },
+      });
+    }
     return { ok: true };
   });
 
@@ -342,7 +397,12 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
     z.object({ clear: z.literal(true) }).strict(),
   ]);
 
-  for (const kind of ["logo", "banner"] as const) {
+  // "sfw-banner" (age plan, Phase 3) is the public-safe banner variant an
+  // 18+ forum shows on surfaces minors/anon/hide-pref viewers can see
+  // (discovery cards, /f share teaser, OG meta). Same pipeline + caps as
+  // the real banner; leaving it unset means those surfaces fall back to
+  // art-less name/colors rendering.
+  for (const kind of ["logo", "banner", "sfw-banner"] as const) {
     const maxBytes = kind === "logo" ? 512 * 1024 : 2 * 1024 * 1024;
     app.post<{ Params: { id: string }; Body: unknown }>(`/forums/:id/${kind}`, async (req, reply) => {
       const gate = await requireForumOwner(req, req.params.id);
@@ -350,14 +410,14 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
       let body: z.infer<typeof imageBody>;
       try { body = imageBody.parse(req.body); }
       catch { reply.code(400); return { error: "invalid body" }; }
-      const column = kind === "logo" ? "logoUrl" as const : "bannerImageUrl" as const;
+      const column = kind === "logo" ? "logoUrl" as const : kind === "banner" ? "bannerImageUrl" as const : "sfwBannerUrl" as const;
       const prev = gate.forum[column];
       if ("clear" in body) {
         await db.update(forums).set({ [column]: null, updatedAt: new Date() }).where(eq(forums.id, gate.forum.id));
         unlinkForumImage(prev);
         return { ok: true, url: null };
       }
-      const written = await writeForumImage(`${gate.forum.id}-${kind}`, body.imageDataUrl, maxBytes);
+      const written = await writeForumImage(`${gate.forum.id}-${kind}`, body.imageDataUrl, maxBytes, gate.me.locale);
       if ("error" in written) { reply.code(written.status); return { error: written.error }; }
       await db.update(forums).set({ [column]: written.url, updatedAt: new Date() }).where(eq(forums.id, gate.forum.id));
       if (prev !== written.url) unlinkForumImage(prev);
@@ -385,7 +445,7 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
         unlinkForumImage(cat.iconUrl);
         return { ok: true, url: null };
       }
-      const written = await writeForumImage(`cat-${cat.id}`, body.imageDataUrl, 128 * 1024);
+      const written = await writeForumImage(`cat-${cat.id}`, body.imageDataUrl, 128 * 1024, gate.me.locale);
       if ("error" in written) { reply.code(written.status); return { error: written.error }; }
       await db.update(roomThreadCategories).set({ iconUrl: written.url }).where(eq(roomThreadCategories.id, cat.id));
       if (cat.iconUrl !== written.url) unlinkForumImage(cat.iconUrl);
@@ -405,18 +465,18 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
     try { body = createBoardBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
     if (!FORUM_BOARD_NAME_RX.test(body.name)) {
-      reply.code(400); return { error: "Board name must be 1-40 chars: letters, numbers, spaces, _ - '" };
+      reply.code(400); return { error: tFor(gate.me.locale, "errors:server.forums.boardNameRule") };
     }
     const activeBoards = (await db.select({ n: sql<number>`count(*)` }).from(rooms)
       .where(and(eq(rooms.forumId, gate.forum.id), isNull(rooms.archivedAt))))[0]?.n ?? 0;
     if (activeBoards >= 10) {
-      reply.code(409); return { error: "This forum is at its 10-board limit. Archive a board to raise another." };
+      reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.boardLimit") };
     }
     // Room names are GLOBALLY unique (a board is a room); friendly 409
     // instead of a UNIQUE explosion.
     const clash = (await db.select({ id: rooms.id }).from(rooms)
       .where(sql`lower(${rooms.name}) = ${body.name.toLowerCase()}`).limit(1))[0];
-    if (clash) { reply.code(409); return { error: "A room already uses that name - try a more specific one (board names are site-wide)." }; }
+    if (clash) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.roomNameTakenSitewide") }; }
 
     const boardId = nanoid();
     await db.insert(rooms).values({
@@ -429,6 +489,10 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
       topic: body.topic?.trim() ? body.topic.trim() : null,
       replyMode: "nested",
       forumId: gate.forum.id,
+      // Boards never hold sockets (chat joins into boards are refused), so
+      // the empty-room archival sweeps must leave them alone; same
+      // exemption server channels use (see seedForumStarter).
+      persistent: true,
     });
     // A board belongs to its forum, which is homed to a server; the forum
     // row is in hand so its serverId is free. emitTreeChanged falls back to
@@ -465,11 +529,11 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
       const update: Partial<typeof rooms.$inferInsert> = {};
       if (body.name !== undefined && body.name !== board.name) {
         if (!FORUM_BOARD_NAME_RX.test(body.name)) {
-          reply.code(400); return { error: "Board name must be 1-40 chars: letters, numbers, spaces, _ - '" };
+          reply.code(400); return { error: tFor(gate.me.locale, "errors:server.forums.boardNameRule") };
         }
         const clash = (await db.select({ id: rooms.id }).from(rooms)
           .where(and(sql`lower(${rooms.name}) = ${body.name.toLowerCase()}`, sql`${rooms.id} != ${board.id}`)).limit(1))[0];
-        if (clash) { reply.code(409); return { error: "A room already uses that name." }; }
+        if (clash) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.forums.roomNameTaken") }; }
         update.name = body.name;
       }
       if (body.topic !== undefined) update.topic = body.topic?.trim() ? body.topic.trim() : null;

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { listStyles } from "../lib/ornaments/index.js";
 
 /**
@@ -20,6 +21,7 @@ export function StylePicker({
   /** When true, prepend a "(use site default)" option whose value is null. */
   allowInherit?: boolean;
 }) {
+  const { t } = useTranslation("common");
   const styles = listStyles();
   return (
     <select
@@ -28,7 +30,7 @@ export function StylePicker({
       className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
     >
       {allowInherit ? (
-        <option value="">(use site default)</option>
+        <option value="">{t("stylePicker.useSiteDefault")}</option>
       ) : null}
       {styles.map((s) => (
         <option key={s.key} value={s.key}>{s.label}</option>

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ArrowDownLeft, ArrowUpRight, ExternalLink } from "lucide-react";
+import { formatNumber } from "../../lib/intlFormat.js";
 import { isDarkSurface, useActiveTheme } from "../../lib/theme.js";
 import { outUrl, type PublicAffiliateCard } from "../../lib/affiliates.js";
 
@@ -31,6 +33,7 @@ export function AffiliateCard({
   card: PublicAffiliateCard;
   size?: AffiliateCardSize;
 }) {
+  const { t } = useTranslation("marketing");
   const large = size === "large";
   const viewerDark = isDarkSurface(useActiveTheme());
   const bannerScrim = viewerDark ? "bg-black/55" : "bg-black/45";
@@ -80,15 +83,15 @@ export function AffiliateCard({
 
   const views = (
     <div className={`flex shrink-0 flex-col items-end gap-0.5 ${large ? "text-sm" : "text-xs"} text-white/90`}>
-      <span className="inline-flex items-center gap-1" title="Visits sent to us">
+      <span className="inline-flex items-center gap-1" title={t("card.visitsInTitle")}>
         <ArrowDownLeft className={large ? "h-4 w-4" : "h-3.5 w-3.5"} aria-hidden="true" />
-        <span className="tabular-nums">{card.clicksIn.toLocaleString()}</span>
-        <span className="sr-only">visits sent to us</span>
+        <span className="tabular-nums">{formatNumber(card.clicksIn)}</span>
+        <span className="sr-only">{t("card.visitsInSr")}</span>
       </span>
-      <span className="inline-flex items-center gap-1" title="Visits we sent you">
+      <span className="inline-flex items-center gap-1" title={t("card.visitsOutTitle")}>
         <ArrowUpRight className={large ? "h-4 w-4" : "h-3.5 w-3.5"} aria-hidden="true" />
-        <span className="tabular-nums">{card.clicksOut.toLocaleString()}</span>
-        <span className="sr-only">visits we sent you</span>
+        <span className="tabular-nums">{formatNumber(card.clicksOut)}</span>
+        <span className="sr-only">{t("card.visitsOutSr")}</span>
       </span>
     </div>
   );
@@ -106,7 +109,7 @@ export function AffiliateCard({
         ))}
         {card.tags.length > shownTags.length ? (
           <span className={`rounded-full bg-white/10 px-2 py-0.5 ${large ? "text-xs" : "text-[11px]"} text-white/70 [text-shadow:none]`}>
-            +{card.tags.length - shownTags.length}
+            {t("card.moreTags", { count: card.tags.length - shownTags.length })}
           </span>
         ) : null}
       </div>
@@ -121,7 +124,7 @@ export function AffiliateCard({
         large ? "px-5 py-2 text-sm" : "px-4 py-1.5 text-sm"
       }`}
     >
-      Visit
+      {t("card.visit")}
       <ExternalLink className="h-4 w-4" aria-hidden="true" />
     </a>
   );
@@ -133,7 +136,7 @@ export function AffiliateCard({
         ref={descRef}
         className={`mt-1 ${expanded ? "" : large ? "line-clamp-3" : "line-clamp-2"} ${large ? "text-[15px] leading-relaxed" : "text-sm leading-snug"} ${description ? "text-white/90" : "italic text-white/60"}`}
       >
-        {description || "No Description"}
+        {description || t("card.noDescription")}
       </p>
       {description && (clamped || expanded) ? (
         <button
@@ -141,7 +144,7 @@ export function AffiliateCard({
           onClick={() => setExpanded((v) => !v)}
           className="mt-0.5 text-xs font-semibold text-white/85 underline underline-offset-2 [text-shadow:none] hover:text-white"
         >
-          {expanded ? "See less" : "See more"}
+          {expanded ? t("card.seeLess") : t("card.seeMore")}
         </button>
       ) : null}
     </>
@@ -194,7 +197,7 @@ export function AffiliateCard({
             {icon}
             <div className="min-w-0 flex-1">
               <div className={`truncate font-action text-xl tracking-tight sm:text-2xl ${title ? "" : "italic text-white/70"}`}>
-                {title || "No Title"}
+                {title || t("card.noTitle")}
               </div>
               {descriptionBlock}
               {tagRow}
@@ -220,7 +223,7 @@ export function AffiliateCard({
           {icon}
           <div className="min-w-0 flex-1">
             <div className={`truncate font-action text-base ${title ? "" : "italic text-white/70"}`}>
-              {title || "No Title"}
+              {title || t("card.noTitle")}
             </div>
             {descriptionBlock}
           </div>

@@ -19,6 +19,7 @@
  * glyphs, no text labels).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Compass, Plus, Settings as SettingsIcon } from "lucide-react";
 import type { ServerSummary } from "../../lib/servers.js";
 import { cropStyleFor } from "../../lib/avatarCrop.js";
@@ -58,6 +59,7 @@ export function ServerRail({
    *  omit to hide the affordance entirely. */
   onOpenSettings?: (server: ServerSummary) => void;
 }) {
+  const { t } = useTranslation("servers");
   // Only servers the viewer has JOINED (plus the implicit-membership home
   // server) ride the rail. Discoverable servers are NOT listed here — the
   // viewer reaches them via the bottom "+" → discover surface and joins them
@@ -148,7 +150,7 @@ export function ServerRail({
 
   return (
     <nav
-      aria-label="Servers"
+      aria-label={t("rail.navLabel")}
       data-tour="server-rail"
       className="flex w-[4.5rem] shrink-0 flex-col items-center gap-2.5 border-l border-keep-rule bg-keep-panel/40 py-2.5"
     >
@@ -198,8 +200,8 @@ export function ServerRail({
           type="button"
           onClick={onDiscover}
           data-tour="server-rail-discover-btn"
-          title={canApply ? "Discover servers, or apply to create your own" : "Discover servers"}
-          aria-label={canApply ? "Discover servers, or apply to create your own" : "Discover servers"}
+          title={canApply ? t("rail.discoverOrCreate") : t("rail.discover")}
+          aria-label={canApply ? t("rail.discoverOrCreate") : t("rail.discover")}
           className="flex h-12 w-12 items-center justify-center rounded-full border border-keep-action/50 bg-keep-action/10 text-keep-action transition-all hover:bg-keep-action/20"
         >
           {canApply ? <Plus className="h-6 w-6" aria-hidden="true" /> : <Compass className="h-6 w-6" aria-hidden="true" />}
@@ -226,15 +228,16 @@ function ServerIcon({
   /** Present only on servers the viewer manages: opens the owner console. */
   onOpenSettings?: (() => void) | undefined;
 }) {
+  const { t } = useTranslation("servers");
   // First letter (grapheme-naive but fine for the fallback glyph).
   const letter = (server.name.trim()[0] ?? "?").toUpperCase();
   const tint = server.iconColor ?? undefined;
   const border = server.borderColor ?? undefined;
   const label = server.isSystem
-    ? `${server.name} (home server)`
+    ? t("rail.homeServerLabel", { name: server.name })
     : server.viewerRole != null
       ? server.name
-      : `${server.name} (visit)`;
+      : t("rail.visitLabel", { name: server.name });
 
   // Long-press (touch) opens settings without a visible gear, mirroring the
   // hover gear on pointer devices. A timer started on press fires the console;
@@ -315,8 +318,8 @@ function ServerIcon({
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onOpenSettings(); }}
-            title={`${server.name} (settings)`}
-            aria-label={`${server.name} (settings)`}
+            title={t("rail.settingsLabel", { name: server.name })}
+            aria-label={t("rail.settingsLabel", { name: server.name })}
             className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full border border-keep-rule bg-keep-panel text-keep-muted shadow-sm opacity-0 transition-opacity hover:text-keep-text focus:opacity-100 group-hover:opacity-100"
           >
             <SettingsIcon className="h-3.5 w-3.5" aria-hidden="true" />

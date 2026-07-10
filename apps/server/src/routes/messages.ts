@@ -18,12 +18,16 @@ import { mentionsField, parseNpcStats } from "@thekeep/shared";
 import { recordAudit } from "../audit.js";
 import { messages, rooms, roomThreadCategories, roomMembers, pinnedMessages, users } from "../db/schema.js";
 import { callerCanEditRoom } from "../auth/roomPermissions.js";
+import { effectiveRoomNsfw } from "../lib/nsfwRooms.js";
+import { boardAgeDenied } from "../forums/nsfw.js";
 import { linkPreviewFromRow } from "../unfurl.js";
+import { maskForMinors, maskMessageForMinors } from "../realtime/minorLanguageFilter.js";
 import { sanitizeBio } from "../auth/html.js";
 import { areServersEnabled, getServerSettings, getSettings } from "../settings.js";
 import { resolveRoomServerId } from "../earning/pool.js";
 import { hasPermission } from "../auth/permissions.js";
 import type { Db } from "../db/index.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -204,6 +208,7 @@ function pinRowToWire(p: typeof pinnedMessages.$inferSelect): PinnedMessage {
     sceneImageUrl: p.sceneImageUrl,
     bodyHtml: p.bodyHtml,
     origCreatedAt: p.origCreatedAt,
+    isNsfw: p.isNsfw,
   };
 }
 
@@ -222,14 +227,77 @@ async function loadRoomPins(db: Db, roomId: string): Promise<PinnedMessage[]> {
 }
 
 /**
+ * Minor language filter (Phase 7, plan_ext.md §J) over a pin set: pins
+ * snapshot chat BODIES, so the same line that reads masked in a minor's
+ * backlog must read masked in the strip pinned above it. Returns null when
+ * no pin masked — callers then serve the ORIGINAL array untouched, keeping
+ * the adult/clean path byte-identical (the same null-means-clean contract
+ * as maskForMinors). A non-null return holds shallow clones for the dirty
+ * pins only; `bodyHtml` stays untouched, mirroring maskMessageForMinors's
+ * documented exclusion (masking inside HTML could split tags).
+ */
+function maskPinsForMinors(pins: PinnedMessage[]): PinnedMessage[] | null {
+  let maskedAny = false;
+  const out = pins.map((p) => {
+    const masked = p.body ? maskForMinors(p.body) : null;
+    if (masked === null) return p;
+    maskedAny = true;
+    return { ...p, body: masked };
+  });
+  return maskedAny ? out : null;
+}
+
+/**
  * Broadcast the room's authoritative pin set to everyone in it. A single
  * delta-free replace: the client swaps its cached pins for `roomId` wholesale
  * (empty `pins: []` clears the strip). Kept as one payload per the contract —
  * not a per-pin stream.
+ *
+ * Flipped-back rooms (age plan, Phase 2): pins snapshot message BODIES, so a
+ * pin of an 18+-stamped message must not broadcast to minor occupants — the
+ * same per-viewer split the GET route applies. A LIVE pin consults its
+ * source row's `messages.isNsfw` (authoritative; also catches a forum
+ * topic's later NSFW re-tag); a SNAPSHOT-ONLY pin (source hard-deleted or
+ * retention-expired, messageId NULL) consults its own `is_nsfw` stamp
+ * frozen at pin time (migration 0340).
+ *
+ * Minor language filter (Phase 7, plan_ext.md §J): the set a minor receives
+ * is additionally body-masked, computed ONCE over the filtered set and
+ * shared by every non-adult socket. When anything filters or masks, the
+ * emit goes per-socket (adult-ness rides the handshake snapshot on
+ * `socket.data.user`, mirroring emitFiltered; a snapshot-less socket fails
+ * closed); the common all-SFW-and-clean set keeps the cheap room-wide emit.
  */
 async function emitRoomPins(io: Io, db: Db, roomId: string): Promise<void> {
   const pins = await loadRoomPins(db, roomId);
-  io.to(`room:${roomId}`).emit("room:pins", { roomId, pins });
+  const liveIds = pins.map((p) => p.messageId).filter((v): v is string => !!v);
+  const stamped = liveIds.length === 0
+    ? new Set<string>()
+    : new Set(
+        (await db
+          .select({ id: messages.id })
+          .from(messages)
+          .where(and(inArray(messages.id, liveIds), eq(messages.isNsfw, true))))
+          .map((r) => r.id),
+      );
+  const filtered = pins.filter((p) => (p.messageId ? !stamped.has(p.messageId) : !p.isNsfw));
+  // One socket enumeration serves both the NSFW split and the minor-mask
+  // presence check (in-memory on the default adapter — same call
+  // emitFiltered makes on every message).
+  const sockets = await io.in(`room:${roomId}`).fetchSockets();
+  const anyMinor = sockets.some(
+    (s) => !(s.data as { user?: { isAdult?: boolean } }).user?.isAdult,
+  );
+  // §J: at most one mask pass per broadcast, shared by every minor socket.
+  const minorPins = anyMinor ? maskPinsForMinors(filtered) : null;
+  if (filtered.length === pins.length && !minorPins) {
+    io.to(`room:${roomId}`).emit("room:pins", { roomId, pins });
+    return;
+  }
+  for (const s of sockets) {
+    const adult = !!(s.data as { user?: { isAdult?: boolean } }).user?.isAdult;
+    s.emit("room:pins", { roomId, pins: adult ? pins : minorPins ?? filtered });
+  }
 }
 
 /**
@@ -260,18 +328,23 @@ async function canCallerPin(
  * success, null on any failure (merged 404/403 so private-room existence never
  * leaks).
  */
-async function canCallerPinMessage(db: Db, userId: string, messageId: string) {
+async function canCallerPinMessage(db: Db, viewer: { id: string; isAdult: boolean }, messageId: string) {
   const m = (await db.select().from(messages).where(eq(messages.id, messageId)).limit(1))[0];
   if (!m) return null;
   // Whispers are private conversations, not room furniture — never pinnable.
   if (m.kind === "whisper") return null;
+  // Age plan, Phase 2: a minor (e.g. a room mod in a flipped-back room)
+  // can't pin an 18+-stamped row — the pin snapshots the body room-wide.
+  if (m.isNsfw && !viewer.isAdult) return null;
   const room = (await db.select().from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
   if (!room) return null;
+  // Board-aware (Phase 3): a board of an 18+ FORUM denies like an 18+ room.
+  if (await boardAgeDenied(db, viewer, room)) return null;
   if (room.type === "private") {
     const member = (await db
       .select()
       .from(roomMembers)
-      .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, userId)))
+      .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, viewer.id)))
       .limit(1))[0];
     if (!member) return null;
   }
@@ -279,15 +352,18 @@ async function canCallerPinMessage(db: Db, userId: string, messageId: string) {
 }
 
 /** Can the caller merely SEE a room's pins (read gate for GET /rooms/:id/pins)?
- *  Public rooms: any authenticated user. Private rooms: members only. */
-async function canCallerSeeRoomPins(db: Db, userId: string, roomId: string): Promise<boolean> {
+ *  Public rooms: any authenticated user. Private rooms: members only.
+ *  Effectively-18+ rooms (age plan, Phase 2): adults only — pins carry
+ *  message bodies, so they're a read path like backlog/search. */
+async function canCallerSeeRoomPins(db: Db, viewer: { id: string; isAdult: boolean }, roomId: string): Promise<boolean> {
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room) return false;
+  if (await boardAgeDenied(db, viewer, room)) return false;
   if (room.type !== "private") return true;
   const member = (await db
     .select()
     .from(roomMembers)
-    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, userId)))
+    .where(and(eq(roomMembers.roomId, roomId), eq(roomMembers.userId, viewer.id)))
     .limit(1))[0];
   return !!member;
 }
@@ -342,6 +418,11 @@ export function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): 
     ...mentionsField(m.mentionsJson),
     ...(m.rankKey ? { rankKey: m.rankKey } : {}),
     ...(m.tier != null ? { tier: m.tier } : {}),
+    // NSFW topic tag / write-time stamp (age plan, Phase 3). Not in the
+    // frozen shared ChatMessage type yet, so it rides as a spread; readers
+    // who can't see the row never receive it (the list/thread routes filter
+    // first), and the client renders it as the built-in "NSFW" chip.
+    ...(m.isNsfw ? { isNsfw: true } : {}),
     ...(m.senderInlineAvatarEnabled ? { senderInlineAvatarEnabled: true } : {}),
     ...(m.senderSelectedBorderRankKey ? { senderSelectedBorderRankKey: m.senderSelectedBorderRankKey } : {}),
     ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
@@ -356,6 +437,47 @@ export function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): 
       ? { deletedByDisplayName: m.deletedByDisplayName }
       : {}),
   };
+}
+
+/**
+ * Broadcast a `message:update` for `row` to its room. An 18+-stamped row
+ * (age plan, Phase 2) must not hand its body to minor occupants — the same
+ * toggle-race class `message:new` gates via emitFiltered: a stamped row
+ * edited (or unfurled) after its room flips back SFW would otherwise
+ * broadcast to minors now legitimately present. Stamped rows emit
+ * per-socket, skipping sockets whose session snapshot isn't adult
+ * (snapshot-less sockets fail closed). Shared by the edit route, the
+ * link-preview removal route, the lock/sticky/category/prefix/nsfw-tag
+ * routes, and unfurlAndAttach so the rule can't drift apart.
+ *
+ * Minor language filter (Phase 7, plan_ext.md §J): the refreshed row rides
+ * the SAME masking split as emitFiltered — without it, the unfurl that
+ * follows any profane message with a URL (or an edit that introduces
+ * profanity) would hand minors the ORIGINAL body over the top of the
+ * masked `message:new` they were served seconds earlier. The masked
+ * variant is computed at most ONCE per update and shared by every
+ * non-adult socket; adults always receive the shared original,
+ * byte-identical. The cheap room-wide emit is kept when the row is
+ * unstamped and no connected minor needs a mask.
+ */
+export async function emitMessageUpdate(io: Io, row: typeof messages.$inferSelect): Promise<void> {
+  const wire = toWire(row);
+  const sockets = await io.in(`room:${row.roomId}`).fetchSockets();
+  const anyMinor = sockets.some(
+    (s) => !(s.data as { user?: { isAdult?: boolean } }).user?.isAdult,
+  );
+  // §J: at most one mask compute per update; null = clean (or filter off).
+  // An 18+-stamped row skips the compute — minors never receive it at all.
+  const minorVariant = anyMinor && !row.isNsfw ? maskMessageForMinors(wire) : null;
+  if (!row.isNsfw && !minorVariant) {
+    io.to(`room:${row.roomId}`).emit("message:update", wire);
+    return;
+  }
+  for (const s of sockets) {
+    const adult = !!(s.data as { user?: { isAdult?: boolean } }).user?.isAdult;
+    if (row.isNsfw && !adult) continue;
+    s.emit("message:update", adult ? wire : minorVariant ?? wire);
+  }
 }
 
 export async function registerMessageRoutes(
@@ -428,7 +550,7 @@ export async function registerMessageRoutes(
     // the cap has expired).
     if (!canEditOthers && !forum && now - +m.createdAt > editGraceMs) {
       reply.code(403);
-      return { error: `Edit window has closed (${Math.round(editGraceMs / 1000)}s after sending).` };
+      return { error: tFor(me.locale, "errors:server.messages.editWindowClosed", { seconds: Math.round(editGraceMs / 1000) }) };
     }
 
     // Apply the same per-surface length cap as fresh messages so
@@ -442,8 +564,8 @@ export async function registerMessageRoutes(
       reply.code(413);
       return {
         error: forum
-          ? `Forum posts capped at ${effectiveCap} chars.`
-          : `Messages capped at ${effectiveCap} chars.`,
+          ? tFor(me.locale, "errors:server.realtime.forumPostsCapped", { max: effectiveCap })
+          : tFor(me.locale, "errors:server.realtime.messagesCapped", { max: effectiveCap }),
       };
     }
 
@@ -463,7 +585,7 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
-    io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    await emitMessageUpdate(io, updated);
     // Cross-room whisper overlay: the recipient may be viewing the
     // whisper from another room (their bucket holds it under a
     // different roomId). Fan the update out to their sockets too so
@@ -475,11 +597,22 @@ export async function registerMessageRoutes(
       const toId = updated.toUserId;
       const wire = toWire(updated);
       const sockets = await io.fetchSockets();
+      // §J: the whisper recipient may be under 18 — same per-socket variant
+      // pick as emitMessageUpdate (a snapshot-less socket fails closed),
+      // computed lazily so the common adult-recipient case does no masking
+      // work. Without this, profanity edited INTO a whisper would land raw
+      // on the minor's cross-room view.
+      let minorVariant: ChatMessage | null | undefined;
       for (const s of sockets) {
         const uid = (s.data as { userId?: string }).userId;
         if (uid !== toId) continue;
         if ((s.data as { roomId?: string }).roomId === m.roomId) continue;
-        s.emit("message:update", wire);
+        if ((s.data as { user?: { isAdult?: boolean } }).user?.isAdult) {
+          s.emit("message:update", wire);
+          continue;
+        }
+        if (minorVariant === undefined) minorVariant = maskMessageForMinors(wire);
+        s.emit("message:update", minorVariant ?? wire);
       }
     }
     return { ok: true };
@@ -534,7 +667,7 @@ export async function registerMessageRoutes(
     const { editGraceMs } = await getServerSettings(db, await resolveRoomServerId(db, m.roomId));
     if (!canDeleteOthers && !forum && now - +m.createdAt > editGraceMs) {
       reply.code(403);
-      return { error: `Delete window has closed (${Math.round(editGraceMs / 1000)}s after sending).` };
+      return { error: tFor(me.locale, "errors:server.messages.deleteWindowClosed", { seconds: Math.round(editGraceMs / 1000) }) };
     }
 
     const deletedAt = new Date(now);
@@ -583,6 +716,18 @@ export async function registerMessageRoutes(
     // crosses the wire to anyone who shouldn't have it.
     const adminWire = toWire(updated, true);
     const plainWire = toWire(updated, false);
+    // §J: a deleted row's wire strips the body, but the update still carries
+    // user text (forum topic title, reply quote snippet) — minor viewers get
+    // the masked variant of the plain wire, computed lazily at most once.
+    // Permission-holders keep adminWire untouched (staff accounts are adult
+    // accounts — the same posture as maskMessageForMinors's originalBody
+    // exclusion).
+    let minorPlainWire: ChatMessage | null | undefined;
+    const plainWireFor = (adult: boolean): ChatMessage => {
+      if (adult) return plainWire;
+      if (minorPlainWire === undefined) minorPlainWire = maskMessageForMinors(plainWire);
+      return minorPlainWire ?? plainWire;
+    };
     const roomSockets = await io.in(`room:${m.roomId}`).fetchSockets();
     if (roomSockets.length === 0) return { ok: true };
     // Look the viewer roles up in one batch, typical room has ≤ 50
@@ -626,6 +771,14 @@ export async function registerMessageRoutes(
     for (const s of roomSockets) {
       const uid = (s.data as { userId?: string }).userId ?? "";
       const role = roles.get(uid) ?? "user";
+      const adult = !!(s.data as { user?: { isAdult?: boolean } }).user?.isAdult;
+      // Age plan Phase 2: mirror emitMessageUpdate's stamped-row posture —
+      // an 18+-stamped row's update never crosses to a non-adult socket
+      // (snapshot-less sockets fail closed). The deleted wire strips the
+      // body but still carries user text (topic title, reply snippet) the
+      // backlog/topics gates never hand minors; e.g. a mod deleting an
+      // 18+-era topic in a room that has since flipped back SFW.
+      if (updated.isNsfw && !adult) continue;
       // Reveal `originalBody` only to viewers with the
       // `view_deleted_message_body` permission. The per-viewer check
       // is per-socket so granting / revoking the permission in the
@@ -636,7 +789,7 @@ export async function registerMessageRoutes(
         const a = await serverAuthority(db, { id: uid, role: role as Role }, delServerId);
         canSeeOriginal = serverCan(a, "view_deleted_post_body");
       }
-      s.emit("message:update", canSeeOriginal ? adminWire : plainWire);
+      s.emit("message:update", canSeeOriginal ? adminWire : plainWireFor(adult));
     }
     // Cross-room whisper overlay: fan the delete out to the recipient
     // even when they're viewing from another room. Same shape as the
@@ -658,8 +811,13 @@ export async function registerMessageRoutes(
           .where(eq(users.id, toId))
           .limit(1))[0]?.role ?? "user";
         const canSeeOriginal = await hasPermission({ id: toId, role: recipRole as Role }, "view_deleted_message_body", db);
-        const wire = canSeeOriginal ? adminWire : plainWire;
-        for (const s of recipientSockets) s.emit("message:update", wire);
+        // §J: same per-socket adult/minor pick — and the same stamped-row
+        // skip — as the room loop above.
+        for (const s of recipientSockets) {
+          const adult = !!(s.data as { user?: { isAdult?: boolean } }).user?.isAdult;
+          if (updated.isNsfw && !adult) continue;
+          s.emit("message:update", canSeeOriginal ? adminWire : plainWireFor(adult));
+        }
       }
     }
     return { ok: true };
@@ -688,10 +846,10 @@ export async function registerMessageRoutes(
     const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
     if (!m) { reply.code(404); return { error: "not found" }; }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
-    if (m.replyToId) { reply.code(400); return { error: "Only top-level topics can be locked." }; }
+    if (m.replyToId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.onlyTopicsLocked") }; }
 
     const forum = await isForumMessage(db, m.roomId);
-    if (!forum) { reply.code(400); return { error: "Locking applies only to forum-mode rooms." }; }
+    if (!forum) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.lockForumOnly") }; }
 
     const isAuthor = m.userId === me.id;
     // Authors can lock their own topic; mods/admins with the
@@ -713,7 +871,7 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
-    io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    await emitMessageUpdate(io, updated);
     // Mod Log: only when a moderator acts on someone ELSE's topic (an author
     // locking their own thread isn't moderation).
     if (m.userId !== me.id) {
@@ -751,10 +909,10 @@ export async function registerMessageRoutes(
       if (!boardCan(board, "pin_topics")) { reply.code(403); return { error: "admins only" }; }
     }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
-    if (m.replyToId) { reply.code(400); return { error: "Only top-level topics can be pinned." }; }
+    if (m.replyToId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.onlyTopicsPinned") }; }
 
     const forum = await isForumMessage(db, m.roomId);
-    if (!forum) { reply.code(400); return { error: "Pinning applies only to forum-mode rooms." }; }
+    if (!forum) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.pinForumOnly") }; }
 
     await db
       .update(messages)
@@ -763,7 +921,7 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
-    io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    await emitMessageUpdate(io, updated);
     await auditForumTopic(db, me.id, m.roomId, m.id, "forum_topic_sticky", { sticky: parsed.sticky, title: m.title ?? null }, m.userId);
     return { ok: true };
   });
@@ -792,10 +950,10 @@ export async function registerMessageRoutes(
     const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
     if (!m) { reply.code(404); return { error: "not found" }; }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
-    if (m.replyToId) { reply.code(400); return { error: "Only top-level topics can be moved." }; }
+    if (m.replyToId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.onlyTopicsMoved") }; }
 
     const forum = await isForumMessage(db, m.roomId);
-    if (!forum) { reply.code(400); return { error: "Moving applies only to forum-mode rooms." }; }
+    if (!forum) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.moveForumOnly") }; }
 
     if (!(await hasPermission(me, "lock_forum_topic", db))) {
       const board = await boardModTier(db, me, m.roomId);
@@ -809,7 +967,7 @@ export async function registerMessageRoutes(
         .from(roomThreadCategories)
         .where(and(eq(roomThreadCategories.id, parsed.categoryId), eq(roomThreadCategories.roomId, m.roomId)))
         .limit(1))[0];
-      if (!cat) { reply.code(400); return { error: "That category does not exist in this board." }; }
+      if (!cat) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.categoryNotInBoard") }; }
     }
 
     await db
@@ -819,7 +977,7 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
-    io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    await emitMessageUpdate(io, updated);
     await auditForumTopic(db, me.id, m.roomId, m.id, "forum_topic_move", { from: m.threadCategoryId ?? null, to: parsed.categoryId, title: m.title ?? null }, m.userId);
     return { ok: true };
   });
@@ -838,9 +996,9 @@ export async function registerMessageRoutes(
     catch { reply.code(400); return { error: "invalid body" }; }
     const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
     if (!m || m.deletedAt) { reply.code(404); return { error: "not found" }; }
-    if (m.replyToId) { reply.code(400); return { error: "Only topics carry a prefix." }; }
+    if (m.replyToId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.onlyTopicsPrefix") }; }
     const room = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
-    if (!room?.forumId) { reply.code(400); return { error: "Prefixes apply only to forum topics." }; }
+    if (!room?.forumId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.prefixForumOnly") }; }
     // Author may tag their own topic; otherwise needs the manage_prefixes grant.
     // We resolve the grant up front because staff-only tags are manager-gated
     // even for the author (see below).
@@ -852,7 +1010,7 @@ export async function registerMessageRoutes(
     if (m.prefixId && !isManager) {
       const cur = (await db.select({ staffOnly: forumPrefixes.staffOnly }).from(forumPrefixes)
         .where(eq(forumPrefixes.id, m.prefixId)).limit(1))[0];
-      if (cur?.staffOnly) { reply.code(403); return { error: "Only staff can change this topic's tag." }; }
+      if (cur?.staffOnly) { reply.code(403); return { error: tFor(me.locale, "errors:server.messages.staffOnlyTag") }; }
     }
     // A non-null prefix must belong to THIS forum AND be offered in the
     // topic's category (global tags apply everywhere; scoped tags only in
@@ -862,16 +1020,75 @@ export async function registerMessageRoutes(
       const { parsePrefixCategoryIds, prefixAppliesToCategory } = await import("@thekeep/shared");
       const pref = (await db.select({ id: forumPrefixes.id, categoryIdsJson: forumPrefixes.categoryIdsJson, staffOnly: forumPrefixes.staffOnly }).from(forumPrefixes)
         .where(and(eq(forumPrefixes.id, parsed.prefixId), eq(forumPrefixes.forumId, room.forumId))).limit(1))[0];
-      if (!pref) { reply.code(400); return { error: "That prefix isn't in this forum." }; }
-      if (pref.staffOnly && !isManager) { reply.code(403); return { error: "That tag can only be set by staff." }; }
+      if (!pref) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.prefixNotInForum") }; }
+      if (pref.staffOnly && !isManager) { reply.code(403); return { error: tFor(me.locale, "errors:server.messages.tagStaffOnly") }; }
       if (!prefixAppliesToCategory({ categoryIds: parsePrefixCategoryIds(pref.categoryIdsJson) }, m.threadCategoryId ?? null)) {
-        reply.code(400); return { error: "That tag isn't available in this topic's category." };
+        reply.code(400); return { error: tFor(me.locale, "errors:server.messages.tagNotInCategory") };
       }
     }
     await db.update(messages).set({ prefixId: parsed.prefixId }).where(eq(messages.id, m.id));
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
-    if (updated) io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    if (updated) await emitMessageUpdate(io, updated);
     return { ok: true };
+  });
+
+  /**
+   * PATCH /messages/:id/nsfw — set or clear a forum topic's NSFW tag (age
+   * plan, Phase 3; the "system tag" rendered as the built-in NSFW chip).
+   * Allowed for the topic AUTHOR or a mod holding `manage_prefixes` (the tag
+   * is curation furniture, so it rides the prefix grant) — and ALWAYS adults
+   * only: a minor can neither set nor clear any NSFW flag, even on their own
+   * topic, whatever forum role they hold.
+   *
+   * Tagging retro-stamps every reply under the topic so the filters keyed
+   * on `messages.is_nsfw` (searches, notification re-reads, backlog clause)
+   * cover the whole thread. Clearing the tag can never drop the stamp below
+   * the board room's own effective 18+ state — content written in an 18+
+   * room stays 18+ — and NEVER touches the replies at all: `is_nsfw` on a
+   * reply doubles as the write-time era stamp (rows written while the
+   * board/server was 18+), which one routine untag must not erase. Tag-
+   * inherited replies stay over-hidden instead (keep-but-hide).
+   */
+  const nsfwTagBody = z.object({ nsfw: z.boolean() }).strict();
+  app.patch<{ Params: { id: string }; Body: unknown }>("/messages/:id/nsfw", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    let parsed: z.infer<typeof nsfwTagBody>;
+    try { parsed = nsfwTagBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
+    if (!m || m.deletedAt) { reply.code(404); return { error: "not found" }; }
+    if (m.replyToId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.onlyTopicsNsfw") }; }
+    const room = (await db
+      .select({ isNsfw: rooms.isNsfw, serverId: rooms.serverId, forumId: rooms.forumId })
+      .from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
+    if (!room?.forumId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.nsfwForumOnly") }; }
+    if (!me.isAdult) {
+      reply.code(403);
+      return { error: tFor(me.locale, "errors:server.messages.nsfwAdultsOnly") };
+    }
+    const isManager = boardCan(await boardModTier(db, me, m.roomId), "manage_prefixes");
+    if (m.userId !== me.id && !isManager) { reply.code(403); return { error: "not yours" }; }
+    // The board room's effective 18+ state is the tag's FLOOR: clearing the
+    // tag inside an 18+ room/server leaves the write-time stamp in place.
+    const value = parsed.nsfw || (await effectiveRoomNsfw(db, room));
+    await db.update(messages).set({ isNsfw: value }).where(eq(messages.id, m.id));
+    // Retro-stamp the whole thread ON RAISE ONLY (forum replies always
+    // attach directly to the topic) so a tag covers replies in search +
+    // notifications too. A clear deliberately leaves the replies untouched:
+    // their `is_nsfw` doubles as the write-time era stamp (rows written
+    // while the board/server was 18+ and later flipped back), and the floor
+    // above only reflects the room's CURRENT state — a blanket downgrade
+    // here would erase that era protection on the first routine untag.
+    // Tag-inherited replies stay over-hidden instead (keep-but-hide; the
+    // thread route still renders them for adults).
+    if (value) {
+      await db.update(messages).set({ isNsfw: true }).where(eq(messages.replyToId, m.id));
+    }
+    await auditForumTopic(db, me.id, m.roomId, m.id, "topic_nsfw_update", { isNsfw: value, title: m.title ?? null }, m.userId);
+    const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
+    if (updated) await emitMessageUpdate(io, updated);
+    return { ok: true, isNsfw: value };
   });
 
   /** Shared move/merge permission check: the sitewide forum-topic permission
@@ -901,19 +1118,19 @@ export async function registerMessageRoutes(
 
     const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
     if (!m || m.deletedAt) { reply.code(404); return { error: "not found" }; }
-    if (m.replyToId) { reply.code(400); return { error: "Only top-level topics can be moved." }; }
+    if (m.replyToId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.onlyTopicsMoved") }; }
     const srcRoom = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, m.roomId)).limit(1))[0];
-    if (!srcRoom?.forumId) { reply.code(400); return { error: "Moving applies only to forum boards." }; }
+    if (!srcRoom?.forumId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.moveBoardsForumOnly") }; }
     const tgtRoom = (await db.select({ id: rooms.id, forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, parsed.boardRoomId)).limit(1))[0];
-    if (!tgtRoom?.forumId) { reply.code(404); return { error: "That board doesn't exist." }; }
-    if (tgtRoom.forumId !== srcRoom.forumId) { reply.code(400); return { error: "You can only move a topic between boards in the same forum." }; }
-    if (tgtRoom.id === m.roomId) { reply.code(400); return { error: "That topic is already on this board." }; }
+    if (!tgtRoom?.forumId) { reply.code(404); return { error: tFor(me.locale, "errors:server.messages.boardMissing") }; }
+    if (tgtRoom.forumId !== srcRoom.forumId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.moveSameForum") }; }
+    if (tgtRoom.id === m.roomId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.alreadyOnBoard") }; }
     if (!(await canMoveTopics(me, m.roomId))) { reply.code(403); return { error: "mods only" }; }
     // A non-null target category must belong to the TARGET board.
     if (parsed.categoryId) {
       const cat = (await db.select({ id: roomThreadCategories.id }).from(roomThreadCategories)
         .where(and(eq(roomThreadCategories.id, parsed.categoryId), eq(roomThreadCategories.roomId, tgtRoom.id))).limit(1))[0];
-      if (!cat) { reply.code(400); return { error: "That category isn't on the destination board." }; }
+      if (!cat) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.categoryNotOnDestination") }; }
     }
     const oldRoomId = m.roomId;
     await db.update(messages).set({ roomId: tgtRoom.id, threadCategoryId: parsed.categoryId ?? null }).where(eq(messages.id, m.id));
@@ -940,13 +1157,13 @@ export async function registerMessageRoutes(
 
     const src = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
     if (!src || src.deletedAt) { reply.code(404); return { error: "not found" }; }
-    if (src.replyToId) { reply.code(400); return { error: "Only a top-level topic can be merged." }; }
-    if (parsed.targetTopicId === src.id) { reply.code(400); return { error: "A topic can't merge into itself." }; }
+    if (src.replyToId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.onlyTopicsMerged") }; }
+    if (parsed.targetTopicId === src.id) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.mergeSelf") }; }
     const tgt = (await db.select().from(messages).where(eq(messages.id, parsed.targetTopicId)).limit(1))[0];
-    if (!tgt || tgt.deletedAt || tgt.replyToId) { reply.code(400); return { error: "The destination must be a live topic." }; }
+    if (!tgt || tgt.deletedAt || tgt.replyToId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.mergeDestinationLive") }; }
     const srcRoom = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, src.roomId)).limit(1))[0];
     const tgtRoom = (await db.select({ forumId: rooms.forumId }).from(rooms).where(eq(rooms.id, tgt.roomId)).limit(1))[0];
-    if (!srcRoom?.forumId || srcRoom.forumId !== tgtRoom?.forumId) { reply.code(400); return { error: "Both topics must be in the same forum." }; }
+    if (!srcRoom?.forumId || srcRoom.forumId !== tgtRoom?.forumId) { reply.code(400); return { error: tFor(me.locale, "errors:server.messages.mergeSameForum") }; }
     if (!(await canMoveTopics(me, src.roomId))) { reply.code(403); return { error: "mods only" }; }
 
     const oldRoomId = src.roomId;
@@ -981,13 +1198,13 @@ export async function registerMessageRoutes(
     if (!me) { reply.code(401); return { error: "auth" }; }
     const m = (await db.select().from(messages).where(eq(messages.id, req.params.id)).limit(1))[0];
     if (!m) { reply.code(404); return { error: "not found" }; }
-    if (m.userId !== me.id) { reply.code(403); return { error: "Only the author can remove their link preview." }; }
+    if (m.userId !== me.id) { reply.code(403); return { error: tFor(me.locale, "errors:server.messages.linkPreviewAuthorOnly") }; }
     await db
       .update(messages)
       .set({ linkPreviewJson: JSON.stringify({ hidden: true }) })
       .where(eq(messages.id, m.id));
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
-    if (updated) io.to(`room:${m.roomId}`).emit("message:update", toWire(updated));
+    if (updated) await emitMessageUpdate(io, updated);
     return { ok: true };
   });
 
@@ -1016,7 +1233,7 @@ export async function registerMessageRoutes(
     // Visibility first (also loads the row + resolves the room). Whispers and
     // messages the caller can't see are indistinguishable 404s so private-room
     // existence never leaks.
-    const m = await canCallerPinMessage(db, me.id, req.params.id);
+    const m = await canCallerPinMessage(db, me, req.params.id);
     if (!m) { reply.code(404); return { error: "message not found or not visible" }; }
     if (m.deletedAt) { reply.code(410); return { error: "already removed" }; }
 
@@ -1043,7 +1260,7 @@ export async function registerMessageRoutes(
       .where(eq(pinnedMessages.roomId, m.roomId)))[0];
     if ((countRow?.n ?? 0) >= MAX_PINS_PER_ROOM) {
       reply.code(409);
-      return { error: `This room already has the maximum of ${MAX_PINS_PER_ROOM} pinned messages.` };
+      return { error: tFor(me.locale, "errors:server.messages.maxPins", { max: MAX_PINS_PER_ROOM }) };
     }
 
     // Next sortOrder = current max + 1 (append to the end of the strip).
@@ -1076,6 +1293,10 @@ export async function registerMessageRoutes(
       sceneImageUrl: m.sceneImageUrl ?? null,
       bodyHtml: m.bodyHtml ?? null,
       origCreatedAt: +m.createdAt,
+      // Freeze the source row's 18+ stamp (age plan; migration 0340) so the
+      // minor gate still holds once retention expires the source and the
+      // live `messages.isNsfw` join can no longer see it.
+      isNsfw: m.isNsfw,
     });
 
     await emitRoomPins(io, db, m.roomId);
@@ -1146,11 +1367,34 @@ export async function registerMessageRoutes(
   app.get<{ Params: { id: string } }>("/rooms/:id/pins", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
-    if (!(await canCallerSeeRoomPins(db, me.id, req.params.id))) {
+    if (!(await canCallerSeeRoomPins(db, me, req.params.id))) {
       reply.code(404);
       return { error: "room not found or not visible" };
     }
-    const pins = await loadRoomPins(db, req.params.id);
+    let pins = await loadRoomPins(db, req.params.id);
+    // Flipped-back rooms (age plan, Phase 2): 18+ pins drop for minors,
+    // matching the backlog clause. A LIVE pin consults its source row's
+    // `messages.isNsfw` (authoritative; also catches a forum topic's later
+    // NSFW re-tag); a SNAPSHOT-ONLY pin (source hard-deleted or
+    // retention-expired, messageId NULL) consults its own `is_nsfw` stamp
+    // frozen at pin time (migration 0340) — same split as emitRoomPins.
+    if (!me.isAdult && pins.length > 0) {
+      const liveIds = pins.map((p) => p.messageId).filter((v): v is string => !!v);
+      const stamped = liveIds.length === 0
+        ? new Set<string>()
+        : new Set(
+            (await db
+              .select({ id: messages.id })
+              .from(messages)
+              .where(and(inArray(messages.id, liveIds), eq(messages.isNsfw, true))))
+              .map((r) => r.id),
+          );
+      pins = pins.filter((p) => (p.messageId ? !stamped.has(p.messageId) : !p.isNsfw));
+      // §J: the surviving pins' snapshot bodies are chat text a minor reads —
+      // mask them like the backlog (per-request objects, so this can never
+      // touch what an adult is served; stored rows stay untouched).
+      pins = maskPinsForMinors(pins) ?? pins;
+    }
     return { pins };
   });
 }

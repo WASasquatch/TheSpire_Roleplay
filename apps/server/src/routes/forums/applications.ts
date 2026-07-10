@@ -46,6 +46,8 @@ import type { Db } from "../../db/index.js";
 import { getSessionUser } from "../auth.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { forumAuthority } from "../../forums/authority.js";
+import { seedForumStarter } from "../../forums/starter.js";
+import { tFor } from "../../i18n.js";
 import { requireForumPermission as sharedRequireForumPermission, type Io } from "./shared.js";
 
 export async function registerForumApplicationRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
@@ -122,11 +124,11 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     if (!(await hasPermission(me, "apply_create_forum", db))) {
-      reply.code(403); return { error: "Forum creation applications aren't available to you." };
+      reply.code(403); return { error: tFor(me.locale, "errors:server.forums.applicationsNotAvailable") };
     }
     let body: z.infer<typeof submitBody>;
     try { body = submitBody.parse(req.body); }
-    catch { reply.code(400); return { error: `Check the fields: name ${FORUM_NAME_MIN}-${FORUM_NAME_MAX} chars, purpose ${FORUM_PURPOSE_MIN}-${FORUM_PURPOSE_MAX} chars.` }; }
+    catch { reply.code(400); return { error: tFor(me.locale, "errors:server.applications.checkFields", { nameMin: FORUM_NAME_MIN, nameMax: FORUM_NAME_MAX, purposeMin: FORUM_PURPOSE_MIN, purposeMax: FORUM_PURPOSE_MAX }) }; }
 
     // Registration rules gate (migration 0301). When the global admin has set
     // forum-registration rules HTML, the applicant must tick "I agree" before
@@ -136,13 +138,13 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
     const rulesActive = rulesHtml.trim().length > 0;
     if (rulesActive && body.agreedToRules !== true) {
       reply.code(400);
-      return { error: "You must agree to the forum registration rules before applying." };
+      return { error: tFor(me.locale, "errors:server.forums.agreeRules") };
     }
 
     const slug = normalizeForumSlug(body.slug);
-    if (!slug) { reply.code(400); return { error: "That slug isn't usable - lowercase letters, numbers, and _ only (3-40), and not a reserved word." }; }
+    if (!slug) { reply.code(400); return { error: tFor(me.locale, "errors:server.applications.slugUnusable") }; }
     const used = await slugInUse(slug);
-    if (used) { reply.code(409); return { error: used === "taken" ? "That slug already belongs to a forum." : "Another pending application already claims that slug." }; }
+    if (used) { reply.code(409); return { error: used === "taken" ? tFor(me.locale, "errors:server.forums.slugTaken") : tFor(me.locale, "errors:server.forums.slugPendingClaim") }; }
 
     // One pending application per applicant (partial unique index backs this;
     // the pre-check keeps the error friendly).
@@ -152,7 +154,7 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
         eq(forumCreationApplications.applicantUserId, me.id),
         eq(forumCreationApplications.status, "pending"),
       )).limit(1))[0];
-    if (pendingMine) { reply.code(409); return { error: "You already have an application pending review." }; }
+    if (pendingMine) { reply.code(409); return { error: tFor(me.locale, "errors:server.applications.pendingReview") }; }
 
     // Rejection cooldown, so a declined applicant revises rather than spams.
     const lastRejected = (await db.select()
@@ -169,7 +171,7 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
       if (elapsed < cooldownMs) {
         const daysLeft = Math.ceil((cooldownMs - elapsed) / 86_400_000);
         reply.code(429);
-        return { error: `Your last application was declined recently - you can re-apply in ${daysLeft} day${daysLeft === 1 ? "" : "s"}.` };
+        return { error: tFor(me.locale, "errors:server.applications.declinedRecently", { count: daysLeft }) };
       }
     }
 
@@ -178,7 +180,7 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
       .where(and(eq(forums.ownerUserId, me.id), sql`${forums.status} != 'archived'`)))[0]?.n ?? 0;
     if (owned >= FORUM_MAX_OWNED_DEFAULT) {
       reply.code(409);
-      return { error: `You already keep ${owned} forums - the limit is ${FORUM_MAX_OWNED_DEFAULT}.` };
+      return { error: tFor(me.locale, "errors:server.forums.ownedLimit", { owned, limit: FORUM_MAX_OWNED_DEFAULT }) };
     }
 
     const id = nanoid();
@@ -194,7 +196,7 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
       });
     } catch {
       // UNIQUE race on the partial pending index - same friendly 409.
-      reply.code(409); return { error: "You already have an application pending review." };
+      reply.code(409); return { error: tFor(me.locale, "errors:server.applications.pendingReview") };
     }
     const rows = await db.select().from(forumCreationApplications)
       .where(eq(forumCreationApplications.id, id)).limit(1);
@@ -258,11 +260,11 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
         const slug = appRow.requestedSlug.toLowerCase();
         const taken = (await db.select({ id: forums.id }).from(forums)
           .where(sql`lower(${forums.slug}) = ${slug}`).limit(1))[0];
-        if (taken) { reply.code(409); return { error: "That slug was claimed since the application was filed. Reject with a note so the applicant can pick another." }; }
+        if (taken) { reply.code(409); return { error: tFor(me.locale, "errors:server.forums.slugClaimedSince") }; }
         const owned = (await db.select({ n: sql<number>`count(*)` }).from(forums)
           .where(and(eq(forums.ownerUserId, appRow.applicantUserId), sql`${forums.status} != 'archived'`)))[0]?.n ?? 0;
         if (owned >= FORUM_MAX_OWNED_DEFAULT) {
-          reply.code(409); return { error: "The applicant is already at the owned-forums limit." };
+          reply.code(409); return { error: tFor(me.locale, "errors:server.forums.applicantAtLimit") };
         }
       }
 
@@ -314,38 +316,16 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
           userId: appRow.applicantUserId,
           role: "owner",
         }).run();
-        tx.insert(rooms).values({
-          id: boardId,
-          name: boardName,
-          type: "public",
-          ownerId: appRow.applicantUserId,
-          originalOwnerUserId: appRow.applicantUserId,
-          lastOwnerUserId: appRow.applicantUserId,
-          topic: "General discussion",
-          replyMode: "nested",
+        // Starter board + system welcome sticky, via the shared seeder so
+        // the boot backfill (ensureForumStarterBoards) can't drift from
+        // what approval provisions.
+        seedForumStarter(tx, {
           forumId,
-        }).run();
-        tx.insert(messages).values({
-          id: nanoid(),
-          roomId: boardId,
-          userId: "system",
-          characterId: null,
-          displayName: "The Spire",
-          kind: "say",
-          title: "Welcome, Keeper - your forum stands",
-          body: [
-            `${appRow.requestedName} is yours to tend. As its Keeper you can:`,
-            "",
-            "• Raise boards and shape categories from your forum settings (coming online in the next update).",
-            "• Sticky and lock topics, and appoint Forum Moderators to help you tend the boards.",
-            "• Welcome everyone, or gate posting behind an application - your call.",
-            "• Set your forum's banner, sigil, and colors so the place feels like yours.",
-            "",
-            `Your forum lives at /forums - share the word. Pin this topic or sweep it away; the hall is yours.`,
-          ].join("\n"),
-          isSticky: true,
-          lastActivityAt: new Date(),
-        }).run();
+          forumName: appRow.requestedName,
+          ownerUserId: appRow.applicantUserId,
+          boardId,
+          boardName,
+        });
       });
       } catch (err) {
         // The board-name clash aborts via a sentinel throw so the whole
@@ -358,18 +338,23 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
         reply.code(409); return { error: `application already ${current?.status ?? "decided"}` };
       }
       if (boardNameTaken) {
-        reply.code(409); return { error: "A room already uses this forum's board name - reject with a note so the applicant picks another slug." };
+        reply.code(409); return { error: tFor(me.locale, "errors:server.forums.boardNameClash") };
       }
 
       // Live toast to the applicant's open tabs (offline applicants see the
-      // status in the Create-Forum modal next time).
+      // status in the Create-Forum modal next time). Localized to the
+      // APPLICANT's saved language (transient per-recipient notice).
       try {
+        const applicantLocale = (await db.select({ locale: users.locale })
+          .from(users).where(eq(users.id, appRow.applicantUserId)).limit(1))[0]?.locale ?? null;
         const sockets = await io.fetchSockets();
         for (const s of sockets) {
           if ((s.data as { userId?: string }).userId !== appRow.applicantUserId) continue;
           s.emit("error:notice", nextStatus === "approved"
-            ? { code: "FORUM_APP_APPROVED", message: `Your forum "${appRow.requestedName}" was approved - find it in the Forums Catalog!` }
-            : { code: "FORUM_APP_REJECTED", message: `Your forum application "${appRow.requestedName}" was declined${body.reviewNote ? `: ${body.reviewNote}` : "."}` });
+            ? { code: "FORUM_APP_APPROVED", message: tFor(applicantLocale, "errors:server.forums.appApproved", { name: appRow.requestedName }) }
+            : { code: "FORUM_APP_REJECTED", message: body.reviewNote
+                ? tFor(applicantLocale, "errors:server.forums.appDeclinedNote", { name: appRow.requestedName, note: body.reviewNote })
+                : tFor(applicantLocale, "errors:server.forums.appDeclined", { name: appRow.requestedName }) });
         }
       } catch { /* notification is best-effort */ }
 
@@ -394,11 +379,17 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
       if (!me) { reply.code(401); return { error: "auth" }; }
       const a = await forumAuthority(db, me, req.params.id);
       if (!a.forum) { reply.code(404); return { error: "no forum" }; }
-      if (a.forum.postingMode !== "application") {
-        reply.code(409); return { error: "This forum is open - no application needed, just post." };
+      // HARD age gate (age plan, Phase 3): the /f/ deep link deliberately
+      // serves a minor the 18+ forum's teaser detail, but applying to a
+      // forum they can never read is a dead end — refuse it plainly.
+      if (a.forum.isNsfw && !me.isAdult) {
+        reply.code(403); return { error: tFor(me.locale, "errors:server.forums.adultsOnly") };
       }
-      if (a.ban) { reply.code(403); return { error: "You are banned from this forum." }; }
-      if (a.isMember) { reply.code(409); return { error: "You're already a member here." }; }
+      if (a.forum.postingMode !== "application") {
+        reply.code(409); return { error: tFor(me.locale, "errors:server.forums.openNoApplication") };
+      }
+      if (a.ban) { reply.code(403); return { error: tFor(me.locale, "errors:server.forums.banned") }; }
+      if (a.isMember) { reply.code(409); return { error: tFor(me.locale, "errors:server.membership.alreadyMember") }; }
       let body: z.infer<typeof applyBody>;
       try { body = applyBody.parse(req.body ?? {}); }
       catch { reply.code(400); return { error: "invalid body" }; }
@@ -410,7 +401,7 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
           eq(forumMembershipApplications.applicantUserId, me.id),
           eq(forumMembershipApplications.status, "pending"),
         )).limit(1))[0];
-      if (pending) { reply.code(409); return { error: "Your application is already pending." }; }
+      if (pending) { reply.code(409); return { error: tFor(me.locale, "errors:server.applications.alreadyPending") }; }
 
       try {
         await db.insert(forumMembershipApplications).values({
@@ -420,7 +411,7 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
           answer: body.answer?.trim() ? body.answer.trim() : null,
         });
       } catch {
-        reply.code(409); return { error: "Your application is already pending." };
+        reply.code(409); return { error: tFor(me.locale, "errors:server.applications.alreadyPending") };
       }
       return { ok: true };
     },
@@ -534,13 +525,18 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
         reply.code(409); return { error: "application was already decided" };
       }
       // Live nudge so an online applicant sees the verdict immediately.
+      // Localized to the APPLICANT's saved language (transient per-recipient).
       try {
+        const applicantLocale = (await db.select({ locale: users.locale })
+          .from(users).where(eq(users.id, appRow.applicantUserId)).limit(1))[0]?.locale ?? null;
         const sockets = await io.fetchSockets();
         for (const s of sockets) {
           if ((s.data as { userId?: string }).userId !== appRow.applicantUserId) continue;
           s.emit("error:notice", nextStatus === "approved"
-            ? { code: "FORUM_MEMBER_APPROVED", message: `You're in - "${gate.forum.name}" approved your application.` }
-            : { code: "FORUM_MEMBER_REJECTED", message: `"${gate.forum.name}" declined your application${body.reviewNote ? `: ${body.reviewNote}` : "."}` });
+            ? { code: "FORUM_MEMBER_APPROVED", message: tFor(applicantLocale, "errors:server.forums.memberApproved", { name: gate.forum.name }) }
+            : { code: "FORUM_MEMBER_REJECTED", message: body.reviewNote
+                ? tFor(applicantLocale, "errors:server.forums.memberDeclinedNote", { name: gate.forum.name, note: body.reviewNote })
+                : tFor(applicantLocale, "errors:server.forums.memberDeclined", { name: gate.forum.name }) });
         }
       } catch { /* best-effort */ }
       return { ok: true };
@@ -553,9 +549,9 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
     const a = await forumAuthority(db, me, req.params.id);
     if (!a.forum) { reply.code(404); return { error: "no forum" }; }
     if (a.forum.ownerUserId === me.id) {
-      reply.code(409); return { error: "The keeper can't leave their own forum." };
+      reply.code(409); return { error: tFor(me.locale, "errors:server.forums.keeperCantLeave") };
     }
-    if (!a.role) { reply.code(409); return { error: "You're not a member here." }; }
+    if (!a.role) { reply.code(409); return { error: tFor(me.locale, "errors:server.membership.notMember") }; }
     await db.delete(forumMembers)
       .where(and(eq(forumMembers.forumId, a.forum.id), eq(forumMembers.userId, me.id)));
     return { ok: true };
@@ -573,9 +569,9 @@ export async function registerForumApplicationRoutes(app: FastifyInstance, db: D
     if (!me) { reply.code(401); return { error: "auth" }; }
     const a = await forumAuthority(db, me, req.params.id);
     if (!a.forum) { reply.code(404); return { error: "no forum" }; }
-    if (a.ban) { reply.code(403); return { error: "You are banned from this forum." }; }
+    if (a.ban) { reply.code(403); return { error: tFor(me.locale, "errors:server.forums.banned") }; }
     if (a.forum.postingMode === "application") {
-      reply.code(409); return { error: "This forum reviews applications. Apply to join instead." };
+      reply.code(409); return { error: tFor(me.locale, "errors:server.forums.reviewsApplications") };
     }
     // Idempotent: owner/mods/existing members already have access.
     if (a.isMember) return { ok: true };

@@ -9,6 +9,7 @@
  * optimistically so the author gets instant feedback.
  */
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { LinkPreview } from "@thekeep/shared";
 
 export function LinkPreviewCard({ preview, canRemove, messageId }: {
@@ -16,6 +17,7 @@ export function LinkPreviewCard({ preview, canRemove, messageId }: {
   canRemove: boolean;
   messageId: string;
 }) {
+  const { t } = useTranslation("common");
   const [hidden, setHidden] = useState(false);
   const [busy, setBusy] = useState(false);
   if (hidden) return null;
@@ -70,8 +72,8 @@ export function LinkPreviewCard({ preview, canRemove, messageId }: {
               .catch(() => { /* stays visible; retry available */ })
               .finally(() => setBusy(false));
           }}
-          title="Remove this preview for everyone (the link stays in your message)"
-          aria-label="Remove link preview"
+          title={t("linkPreview.removeTitle")}
+          aria-label={t("linkPreview.removeAria")}
           className="absolute right-1 top-1 rounded bg-keep-bg/70 px-1.5 text-xs leading-5 text-keep-muted hover:text-keep-text"
         >
           ✕

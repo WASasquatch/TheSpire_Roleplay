@@ -21,7 +21,18 @@ export interface ForumPrefixCtx {
   canManagePrefixes: boolean;
   /** Forum allows custom tags AND the viewer may mint one on the fly. */
   canCreateCustom: boolean;
-  onAssign: (topicId: string, currentPrefixId: string | null, topicCategoryId: string | null) => void;
+  /**
+   * Open the tag picker for one topic. `nsfw` carries what the picker's
+   * NSFW re-tag section (age-restriction plan Phase 3) needs: the topic's
+   * current tag state and its author (the author may re-tag their own
+   * topic, adults only — the picker mirrors the server's gate with these).
+   */
+  onAssign: (
+    topicId: string,
+    currentPrefixId: string | null,
+    topicCategoryId: string | null,
+    nsfw: { current: boolean; authorUserId: string },
+  ) => void;
 }
 
 export const ForumPrefixContext = createContext<ForumPrefixCtx | null>(null);

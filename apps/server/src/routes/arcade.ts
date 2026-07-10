@@ -26,6 +26,7 @@ import {
   BASIC_HEAL_AMOUNT, BASIC_HEAL_COST, POTION_HEAL_AMOUNT,
   catchUp, currentSimHour, foodEffect, freshStats, rollCheckIn, rollName, serverDayKey, toyEffect, type EidolonProgress,
 } from "../earning/eidolon.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -40,7 +41,7 @@ const gaugeSum = (s: { satiety: number; joy: number; vigor: number; hygiene: num
 export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
   /* ---- identity + gate ---- */
   type Gate =
-    | { ok: true; userId: string; role: import("@thekeep/shared").Role; scope: Scope; ownerId: string; serverId: string }
+    | { ok: true; userId: string; role: import("@thekeep/shared").Role; scope: Scope; ownerId: string; serverId: string; locale: string | null }
     | { ok: false; code: number; body: Record<string, unknown> };
 
   async function gate(req: FastifyRequest, characterId: string | null, requestedServerId: string | undefined): Promise<Gate> {
@@ -49,7 +50,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // Two permission gates: the Arcade section, then this specific game.
     // Admins can revoke either via the matrix (kill-switch).
     if (!(await hasPermission(me, "use_arcade", db)) || !(await hasPermission(me, "use_eidolon_tamer", db))) {
-      return { ok: false, code: 403, body: { error: "The Eidolon Tamer isn't available to you." } };
+      return { ok: false, code: 403, body: { error: tFor(me.locale, "errors:server.arcade.eidolonUnavailable") } };
     }
     let scope: Scope = "user";
     let ownerId = me.id;
@@ -67,7 +68,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // default, so this is byte-identical to the legacy single-pool check.
     const owned = await ownsPurchase(db, { flairKey: FLAIR_EIDOLON_TAMER, scope, ownerId, serverId });
     if (!owned) return { ok: false, code: 402, body: { error: "locked", needsUnlock: true } };
-    return { ok: true, userId: me.id, role: me.role, scope, ownerId, serverId };
+    return { ok: true, userId: me.id, role: me.role, scope, ownerId, serverId, locale: me.locale };
   }
 
   async function loadRow(scope: Scope, ownerId: string, serverId: string): Promise<Row | undefined> {
@@ -290,7 +291,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
   app.post<{ Body: unknown }>("/arcade/eidolon/visit", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
-    if (!(await hasPermission(me, "use_arcade", db))) { reply.code(403); return { error: "The Arcade isn't available to you." }; }
+    if (!(await hasPermission(me, "use_arcade", db))) { reply.code(403); return { error: tFor(me.locale, "errors:server.arcade.arcadeUnavailable") }; }
     let body: z.infer<typeof visitBody>;
     try { body = visitBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
@@ -308,13 +309,13 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       ? targetOwnerId
       : (await db.select({ userId: characters.userId }).from(characters).where(eq(characters.id, targetOwnerId)).limit(1))[0]?.userId;
     if (!targetUserId) { reply.code(404); return { error: "no such familiar" }; }
-    if (targetUserId === me.id) { reply.code(409); return { error: "you can't pat your own familiar" }; }
+    if (targetUserId === me.id) { reply.code(409); return { error: tFor(me.locale, "errors:server.arcade.patOwn") }; }
 
     const row = await loadRow(targetScope, targetOwnerId, sid);
-    if (!row) { reply.code(404); return { error: "they have no familiar to pat" }; }
+    if (!row) { reply.code(404); return { error: tFor(me.locale, "errors:server.arcade.nothingToPat") }; }
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
-    if (prog.dead) { reply.code(409); return { error: "that familiar lies dormant" }; }
+    if (prog.dead) { reply.code(409); return { error: tFor(me.locale, "errors:server.arcade.familiarDormant") }; }
 
     // Atomic cooldown claim: read last pat + write the new timestamp in one
     // transaction so a double-fire can't double-pat (the second sees the claim).
@@ -332,7 +333,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
         .onConflictDoUpdate({ target: [eidolonVisits.serverId, eidolonVisits.visitorUserId, eidolonVisits.targetOwnerScope, eidolonVisits.targetOwnerId], set: { visitedAt: nowMs } }).run();
       return { ok: true, retryAfterMs: 0 };
     });
-    if (!claim.ok) { reply.code(429); return { error: "you've already patted this familiar today", retryAfterMs: claim.retryAfterMs }; }
+    if (!claim.ok) { reply.code(429); return { error: tFor(me.locale, "errors:server.arcade.alreadyPatted"), retryAfterMs: claim.retryAfterMs }; }
 
     // Apply the joy to the target's familiar. NOT a check-in for the owner
     // (their streak only advances when THEY tend it) — persist writes the
@@ -363,7 +364,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // the lineage it would feed) or be abused to reroll a trait/variant. Sell
     // and release are the only ways to clear the slot (both write the Hall row).
     // Scoped to the active server: the familiar is SEPARATE per server.
-    if (await loadRow(g.scope, g.ownerId, g.serverId)) { reply.code(409); return { error: "you already have a familiar: sell, release, or revive it first" }; }
+    if (await loadRow(g.scope, g.ownerId, g.serverId)) { reply.code(409); return { error: tFor(g.locale, "errors:server.arcade.alreadyHaveFamiliar") }; }
 
     let speciesId: string | null = null;
     let petItemKey: string | null = null;
@@ -381,7 +382,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       if (!it || it.category !== "pet") { reply.code(400); return { error: "not a pet" }; }
       const held = (await db.select({ qty: identityInventory.quantity }).from(identityInventory)
         .where(and(eq(identityInventory.serverId, g.serverId), eq(identityInventory.ownerScope, g.scope), eq(identityInventory.ownerId, g.ownerId), eq(identityInventory.itemKey, body.petItemKey))).limit(1))[0];
-      if (!held || held.qty < 1) { reply.code(403); return { error: "you don't own that pet" }; }
+      if (!held || held.qty < 1) { reply.code(403); return { error: tFor(g.locale, "errors:server.arcade.dontOwnPet") }; }
       petItemKey = body.petItemKey;
       if (!name) name = it.name;
     }
@@ -437,7 +438,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     if (!row) { reply.code(404); return { error: "no familiar" }; }
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
-    if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant: revive it with a magical item" }; }
+    if (prog.dead) { reply.code(409); return { error: tFor(g.locale, "errors:server.arcade.dormantRevive") }; }
     const jg = effectiveTraits(row.kind, row.speciesId, row.trait).joyGain;
     const before = gaugeSum(prog.stats);
     if (body.kind === "play") { prog.stats.joy = clamp(prog.stats.joy + 14 * jg); prog.stats.vigor = clamp(prog.stats.vigor - 2); }
@@ -460,13 +461,13 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     const g = await gate(req, body.characterId ?? null, body.serverId);
     if (!g.ok) { reply.code(g.code); return g.body; }
     // Reject a concurrent double-fire so one click can't consume two foods.
-    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment, still tending your familiar" }; }
+    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: tFor(g.locale, "errors:server.arcade.stillTending") }; }
     try {
       const row = await loadRow(g.scope, g.ownerId, g.serverId);
       if (!row) { reply.code(404); return { error: "no familiar" }; }
       const item = (await db.select({ key: items.key, price: items.price, category: items.category }).from(items).where(and(eq(items.serverId, g.serverId), eq(items.key, body.itemKey))).limit(1))[0];
-      if (!item || item.category !== "food") { reply.code(400); return { error: "that isn't food" }; }
-      if (!consumeOne(g.scope, g.ownerId, g.serverId, body.itemKey)) { reply.code(409); return { error: "you don't have that food" }; }
+      if (!item || item.category !== "food") { reply.code(400); return { error: tFor(g.locale, "errors:server.arcade.notFood") }; }
+      if (!consumeOne(g.scope, g.ownerId, g.serverId, body.itemKey)) { reply.code(409); return { error: tFor(g.locale, "errors:server.arcade.dontHaveFood") }; }
       await emitToUser(g.userId, "earning:inventory_changed", { scope: g.scope, ownerId: g.ownerId, itemKey: body.itemKey, delta: -1, reason: "eidolon_feed" });
       const nowMs = Date.now();
       const prog = catchUp(row, nowMs);
@@ -504,13 +505,13 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // Must be a toy-category item the identity holds (>=1). Reusable: NOT consumed,
     // so owning one grants unlimited play; buying more is pointless (and harmless).
     const item = (await db.select({ key: items.key, category: items.category }).from(items).where(and(eq(items.serverId, g.serverId), eq(items.key, body.itemKey))).limit(1))[0];
-    if (!item || item.category !== "toy") { reply.code(400); return { error: "that isn't a toy" }; }
+    if (!item || item.category !== "toy") { reply.code(400); return { error: tFor(g.locale, "errors:server.arcade.notToy") }; }
     const held = (await db.select({ qty: identityInventory.quantity }).from(identityInventory)
       .where(and(eq(identityInventory.serverId, g.serverId), eq(identityInventory.ownerScope, g.scope), eq(identityInventory.ownerId, g.ownerId), eq(identityInventory.itemKey, body.itemKey))).limit(1))[0];
-    if (!held || held.qty < 1) { reply.code(403); return { error: "you don't own that toy" }; }
+    if (!held || held.qty < 1) { reply.code(403); return { error: tFor(g.locale, "errors:server.arcade.dontOwnToy") }; }
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
-    if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant: revive it with a magical item" }; }
+    if (prog.dead) { reply.code(409); return { error: tFor(g.locale, "errors:server.arcade.dormantRevive") }; }
     const jg = effectiveTraits(row.kind, row.speciesId, row.trait).joyGain;
     const before = gaugeSum(prog.stats);
     const eff = toyEffect(body.itemKey);
@@ -533,20 +534,20 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     if (!g.ok) { reply.code(g.code); return g.body; }
     // Reject a concurrent double-fire so one click can't consume two potions
     // (or double-charge the basic heal).
-    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment, still tending your familiar" }; }
+    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: tFor(g.locale, "errors:server.arcade.stillTending") }; }
     try {
       const row = await loadRow(g.scope, g.ownerId, g.serverId);
       if (!row) { reply.code(404); return { error: "no familiar" }; }
       const nowMs = Date.now();
       const prog = catchUp(row, nowMs);
-      if (prog.dead) { reply.code(409); return { error: "your familiar lies dormant: revive it with a magical item" }; }
+      if (prog.dead) { reply.code(409); return { error: tFor(g.locale, "errors:server.arcade.dormantRevive") }; }
       const before = gaugeSum(prog.stats);
 
       if (body.itemKey) {
         // Potion path: must be a magic-category consumable they hold.
         const item = (await db.select({ key: items.key, category: items.category }).from(items).where(and(eq(items.serverId, g.serverId), eq(items.key, body.itemKey))).limit(1))[0];
-        if (!item || item.category !== "magic") { reply.code(400); return { error: "that won't cure anything" }; }
-        if (!consumeOne(g.scope, g.ownerId, g.serverId, body.itemKey)) { reply.code(409); return { error: "you don't have that item" }; }
+        if (!item || item.category !== "magic") { reply.code(400); return { error: tFor(g.locale, "errors:server.arcade.wontCure") }; }
+        if (!consumeOne(g.scope, g.ownerId, g.serverId, body.itemKey)) { reply.code(409); return { error: tFor(g.locale, "errors:server.arcade.dontHaveItem") }; }
         await emitToUser(g.userId, "earning:inventory_changed", { scope: g.scope, ownerId: g.ownerId, itemKey: body.itemKey, delta: -1, reason: "eidolon_remedy" });
         prog.sick = false;
         prog.stats.health = clamp(prog.stats.health + POTION_HEAL_AMOUNT);
@@ -554,7 +555,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
         // Basic heal: small currency cost, small heal, no cure. Debited on the
         // active server's pool (the same economy the familiar lives on).
         const debit = debitCurrency(g.scope, g.userId, g.ownerId, g.serverId, BASIC_HEAL_COST, "eidolon_basic_heal");
-        if (!debit.ok) { reply.code(402); return { error: "not enough currency", required: BASIC_HEAL_COST, balance: debit.balance }; }
+        if (!debit.ok) { reply.code(402); return { error: tFor(g.locale, "errors:server.common.notEnoughCurrency"), required: BASIC_HEAL_COST, balance: debit.balance }; }
         await emitToUser(g.userId, "earning:earned", {
           scope: g.scope, ownerId: g.scope === "character" ? g.ownerId : g.userId,
           xpDelta: 0, currencyDelta: -BASIC_HEAL_COST, xpTotal: debit.final.xp, currencyTotal: debit.final.currency,
@@ -585,17 +586,17 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     // Reject a concurrent double-fire so one click can't consume two items. The
     // re-checked `!prog.dead` below also stops a SEQUENTIAL duplicate (the second
     // sees the familiar already awake).
-    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: "one moment, still tending your familiar" }; }
+    if (!beginConsume(g.scope, g.ownerId)) { reply.code(429); return { error: tFor(g.locale, "errors:server.arcade.stillTending") }; }
     try {
       const row = await loadRow(g.scope, g.ownerId, g.serverId);
       if (!row) { reply.code(404); return { error: "no familiar" }; }
       const nowMs = Date.now();
       const prog = catchUp(row, nowMs);
-      if (!prog.dead) { reply.code(409); return { error: "your familiar still lives" }; }
+      if (!prog.dead) { reply.code(409); return { error: tFor(g.locale, "errors:server.arcade.stillLives") }; }
       // Only a magic-category consumable (a Potion) they hold can wake it.
       const item = (await db.select({ key: items.key, category: items.category }).from(items).where(and(eq(items.serverId, g.serverId), eq(items.key, body.itemKey))).limit(1))[0];
-      if (!item || item.category !== "magic") { reply.code(400); return { error: "only a magical item can wake it" }; }
-      if (!consumeOne(g.scope, g.ownerId, g.serverId, body.itemKey)) { reply.code(409); return { error: "you don't have that item" }; }
+      if (!item || item.category !== "magic") { reply.code(400); return { error: tFor(g.locale, "errors:server.arcade.onlyMagicWakes") }; }
+      if (!consumeOne(g.scope, g.ownerId, g.serverId, body.itemKey)) { reply.code(409); return { error: tFor(g.locale, "errors:server.arcade.dontHaveItem") }; }
       await emitToUser(g.userId, "earning:inventory_changed", { scope: g.scope, ownerId: g.ownerId, itemKey: body.itemKey, delta: -1, reason: "eidolon_revive" });
       // Wake to a fragile second life: clear the dormancy/sickness, restore health,
       // and lift the collapsed upkeep stats off the floor (reviveStats) so it
@@ -629,7 +630,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
     if (!row) return { eidolon: null };
     const nowMs = Date.now();
     const prog = catchUp(row, nowMs);
-    if (!prog.dead) { reply.code(409); return { error: "your familiar still lives" }; }
+    if (!prog.dead) { reply.code(409); return { error: tFor(g.locale, "errors:server.arcade.stillLives") }; }
     const where = and(eq(eidolonState.serverId, g.serverId), eq(eidolonState.ownerScope, g.scope), eq(eidolonState.ownerId, g.ownerId));
     // Record the departure to the Hall, then clear — atomically, so the memorial
     // (and the lineage head-start it feeds the next hatch) can't be lost to a race.
@@ -687,7 +688,7 @@ export async function registerArcadeRoutes(app: FastifyInstance, db: Db, io: Io)
       return { kind: "sold", value, level, final };
     });
     if (outcome.kind === "none") { reply.code(404); return { error: "no familiar" }; }
-    if (outcome.kind === "dead") { reply.code(409); return { error: "a dormant familiar can't be sold: revive it first, or release it" }; }
+    if (outcome.kind === "dead") { reply.code(409); return { error: tFor(g.locale, "errors:server.arcade.dormantCantSell") }; }
     if (outcome.value > 0) {
       await emitToUser(g.userId, "earning:earned", {
         scope: g.scope, ownerId: g.scope === "character" ? g.ownerId : g.userId,

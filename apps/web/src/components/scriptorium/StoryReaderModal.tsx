@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import type {
   PrivateStoryStub,
   StoryApplauseState,
@@ -10,6 +12,7 @@ import type {
   StorySubscriptionState,
 } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatNumber } from "../../lib/intlFormat.js";
 import { themeStyle } from "../../lib/theme.js";
 import { useChat } from "../../state/store.js";
 import { fetchStoryCopyState, buyStoryCopy, setStoryShowcase, type StoryCopyState } from "../../lib/storyCopies.js";
@@ -91,6 +94,7 @@ function keepBgVarRgb(el: Element): [number, number, number] | null {
  * every 2s of inactivity.
  */
 export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit, onBack }: Props) {
+  const { t } = useTranslation("scriptorium");
   const [detail, setDetail] = useState<StoryDetail | null>(null);
   const [stub, setStub] = useState<PrivateStoryStub | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -134,8 +138,9 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
           if (i >= 0) setChapterIdx(i);
         }
       })
-      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : "load failed"); });
+      .catch((e) => { if (!cancelled) setError(e instanceof Error ? e.message : t("errors.loadFailed")); });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storyId, initialChapterIndex, refreshKey]);
 
   const chapters = detail?.chapters ?? [];
@@ -349,8 +354,8 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
               type="button"
               onClick={() => setNavOpen(true)}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-base leading-none text-keep-muted hover:text-keep-text md:hidden"
-              title="Contents: chapters, codex, buy a copy"
-              aria-label="Open contents menu"
+              title={t("reader.contentsTitle")}
+              aria-label={t("reader.contentsAria")}
             >
               ☰
             </button>
@@ -360,24 +365,24 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
               type="button"
               onClick={onBack}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
-              title="Back to Scriptorium"
+              title={t("backToScriptorium")}
             >
               <span className="md:hidden" aria-hidden>←</span>
-              <span className="hidden md:inline">← Back</span>
+              <span className="hidden md:inline">{t("back")}</span>
             </button>
           ) : null}
           <h2 className="min-w-0 flex-1 truncate font-action text-lg">
-            {detail ? detail.story.title : stub ? stub.title : "Loading..."}
+            {detail ? detail.story.title : stub ? stub.title : t("common:loadingDots")}
           </h2>
           <div className="flex items-center gap-1">
             <button type="button" onClick={() => setMode("book")}
               className={`rounded border px-2 py-0.5 text-[11px] uppercase tracking-widest ${
                 mode === "book" ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted"
-              }`}>Book</button>
+              }`}>{t("reader.modeBook")}</button>
             <button type="button" onClick={() => setMode("pageless")}
               className={`rounded border px-2 py-0.5 text-[11px] uppercase tracking-widest ${
                 mode === "pageless" ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted"
-              }`}>Pageless</button>
+              }`}>{t("reader.modePageless")}</button>
             <button type="button" onClick={() => setTypoOpen((v) => !v)}
               className="rounded border border-keep-rule px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted">
               Aa
@@ -385,7 +390,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
             {onEdit && detail?.viewerCanEdit ? (
               <button type="button" onClick={onEdit}
                 className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted">
-                Edit
+                {t("edit")}
               </button>
             ) : null}
           </div>
@@ -411,7 +416,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
         {stub ? (
           <PrivateStub stub={stub} onClose={onClose} />
         ) : !detail ? (
-          <p className="p-6 italic text-keep-muted">Loading...</p>
+          <p className="p-6 italic text-keep-muted">{t("common:loadingDots")}</p>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col">
             {/* Moderator paywall-bypass warning. Shown only when full access
@@ -419,7 +424,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
                 so a mod knows the book is normally purchase-to-read. */}
             {detail.paywallBypassed ? (
               <div className="shrink-0 border-b border-amber-400/40 bg-amber-400/10 px-4 py-2 text-center text-xs text-amber-200">
-                ⚠️ This book is marked <b>Buy to Read</b>. You're viewing it in full via moderator access. Readers must buy a copy to read past a sample.
+                <Trans t={t} i18nKey="reader.paywallBypassed" components={[<b key="0" />]} />
               </div>
             ) : null}
             <div
@@ -505,7 +510,7 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
                       full={chapterBodies[currentChapter.id] ?? null}
                     />
                   ) : (
-                    <p className="italic text-keep-muted">This story has no published chapters yet.</p>
+                    <p className="italic text-keep-muted">{t("reader.noPublishedChapters")}</p>
                   )}
                 </BookPagedView>
               )}
@@ -522,13 +527,13 @@ export function StoryReaderModal({ storyId, initialChapterIndex, onClose, onEdit
         {navOpen && detail ? (
           <div className="absolute inset-0 z-30 flex flex-col bg-keep-bg md:hidden">
             <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule bg-keep-banner px-3 py-2">
-              <h3 className="min-w-0 flex-1 truncate font-action text-base">Contents</h3>
+              <h3 className="min-w-0 flex-1 truncate font-action text-base">{t("reader.contents")}</h3>
               <button
                 type="button"
                 onClick={() => setNavOpen(false)}
                 className="rounded border border-keep-rule bg-keep-bg px-3 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:text-keep-text"
               >
-                Done
+                {t("reader.done")}
               </button>
             </header>
             <div className="keep-panel min-h-0 flex-1 overflow-y-auto">
@@ -780,11 +785,12 @@ function PageNavBar({
   minFont: number;
   maxFont: number;
 }) {
+  const { t } = useTranslation("scriptorium");
   // Prev/Next labels adapt at chapter boundaries so the reader gets a
   // clear "you're flipping chapters now" signal instead of a button
   // that silently changes meaning.
-  const prevLabel = atFirstPage && hasPrevChapter ? "← Prev chapter" : "← Page";
-  const nextLabel = atLastPage && hasNextChapter ? "Next chapter →" : "Page →";
+  const prevLabel = atFirstPage && hasPrevChapter ? t("reader.prevChapter") : t("reader.prevPage");
+  const nextLabel = atLastPage && hasNextChapter ? t("reader.nextChapter") : t("reader.nextPage");
   const prevDisabled = atFirstPage && !hasPrevChapter;
   const nextDisabled = atLastPage && !hasNextChapter;
   const borderClass = position === "top"
@@ -801,7 +807,7 @@ function PageNavBar({
         {prevLabel}
       </button>
       <span className="tabular-nums text-keep-muted">
-        Page {pageIdx + 1} of {totalPages}
+        {t("reader.pageOf", { page: pageIdx + 1, total: totalPages })}
       </span>
       <button
         type="button"
@@ -820,7 +826,7 @@ function PageNavBar({
         type="button"
         onClick={() => setFontStep(Math.max(minFont, fontStep - 1))}
         disabled={fontStep <= minFont}
-        title="Smaller text"
+        title={t("reader.smallerText")}
         className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-1 text-[10px] uppercase tracking-widest disabled:opacity-40"
       >
         A−
@@ -830,7 +836,7 @@ function PageNavBar({
         type="button"
         onClick={() => setFontStep(Math.min(maxFont, fontStep + 1))}
         disabled={fontStep >= maxFont}
-        title="Larger text"
+        title={t("reader.largerText")}
         className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-1 text-[10px] uppercase tracking-widest disabled:opacity-40"
       >
         A+
@@ -873,6 +879,7 @@ function ReaderSidebar({
   mode: ReadMode;
   onJumpChapter: (chapterId: string) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const s = detail.story;
   const authorName = s.author.characterName ?? s.author.masterUsername;
   return (
@@ -889,20 +896,20 @@ function ReaderSidebar({
           />
         ) : null}
         <h2 className="font-action text-xl leading-tight">{s.title}</h2>
-        <p className="mt-0.5 text-sm italic text-keep-muted">by {authorName}</p>
+        <p className="mt-0.5 text-sm italic text-keep-muted">{t("byAuthor", { name: authorName })}</p>
         {s.status === "in_progress" ? (
           <p className="mt-2">
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-amber-400/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-amber-300">
               <span aria-hidden="true">✎</span>
-              Still writing
+              {t("reader.stillWriting")}
             </span>
           </p>
         ) : null}
         {s.buyToRead ? (
           <p className="mt-2">
-            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/60 bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-amber-300" title="Readers buy a copy to read past a sample">
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/60 bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-amber-300" title={t("reader.buyToReadChipTitle")}>
               <span aria-hidden="true">🔒</span>
-              Buy to read
+              {t("reader.buyToReadChip")}
             </span>
           </p>
         ) : null}
@@ -911,7 +918,7 @@ function ReaderSidebar({
         ) : null}
         {s.contentWarnings.length > 0 ? (
           <p className="mt-2 text-xs italic opacity-80">
-            Content: {s.contentWarnings.join(", ")}
+            {t("reader.contentLine", { list: s.contentWarnings.join(", ") })}
           </p>
         ) : null}
 
@@ -921,12 +928,12 @@ function ReaderSidebar({
             as a single bar instead of free-floating chips. */}
         <MetaBar
           segments={[
-            { label: "Rating", value: s.rating },
-            { label: "Genre", value: labelForGenre(s.genre) },
+            { label: t("rating.legend"), value: s.rating },
+            { label: t("genre"), value: labelForGenre(t, s.genre) },
             ...(s.status !== "in_progress"
-              ? [{ label: "Status", value: labelForStatus(s.status) }]
+              ? [{ label: t("statusLabel"), value: labelForStatus(t, s.status) }]
               : []),
-            { label: "Length", value: `${s.totalChapters}ch · ${s.totalWords.toLocaleString()}w` },
+            { label: t("reader.lengthLabel"), value: t("reader.lengthValue", { chapters: s.totalChapters, words: formatNumber(s.totalWords) }) },
           ]}
         />
 
@@ -948,7 +955,7 @@ function ReaderSidebar({
       {chapters.length > 0 ? (
         <section>
           <header className="keep-section-header border-y border-keep-rule/40 bg-keep-panel-200/40 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
-            Chapters
+            {t("reader.chapters")}
             <span className="ml-2 tabular-nums normal-case">({chapters.length})</span>
           </header>
           <ol className="text-sm">
@@ -959,14 +966,14 @@ function ReaderSidebar({
                   <button
                     type="button"
                     onClick={() => onJumpChapter(c.id)}
-                    title={c.title || `Chapter ${i + 1}`}
+                    title={c.title || t("editor.chapterN", { number: i + 1 })}
                     data-active={active ? "true" : undefined}
                     className={`keep-row block w-full truncate border-b border-keep-rule/20 px-3 py-2 text-left ${
                       active ? "text-keep-action" : "text-keep-text/85 hover:text-keep-text"
                     }`}
                   >
                     <span className="mr-2 inline-block w-5 text-right tabular-nums text-keep-muted">{i + 1}.</span>
-                    {c.title || `Chapter ${i + 1}`}
+                    {c.title || t("editor.chapterN", { number: i + 1 })}
                   </button>
                 </li>
               );
@@ -983,7 +990,7 @@ function ReaderSidebar({
         <details className="group border-t border-keep-rule/40">
           <summary className="keep-section-header keep-row flex cursor-pointer items-center bg-keep-panel-200/40 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
             <span className="mr-2 text-keep-muted transition group-open:rotate-90">▶</span>
-            Reviews
+            {t("reviews.title")}
           </summary>
           <div className="px-3 pb-2 pt-1">
             <StoryReviewsPanel
@@ -999,7 +1006,7 @@ function ReaderSidebar({
       <details className="group border-y border-keep-rule/40">
         <summary className="keep-section-header keep-row flex cursor-pointer items-center bg-keep-panel-200/40 px-3 py-2 text-xs font-semibold uppercase tracking-widest text-keep-muted">
           <span className="mr-2 text-keep-muted transition group-open:rotate-90">▶</span>
-          Codex
+          {t("reader.codex")}
         </summary>
         <div className="px-3 pb-2 pt-1">
           <StoryCodexAppendix storyId={s.id} />
@@ -1010,8 +1017,8 @@ function ReaderSidebar({
           micro-copy so first-timers know about the keyboard nav. */}
       <p className="mt-auto px-3 pb-3 pt-3 text-xs italic text-keep-muted">
         {mode === "book"
-          ? "Tip: ← / → flip pages."
-          : "Tip: scroll to read; toggle Book mode for paged view."}
+          ? t("reader.tipBook")
+          : t("reader.tipPageless")}
       </p>
     </div>
   );
@@ -1105,6 +1112,7 @@ function ActionBar({
 
 /* ---------- Buy-a-Copy bar (full width, below the action row) ---------- */
 function BuyCopyBar({ storyId }: { storyId: string }) {
+  const { t } = useTranslation("scriptorium");
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const setNotice = useChat((s) => s.setNotice);
   const [state, setState] = useState<StoryCopyState | null>(null);
@@ -1124,9 +1132,9 @@ function BuyCopyBar({ storyId }: { storyId: string }) {
     try {
       const res = await buyStoryCopy(storyId, activeCharacterId);
       setState(await fetchStoryCopyState(storyId, activeCharacterId));
-      setNotice({ code: "scriptorium_copy", message: `Copy added to your Library (−${res.price}).` });
+      setNotice({ code: "scriptorium_copy", message: t("buy.copyAdded", { price: res.price }) });
     } catch (e) {
-      setNotice({ code: "scriptorium_copy_err", message: e instanceof Error ? e.message : "Purchase failed." });
+      setNotice({ code: "scriptorium_copy_err", message: e instanceof Error ? e.message : t("errors.purchaseFailed") });
     } finally {
       setBusy(false);
     }
@@ -1139,7 +1147,7 @@ function BuyCopyBar({ storyId }: { storyId: string }) {
       const r = await setStoryShowcase(storyId, activeCharacterId, !state.showcased);
       setState({ ...state, showcased: r.shown });
     } catch (e) {
-      setNotice({ code: "scriptorium_showcase_err", message: e instanceof Error ? e.message : "Couldn't update your Library." });
+      setNotice({ code: "scriptorium_showcase_err", message: e instanceof Error ? e.message : t("errors.libraryUpdateFailed") });
     } finally {
       setBusy(false);
     }
@@ -1158,9 +1166,9 @@ function BuyCopyBar({ storyId }: { storyId: string }) {
       disabled={busy}
       title={owned
         ? (state.showcased
-            ? "Showing on your profile, tap to hide"
-            : "You own this, tap to show it on your profile")
-        : `Buy a copy for ${state.price} (adds it to your profile Library)`}
+            ? t("buy.showingTitle")
+            : t("buy.ownedTitle"))
+        : t("buy.buyBarTitle", { price: state.price })}
       className={`mt-2 flex w-full items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-semibold uppercase tracking-widest shadow-inner transition disabled:opacity-50 ${
         active
           ? "border-keep-action bg-keep-action/20 text-keep-action hover:bg-keep-action/30"
@@ -1168,7 +1176,7 @@ function BuyCopyBar({ storyId }: { storyId: string }) {
       }`}
     >
       <span className="text-base leading-none" aria-hidden>{owned ? "📚" : "📖"}</span>
-      <span>{owned ? (state.showcased ? "Showing on Profile" : "Show on Profile") : "Buy a Copy"}</span>
+      <span>{owned ? (state.showcased ? t("buy.showingOnProfile") : t("buy.showOnProfile")) : t("buy.buyACopy")}</span>
       {!owned ? (
         <span className="text-xs tabular-nums opacity-70 normal-case">· {state.price}</span>
       ) : state.showcased ? (
@@ -1199,6 +1207,7 @@ function ActionSegment({
 
 /* ---------- Applause segment ---------- */
 function ApplauseSegment({ storyId, initialCount }: { storyId: string; initialCount: number }) {
+  const { t } = useTranslation("scriptorium");
   const [count, setCount] = useState(initialCount);
   const [viewerApplauded, setViewerApplauded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1235,14 +1244,14 @@ function ApplauseSegment({ storyId, initialCount }: { storyId: string; initialCo
       type="button"
       onClick={toggle}
       disabled={busy}
-      title={viewerApplauded ? "Remove your applause" : "Applaud this story"}
+      title={viewerApplauded ? t("reader.removeApplause") : t("reader.applaudStory")}
       className={`flex w-full flex-col items-center justify-center gap-0.5 px-2 py-2 text-center transition hover:bg-keep-action/10 ${
         viewerApplauded ? "text-keep-action" : "text-keep-text"
       } disabled:opacity-50`}
     >
       <span className="text-base leading-none" aria-hidden>👏</span>
       <span className="text-[10px] font-semibold uppercase tracking-widest">
-        {viewerApplauded ? "Applauded" : "Applaud"}
+        {viewerApplauded ? t("reader.applauded") : t("reader.applaud")}
       </span>
       {count > 0 ? <span className="text-xs tabular-nums opacity-70">{count}</span> : null}
     </button>
@@ -1251,6 +1260,7 @@ function ApplauseSegment({ storyId, initialCount }: { storyId: string; initialCo
 
 /* ---------- Follow segment ---------- */
 function FollowSegment({ storyId }: { storyId: string }) {
+  const { t } = useTranslation("scriptorium");
   const [state, setState] = useState<StorySubscriptionState | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -1287,14 +1297,14 @@ function FollowSegment({ storyId }: { storyId: string }) {
       type="button"
       onClick={toggle}
       disabled={busy || !state}
-      title={subscribed ? "You'll be notified when a new chapter publishes" : "Get notified when a new chapter publishes"}
+      title={subscribed ? t("reader.followingTitle") : t("reader.followTitle")}
       className={`flex w-full flex-col items-center justify-center gap-0.5 px-2 py-2 text-center transition hover:bg-keep-action/10 ${
         subscribed ? "text-keep-action" : "text-keep-text"
       } disabled:opacity-50`}
     >
       <span className="text-base leading-none" aria-hidden>{subscribed ? "✦" : "✧"}</span>
       <span className="text-[10px] font-semibold uppercase tracking-widest">
-        {subscribed ? "Following" : "Follow"}
+        {subscribed ? t("reader.following") : t("reader.follow")}
       </span>
       {count > 0 ? <span className="text-xs tabular-nums opacity-70">{count}</span> : null}
     </button>
@@ -1303,10 +1313,11 @@ function FollowSegment({ storyId }: { storyId: string }) {
 
 /* ---------- Report segment ---------- */
 function ReportSegment({ storyId }: { storyId: string }) {
+  const { t } = useTranslation("scriptorium");
   const [busy, setBusy] = useState(false);
 
   async function report() {
-    const reason = window.prompt("Why are you reporting this story? (optional)") ?? "";
+    const reason = window.prompt(t("reader.reportPrompt")) ?? "";
     if (busy) return;
     setBusy(true);
     try {
@@ -1315,7 +1326,7 @@ function ReportSegment({ storyId }: { storyId: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ targetKind: "story", targetId: storyId, reason: reason.trim() }),
       });
-      window.alert("Report submitted. Thanks for flagging it.");
+      window.alert(t("reader.reportSubmitted"));
     } finally {
       setBusy(false);
     }
@@ -1326,11 +1337,11 @@ function ReportSegment({ storyId }: { storyId: string }) {
       type="button"
       onClick={report}
       disabled={busy}
-      title="Report this story to moderators"
+      title={t("reader.reportStoryTitle")}
       className="flex w-full flex-col items-center justify-center gap-0.5 px-2 py-2 text-center text-keep-muted transition hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
     >
       <span className="text-base leading-none" aria-hidden>🚩</span>
-      <span className="text-[10px] font-semibold uppercase tracking-widest">Report</span>
+      <span className="text-[10px] font-semibold uppercase tracking-widest">{t("report.report")}</span>
     </button>
   );
 }
@@ -1360,6 +1371,7 @@ function LockedReadingPane({
   typographyStyle: CSSProperties;
   onUnlocked: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const setNotice = useChat((s) => s.setNotice);
   const me = useChat((s) => s.me);
@@ -1370,10 +1382,10 @@ function LockedReadingPane({
     setBusy(true);
     try {
       const res = await buyStoryCopy(story.id, activeCharacterId);
-      setNotice({ code: "scriptorium_copy", message: `Unlocked! Copy added to your Library (−${res.price}).` });
+      setNotice({ code: "scriptorium_copy", message: t("buy.unlockedCopyAdded", { price: res.price }) });
       onUnlocked();
     } catch (e) {
-      setNotice({ code: "scriptorium_copy_err", message: e instanceof Error ? e.message : "Purchase failed." });
+      setNotice({ code: "scriptorium_copy_err", message: e instanceof Error ? e.message : t("errors.purchaseFailed") });
     } finally {
       setBusy(false);
     }
@@ -1394,17 +1406,16 @@ function LockedReadingPane({
           {firstChapter ? (
             <ChapterBlock chapterRef={firstChapter} full={sampleBody} />
           ) : (
-            <p className="italic opacity-60">No preview available yet.</p>
+            <p className="italic opacity-60">{t("reader.noPreview")}</p>
           )}
         </div>
 
         {/* Paywall CTA */}
         <div className="mx-auto -mt-6 max-w-prose rounded-lg border border-keep-action/40 bg-keep-action/10 p-5 text-center shadow-inner">
           <div className="text-2xl" aria-hidden>🔒</div>
-          <h3 className="mt-1 font-action text-lg text-keep-text">Buy to keep reading</h3>
+          <h3 className="mt-1 font-action text-lg text-keep-text">{t("reader.buyToKeepReading")}</h3>
           <p className="mt-1 text-sm text-keep-muted">
-            This is a preview. Buy a copy to read all {chapterCount} {chapterCount === 1 ? "chapter" : "chapters"}
-            {". "}It's added to your Library and you can show it on your profile.
+            {t("reader.lockedCta", { count: chapterCount })}
           </p>
           {me ? (
             <button
@@ -1413,14 +1424,14 @@ function LockedReadingPane({
               disabled={busy}
               className="mt-3 inline-flex items-center justify-center gap-2 rounded-md border border-keep-action bg-keep-action px-5 py-2 text-sm font-semibold uppercase tracking-widest text-keep-bg transition hover:brightness-110 disabled:opacity-50"
             >
-              <span aria-hidden>📖</span> {busy ? "Unlocking…" : `Buy to read · ${story.copyPrice}`}
+              <span aria-hidden>📖</span> {busy ? t("reader.unlocking") : t("reader.buyToReadPrice", { price: story.copyPrice })}
             </button>
           ) : (
             <a
               href="/login"
               className="mt-3 inline-block rounded-md border border-keep-action bg-keep-action px-5 py-2 text-sm font-semibold uppercase tracking-widest text-keep-bg hover:brightness-110"
             >
-              Sign in to buy
+              {t("reader.signInToBuy")}
             </a>
           )}
         </div>
@@ -1430,6 +1441,7 @@ function LockedReadingPane({
 }
 
 function ReaderHeader({ detail }: { detail: StoryDetail }) {
+  const { t } = useTranslation("scriptorium");
   const s = detail.story;
   const authorName = s.author.characterName ?? s.author.masterUsername;
   return (
@@ -1439,12 +1451,12 @@ function ReaderHeader({ detail }: { detail: StoryDetail }) {
           className="mx-auto mb-4 max-h-72 w-full max-w-md rounded object-cover" />
       ) : null}
       <h1 className="font-action text-3xl leading-tight">{s.title}</h1>
-      <p className="mt-1 text-sm italic">by {authorName}</p>
+      <p className="mt-1 text-sm italic">{t("byAuthor", { name: authorName })}</p>
       {s.status === "in_progress" ? (
         <p className="mt-2">
           <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/60 bg-amber-400/15 px-3 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-amber-300">
             <span aria-hidden="true">✎</span>
-            Still writing
+            {t("reader.stillWriting")}
           </span>
         </p>
       ) : null}
@@ -1455,25 +1467,25 @@ function ReaderHeader({ detail }: { detail: StoryDetail }) {
       ) : null}
       <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[11px] uppercase tracking-widest opacity-80">
         <span>{s.rating}</span><span>·</span>
-        <span>{labelForGenre(s.genre)}</span>
+        <span>{labelForGenre(t, s.genre)}</span>
         {s.status !== "in_progress" ? (
           <>
             <span>·</span>
-            <span>{labelForStatus(s.status)}</span>
+            <span>{labelForStatus(t, s.status)}</span>
           </>
         ) : null}
         <span>·</span>
-        <span>{s.totalChapters} ch · {s.totalWords.toLocaleString()} w</span>
+        <span>{t("reader.lengthLine", { chapters: s.totalChapters, words: formatNumber(s.totalWords) })}</span>
       </div>
       {s.contentWarnings.length > 0 ? (
         <p className="mt-2 text-xs italic opacity-80">
-          Content: {s.contentWarnings.join(", ")}
+          {t("reader.contentLine", { list: s.contentWarnings.join(", ") })}
         </p>
       ) : null}
       <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
         {s.allowApplause ? <ApplauseButton storyId={s.id} initialCount={s.applauseCount} /> : null}
         <FollowButton storyId={s.id} />
-        <ScriptoriumReportButton storyId={s.id} targetKind="story" targetId={s.id} label="Report story" />
+        <ScriptoriumReportButton storyId={s.id} targetKind="story" targetId={s.id} label={t("reader.reportStory")} />
       </div>
     </header>
   );
@@ -1488,6 +1500,7 @@ function ReaderHeader({ detail }: { detail: StoryDetail }) {
  * but no self-pings, the publish-fanout filters publishingUserId).
  */
 function FollowButton({ storyId }: { storyId: string }) {
+  const { t } = useTranslation("scriptorium");
   const [state, setState] = useState<StorySubscriptionState | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -1541,7 +1554,7 @@ function FollowButton({ storyId }: { storyId: string }) {
         type="button"
         onClick={toggleFollow}
         disabled={busy}
-        title={state.subscribed ? "You'll get an in-app notification on new chapters" : "Get notified when a new chapter publishes"}
+        title={state.subscribed ? t("reader.followingInAppTitle") : t("reader.followTitle")}
         className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition ${
           state.subscribed
             ? "border-keep-action bg-keep-action/15 text-keep-action"
@@ -1549,7 +1562,7 @@ function FollowButton({ storyId }: { storyId: string }) {
         }`}
       >
         <span aria-hidden>{state.subscribed ? "✦" : "✧"}</span>
-        <span>{state.subscribed ? "Following" : "Follow"}</span>
+        <span>{state.subscribed ? t("reader.following") : t("reader.follow")}</span>
         {state.subscriberCount > 0 ? (
           <span className="ml-1 tabular-nums text-xs opacity-70">{state.subscriberCount}</span>
         ) : null}
@@ -1559,7 +1572,7 @@ function FollowButton({ storyId }: { storyId: string }) {
           type="button"
           onClick={togglePush}
           disabled={busy}
-          title={state.pushEnabled ? "Browser notifications are on for this story. Tap to turn them off." : "Also send a browser notification when a new chapter publishes."}
+          title={state.pushEnabled ? t("reader.pushOnTitle") : t("reader.pushOffTitle")}
           className={`rounded-full border px-2 py-1 text-sm transition ${
             state.pushEnabled
               ? "border-keep-action bg-keep-action/15 text-keep-action"
@@ -1579,6 +1592,7 @@ function FollowButton({ storyId }: { storyId: string }) {
  * surface the rollup count.
  */
 function ApplauseButton({ storyId, initialCount }: { storyId: string; initialCount: number }) {
+  const { t } = useTranslation("scriptorium");
   const [count, setCount] = useState(initialCount);
   const [viewerApplauded, setViewerApplauded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -1626,7 +1640,7 @@ function ApplauseButton({ storyId, initialCount }: { storyId: string; initialCou
       type="button"
       onClick={toggle}
       disabled={busy}
-      title={viewerApplauded ? "Take back your applause" : "Applaud this story"}
+      title={viewerApplauded ? t("reader.takeBackApplause") : t("reader.applaudStory")}
       className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-sm transition ${
         viewerApplauded
           ? "border-amber-400 bg-amber-400/15 text-amber-300"
@@ -1634,30 +1648,32 @@ function ApplauseButton({ storyId, initialCount }: { storyId: string; initialCou
       }`}
     >
       <span aria-hidden>👏</span>
-      <span className="tabular-nums">{count.toLocaleString()}</span>
+      <span className="tabular-nums">{formatNumber(count)}</span>
     </button>
   );
 }
 
 function ReaderFooter({ detail: _detail }: { detail: StoryDetail }) {
+  const { t } = useTranslation("scriptorium");
   // In-progress signaling moved to the header chip, the footer just
   // marks the end of available reading.
   return (
     <footer className="mx-auto mt-10 max-w-prose border-t border-current/20 pt-4 text-center text-xs opacity-70">
-      <p>· end ·</p>
+      <p>{t("reader.endMark")}</p>
     </footer>
   );
 }
 
 function ChapterBlock({ chapterRef, full }: { chapterRef: StoryChapterRef; full: StoryChapter | null }) {
+  const { t } = useTranslation("scriptorium");
   return (
     <section className="mx-auto mb-10 max-w-prose" data-chapter-id={chapterRef.id}>
       <h2 className="mb-4 font-action text-2xl">
-        {chapterRef.title || `Chapter ${chapterRef.sortOrder + 1}`}
+        {chapterRef.title || t("editor.chapterN", { number: chapterRef.sortOrder + 1 })}
       </h2>
       {chapterRef.contentWarnings.length > 0 ? (
         <p className="mb-3 text-[11px] italic opacity-70">
-          Chapter content: {chapterRef.contentWarnings.join(", ")}
+          {t("reader.chapterContentLine", { list: chapterRef.contentWarnings.join(", ") })}
         </p>
       ) : null}
       {full ? (
@@ -1665,13 +1681,13 @@ function ChapterBlock({ chapterRef, full }: { chapterRef: StoryChapterRef; full:
           <ChapterBody html={full.bodyHtml} />
           {hasVisibleContent(full.authorNotesHtml) ? (
             <div className="mt-6 border-t border-current/20 pt-3 text-sm opacity-80">
-              <h4 className="mb-1 text-xs uppercase tracking-widest">Author's notes</h4>
+              <h4 className="mb-1 text-xs uppercase tracking-widest">{t("authorsNotes")}</h4>
               <div dangerouslySetInnerHTML={{ __html: full.authorNotesHtml }} />
             </div>
           ) : null}
         </>
       ) : (
-        <p className="italic opacity-60">Loading chapter...</p>
+        <p className="italic opacity-60">{t("editor.loadingChapter")}</p>
       )}
     </section>
   );
@@ -1709,25 +1725,26 @@ function ChapterPager({
   onNext: () => void;
   onJump: (i: number) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   if (chapters.length === 0) return null;
   return (
     <nav className="mx-auto mt-8 max-w-prose border-t border-current/20 pt-4">
       <div className="flex items-center justify-between text-sm">
         <button type="button" onClick={onPrev} disabled={index === 0}
           className="rounded border border-current/30 px-3 py-1 disabled:opacity-30">
-          ← Prev
+          {t("reader.prev")}
         </button>
         <select value={index} onChange={(e) => onJump(parseInt(e.target.value, 10))}
           className="rounded border border-current/30 bg-transparent px-2 py-1 text-sm">
           {chapters.map((c, i) => (
             <option key={c.id} value={i}>
-              {i + 1}. {c.title || `Chapter ${i + 1}`}
+              {i + 1}. {c.title || t("editor.chapterN", { number: i + 1 })}
             </option>
           ))}
         </select>
         <button type="button" onClick={onNext} disabled={index >= chapters.length - 1}
           className="rounded border border-current/30 px-3 py-1 disabled:opacity-30">
-          Next →
+          {t("reader.next")}
         </button>
       </div>
     </nav>
@@ -1743,9 +1760,10 @@ function PagelessTOC({
   activeChapterId: string | null;
   onJump: (c: StoryChapterRef) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   return (
     <div className="sticky top-0 max-h-full overflow-y-auto p-3">
-      <h3 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">Chapters</h3>
+      <h3 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">{t("reader.chapters")}</h3>
       <ol className="space-y-1 text-xs">
         {chapters.map((c, i) => (
           <li key={c.id}>
@@ -1753,8 +1771,8 @@ function PagelessTOC({
               className={`block w-full truncate rounded px-2 py-1 text-left ${
                 activeChapterId === c.id ? "bg-keep-action/15 text-keep-action" : "text-keep-muted hover:text-keep-text"
               }`}
-              title={c.title || `Chapter ${i + 1}`}>
-              {i + 1}. {c.title || `Chapter ${i + 1}`}
+              title={c.title || t("editor.chapterN", { number: i + 1 })}>
+              {i + 1}. {c.title || t("editor.chapterN", { number: i + 1 })}
             </button>
           </li>
         ))}
@@ -1776,24 +1794,25 @@ function TypoControls({
   widthStep: number; setWidthStep: (n: number) => void;
   scheme: ReaderScheme; setScheme: (s: ReaderScheme) => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <span className="text-[10px] uppercase tracking-widest text-keep-muted">Aa</span>
-      <Stepper label="Family">
+      <Stepper label={t("reader.typo.family")}>
         {(["serif", "sans", "dyslexic"] as const).map((f) => (
           <SmallToggle key={f} active={fontFamily === f} onClick={() => setFontFamily(f)}>{f}</SmallToggle>
         ))}
       </Stepper>
-      <Stepper label="Size">
+      <Stepper label={t("reader.typo.size")}>
         <StepButtons value={fontStep} setValue={setFontStep} max={FONT_SIZE_STEPS.length - 1} />
       </Stepper>
-      <Stepper label="Line">
+      <Stepper label={t("reader.typo.line")}>
         <StepButtons value={lineStep} setValue={setLineStep} max={LINE_HEIGHT_STEPS.length - 1} />
       </Stepper>
-      <Stepper label="Width">
+      <Stepper label={t("reader.typo.width")}>
         <StepButtons value={widthStep} setValue={setWidthStep} max={MAX_WIDTH_STEPS.length - 1} />
       </Stepper>
-      <Stepper label="Theme">
+      <Stepper label={t("reader.typo.theme")}>
         {(["auto", "light", "sepia", "dark"] as const).map((s) => (
           <SmallToggle key={s} active={scheme === s} onClick={() => setScheme(s)}>{s}</SmallToggle>
         ))}
@@ -1833,24 +1852,30 @@ function StepButtons({ value, setValue, max }: { value: number; setValue: (n: nu
 }
 
 function PrivateStub({ stub, onClose }: { stub: PrivateStoryStub; onClose: () => void }) {
+  const { t } = useTranslation("scriptorium");
   return (
     <div className="flex flex-1 items-center justify-center p-8 text-center">
       <div className="max-w-sm space-y-3">
         <h2 className="font-action text-2xl">{stub.title}</h2>
         <p className="text-sm italic text-keep-muted">
           {stub.reason === "rating"
-            ? "This story carries a mature rating. Sign in to view stories marked R or NC-17."
-            : "This story is private. Only the author can see it."}
+            ? (stub.requiresAuth
+              // Anonymous hit an NC-17 body: an account fixes it.
+              ? t("reader.stubMatureSignIn")
+              // Signed-in viewer under 18 (age plan Phase 4): no
+              // sign-in path fixes this, so say so plainly.
+              : t("reader.stubAdultsOnly"))
+            : t("reader.stubPrivate")}
         </p>
         <div className="flex justify-center gap-2">
           {stub.requiresAuth ? (
             <a href="/login" className="rounded border border-keep-action bg-keep-action px-4 py-1.5 text-sm font-semibold uppercase tracking-widest text-keep-bg">
-              Sign in
+              {t("signIn")}
             </a>
           ) : null}
           <button type="button" onClick={onClose}
             className="rounded border border-keep-rule bg-keep-bg px-4 py-1.5 text-sm">
-            Close
+            {t("common:close")}
           </button>
         </div>
       </div>
@@ -1881,15 +1906,12 @@ function useReaderPref<T>(key: string, fallback: T): [T, (next: T) => void] {
   return [value, setValue];
 }
 
-function labelForGenre(g: StoryGenre): string {
-  if (g === "scifi") return "Sci-fi";
-  if (g === "slice-of-life") return "Slice of life";
-  return g.charAt(0).toUpperCase() + g.slice(1).replace(/-/g, " ");
+function labelForGenre(t: TFunction<"scriptorium">, g: StoryGenre): string {
+  return t(`genres.${g}`);
 }
 
-function labelForStatus(s: StoryStatus): string {
-  if (s === "in_progress") return "In progress";
-  return s.charAt(0).toUpperCase() + s.slice(1);
+function labelForStatus(t: TFunction<"scriptorium">, s: StoryStatus): string {
+  return t(`statuses.${s}`);
 }
 
 /**

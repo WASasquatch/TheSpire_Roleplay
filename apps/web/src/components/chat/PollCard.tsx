@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { BarChart3, Check, Lock } from "lucide-react";
 import { isPollClosed, type ChatMessage, type PollState } from "@thekeep/shared";
 import { ensureInjectedStyle } from "../../lib/injectStyle.js";
@@ -67,18 +69,19 @@ interface Props {
   readOnly?: boolean;
 }
 
-function timeLeft(closesAt: number): string {
+function timeLeft(t: TFunction<"chat">, closesAt: number): string {
   const ms = closesAt - Date.now();
-  if (ms <= 0) return "closing…";
+  if (ms <= 0) return t("poll.closing");
   const p = relTimeParts(ms, { justNowSec: 0, hourCutoffHrs: 48, roundMode: "round" });
   switch (p.tier) {
-    case "minutes": return `closes in ${p.value}m`;
-    case "hours": return `closes in ${p.value}h`;
-    default: return `closes in ${p.value}d`;
+    case "minutes": return t("poll.closesInMinutes", { value: p.value });
+    case "hours": return t("poll.closesInHours", { value: p.value });
+    default: return t("poll.closesInDays", { value: p.value });
   }
 }
 
 export function PollCard({ message, poll, isAuthor, canModerate, compact, readOnly }: Props) {
+  const { t } = useTranslation("chat");
   useEffect(() => { ensureInjectedStyle(POLL_STYLE_ID, POLL_CSS); }, []);
 
   const closed = isPollClosed(poll, Date.now());
@@ -123,7 +126,7 @@ export function PollCard({ message, poll, isAuthor, canModerate, compact, readOn
       await votePoll(message.id, optionIds);
     } catch (e) {
       setMyVote(prev);
-      setErr(e instanceof Error ? e.message : "Vote failed.");
+      setErr(e instanceof Error ? e.message : t("poll.voteFailed"));
     } finally {
       setBusy(false);
     }
@@ -147,7 +150,7 @@ export function PollCard({ message, poll, isAuthor, canModerate, compact, readOn
     if (busy) return;
     setBusy(true); setErr(null);
     try { await closePoll(message.id); }
-    catch (e) { setErr(e instanceof Error ? e.message : "Couldn't close the poll."); }
+    catch (e) { setErr(e instanceof Error ? e.message : t("poll.closeFailed")); }
     finally { setBusy(false); }
   }
 
@@ -158,15 +161,15 @@ export function PollCard({ message, poll, isAuthor, canModerate, compact, readOn
       ref={rootRef}
       className={`rounded-lg border border-keep-accent/40 bg-keep-panel/40 ${pad}`}
       role="group"
-      aria-label="Poll"
+      aria-label={t("poll.ariaLabel")}
     >
       <div className="mb-2 flex items-start gap-2">
         <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-keep-accent" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           {question ? <p className="font-semibold leading-snug text-keep-text">{question}</p> : null}
           <p className="mt-0.5 text-[11px] uppercase tracking-widest text-keep-muted">
-            {poll.allowMultiple ? "Pick any" : "Pick one"}
-            {!poll.showVoters ? " · anonymous" : ""}
+            {poll.allowMultiple ? t("poll.pickAny") : t("poll.pickOne")}
+            {!poll.showVoters ? t("poll.anonymousSuffix") : ""}
           </p>
         </div>
       </div>
@@ -192,7 +195,7 @@ export function PollCard({ message, poll, isAuthor, canModerate, compact, readOn
             onSubmitMulti={() => void submit([...staged])}
           />
           {readOnly ? (
-            <p className="mt-2 text-[11px] italic text-keep-muted">Sign in to vote and see the results.</p>
+            <p className="mt-2 text-[11px] italic text-keep-muted">{t("poll.signInHint")}</p>
           ) : null}
         </>
       )}
@@ -201,11 +204,11 @@ export function PollCard({ message, poll, isAuthor, canModerate, compact, readOn
 
       <div className="mt-2.5 flex items-center justify-between gap-2 text-[11px] text-keep-muted">
         <span>
-          {poll.totalVoters} {poll.totalVoters === 1 ? "voter" : "voters"}
+          {t("poll.voters", { count: poll.totalVoters })}
           {closed
-            ? " · closed"
+            ? t("poll.closedSuffix")
             : poll.closesAt != null
-              ? ` · ${timeLeft(poll.closesAt)}`
+              ? ` · ${timeLeft(t, poll.closesAt)}`
               : ""}
         </span>
         <span className="flex items-center gap-2">
@@ -216,7 +219,7 @@ export function PollCard({ message, poll, isAuthor, canModerate, compact, readOn
               disabled={busy}
               className="rounded border border-keep-rule px-1.5 py-0.5 uppercase tracking-widest hover:text-keep-text disabled:opacity-50"
             >
-              Retract
+              {t("poll.retract")}
             </button>
           ) : null}
           {!readOnly && !closed && (isAuthor || canModerate) ? (
@@ -226,7 +229,7 @@ export function PollCard({ message, poll, isAuthor, canModerate, compact, readOn
               disabled={busy}
               className="inline-flex items-center gap-1 rounded border border-keep-accent/50 px-1.5 py-0.5 uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50"
             >
-              <Lock className="h-3 w-3" aria-hidden="true" /> Close
+              <Lock className="h-3 w-3" aria-hidden="true" /> {t("common:close")}
             </button>
           ) : null}
         </span>
@@ -244,6 +247,7 @@ function OptionButtons({ poll, allowMultiple, staged, busy, onPickSingle, onTogg
   onToggle: (id: string) => void;
   onSubmitMulti: () => void;
 }) {
+  const { t } = useTranslation("chat");
   return (
     <div className="flex flex-col gap-1.5">
       {poll.options.map((o) => {
@@ -281,7 +285,7 @@ function OptionButtons({ poll, allowMultiple, staged, busy, onPickSingle, onTogg
           onClick={onSubmitMulti}
           className="mt-0.5 self-start rounded-md border border-keep-accent bg-keep-accent px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          Vote
+          {t("poll.vote")}
         </button>
       ) : null}
     </div>

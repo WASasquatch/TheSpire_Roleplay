@@ -14,7 +14,7 @@
  * route/realtime action that triggered it (the real side-effect already
  * committed).
  */
-import { and, count, desc, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, isNull, lt, sql, type SQL } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import type {
@@ -28,8 +28,9 @@ import type {
   NotificationWire,
 } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
-import { notifications, servers, users } from "../db/schema.js";
+import { forums, messages, notifications, rooms, servers, users } from "../db/schema.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
+import { isIsolatedBetweenIds } from "../auth/ageIsolation.js";
 import { cursorPageSlice } from "../lib/pagination.js";
 import { pushToUser } from "../push.js";
 import { emitToUser, socketsForUser } from "../realtime/presence.js";
@@ -111,6 +112,11 @@ async function insertOne(db: Db, input: NotifyInput): Promise<string | null> {
   if (input.actor) {
     const blocked = await blockedUserIdsFor(db, input.userId);
     if (blocked.has(input.actor.id)) return null;
+    // Minor isolation (age plan, Phase 5): an isolated pair must not
+    // notify each other either — the actor's name/snippet in an inbox row
+    // would leak an account that is supposed to not exist for this
+    // recipient. Same suppress-silently posture as the block gate above.
+    if (await isIsolatedBetweenIds(db, input.userId, input.actor.id)) return null;
   }
   if (input.dedupeKey) {
     const since = new Date(Date.now() - (input.dedupeWindowMs ?? DEFAULT_DEDUPE_WINDOW_MS));
@@ -156,16 +162,58 @@ async function insertOne(db: Db, input: NotifyInput): Promise<string | null> {
   return id;
 }
 
+/**
+ * Read-time age re-filter (age plan — the bell's analog of the forum
+ * engine's nsfwTopicRowFilter): rows don't exist for an inbox OWNER who is
+ * CURRENTLY a minor when they point into 18+ content — the row's target
+ * room is effectively 18+ right now (its flag, its server's, or its parent
+ * forum's), or the exact message the row deep-links to (`metadata.messageId`,
+ * how chat mentions are stored) is stamped `is_nsfw`. Mention rows persist a
+ * 140-char body snippet, so this covers rooms that flipped 18+ AFTER the
+ * row was written and admin DOB corrections that turned an adult account
+ * into a minor one — the write-side skips only guard rows created while the
+ * recipient was already a minor. Adults are never filtered (HARD tier): the
+ * first NOT EXISTS ("the owner is a minor"; NULL birthdate = legacy adult,
+ * same SQL age test as isolationVisibleSql) short-circuits for them. Keyed
+ * on the owner id, so badge pulses and route fetches need no viewer
+ * plumbing — the inbox owner IS the viewer on every read path.
+ */
+function ageVisibleSql(userId: string): SQL {
+  return sql`(
+    NOT EXISTS (
+      SELECT 1 FROM ${users} age_u
+      WHERE age_u.id = ${userId}
+        AND age_u.birthdate IS NOT NULL
+        AND age_u.birthdate > date('now','-18 years')
+    )
+    OR (
+      NOT EXISTS (
+        SELECT 1 FROM ${rooms} r
+        LEFT JOIN ${servers} s ON s.id = r.server_id
+        LEFT JOIN ${forums} f ON f.id = r.forum_id
+        WHERE ${notifications.targetKind} = 'room'
+          AND r.id = ${notifications.targetId}
+          AND (r.is_nsfw = 1 OR COALESCE(s.is_nsfw, 0) = 1 OR COALESCE(f.is_nsfw, 0) = 1)
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM ${messages} t
+        WHERE t.id = json_extract(${notifications.metadataJson}, '$.messageId')
+          AND t.is_nsfw = 1
+      )
+    )
+  )`;
+}
+
 /** Total + per-server unread for one user (boot fetch, badge pulses). */
 export async function badgeFor(db: Db, userId: string): Promise<NotificationBadge> {
   const unreadRow = (await db
     .select({ n: count() })
     .from(notifications)
-    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt))))[0];
+    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt), ageVisibleSql(userId))))[0];
   const perServer = await db
     .select({ serverId: notifications.serverId, n: count() })
     .from(notifications)
-    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt)))
+    .where(and(eq(notifications.userId, userId), isNull(notifications.readAt), ageVisibleSql(userId)))
     .groupBy(notifications.serverId);
   const unreadByServer: Record<string, number> = {};
   for (const r of perServer) if (r.serverId) unreadByServer[r.serverId] = r.n;
@@ -341,7 +389,9 @@ export async function listNotifications(
   userId: string,
   opts: { cursor?: number | null; limit: number; category?: NotificationCategory | null },
 ): Promise<NotificationPage> {
-  const conds = [eq(notifications.userId, userId)];
+  // Minor viewers get the age re-filter (see ageVisibleSql): the inbox page
+  // must agree with the badge, or the bell shows counts for invisible rows.
+  const conds = [eq(notifications.userId, userId), ageVisibleSql(userId)];
   if (opts.category) conds.push(eq(notifications.category, opts.category));
   if (opts.cursor) conds.push(lt(notifications.createdAt, new Date(opts.cursor)));
   const rows = await db

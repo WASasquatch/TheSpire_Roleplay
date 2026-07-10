@@ -14,6 +14,8 @@ import {
   type ResolvedTarget,
 } from "../commands/identityArg.js";
 import { emitToUser, socketsForUsers } from "../realtime/presence.js";
+import { isIsolatedBetweenIds, isolationHiddenSetForViewerId } from "../auth/ageIsolation.js";
+import { tFor } from "../i18n.js";
 import type { Db } from "../db/index.js";
 
 /**
@@ -90,6 +92,7 @@ export async function resolveTitleTarget(db: Db, name: string): Promise<
 export function ambiguousTargetMessage(
   typedName: string,
   matches: ResolvedTarget[],
+  locale: string | null = null,
 ): string {
   const list = matches
     .map((m) => {
@@ -99,7 +102,11 @@ export function ambiguousTargetMessage(
       return `${label} ${formatTokenFor(m)}`;
     })
     .join(", ");
-  return `"${typedName}" matches ${matches.length} identities. Re-run with one of: ${list}`;
+  return tFor(locale, "errors:server.titles.ambiguous", {
+    name: typedName,
+    count: matches.length,
+    list,
+  });
 }
 
 /**
@@ -249,8 +256,16 @@ interface TitleRow {
  * dissolving titles are NOT returned (they'd leak in-flight relationship
  * state to anyone who runs /whois). For the purposes of the recipient's
  * own UI, the prompt event already carries the in-flight info.
+ *
+ * `viewerUserId` (age plan, Phase 5): when the reading VIEWER is known,
+ * titles whose OTHER party is isolation-hidden from that viewer are
+ * dropped — a chip like "Married to X" names X, and an isolated pair must
+ * not surface each other's names anywhere, including on a third party's
+ * profile or the viewer's own. Hidden, not severed: the row survives and
+ * the chip returns when the mode ends. Omitted viewer (anonymous public
+ * profile fetches) filters nothing, mirroring blocks.
  */
-export async function listTitlesForIdentity(db: Db, identity: Identity): Promise<ProfileTitle[]> {
+export async function listTitlesForIdentity(db: Db, identity: Identity, viewerUserId?: string | null): Promise<ProfileTitle[]> {
   // Resolve the subject's gender ONCE up front. Every chip on this
   // profile renders against the same subject, so a per-row lookup
   // would be wasteful (and would mean an extra round trip per title).
@@ -346,12 +361,19 @@ export async function listTitlesForIdentity(db: Db, identity: Identity): Promise
   const usernameById = new Map(userRows.map((r) => [r.id, { name: r.username, disabled: !!r.disabledAt }]));
   const charById = new Map(charRows.map((r) => [r.id, { name: r.name, deleted: !!r.deletedAt }]));
 
+  // Isolation hide set over the other-party accounts (see the doc comment).
+  // Empty without a DB read for non-isolating viewer classes.
+  const isolationHidden = viewerUserId
+    ? await isolationHiddenSetForViewerId(db, viewerUserId, userIds)
+    : new Set<string>();
+
   const out: ProfileTitle[] = [];
 
   function addRow(
     r: { id: string; kindSlug: string; formatA: string; formatB: string; otherUserId: string; otherCharacterId: string | null },
     side: Side,
   ) {
+    if (isolationHidden.has(r.otherUserId)) return; // isolated pair: name must not render
     let displayName: string;
     if (r.otherCharacterId) {
       const ch = charById.get(r.otherCharacterId);
@@ -487,23 +509,32 @@ export async function requestTitle(
   requester: Identity,
   targetName: string,
   kindSlug: string,
+  /** Requester's users.locale — every refusal here is requester-facing. */
+  locale: string | null = null,
 ): Promise<RequestResult> {
   const kind = await findKindBySlug(db, kindSlug);
   if (!kind || !kind.enabled) {
-    return { ok: false, code: "NO_KIND", message: `No title type called "${kindSlug}".` };
+    return { ok: false, code: "NO_KIND", message: tFor(locale, "errors:server.titles.noKind", { kind: kindSlug }) };
   }
 
   const resolution = await resolveTitleTarget(db, targetName);
   if (resolution.kind === "none") {
-    return { ok: false, code: "NO_USER", message: `No user or character named "${targetName}".` };
+    return { ok: false, code: "NO_USER", message: tFor(locale, "errors:server.titles.noIdentity", { name: targetName }) };
   }
   if (resolution.kind === "ambiguous") {
-    return { ok: false, code: "AMBIGUOUS", message: ambiguousTargetMessage(targetName, resolution.matches) };
+    return { ok: false, code: "AMBIGUOUS", message: ambiguousTargetMessage(targetName, resolution.matches, locale) };
   }
   const target = resolution.target;
 
   if (identitiesEqual(requester, target)) {
-    return { ok: false, code: "SELF", message: "You can't request a title with yourself." };
+    return { ok: false, code: "SELF", message: tFor(locale, "errors:server.titles.self") };
+  }
+
+  // Minor isolation (age plan, Phase 5): an isolated pair behaves as if the
+  // other doesn't exist, so the refusal is the exact no-such-user line the
+  // failed resolution above uses — never a hint that isolation is on.
+  if (await isIsolatedBetweenIds(db, requester.userId, target.userId)) {
+    return { ok: false, code: "NO_USER", message: tFor(locale, "errors:server.titles.noIdentity", { name: targetName }) };
   }
 
   if (await isIgnoredBy(db, target.userId, requester.userId)) {
@@ -517,8 +548,18 @@ export async function requestTitle(
   // accepted one is already done, a dissolving one is already in-flight.
   const existing = await findExistingRow(db, kind.id, requester, target);
   if (existing) {
-    const verb = existing.status === "accepted" ? "already exists" : "is already pending";
-    return { ok: false, code: "DUP", message: `That ${kind.label.toLowerCase()} title ${verb}.` };
+    // Two full-sentence keys (never verb-fragment concatenation, plan §4).
+    return {
+      ok: false,
+      code: "DUP",
+      message: tFor(
+        locale,
+        existing.status === "accepted"
+          ? "errors:server.titles.duplicateExists"
+          : "errors:server.titles.duplicatePending",
+        { label: kind.label.toLowerCase() },
+      ),
+    };
   }
 
   if (kind.exclusive) {
@@ -527,7 +568,7 @@ export async function requestTitle(
       return {
         ok: false,
         code: "EXCLUSIVE_SELF",
-        message: `You already hold a ${kind.label.toLowerCase()} title; dissolve it first.`,
+        message: tFor(locale, "errors:server.titles.exclusiveSelf", { label: kind.label.toLowerCase() }),
       };
     }
     const conflictTheirs = await findExclusiveConflict(db, kind.id, target);
@@ -535,7 +576,7 @@ export async function requestTitle(
       return {
         ok: false,
         code: "EXCLUSIVE_OTHER",
-        message: `${target.displayName} already holds a ${kind.label.toLowerCase()} title.`,
+        message: tFor(locale, "errors:server.titles.exclusiveOther", { name: target.displayName, label: kind.label.toLowerCase() }),
       };
     }
   }
@@ -596,18 +637,20 @@ export async function dissolveTitle(
   initiator: Identity,
   targetName: string,
   kindSlug: string,
+  /** Initiator's users.locale — every refusal here is initiator-facing. */
+  locale: string | null = null,
 ): Promise<RequestResult> {
   const kind = await findKindBySlug(db, kindSlug);
   if (!kind) {
-    return { ok: false, code: "NO_KIND", message: `No title type called "${kindSlug}".` };
+    return { ok: false, code: "NO_KIND", message: tFor(locale, "errors:server.titles.noKind", { kind: kindSlug }) };
   }
 
   const resolution = await resolveTitleTarget(db, targetName);
   if (resolution.kind === "none") {
-    return { ok: false, code: "NO_USER", message: `No user or character named "${targetName}".` };
+    return { ok: false, code: "NO_USER", message: tFor(locale, "errors:server.titles.noIdentity", { name: targetName }) };
   }
   if (resolution.kind === "ambiguous") {
-    return { ok: false, code: "AMBIGUOUS", message: ambiguousTargetMessage(targetName, resolution.matches) };
+    return { ok: false, code: "AMBIGUOUS", message: ambiguousTargetMessage(targetName, resolution.matches, locale) };
   }
   const target = resolution.target;
 
@@ -616,7 +659,7 @@ export async function dissolveTitle(
     return {
       ok: false,
       code: "NO_TITLE",
-      message: `You have no ${kind.label.toLowerCase()} title with ${target.displayName}.`,
+      message: tFor(locale, "errors:server.titles.noTitleWith", { label: kind.label.toLowerCase(), name: target.displayName }),
     };
   }
 
@@ -683,6 +726,8 @@ export async function respondToPrompt(
   responderUserId: string,
   rowId: string,
   accept: boolean,
+  /** Responder's users.locale — every refusal here is responder-facing. */
+  locale: string | null = null,
 ): Promise<RequestResult> {
   const row = (await db
     .select()
@@ -690,7 +735,7 @@ export async function respondToPrompt(
     .where(eq(mutualTitles.id, rowId))
     .limit(1))[0];
   if (!row) {
-    return { ok: false, code: "NO_PROMPT", message: "That request no longer exists." };
+    return { ok: false, code: "NO_PROMPT", message: tFor(locale, "errors:server.titles.promptGone") };
   }
 
   // Authorization: figure out which side the responder is on, then
@@ -704,12 +749,12 @@ export async function respondToPrompt(
     responderSide = row.dissolveInitiator === "a" ? "b" : "a";
   }
   if (responderSide === null) {
-    return { ok: false, code: "FORBIDDEN", message: "That request isn't yours to answer." };
+    return { ok: false, code: "FORBIDDEN", message: tFor(locale, "errors:server.titles.notYourPrompt") };
   }
 
   if (row.status === "pending") {
     if (responderSide !== "b") {
-      return { ok: false, code: "FORBIDDEN", message: "Only the recipient can answer this request." };
+      return { ok: false, code: "FORBIDDEN", message: tFor(locale, "errors:server.titles.recipientAnswers") };
     }
     if (accept) {
       await db
@@ -724,7 +769,7 @@ export async function respondToPrompt(
 
   if (row.status === "dissolving") {
     if (row.dissolveInitiator === responderSide) {
-      return { ok: false, code: "FORBIDDEN", message: "You initiated this dissolve - the other party answers it." };
+      return { ok: false, code: "FORBIDDEN", message: tFor(locale, "errors:server.titles.initiatorWaits") };
     }
     if (accept) {
       await db.delete(mutualTitles).where(eq(mutualTitles.id, row.id));
@@ -738,7 +783,7 @@ export async function respondToPrompt(
   }
 
   // status === "accepted" - nothing to respond to.
-  return { ok: false, code: "NO_PROMPT", message: "That request is already settled." };
+  return { ok: false, code: "NO_PROMPT", message: tFor(locale, "errors:server.titles.promptSettled") };
 }
 
 /* -------------------------------------------------------------------------- */

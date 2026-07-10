@@ -4,19 +4,20 @@
  * Phase-7 public /f/ page reuses them).
  */
 import type { ChatMessage, ForumAutoRule, ForumBoardTopicsPage, ForumCreationApplicationWire, ForumDetail, ForumManagedEntry, ForumMemberEntry, ForumMembershipApplicationWire, ForumModEntry, ForumModLogEntry, ForumModPermission, ForumPermission, ForumReportWire, ForumSummary, ForumUsergroupMemberWire, ForumUsergroupWire, ForumUserSearchHit, NpcStat, ThreadCategory, UserNpcWire } from "@thekeep/shared";
+import { i18n } from "./i18n.js";
 import { relTimeParts } from "./relativeTime.js";
 
 export async function fetchForums(): Promise<ForumSummary[]> {
   const r = await fetch("/forums", { credentials: "include" });
-  if (!r.ok) throw new Error(`Couldn't load the forums catalog (${r.status}).`);
+  if (!r.ok) throw new Error(i18n.t("errors:forums.catalogLoad", { status: r.status }));
   const j = (await r.json()) as { forums: ForumSummary[] };
   return j.forums;
 }
 
 export async function fetchForumDetail(idOrSlug: string): Promise<ForumDetail> {
   const r = await fetch(`/forums/${encodeURIComponent(idOrSlug)}`, { credentials: "include" });
-  if (r.status === 404) throw new Error("That forum doesn't exist (or was archived).");
-  if (!r.ok) throw new Error(`Couldn't load that forum (${r.status}).`);
+  if (r.status === 404) throw new Error(i18n.t("errors:forums.missing"));
+  if (!r.ok) throw new Error(i18n.t("errors:forums.load", { status: r.status }));
   return (await r.json()) as ForumDetail;
 }
 
@@ -29,7 +30,7 @@ export async function fetchForumDetail(idOrSlug: string): Promise<ForumDetail> {
  *  and empty catalogs (each list is `[]`, never null). */
 export async function fetchForumDiscover(): Promise<{ popular: ForumSummary[]; new: ForumSummary[] }> {
   const r = await fetch("/forums/discover", { credentials: "include" });
-  if (!r.ok) throw new Error(`Couldn't load forum discovery (${r.status}).`);
+  if (!r.ok) throw new Error(i18n.t("errors:forums.discoveryLoad", { status: r.status }));
   const j = (await r.json()) as { popular?: ForumSummary[]; new?: ForumSummary[] };
   return { popular: j.popular ?? [], new: j.new ?? [] };
 }
@@ -41,7 +42,7 @@ export async function searchForums(q: string, tag?: string | null): Promise<Foru
   if (q.trim()) params.set("q", q.trim());
   if (tag?.trim()) params.set("tag", tag.trim());
   const r = await fetch(`/forums/discover/search?${params.toString()}`, { credentials: "include" });
-  if (!r.ok) throw new Error(`Search failed (${r.status}).`);
+  if (!r.ok) throw new Error(i18n.t("errors:forums.searchFailed", { status: r.status }));
   const j = (await r.json()) as { items?: ForumSummary[] };
   return j.items ?? [];
 }
@@ -49,7 +50,7 @@ export async function searchForums(q: string, tag?: string | null): Promise<Foru
 /** The discover tag cloud (genre chips), most-used first. Empty = no tags yet. */
 export async function fetchForumTags(): Promise<{ tag: string; count: number }[]> {
   const r = await fetch("/forums/tags", { credentials: "include" });
-  if (!r.ok) throw new Error(`Couldn't load forum tags (${r.status}).`);
+  if (!r.ok) throw new Error(i18n.t("errors:forums.tagsLoad", { status: r.status }));
   const j = (await r.json()) as { tags?: { tag: string; count: number }[] };
   return j.tags ?? [];
 }
@@ -68,10 +69,10 @@ export function relTime(ms: number | null): string | null {
   if (!ms) return null;
   const p = relTimeParts(Date.now() - ms, { justNowSec: 90, hourCutoffHrs: 48, roundMode: "floor" });
   switch (p.tier) {
-    case "justNow": return "just now";
-    case "minutes": return `${p.value}m ago`;
-    case "hours": return `${p.value}h ago`;
-    default: return `${p.value}d ago`;
+    case "justNow": return i18n.t("common:relTime.justNow");
+    case "minutes": return i18n.t("common:relTime.minutesAgo", { value: p.value });
+    case "hours": return i18n.t("common:relTime.hoursAgo", { value: p.value });
+    default: return i18n.t("common:relTime.daysAgo", { value: p.value });
   }
 }
 
@@ -89,7 +90,7 @@ export async function checkForumSlug(slug: string): Promise<SlugCheck> {
 
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   const j = (await r.json().catch(() => null)) as ({ error?: string } & T) | null;
-  if (!r.ok) throw new Error(j?.error ?? `Request failed (${r.status}).`);
+  if (!r.ok) throw new Error(j?.error ?? i18n.t("errors:requestFailed", { status: r.status }));
   return j as T;
 }
 
@@ -155,6 +156,9 @@ export async function updateForum(forumId: string, patch: {
   /** Discovery: owner-set genre tags people can search by. Normalized
    *  (and capped) server-side; pass the cleaned list straight through. */
   tags?: string[];
+  /** Whole-forum 18+ flag (age-restriction plan Phase 3). Adult owners
+   *  only; the server re-checks the caller's age and audits the flip. */
+  isNsfw?: boolean;
 }): Promise<void> {
   const r = await fetch(`/forums/${encodeURIComponent(forumId)}`, {
     method: "PATCH",
@@ -198,10 +202,12 @@ export async function archiveBoard(forumId: string, roomId: string): Promise<voi
 
 /** Upload (or clear, with null) the forum's logo or banner image. Body is a
  *  base64 data URL — same pipeline as emoticon sheets (magic-byte checked,
- *  content-hashed, served from /uploads/forums/). Returns the new URL. */
+ *  content-hashed, served from /uploads/forums/). Returns the new URL.
+ *  `sfw-banner` is the public-safe variant an 18+ forum shows on discovery
+ *  cards / share pages / link previews (age plan, decision #10). */
 export async function setForumImage(
   forumId: string,
-  kind: "logo" | "banner",
+  kind: "logo" | "banner" | "sfw-banner",
   imageDataUrl: string | null,
 ): Promise<string | null> {
   const r = await fetch(`/forums/${encodeURIComponent(forumId)}/${kind}`, {
@@ -245,11 +251,11 @@ export async function fetchMyWorlds(): Promise<Array<{ id: string; name: string;
 export function readImageFile(file: File, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     if (file.size > maxBytes) {
-      reject(new Error(`Image too large (max ${Math.round(maxBytes / 1024)}KB).`));
+      reject(new Error(i18n.t("errors:imageTooLarge", { kb: Math.round(maxBytes / 1024) })));
       return;
     }
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Couldn't read that file."));
+    reader.onerror = () => reject(new Error(i18n.t("errors:fileReadFailed")));
     reader.onload = () => resolve(String(reader.result));
     reader.readAsDataURL(file);
   });
@@ -589,6 +595,18 @@ export async function setTopicPrefix(messageId: string, prefixId: string | null)
   await jsonOrThrow(r);
 }
 
+/** Set or clear a topic's NSFW tag (age-restriction plan Phase 3) — the
+ *  built-in system chip, separate from owner prefixes. Allowed for the
+ *  topic's author (18+ accounts only), the forum owner, or a mod holding
+ *  manage_prefixes; the server re-tags the topic's replies to match. */
+export async function setTopicNsfw(messageId: string, nsfw: boolean): Promise<void> {
+  const r = await fetch(`/messages/${encodeURIComponent(messageId)}/nsfw`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include",
+    body: JSON.stringify({ nsfw }),
+  });
+  await jsonOrThrow(r);
+}
+
 /** Flag a forum post to the forum's owner/mods (forum report queue). */
 export async function reportForumPost(forumId: string, messageId: string, reason: string): Promise<void> {
   const r = await fetch(`/forums/${encodeURIComponent(forumId)}/reports`, {
@@ -692,10 +710,16 @@ export function postToBoard(input: {
   format?: "say" | "action" | "npc";
   /** Saved NPC to voice when format = "npc". */
   npcId?: string;
+  /** New topic only: mark it NSFW at compose time (age plan, Phase 3).
+   *  Carried in the socket payload so the topic row is stamped at INSERT —
+   *  a post-then-retag pair would leave an untagged window where minors'
+   *  notifications and lists could pick the topic up. Not in the frozen
+   *  shared payload type; the server reads it via a safe cast. */
+  nsfw?: boolean;
 }): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const socket = getSocket();
-    if (!socket) { reject(new Error("Not connected.")); return; }
+    if (!socket) { reject(new Error(i18n.t("errors:notConnected"))); return; }
     socket.emit("forum:post", {
       roomId: input.roomId,
       text: input.text,
@@ -706,12 +730,13 @@ export function postToBoard(input: {
       ...(input.poll ? { poll: input.poll } : {}),
       ...(input.format && input.format !== "say" ? { format: input.format } : {}),
       ...(input.npcId ? { npcId: input.npcId } : {}),
+      ...(input.nsfw ? { nsfw: true } : {}),
     }, (res) => {
       if (res && "ok" in res && res.ok) resolve(res.messageId);
-      else reject(new Error(res && "message" in res ? res.message : "Post failed."));
+      else reject(new Error(res && "message" in res ? res.message : i18n.t("errors:forums.postFailed")));
     });
     // Belt-and-suspenders: never hang the composer on a dropped ack.
-    setTimeout(() => reject(new Error("The post timed out - check your connection.")), 15_000);
+    setTimeout(() => reject(new Error(i18n.t("errors:forums.postTimeout"))), 15_000);
   });
 }
 

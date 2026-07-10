@@ -3,6 +3,7 @@ import { blocks, users } from "../../db/schema.js";
 import { createBlock, deleteBlock, isBlockedBetween, isBlockProtected } from "../../auth/blocks.js";
 import { notifyBlockChange } from "../../realtime/broadcast.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg, type ResolvedTarget } from "../identityArg.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -19,7 +20,7 @@ function notice(ctx: CommandContext, code: string, message: string) {
 async function resolveBlockTarget(ctx: CommandContext, raw: string): Promise<ResolvedTarget | null> {
   const resolution = await resolveIdentityArg(ctx.db, raw);
   if (resolution.kind === "none") {
-    notice(ctx, "NO_USER", `No user named "${raw}".`);
+    notice(ctx, "NO_USER", tFor(ctx.user.locale, "commands:shared.noUserNamed", { name: raw }));
     return null;
   }
   if (resolution.kind === "ambiguous") {
@@ -59,19 +60,19 @@ export const blockCommand: CommandHandler = {
         .where(eq(blocks.blockerUserId, ctx.user.id));
       const names = rows.map((r) => r.username).sort();
       const body = names.length
-        ? `You have blocked: ${names.join(", ")}`
-        : "You haven't blocked anyone. Use /block <name> to add someone.";
+        ? tFor(ctx.user.locale, "commands:block.list", { names: names.join(", ") })
+        : tFor(ctx.user.locale, "commands:block.listEmpty");
       notice(ctx, "BLOCK_LIST", body);
       return;
     }
 
     const resolved = await resolveBlockTarget(ctx, target);
     if (!resolved) return;
-    if (resolved.userId === ctx.user.id) return notice(ctx, "BLOCK_SELF", "You can't block yourself.");
+    if (resolved.userId === ctx.user.id) return notice(ctx, "BLOCK_SELF", tFor(ctx.user.locale, "commands:block.self"));
     // Moderators and admins can't be blocked (by anyone, including other
     // staff), they need to stay visible for moderation.
     if (await isBlockProtected(ctx.db, resolved.userId)) {
-      return notice(ctx, "BLOCK_STAFF", `You can't block ${resolved.masterUsername} - moderators and admins can't be blocked.`);
+      return notice(ctx, "BLOCK_STAFF", tFor(ctx.user.locale, "commands:block.staff", { name: resolved.masterUsername }));
     }
 
     const created = await createBlock(ctx.db, ctx.user.id, resolved.userId);
@@ -80,8 +81,8 @@ export const blockCommand: CommandHandler = {
       ctx,
       created ? "BLOCKED" : "ALREADY_BLOCKED",
       created
-        ? `Blocked ${resolved.masterUsername}. You can no longer see each other. Use /unblock ${resolved.masterUsername} (or Profile -> Privacy) to undo.`
-        : `You've already blocked ${resolved.masterUsername}.`,
+        ? tFor(ctx.user.locale, "commands:block.blocked", { name: resolved.masterUsername })
+        : tFor(ctx.user.locale, "commands:block.already", { name: resolved.masterUsername }),
     );
   },
 };
@@ -97,14 +98,14 @@ export const unblockCommand: CommandHandler = {
   description: "Lift a block you created. Their account and characters become visible to you again (unless they've also blocked you).",
   async run(ctx) {
     const target = ctx.argsText.trim();
-    if (!target) return notice(ctx, "NEED_NAME", "Usage: /unblock <name>");
+    if (!target) return notice(ctx, "NEED_NAME", tFor(ctx.user.locale, "commands:unblock.usage"));
 
     const resolved = await resolveBlockTarget(ctx, target);
     if (!resolved) return;
 
     const removed = await deleteBlock(ctx.db, ctx.user.id, resolved.userId);
     if (!removed) {
-      notice(ctx, "NOT_BLOCKED", `You hadn't blocked ${resolved.masterUsername}.`);
+      notice(ctx, "NOT_BLOCKED", tFor(ctx.user.locale, "commands:unblock.notBlocked", { name: resolved.masterUsername }));
       return;
     }
     // Only repaint/notify when the pair is now fully unblocked (the other
@@ -115,8 +116,8 @@ export const unblockCommand: CommandHandler = {
       ctx,
       "UNBLOCKED",
       stillBlocked
-        ? `Removed your block on ${resolved.masterUsername}, but they've also blocked you, so you still can't see each other.`
-        : `Unblocked ${resolved.masterUsername}.`,
+        ? tFor(ctx.user.locale, "commands:unblock.stillBlocked", { name: resolved.masterUsername })
+        : tFor(ctx.user.locale, "commands:unblock.done", { name: resolved.masterUsername }),
     );
   },
 };

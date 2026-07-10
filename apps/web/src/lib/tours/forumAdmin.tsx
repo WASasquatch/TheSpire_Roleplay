@@ -1,29 +1,30 @@
+import type { TFunction } from "i18next";
 import type { CoachStep } from "../../components/tours/CoachTour.js";
 
-export const steps: CoachStep[] = [
+export const steps = (t: TFunction<"tours">): CoachStep[] => [
   {
-    title: "Your forum settings",
-    body: "Everything you need to run the place lives in these tabs. Pick one to open its tools.",
+    title: t("forumAdmin.settings.title"),
+    body: t("forumAdmin.settings.body"),
     targets: ['[data-tour="forum-settings-tab-strip"]'],
   },
   {
-    title: "The basics",
-    body: "Overview sets your forum's name, purpose, and who can join or post. Boards is where you add and reorder the boards inside it.",
+    title: t("forumAdmin.basics.title"),
+    body: t("forumAdmin.basics.body"),
     targets: ['[data-tour="forum-settings-tab-overview"]', '[data-tour="forum-settings-tab-boards"]'],
   },
   {
-    title: "Your team",
-    body: "In Roles you promote trusted members to moderators and choose exactly what each of them is allowed to do.",
+    title: t("forumAdmin.team.title"),
+    body: t("forumAdmin.team.body"),
     targets: ['[data-tour="forum-settings-tab-roles"]'],
   },
   {
-    title: "Keep order",
-    body: "Bans lets you remove troublemakers, for a while or for good, and lift a ban later.",
+    title: t("forumAdmin.keepOrder.title"),
+    body: t("forumAdmin.keepOrder.body"),
     targets: ['[data-tour="forum-settings-tab-bans"]'],
   },
   {
-    title: "The paper trail",
-    body: "The Mod log records what your moderators have done, so nothing happens in the dark.",
+    title: t("forumAdmin.modLog.title"),
+    body: t("forumAdmin.modLog.body"),
     targets: ['[data-tour="forum-settings-tab-modlog"]'],
   },
 ];

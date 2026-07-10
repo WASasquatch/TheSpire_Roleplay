@@ -15,8 +15,10 @@
  *    same mood filters + ambient FX overlays), skipping the hand-drawn face.
  */
 import React from "react";
+import { useTranslation } from "react-i18next";
 import { eidolonPrimaryMood, EIDOLON_MOOD_LABEL, isNightHour, NIGHT_END, NIGHT_START } from "@thekeep/shared";
 import type { EidolonMood, EidolonStats } from "@thekeep/shared";
+import { i18n } from "../../lib/i18n";
 
 /* ---- small math helpers (verbatim) ---- */
 type RGB = [number, number, number];
@@ -149,6 +151,10 @@ export interface SpeciesVisual {
   Body: () => React.JSX.Element;
 }
 
+// i18n note: the name/tagline/flavor strings below are the REFERENCE (source)
+// copies; every render site shows them via the `arcade` catalog
+// (arcade.eidolon.species.<id>.*), so edits must be mirrored in
+// packages/shared/locales/en/arcade.json.
 export const SPECIES_VISUAL: Record<string, SpeciesVisual> = {
   dragon: { name: "Dragon", base: [78, 142, 96], shell: "#1d3a2a", accent: "#74e0a0", flavor: "A scaled wyrmling.", tagline: "Hardy · Ravenous", Body: DragonBody },
   gargoyle: { name: "Gargoyle", base: [148, 150, 160], shell: "#2b2d36", accent: "#aeb8cc", flavor: "Hewn from cursed stone.", tagline: "Stoic · Low-upkeep", Body: GargoyleBody },
@@ -159,7 +165,8 @@ const speciesVisual = (id: string | null): SpeciesVisual => (id && SPECIES_VISUA
 export const speciesBase = (id: string | null): RGB => speciesVisual(id).base;
 
 /** Visual growth stage from level — the familiar visibly grows as it's raised.
- *  Pure CSS scale + an elder aura (no new art), driven by the snapshot level. */
+ *  Pure CSS scale + an elder aura (no new art), driven by the snapshot level.
+ *  `label` is the reference copy; callers render t("arcade.eidolon.growth.<tier>"). */
 export function growthTier(level: number): { tier: "hatchling" | "adult" | "elder"; scale: number; label: string } {
   if (level >= 20) return { tier: "elder", scale: 1.12, label: "Elder" };
   if (level >= 5) return { tier: "adult", scale: 1, label: "Adult" };
@@ -172,6 +179,7 @@ const SMUDGES: Array<[number, number, number, number]> = [[74, 150, 11, 7], [122
 export function Familiar({ vis, speciesId, kind, petIconUrl, squish }: {
   vis: Visual; speciesId: string | null; kind: "species" | "pet"; petIconUrl: string | null; squish: boolean;
 }): React.JSX.Element {
+  const { t } = useTranslation("arcade");
   const Body = speciesVisual(speciesId).Body;
   const { skin, dark, eye, glow, dirtI, hungerI, sadI, tiredI, sickI, angryI, happyI, asleep, dead, anim } = vis;
   const isPet = kind === "pet" && !!petIconUrl;
@@ -225,7 +233,7 @@ export function Familiar({ vis, speciesId, kind, petIconUrl, squish }: {
       className={`familiar familiar--${anim} familiar--${speciesId ?? "pet"} ${squish ? "familiar--squish" : ""} ${isPet ? "familiar--petimg" : ""}`}
       viewBox="0 0 200 210"
       style={sv({ "--skin": skin, "--dark": dark, "--eye": eye, filter, opacity: dead ? 0.78 : 1 })}
-      role="img" aria-label="familiar"
+      role="img" aria-label={t("arcade.eidolon.familiarAria")}
     >
       <ellipse className="shadow" cx="100" cy="192" rx="46" ry="9" />
       {isPet ? (
@@ -313,8 +321,9 @@ export function Familiar({ vis, speciesId, kind, petIconUrl, squish }: {
 export function Egg({ crack = 0, shell = "#241a3a", accent = "#f0d785", noRock = false }: {
   crack?: number; shell?: string; accent?: string; noRock?: boolean;
 }): React.JSX.Element {
+  const { t } = useTranslation("arcade");
   return (
-    <svg className={`egg egg--c${crack} ${noRock ? "egg--still" : ""}`} viewBox="0 0 200 210" role="img" aria-label="dormant egg">
+    <svg className={`egg egg--c${crack} ${noRock ? "egg--still" : ""}`} viewBox="0 0 200 210" role="img" aria-label={t("arcade.eidolon.eggAria")}>
       <ellipse className="egg-shadow" cx="100" cy="192" rx="42" ry="8" />
       <path className="egg-body" style={{ fill: shell }} d="M100 28 C60 28 44 100 44 138 C44 174 70 192 100 192 C130 192 156 174 156 138 C156 100 140 28 100 28 Z" />
       <path className="egg-band" d="M50 120 Q100 138 150 120 L150 134 Q100 152 50 134 Z" />
@@ -392,7 +401,10 @@ export const GAUGE_ICON: Record<string, string> = {
 
 export function fmtClock(t: number): string {
   const h = Math.floor(t) % 24; const m = Math.floor((t - Math.floor(t)) * 60);
-  const ap = h < 12 ? "AM" : "PM"; let hh = h % 12; if (hh === 0) hh = 12;
+  // i18n.t (not a hook): this is a plain helper. Callers render it from
+  // ticking state, so a language flip is picked up within a second.
+  const ap = h < 12 ? i18n.t("arcade:arcade.eidolon.clock.am") : i18n.t("arcade:arcade.eidolon.clock.pm");
+  let hh = h % 12; if (hh === 0) hh = 12;
   return `${hh}:${String(m).padStart(2, "0")} ${ap}`;
 }
 export function celestial(t: number, night: boolean): { left: number; top: number } {

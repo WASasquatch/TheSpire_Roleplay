@@ -1,12 +1,18 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { AutomodRule, Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, normalizeTheme, THEME_PRESETS } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
 import { parseDurationMs } from "../../lib/duration.js";
 import { useChat } from "../../state/store.js";
+import { useReducedMotion } from "../../lib/reducedMotion.js";
+import { recordNav } from "../../lib/nav-metrics.js";
 import { StylePicker } from "../StylePicker.js";
 import { ThemePicker } from "../cosmetics/ThemePicker.js";
+import { TabBtn } from "../shared/TabBtn.js";
 import { AdminSaveFooter, useAdminShell, type SettingsRow } from "./adminShell.js";
+import { afterNextPaint, flashAnchor } from "./FindSetting.js";
+import type { SettingsSubtab } from "./adminSearchIndex.js";
 
 /* =============================================================
  * SETTINGS TAB
@@ -24,7 +30,24 @@ function formatMs(ms: number): string {
   return `${Math.round(ms / 1000)}s`;
 }
 
-export function SettingsTab() {
+/** Strip order for the Settings sections (docs/ADMIN_IA.md §4). Ids are
+ *  display-only (never persisted, never sent on the wire); the union
+ *  itself lives in adminSearchIndex.ts so the search index, the
+ *  AdminPanel plumbing, and this tab share it without an import cycle. */
+const SETTINGS_SUBTABS: readonly SettingsSubtab[] = ["accounts", "chat", "safety", "theme", "features"];
+
+interface SettingsTabProps {
+  /** Find-a-setting jump handed down by the AdminPanel shell
+   *  (docs/ADMIN_IA.md §5.3): land on `subtab`, then scroll to + flash
+   *  the element stamped `data-admin-anchor={anchor}`. Null/absent =
+   *  no jump armed. */
+  findRequest?: { subtab: SettingsSubtab; anchor: string } | null;
+  /** Called once the jump has been handled so the shell can disarm it. */
+  onFindHandled?: () => void;
+}
+
+export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {}) {
+  const { t } = useTranslation("admin");
   const setBranding = useChat((s) => s.setBranding);
   // Edit permission gates the Save button. A delegate granted only
   // `view_admin_settings` reads the form but can't submit changes,
@@ -58,6 +81,35 @@ export function SettingsTab() {
   const [serversEnabled, setServersEnabled] = useState(false);
   const [antiSpamEnabled, setAntiSpamEnabled] = useState(false);
   const [automodEnabled, setAutomodEnabled] = useState(false);
+  const [allowMinorSignups, setAllowMinorSignups] = useState(false);
+  // Minor language filter: master toggle + the two overlay word lists,
+  // edited as one-word-per-line textareas (split/joined on save/load).
+  const [minorFilterEnabled, setMinorFilterEnabled] = useState(true);
+  const [minorFilterTerms, setMinorFilterTerms] = useState("");
+  const [minorFilterAllow, setMinorFilterAllow] = useState("");
+  // Language-filter live preview (see the Try-it block for why it exists).
+  // undefined = nothing typed yet; null = server says the sentence is clean.
+  const [filterTryText, setFilterTryText] = useState("");
+  const [filterTryResult, setFilterTryResult] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    const text = filterTryText.trim();
+    if (!text) { setFilterTryResult(undefined); return; }
+    let stale = false;
+    const timer = window.setTimeout(async () => {
+      try {
+        const r = await fetch("/admin/minor-filter/preview", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        if (!r.ok) return;
+        const j = (await r.json()) as { masked: string | null };
+        if (!stale) setFilterTryResult(j.masked);
+      } catch { /* preview is a nicety; stay quiet on network blips */ }
+    }, 400);
+    return () => { stale = true; window.clearTimeout(timer); };
+  }, [filterTryText]);
   const [defaultStyleKey, setDefaultStyleKey] = useState<string>("medieval");
   // Per-preset design pinning. Keyed by THEME_PRESETS name. Empty
   // entry on a preset means "fall through to defaultStyleKey for
@@ -66,6 +118,19 @@ export function SettingsTab() {
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Which Settings section is on screen (docs/ADMIN_IA.md §4). Display-only
+  // state: switching toggles the `hidden` attribute on the section wrappers
+  // in the form below — every section stays MOUNTED, so unsaved edits, the
+  // dirty nudge, and the single save/PUT flow are untouched by subtab hops.
+  const [subtab, setSubtab] = useState<SettingsSubtab>("accounts");
+  const changeSubtab = (next: SettingsSubtab) => {
+    // Same section-switch analytics choke point as the outer tab strip
+    // (stable enum key, never free text). Find-a-setting jumps set the
+    // state directly instead — the pick already went through the panel's
+    // changeTab recordNav, so routing them here would double-count.
+    if (next !== subtab) recordNav("tab", `admin:settings:${next}`);
+    setSubtab(next);
+  };
 
   async function load() {
     setError(null);
@@ -96,13 +161,27 @@ export function SettingsTab() {
       setServersEnabled(j.serversEnabled);
       setAntiSpamEnabled(j.antiSpamEnabled);
       setAutomodEnabled(j.automodEnabled);
+      setAllowMinorSignups(j.allowMinorSignups);
+      setMinorFilterEnabled(j.minorFilterEnabled);
+      setMinorFilterTerms((j.minorFilterTerms ?? []).join("\n"));
+      setMinorFilterAllow((j.minorFilterAllow ?? []).join("\n"));
       setDefaultStyleKey(j.defaultStyleKey || "medieval");
       setThemeDesignMap(j.themeDesignMap ?? {});
+      setTouchedSinceSave(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "load failed");
+      setError(err instanceof Error ? err.message : t("loadFailed"));
     }
   }
   useEffect(() => { load(); }, []);
+
+  // Unsaved-edits nudge. A checked toggle LOOKS committed while the actual
+  // save lives in the footer button; the owner burned a debugging session on
+  // a ticked-but-never-saved "Allow ages 13 to 17" box. One form-level
+  // onChange (change events bubble from every input) flips this on any edit;
+  // it resets on load and on a successful save. Button-driven controls (the
+  // theme picker) don't bubble a change event, so this is a guardrail, not
+  // an exact diff.
+  const [touchedSinceSave, setTouchedSinceSave] = useState(false);
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -113,18 +192,18 @@ export function SettingsTab() {
       const ttlMs = parseDurationMs(sessionTtl, 0);
       const idleGraceMs = parseDurationMs(idleGrace, 0);
       const editGraceMs = parseDurationMs(editGrace, 0);
-      if (retentionMs === null) throw new Error("retention must be a duration like 30d (or 0 for never)");
-      if (ttlMs === null || ttlMs < 5 * 60 * 1000) throw new Error("session TTL must be at least 5m");
-      if (idleGraceMs === null || idleGraceMs < 30 * 1000) throw new Error("idle grace must be at least 30s");
-      if (idleGraceMs > 24 * 60 * 60 * 1000) throw new Error("idle grace must be 24h or less");
-      if (editGraceMs === null) throw new Error("edit window must be a duration like 5m (or 0 to disable edits)");
+      if (retentionMs === null) throw new Error(t("settings.retentionError"));
+      if (ttlMs === null || ttlMs < 5 * 60 * 1000) throw new Error(t("settings.ttlError"));
+      if (idleGraceMs === null || idleGraceMs < 30 * 1000) throw new Error(t("settings.idleGraceMinError"));
+      if (idleGraceMs > 24 * 60 * 60 * 1000) throw new Error(t("settings.idleGraceMaxError"));
+      if (editGraceMs === null) throw new Error(t("settings.editGraceError"));
       // Server caps at 7d; same here so the input error is friendlier
       // than an opaque 400 from the route.
-      if (editGraceMs > 7 * 24 * 60 * 60 * 1000) throw new Error("edit window must be 7 days or less");
+      if (editGraceMs > 7 * 24 * 60 * 60 * 1000) throw new Error(t("settings.editGraceMaxError"));
       const intOrThrow = (label: string, raw: string, min: number, max: number): number => {
         const n = parseInt(raw, 10);
         if (!Number.isFinite(n) || n < min || n > max) {
-          throw new Error(`${label} must be an integer ${min}-${max}`);
+          throw new Error(t("settings.intError", { label, min, max }));
         }
         return n;
       };
@@ -132,16 +211,16 @@ export function SettingsTab() {
         messageRetentionMs: retentionMs,
         sessionTtlMs: ttlMs,
         idleGraceMs,
-        maxCharactersPerUser: intOrThrow("Max characters/user", maxChars, 1, 1000),
-        maxAccountsPerEmail: intOrThrow("Max accounts/email", maxEmail, 1, 50),
-        maxRoomsPerOwner: intOrThrow("Max rooms/owner", maxRooms, 0, 1000),
-        maxMessageLength: intOrThrow("Max chat message length", maxMsgLen, 100, 50_000),
-        maxDirectMessageLength: intOrThrow("Max DM length", maxDmLen, 100, 50_000),
-        maxForumPostLength: intOrThrow("Max forum post length", maxForumLen, 100, 50_000),
-        maxForumTopicTitleLength: intOrThrow("Max forum topic title length", maxForumTitleLen, 10, 500),
-        forumTopicsPerPage: intOrThrow("Forum topics per page", forumTopicsPerPage, 5, 100),
+        maxCharactersPerUser: intOrThrow(t("settings.errMaxCharsPerUser"), maxChars, 1, 1000),
+        maxAccountsPerEmail: intOrThrow(t("settings.errMaxAccountsPerEmail"), maxEmail, 1, 50),
+        maxRoomsPerOwner: intOrThrow(t("settings.errMaxRoomsPerOwner"), maxRooms, 0, 1000),
+        maxMessageLength: intOrThrow(t("settings.errMaxChatLen"), maxMsgLen, 100, 50_000),
+        maxDirectMessageLength: intOrThrow(t("settings.errMaxDmLen"), maxDmLen, 100, 50_000),
+        maxForumPostLength: intOrThrow(t("settings.errMaxForumLen"), maxForumLen, 100, 50_000),
+        maxForumTopicTitleLength: intOrThrow(t("settings.errMaxForumTitleLen"), maxForumTitleLen, 10, 500),
+        forumTopicsPerPage: intOrThrow(t("settings.errForumTopicsPerPage"), forumTopicsPerPage, 5, 100),
         editGraceMs,
-        maxBioLength: intOrThrow("Max bio length", maxBioLen, 1000, 200_000),
+        maxBioLength: intOrThrow(t("settings.errMaxBioLen"), maxBioLen, 1000, 200_000),
         registrationOpen: regOpen,
         activityFeedsEnabled,
         featuredWorldsEnabled,
@@ -150,6 +229,12 @@ export function SettingsTab() {
         serversEnabled,
         antiSpamEnabled,
         automodEnabled,
+        allowMinorSignups,
+        minorFilterEnabled,
+        // One word or phrase per line (commas work too); the server trims
+        // and dedupes, so this split only has to break lines apart.
+        minorFilterTerms: minorFilterTerms.split(/[\n,]+/).map((w) => w.trim()).filter(Boolean),
+        minorFilterAllow: minorFilterAllow.split(/[\n,]+/).map((w) => w.trim()).filter(Boolean),
         defaultStyleKey,
         themeDesignMap,
       };
@@ -195,10 +280,11 @@ export function SettingsTab() {
         // back to prefers-color-scheme + cached last-active theme.
         defaultThemeJson: j.defaultThemeJson ?? null,
       });
+      setTouchedSinceSave(false);
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -218,371 +304,556 @@ export function SettingsTab() {
         formId="admin-settings-form"
         saving={saving}
         savedFlash={savedFlash}
+        dirty={touchedSinceSave}
         lastUpdatedAt={data?.updatedAt ?? null}
         error={error}
-        saveLabel="Save settings"
+        saveLabel={t("saveSettings")}
         canEdit={canEditSiteSettings}
-        readOnlyHint="Read-only, needs edit_site_settings to save."
+        readOnlyHint={t("readOnlyNeedsSiteSettings")}
       />,
     );
     return () => shell.setFooter(null);
-  }, [shell, saving, savedFlash, error, data?.updatedAt, canEditSiteSettings]);
+  }, [shell, saving, savedFlash, touchedSinceSave, error, data?.updatedAt, canEditSiteSettings, t]);
+
+  // Find-a-setting jump (docs/ADMIN_IA.md §5.3). Waits for `data` so the
+  // form (and its data-admin-anchor stamps) is actually on screen — the
+  // effect re-fires when the settings row arrives. The subtab that owns
+  // the anchor is un-hidden FIRST (a display:none element can't be
+  // scrolled to), then the scroll + flash run after that swap has
+  // painted. A missing anchor is silently fine; the user still lands on
+  // this tab + subtab.
+  const reduceMotion = useReducedMotion();
+  useEffect(() => {
+    if (!findRequest || !data) return;
+    setSubtab(findRequest.subtab);
+    return afterNextPaint(() => {
+      flashAnchor(findRequest.anchor, reduceMotion);
+      onFindHandled?.();
+    });
+  }, [findRequest, data, reduceMotion, onFindHandled]);
 
   if (!data) {
-    return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
+    return <div className="text-keep-muted text-xs">{error ?? t("loading")}</div>;
   }
 
   return (
     <div className="space-y-4">
-    <form id="admin-settings-form" onSubmit={save} className="space-y-4">
+    <form
+      id="admin-settings-form"
+      onSubmit={save}
+      onChange={() => setTouchedSinceSave(true)}
+      className="space-y-4"
+    >
       <p className="text-xs text-keep-muted">
-        Sitewide configuration. Changes apply immediately for new sessions and the next hourly retention sweep.
+        {t("settings.description")}
       </p>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Message retention</legend>
-        <div className="flex items-baseline gap-2">
-          <input
-            type="text"
-            value={retention}
-            onChange={(e) => setRetention(e.target.value)}
-            placeholder="30d, 90d, 0 = forever"
-            className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
-          />
-          <span className="text-keep-muted">
-            Messages older than this are purged hourly. <code>0</code> retains forever.
-          </span>
-        </div>
-      </fieldset>
+      {/* Subtab strip (docs/ADMIN_IA.md §4). The buttons only flip the
+          `subtab` flag: every section below stays MOUNTED and toggles
+          the HTML `hidden` attribute instead of conditional-rendering,
+          so unsaved edits in controlled inputs survive switches and
+          change events keep bubbling up to the form-level dirty
+          listener above (save() reads React state, not FormData, so
+          display:none is fully safe). TabBtn renders type="button",
+          so a click can never submit this form. The strip wraps on
+          phones (flex-wrap); no nested dropdown. */}
+      <nav
+        aria-label={t("settings.subtabAria")}
+        className="flex flex-wrap items-center gap-1 text-xs uppercase tracking-widest"
+      >
+        {SETTINGS_SUBTABS.map((s) => (
+          <TabBtn key={s} active={subtab === s} onClick={() => changeSubtab(s)}>
+            {t(`settings.subtab.${s}`)}
+          </TabBtn>
+        ))}
+      </nav>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Idle timeout</legend>
-        <div className="flex items-baseline gap-2">
-          <input
-            type="text"
-            value={sessionTtl}
-            onChange={(e) => setSessionTtl(e.target.value)}
-            placeholder="30m, 1h, 1d"
-            className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
-          />
-          <span className="text-keep-muted">
-            How long a user can be idle before they get bounced back to the login splash. Sliding: any keypress, mousemove, message, or room switch resets the clock. Min 5m.
-          </span>
-        </div>
-      </fieldset>
+      {/* ----- Joining & accounts ------------------------------------ */}
+      <section hidden={subtab !== "accounts"} className="space-y-4">
+        <fieldset data-admin-anchor="settings.accountLimitsLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.accountLimitsLegend")}</legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label data-admin-anchor="settings.registrationLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.registrationLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={regOpen}
+                  onChange={(e) => setRegOpen(e.target.checked)}
+                />
+                <span>{regOpen ? t("settings.registrationOn") : t("settings.registrationOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.registrationHint")}
+              </span>
+            </label>
+            <label data-admin-anchor="settings.signupAgeLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.signupAgeLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={allowMinorSignups}
+                  onChange={(e) => setAllowMinorSignups(e.target.checked)}
+                />
+                <span>{allowMinorSignups ? t("settings.signupAgeOn") : t("settings.signupAgeOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.signupAgeHint")}
+              </span>
+            </label>
+            <LimitField
+              anchor="settings.maxEmailLabel"
+              label={t("settings.maxEmailLabel")}
+              hint={t("settings.maxEmailHint")}
+              value={maxEmail}
+              onChange={setMaxEmail}
+              min={1}
+              max={50}
+            />
+            <LimitField
+              anchor="settings.maxCharsLabel"
+              label={t("settings.maxCharsLabel")}
+              hint={t("settings.maxCharsHint")}
+              value={maxChars}
+              onChange={setMaxChars}
+              min={1}
+              max={1000}
+            />
+            <LimitField
+              anchor="settings.maxRoomsLabel"
+              label={t("settings.maxRoomsLabel")}
+              hint={t("settings.maxRoomsHint")}
+              value={maxRooms}
+              onChange={setMaxRooms}
+              min={0}
+              max={1000}
+            />
+            <LimitField
+              anchor="settings.maxBioLenLabel"
+              label={t("settings.maxBioLenLabel")}
+              hint={t("settings.maxBioLenHint")}
+              value={maxBioLen}
+              onChange={setMaxBioLen}
+              min={1000}
+              max={200_000}
+            />
+          </div>
+        </fieldset>
+      </section>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Idle ghost lifetime</legend>
-        <div className="flex items-baseline gap-2">
-          <input
-            type="text"
-            value={idleGrace}
-            onChange={(e) => setIdleGrace(e.target.value)}
-            placeholder="30m, 1h"
-            className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
-          />
-          <span className="text-keep-muted">
-            When someone closes their tab or refreshes, they stay in the userlist faded out as "(idle)" for this long instead of vanishing. Inside the window, no connect/disconnect chat lines fire. The room they were in is also held open against archival. Min 30s, max 24h.
-          </span>
-        </div>
-      </fieldset>
-
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Limits & capacity</legend>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <LimitField
-            label="Max characters / user"
-            hint="Per-account ceiling on character profiles."
-            value={maxChars}
-            onChange={setMaxChars}
-            min={1}
-            max={1000}
-          />
-          <LimitField
-            label="Max accounts / email"
-            hint="1 = traditional. Raise to allow shared/family accounts."
-            value={maxEmail}
-            onChange={setMaxEmail}
-            min={1}
-            max={50}
-          />
-          <LimitField
-            label="Max rooms / owner"
-            hint="Cap on user-created rooms a single user may own. 0 disables user-created rooms."
-            value={maxRooms}
-            onChange={setMaxRooms}
-            min={0}
-            max={1000}
-          />
-          <LimitField
-            label="Max chat message length"
-            hint="Hard cap on flat-chat body length (chars)."
-            value={maxMsgLen}
-            onChange={setMaxMsgLen}
-            min={100}
-            max={50_000}
-          />
-          <LimitField
-            label="Max direct message length"
-            hint="Hard cap on DM body length (chars). Independent from chat so private long-form conversations can have more room."
-            value={maxDmLen}
-            onChange={setMaxDmLen}
-            min={100}
-            max={50_000}
-          />
-          <LimitField
-            label="Max forum post length"
-            hint="Hard cap on forum topic + reply body length (chars) in nested rooms. Typically larger than chat to allow long-form posts."
-            value={maxForumLen}
-            onChange={setMaxForumLen}
-            min={100}
-            max={50_000}
-          />
-          <LimitField
-            label="Max forum topic title length"
-            hint="Hard cap on a forum topic title (chars). Kept short so titles stay list-renderable in the topic picker."
-            value={maxForumTitleLen}
-            onChange={setMaxForumTitleLen}
-            min={10}
-            max={500}
-          />
-          <LimitField
-            label="Forum topics per page"
-            hint="How many non-sticky topics appear on each page of a forum category's numbered pagination strip. Stickies stay on page 1 only and don't count against this. Default 20."
-            value={forumTopicsPerPage}
-            onChange={setForumTopicsPerPage}
-            min={5}
-            max={100}
-          />
-          <label className="text-xs">
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">
-              Edit / delete window
-            </span>
+      {/* ----- Chat & forums ----------------------------------------- */}
+      <section hidden={subtab !== "chat"} className="space-y-4">
+        <fieldset data-admin-anchor="settings.retentionLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.retentionLegend")}</legend>
+          <div className="flex items-baseline gap-2">
             <input
               type="text"
-              value={editGrace}
-              onChange={(e) => setEditGrace(e.target.value)}
-              placeholder="5m"
-              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+              value={retention}
+              onChange={(e) => setRetention(e.target.value)}
+              placeholder={t("settings.retentionPlaceholder")}
+              className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
             />
-            <span className="mt-0.5 block text-[10px] text-keep-muted">
-              How long after sending an author can edit / delete their own chat or DM message. Duration like 30s / 5m / 1h. 0 disables author edits entirely. Mods + admins always bypass this; forum posts are exempt and stay editable indefinitely.
+            <span className="text-keep-muted">
+              <Trans t={t} i18nKey="settings.retentionHelp">
+                {"Messages older than this are purged hourly. "}
+                <code>0</code>
+                {" retains forever."}
+              </Trans>
             </span>
-          </label>
-          <LimitField
-            label="Max bio length"
-            hint="Hard cap on profile bio HTML (chars)."
-            value={maxBioLen}
-            onChange={setMaxBioLen}
-            min={1000}
-            max={200_000}
-          />
-          <label className="text-xs">
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Registration</span>
-            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
-              <input
-                type="checkbox"
-                checked={regOpen}
-                onChange={(e) => setRegOpen(e.target.checked)}
-              />
-              <span>{regOpen ? "Open - anyone can register" : "Closed - login only"}</span>
-            </div>
-            <span className="mt-0.5 block text-[10px] text-keep-muted">
-              When closed, /auth/register returns 503 and the login screen hides the Register tab.
-            </span>
-          </label>
-          <label className="text-xs">
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Activity feeds</span>
-            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
-              <input
-                type="checkbox"
-                checked={activityFeedsEnabled}
-                onChange={(e) => setActivityFeedsEnabled(e.target.checked)}
-              />
-              <span>{activityFeedsEnabled ? "On - splash shows live counters" : "Off - cold-start posture"}</span>
-            </div>
-            <span className="mt-0.5 block text-[10px] text-keep-muted">
-              When off, the splash hides the "X users online" / room counters so an empty community doesn't telegraph "dead site" to first visitors. Flip on once there's a real pulse to surface.
-            </span>
-          </label>
-          <label className="text-xs">
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Messages in last 24h</span>
-            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
-              <input
-                type="checkbox"
-                checked={splashMessages24hEnabled}
-                onChange={(e) => setSplashMessages24hEnabled(e.target.checked)}
-              />
-              <span>{splashMessages24hEnabled ? "On - splash shows rolling 24h message count" : "Off - splash hides the 24h message stat"}</span>
-            </div>
-            <span className="mt-0.5 block text-[10px] text-keep-muted">
-              Surfaces a rolling 24h chat-message count on the splash. Independent of Activity feeds, flip it on alone to show the message volume by itself, or pair with Activity feeds so it sits in the same row as the online/registered/room counters.
-            </span>
-          </label>
-          <label className="text-xs">
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Featured worlds carousel</span>
-            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
-              <input
-                type="checkbox"
-                checked={featuredWorldsEnabled}
-                onChange={(e) => setFeaturedWorldsEnabled(e.target.checked)}
-              />
-              <span>{featuredWorldsEnabled ? "On - splash rotates open worlds" : "Off - splash hides the carousel"}</span>
-            </div>
-            <span className="mt-0.5 block text-[10px] text-keep-muted">
-              Splash page picks up to 10 random open worlds and rotates them as a "settings you can play in" strip. Off by default; the seeded defaults plus any community open worlds will fill the rotation once enabled.
-            </span>
-          </label>
-          <label className="text-xs">
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Profile bio Designer</span>
-            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
-              <input
-                type="checkbox"
-                checked={profileDesignerEnabled}
-                onChange={(e) => setProfileDesignerEnabled(e.target.checked)}
-              />
-              <span>{profileDesignerEnabled ? "On - bio tab offers a visual Designer (desktop)" : "Off - bio editor is raw HTML source only"}</span>
-            </div>
-            <span className="mt-0.5 block text-[10px] text-keep-muted">
-              Adds a visual drag-and-drop Designer alongside the raw-HTML Source on the profile bio tab (desktop only). Off by default. Try it on your own profile before enabling site-wide; the Source view remains available either way.
-            </span>
-          </label>
-          <label className="text-xs">
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Multi-server</span>
-            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
-              <input
-                type="checkbox"
-                checked={serversEnabled}
-                onChange={(e) => setServersEnabled(e.target.checked)}
-              />
-              <span>{serversEnabled ? "On - server rail + join/create your own servers" : "Off - single-server chat (today's experience)"}</span>
-            </div>
-            <span className="mt-0.5 block text-[10px] text-keep-muted">
-              Master switch for the multi-server feature: the round server-icon rail beside the userlist, the discover/create-a-server flow, and all per-server scoping. Off keeps the chat exactly as a single server. The SERVERS_KILL env var overrides this to off.
-            </span>
-          </label>
-          <label className="text-xs">
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Anti-spam</span>
-            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
-              <input
-                type="checkbox"
-                checked={antiSpamEnabled}
-                onChange={(e) => setAntiSpamEnabled(e.target.checked)}
-              />
-              <span>{antiSpamEnabled ? "On - rapid-fire floods get warned, then auto-muted" : "Off - no automatic spam throttling"}</span>
-            </div>
-            <span className="mt-0.5 block text-[10px] text-keep-muted">
-              Catches rapid-fire message floods: after more than five messages in a few seconds a user gets a warning and a short, growing cooldown, then an automatic mute (5 minutes, growing on repeat offenders) after three warnings. Keeps a room from being blown out when no mod is around. Trusted users, mods, and admins are exempt via the bypass_anti_spam permission.
-            </span>
-          </label>
-          <label className="text-xs">
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Auto-moderation</span>
-            <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
-              <input
-                type="checkbox"
-                checked={automodEnabled}
-                onChange={(e) => setAutomodEnabled(e.target.checked)}
-              />
-              <span>{automodEnabled ? "On - messages are checked against your rules below" : "Off - no content filtering (mature-RP safe)"}</span>
-            </div>
-            <span className="mt-0.5 block text-[10px] text-keep-muted">
-              Master switch for content auto-moderation. When on, each message is checked against the rules below before it posts; a matching rule can warn (block the message), delete (silently drop it), or mute the sender. Off by default so mature roleplay isn't caught by surprise. Trusted users, mods, and admins are exempt via the bypass_automod permission. Manage rules and try sample text in the Auto-moderation section below.
-            </span>
-          </label>
-        </div>
-      </fieldset>
+          </div>
+        </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Default theme</legend>
-        <p className="mb-2 text-keep-muted">
-          Used when a user has no custom theme and no active character with a theme.
-          Cleared (no override) means the built-in Parchment palette.
-        </p>
-        <ThemePicker
-          theme={theme ?? DEFAULT_THEME}
-          onChange={setTheme}
-          onReset={() => setTheme(null)}
-        />
-        {!theme ? (
-          <div className="mt-1 italic text-keep-muted">No site default - using built-in Parchment.</div>
-        ) : null}
-      </fieldset>
+        <fieldset data-admin-anchor="settings.idleTimeoutLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.idleTimeoutLegend")}</legend>
+          <div className="flex items-baseline gap-2">
+            <input
+              type="text"
+              value={sessionTtl}
+              onChange={(e) => setSessionTtl(e.target.value)}
+              placeholder={t("settings.idleTimeoutPlaceholder")}
+              className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+            />
+            <span className="text-keep-muted">
+              {t("settings.idleTimeoutHelp")}
+            </span>
+          </div>
+        </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Theme style</legend>
-        <p className="mb-2 text-keep-muted">
-          The fallback visual treatment (ornaments, borders, textures) for
-          palettes that don't have a design pinned below. Orthogonal to
-          the palette, picking a style doesn't change which colors are
-          used, just how they're rendered. Users can override this on
-          their master or character profile.
-        </p>
-        <StylePicker
-          value={defaultStyleKey}
-          // Admin requires a non-null value; if the user manages to
-          // pick "(use site default)" (only shown with allowInherit)
-          // fall through to the launch flagship.
-          onChange={(k) => setDefaultStyleKey(k ?? "medieval")}
-        />
-      </fieldset>
+        <fieldset data-admin-anchor="settings.idleGhostLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.idleGhostLegend")}</legend>
+          <div className="flex items-baseline gap-2">
+            <input
+              type="text"
+              value={idleGrace}
+              onChange={(e) => setIdleGrace(e.target.value)}
+              placeholder={t("settings.idleGhostPlaceholder")}
+              className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+            />
+            <span className="text-keep-muted">
+              {t("settings.idleGhostHelp")}
+            </span>
+          </div>
+        </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Designs by theme</legend>
-        <p className="mb-2 text-keep-muted">
-          Pin a design to each named palette. When a user (or character)
-          picks one of these themes, they get the paired design unless
-          they've explicitly overridden it on their profile. "Use site
-          default" means that theme falls through to the Theme style
-          above. Custom palettes (anything not matching one of these
-          presets) always fall through.
-        </p>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {THEME_PRESETS.map((p) => (
-            <label key={p.name} className="flex items-center gap-2">
-              <span
-                aria-hidden
-                title={`Preview of ${p.name}'s palette`}
-                className="flex shrink-0 rounded border"
-                style={{ borderColor: p.theme.border }}
-              >
-                {(["panel", "action", "accent"] as const).map((slot) => (
-                  <span
-                    key={slot}
-                    className="inline-block h-4 w-4"
-                    style={{ backgroundColor: p.theme[slot] }}
-                  />
-                ))}
+        <fieldset data-admin-anchor="settings.chatLimitsLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.chatLimitsLegend")}</legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <LimitField
+              anchor="settings.maxMsgLenLabel"
+              label={t("settings.maxMsgLenLabel")}
+              hint={t("settings.maxMsgLenHint")}
+              value={maxMsgLen}
+              onChange={setMaxMsgLen}
+              min={100}
+              max={50_000}
+            />
+            <LimitField
+              anchor="settings.maxDmLenLabel"
+              label={t("settings.maxDmLenLabel")}
+              hint={t("settings.maxDmLenHint")}
+              value={maxDmLen}
+              onChange={setMaxDmLen}
+              min={100}
+              max={50_000}
+            />
+            <label data-admin-anchor="settings.editWindowLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+                {t("settings.editWindowLabel")}
               </span>
-              <span className="min-w-[6rem] truncate font-semibold">{p.name}</span>
-              <StylePicker
-                value={themeDesignMap[p.name] ?? null}
-                allowInherit
-                onChange={(k) => {
-                  setThemeDesignMap((prev) => {
-                    const next = { ...prev };
-                    if (k === null) delete next[p.name];
-                    else next[p.name] = k;
-                    return next;
-                  });
-                }}
+              <input
+                type="text"
+                value={editGrace}
+                onChange={(e) => setEditGrace(e.target.value)}
+                placeholder="5m"
+                className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
+              />
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.editWindowHint")}
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset data-admin-anchor="settings.forumLimitsLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.forumLimitsLegend")}</legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <LimitField
+              anchor="settings.maxForumLenLabel"
+              label={t("settings.maxForumLenLabel")}
+              hint={t("settings.maxForumLenHint")}
+              value={maxForumLen}
+              onChange={setMaxForumLen}
+              min={100}
+              max={50_000}
+            />
+            <LimitField
+              anchor="settings.maxForumTitleLenLabel"
+              label={t("settings.maxForumTitleLenLabel")}
+              hint={t("settings.maxForumTitleLenHint")}
+              value={maxForumTitleLen}
+              onChange={setMaxForumTitleLen}
+              min={10}
+              max={500}
+            />
+            <LimitField
+              anchor="settings.forumTopicsPerPageLabel"
+              label={t("settings.forumTopicsPerPageLabel")}
+              hint={t("settings.forumTopicsPerPageHint")}
+              value={forumTopicsPerPage}
+              onChange={setForumTopicsPerPage}
+              min={5}
+              max={100}
+            />
+          </div>
+        </fieldset>
+      </section>
+
+      {/* ----- Safety & filters -------------------------------------- */}
+      <section hidden={subtab !== "safety"} className="space-y-4">
+        <fieldset data-admin-anchor="settings.safetyTogglesLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.safetyTogglesLegend")}</legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label data-admin-anchor="settings.antiSpamLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.antiSpamLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={antiSpamEnabled}
+                  onChange={(e) => setAntiSpamEnabled(e.target.checked)}
+                />
+                <span>{antiSpamEnabled ? t("settings.antiSpamOn") : t("settings.antiSpamOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.antiSpamHint")}
+              </span>
+            </label>
+            <label data-admin-anchor="settings.automodLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.automodLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={automodEnabled}
+                  onChange={(e) => setAutomodEnabled(e.target.checked)}
+                />
+                <span>{automodEnabled ? t("settings.automodOn") : t("settings.automodOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.automodHint")}
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        {/* Minor language filter. Sits under the protection toggles above
+            (anti-spam / auto-moderation): same save flow, same permission.
+            Masking is VIEWER-side for under-18 accounts only; nothing here
+            edits stored messages, and adults always see the original. */}
+        <fieldset data-admin-anchor="settings.minorFilterLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.minorFilterLegend")}</legend>
+          <p className="mb-2 text-keep-muted">
+            {t("settings.minorFilterHelp")}
+          </p>
+          <label className="mb-2 flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+            <input
+              type="checkbox"
+              checked={minorFilterEnabled}
+              onChange={(e) => setMinorFilterEnabled(e.target.checked)}
+            />
+            <span>{minorFilterEnabled ? t("settings.minorFilterOn") : t("settings.minorFilterOff")}</span>
+          </label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label data-admin-anchor="settings.minorFilterTermsLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.minorFilterTermsLabel")}</span>
+              <textarea
+                value={minorFilterTerms}
+                onChange={(e) => setMinorFilterTerms(e.target.value)}
+                rows={5}
+                placeholder={t("settings.minorFilterTermsPh")}
+                className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+              />
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.minorFilterTermsHint")}
+              </span>
+            </label>
+            <label data-admin-anchor="settings.minorFilterAllowLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.minorFilterAllowLabel")}</span>
+              <textarea
+                value={minorFilterAllow}
+                onChange={(e) => setMinorFilterAllow(e.target.value)}
+                rows={5}
+                placeholder={t("settings.minorFilterAllowPh")}
+                className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+              />
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.minorFilterAllowHint")}
+              </span>
+            </label>
+          </div>
+          {/* Live preview. The built-in word list is invisible in the boxes
+              above, and an EMPTY Added-words box read to the owner as "the
+              filter does nothing" — one typed test kills that doubt better
+              than any copy. Evaluates the SAVED settings through the same
+              matcher the live surfaces use (parity rule shared with the
+              automod tester). stopPropagation keeps preview typing from
+              tripping the form-level unsaved-changes nudge — nothing here
+              is a setting. */}
+          <div className="mt-2">
+            <label className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.minorFilterTryLabel")}</span>
+              <input
+                value={filterTryText}
+                onChange={(e) => { e.stopPropagation(); setFilterTryText(e.target.value); }}
+                placeholder={t("settings.minorFilterTryPh")}
+                className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
               />
             </label>
-          ))}
-        </div>
-      </fieldset>
+            {filterTryResult !== undefined ? (
+              <p className={`mt-1 text-xs ${filterTryResult === null ? "text-keep-muted" : "text-keep-text"}`}>
+                {filterTryResult === null
+                  ? t("settings.minorFilterTryClean")
+                  : t("settings.minorFilterTryMasked", { masked: filterTryResult })}
+              </p>
+            ) : null}
+          </div>
+        </fieldset>
+      </section>
+
+      {/* ----- Look & theme ------------------------------------------ */}
+      <section hidden={subtab !== "theme"} className="space-y-4">
+        <fieldset data-admin-anchor="settings.defaultThemeLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.defaultThemeLegend")}</legend>
+          <p className="mb-2 text-keep-muted">
+            {t("settings.defaultThemeHelp")}
+          </p>
+          <ThemePicker
+            theme={theme ?? DEFAULT_THEME}
+            onChange={setTheme}
+            onReset={() => setTheme(null)}
+          />
+          {!theme ? (
+            <div className="mt-1 italic text-keep-muted">{t("settings.noSiteDefault")}</div>
+          ) : null}
+        </fieldset>
+
+        <fieldset data-admin-anchor="settings.themeStyleLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.themeStyleLegend")}</legend>
+          <p className="mb-2 text-keep-muted">
+            {t("settings.themeStyleHelp")}
+          </p>
+          <StylePicker
+            value={defaultStyleKey}
+            // Admin requires a non-null value; if the user manages to
+            // pick "(use site default)" (only shown with allowInherit)
+            // fall through to the launch flagship.
+            onChange={(k) => setDefaultStyleKey(k ?? "medieval")}
+          />
+        </fieldset>
+
+        <fieldset data-admin-anchor="settings.designsByThemeLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.designsByThemeLegend")}</legend>
+          <p className="mb-2 text-keep-muted">
+            {t("settings.designsByThemeHelp")}
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {THEME_PRESETS.map((p) => (
+              <label key={p.name} className="flex items-center gap-2">
+                <span
+                  aria-hidden
+                  title={t("settings.palettePreviewTitle", { name: p.name })}
+                  className="flex shrink-0 rounded border"
+                  style={{ borderColor: p.theme.border }}
+                >
+                  {(["panel", "action", "accent"] as const).map((slot) => (
+                    <span
+                      key={slot}
+                      className="inline-block h-4 w-4"
+                      style={{ backgroundColor: p.theme[slot] }}
+                    />
+                  ))}
+                </span>
+                <span className="min-w-[6rem] truncate font-semibold">{p.name}</span>
+                <StylePicker
+                  value={themeDesignMap[p.name] ?? null}
+                  allowInherit
+                  onChange={(k) => {
+                    setThemeDesignMap((prev) => {
+                      const next = { ...prev };
+                      if (k === null) delete next[p.name];
+                      else next[p.name] = k;
+                      return next;
+                    });
+                  }}
+                />
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      </section>
+
+      {/* ----- Homepage & extras ------------------------------------- */}
+      <section hidden={subtab !== "features"} className="space-y-4">
+        <fieldset data-admin-anchor="settings.homepageTogglesLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.homepageTogglesLegend")}</legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label data-admin-anchor="settings.activityFeedsLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.activityFeedsLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={activityFeedsEnabled}
+                  onChange={(e) => setActivityFeedsEnabled(e.target.checked)}
+                />
+                <span>{activityFeedsEnabled ? t("settings.activityFeedsOn") : t("settings.activityFeedsOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.activityFeedsHint")}
+              </span>
+            </label>
+            <label data-admin-anchor="settings.messages24hLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.messages24hLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={splashMessages24hEnabled}
+                  onChange={(e) => setSplashMessages24hEnabled(e.target.checked)}
+                />
+                <span>{splashMessages24hEnabled ? t("settings.messages24hOn") : t("settings.messages24hOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.messages24hHint")}
+              </span>
+            </label>
+            <label data-admin-anchor="settings.featuredWorldsLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.featuredWorldsLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={featuredWorldsEnabled}
+                  onChange={(e) => setFeaturedWorldsEnabled(e.target.checked)}
+                />
+                <span>{featuredWorldsEnabled ? t("settings.featuredWorldsOn") : t("settings.featuredWorldsOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.featuredWorldsHint")}
+              </span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset data-admin-anchor="settings.featureTogglesLegend" className="rounded border border-keep-rule p-3 text-xs">
+          <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.featureTogglesLegend")}</legend>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <label data-admin-anchor="settings.designerLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.designerLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={profileDesignerEnabled}
+                  onChange={(e) => setProfileDesignerEnabled(e.target.checked)}
+                />
+                <span>{profileDesignerEnabled ? t("settings.designerOn") : t("settings.designerOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.designerHint")}
+              </span>
+            </label>
+            <label data-admin-anchor="settings.multiServerLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.multiServerLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={serversEnabled}
+                  onChange={(e) => setServersEnabled(e.target.checked)}
+                />
+                <span>{serversEnabled ? t("settings.multiServerOn") : t("settings.multiServerOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.multiServerHint")}
+              </span>
+            </label>
+          </div>
+        </fieldset>
+      </section>
 
       {/* Save controls + status (incl. error) live in the modal
           footer via `useAdminShell().setFooter(...)` near the top of
           this component. No inline save row, keeps the form
-          scrolling area focused on field editing. */}
+          scrolling area focused on field editing. Validation errors
+          surface there even when the failing field sits on a hidden
+          subtab — no auto-switch-on-error, by design. */}
     </form>
 
     {/* Auto-moderation rule management + test box. Self-contained
         (own fetch/state), lives OUTSIDE the settings <form> so its
-        buttons never submit the settings save. The master toggle
-        above (Auto-moderation) enables/disables enforcement; these
-        rules define WHAT gets caught. */}
-    <AutomodRulesCard canEdit={canEditSiteSettings} />
+        buttons never submit the settings save; it shows with the
+        Safety & filters subtab via the same `hidden` toggle as the
+        in-form sections (stays mounted, so its rule list doesn't
+        refetch on every visit). The master toggle above
+        (Auto-moderation) enables/disables enforcement; these rules
+        define WHAT gets caught. */}
+    <div hidden={subtab !== "safety"}>
+      <AutomodRulesCard canEdit={canEditSiteSettings} />
+    </div>
     </div>
   );
 }
@@ -597,22 +868,23 @@ export function SettingsTab() {
  * save flow. Gated read-only when the admin lacks edit_site_settings.
  */
 
-const AUTOMOD_KIND_LABELS: Record<AutomodRule["kind"], string> = {
-  keyword: "Keyword",
-  regex: "Regex",
-  link: "Any link",
-  invite: "Invite link",
-  mention_cap: "Mention cap",
+/** Catalog keys (admin ns) for the automod enum labels; resolve with t(). */
+const AUTOMOD_KIND_KEYS: Record<AutomodRule["kind"], string> = {
+  keyword: "settings.automodKind.keyword",
+  regex: "settings.automodKind.regex",
+  link: "settings.automodKind.link",
+  invite: "settings.automodKind.invite",
+  mention_cap: "settings.automodKind.mention_cap",
 };
-const AUTOMOD_ACTION_LABELS: Record<AutomodRule["action"], string> = {
-  warn: "Warn (block message)",
-  delete: "Delete (silent)",
-  mute: "Mute sender",
+const AUTOMOD_ACTION_KEYS: Record<AutomodRule["action"], string> = {
+  warn: "settings.automodAction.warn",
+  delete: "settings.automodAction.delete",
+  mute: "settings.automodAction.mute",
 };
-const AUTOMOD_SCOPE_LABELS: Record<AutomodRule["scope"], string> = {
-  chat: "Chat only",
-  forum: "Forum only",
-  both: "Chat + forum",
+const AUTOMOD_SCOPE_KEYS: Record<AutomodRule["scope"], string> = {
+  chat: "settings.automodScope.chat",
+  forum: "settings.automodScope.forum",
+  both: "settings.automodScope.both",
 };
 
 type AutomodDraft = {
@@ -640,6 +912,7 @@ function freshAutomodDraft(): AutomodDraft {
 }
 
 function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
+  const { t } = useTranslation("admin");
   const [rules, setRules] = useState<AutomodRule[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -662,7 +935,7 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
       setRules(j.rules);
       setLoaded(true);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "load failed");
+      setErr(e instanceof Error ? e.message : t("loadFailed"));
     }
   }
   useEffect(() => { loadRules(); }, []);
@@ -697,7 +970,7 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
           ? Math.round(Number(draft.muteMinutes) * 60_000)
           : null;
       if (draft.action === "mute" && draft.muteMinutes.trim() && (!Number.isFinite(muteMs) || (muteMs ?? 0) < 60_000)) {
-        throw new Error("Mute length must be at least 1 minute (or blank for the default).");
+        throw new Error(t("settings.muteLengthError"));
       }
       const payload = {
         kind: draft.kind,
@@ -721,7 +994,7 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
       await loadRules();
       cancelEdit();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "save failed");
+      setErr(e instanceof Error ? e.message : t("saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -739,13 +1012,13 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
       if (!r.ok) throw new Error(await readError(r));
       await loadRules();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "update failed");
+      setErr(e instanceof Error ? e.message : t("updateFailed"));
     }
   }
 
   async function deleteRule(rule: AutomodRule) {
     // eslint-disable-next-line no-alert
-    if (!window.confirm("Delete this auto-moderation rule?")) return;
+    if (!window.confirm(t("settings.deleteRuleConfirm"))) return;
     setErr(null);
     try {
       const r = await fetch(`/admin/automod/rules/${rule.id}`, { method: "DELETE", credentials: "include" });
@@ -753,7 +1026,7 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
       await loadRules();
       if (editingId === rule.id) cancelEdit();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "delete failed");
+      setErr(e instanceof Error ? e.message : t("deleteFailed"));
     }
   }
 
@@ -770,17 +1043,17 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
       const j = (await r.json()) as typeof testResult;
       setTestResult(j);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "test failed");
+      setErr(e instanceof Error ? e.message : t("settings.testFailed"));
     }
   }
 
   const inputCls = "rounded border border-keep-rule bg-keep-bg px-2 py-1";
 
   return (
-    <fieldset className="rounded border border-keep-rule p-3 text-xs">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Auto-moderation rules</legend>
+    <fieldset data-admin-anchor="settings.automodRulesLegend" className="rounded border border-keep-rule p-3 text-xs">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("settings.automodRulesLegend")}</legend>
       <p className="mb-2 text-keep-muted">
-        Rules checked against each message when Auto-moderation is on (toggle above). A rule can warn (block the message with a notice), delete it silently, or mute the sender. Trusted users, mods, and admins are always exempt. Off by default so mature roleplay isn't caught by surprise, use the test box below to blunt false positives before enabling.
+        {t("settings.automodRulesHelp")}
       </p>
 
       {err ? <div className="mb-2 rounded border border-red-500/40 bg-red-500/10 px-2 py-1 text-red-300">{err}</div> : null}
@@ -788,32 +1061,32 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
       {/* Rule list */}
       <div className="mb-3 space-y-1">
         {!loaded ? (
-          <div className="text-keep-muted">loading rules...</div>
+          <div className="text-keep-muted">{t("settings.loadingRules")}</div>
         ) : rules.length === 0 ? (
-          <div className="italic text-keep-muted">No rules yet. Add one below.</div>
+          <div className="italic text-keep-muted">{t("settings.noRules")}</div>
         ) : (
           rules.map((rule) => (
             <div
               key={rule.id}
               className={`flex flex-wrap items-center gap-2 rounded border border-keep-rule px-2 py-1 ${rule.enabled ? "" : "opacity-50"}`}
             >
-              <span className="rounded bg-keep-panel px-1.5 py-0.5 font-semibold">{AUTOMOD_KIND_LABELS[rule.kind]}</span>
+              <span className="rounded bg-keep-panel px-1.5 py-0.5 font-semibold">{t(AUTOMOD_KIND_KEYS[rule.kind])}</span>
               {rule.kind !== "link" && rule.kind !== "invite" ? (
-                <code className="max-w-[16rem] truncate rounded bg-keep-bg px-1">{rule.pattern || "(empty)"}</code>
+                <code className="max-w-[16rem] truncate rounded bg-keep-bg px-1">{rule.pattern || t("settings.emptyPattern")}</code>
               ) : null}
               <span className="text-keep-muted">→</span>
-              <span>{AUTOMOD_ACTION_LABELS[rule.action]}</span>
+              <span>{t(AUTOMOD_ACTION_KEYS[rule.action])}</span>
               <span className="text-keep-muted">·</span>
-              <span className="text-keep-muted">{AUTOMOD_SCOPE_LABELS[rule.scope]}</span>
+              <span className="text-keep-muted">{t(AUTOMOD_SCOPE_KEYS[rule.scope])}</span>
               {rule.note ? <span className="text-keep-muted">· {rule.note}</span> : null}
               <span className="ml-auto flex items-center gap-2">
                 {canEdit ? (
                   <>
                     <button type="button" className="underline" onClick={() => toggleRule(rule)}>
-                      {rule.enabled ? "Disable" : "Enable"}
+                      {rule.enabled ? t("affiliates.disable") : t("affiliates.enable")}
                     </button>
-                    <button type="button" className="underline" onClick={() => startEdit(rule)}>Edit</button>
-                    <button type="button" className="text-red-400 underline" onClick={() => deleteRule(rule)}>Delete</button>
+                    <button type="button" className="underline" onClick={() => startEdit(rule)}>{t("edit")}</button>
+                    <button type="button" className="text-red-400 underline" onClick={() => deleteRule(rule)}>{t("common:delete")}</button>
                   </>
                 ) : null}
               </span>
@@ -826,69 +1099,69 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
       {canEdit ? (
         <div className="mb-3 rounded border border-keep-rule bg-keep-bg/40 p-2">
           <div className="mb-2 font-semibold uppercase tracking-widest text-keep-muted">
-            {editingId ? "Edit rule" : "Add rule"}
+            {editingId ? t("settings.editRule") : t("settings.addRule")}
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="flex flex-col gap-1">
-              <span className="text-keep-muted">Match on</span>
+              <span className="text-keep-muted">{t("settings.matchOn")}</span>
               <select
                 className={inputCls}
                 value={draft.kind}
                 onChange={(e) => setDraft((d) => ({ ...d, kind: e.target.value as AutomodRule["kind"] }))}
               >
-                {(Object.keys(AUTOMOD_KIND_LABELS) as AutomodRule["kind"][]).map((k) => (
-                  <option key={k} value={k}>{AUTOMOD_KIND_LABELS[k]}</option>
+                {(Object.keys(AUTOMOD_KIND_KEYS) as AutomodRule["kind"][]).map((k) => (
+                  <option key={k} value={k}>{t(AUTOMOD_KIND_KEYS[k])}</option>
                 ))}
               </select>
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-keep-muted">Action</span>
+              <span className="text-keep-muted">{t("settings.actionLabel")}</span>
               <select
                 className={inputCls}
                 value={draft.action}
                 onChange={(e) => setDraft((d) => ({ ...d, action: e.target.value as AutomodRule["action"] }))}
               >
-                {(Object.keys(AUTOMOD_ACTION_LABELS) as AutomodRule["action"][]).map((a) => (
-                  <option key={a} value={a}>{AUTOMOD_ACTION_LABELS[a]}</option>
+                {(Object.keys(AUTOMOD_ACTION_KEYS) as AutomodRule["action"][]).map((a) => (
+                  <option key={a} value={a}>{t(AUTOMOD_ACTION_KEYS[a])}</option>
                 ))}
               </select>
             </label>
             {!patternless ? (
               <label className="flex flex-col gap-1 sm:col-span-2">
                 <span className="text-keep-muted">
-                  {draft.kind === "mention_cap" ? "Max @mentions allowed" : draft.kind === "regex" ? "Regular expression" : "Word or phrase"}
+                  {draft.kind === "mention_cap" ? t("settings.mentionCapLabel") : draft.kind === "regex" ? t("settings.regexLabel") : t("settings.keywordLabel")}
                 </span>
                 <input
                   className={`${inputCls} font-mono`}
                   value={draft.pattern}
-                  placeholder={draft.kind === "mention_cap" ? "e.g. 5" : draft.kind === "regex" ? "e.g. \\bbad(word)?\\b" : "e.g. spoiler"}
+                  placeholder={draft.kind === "mention_cap" ? t("settings.mentionCapPlaceholder") : draft.kind === "regex" ? t("settings.regexPlaceholder") : t("settings.keywordPlaceholder")}
                   onChange={(e) => setDraft((d) => ({ ...d, pattern: e.target.value }))}
                 />
               </label>
             ) : (
               <div className="sm:col-span-2 text-keep-muted italic">
-                {draft.kind === "link" ? "Matches any http/https link in the message." : "Matches common chat/forum/other-service invite links."}
+                {draft.kind === "link" ? t("settings.linkNote") : t("settings.inviteNote")}
               </div>
             )}
             <label className="flex flex-col gap-1">
-              <span className="text-keep-muted">Applies to</span>
+              <span className="text-keep-muted">{t("settings.appliesTo")}</span>
               <select
                 className={inputCls}
                 value={draft.scope}
                 onChange={(e) => setDraft((d) => ({ ...d, scope: e.target.value as AutomodRule["scope"] }))}
               >
-                {(Object.keys(AUTOMOD_SCOPE_LABELS) as AutomodRule["scope"][]).map((s) => (
-                  <option key={s} value={s}>{AUTOMOD_SCOPE_LABELS[s]}</option>
+                {(Object.keys(AUTOMOD_SCOPE_KEYS) as AutomodRule["scope"][]).map((s) => (
+                  <option key={s} value={s}>{t(AUTOMOD_SCOPE_KEYS[s])}</option>
                 ))}
               </select>
             </label>
             {draft.action === "mute" ? (
               <label className="flex flex-col gap-1">
-                <span className="text-keep-muted">Mute length (minutes)</span>
+                <span className="text-keep-muted">{t("settings.muteLengthLabel")}</span>
                 <input
                   className={inputCls}
                   value={draft.muteMinutes}
-                  placeholder="blank = default (10)"
+                  placeholder={t("settings.muteLengthPlaceholder")}
                   onChange={(e) => setDraft((d) => ({ ...d, muteMinutes: e.target.value }))}
                 />
               </label>
@@ -901,7 +1174,7 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
                     checked={draft.caseInsensitive}
                     onChange={(e) => setDraft((d) => ({ ...d, caseInsensitive: e.target.checked }))}
                   />
-                  <span>Ignore case</span>
+                  <span>{t("settings.ignoreCase")}</span>
                 </label>
                 <label className="flex items-center gap-2">
                   <input
@@ -909,7 +1182,7 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
                     checked={draft.wholeWord}
                     onChange={(e) => setDraft((d) => ({ ...d, wholeWord: e.target.checked }))}
                   />
-                  <span>Whole word only</span>
+                  <span>{t("settings.wholeWord")}</span>
                 </label>
               </>
             ) : draft.kind === "regex" ? (
@@ -919,15 +1192,15 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
                   checked={draft.caseInsensitive}
                   onChange={(e) => setDraft((d) => ({ ...d, caseInsensitive: e.target.checked }))}
                 />
-                <span>Ignore case</span>
+                <span>{t("settings.ignoreCase")}</span>
               </label>
             ) : null}
             <label className="flex flex-col gap-1 sm:col-span-2">
-              <span className="text-keep-muted">Note (optional)</span>
+              <span className="text-keep-muted">{t("settings.noteLabel")}</span>
               <input
                 className={inputCls}
                 value={draft.note}
-                placeholder="Why this rule exists"
+                placeholder={t("settings.notePlaceholder")}
                 onChange={(e) => setDraft((d) => ({ ...d, note: e.target.value }))}
               />
             </label>
@@ -939,10 +1212,10 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
               onClick={submitDraft}
               className="rounded border border-keep-rule bg-keep-panel px-3 py-1 font-semibold disabled:opacity-50"
             >
-              {editingId ? "Save rule" : "Add rule"}
+              {editingId ? t("settings.saveRule") : t("settings.addRule")}
             </button>
             {editingId ? (
-              <button type="button" onClick={cancelEdit} className="underline text-keep-muted">Cancel</button>
+              <button type="button" onClick={cancelEdit} className="underline text-keep-muted">{t("common:cancel")}</button>
             ) : null}
           </div>
         </div>
@@ -950,15 +1223,15 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
 
       {/* Test box */}
       <div className="rounded border border-keep-rule bg-keep-bg/40 p-2">
-        <div className="mb-2 font-semibold uppercase tracking-widest text-keep-muted">Test a message</div>
+        <div className="mb-2 font-semibold uppercase tracking-widest text-keep-muted">{t("settings.testTitle")}</div>
         <p className="mb-2 text-keep-muted">
-          Paste sample text to see which enabled rules would fire (and the resulting action). Nothing is saved or posted.
+          {t("settings.testHelp")}
         </p>
         <textarea
           className={`${inputCls} w-full font-mono`}
           rows={3}
           value={testText}
-          placeholder="Type or paste a message to test..."
+          placeholder={t("settings.testPlaceholder")}
           onChange={(e) => setTestText(e.target.value)}
         />
         <div className="mt-2 flex items-center gap-2">
@@ -967,30 +1240,37 @@ function AutomodRulesCard({ canEdit }: { canEdit: boolean }) {
             value={testSurface}
             onChange={(e) => setTestSurface(e.target.value as "chat" | "forum")}
           >
-            <option value="chat">As chat</option>
-            <option value="forum">As forum post</option>
+            <option value="chat">{t("settings.asChat")}</option>
+            <option value="forum">{t("settings.asForum")}</option>
           </select>
           <button
             type="button"
             onClick={runTest}
             className="rounded border border-keep-rule bg-keep-panel px-3 py-1 font-semibold"
           >
-            Run test
+            {t("settings.runTest")}
           </button>
         </div>
         {testResult ? (
           <div className="mt-2">
             {testResult.hits.length === 0 ? (
-              <div className="text-green-400">No rules fired, this message would post.</div>
+              <div className="text-green-400">{t("settings.noRulesFired")}</div>
             ) : (
               <>
                 <div className="mb-1">
-                  Resulting action: <span className="font-semibold">{testResult.action ? AUTOMOD_ACTION_LABELS[testResult.action] : "none"}</span>
+                  <Trans
+                    t={t}
+                    i18nKey="settings.resultingAction"
+                    values={{ action: testResult.action ? t(AUTOMOD_ACTION_KEYS[testResult.action]) : t("settings.noneAction") }}
+                  >
+                    {"Resulting action: "}
+                    <span className="font-semibold">{"{{action}}"}</span>
+                  </Trans>
                 </div>
                 <ul className="list-disc pl-5 text-keep-muted">
                   {testResult.hits.map((h, i) => (
                     <li key={`${h.ruleId}-${i}`}>
-                      {AUTOMOD_KIND_LABELS[h.kind]} ({AUTOMOD_ACTION_LABELS[h.action]}): <code>{h.label}</code>
+                      {t(AUTOMOD_KIND_KEYS[h.kind])} ({t(AUTOMOD_ACTION_KEYS[h.action])}): <code>{h.label}</code>
                     </li>
                   ))}
                 </ul>
@@ -1010,6 +1290,7 @@ function LimitField({
   onChange,
   min,
   max,
+  anchor,
 }: {
   label: string;
   hint: string;
@@ -1017,9 +1298,12 @@ function LimitField({
   onChange: (v: string) => void;
   min: number;
   max: number;
+  /** Find-a-setting jump target: the row's own catalog key, stamped
+   *  verbatim as `data-admin-anchor` (docs/ADMIN_IA.md §5.3). */
+  anchor: string;
 }) {
   return (
-    <label className="text-xs">
+    <label data-admin-anchor={anchor} className="text-xs">
       <span className="mb-1 block uppercase tracking-widest text-keep-muted">{label}</span>
       <input
         type="number"

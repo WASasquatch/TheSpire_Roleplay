@@ -47,6 +47,8 @@ import {
 } from "../db/schema.js";
 import { serverAuthority, serverCan } from "../servers/authority.js";
 import { ensureDefaultUsergroup, serverRoomIds } from "../servers/usergroups.js";
+import { evictMinorsFromServer, setRoomNsfw } from "../lib/nsfwRooms.js";
+import { recordAudit } from "../audit.js";
 import { invalidateServerSettings } from "../settings.js";
 import {
   broadcastRoomState,
@@ -56,6 +58,7 @@ import {
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
+import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 import {
   auditServer,
@@ -196,6 +199,9 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     publicBrowsing: z.boolean().optional(),
     joinMode: z.enum(["open", "application", "invite"]).optional(),
     applicationPrompt: z.string().trim().max(300).nullable().optional(),
+    /** "18+ community" flag (age plan, Phase 2). Adults only to change; the
+     *  system server is refused below; flipping ON evicts minor members. */
+    isNsfw: z.boolean().optional(),
     /** Owner-set discovery tags (migration 0301). normalizeTags/serializeTags
      *  do the real sanitizing on persist — the loose array bound just rejects
      *  absurd payloads before we touch the normalizer. */
@@ -230,7 +236,7 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         update.themeJson = null;
       } else {
         try { update.themeJson = JSON.stringify(normalizeTheme(JSON.parse(body.themeJson))); }
-        catch { reply.code(400); return { error: "themeJson must be a JSON theme object" }; }
+        catch { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.common.themeJsonInvalid") }; }
       }
     }
     if (body.themeStyleKey !== undefined) update.themeStyleKey = body.themeStyleKey;
@@ -247,9 +253,24 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     // (everyone is an implicit member) — refuse to gate it.
     if (body.joinMode !== undefined) {
       if (gate.server.isSystem && body.joinMode !== "open") {
-        reply.code(409); return { error: "The home server can't be gated." };
+        reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.homeCantBeGated") };
       }
       update.joinMode = body.joinMode;
+    }
+    // "18+ community" flag (age plan, Phase 2). The system/default server is
+    // locked SFW — the flagship partition puts the adult side in a SIBLING
+    // server, never here (also asserted at boot in assertServerInvariants).
+    // Only adults may set OR clear it: no staff bypass for minor accounts.
+    const nsfwChanging = body.isNsfw !== undefined && body.isNsfw !== gate.server.isNsfw;
+    if (nsfwChanging) {
+      if (gate.server.isSystem && body.isNsfw) {
+        reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.homeCantBeNsfw") };
+      }
+      if (!gate.me.isAdult) {
+        reply.code(403); return { error: tFor(gate.me.locale, "errors:server.common.nsfwSettingAdultsOnly") };
+      }
+      // `nsfwChanging` proved body.isNsfw defined; !! carries that to TS.
+      update.isNsfw = !!body.isNsfw;
     }
     if (body.roomOrder !== undefined) {
       const own = new Set((await db.select({ id: rooms.id }).from(rooms)
@@ -257,6 +278,25 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       update.roomOrderJson = JSON.stringify(body.roomOrder.filter((id) => own.has(id)));
     }
     await db.update(servers).set(update).where(eq(servers.id, gate.server.id));
+    if (nsfwChanging) {
+      // Flip ON: boot minor occupants out of every room this server owns
+      // (server_members rows are KEPT — keep-but-hide; the rail/discover/
+      // join gates are what keep them out). Flip OFF just re-reveals; the
+      // 18+-era history stays minor-hidden via the message stamps.
+      if (body.isNsfw) {
+        // Catalog key, resolved per evicted socket's own locale.
+        await evictMinorsFromServer(io, db, gate.server.id, "errors:server.servers.communityNowAdultsOnly");
+      }
+      // Typed platform audit row on top of the generic appearance entry so
+      // global staff can trace 18+ flips from the admin Audit feed.
+      await recordAudit(db, {
+        actorUserId: gate.me.id,
+        action: "server_nsfw_update",
+        metadata: { serverId: gate.server.id, slug: gate.server.slug, isNsfw: body.isNsfw },
+      });
+      // Minors' rails drop the whole server subtree on this refetch pulse.
+      emitTreeChanged(io, gate.server.id);
+    }
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_appearance_update",
       metadata: { slug: gate.server.slug, fields: Object.keys(update).filter((k) => k !== "updatedAt") },
@@ -271,12 +311,20 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     z.object({ clear: z.literal(true) }).strict(),
   ]);
 
-  // POST /servers/:id/{logo,banner,horizontal-logo} — upload (or clear) the
-  // server's round icon / header banner / wide top-bar wordmark. Mirrors the
-  // forum image endpoints; gated on manage_appearance (the same key the
-  // appearance PATCH uses).
-  const IMAGE_COLUMN = { logo: "logoUrl", banner: "bannerImageUrl", "horizontal-logo": "horizontalLogoUrl" } as const;
-  for (const kind of ["logo", "banner", "horizontal-logo"] as const) {
+  // POST /servers/:id/{logo,banner,horizontal-logo,sfw-banner} — upload (or
+  // clear) the server's round icon / header banner / wide top-bar wordmark /
+  // public-safe banner. Mirrors the forum image endpoints; gated on
+  // manage_appearance (the same key the appearance PATCH uses). The
+  // sfw-banner is the "safe for everyone" variant (age plan, decision #10):
+  // discovery cards, the /s/:slug share page, and link previews show it (or
+  // an art-less name/colors fallback) to viewers who can't see NSFW.
+  const IMAGE_COLUMN = {
+    logo: "logoUrl",
+    banner: "bannerImageUrl",
+    "horizontal-logo": "horizontalLogoUrl",
+    "sfw-banner": "sfwBannerUrl",
+  } as const;
+  for (const kind of ["logo", "banner", "horizontal-logo", "sfw-banner"] as const) {
     const maxBytes = kind === "logo" ? 512 * 1024 : kind === "horizontal-logo" ? 1024 * 1024 : 2 * 1024 * 1024;
     const column = IMAGE_COLUMN[kind];
     app.post<{ Params: { id: string }; Body: unknown }>(`/servers/:id/${kind}`, async (req, reply) => {
@@ -291,7 +339,7 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         await db.update(servers).set({ [column]: null, updatedAt: new Date() }).where(eq(servers.id, gate.server.id));
         unlinkServerImage(prev);
       } else {
-        const written = await writeServerImage(`${gate.server.id}-${kind}`, body.imageDataUrl, maxBytes);
+        const written = await writeServerImage(`${gate.server.id}-${kind}`, body.imageDataUrl, maxBytes, gate.me.locale);
         if ("error" in written) { reply.code(written.status); return { error: written.error }; }
         await db.update(servers).set({ [column]: written.url, updatedAt: new Date() }).where(eq(servers.id, gate.server.id));
         if (prev !== written.url) unlinkServerImage(prev);
@@ -326,6 +374,8 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     // A server channel persists when empty by default (Discord-like); the owner
     // can untick this to make an ephemeral, park-when-empty room instead.
     persistent: z.boolean().default(true),
+    /** Create the room already flagged 18+ (age plan, Phase 2; adults only). */
+    isNsfw: z.boolean().default(false),
   }).strict();
   app.post<{ Params: { id: string }; Body: unknown }>("/servers/:id/rooms", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
@@ -334,10 +384,13 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     let body: z.infer<typeof serverRoomCreateBody>;
     try { body = serverRoomCreateBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    if (body.type === "private" && !body.password) { reply.code(400); return { error: "a private room needs a password" }; }
+    if (body.isNsfw && !gate.me.isAdult) {
+      reply.code(403); return { error: tFor(gate.me.locale, "errors:server.common.nsfwSettingAdultsOnly") };
+    }
+    if (body.type === "private" && !body.password) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.servers.privateNeedsPassword") }; }
     const dup = (await db.select({ id: rooms.id }).from(rooms)
       .where(sql`lower(${rooms.name}) = ${body.name.toLowerCase()}`).limit(1))[0];
-    if (dup) { reply.code(409); return { error: "a room with that name already exists" }; }
+    if (dup) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.roomNameExists") }; }
     const id = nanoid();
     const argon2 = (await import("argon2")).default;
     await db.insert(rooms).values({
@@ -356,8 +409,9 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       // Channels persist when empty so the server's structure survives a quiet
       // moment; without this the zombie sweep parks them within ~60s.
       persistent: body.persistent,
+      isNsfw: body.isNsfw,
     });
-    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_create", targetRoomId: id, metadata: { name: body.name } });
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_create", targetRoomId: id, metadata: { name: body.name, ...(body.isNsfw ? { isNsfw: true } : {}) } });
     emitTreeChanged(io, gate.server.id);
     return { ok: true, id };
   });
@@ -372,6 +426,10 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     messageExpiryMinutes: z.number().int().min(0).max(100_000).nullable().optional(),
     isDefault: z.boolean().optional(),
     persistent: z.boolean().optional(),
+    /** 18+ room flag (age plan, Phase 2). Routed through the shared toggle
+     *  core, not the generic update: adult-only, landing-room rule, minor
+     *  eviction, audit, system line. */
+    isNsfw: z.boolean().optional(),
   }).strict();
 
   app.patch<{ Params: { id: string; roomId: string }; Body: unknown }>("/servers/:id/rooms/:roomId", async (req, reply) => {
@@ -383,10 +441,18 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     let body: z.infer<typeof serverRoomPatchBody>;
     try { body = serverRoomPatchBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
+    // Landing-room rule cross-check (age plan §E), COMBINED post-patch state:
+    // neither "flag the landing 18+" nor "make an 18+ room the landing" may
+    // slip through in an all-ages server (moot inside an 18+ server — minors
+    // can't enter it at all).
+    if ((body.isDefault ?? room.isDefault) && (body.isNsfw ?? room.isNsfw) && !gate.server.isNsfw) {
+      reply.code(400);
+      return { error: tFor(gate.me.locale, "errors:server.servers.landingCantBeNsfw") };
+    }
     if (body.name && body.name.toLowerCase() !== room.name.toLowerCase()) {
       const dup = (await db.select({ id: rooms.id }).from(rooms)
         .where(and(sql`lower(${rooms.name}) = ${body.name.toLowerCase()}`, ne(rooms.id, room.id))).limit(1))[0];
-      if (dup) { reply.code(409); return { error: "a room with that name already exists" }; }
+      if (dup) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.roomNameExists") }; }
     }
     const update: Partial<typeof rooms.$inferInsert> = {};
     if (body.name !== undefined) update.name = body.name;
@@ -409,14 +475,30 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       const argon2 = (await import("argon2")).default;
       if (body.type === "private") {
         if (body.password) update.passwordHash = await argon2.hash(body.password);
-        else if (!room.passwordHash) { reply.code(400); return { error: "switching to private requires a password" }; }
+        else if (!room.passwordHash) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.servers.privateSwitchNeedsPassword") }; }
       } else { update.passwordHash = null; }
     } else if (body.password !== undefined) {
       const argon2 = (await import("argon2")).default;
       update.passwordHash = body.password ? await argon2.hash(body.password) : null;
     }
-    await db.update(rooms).set(update).where(eq(rooms.id, room.id));
-    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_update", targetRoomId: room.id, metadata: { fields: Object.keys(update) } });
+    // 18+ flag goes through the shared toggle core (NOT the generic update):
+    // it owns the adult-only write, the landing-room rule, the minor
+    // eviction, the `room_nsfw_update` audit row, and the system line.
+    let nsfwChanged = false;
+    if (body.isNsfw !== undefined && body.isNsfw !== room.isNsfw) {
+      const result = await setRoomNsfw({ db, io, room, value: body.isNsfw, actor: gate.me });
+      if (!result.ok) {
+        reply.code(result.code === "AGE_RESTRICTED" ? 403 : 409);
+        return { error: result.message };
+      }
+      nsfwChanged = result.changed;
+    }
+    // An isNsfw-only patch leaves `update` empty; drizzle rejects an empty
+    // SET, and the toggle core already broadcast, so skip the generic write.
+    if (Object.keys(update).length > 0) {
+      await db.update(rooms).set(update).where(eq(rooms.id, room.id));
+    }
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_update", targetRoomId: room.id, metadata: { fields: [...Object.keys(update), ...(nsfwChanged ? ["isNsfw"] : [])] } });
     await broadcastRoomState(io, db, room.id);
     emitTreeChanged(io, gate.server.id);
     return { ok: true };
@@ -437,7 +519,7 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     if (room.isSystem) {
       if (!gate.authority.isOwner) {
         reply.code(403);
-        return { error: "only the server owner can remove a system room" };
+        return { error: tFor(gate.me.locale, "errors:server.servers.systemRoomOwnerOnly") };
       }
       systemSurvivor = (await db
         .select()
@@ -447,7 +529,7 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         .limit(1))[0];
       if (!systemSurvivor) {
         reply.code(400);
-        return { error: "can't remove the server's only system room; make another room first" };
+        return { error: tFor(gate.me.locale, "errors:server.servers.lastSystemRoom") };
       }
     }
     // Relocate live occupants to this server's landing (then canonical), mirror
@@ -457,9 +539,23 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     let landing = (await findServerLanding(db, gate.server.id)) ?? (await findCanonicalLanding(db));
     if (landing && landing.id === room.id) landing = systemSurvivor ?? (await findCanonicalLanding(db));
     const remoteSockets = await io.in(`room:${room.id}`).fetchSockets();
+    // Localize the eviction toast per occupant (transient per-recipient
+    // notice): one batched locale read over the affected accounts.
+    const evictedIds = [...new Set(remoteSockets
+      .map((s) => (s.data as { userId?: string }).userId)
+      .filter((u): u is string => !!u))];
+    const evictedLocales = new Map(
+      evictedIds.length
+        ? (await db.select({ id: users.id, locale: users.locale }).from(users).where(inArray(users.id, evictedIds)))
+            .map((r) => [r.id, r.locale] as const)
+        : [],
+    );
     for (const s of remoteSockets) {
       s.leave(`room:${room.id}`);
-      s.emit("error:notice", { code: "ROOM_DELETED", message: `Room "${room.name}" was removed.` });
+      s.emit("error:notice", {
+        code: "ROOM_DELETED",
+        message: tFor(evictedLocales.get((s.data as { userId?: string }).userId ?? "") ?? null, "errors:server.servers.roomRemoved", { name: room.name }),
+      });
       if (landing) {
         s.join(`room:${landing.id}`);
         (s.data as { roomId?: string }).roomId = landing.id;
@@ -656,12 +752,12 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         : await requireServerPermission(req, req.params.id, "manage_members");
       if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
       if (req.params.userId === gate.server.ownerUserId) {
-        reply.code(409); return { error: "The owner already holds every power." };
+        reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.ownerHoldsAllPowers") };
       }
       const ban = (await db.select().from(serverBans)
         .where(and(eq(serverBans.serverId, gate.server.id), eq(serverBans.userId, req.params.userId))).limit(1))[0];
       if (ban && (!ban.until || +ban.until > Date.now())) {
-        reply.code(409); return { error: "That user is banned from this server - lift the ban first." };
+        reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.targetBanned") };
       }
       // A mod's grant excludes owner-only keys (manage_appearance) — appearance
       // stays owner-only, so even the owner can't hand it to a mod here.
@@ -733,13 +829,13 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     if (!(await serversLive(reply))) return { error: "not found" };
     const gate = await requireServerPermission(req, req.params.id, "manage_members");
     if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
-    if (req.params.userId === gate.server.ownerUserId) { reply.code(409); return { error: "The owner can't be removed." }; }
+    if (req.params.userId === gate.server.ownerUserId) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.common.ownerCantBeRemoved") }; }
     const row = (await db.select().from(serverMembers)
       .where(and(eq(serverMembers.serverId, gate.server.id), eq(serverMembers.userId, req.params.userId))).limit(1))[0];
     if (!row) { reply.code(404); return { error: "not a member here" }; }
     // Removing an admin lieutenant is an owner-only act (mirrors appointing).
     if (row.role === "admin" && !gate.authority.isOwner) {
-      reply.code(403); return { error: "Only the owner can remove an admin." };
+      reply.code(403); return { error: tFor(gate.me.locale, "errors:server.servers.onlyOwnerRemovesAdmin") };
     }
     await db.delete(serverMembers)
       .where(and(eq(serverMembers.serverId, gate.server.id), eq(serverMembers.userId, req.params.userId)));
@@ -893,7 +989,7 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     try { body = groupBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
     const count = Number((await db.select({ n: sql<number>`count(*)` }).from(serverUsergroups).where(eq(serverUsergroups.serverId, gate.server.id)))[0]?.n ?? 0);
-    if (count >= SERVER_MAX_USERGROUPS) { reply.code(409); return { error: `A server can have at most ${SERVER_MAX_USERGROUPS} usergroups.` }; }
+    if (count >= SERVER_MAX_USERGROUPS) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.usergroupLimit", { max: SERVER_MAX_USERGROUPS }) }; }
     const requested = (body.permissions ?? []).filter(isServerFeaturePermission) as ServerFeaturePermission[];
     const perms = clampFeaturePerms(requested, gate.authority.permissions, gate.authority.isOwner);
     const autoRules = await validServerAutoRules(gate.server.id, body.autoRules);
@@ -965,7 +1061,7 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     const group = (await db.select().from(serverUsergroups)
       .where(and(eq(serverUsergroups.id, req.params.gid), eq(serverUsergroups.serverId, gate.server.id))).limit(1))[0];
     if (!group) { reply.code(404); return { error: "no such usergroup" }; }
-    if (group.isDefault) { reply.code(400); return { error: "The default group can't be deleted." }; }
+    if (group.isDefault) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.common.defaultGroupCantDelete") }; }
     await db.delete(serverUsergroups).where(eq(serverUsergroups.id, group.id)); // cascades members
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_usergroup_change",
@@ -1003,11 +1099,11 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     const group = (await db.select().from(serverUsergroups)
       .where(and(eq(serverUsergroups.id, req.params.gid), eq(serverUsergroups.serverId, gate.server.id))).limit(1))[0];
     if (!group) { reply.code(404); return { error: "no such usergroup" }; }
-    if (group.isDefault) { reply.code(400); return { error: "Everyone already belongs to the default group." }; }
+    if (group.isDefault) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.common.everyoneInDefaultGroup") }; }
     let body: z.infer<typeof groupMemberBody>;
     try { body = groupMemberBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
-    const target = await resolveServerTarget(body.target);
+    const target = await resolveServerTarget(body.target, gate.me.locale);
     if (!target.ok) { reply.code(404); return { error: target.error }; }
     await db.insert(serverUsergroupMembers)
       .values({ groupId: group.id, userId: target.userId, addedBy: gate.me.id, isAuto: false })
@@ -1026,7 +1122,7 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     const group = (await db.select().from(serverUsergroups)
       .where(and(eq(serverUsergroups.id, req.params.gid), eq(serverUsergroups.serverId, gate.server.id))).limit(1))[0];
     if (!group) { reply.code(404); return { error: "no such usergroup" }; }
-    if (group.isDefault) { reply.code(400); return { error: "The default group has no removable members." }; }
+    if (group.isDefault) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.common.defaultGroupNoRemovable") }; }
     await db.delete(serverUsergroupMembers)
       .where(and(eq(serverUsergroupMembers.groupId, group.id), eq(serverUsergroupMembers.userId, req.params.userId)));
     await auditServer(db, {

@@ -7,12 +7,14 @@ import type {
   StoryDetail,
   StoryReadingPosition } from "@thekeep/shared";
 import {
+  SFW_RATINGS,
   deriveSlug,
   normalizeTheme,
   parseTagList,
   serializeTagList,
 } from "@thekeep/shared";
 import { hasPermission } from "../../auth/permissions.js";
+import type { NsfwViewer } from "../../auth/ageGate.js";
 import {
   storyCopies,
   stories,
@@ -29,6 +31,7 @@ import {
   countRows,
   offsetPageEnvelope,
 } from "../../lib/pagination.js";
+import { tFor } from "../../i18n.js";
 import { getSessionUser } from "../auth.js";
 import { getSettings } from "../../settings.js";
 import type { Db } from "../../db/index.js";
@@ -43,9 +46,11 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
    */
   async function buildDetail(
     s: typeof stories.$inferSelect,
-    me: { id: string; role: Role } | null,
+    // NsfwViewer (birthdate + hideNsfw) rides along so the card's linked-
+    // world ref can be gated for viewers who can't see 18+ worlds.
+    me: ({ id: string; role: Role } & NsfwViewer) | null,
   ): Promise<StoryDetail> {
-    const card = await toCard(db, s);
+    const card = await toCard(db, s, me);
     const isAuthor = !!me && me.id === s.authorUserId;
     const isAdmin = !!me && (await hasPermission(me, "view_others_scriptorium_drafts", db));
     // Collaborators with `readDrafts` (all active roles do) see drafts
@@ -118,8 +123,14 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
    * for NC-17 to anonymous viewers. The shelf is honest about what
    * exists; the access gate is at body-open time, not on the
    * cover thumbnail.
+   *
+   * The one exception (age-restriction plan Phase 4): a signed-in
+   * viewer under 18 is clamped to G / PG / PG-13 — stricter than
+   * anonymous, and card-level, because minors can never open the
+   * body so the card would be a dead teaser.
    */
   app.get<{ Querystring: { limit?: string } }>("/stories/splash", browseLimit, async (req) => {
+    const me = await getSessionUser(req, db);
     const limit = Math.min(24, Math.max(1, parseInt(req.query.limit ?? "12", 10) || 12));
     const rows = await db
       .select()
@@ -128,10 +139,11 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
         eq(stories.visibility, "public"),
         ne(stories.status, "draft"),
         ne(stories.status, "abandoned"),
+        ...(me && !me.isAdult ? [inArray(stories.rating, [...SFW_RATINGS])] : []),
       ))
       .orderBy(desc(stories.publishedAt), desc(stories.updatedAt))
       .limit(limit);
-    const entries = await Promise.all(rows.map((r) => toCard(db, r)));
+    const entries = await Promise.all(rows.map((r) => toCard(db, r, me)));
     return { entries };
   });
 
@@ -144,7 +156,7 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
       .from(stories)
       .where(eq(stories.authorUserId, me.id))
       .orderBy(desc(stories.updatedAt));
-    const cards = await Promise.all(rows.map((r) => toCard(db, r)));
+    const cards = await Promise.all(rows.map((r) => toCard(db, r, me)));
     return { stories: cards };
   });
 
@@ -156,10 +168,18 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
       .select({ story: stories, position: storyReadingPositions })
       .from(storyReadingPositions)
       .innerJoin(stories, eq(stories.id, storyReadingPositions.storyId))
-      .where(eq(storyReadingPositions.userId, me.id))
+      .where(and(
+        eq(storyReadingPositions.userId, me.id),
+        // HARD age clamp (age plan, Phase 4): same staleness case as the
+        // Following list — a story re-rated adult while the minor was mid-
+        // read must not keep its card (title/summary/cover) in Continue
+        // Reading; opening it would dead-end on the rating stub anyway.
+        // The position row is kept, so it resurfaces at 18.
+        ...(me.isAdult ? [] : [inArray(stories.rating, [...SFW_RATINGS])]),
+      ))
       .orderBy(desc(storyReadingPositions.updatedAt))
       .limit(50);
-    const cards = await Promise.all(rows.map((r) => toCard(db, r.story)));
+    const cards = await Promise.all(rows.map((r) => toCard(db, r.story, me)));
     return { stories: cards };
   });
 
@@ -193,10 +213,17 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
     //     login-required private-stub for NC-17 to anonymous.
     //     So the catalog is a catalog (honest about what exists);
     //     the access gate is the body, not the chip + thumbnail.
+    //   - EXCEPT viewers under 18 (age-restriction plan Phase 4):
+    //     minors are clamped to G / PG / PG-13 at the card level,
+    //     stricter than anonymous, because they can never open an
+    //     R / NC-17 body and must not be shown dead teasers.
     // `users.storyCwBlocklist` is still honored as a personal
     // opt-OUT for signed-in readers who explicitly chose to hide
     // certain content warnings (configurable in profile settings);
     // it's a viewer preference, not a default gate.
+    if (me && !me.isAdult) {
+      conds.push(inArray(stories.rating, [...SFW_RATINGS]));
+    }
     if (me) {
       const meRow = (await db
         .select({ cw: users.storyCwBlocklist })
@@ -246,7 +273,7 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
       .orderBy(...orderBy)
       .limit(pageSize)
       .offset(page * pageSize);
-    const entries = await Promise.all(rows.map((r) => toCard(db, r)));
+    const entries = await Promise.all(rows.map((r) => toCard(db, r, me)));
 
     // Buy-a-Copy state for the card tiles. Price + open/closed come from
     // config; ownership is a single batched lookup over THIS page's ids,
@@ -283,17 +310,24 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
     try { body = createStoryBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
 
+    // Age-restriction plan Phase 4: accounts under 18 author G / PG /
+    // PG-13 only. Server-side twin of the RatingPicker clamp.
+    if (body.rating !== undefined && !(SFW_RATINGS as readonly string[]).includes(body.rating) && !me.isAdult) {
+      reply.code(400);
+      return { error: tFor(me.locale, "errors:server.stories.matureRatingsAdultsOnly") };
+    }
+
     const slug = (body.slug ?? deriveSlug(body.title)).toLowerCase();
     if (!SLUG_RX.test(slug)) {
       reply.code(400);
-      return { error: "slug must be 1-60 lowercase letters, numbers, hyphens" };
+      return { error: tFor(me.locale, "errors:server.common.slugRule") };
     }
     const dup = (await db
       .select()
       .from(stories)
       .where(and(eq(stories.authorUserId, me.id), sql`lower(${stories.slug}) = ${slug}`))
       .limit(1))[0];
-    if (dup) { reply.code(409); return { error: "you already have a story with that slug" }; }
+    if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.stories.duplicateSlug") }; }
 
     if (body.authorCharacterId !== undefined) {
       const ok = await isOwnIdentity(db, me.id, body.authorCharacterId ?? null);
@@ -302,7 +336,9 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
 
     if (body.linkedWorldId) {
       const w = (await db.select().from(worlds).where(eq(worlds.id, body.linkedWorldId)).limit(1))[0];
-      if (!w || (w.visibility === "private" && w.ownerUserId !== me.id)) {
+      // 18+ worlds are invisible to minors (age plan Phase 4), so a
+      // minor linking one is referencing a world they can't see.
+      if (!w || (w.visibility === "private" && w.ownerUserId !== me.id) || (w.isNsfw && !me.isAdult)) {
         reply.code(400);
         return { error: "linkedWorldId must reference a world you can see" };
       }
@@ -337,13 +373,13 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
       // when it fires, return a friendly 409 instead of a 500.
       if (e instanceof Error && /UNIQUE|constraint/i.test(e.message)) {
         reply.code(409);
-        return { error: "you already have a story with that slug" };
+        return { error: tFor(me.locale, "errors:server.stories.duplicateSlug") };
       }
       throw e;
     }
     const created = (await db.select().from(stories).where(eq(stories.id, id)).limit(1))[0]!;
     reply.code(201);
-    return await toCard(db, created);
+    return await toCard(db, created, me);
   });
 
   /* ---------- Read story (landing) ---------- */
@@ -357,7 +393,7 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
       reply.code(404);
       return { error: "not found" };
     }
-    return await buildDetail(s, me ? { id: me.id, role: me.role } : null);
+    return await buildDetail(s, me ? { id: me.id, role: me.role, birthdate: me.birthdate, hideNsfw: me.hideNsfw } : null);
   });
 
   /* ---------- Canonical @handle/slug ---------- */
@@ -374,7 +410,7 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
         reply.code(404);
         return { error: "not found" };
       }
-      return await buildDetail(s, me ? { id: me.id, role: me.role } : null);
+      return await buildDetail(s, me ? { id: me.id, role: me.role, birthdate: me.birthdate, hideNsfw: me.hideNsfw } : null);
     },
   );
 
@@ -392,6 +428,13 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
     let body;
     try { body = updateStoryBody.parse(req.body); }
     catch { reply.code(400); return { error: "invalid body" }; }
+
+    // Age-restriction plan Phase 4: the CALLER (author or admin editor)
+    // must be an adult to set R / NC-17. Lowering a rating stays open.
+    if (body.rating !== undefined && !(SFW_RATINGS as readonly string[]).includes(body.rating) && !me.isAdult) {
+      reply.code(400);
+      return { error: tFor(me.locale, "errors:server.stories.matureRatingsAdultsOnly") };
+    }
 
     const update: Partial<typeof stories.$inferInsert> = { updatedAt: new Date() };
     if (body.title !== undefined) update.title = body.title.trim();
@@ -414,7 +457,8 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
     if (body.linkedWorldId !== undefined) {
       if (body.linkedWorldId) {
         const w = (await db.select().from(worlds).where(eq(worlds.id, body.linkedWorldId)).limit(1))[0];
-        if (!w || (w.visibility === "private" && w.ownerUserId !== me.id)) {
+        // Mirror the create path: 18+ worlds are invisible to minors.
+        if (!w || (w.visibility === "private" && w.ownerUserId !== me.id) || (w.isNsfw && !me.isAdult)) {
           reply.code(400);
           return { error: "linkedWorldId must reference a world you can see" };
         }
@@ -431,7 +475,7 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
       const slug = body.slug.toLowerCase();
       if (!SLUG_RX.test(slug)) {
         reply.code(400);
-        return { error: "slug must be 1-60 lowercase letters, numbers, hyphens" };
+        return { error: tFor(me.locale, "errors:server.common.slugRule") };
       }
       if (slug !== s.slug.toLowerCase()) {
         const dup = (await db
@@ -439,13 +483,13 @@ export async function registerStoryCatalogRoutes(app: FastifyInstance, db: Db): 
           .from(stories)
           .where(and(eq(stories.authorUserId, s.authorUserId), sql`lower(${stories.slug}) = ${slug}`, ne(stories.id, s.id)))
           .limit(1))[0];
-        if (dup) { reply.code(409); return { error: "you already have a story with that slug" }; }
+        if (dup) { reply.code(409); return { error: tFor(me.locale, "errors:server.stories.duplicateSlug") }; }
         update.slug = slug;
       }
     }
     await db.update(stories).set(update).where(eq(stories.id, s.id));
     const updated = (await db.select().from(stories).where(eq(stories.id, s.id)).limit(1))[0]!;
-    return await toCard(db, updated);
+    return await toCard(db, updated, me);
   });
 
   /* ---------- Delete story (author-only) ---------- */

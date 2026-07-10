@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { EMAIL_CATEGORY_KEYS, EMAIL_CATEGORY_LABELS, EMAIL_CATEGORY_HINTS, DEFAULT_EMAIL_CATEGORY, emailCategoryLabel, type EmailCategory } from "@thekeep/shared";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { RichEditor } from "../shared/RichEditor.js";
 
 interface Campaign {
@@ -25,27 +27,29 @@ const input = "w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-
 const btn = "rounded border border-keep-border bg-keep-panel px-3 py-1.5 text-sm font-semibold hover:bg-keep-panel/80 disabled:opacity-50";
 
 function fmtWhen(ms: number): string {
-  try { return new Date(ms).toLocaleString(); } catch { return String(ms); }
+  try { return formatDateTime(ms); } catch { return String(ms); }
 }
 
 function CampaignRow({ c, onCancel }: { c: Campaign; onCancel: (id: string) => void }) {
+  const { t } = useTranslation("admin");
   const canCancel = c.status === "scheduled" || c.status === "sending";
   return (
     <div className="flex items-center justify-between gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs">
       <span className="min-w-0 truncate">
         {c.category ? <span className="mr-1 rounded bg-keep-panel px-1 text-[10px] uppercase tracking-wide text-keep-muted">{emailCategoryLabel(c.category)}</span> : null}
         {c.subject}
-        {c.status === "scheduled" && c.scheduledAt ? <span className="ml-1 text-keep-muted">- scheduled {fmtWhen(c.scheduledAt)}</span> : null}
+        {c.status === "scheduled" && c.scheduledAt ? <span className="ml-1 text-keep-muted">{t("email.scheduledSuffix", { when: fmtWhen(c.scheduledAt) })}</span> : null}
       </span>
       <span className="flex shrink-0 items-center gap-2 text-keep-muted">
-        <span>{c.sentCount}/{c.total} sent{c.failedCount ? `, ${c.failedCount} failed` : ""} · {c.status}</span>
-        {canCancel ? <button type="button" className="text-keep-accent hover:underline" onClick={() => onCancel(c.id)}>cancel</button> : null}
+        <span>{t("email.sentProgress", { sent: c.sentCount, total: c.total })}{c.failedCount ? t("email.failedSuffix", { count: c.failedCount }) : ""} · {c.status}</span>
+        {canCancel ? <button type="button" className="text-keep-accent hover:underline" onClick={() => onCancel(c.id)}>{t("email.cancelAction")}</button> : null}
       </span>
     </div>
   );
 }
 
 export function AdminEmailTab() {
+  const { t } = useTranslation("admin");
   const [section, setSection] = useState<Section>("compose");
 
   // Verification settings
@@ -106,7 +110,7 @@ export function AdminEmailTab() {
   }, [query, mode]);
 
   async function cancelCampaign(id: string) {
-    if (!window.confirm("Cancel this campaign? Already-sent emails can't be recalled; the rest won't go out.")) return;
+    if (!window.confirm(t("email.cancelConfirm"))) return;
     try {
       await fetch(`/admin/email/campaigns/${id}/cancel`, { method: "POST", credentials: "include" });
       await refreshStatus();
@@ -125,10 +129,10 @@ export function AdminEmailTab() {
       });
       if (!r.ok) throw new Error("save failed");
       setDailyCap(String(cap));
-      setSettingsMsg("Saved.");
+      setSettingsMsg(t("saved"));
       await refreshStatus();
     } catch {
-      setSettingsMsg("Save failed (check your permissions).");
+      setSettingsMsg(t("email.saveFailedPermissions"));
     } finally {
       setSavingSettings(false);
     }
@@ -137,9 +141,9 @@ export function AdminEmailTab() {
   async function send(e: FormEvent) {
     e.preventDefault();
     setSendMsg(null);
-    if (!subject.trim() || !html.trim()) { setSendMsg("Subject and body are required."); return; }
-    if (mode === "user" && !picked) { setSendMsg("Pick a recipient first."); return; }
-    if (mode === "all" && !window.confirm("Send this to everyone subscribed now? It will go out in daily batches.")) return;
+    if (!subject.trim() || !html.trim()) { setSendMsg(t("email.subjectBodyRequired")); return; }
+    if (mode === "user" && !picked) { setSendMsg(t("email.pickRecipient")); return; }
+    if (mode === "all" && !window.confirm(t("email.broadcastConfirm"))) return;
     setSending(true);
     try {
       if (mode === "user" && picked) {
@@ -147,21 +151,21 @@ export function AdminEmailTab() {
           method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ toUserId: picked.id, subject, html }),
         });
-        if (!r.ok) throw new Error("Send failed.");
-        setSendMsg(`Sent to ${picked.username}.`);
+        if (!r.ok) throw new Error(t("email.sendFailed"));
+        setSendMsg(t("email.sentTo", { name: picked.username }));
       } else {
         const r = await fetch("/admin/email/broadcast", {
           method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ subject, html, category }),
         });
         const j = await r.json();
-        if (!r.ok) throw new Error(j.error === "no_recipients" ? "No eligible recipients." : "Broadcast failed.");
-        setSendMsg(`Queued for ${j.total} recipient(s).`);
+        if (!r.ok) throw new Error(j.error === "no_recipients" ? t("email.noRecipients") : t("email.broadcastFailed"));
+        setSendMsg(t("email.queuedFor", { count: j.total }));
       }
       setSubject(""); setHtml(""); setPicked(null); setQuery("");
       await refreshStatus();
     } catch (err) {
-      setSendMsg(err instanceof Error ? err.message : "Failed.");
+      setSendMsg(err instanceof Error ? err.message : t("email.failed"));
     } finally {
       setSending(false);
     }
@@ -170,12 +174,14 @@ export function AdminEmailTab() {
   async function scheduleNewsletter(e: FormEvent) {
     e.preventDefault();
     setNlMsg(null);
-    if (!nlSubject.trim() || !nlHtml.trim()) { setNlMsg("Subject and body are required."); return; }
+    if (!nlSubject.trim() || !nlHtml.trim()) { setNlMsg(t("email.subjectBodyRequired")); return; }
     const whenMs = nlWhen ? new Date(nlWhen).getTime() : Date.now();
-    if (Number.isNaN(whenMs)) { setNlMsg("Pick a valid delivery time."); return; }
+    if (Number.isNaN(whenMs)) { setNlMsg(t("email.invalidTime")); return; }
     const future = whenMs > Date.now() + 30_000;
-    const label = future ? `scheduled for ${fmtWhen(whenMs)}` : "sent now";
-    if (!window.confirm(`Send this newsletter to everyone who hasn't unsubscribed from Newsletter (${label})? It goes out in daily batches.`)) return;
+    const confirmMsg = future
+      ? t("email.newsletterConfirmScheduled", { when: fmtWhen(whenMs) })
+      : t("email.newsletterConfirmNow");
+    if (!window.confirm(confirmMsg)) return;
     setNlSending(true);
     try {
       const r = await fetch("/admin/email/broadcast", {
@@ -183,12 +189,12 @@ export function AdminEmailTab() {
         body: JSON.stringify({ subject: nlSubject, html: nlHtml, category: "newsletter", ...(future ? { scheduledAt: whenMs } : {}) }),
       });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.error === "no_recipients" ? "No eligible recipients." : "Could not schedule.");
-      setNlMsg(future ? `Scheduled for ${j.total} recipient(s) at ${fmtWhen(whenMs)}.` : `Sending now to ${j.total} recipient(s).`);
+      if (!r.ok) throw new Error(j.error === "no_recipients" ? t("email.noRecipients") : t("email.scheduleFailed"));
+      setNlMsg(future ? t("email.scheduledFor", { count: j.total, when: fmtWhen(whenMs) }) : t("email.sendingNowTo", { count: j.total }));
       setNlSubject(""); setNlHtml(""); setNlWhen("");
       await refreshStatus();
     } catch (err) {
-      setNlMsg(err instanceof Error ? err.message : "Failed.");
+      setNlMsg(err instanceof Error ? err.message : t("email.failed"));
     } finally {
       setNlSending(false);
     }
@@ -211,23 +217,27 @@ export function AdminEmailTab() {
     <div className="space-y-5 text-sm">
       {status && !status.configured ? (
         <div className="rounded border border-keep-accent/40 bg-keep-accent/10 px-3 py-2 text-xs text-keep-accent">
-          Email isn't configured yet. Set the <code>BREVO_API_KEY</code> secret. Sending will be skipped until it's set.
+          <Trans t={t} i18nKey="email.notConfigured">
+            {"Email isn't configured yet. Set the "}
+            <code>BREVO_API_KEY</code>
+            {" secret. Sending will be skipped until it's set."}
+          </Trans>
         </div>
       ) : null}
 
       <div className="flex gap-1 border-b border-keep-rule pb-2">
-        {tabBtn("compose", "Compose")}
-        {tabBtn("newsletter", "Newsletter")}
-        {tabBtn("settings", "Settings")}
+        {tabBtn("compose", t("email.tabCompose"))}
+        {tabBtn("newsletter", t("email.tabNewsletter"))}
+        {tabBtn("settings", t("email.tabSettings"))}
       </div>
 
       {section === "compose" ? (
         <>
-          <form onSubmit={send} className={card}>
-            <div className={legend}>Send an email</div>
+          <form data-admin-anchor="email.sendTitle" onSubmit={send} className={card}>
+            <div className={legend}>{t("email.sendTitle")}</div>
             <div className="flex gap-4 text-xs">
-              <label className="flex items-center gap-1.5"><input type="radio" checked={mode === "user"} onChange={() => setMode("user")} /> A specific user</label>
-              <label className="flex items-center gap-1.5"><input type="radio" checked={mode === "all"} onChange={() => setMode("all")} /> All users (broadcast)</label>
+              <label className="flex items-center gap-1.5"><input type="radio" checked={mode === "user"} onChange={() => setMode("user")} /> {t("email.specificUser")}</label>
+              <label className="flex items-center gap-1.5"><input type="radio" checked={mode === "all"} onChange={() => setMode("all")} /> {t("email.allUsers")}</label>
             </div>
 
             {mode === "user" ? (
@@ -235,11 +245,11 @@ export function AdminEmailTab() {
                 {picked ? (
                   <div className="flex items-center justify-between rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs">
                     <span>{picked.username} &lt;{picked.email}&gt;</span>
-                    <button type="button" className="text-keep-muted hover:text-keep-text" onClick={() => setPicked(null)}>change</button>
+                    <button type="button" className="text-keep-muted hover:text-keep-text" onClick={() => setPicked(null)}>{t("email.change")}</button>
                   </div>
                 ) : (
                   <>
-                    <input className={input} placeholder="Search username or email…" value={query} onChange={(e) => setQuery(e.target.value)} />
+                    <input className={input} placeholder={t("email.searchPlaceholder")} value={query} onChange={(e) => setQuery(e.target.value)} />
                     {results.length > 0 ? (
                       <div className="max-h-40 overflow-y-auto rounded border border-keep-rule">
                         {results.map((u) => (
@@ -255,22 +265,30 @@ export function AdminEmailTab() {
             ) : (
               <div className="space-y-2">
                 <label className="block">
-                  <span className="mb-1 block text-xs text-keep-muted">Category</span>
+                  <span className="mb-1 block text-xs text-keep-muted">{t("email.categoryLabel")}</span>
                   <select className={input} value={category} onChange={(e) => setCategory(e.target.value as EmailCategory)}>
                     {EMAIL_CATEGORY_KEYS.map((k) => <option key={k} value={k}>{EMAIL_CATEGORY_LABELS[k]}</option>)}
                   </select>
                   <span className="mt-1 block text-[11px] text-keep-muted">{EMAIL_CATEGORY_HINTS[category]}</span>
                 </label>
                 <div className="rounded border border-keep-action/40 bg-keep-action/10 px-2 py-1 text-[11px] text-keep-text/90">
-                  Goes to every account with an email that hasn't unsubscribed from <strong>{EMAIL_CATEGORY_LABELS[category]}</strong> (everyone is included by default), in daily batches of up to {status?.dailyCap ?? 300}. The footer link lets a recipient unsubscribe from this category only.
+                  <Trans
+                    t={t}
+                    i18nKey="email.broadcastInfo"
+                    values={{ label: EMAIL_CATEGORY_LABELS[category], cap: status?.dailyCap ?? 300 }}
+                  >
+                    {"Goes to every account with an email that hasn't unsubscribed from "}
+                    <strong>{"{{label}}"}</strong>
+                    {" (everyone is included by default), in daily batches of up to {{cap}}. The footer link lets a recipient unsubscribe from this category only."}
+                  </Trans>
                 </div>
               </div>
             )}
 
-            <input className={input} placeholder="Subject" value={subject} maxLength={200} onChange={(e) => setSubject(e.target.value)} />
-            <div className="min-h-[220px]"><RichEditor value={html} onChange={setHtml} placeholder="Write your message…" minHeight="180px" /></div>
+            <input className={input} placeholder={t("email.subjectPlaceholder")} value={subject} maxLength={200} onChange={(e) => setSubject(e.target.value)} />
+            <div className="min-h-[220px]"><RichEditor value={html} onChange={setHtml} placeholder={t("email.messagePlaceholder")} minHeight="180px" /></div>
             <div className="flex items-center gap-3">
-              <button type="submit" className={btn} disabled={sending}>{sending ? "Sending…" : mode === "user" ? "Send email" : "Queue broadcast"}</button>
+              <button type="submit" className={btn} disabled={sending}>{sending ? t("email.sending") : mode === "user" ? t("email.sendEmail") : t("email.queueBroadcast")}</button>
               {sendMsg ? <span className="text-xs text-keep-muted">{sendMsg}</span> : null}
             </div>
           </form>
@@ -278,8 +296,8 @@ export function AdminEmailTab() {
           {broadcasts.length > 0 ? (
             <div className={card}>
               <div className="flex items-center justify-between">
-                <div className={legend}>Recent broadcasts</div>
-                <button type="button" className="text-xs text-keep-muted hover:text-keep-text" onClick={refreshStatus}>refresh</button>
+                <div className={legend}>{t("email.recentBroadcasts")}</div>
+                <button type="button" className="text-xs text-keep-muted hover:text-keep-text" onClick={refreshStatus}>{t("email.refreshLower")}</button>
               </div>
               <div className="space-y-1">{broadcasts.map((c) => <CampaignRow key={c.id} c={c} onCancel={cancelCampaign} />)}</div>
             </div>
@@ -289,58 +307,62 @@ export function AdminEmailTab() {
 
       {section === "newsletter" ? (
         <>
-          <form onSubmit={scheduleNewsletter} className={card}>
-            <div className={legend}>New newsletter</div>
+          <form data-admin-anchor="email.newNewsletter" onSubmit={scheduleNewsletter} className={card}>
+            <div className={legend}>{t("email.newNewsletter")}</div>
             <p className="text-[11px] text-keep-muted">
-              Goes to every account with an email that hasn't unsubscribed from <strong>Newsletter</strong> (everyone is included by default). Pick a delivery time (or leave it blank to send now); it goes out in daily batches starting then, and skips anyone who unsubscribes before it sends.
+              <Trans t={t} i18nKey="email.newsletterInfo">
+                {"Goes to every account with an email that hasn't unsubscribed from "}
+                <strong>Newsletter</strong>
+                {" (everyone is included by default). Pick a delivery time (or leave it blank to send now); it goes out in daily batches starting then, and skips anyone who unsubscribes before it sends."}
+              </Trans>
             </p>
-            <input className={input} placeholder="Subject" value={nlSubject} maxLength={200} onChange={(e) => setNlSubject(e.target.value)} />
-            <div className="min-h-[220px]"><RichEditor value={nlHtml} onChange={setNlHtml} placeholder="Write the newsletter…" minHeight="180px" /></div>
+            <input className={input} placeholder={t("email.subjectPlaceholder")} value={nlSubject} maxLength={200} onChange={(e) => setNlSubject(e.target.value)} />
+            <div className="min-h-[220px]"><RichEditor value={nlHtml} onChange={setNlHtml} placeholder={t("email.newsletterPlaceholder")} minHeight="180px" /></div>
             <label className="block">
-              <span className="mb-1 block text-xs text-keep-muted">Deliver at (leave blank to send now)</span>
+              <span className="mb-1 block text-xs text-keep-muted">{t("email.deliverAt")}</span>
               <input className={input} type="datetime-local" value={nlWhen} onChange={(e) => setNlWhen(e.target.value)} />
             </label>
             <div className="flex items-center gap-3">
-              <button type="submit" className={btn} disabled={nlSending}>{nlSending ? "Saving…" : nlWhen ? "Schedule newsletter" : "Send newsletter now"}</button>
+              <button type="submit" className={btn} disabled={nlSending}>{nlSending ? t("common:saving") : nlWhen ? t("email.scheduleNewsletter") : t("email.sendNewsletterNow")}</button>
               {nlMsg ? <span className="text-xs text-keep-muted">{nlMsg}</span> : null}
             </div>
           </form>
 
           <div className={card}>
             <div className="flex items-center justify-between">
-              <div className={legend}>Newsletters</div>
-              <button type="button" className="text-xs text-keep-muted hover:text-keep-text" onClick={refreshStatus}>refresh</button>
+              <div className={legend}>{t("email.newsletters")}</div>
+              <button type="button" className="text-xs text-keep-muted hover:text-keep-text" onClick={refreshStatus}>{t("email.refreshLower")}</button>
             </div>
             {newsletters.length > 0 ? (
               <div className="space-y-1">{newsletters.map((c) => <CampaignRow key={c.id} c={c} onCancel={cancelCampaign} />)}</div>
-            ) : <p className="text-xs text-keep-muted">No newsletters yet.</p>}
+            ) : <p className="text-xs text-keep-muted">{t("email.noNewsletters")}</p>}
           </div>
         </>
       ) : null}
 
       {section === "settings" ? (
-        <form onSubmit={saveSettings} className={card}>
-          <div className={legend}>Email verification</div>
+        <form data-admin-anchor="email.verificationLegend" onSubmit={saveSettings} className={card}>
+          <div className={legend}>{t("email.verificationLegend")}</div>
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={verifyEnabled} onChange={(e) => setVerifyEnabled(e.target.checked)} />
-            <span>Require new users to verify their email after registering.</span>
+            <span>{t("email.requireVerification")}</span>
           </label>
           <div className={verifyEnabled ? "space-y-2" : "space-y-2 opacity-50"}>
             <label className="block">
-              <span className="mb-1 block text-xs text-keep-muted">Enforcement</span>
+              <span className="mb-1 block text-xs text-keep-muted">{t("email.enforcement")}</span>
               <select className={input} value={verifyMode} disabled={!verifyEnabled} onChange={(e) => setVerifyMode(e.target.value === "block" ? "block" : "nudge")}>
-                <option value="nudge">Nudge: account works, dismissible reminder banner</option>
-                <option value="block">Block: can't chat until verified</option>
+                <option value="nudge">{t("email.modeNudge")}</option>
+                <option value="block">{t("email.modeBlock")}</option>
               </select>
             </label>
           </div>
-          <p className="text-[11px] text-keep-muted">Existing accounts are treated as already verified, so turning this on only affects new sign-ups.</p>
-          <label className="block">
-            <span className="mb-1 block text-xs text-keep-muted">Broadcast daily cap (emails/day)</span>
+          <p className="text-[11px] text-keep-muted">{t("email.verificationNote")}</p>
+          <label data-admin-anchor="email.dailyCapLabel" className="block">
+            <span className="mb-1 block text-xs text-keep-muted">{t("email.dailyCapLabel")}</span>
             <input className={input + " w-32"} value={dailyCap} onChange={(e) => setDailyCap(e.target.value)} placeholder="300" />
           </label>
           <div className="flex items-center gap-3">
-            <button type="submit" className={btn} disabled={savingSettings}>{savingSettings ? "Saving…" : "Save settings"}</button>
+            <button type="submit" className={btn} disabled={savingSettings}>{savingSettings ? t("common:saving") : t("saveSettings")}</button>
             {settingsMsg ? <span className="text-xs text-keep-muted">{settingsMsg}</span> : null}
           </div>
         </form>

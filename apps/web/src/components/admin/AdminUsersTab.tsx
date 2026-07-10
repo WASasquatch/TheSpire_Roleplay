@@ -1,11 +1,14 @@
 import { Fragment, useEffect, useMemo, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { ProfileView, Role } from "@thekeep/shared";
 import { isMasterAdminRole } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDate, formatDateTime } from "../../lib/intlFormat.js";
 import { useChat } from "../../state/store.js";
 import { useEarning } from "../../state/earning.js";
 import { AccountBanControl } from "../moderation/AccountBanControl.js";
 import { ProfileModal } from "../profile/ProfileModal.js";
+import { isoAgeUtc } from "../AuthGate.js";
 
 /* =============================================================
  * USERS TAB
@@ -23,6 +26,17 @@ interface AdminUserRow {
   createdAt: number;
   lastLoginAt: number | null;
   disabled: boolean;
+  /** ISO YYYY-MM-DD, or null for legacy accounts registered before birth
+   *  dates were collected (they attested 18+ at signup and count as
+   *  adults). Only this admin directory ever carries another user's date. */
+  birthdate: string | null;
+  /** Server-derived from `birthdate` at read time, so it is always in
+   *  sync (a 17-year-old flips to "adult" on their 18th birthday with no
+   *  write anywhere). */
+  ageBracket: "adult" | "minor" | "legacy";
+  /** The minor's "only see members under 18 and staff" toggle. Editable
+   *  here (behind `edit_user_dob`) for support cases; inert for adults. */
+  isolateFromAdults: boolean;
   characters: Array<{ id: string; name: string; deleted: boolean }>;
   /** Last ~5 distinct IPs this user has been seen on, newest-first.
    *  Captured on activity (login, connect, room switch, chat, posts), not
@@ -36,11 +50,12 @@ interface AdminUserRow {
 type UserSortKey = "username" | "role" | "state" | "chars" | "registered" | "lastSeen";
 type UserSortDir = "asc" | "desc";
 type RoleFilter = "any" | "user" | "trusted" | "mod" | "admin" | "masteradmin";
-type StateFilter = "any" | "online" | "offline" | "disabled" | "away";
+type StateFilter = "any" | "online" | "offline" | "disabled" | "away" | "minor";
 type RegisteredFilter = "any" | "24h" | "5d" | "7d" | "30d";
 type LoginFilter = "any" | "never" | "active";
 
 export function UsersTab() {
+  const { t } = useTranslation("admin");
   const [rows, setRows] = useState<AdminUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,11 +104,13 @@ export function UsersTab() {
       // disabled); clearing the IP pivot restores the name search.
       if (q.trim() && !ipPivot.trim()) params.set("q", q.trim());
       if (ipPivot.trim()) params.set("ip", ipPivot.trim());
-      // "disabled" is a DB-backed state, so push it server-side — otherwise
-      // a disabled account past the first page (username-ordered, limit 100)
-      // never loads and the local filter finds nothing. online/offline/away
-      // stay client-side (runtime presence).
+      // "disabled" and "minor" are DB-backed states, so push them
+      // server-side — otherwise a matching account past the first page
+      // (username-ordered, limit 100) never loads and the local filter
+      // finds nothing. online/offline/away stay client-side (runtime
+      // presence).
       if (stateFilter === "disabled") params.set("state", "disabled");
+      if (stateFilter === "minor") params.set("state", "minor");
       const qs = params.toString();
       const url = qs ? `/admin/users?${qs}` : "/admin/users";
       const r = await fetch(url, { credentials: "include" });
@@ -102,7 +119,7 @@ export function UsersTab() {
       setRows(j.users);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "load failed");
+      setError(err instanceof Error ? err.message : t("loadFailed"));
     } finally {
       setLoading(false);
     }
@@ -126,7 +143,7 @@ export function UsersTab() {
 
   async function destroy(u: AdminUserRow) {
     const ok = window.confirm(
-      `DELETE user "${u.username}"?\n\nThis cascades through their characters, room memberships, sessions, and bans. Their messages keep the snapshotted display name in history but their account is gone permanently. This cannot be undone.`,
+      t("users.deleteConfirm", { name: u.username }),
     );
     if (!ok) return;
     try {
@@ -138,7 +155,7 @@ export function UsersTab() {
       setEditing(null);
       await reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "delete failed");
+      setError(err instanceof Error ? err.message : t("deleteFailed"));
     }
   }
 
@@ -163,6 +180,7 @@ export function UsersTab() {
       if (stateFilter === "offline" && (u.online || u.disabled)) return false;
       if (stateFilter === "disabled" && !u.disabled) return false;
       if (stateFilter === "away" && !u.away) return false;
+      if (stateFilter === "minor" && u.ageBracket !== "minor") return false;
       if (sinceCutoff != null && u.createdAt < sinceCutoff) return false;
       if (loginFilter === "never" && u.lastLoginAt != null) return false;
       if (loginFilter === "active" && u.lastLoginAt == null) return false;
@@ -214,12 +232,11 @@ export function UsersTab() {
   return (
     <div className="space-y-3">
       <p className="text-xs text-keep-muted">
-        Every registered account, including disabled ones. Search matches
-        username, email, and character name (so a persona name finds its
-        owning OOC account). Editing role to "admin" grants global
-        moderation - same as <code>/promoteadmin</code>. "masteradmin"
-        (master-only to set) additionally unlocks settings, branding,
-        rules, account-disable, and email changes.
+        <Trans t={t} i18nKey="users.description">
+          {'Every registered account, including disabled ones. Search matches username, email, and character name (so a persona name finds its owning OOC account). Editing role to "admin" grants global moderation - same as '}
+          <code>/promoteadmin</code>
+          {'. "masteradmin" (master-only to set) additionally unlocks settings, branding, rules, account-disable, and email changes.'}
+        </Trans>
       </p>
 
       {/* IP pivot chip, surfaces while a click on an IP chip in the
@@ -230,86 +247,90 @@ export function UsersTab() {
       {ipPivot ? (
         <div className="flex items-center gap-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">
           <span>
-            Showing every account seen on <span className="font-mono">{ipPivot}</span>
+            <Trans t={t} i18nKey="users.ipPivotBanner" values={{ ip: ipPivot }}>
+              {"Showing every account seen on "}
+              <span className="font-mono">{"{{ip}}"}</span>
+            </Trans>
           </span>
           <button
             type="button"
             onClick={() => setIpPivot("")}
             className="ml-auto rounded border border-keep-accent/40 px-1.5 py-0 hover:bg-keep-accent/15"
-            title="Clear IP pivot"
-            aria-label="Clear IP pivot"
+            title={t("users.clearIpPivot")}
+            aria-label={t("users.clearIpPivot")}
           >
-            × Clear
+            {t("users.clearButton")}
           </button>
         </div>
       ) : null}
 
       <div className="flex flex-wrap items-end gap-2 rounded border border-keep-rule/60 bg-keep-bg/30 p-2 text-xs">
         <label className="flex flex-col gap-0.5">
-          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Search</span>
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("users.searchLabel")}</span>
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
             disabled={!!ipPivot}
-            placeholder="username / email / character"
-            title={ipPivot ? "Clear the IP pivot to search by name again" : "Search username, email, or character name"}
+            placeholder={t("users.searchPlaceholder")}
+            title={ipPivot ? t("users.searchTitlePivot") : t("users.searchTitle")}
             className="min-w-[12rem] rounded border border-keep-rule bg-keep-bg px-2 py-1 disabled:opacity-50"
           />
         </label>
         <label className="flex flex-col gap-0.5">
-          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Role</span>
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("users.roleLabel")}</span>
           <select
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value as RoleFilter)}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="any">any</option>
-            <option value="user">user</option>
-            <option value="trusted">trusted</option>
-            <option value="mod">mod</option>
-            <option value="admin">admin</option>
-            <option value="masteradmin">master</option>
+            <option value="any">{t("users.filterAny")}</option>
+            <option value="user">{t("users.role.user")}</option>
+            <option value="trusted">{t("users.role.trusted")}</option>
+            <option value="mod">{t("users.role.mod")}</option>
+            <option value="admin">{t("users.role.admin")}</option>
+            <option value="masteradmin">{t("users.role.masteradmin")}</option>
           </select>
         </label>
         <label className="flex flex-col gap-0.5">
-          <span className="text-[10px] uppercase tracking-widest text-keep-muted">State</span>
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("users.stateLabel")}</span>
           <select
             value={stateFilter}
             onChange={(e) => setStateFilter(e.target.value as StateFilter)}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="any">any</option>
-            <option value="online">online</option>
-            <option value="offline">offline</option>
-            <option value="away">away</option>
-            <option value="disabled">disabled</option>
+            <option value="any">{t("users.filterAny")}</option>
+            <option value="online">{t("users.state.online")}</option>
+            <option value="offline">{t("users.state.offline")}</option>
+            <option value="away">{t("users.state.away")}</option>
+            <option value="disabled">{t("users.state.disabled")}</option>
+            <option value="minor">{t("users.stateUnder18")}</option>
           </select>
         </label>
         <label className="flex flex-col gap-0.5">
-          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Registered</span>
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("users.registeredLabel")}</span>
           <select
             value={registeredFilter}
             onChange={(e) => setRegisteredFilter(e.target.value as RegisteredFilter)}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="any">any time</option>
-            <option value="24h">last 24h</option>
-            <option value="5d">last 5 days</option>
-            <option value="7d">last 7 days</option>
-            <option value="30d">last 30 days</option>
+            <option value="any">{t("users.anyTime")}</option>
+            <option value="24h">{t("users.last24h")}</option>
+            <option value="5d">{t("users.last5d")}</option>
+            <option value="7d">{t("users.last7d")}</option>
+            <option value="30d">{t("users.last30d")}</option>
           </select>
         </label>
         <label className="flex flex-col gap-0.5">
-          <span className="text-[10px] uppercase tracking-widest text-keep-muted">Login</span>
+          <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("users.loginLabel")}</span>
           <select
             value={loginFilter}
             onChange={(e) => setLoginFilter(e.target.value as LoginFilter)}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
-            title="Never = registered but no login session ever; active = has at least one login."
+            title={t("users.loginTitle")}
           >
-            <option value="any">any</option>
-            <option value="never">never logged in</option>
-            <option value="active">has logged in</option>
+            <option value="any">{t("users.filterAny")}</option>
+            <option value="never">{t("users.neverLoggedIn")}</option>
+            <option value="active">{t("users.hasLoggedIn")}</option>
           </select>
         </label>
         {filterActive ? (
@@ -317,10 +338,10 @@ export function UsersTab() {
             type="button"
             onClick={clearFilters}
             className="rounded border border-keep-rule px-2 py-1 hover:bg-keep-banner/40"
-          >Clear filters</button>
+          >{t("users.clearFilters")}</button>
         ) : null}
         <span className="ml-auto text-keep-muted">
-          {loading ? "loading…" : `${filteredSorted.length} of ${rows.length}`}
+          {loading ? t("users.loadingEllipsis") : t("users.countOf", { shown: filteredSorted.length, total: rows.length })}
         </span>
       </div>
 
@@ -329,27 +350,33 @@ export function UsersTab() {
       ) : null}
 
       {loading ? (
-        <div className="text-keep-muted text-xs">loading...</div>
+        <div className="text-keep-muted text-xs">{t("loading")}</div>
       ) : filteredSorted.length === 0 ? (
         <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">
-          {rows.length === 0 ? "No users match." : "No users match the current filters."}
+          {rows.length === 0 ? t("users.noUsers") : t("users.noFilterMatches")}
         </div>
       ) : (
         <div className="-mx-1 overflow-x-auto px-1">
         <table className="w-full min-w-[720px] text-xs">
           <thead className="bg-keep-banner/50 text-keep-muted uppercase tracking-widest">
             <tr>
-              <th className="cursor-pointer px-2 py-1 text-left hover:text-keep-text" onClick={() => toggleSort("username")}>Username{sortIndicator("username")}</th>
-              <th className="px-2 py-1 text-left">Email</th>
-              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("role")}>Role{sortIndicator("role")}</th>
-              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("state")}>State{sortIndicator("state")}</th>
-              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("chars")}>Chars{sortIndicator("chars")}</th>
+              <th className="cursor-pointer px-2 py-1 text-left hover:text-keep-text" onClick={() => toggleSort("username")}>{t("users.colUsername")}{sortIndicator("username")}</th>
+              <th className="px-2 py-1 text-left">{t("users.colEmail")}</th>
+              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("role")}>{t("users.colRole")}{sortIndicator("role")}</th>
+              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("state")}>{t("users.colState")}{sortIndicator("state")}</th>
               <th
+                data-admin-anchor="users.colAge"
+                className="px-2 py-1"
+                title={t("users.colAgeTitle")}
+              >{t("users.colAge")}</th>
+              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("chars")}>{t("users.colChars")}{sortIndicator("chars")}</th>
+              <th
+                data-admin-anchor="users.colIps"
                 className="px-2 py-1 text-left"
-                title="Up to 5 most-recent distinct IPs the user has been seen on. Captured on activity (login, connect, room switch, chat, posts), so this stays current as a user roams networks instead of showing only their original login IP. Click an IP to pivot the list to every account that shares it. Numeric badge = count of OTHER accounts seen on the same IP, flag for ban evasion or shared-device review."
-              >IPs &amp; alts</th>
-              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("registered")}>Registered{sortIndicator("registered")}</th>
-              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("lastSeen")}>Last seen{sortIndicator("lastSeen")}</th>
+                title={t("users.colIpsTitle")}
+              >{t("users.colIps")}</th>
+              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("registered")}>{t("users.colRegistered")}{sortIndicator("registered")}</th>
+              <th className="cursor-pointer px-2 py-1 hover:text-keep-text" onClick={() => toggleSort("lastSeen")}>{t("users.colLastSeen")}{sortIndicator("lastSeen")}</th>
               <th className="px-2 py-1"></th>
             </tr>
           </thead>
@@ -367,7 +394,7 @@ export function UsersTab() {
                     type="button"
                     onClick={() => toggleExpanded(u.userId)}
                     aria-expanded={isExpanded}
-                    title={isExpanded ? "Hide characters" : "Show all characters"}
+                    title={isExpanded ? t("users.hideCharacters") : t("users.showCharacters")}
                     className="flex items-center gap-1.5 rounded text-left hover:text-keep-action"
                   >
                     <span aria-hidden className="text-keep-muted">{isExpanded ? "▾" : "▸"}</span>
@@ -390,18 +417,25 @@ export function UsersTab() {
                           ? "bg-keep-action/20 text-keep-action"
                           : "bg-keep-muted/20 text-keep-muted"
                   }`}>
-                    {u.role === "masteradmin" ? "master" : u.role}
+                    {t(`users.role.${u.role}`)}
                   </span>
                 </td>
                 <td className="px-2 py-1 text-center">
                   {u.disabled ? (
-                    <span className="text-keep-accent">disabled</span>
+                    <span className="text-keep-accent">{t("users.state.disabled")}</span>
                   ) : u.online ? (
-                    <span className="text-keep-action">online</span>
+                    <span className="text-keep-action">{t("users.state.online")}</span>
                   ) : (
-                    <span className="text-keep-muted">offline</span>
+                    <span className="text-keep-muted">{t("users.state.offline")}</span>
                   )}
-                  {u.away ? <span className="ml-1 text-keep-system">away</span> : null}
+                  {u.away ? <span className="ml-1 text-keep-system">{t("users.state.away")}</span> : null}
+                </td>
+                <td className="px-2 py-1 text-center">
+                  <AgeBracketCell
+                    birthdate={u.birthdate}
+                    bracket={u.ageBracket}
+                    isolated={u.isolateFromAdults}
+                  />
                 </td>
                 <td className="px-2 py-1 text-center tabular-nums" title={u.characters.map((c) => c.name).join(", ")}>
                   {u.characters.filter((c) => !c.deleted).length}
@@ -413,11 +447,11 @@ export function UsersTab() {
                     onPickIp={(ip) => setIpPivot(ip)}
                   />
                 </td>
-                <td className="px-2 py-1 text-center tabular-nums" title={new Date(u.createdAt).toLocaleString()}>
-                  {new Date(u.createdAt).toLocaleDateString()}
+                <td className="px-2 py-1 text-center tabular-nums" title={formatDateTime(u.createdAt)}>
+                  {formatDate(u.createdAt)}
                 </td>
-                <td className="px-2 py-1 text-center tabular-nums" title={u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : "Never logged in"}>
-                  {u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleDateString() : <span className="text-keep-muted/70 italic">never</span>}
+                <td className="px-2 py-1 text-center tabular-nums" title={u.lastLoginAt ? formatDateTime(u.lastLoginAt) : t("users.neverLoggedInTitle")}>
+                  {u.lastLoginAt ? formatDate(u.lastLoginAt) : <span className="text-keep-muted/70 italic">{t("users.never")}</span>}
                 </td>
                 <td className="px-2 py-1 text-right">
                   <button
@@ -425,7 +459,7 @@ export function UsersTab() {
                     onClick={() => setEditing(u)}
                     className="mr-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
                   >
-                    Edit
+                    {t("edit")}
                   </button>
                   {/* Delete is gated on the granular `hard_delete_user`
                       key. Defaults to masteradmin-only via the matrix
@@ -438,7 +472,7 @@ export function UsersTab() {
                       onClick={() => destroy(u)}
                       className="rounded border border-keep-accent/60 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
                     >
-                      Delete
+                      {t("common:delete")}
                     </button>
                   ) : null}
                 </td>
@@ -446,8 +480,8 @@ export function UsersTab() {
               {isExpanded ? (
                 <tr className="border-t border-keep-rule/40 bg-keep-bg/30">
                   {/* Full character roster for the user, View/Edit per
-                      profile. colSpan spans all 9 header columns. */}
-                  <td colSpan={9} className="px-3 pb-3">
+                      profile. colSpan spans all 10 header columns. */}
+                  <td colSpan={10} className="px-3 pb-3">
                     <AdminCharactersSection user={u} />
                   </td>
                 </tr>
@@ -498,6 +532,7 @@ function UserIpChips({
   activeIp: string;
   onPickIp: (ip: string) => void;
 }) {
+  const { t } = useTranslation("admin");
   if (recentIps.length === 0) {
     return <span className="italic text-keep-muted">-</span>;
   }
@@ -520,7 +555,7 @@ function UserIpChips({
             <button
               type="button"
               onClick={() => onPickIp(entry.ip)}
-              title={`Last seen ${new Date(entry.lastSeenAt).toLocaleString()}. Click to show every other account that has used this IP.`}
+              title={t("users.ipChipTitle", { time: formatDateTime(entry.lastSeenAt) })}
               className={`inline-flex items-center gap-1 rounded border px-1.5 py-0 font-mono text-[10px] hover:bg-keep-banner ${
                 isActive
                   ? "border-keep-accent bg-keep-accent/15 text-keep-accent"
@@ -530,15 +565,60 @@ function UserIpChips({
               <span>{entry.ip}</span>
               <span
                 className={`rounded-full px-1 text-[9px] uppercase tracking-widest ${altClass}`}
-                title={`${entry.altCount} other account${entry.altCount === 1 ? "" : "s"} seen on this IP`}
+                title={t("users.altBadgeTitle", { count: entry.altCount })}
               >
-                {entry.altCount} alt{entry.altCount === 1 ? "" : "s"}
+                {t("users.altBadge", { count: entry.altCount })}
               </span>
             </button>
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/**
+ * Age-bracket chip for the UsersTab row (age plan Phase 4). The bracket
+ * arrives server-derived so it can't drift from the stored date; the
+ * exact birth date only surfaces in the hover title (this directory is
+ * the one payload allowed to carry it, and keeping it off the visible
+ * grid means a shoulder-surfed screen shows brackets, not dates).
+ * Minors get the accent treatment because they are the rows the age
+ * gates exist for; an "isolated" tag marks minors who turned on "only
+ * see members under 18 and staff".
+ */
+function AgeBracketCell({
+  birthdate,
+  bracket,
+  isolated,
+}: {
+  birthdate: string | null;
+  bracket: "adult" | "minor" | "legacy";
+  isolated: boolean;
+}) {
+  const { t } = useTranslation("admin");
+  const title = bracket === "legacy"
+    ? t("users.legacyTitle")
+    : t("users.bornTitle", { date: birthdate ?? t("users.unknownDate") });
+  const chipClass = bracket === "minor"
+    ? "bg-keep-accent/20 text-keep-accent font-semibold"
+    : bracket === "adult"
+      ? "bg-keep-muted/20 text-keep-muted"
+      : "bg-keep-muted/10 text-keep-muted italic";
+  return (
+    <span title={title} className="inline-flex items-center gap-1">
+      <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${chipClass}`}>
+        {t(`users.bracket.${bracket}`)}
+      </span>
+      {isolated && bracket === "minor" ? (
+        <span
+          className="rounded bg-keep-action/15 px-1 text-[9px] uppercase tracking-widest text-keep-action"
+          title={t("users.isolatedTitle")}
+        >
+          {t("users.isolatedChip")}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -561,10 +641,18 @@ function UserEditForm({
   onCancel: () => void;
   onSubmit: (body: Record<string, unknown>) => Promise<void>;
 }) {
+  const { t } = useTranslation("admin");
   const [username, setUsername] = useState(user.username);
   const [email, setEmail] = useState(user.email);
   const [role, setRole] = useState<Role>(user.role);
   const [disabled, setDisabled] = useState(user.disabled);
+  // Age settings (age plan Phase 4). `dob` is the correction input
+  // (empty string = legacy account with no date; leaving it empty sends
+  // nothing — the stored NULL can't be re-written on purpose). The
+  // isolation checkbox mirrors the minor's own "only see members under
+  // 18 and staff" toggle for support cases.
+  const [dob, setDob] = useState(user.birthdate ?? "");
+  const [isolate, setIsolate] = useState(user.isolateFromAdults);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Per-field permission gates. Each one corresponds to a server-side
@@ -580,6 +668,9 @@ function UserEditForm({
   // ban experience as the profile mod panel, replacing the bare "disabled"
   // checkbox as the primary way to lock an account here.
   const canBanAccount = mePermissions.includes("ban_account");
+  // One key covers both age-settings fields (dob correction + isolation
+  // set/clear); the server gates them together, see routes/users.ts.
+  const canEditDob = mePermissions.includes("edit_user_dob");
   // A non-masteradmin caller can't act on a masteradmin target at all
   // (no demote, no rename, etc.), the row stays read-only so they
   // don't submit a save that would 403. The "you can't outrank
@@ -587,6 +678,12 @@ function UserEditForm({
   // exceptions.
   const targetIsMaster = user.role === "masteradmin";
   const locked = !isMaster && targetIsMaster;
+  // Live "would this date be a minor?" read of the DOB input, drives the
+  // isolation checkbox's visibility so it appears the moment a minor
+  // date is typed (and for already-minor targets, whose date seeds the
+  // field on open).
+  const dobAge = dob ? isoAgeUtc(dob) : null;
+  const dobDerivesMinor = dobAge != null && dobAge < 18;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -598,13 +695,27 @@ function UserEditForm({
       if (email !== user.email) body.email = email;
       if (role !== user.role) body.role = role;
       if (disabled !== user.disabled) body.disabled = disabled;
+      if (canEditDob && dob && dob !== (user.birthdate ?? "")) {
+        // An edit that turns an adult (or legacy) account into a minor
+        // signs the user out on the spot and drops the age gates over
+        // their account — worth a deliberate confirm, same as delete.
+        const nextAge = isoAgeUtc(dob);
+        if (user.ageBracket !== "minor" && nextAge != null && nextAge < 18) {
+          const ok = window.confirm(
+            t("users.minorConfirm", { name: user.username }),
+          );
+          if (!ok) return;
+        }
+        body.dob = dob;
+      }
+      if (canEditDob && isolate !== user.isolateFromAdults) body.isolateFromAdults = isolate;
       if (Object.keys(body).length === 0) {
         onCancel();
         return;
       }
       await onSubmit(body);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("saveFailed"));
     } finally {
       setSubmitting(false);
     }
@@ -613,12 +724,12 @@ function UserEditForm({
   return (
     <form onSubmit={submit} className="rounded border border-keep-rule bg-keep-bg p-3 text-xs">
       <div className="mb-2 flex items-center justify-between">
-        <div className="font-semibold">Editing {user.username}</div>
-        <button type="button" onClick={onCancel} className="text-keep-muted hover:text-keep-text">cancel</button>
+        <div className="font-semibold">{t("users.editing", { name: user.username })}</div>
+        <button type="button" onClick={onCancel} className="text-keep-muted hover:text-keep-text">{t("users.cancelLower")}</button>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <label>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Username</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.usernameLabel")}</span>
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -632,7 +743,7 @@ function UserEditForm({
             grantable through the matrix. */}
         {canEditEmail ? (
           <label>
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Email</span>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.emailLabel")}</span>
             <input
               type="email"
               value={email}
@@ -643,22 +754,22 @@ function UserEditForm({
           </label>
         ) : null}
         <label>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Role</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.roleLabel")}</span>
           <select
             value={role}
             onChange={(e) => setRole(e.target.value as Role)}
             disabled={locked}
             className="w-full rounded border border-keep-rule px-2 py-1 disabled:bg-keep-banner/30"
           >
-            <option value="user">user</option>
-            <option value="trusted">trusted</option>
-            <option value="mod">mod</option>
-            <option value="admin">admin</option>
+            <option value="user">{t("users.roleOption.user")}</option>
+            <option value="trusted">{t("users.roleOption.trusted")}</option>
+            <option value="mod">{t("users.roleOption.mod")}</option>
+            <option value="admin">{t("users.roleOption.admin")}</option>
             {/* `masteradmin` is master-only on both ends, only a
                 master can mint another master, and only a master can
                 strip an existing master's role. A plain admin sees
                 the option absent (it'd 403 server-side anyway). */}
-            {isMaster ? <option value="masteradmin">masteradmin</option> : null}
+            {isMaster ? <option value="masteradmin">{t("users.roleOption.masteradmin")}</option> : null}
           </select>
         </label>
         {/* Disabled toggle is gated on `disable_user`/`enable_user`
@@ -672,13 +783,55 @@ function UserEditForm({
               checked={disabled}
               onChange={(e) => setDisabled(e.target.checked)}
             />
-            <span>Disabled (account cannot log in)</span>
+            <span>{t("users.disabledLabel")}</span>
+          </label>
+        ) : null}
+        {/* Birth-date correction, gated on `edit_user_dob` (users can
+            never edit their own — decision #7). Saving a date that makes
+            an adult a minor confirms first (see submit), then the server
+            signs them out so their session rebuilds with the age gates. */}
+        {canEditDob ? (
+          <label>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.birthDateLabel")}</span>
+            <input
+              type="date"
+              value={dob}
+              onChange={(e) => setDob(e.target.value)}
+              max={new Date().toISOString().slice(0, 10)}
+              className="w-full rounded border border-keep-rule px-2 py-1"
+            />
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              {user.birthdate == null
+                ? t("users.noDobHint")
+                : t("users.dobHint")}
+            </span>
+          </label>
+        ) : null}
+        {/* Isolation set/clear for support cases. Only meaningful for
+            minors (the server rejects turning it ON for adults, and the
+            flag is inert once the account is 18), so the checkbox shows
+            only when the date in the field is under 18 — or when the
+            flag is already set, so it can still be cleared on accounts
+            that aged out with it on. */}
+        {canEditDob && (dobDerivesMinor || user.isolateFromAdults) ? (
+          <label className="flex items-end gap-2 pb-1">
+            <input
+              type="checkbox"
+              checked={isolate}
+              onChange={(e) => setIsolate(e.target.checked)}
+            />
+            <span>
+              {t("users.isolationLabel")}
+              <span className="block text-[10px] text-keep-muted">
+                {t("users.isolationHint")}
+              </span>
+            </span>
           </label>
         ) : null}
       </div>
       {locked ? (
         <div className="mt-2 rounded border border-keep-rule bg-keep-banner/30 p-2 text-[11px] text-keep-muted">
-          This user is an owner. Only another owner can edit their profile or change their role.
+          {t("users.lockedNote")}
         </div>
       ) : null}
 
@@ -692,14 +845,14 @@ function UserEditForm({
           onClick={onCancel}
           className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 hover:bg-keep-banner"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="submit"
           disabled={submitting || locked}
           className="keep-button rounded border border-keep-rule bg-keep-banner px-3 py-1 disabled:opacity-50 hover:bg-keep-banner/80"
         >
-          {submitting ? "Saving..." : "Save"}
+          {submitting ? t("common:savingDots") : t("common:save")}
         </button>
       </div>
 
@@ -711,8 +864,8 @@ function UserEditForm({
       {!locked && (canBanAccount || canResetPassword || canGrantEarning || canClearCosmetic) ? (
         <div className="mt-4 space-y-3 border-t border-keep-rule pt-3">
           {canBanAccount ? (
-            <div>
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">Account ban</div>
+            <div data-admin-anchor="users.accountBan">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">{t("users.accountBan")}</div>
               <AccountBanControl userId={user.userId} targetName={user.username} canBan={canBanAccount} />
             </div>
           ) : null}
@@ -735,6 +888,7 @@ function UserEditForm({
 }
 
 function AdminCharactersSection({ user }: { user: AdminUserRow }) {
+  const { t } = useTranslation("admin");
   const openEditor = useChat((s) => s.openEditor);
   const live = user.characters.filter((c) => !c.deleted);
   const deleted = user.characters.filter((c) => c.deleted);
@@ -748,19 +902,19 @@ function AdminCharactersSection({ user }: { user: AdminUserRow }) {
     try {
       const r = await fetch(`/profiles/${encodeURIComponent(name)}`, { credentials: "include" });
       if (!r.ok) {
-        setViewError(r.status === 404 ? "Profile not found." : `Couldn't load profile (HTTP ${r.status}).`);
+        setViewError(r.status === 404 ? t("users.profileNotFound") : t("modCases.profileLoadHttpError", { status: r.status }));
         setViewingName(null);
         return;
       }
       const j = await r.json();
       if (j && "private" in j) {
-        setViewError("Profile is restricted.");
+        setViewError(t("users.profileRestricted"));
         setViewingName(null);
         return;
       }
       setViewing(j as ProfileView);
     } catch {
-      setViewError("Couldn't load profile.");
+      setViewError(t("modCases.profileLoadError"));
       setViewingName(null);
     }
   }
@@ -775,12 +929,12 @@ function AdminCharactersSection({ user }: { user: AdminUserRow }) {
     <>
       <div className="mt-3 rounded border border-keep-rule/60 bg-keep-bg/40 p-2">
         <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">
-          Profiles
+          {t("users.profiles")}
         </div>
         <ul className="space-y-1">
           <li className="flex items-center justify-between gap-2 rounded border border-keep-rule/60 bg-keep-bg px-2 py-1">
             <span className="truncate">
-              <span className="mr-2 rounded bg-keep-action/15 px-1 text-[9px] uppercase tracking-widest text-keep-action">OOC</span>
+              <span className="mr-2 rounded bg-keep-action/15 px-1 text-[9px] uppercase tracking-widest text-keep-action">{t("common:identity.ooc")}</span>
               {user.username}
             </span>
             <div className="flex shrink-0 gap-1">
@@ -789,7 +943,7 @@ function AdminCharactersSection({ user }: { user: AdminUserRow }) {
                 onClick={() => openView(user.username)}
                 className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner"
               >
-                View
+                {t("users.view")}
               </button>
             </div>
           </li>
@@ -802,14 +956,14 @@ function AdminCharactersSection({ user }: { user: AdminUserRow }) {
                   onClick={() => openView(c.name)}
                   className="keep-button rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner"
                 >
-                  View
+                  {t("users.view")}
                 </button>
                 <button
                   type="button"
                   onClick={() => editChar(c)}
                   className="keep-button rounded border border-keep-action/60 bg-keep-bg px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/10"
                 >
-                  Edit
+                  {t("edit")}
                 </button>
               </div>
             </li>
@@ -817,7 +971,7 @@ function AdminCharactersSection({ user }: { user: AdminUserRow }) {
           {deleted.map((c) => (
             <li key={c.id} className="flex items-center justify-between gap-2 rounded border border-keep-rule/30 bg-keep-banner/20 px-2 py-1 text-keep-muted line-through">
               <span className="truncate">{c.name}</span>
-              <span className="shrink-0 text-[10px] uppercase tracking-widest">deleted</span>
+              <span className="shrink-0 text-[10px] uppercase tracking-widest">{t("users.deletedTag")}</span>
             </li>
           ))}
         </ul>
@@ -825,7 +979,7 @@ function AdminCharactersSection({ user }: { user: AdminUserRow }) {
           <div className="mt-2 text-[11px] text-keep-accent">{viewError}</div>
         ) : null}
         {viewingName && !viewing && !viewError ? (
-          <div className="mt-2 text-[11px] text-keep-muted">Loading {viewingName}...</div>
+          <div className="mt-2 text-[11px] text-keep-muted">{t("users.loadingName", { name: viewingName })}</div>
         ) : null}
       </div>
       {viewing ? (
@@ -851,6 +1005,7 @@ function AdminCharactersSection({ user }: { user: AdminUserRow }) {
  * ========================================================= */
 
 function PasswordResetSection({ userId, username }: { userId: string; username: string }) {
+  const { t } = useTranslation("admin");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
@@ -861,8 +1016,8 @@ function PasswordResetSection({ userId, username }: { userId: string; username: 
   async function submit() {
     setErr(null);
     setOk(false);
-    if (next.length < 8) { setErr("Password must be at least 8 chars."); return; }
-    if (next !== confirm) { setErr("Passwords don't match."); return; }
+    if (next.length < 8) { setErr(t("users.passwordTooShort")); return; }
+    if (next !== confirm) { setErr(t("users.passwordMismatch")); return; }
     setBusy(true);
     try {
       const r = await fetch(`/admin/users/${userId}/password`, {
@@ -876,7 +1031,7 @@ function PasswordResetSection({ userId, username }: { userId: string; username: 
       setNext("");
       setConfirm("");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "reset failed");
+      setErr(e instanceof Error ? e.message : t("users.resetFailed"));
     } finally {
       setBusy(false);
     }
@@ -919,11 +1074,11 @@ function PasswordResetSection({ userId, username }: { userId: string; username: 
   }
 
   return (
-    <fieldset className="rounded border border-keep-rule p-2">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Reset password for {username}</legend>
+    <fieldset data-admin-anchor="users.resetPassword" className="rounded border border-keep-rule p-2">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("users.resetPasswordLegend", { name: username })}</legend>
       <div className="grid grid-cols-2 gap-2">
         <label>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">New password</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.newPassword")}</span>
           <input
             type="text"
             value={next}
@@ -935,7 +1090,7 @@ function PasswordResetSection({ userId, username }: { userId: string; username: 
           />
         </label>
         <label>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Confirm</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.confirmPassword")}</span>
           <input
             type="text"
             value={confirm}
@@ -948,7 +1103,7 @@ function PasswordResetSection({ userId, username }: { userId: string; username: 
         </label>
       </div>
       <p className="mt-1 text-[10px] text-keep-muted">
-        The user's active sessions are dropped on reset; they'll have to log in again with the new password. Generate fills both fields with a 20-char password and copies it to the clipboard so you can paste it into whatever channel you're using to hand it back.
+        {t("users.resetPasswordHelp")}
       </p>
       <div className="mt-2 flex items-center gap-2">
         <button
@@ -957,7 +1112,7 @@ function PasswordResetSection({ userId, username }: { userId: string; username: 
           disabled={busy}
           className="keep-button rounded border border-keep-rule bg-keep-banner/40 px-3 py-1 text-keep-text hover:bg-keep-banner disabled:opacity-50"
         >
-          Generate
+          {t("users.generate")}
         </button>
         <button
           type="button"
@@ -965,11 +1120,11 @@ function PasswordResetSection({ userId, username }: { userId: string; username: 
           disabled={busy || !next || !confirm}
           className="keep-button rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
         >
-          {busy ? "Resetting…" : "Reset password"}
+          {busy ? t("users.resetting") : t("users.resetPassword")}
         </button>
-        {copied ? <span className="text-keep-system">Copied to clipboard.</span> : null}
+        {copied ? <span className="text-keep-system">{t("users.copiedToClipboard")}</span> : null}
         {err ? <span className="text-keep-accent">{err}</span> : null}
-        {ok ? <span className="text-keep-system">Password reset.</span> : null}
+        {ok ? <span className="text-keep-system">{t("users.passwordResetDone")}</span> : null}
       </div>
     </fieldset>
   );
@@ -994,6 +1149,7 @@ function generateStrongPassword(length: number): string {
 }
 
 function EarningGrantSection({ username }: { username: string }) {
+  const { t } = useTranslation("admin");
   const [xp, setXp] = useState("");
   const [currency, setCurrency] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1004,7 +1160,7 @@ function EarningGrantSection({ username }: { username: string }) {
     setErr(null); setOk(null);
     const xpDelta = parseInt(xp || "0", 10) || 0;
     const currencyDelta = parseInt(currency || "0", 10) || 0;
-    if (xpDelta === 0 && currencyDelta === 0) { setErr("Enter an XP or Currency amount (positive to grant, negative to revoke)."); return; }
+    if (xpDelta === 0 && currencyDelta === 0) { setErr(t("users.grantAmountError")); return; }
     setBusy(true);
     try {
       if (xpDelta !== 0) {
@@ -1025,21 +1181,21 @@ function EarningGrantSection({ username }: { username: string }) {
         });
         if (!r.ok) throw new Error(await readError(r));
       }
-      setOk(`Granted ${xpDelta} XP, ${currencyDelta} Currency.`);
+      setOk(t("users.grantedAmounts", { xp: xpDelta, currency: currencyDelta }));
       setXp(""); setCurrency("");
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "grant failed");
+      setErr(e instanceof Error ? e.message : t("users.grantFailed"));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <fieldset className="rounded border border-keep-rule p-2">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Grant XP / Currency</legend>
+    <fieldset data-admin-anchor="users.grantLegend" className="rounded border border-keep-rule p-2">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("users.grantLegend")}</legend>
       <div className="grid grid-cols-2 gap-2">
         <label>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">XP (+ / -)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.xpLabel")}</span>
           <input
             type="number"
             value={xp}
@@ -1049,7 +1205,7 @@ function EarningGrantSection({ username }: { username: string }) {
           />
         </label>
         <label>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Currency (+ / -)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.currencyLabel")}</span>
           <input
             type="number"
             value={currency}
@@ -1060,7 +1216,7 @@ function EarningGrantSection({ username }: { username: string }) {
         </label>
       </div>
       <p className="mt-1 text-[10px] text-keep-muted">
-        Goes through the live earning engine, rank recomputes, the user's wallet updates live, the ledger gets an audit row. Negative values revoke.
+        {t("users.grantHelp")}
       </p>
       <div className="mt-2 flex items-center gap-2">
         <button
@@ -1069,7 +1225,7 @@ function EarningGrantSection({ username }: { username: string }) {
           disabled={busy}
           className="keep-button rounded border border-keep-action/60 bg-keep-action/10 px-3 py-1 text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
         >
-          {busy ? "Granting…" : "Grant"}
+          {busy ? t("users.granting") : t("users.grant")}
         </button>
         {err ? <span className="text-keep-accent">{err}</span> : null}
         {ok ? <span className="text-keep-system">{ok}</span> : null}
@@ -1079,6 +1235,7 @@ function EarningGrantSection({ username }: { username: string }) {
 }
 
 function CosmeticGrantSection({ username }: { username: string }) {
+  const { t } = useTranslation("admin");
   const snapshot = useEarning((s) => s.snapshot);
   const [pickedStyle, setPickedStyle] = useState<string>("");
   const [pickedBorder, setPickedBorder] = useState<string>("");
@@ -1120,7 +1277,7 @@ function CosmeticGrantSection({ username }: { username: string }) {
       setOk(successMsg);
       setRefreshKey((k) => k + 1);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "request failed");
+      setErr(e instanceof Error ? e.message : t("requestFailed"));
     } finally {
       setBusy(false);
     }
@@ -1132,55 +1289,55 @@ function CosmeticGrantSection({ username }: { username: string }) {
   const rankNameByKey = new Map((snapshot?.catalog.ranks ?? []).map((r) => [r.key, r.name]));
 
   return (
-    <fieldset className="rounded border border-keep-rule p-2">
-      <legend className="px-1 uppercase tracking-widest text-keep-muted">Cosmetics: grant / revoke</legend>
+    <fieldset data-admin-anchor="users.cosmeticsLegend" className="rounded border border-keep-rule p-2">
+      <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("users.cosmeticsLegend")}</legend>
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Name style</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.nameStyleLabel")}</span>
           <div className="flex gap-1">
             <select
               value={pickedStyle}
               onChange={(e) => setPickedStyle(e.target.value)}
               className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1"
             >
-              <option value="">pick one</option>
+              <option value="">{t("users.pickOne")}</option>
               {styles.map((s) => (
                 <option key={s.key} value={s.key}>{s.name}</option>
               ))}
             </select>
             <button
               type="button"
-              onClick={() => pickedStyle && void callAction("/admin/earning/grant-style", { username, styleKey: pickedStyle }, `Granted style "${pickedStyle}".`)}
+              onClick={() => pickedStyle && void callAction("/admin/earning/grant-style", { username, styleKey: pickedStyle }, t("users.grantedStyle", { key: pickedStyle }))}
               disabled={busy || !pickedStyle}
               className="shrink-0 rounded border border-keep-action/60 bg-keep-action/10 px-2 text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
             >
-              Grant
+              {t("users.grant")}
             </button>
           </div>
         </div>
         <div>
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Border (tier-IV rank)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.borderLabel")}</span>
           <div className="flex gap-1">
             <select
               value={pickedBorder}
               onChange={(e) => setPickedBorder(e.target.value)}
               className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1"
             >
-              <option value="">pick one</option>
-              {borderRanks.map((t) => {
-                const rank = snapshot?.catalog.ranks.find((r) => r.key === t.rankKey);
+              <option value="">{t("users.pickOne")}</option>
+              {borderRanks.map((t2) => {
+                const rank = snapshot?.catalog.ranks.find((r) => r.key === t2.rankKey);
                 return (
-                  <option key={t.rankKey} value={t.rankKey}>{rank?.name ?? t.rankKey}</option>
+                  <option key={t2.rankKey} value={t2.rankKey}>{rank?.name ?? t2.rankKey}</option>
                 );
               })}
             </select>
             <button
               type="button"
-              onClick={() => pickedBorder && void callAction("/admin/earning/grant-border", { username, rankKey: pickedBorder }, `Granted border for rank "${pickedBorder}".`)}
+              onClick={() => pickedBorder && void callAction("/admin/earning/grant-border", { username, rankKey: pickedBorder }, t("users.grantedBorder", { key: pickedBorder }))}
               disabled={busy || !pickedBorder}
               className="shrink-0 rounded border border-keep-action/60 bg-keep-action/10 px-2 text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
             >
-              Grant
+              {t("users.grant")}
             </button>
           </div>
         </div>
@@ -1194,9 +1351,9 @@ function CosmeticGrantSection({ username }: { username: string }) {
       {owned.styles.length > 0 || owned.borders.length > 0 ? (
         <div className="mt-2 grid grid-cols-2 gap-2">
           <div>
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Owned styles</span>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.ownedStyles")}</span>
             {owned.styles.length === 0 ? (
-              <div className="text-keep-muted">(none)</div>
+              <div className="text-keep-muted">{t("noneParen")}</div>
             ) : (
               <ul className="space-y-1">
                 {owned.styles.map((k) => (
@@ -1204,11 +1361,11 @@ function CosmeticGrantSection({ username }: { username: string }) {
                     <span className="truncate" title={k}>{styleNameByKey.get(k) ?? k}</span>
                     <button
                       type="button"
-                      onClick={() => void callAction("/admin/earning/revoke-style", { username, styleKey: k }, `Revoked style "${k}".`)}
+                      onClick={() => void callAction("/admin/earning/revoke-style", { username, styleKey: k }, t("users.revokedStyle", { key: k }))}
                       disabled={busy}
                       className="shrink-0 rounded border border-keep-accent/60 bg-keep-accent/10 px-2 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
                     >
-                      Revoke
+                      {t("users.revoke")}
                     </button>
                   </li>
                 ))}
@@ -1216,9 +1373,9 @@ function CosmeticGrantSection({ username }: { username: string }) {
             )}
           </div>
           <div>
-            <span className="mb-1 block uppercase tracking-widest text-keep-muted">Owned borders</span>
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("users.ownedBorders")}</span>
             {owned.borders.length === 0 ? (
-              <div className="text-keep-muted">(none)</div>
+              <div className="text-keep-muted">{t("noneParen")}</div>
             ) : (
               <ul className="space-y-1">
                 {owned.borders.map((k) => (
@@ -1226,11 +1383,11 @@ function CosmeticGrantSection({ username }: { username: string }) {
                     <span className="truncate" title={k}>{rankNameByKey.get(k) ?? k}</span>
                     <button
                       type="button"
-                      onClick={() => void callAction("/admin/earning/revoke-border", { username, rankKey: k }, `Revoked border "${k}".`)}
+                      onClick={() => void callAction("/admin/earning/revoke-border", { username, rankKey: k }, t("users.revokedBorder", { key: k }))}
                       disabled={busy}
                       className="shrink-0 rounded border border-keep-accent/60 bg-keep-accent/10 px-2 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
                     >
-                      Revoke
+                      {t("users.revoke")}
                     </button>
                   </li>
                 ))}
@@ -1239,11 +1396,11 @@ function CosmeticGrantSection({ username }: { username: string }) {
           </div>
         </div>
       ) : (
-        <p className="mt-1 text-[10px] text-keep-muted">(User owns no cosmetics yet.)</p>
+        <p className="mt-1 text-[10px] text-keep-muted">{t("users.noCosmetics")}</p>
       )}
 
       <p className="mt-1 text-[10px] text-keep-muted">
-        Grants bypass normal Currency / rank gates. Revokes also clear the equipped slot if the item was active. Both are idempotent.
+        {t("users.cosmeticsHelp")}
       </p>
       <div className="mt-1 flex items-center gap-2">
         {err ? <span className="text-keep-accent">{err}</span> : null}
@@ -1254,6 +1411,7 @@ function CosmeticGrantSection({ username }: { username: string }) {
 }
 
 function EarningResetSection({ username }: { username: string }) {
+  const { t } = useTranslation("admin");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
@@ -1261,13 +1419,7 @@ function EarningResetSection({ username }: { username: string }) {
   async function reset() {
     setErr(null); setOk(false);
     const confirmed = window.confirm(
-      `Hard-reset ${username}'s earning state?\n\nThis wipes:\n` +
-      "  • Master XP, Currency, rank, tier, and peak\n" +
-      "  • Every character pool (XP / Currency / rank)\n" +
-      "  • Owned name styles\n" +
-      "  • Owned rank borders\n" +
-      "  • Equipped cosmetics\n\n" +
-      "Cannot be undone. Use for testing earning flows from scratch."
+      t("users.resetEarningConfirm", { name: username }),
     );
     if (!confirmed) return;
     setBusy(true);
@@ -1281,17 +1433,17 @@ function EarningResetSection({ username }: { username: string }) {
       if (!r.ok) throw new Error(await readError(r));
       setOk(true);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "reset failed");
+      setErr(e instanceof Error ? e.message : t("users.resetFailed"));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <fieldset className="rounded border border-keep-accent/40 p-2">
-      <legend className="px-1 uppercase tracking-widest text-keep-accent">Reset earning state</legend>
+    <fieldset data-admin-anchor="users.resetEarningLegend" className="rounded border border-keep-accent/40 p-2">
+      <legend className="px-1 uppercase tracking-widest text-keep-accent">{t("users.resetEarningLegend")}</legend>
       <p className="text-[10px] text-keep-muted">
-        Destructive test affordance, clears the user's XP / Currency / rank / peak, drops every character pool to zero, and removes all owned styles + borders. Useful for testing earning flows from a clean slate.
+        {t("users.resetEarningHelp")}
       </p>
       <div className="mt-2 flex items-center gap-2">
         <button
@@ -1300,10 +1452,10 @@ function EarningResetSection({ username }: { username: string }) {
           disabled={busy}
           className="keep-button rounded border border-keep-accent/60 bg-keep-accent/10 px-3 py-1 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
         >
-          {busy ? "Resetting…" : "Reset earning"}
+          {busy ? t("users.resetting") : t("users.resetEarning")}
         </button>
         {err ? <span className="text-keep-accent">{err}</span> : null}
-        {ok ? <span className="text-keep-system">Earning reset.</span> : null}
+        {ok ? <span className="text-keep-system">{t("users.earningResetDone")}</span> : null}
       </div>
     </fieldset>
   );

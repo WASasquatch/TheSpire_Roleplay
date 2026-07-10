@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { MessageSquare, Search, Server } from "lucide-react";
 import type { MessageSearchHit } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDate, formatDateTime } from "../../lib/intlFormat.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 
 type Scope = "room" | "server";
@@ -44,6 +46,7 @@ const MAX_HITS = 8;
  * ("in <room> · on <server>"); room-scope hits omit that line.
  */
 export function SearchBar({ roomId, currentServerId, onJump, onClose, defaultScope }: Props) {
+  const { t } = useTranslation("chat");
   const [scope, setScope] = useState<Scope>(defaultScope ?? "room");
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<MessageSearchHit[]>([]);
@@ -78,7 +81,7 @@ export function SearchBar({ roomId, currentServerId, onJump, onClose, defaultSco
     }
     let cancelled = false;
     setLoading(true);
-    const t = window.setTimeout(async () => {
+    const timer = window.setTimeout(async () => {
       try {
         const url =
           effectiveScope === "room"
@@ -101,7 +104,7 @@ export function SearchBar({ roomId, currentServerId, onJump, onClose, defaultSco
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "search failed");
+          setError(err instanceof Error ? err.message : t("search.failed"));
           setHits([]);
         }
       } finally {
@@ -110,9 +113,9 @@ export function SearchBar({ roomId, currentServerId, onJump, onClose, defaultSco
     }, DEBOUNCE_MS);
     return () => {
       cancelled = true;
-      window.clearTimeout(t);
+      window.clearTimeout(timer);
     };
-  }, [query, effectiveScope, roomId, currentServerId]);
+  }, [query, effectiveScope, roomId, currentServerId, t]);
 
   function clear() {
     setQuery("");
@@ -137,23 +140,23 @@ export function SearchBar({ roomId, currentServerId, onJump, onClose, defaultSco
 
   const placeholder =
     effectiveScope === "server"
-      ? "Search messages across this server…"
+      ? t("search.placeholderServer")
       : roomId
-        ? "Search messages in this room…"
-        : "Join a room to search";
+        ? t("search.placeholderRoom")
+        : t("search.placeholderNoRoom");
 
   return (
     <div className="relative">
       {showPopup ? (
         <div className={`absolute inset-x-0 bottom-full mb-1 max-h-80 overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-lg${reduceMotion ? " tk-slide-up-in" : ""}`}>
           {loading && ordered.length === 0 ? (
-            <div className="px-2 py-1.5 text-[11px] italic text-keep-muted">searching…</div>
+            <div className="px-2 py-1.5 text-[11px] italic text-keep-muted">{t("search.searching")}</div>
           ) : null}
           {error ? (
             <div className="px-2 py-1.5 text-[11px] text-keep-accent">{error}</div>
           ) : null}
           {ordered.length === 0 && !loading && !error ? (
-            <div className="px-2 py-1.5 text-[11px] italic text-keep-muted">no matches</div>
+            <div className="px-2 py-1.5 text-[11px] italic text-keep-muted">{t("search.noMatches")}</div>
           ) : null}
           {ordered.length > 0 ? (
             <ul>
@@ -163,12 +166,12 @@ export function SearchBar({ roomId, currentServerId, onJump, onClose, defaultSco
                     type="button"
                     onClick={() => pick(h)}
                     className="block w-full border-t border-keep-rule/40 px-2 py-1.5 text-left text-xs first:border-t-0 hover:bg-keep-banner"
-                    title={new Date(h.createdAt).toLocaleString()}
+                    title={formatDateTime(h.createdAt)}
                   >
                     <div className="flex items-baseline justify-between gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
                       <span className="truncate">{h.displayName}</span>
                       <span className="shrink-0 tabular-nums">
-                        {new Date(h.createdAt).toLocaleDateString()}
+                        {formatDate(h.createdAt)}
                       </span>
                     </div>
                     {effectiveScope === "server" ? <HitContext hit={h} /> : null}
@@ -196,17 +199,17 @@ export function SearchBar({ roomId, currentServerId, onJump, onClose, defaultSco
           placeholder={placeholder}
           className="min-w-0 flex-1 bg-transparent py-1.5 text-xs outline-none md:py-1"
         />
-        <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label="Search scope">
+        <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label={t("search.scopeAria")}>
           <ScopeIcon
             icon={<MessageSquare className="h-3.5 w-3.5" aria-hidden />}
-            label="Search this room"
+            label={t("search.scopeRoom")}
             active={effectiveScope === "room"}
             disabled={!roomId}
             onClick={() => setScope("room")}
           />
           <ScopeIcon
             icon={<Server className="h-3.5 w-3.5" aria-hidden />}
-            label="Search this server"
+            label={t("search.scopeServer")}
             active={effectiveScope === "server"}
             onClick={() => setScope("server")}
           />
@@ -254,18 +257,29 @@ function ScopeIcon({
  * no room name (defensive — the server route always sets it for this route).
  */
 function HitContext({ hit }: { hit: MessageSearchHit }) {
+  const { t } = useTranslation("chat");
   if (!hit.roomName && !hit.title) return null;
   return (
     <div className="mt-0.5 flex flex-wrap items-baseline gap-x-1.5 text-[10px] text-keep-muted/90">
       {hit.title ? <span className="truncate font-medium text-keep-text/80">{hit.title}</span> : null}
       {hit.roomName ? (
         <span className="truncate">
-          in <span className="text-keep-text/70">{hit.roomName}</span>
+          <Trans
+            t={t}
+            i18nKey="search.hitInRoom"
+            values={{ name: hit.roomName }}
+            components={{ 1: <span className="text-keep-text/70" /> }}
+          />
         </span>
       ) : null}
       {hit.serverName ? (
         <span className="truncate">
-          · on <span className="text-keep-text/70">{hit.serverName}</span>
+          <Trans
+            t={t}
+            i18nKey="search.hitOnServer"
+            values={{ name: hit.serverName }}
+            components={{ 1: <span className="text-keep-text/70" /> }}
+          />
         </span>
       ) : null}
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { ArrowLeftRight } from "lucide-react";
 import type { AnnouncementBanner, AnnouncementBannerSource } from "@thekeep/shared";
 import { legibleAgainstBg, renderUiRouteChipsInHtml } from "@thekeep/shared";
@@ -92,6 +93,7 @@ interface Props {
  * WCAG floor.
  */
 export function BannerMarquee({ appName, serverName }: Props) {
+  const { t } = useTranslation("common");
   const [banners, setBanners] = useState<AnnouncementBanner[]>([]);
   const [activeIdx, setActiveIdx] = useState(0);
   const [fading, setFading] = useState(false);
@@ -150,7 +152,9 @@ export function BannerMarquee({ appName, serverName }: Props) {
   const effectiveSource: AnnouncementBannerSource =
     wantsServer || appBanners.length === 0 ? (hasServerSource ? "server" : "app") : "app";
   const shown = effectiveSource === "server" ? serverBanners : appBanners;
-  const sourceLabel = `${effectiveSource === "server" ? serverName : appName} Announcements`;
+  const sourceLabel = t("marquee.sourceLabel", {
+    name: effectiveSource === "server" ? serverName : appName,
+  });
 
   // Publish hidden-state to the Room Info bar's "bring back announcements"
   // button: hidden ONLY when there are banners but the viewer dismissed
@@ -287,7 +291,7 @@ export function BannerMarquee({ appName, serverName }: Props) {
   return (
     <div
       role="region"
-      aria-label="Site announcements"
+      aria-label={t("marquee.regionAria")}
       style={{
         backgroundColor: bgHex,
         color: textHex,
@@ -408,8 +412,8 @@ export function BannerMarquee({ appName, serverName }: Props) {
                 style={{
                   backgroundColor: i === activeIdx ? accentHex : `${accentHex}55`,
                 }}
-                aria-label={`Show announcement ${i + 1} of ${shown.length}`}
-                title={`Show announcement ${i + 1} of ${shown.length}`}
+                aria-label={t("marquee.showAnnouncement", { index: i + 1, total: shown.length })}
+                title={t("marquee.showAnnouncement", { index: i + 1, total: shown.length })}
               />
             ))}
           </div>
@@ -426,16 +430,12 @@ export function BannerMarquee({ appName, serverName }: Props) {
               setSourceMode((m) => (m === "server" ? "app" : "server"))
             }
             className="flex h-5 w-5 items-center justify-center rounded border border-keep-action/40 bg-keep-action/20 text-keep-action hover:border-keep-action hover:bg-keep-action/40"
-            aria-label={
-              effectiveSource === "server"
-                ? `Show ${appName} Announcements`
-                : `Show ${serverName} Announcements`
-            }
-            title={
-              effectiveSource === "server"
-                ? `Show ${appName} Announcements`
-                : `Show ${serverName} Announcements`
-            }
+            aria-label={t("marquee.showSource", {
+              name: effectiveSource === "server" ? appName : serverName,
+            })}
+            title={t("marquee.showSource", {
+              name: effectiveSource === "server" ? appName : serverName,
+            })}
           >
             <ArrowLeftRight aria-hidden className="h-3 w-3" />
           </button>
@@ -454,8 +454,8 @@ export function BannerMarquee({ appName, serverName }: Props) {
           type="button"
           onClick={() => dismiss(dismissKey)}
           className="flex h-5 w-5 items-center justify-center rounded border border-keep-action/40 bg-keep-action/20 text-[11px] leading-none text-keep-action hover:border-keep-action hover:bg-keep-action/40"
-          aria-label="Dismiss site announcements"
-          title="Hide announcements for 24 hours (or until an admin edits them). Bring them back sooner from the Room Info bar."
+          aria-label={t("marquee.dismissAria")}
+          title={t("marquee.dismissTitle")}
         >
           ×
         </button>

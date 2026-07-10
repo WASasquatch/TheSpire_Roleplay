@@ -1,0 +1,1111 @@
+{
+  "shared": {
+    "noUserNamed": "No user named \"{{name}}\".",
+    "noUserOrCharacter": "No user or character named \"{{name}}\".",
+    "roomNotFound": "Room not found.",
+    "itemNotFound": "No item called \"{{name}}\".",
+    "itemNotUsable": "{{name}} isn't usable right now.",
+    "sessionConflict": "A {{kind}} session is already running in this room. Wait for it to finish."
+  },
+  "identity": {
+    "ambiguousTitle": "\"{{name}}\" matched {{total}} identities",
+    "ambiguousBody": "Re-run with one of:\n{{tokens}}"
+  },
+  "away": {
+    "notAway": "You're not marked as away."
+  },
+  "color": {
+    "currentCharacter": "Current color for this character: {{color}}. Usage: /color <hex>  |  /color clear",
+    "currentOoc": "Current color for your OOC account: {{color}}. Usage: /color <hex>  |  /color clear",
+    "noneCharacter": "No color set for this character. Usage: /color <hex>  (e.g. /color 990000)",
+    "noneOoc": "No color set for your OOC account. Usage: /color <hex>  (e.g. /color 990000)",
+    "clearedCharacter": "Character chat color cleared. Falls back to your OOC color.",
+    "clearedOoc": "OOC chat color cleared.",
+    "invalidHex": "Color must be a hex value: e.g. /color 990000 or /color #abc.",
+    "setCharacter": "Character chat color set to {{color}}.",
+    "setOoc": "OOC chat color set to {{color}}."
+  },
+  "mood": {
+    "empty": "Mood cannot be empty (use /mood clear to remove)."
+  },
+  "me": {
+    "usage": "Usage: /{{command}} <action>"
+  },
+  "users": {
+    "noArgs": "/users takes no arguments. Use /whois <name> to view someone specific."
+  },
+  "bookmarks": {
+    "noArgs": "/bookmarks takes no arguments. Open the modal and edit categories there."
+  },
+  "export": {
+    "badDuration": "Couldn't read that duration. Try /export 5h, /export 90m, or /export 2d (add 'light' for a light page).",
+    "clamped": "That's longer than chat is kept here, so exporting the last {{duration}} instead."
+  },
+  "icon": {
+    "permission": "Only the room owner or a mod can set the room icon.",
+    "usage": "Usage: /icon <emoji or image URL>  (or /icon clear)",
+    "invalid": "Give a single emoji, a short glyph, or an http(s) image URL (max 500 chars)."
+  },
+  "item": {
+    "usage": "Usage: /item <name-or-alias>"
+  },
+  "refresh": {
+    "slowModeOff": "Slow mode off — real-time updates resumed.",
+    "badArg": "Usage: /refresh [seconds|off]. Got \"{{arg}}\".",
+    "outOfRange": "Auto-refresh must be between {{min}} and {{max}} seconds (or 'off').",
+    "slowModeOn": "Slow mode on: the userlist and typing pause and resync every {{seconds}}s (eases load on slower devices). Chat stays live. /refresh off to stop."
+  },
+  "eidolon": {
+    "usage": "Usage: /eidolon emote",
+    "arcadeLocked": "The Spire Arcade isn't available to you.",
+    "notUnlocked": "You haven't unlocked the Eidolon Tamer on this identity.",
+    "noFamiliar": "You don't have a familiar yet. Hatch one in the Spire Arcade."
+  },
+  "earningUi": {
+    "noArgs": "{{command}} takes no arguments."
+  },
+  "roll": {
+    "badFormat": "Bad dice format. Try /roll 1d20, /roll 3d6, or /roll 1d20+3.",
+    "badCount": "Dice count must be 1-{{max}}.",
+    "badSides": "Sides must be 2-{{max}}.",
+    "badModifier": "Modifier must be between -{{max}} and +{{max}}.",
+    "dcCurrent": "Room difficulty is {{dc}}. Rolls meet or beat it to pass.",
+    "dcNone": "No difficulty set for this room. Owners/mods can set one with /roll dc <n>.",
+    "dcPermission": "Only the room owner, a mod, or an admin can set the difficulty.",
+    "dcInvalid": "Difficulty must be a whole number from 1 to {{max}}. Try /roll dc 15.",
+    "usage": "Usage: /roll <NdM[±X]>. Try /roll 1d20, /roll 3d6, /roll 1d20+3.",
+    "initUsage": "Initiative takes an optional flat modifier, e.g. /init +3.",
+    "initModifierRange": "Initiative modifier must be between -{{max}} and +{{max}}."
+  },
+  "scene": {
+    "permission": "Only the room owner or a mod can mark scenes.",
+    "usage": "Usage: /scene <title> or /scene end.",
+    "imageUrlInvalid": "Scene image URL must be http(s) and 500 chars or fewer."
+  },
+  "reply": {
+    "usage": "Usage: /reply <message-id> <text>",
+    "empty": "Reply body is empty.",
+    "notAvailable": "That message is no longer available to reply to.",
+    "badKind": "You can only reply to chat messages.",
+    "topicLocked": "This topic is locked and isn't accepting new replies."
+  },
+  "trash": {
+    "usage": "Usage: /trash <duration> - e.g. /trash 30m to delete the last 30 minutes.",
+    "forum": "/trash isn't available in forum rooms - delete topics individually instead.",
+    "badDuration": "Bad duration. Use forms like 5m, 30m, 1h, 1h30m, 1d.",
+    "none": "No messages in the last {{duration}} to delete."
+  },
+  "poll": {
+    "forMissing": "Add a duration after --for, e.g. --for 2h.",
+    "forInvalid": "Bad --for duration. Use 30m, 2h, or 1d.",
+    "usage": "Usage: /poll <question> | <option1> | <option2>. Try --multi, --secret, or --for 2h.",
+    "noQuestion": "Start with the question, then the options: /poll Question? | A | B",
+    "tooFew": "A poll needs at least {{min}} options, separated by | . Example: /poll {{question}} | A | B",
+    "tooMany": "A poll can have at most {{max}} options."
+  },
+  "npc": {
+    "usage": "Usage: /npc <Name> <text>  (or /npc <Name> /me <action>)",
+    "disabled": "/npc is disabled in this room.",
+    "badName": "NPC name must be 1-40 chars: letters, numbers, spaces, _ - '",
+    "empty": "NPC line is empty."
+  },
+  "npcMode": {
+    "usage": "Usage: /npcmode on  (or)  /npcmode off",
+    "permission": "Only the room owner or a mod can change NPC mode."
+  },
+  "whisper": {
+    "usage": "Usage: /whisper <username> <text>",
+    "empty": "Whisper body is empty.",
+    "self": "Whispering yourself isn't useful."
+  },
+  "block": {
+    "list": "You have blocked: {{names}}",
+    "listEmpty": "You haven't blocked anyone. Use /block <name> to add someone.",
+    "self": "You can't block yourself.",
+    "staff": "You can't block {{name}} - moderators and admins can't be blocked.",
+    "blocked": "Blocked {{name}}. You can no longer see each other. Use /unblock {{name}} (or Profile -> Privacy) to undo.",
+    "already": "You've already blocked {{name}}."
+  },
+  "unblock": {
+    "usage": "Usage: /unblock <name>",
+    "notBlocked": "You hadn't blocked {{name}}.",
+    "stillBlocked": "Removed your block on {{name}}, but they've also blocked you, so you still can't see each other.",
+    "done": "Unblocked {{name}}."
+  },
+  "ignore": {
+    "list": "You are ignoring: {{names}}",
+    "listEmpty": "Your ignore list is empty. Use /ignore <name> to add someone.",
+    "cleared": "Ignore list cleared.",
+    "self": "You can't ignore yourself.",
+    "removed": "No longer ignoring {{name}}.",
+    "added": "Now ignoring {{name}}. Use /unignore {{name}} (or /ignore {{name}} again) to undo."
+  },
+  "unignore": {
+    "usage": "Usage: /unignore <username>",
+    "notIgnored": "You weren't ignoring {{name}}."
+  },
+  "friend": {
+    "usage": "Usage: /friend <name>",
+    "self": "Friending yourself isn't useful.",
+    "alreadyFriends": "You and {{name}} are already friends.",
+    "pending": "Friend request to {{name}} is still pending, wait for them to /accept.",
+    "acceptedTheirs": "Accepted {{name}}'s friend request.",
+    "requestSent": "Friend request sent to {{name}}.",
+    "noRequest": "No pending friend request from {{name}}."
+  },
+  "accept": {
+    "usage": "Usage: /accept <name>",
+    "done": "You and {{name}} are now friends."
+  },
+  "decline": {
+    "usage": "Usage: /decline <name>",
+    "done": "Declined {{name}}'s friend request."
+  },
+  "unfriend": {
+    "usage": "Usage: /unfriend <name>",
+    "notFriended": "{{name}} isn't on your friends list or in your inbox.",
+    "done": "Removed {{name}} from your friends list."
+  },
+  "friends": {
+    "empty": "Friends list is empty for this identity. Use /friend <name> to send a request.",
+    "unknown": "(unknown)",
+    "list": "Friends: {{names}}"
+  },
+  "char": {
+    "badName": "Character name must be 1-40 chars: letters, numbers, spaces, _ - '",
+    "duplicate": "You already have a character named \"{{name}}\".",
+    "limit": "Limit of {{max}} characters per account.",
+    "notFound": "No character named \"{{name}}\".",
+    "listTitle": "Your characters",
+    "listEmptyBody": "You have no characters yet.\nCreate one with /char create <name>.",
+    "listTitleCount": "Your characters ({{total}})",
+    "badSubcommand": "Unknown subcommand. Try /char create, switch, edit, delete, clear (or 'switch OOC'), list."
+  },
+  "incognito": {
+    "on": "You're now incognito as \"{{alias}}\". The room sees you as having left. Use /incognito again to return.",
+    "off": "You're back. The room sees you as having joined.",
+    "alreadyOn": "You're already incognito.",
+    "alreadyOff": "You're not incognito.",
+    "aliasUsage": "Usage: /incognito alias <name>",
+    "aliasTooLong": "Alias must be 60 characters or fewer.",
+    "aliasSet": "Incognito alias set to \"{{alias}}\".",
+    "exitUsage": "Usage: /incognito exit <message>",
+    "exitTooLong": "Exit message must be 280 characters or fewer.",
+    "exitSaved": "Incognito exit message saved.",
+    "returnUsage": "Usage: /incognito return <message>",
+    "returnTooLong": "Return message must be 280 characters or fewer.",
+    "returnSaved": "Incognito return message saved.",
+    "cleared": "Incognito alias and custom messages reset to defaults."
+  },
+  "request": {
+    "noKinds": "No title kinds are configured.",
+    "kinds": "Available titles: {{kinds}}. Usage: /request <kind> <user>.",
+    "needTarget": "Usage: /request {{kind}} <user-or-character>",
+    "failed": "Request failed.",
+    "sent": "Request sent to {{name}}. They'll see an Accept | Decline prompt."
+  },
+  "dissolve": {
+    "usage": "Usage: /dissolve [kind] <user-or-character>",
+    "noTitle": "You have no accepted titles with {{name}}.",
+    "ambiguous": "Multiple titles with {{name}} ({{kinds}}). Specify which: /dissolve <kind> <name>.",
+    "failed": "Dissolve failed.",
+    "sent": "Dissolve request sent to {{name}}. They'll see an Accept | Decline prompt."
+  },
+  "titles": {
+    "none": "{{name}} has no mutual titles.",
+    "list": "{{name}}: {{titles}}"
+  },
+  "write": {
+    "noStory": "You don't have a story with slug \"{{slug}}\". /write new to start one."
+  },
+  "story": {
+    "usage": "Usage: /story <slug> [chapter <N>]",
+    "chapterUsage": "Chapter index must be a positive integer.",
+    "usageShort": "Usage: /story <slug>",
+    "notFound": "No story with slug \"{{slug}}\"."
+  },
+  "scriptorium": {
+    "unknownTab": "Unknown tab \"{{tab}}\". Try /scriptorium find | my | reading | following."
+  },
+  "expiry": {
+    "current": "Messages in this room auto-expire after {{minutes}} minutes.",
+    "none": "No per-room expiry set; only the global retention setting applies.",
+    "permission": "Only the room owner / mod / admin can change the expiry.",
+    "invalid": "Expiry must be a whole number of minutes between 1 and 43200 (30 days). Use /expiry off to clear."
+  },
+  "replyMode": {
+    "current": "This room's reply mode: {{mode}}.",
+    "invalid": "Reply mode must be 'flat' or 'nested'.",
+    "forumBoard": "This room is a forum board - boards always use nested replies.",
+    "permission": "Only the room owner / mod / admin can change the reply mode.",
+    "already": "Reply mode is already {{mode}}."
+  },
+  "nsfw": {
+    "on18": "This room is 18+. Members under 18 can't see it.",
+    "effectiveCommunity": "This room is 18+ because this whole community is 18+.",
+    "off18": "This room is not 18+. Anyone can see it.",
+    "usage": "Use /nsfw on or /nsfw off. Bare /nsfw shows the current setting.",
+    "permission": "Only the room owner / mod / admin can change the 18+ setting.",
+    "already18": "This room is already 18+.",
+    "alreadyNot18": "This room is already not 18+."
+  },
+  "list": {
+    "title": "Public rooms",
+    "empty": "No public rooms exist yet.",
+    "titleCount": "Public rooms ({{total}})"
+  },
+  "clear": {
+    "badDuration": "Bad duration. Use forms like 5m, 30m, 1h, 1h30m, 1d, or just /clear to clear your own view.",
+    "noPermission": "Only moderators can clear messages for everyone. Plain /clear hides earlier messages from your own view.",
+    "forum": "/clear <duration> isn't available in forum rooms. Remove topics individually there.",
+    "none": "No messages in the last {{duration}} to hide."
+  },
+  "find": {
+    "usage": "Usage: /find <name> - search rooms by partial name.",
+    "title": "Rooms matching \"{{query}}\"",
+    "noMatch": "No rooms match \"{{query}}\".",
+    "tagPrivate": "private",
+    "tagArchived": "archived",
+    "titleTruncated": "Rooms matching \"{{query}}\" (first {{cap}} of {{total}}+)",
+    "titleCount": "Rooms matching \"{{query}}\" ({{total}})"
+  },
+  "room": {
+    "creationDisabled": "User-created rooms are disabled by an administrator.",
+    "limit": "You already own {{owned}} rooms - the per-user limit is {{max}}.",
+    "badName": "Room name must be 1-40 chars: letters, numbers, spaces, _ - '",
+    "badNameShort": "Bad room name.",
+    "passwordIgnored": "{{name}} is a public room - the password you supplied was ignored.",
+    "badPassword": "Incorrect password.",
+    "duplicate": "A room named \"{{name}}\" already exists."
+  },
+  "go": {
+    "usage": "Usage: /go <room> [password]"
+  },
+  "private": {
+    "usage": "Usage: /private <name> <password>"
+  },
+  "invite": {
+    "usage": "Usage: /invite <username>"
+  },
+  "topic": {
+    "noneSet": "(no topic set)",
+    "current": "Topic: {{topic}}",
+    "permission": "Only the room owner or a mod can change the topic."
+  },
+  "slug": {
+    "current": "Room link handle: {{slug}}. Paste {room:{{slug}}} into chat or an announcement to link here.",
+    "none": "This room has no link handle yet.",
+    "permission": "Only the room owner or a mod can change the room's link handle.",
+    "invalid": "Handle must be letters, numbers, and hyphens (e.g. the-tavern).",
+    "taken": "The handle \"{{slug}}\" is already used by another room."
+  },
+  "describe": {
+    "title": "Room description - {{name}}",
+    "thisRoom": "this room",
+    "noneSet": "(no description set)",
+    "permission": "Only the room owner or a mod can change the description.",
+    "tooLong": "Description is capped at {{max}} chars."
+  },
+  "theater": {
+    "kind": {
+      "video": "video file",
+      "youtube": "YouTube",
+      "vimeo": "Vimeo",
+      "live": "live stream",
+      "embed": "embed (display-only)"
+    },
+    "statusOn": "Theater is ON (loop: {{loop}}).",
+    "statusOff": "Theater is OFF. Owner/mod: /theater on to enable.",
+    "playlistEmpty": "Playlist is empty - add a video with /theater add <url>.",
+    "permChange": "Only the room owner / mod / admin can change theater settings.",
+    "badUrl": "Give a full http(s) media URL, e.g. /theater add https://example.com/clip.mp4",
+    "badLiveUrl": "Live streams must be an https link (a plain http link won't load on this site). See the Theater streaming guide in Help.",
+    "playlistFull": "Playlist is full (50 sources). Remove some with /theater remove <n>.",
+    "queued_one": "Queued {{count}} video from that YouTube playlist.",
+    "queued_other": "Queued {{count}} videos from that YouTube playlist.",
+    "queuedSkipped_one": "Queued {{count}} video from that YouTube playlist ({{skipped}} skipped - playlist cap is 50).",
+    "queuedSkipped_other": "Queued {{count}} videos from that YouTube playlist ({{skipped}} skipped - playlist cap is 50).",
+    "playlistPrivateOrEmpty": "the playlist looks private or empty",
+    "expandFailedQueuedSingle": "Couldn't expand that YouTube playlist — {{detail}}. Queued the single video instead.",
+    "expandFailed": "Couldn't expand that YouTube playlist — {{detail}}.",
+    "kindLive": "{{kind}} live",
+    "added": "Added to the theater playlist (#{{position}}, {{kind}}): {{source}}",
+    "permStart": "You don't have permission to start a theater. Ask an admin for theater access.",
+    "alreadyOn": "Theater mode is already on.",
+    "alreadyOff": "Theater mode is already off.",
+    "badLoop": "Loop must be 'off' (stop at end), 'one' (repeat current), or 'all' (advance + loop the playlist).",
+    "loopAlready": "Loop is already {{mode}}.",
+    "badIndex": "Give a playlist position between 1 and {{max}}. See /theater list.",
+    "removed": "Removed from the theater playlist: {{source}}",
+    "alreadyEmpty": "The playlist is already empty.",
+    "cleared": "Theater playlist cleared.",
+    "usage": "Usage: /theater on|off | add <url> [title] | remove <n> | clear | loop off|one|all | list"
+  },
+  "world": {
+    "noneLinkedAttach": "No world is linked to this room. Use /world link <slug> to attach one.",
+    "viewUsage": "Usage: /world view <slug>",
+    "notVisible": "No visible world with slug \"{{slug}}\".",
+    "linkPermission": "Only the room owner / mod / admin can link a world.",
+    "linkUsage": "Usage: /world link <slug>",
+    "notOwned": "You don't own a world with slug \"{{slug}}\". Browse the catalog with /world catalog to use someone else's open world.",
+    "unlinkPermission": "Only the room owner / mod / admin can unlink the world.",
+    "noneLinked": "No world is linked to this room.",
+    "joinNoneLinked": "No world is linked to this room. Pass a slug, e.g. /world join darkrealm.",
+    "notOpen": "\"{{name}}\" isn't open for community membership.",
+    "inviteOnly": "\"{{name}}\" is invite-only. The author adds members directly, ask them if you'd like in.",
+    "applicationRequired": "\"{{name}}\" accepts new members by application. Opened the form for you.",
+    "alreadyMember": "You're already a member of \"{{name}}\" (as this identity).",
+    "joined": "Joined \"{{name}}\".",
+    "leaveNoneLinked": "No world is linked to this room. Pass a slug, e.g. /world leave darkrealm.",
+    "notMember": "You're not a member of \"{{name}}\" (as this identity).",
+    "left": "Left \"{{name}}\".",
+    "badSubcommand": "\"{{arg}}\" isn't a /world subcommand or a visible world slug. Try /world, /world view <slug>, /world catalog, etc.",
+    "usage": "Try /world, /world <slug>, /world view <slug>, /world link <slug>, /world unlink, /world catalog, /world join, /world leave, or /world primary."
+  },
+  "kick": {
+    "permission": "Only room owner/mod or a site admin can /kick.",
+    "usage": "Usage: /kick <username> [reason]",
+    "self": "Kicking yourself isn't useful.",
+    "adminProtected": "Site admins can't be kicked by non-admins.",
+    "keymaster": "The keymaster can't be kicked.",
+    "loggedOutReason": "You were logged out by {{name}}: {{reason}}",
+    "loggedOut": "You were logged out by {{name}}.",
+    "kickedReason": "You were kicked from this room by {{name}}: {{reason}}",
+    "kicked": "You were kicked from this room by {{name}}."
+  },
+  "mute": {
+    "permission": "Only room owner/mod or a site admin can /mute.",
+    "usage": "Usage: /mute <username> <duration> [reason]. Examples: /mute Alice 10m, /mute Bob 1h20m spam",
+    "badDuration": "Bad duration. Use forms like 5m, 30m, 1h, 1h20m, 7d.",
+    "self": "Muting yourself isn't useful.",
+    "adminProtected": "Site admins can't be muted by non-admins.",
+    "keymaster": "The keymaster can't be muted."
+  },
+  "unmute": {
+    "permission": "Only room owner/mod or a site admin can /unmute.",
+    "usage": "Usage: /unmute <username>",
+    "notMuted": "{{name}} isn't muted here."
+  },
+  "promote": {
+    "permission": "Only the room owner (or a site admin) can promote room mods.",
+    "usage": "Usage: /promote <username>",
+    "self": "You're already at the top of this room."
+  },
+  "demote": {
+    "permission": "Only the room owner (or a site admin) can demote room mods.",
+    "usage": "Usage: /demote <username>",
+    "notMember": "{{name}} isn't in this room's member list.",
+    "owner": "Use /demote on mods only - owners can't be demoted from their own room.",
+    "notMod": "{{name}} isn't a mod."
+  },
+  "promoteAdmin": {
+    "usage": "Usage: /promoteadmin <username>",
+    "rank": "Only an admin or higher can grant the admin tier.",
+    "already": "{{name}} is already a site admin."
+  },
+  "demoteAdmin": {
+    "usage": "Usage: /demoteadmin <username>",
+    "rank": "Only an admin or higher can revoke the admin tier.",
+    "isOwner": "{{name}} is an owner - demote via the admin panel.",
+    "notAdmin": "{{name}} isn't a site admin.",
+    "keymaster": "The keymaster (first admin) cannot be demoted.",
+    "self": "Demote yourself by asking another admin - keeps the chain of custody honest."
+  },
+  "ban": {
+    "permission": "Only the room owner or a site admin can /ban. Room mods can /kick or /mute instead.",
+    "usage": "Usage: /ban <username> [duration] [reason]",
+    "self": "Banning yourself isn't useful.",
+    "adminProtected": "Site admins can't be banned by non-admins.",
+    "keymaster": "The keymaster can't be banned.",
+    "bannedTimedReason": "You were banned from this room for {{duration}} by {{name}}: {{reason}}",
+    "bannedTimed": "You were banned from this room for {{duration}} by {{name}}.",
+    "bannedReason": "You were banned from this room by {{name}}: {{reason}}",
+    "banned": "You were banned from this room by {{name}}."
+  },
+  "unban": {
+    "permission": "Only the room owner or a site admin can /unban.",
+    "usage": "Usage: /unban <username>",
+    "notBanned": "{{name}} isn't banned from this room."
+  },
+  "announce": {
+    "usage": "Usage: /announce [all] <text>",
+    "allPermission": "/announce all is admin-only. Drop 'all' to announce in the current room.",
+    "allUsage": "Usage: /announce all <text>",
+    "permission": "Only room owner/mod or a site admin can /announce."
+  },
+  "earning": {
+    "poolLine": "{{scope}}: {{currency}} Currency · {{xp}} XP{{rankBit}}",
+    "masterScope": "Your master OOC",
+    "sendUsage": "Usage: /currency send <target> <amount>",
+    "badAmount": "Amount must be a whole number.",
+    "suggestionCharacter": "[char] {{name}}",
+    "suggestionUser": "[user] {{name}}",
+    "didYouMean": "{{message}} Try: {{suggestions}}",
+    "sent": "Sent {{amount}} Currency from {{from}} to {{to}}.",
+    "yourMaster": "your master",
+    "characterTarget": "{{name}} (character)",
+    "currencyPrivate": "{{name}} keeps their Currency private.",
+    "noRecord": "{{name}} has no Earning record yet.",
+    "currencyView": "{{name}}: {{currency}} Currency.",
+    "borderWithCost": "{{name}} ({{cost}} Currency)",
+    "borders": "Available borders to purchase: {{borders}}. Open Earning to buy.",
+    "expView": "{{name}}: {{xp}} XP{{rankBit}}.",
+    "transfer": {
+      "transfersDisabled": "Currency transfers are disabled.",
+      "amountWhole": "Amount must be a whole number.",
+      "amountRange": "Amount must be between {{min}} and {{max}} Currency.",
+      "targetNotFound": "No user or character named \"{{name}}\".",
+      "matchesCharAndUser": "\"{{name}}\" matches a character and a user, be more specific.",
+      "matchesMultipleCharacters": "\"{{name}}\" matches multiple characters, be more specific.",
+      "senderCharacterMissing": "Sender character not found.",
+      "senderMissing": "Sender not found.",
+      "selfSend": "You can't send Currency to yourself.",
+      "crossServer": "You can't send Currency to a pool on a different server.",
+      "senderTooNew": "Your account needs to be at least {{days}} days old to send Currency.",
+      "recipientTooNew": "Recipient's account needs to be at least {{days}} days old.",
+      "dailySendCap": "That exceeds your daily send cap. {{remaining}} Currency remaining today.",
+      "dailyReceiveCap": "{{name}} has reached their daily receive cap. Try again tomorrow.",
+      "insufficientFundsMaster": "You only have {{balance}} Currency in your master pool.",
+      "insufficientFundsCharacter": "You only have {{balance}} Currency in your {{name}} pool.",
+      "failed": "Transfer failed. Try again in a moment."
+    }
+  },
+  "items": {
+    "usage": "Usage: /{{command}} <name> [num] <item>",
+    "cantThrow": "{{name}} can't be /thrown.",
+    "cantDrop": "{{name}} can't be /dropped.",
+    "cantGive": "{{name}} can't be /given.",
+    "ambiguous": "Multiple users match \"{{name}}\": {{matches}}. Be more specific.",
+    "noTarget": "No one named \"{{name}}\" is in this room.",
+    "cooldown": "Slow down, you can /{{command}} again in {{seconds}}s.",
+    "insufficientGive": "You have {{have}} {{item}}, can't give {{want}}.",
+    "insufficientThrow": "You have {{have}} {{item}}, can't throw {{want}}.",
+    "insufficientDrop": "You have {{have}} {{item}}, can't drop {{want}}."
+  },
+  "profile": {
+    "noArgs": "/profile takes no arguments. Use /whois <name> to view someone else."
+  },
+  "whois": {
+    "noProfiles": "No profiles found.",
+    "noIdentityMatch": "No identity matches \"{{name}}\".",
+    "noActiveMatch": "No user or active character named \"{{name}}\"."
+  },
+  "duel": {
+    "incognito": "You can't /duel while in /incognito, every turn line names the participants.",
+    "usage": "Usage: /duel <opponent> [class]",
+    "nonePending": "No duel challenge is pending in this room.",
+    "alreadyUnderway": "That duel is already underway.",
+    "notAddressed": "This challenge isn't addressed to you.",
+    "noneRunning": "No duel is running in this room.",
+    "notActive": "That duel hasn't started, opponent still hasn't accepted.",
+    "notFighter": "Only the two duelists can act here.",
+    "status": "{{challenger}} ({{challengerClass}}) HP {{challengerHp}}/{{challengerMax}} vs {{defender}} ({{defenderClass}}) HP {{defenderHp}}/{{defenderMax}}. {{turn}}'s turn, {{seconds}}s left.",
+    "outOfTurn": "Not your turn, waiting on {{name}}.",
+    "turnAnnounce": "{{name}}'s turn (HP {{hp}}/{{max}}). /duel attack | defend | parry | rest.",
+    "noOpponent": "No user or character matched \"{{name}}\".",
+    "self": "You can't duel yourself."
+  },
+  "rps": {
+    "incognito": "You can't host or join rock-paper-scissors while in /incognito, the result line would print your name. Run /incognito to drop back to visible first.",
+    "active": "A round is already running in this room ({{seconds}}s left). Run /rps <throw> to enter.",
+    "usage": "Usage: /rps <rock|paper|scissors>. Short forms work too (r/p/s).",
+    "updated": "Updated your throw to {{choice}}. ({{seconds}}s left.)",
+    "entered": "You entered {{choice}}. ({{seconds}}s left.)",
+    "gameConflict": "Can't /rps here, a {{kind}} session is already running."
+  },
+  "raffle": {
+    "incognito": "You can't host a raffle while in /incognito, the start announce and result line would print your name. Run /incognito to drop back to visible first.",
+    "usage": "Usage: /raffle item <name> [count]  |  /raffle currency <amount>  |  /raffle cancel  |  /raffle status",
+    "noneRunning": "No raffle is running here right now.",
+    "sitewideNote": " (sitewide)",
+    "status": "{{name}}'s raffle{{scopeNote}} for {{prize}}, {{claimants}} claimant(s), {{seconds}}s left.",
+    "noneToCancel": "No raffle to cancel.",
+    "cancelPermission": "Only the host can cancel a raffle.",
+    "conflictRps": "A rock-paper-scissors round is already running in this room. Wait for it to finish.",
+    "conflictRaffle": "A raffle is already running in this room. Wait for it to finish.",
+    "conflictSitewide": "A sitewide raffle is already running. Wait for it to finish.",
+    "itemUsage": "Usage: /raffle item <name> [count]",
+    "notEnoughItems": "You only have {{have}} {{item}}. (Tried to raffle {{tried}}.)",
+    "currencyUsage": "Usage: /raffle currency <amount>",
+    "notEnoughCurrency": "Your active wallet only has {{balance}} Currency. (Tried to raffle {{amount}}.)",
+    "firstArg": "First arg must be 'item', 'currency', 'cancel', or 'status'."
+  },
+  "claim": {
+    "incognito": "You can't /claim while in /incognito, winners and the entrant list are printed by name. Run /incognito to drop back to visible first.",
+    "notRaffle": "The active game ({{kind}}) isn't a raffle. There's nothing to claim.",
+    "entered": "Entered. Drawing in {{seconds}}s.",
+    "already": "Already entered. Drawing in {{seconds}}s."
+  },
+  "trivia": {
+    "incognito": "You can't host trivia while in /incognito, the start line names you.",
+    "usage": "Usage: /trivia <question> | <answer>",
+    "usagePipe": "Usage: /trivia <question> | <answer> (use a pipe `|` between question and answer)."
+  },
+  "answer": {
+    "incognito": "You can't /answer while in /incognito, the result line names guessers.",
+    "usage": "Usage: /answer <your guess>",
+    "none": "No trivia round is running here right now.",
+    "host": "You can't /answer your own trivia. Wait for someone else to guess (or for the timer to run out).",
+    "miss": "Not it, keep trying.",
+    "over": "That round just ended."
+  },
+  "storydice": {
+    "incognito": "You can't host or play Story Dice while in /incognito, start + result lines name participants, and your submission posts as a chat line attributed to you.",
+    "none": "No Story Dice round is running here. Use /storydice with no args to open one.",
+    "once": "You already submitted this round. One submission per identity, the room is voting on your post now."
+  },
+  "scramble": {
+    "incognito": "You can't host or play Word Scramble while in /incognito, the round + result lines name participants by display name.",
+    "none": "No Word Scramble round is running here.",
+    "status": "Round {{round}}/{{total}}, letters {{letters}} ({{length}} long). {{seconds}}s left.",
+    "notHost": "Only the host of the current game can cancel it.",
+    "active": "Scramble round {{round}}/{{total}} is live (letters {{letters}}). Type `/scramble <word>` to guess.",
+    "oneWord": "Guess one word at a time: /scramble <word>.",
+    "tooShort": "Words must be at least 3 letters.",
+    "letters": "That word doesn't fit the available letters.",
+    "notWord": "Not in the dictionary.",
+    "duplicate": "You already scored \"{{word}}\" this round.",
+    "score": "+{{points}} for \"{{word}}\". Total: {{total}}.",
+    "scoreExact": "+{{points}} for \"{{word}}\" (exact match, 2× bonus!). Total: {{total}}.",
+    "gameConflict": "Can't /scramble here, a {{kind}} session is already running."
+  },
+  "games": {
+    "header": "🎮 Social games:",
+    "rps": "• /rps: Rock-paper-scissors. Open a quick round, throw rock, paper, or scissors.",
+    "trivia": "• /trivia <question> | <answer>: Ask a trivia question; the room races to /answer.",
+    "storydice": "• /storydice: You get four prompt words. Write a short IC post weaving them in. The room votes the winner with 📖.",
+    "scramble": "• /scramble [rounds] [words...]: Letters from a word are shuffled; find as many words as you can. You can also supply your own words for each round.",
+    "duel": "• /duel <opponent>: One-on-one duel. Pick a class and trade attacks, defends, parries, and rests until someone falls.",
+    "raffle": "• /raffle item <name> or /raffle currency <amount>: Put up a prize from your stuff. Others run /claim. One winner is drawn at random.",
+    "footer": "Winners may earn XP, Currency, or shop items as a bonus."
+  },
+  "docs": {
+    "accept": {
+      "description": "Accept a pending friend request from this user or character."
+    },
+    "announce": {
+      "description": "Send a high-visibility announcement. 'all' = every room (admin only); otherwise current room (owner/mod/admin).",
+      "sub": {
+        "<text>": "Announce in the current room (owner/mod/admin).",
+        "all": "Announce sitewide to every room (site admin only)."
+      }
+    },
+    "announceraffle": {
+      "description": "Admin-only sitewide raffle. The prize is broadcast as an announce line to every room, and anyone in any room can /claim. Longer window (3 minutes) so people outside the host room have time to see it. The prize is debited from your active inventory / wallet just like /raffle.",
+      "sub": {
+        "item": "Sitewide item raffle.",
+        "currency": "Sitewide Currency raffle.",
+        "cancel": "End the sitewide raffle early and refund the prize. Host only.",
+        "status": "Show the active sitewide raffle (prize, claimants, seconds left)."
+      }
+    },
+    "answer": {
+      "description": "Submit a guess for the active trivia round. The first correct match wins the round, the answer is revealed, and the timer ends early. Wrong guesses are kept private (only you see the 'miss' notice); the result line at round-end lists every guess so spectators see who tried what."
+    },
+    "away": {
+      "description": "Mark yourself away with an optional reason. Use /back to return.",
+      "sub": {
+        "<reason>": "Mark yourself away with a reason (visible to others on hover).",
+        "(no args, present)": "Mark yourself away with no reason note.",
+        "(no args, away)": "If you're already away, this returns you to present."
+      }
+    },
+    "back": {
+      "description": "Clear your away state and return to present."
+    },
+    "ban": {
+      "description": "Banish a user from the current room. Owner/admin only, room mods can /kick or /mute, but only the room owner can permanently bar someone.",
+      "sub": {
+        "<username>": "Permanent ban with no reason note. Boots their sockets to the landing room and refuses re-entry.",
+        "<duration>": "Time-limited ban. Duration formats: s/m/h/d, combinable (e.g. 30m, 1h20m, 7d). Omit for permanent.",
+        "[reason]": "Optional reason. The booted user sees it; everyone else sees a system notice."
+      }
+    },
+    "block": {
+      "description": "Globally + mutually block a user: you and they (and all your characters) can't see each other anywhere. Stronger than /ignore. Lift with /unblock or Profile -> Privacy.",
+      "sub": {
+        "<name>": "Block this user globally and mutually."
+      }
+    },
+    "bookmarks": {
+      "description": "Open your bookmarks, chat messages and threads you've saved for later."
+    },
+    "char": {
+      "description": "Manage your characters. /char switch OOC (or /char clear, /char disable) returns you to your master account.",
+      "sub": {
+        "create": "Create a new character and open the editor.",
+        "switch": "Switch to a character (sets your display name + theme). Use 'OOC' as the name to drop the active character and become your master account again.",
+        "edit": "Open the editor for a character.",
+        "delete": "Soft-delete a character. Message history keeps the snapshotted name.",
+        "clear": "Drop the active character and switch back to your master account (OOC).",
+        "list": "List your characters."
+      }
+    },
+    "check": {
+      "description": "Make a 50/50 Pass/Fail check. Result is broadcast to the room and can't be re-rolled. For branching prose, use a <check>…</check> block."
+    },
+    "claim": {
+      "description": "Enter the active raffle. The room's own raffle wins precedence when both a room raffle and a sitewide raffle are running here; in that case, head to a room with no local raffle to /claim the sitewide one. One entry per identity per raffle, running it twice is a no-op."
+    },
+    "clear": {
+      "description": "No args: hide earlier messages from your OWN view. With a duration (mods): hide the last N (e.g. 30m, 2h) from EVERYONE, kept for moderators to review.",
+      "sub": {
+        "(none)": "Hide earlier messages in this room from your own view (durable; doesn't delete).",
+        "<duration>": "Mods: hide the last N from everyone's view (30s, 5m, 2h, 1h30m, 1d). Kept for moderators; use /trash to delete permanently."
+      }
+    },
+    "collection": {
+      "description": "Open your pinned-item Collection (Earnings ▸ Items ▸ Collection)."
+    },
+    "color": {
+      "description": "Set the hex color used for your chat messages and actions. Sets the active character's color when you're in-character, your master/OOC color otherwise, so Character A and Character B can keep different chat colors.",
+      "sub": {
+        "(no args)": "Show your current chat color.",
+        "<hex>": "Set your chat color. Accepts #rrggbb, rrggbb, #rgb, or rgb (e.g. /color 990000, /color #abc).",
+        "clear": "Revert to the default chat color."
+      }
+    },
+    "currency": {
+      "description": "Show your Currency balance, look up another user's balance, or send Currency. Output is private to you, never broadcast.",
+      "sub": {
+        "(no args)": "Show your own master + active-character balance.",
+        "<user>": "Show a user's master Currency balance (honors their privacy toggle).",
+        "send": "Send Currency from your active identity to another user or character. Subject to daily caps, account-age gates, and amount limits configured in the admin panel."
+      }
+    },
+    "decline": {
+      "description": "Decline a pending friend request. The sender isn't notified."
+    },
+    "demote": {
+      "description": "Demote a room mod back to member (room owner only)."
+    },
+    "demoteadmin": {
+      "description": "Demote a site admin to user (admin only). The keymaster cannot be demoted."
+    },
+    "describe": {
+      "description": "Show or set the room's long-form description (shown to users on join). Owner/mod only to edit.",
+      "sub": {
+        "(no args)": "Show the current description.",
+        "<text>": "Set or replace the description (owner/mod/admin).",
+        "clear": "Remove the description (owner/mod/admin)."
+      }
+    },
+    "dissolve": {
+      "description": "Request to remove an accepted mutual title. The other party gets an Accept | Decline prompt. Kind is optional when you only have one shared title with that name.",
+      "sub": {
+        "<name>": "Dissolve your shared title with this user. Only works if you share exactly one title kind with them.",
+        "<kind> <name>": "Dissolve a specific title kind with this user (required when you share multiple)."
+      }
+    },
+    "drop": {
+      "description": "Consume an item to drop it on someone in the room, flavor only, target gets nothing. Same shape as /throw with different flavor text. Quantity defaults to 1. Each item ships its own random `/drop` lines; if an item has none, /drop isn't allowed on it. Subject to a 4-second per-sender cooldown.",
+      "sub": {
+        "<name> <item>": "Drop one of the named item on a user. Consumed from your inventory; target gets nothing.",
+        "<name> <num> <item>": "Drop a specific quantity. Caps at what your active identity actually owns."
+      }
+    },
+    "duel": {
+      "description": "Turn-based 1v1 combat. Challenge someone with /duel <name>; the opponent accepts with /duel accept and picks their own class. As the challenger, set your own class right in the start line: /duel Casey as mage. Everyone starts at 20 HP; classes (knight/archer/mage/gunslinger) differ by weapon, damage dice, and crit range. Winner mints the configured XP / Currency / item reward; the loser earns a reduced consolation.",
+      "sub": {
+        "<opponent>": "Challenge someone with the default class (knight). Use a name, or paste an identity token to disambiguate when multiple identities share the name.",
+        "<opponent> as <class>": "Challenge someone and set YOUR class for the fight. Classes: knight, archer, mage, gunslinger.",
+        "<opponent> as <class> vs <class>": "Same as above, plus a suggested class for the opponent. They can still pick their own on accept.",
+        "accept [class]": "Accept a pending challenge. Pick your class (defaults to knight or whatever the challenger suggested).",
+        "decline": "Refuse a pending challenge.",
+        "attack": "Attack the opponent. Server rolls 1d20 + your hit mod vs their defense.",
+        "defend": "Brace this turn, incoming damage halved. Your opponent sees only a generic guarded stance.",
+        "parry": "Contest the next attack, 1d20 vs attacker's roll to negate + counter. Your opponent sees only a generic guarded stance.",
+        "rest": "Recover 2d6 HP. Skip your attack this turn.",
+        "status": "Print HP, classes, whose turn it is, and seconds left.",
+        "forfeit": "Surrender. Opponent wins; you get nothing."
+      }
+    },
+    "earnings": {
+      "description": "Open your Earnings dashboard (XP, currency, rank, cosmetics, items)."
+    },
+    "eidolon": {
+      "description": "Post your familiar's current mood into the room as an action.",
+      "sub": {
+        "emote": "Speak your familiar's current mood."
+      }
+    },
+    "exp": {
+      "description": "Show your XP, Rank, and Tier (master + active character), plus any rank borders you can purchase. Look up another user with /exp <name>. Output is private to you.",
+      "sub": {
+        "(no args)": "Show your own earning summary and any unlocked-but-unpurchased borders.",
+        "<user>": "Show a user's master Rank and Tier (always public)."
+      }
+    },
+    "expiry": {
+      "description": "Show or set per-room message auto-expiry (owner/mod only).",
+      "sub": {
+        "(no args)": "Show this room's current expiry setting.",
+        "<minutes>": "Delete messages older than N minutes (1-43200 = 30 days).",
+        "off": "Clear the per-room expiry; only the global retention applies."
+      }
+    },
+    "export": {
+      "description": "Download the recent chat as a formatted HTML log: timestamps, names (OOC or character), and colours intact. e.g. /export 5h, /export 90m, /export 2d. Add 'dark' or 'light' for the page theme (default dark). No duration = last 12h. The range is capped at how long messages are kept here."
+    },
+    "find": {
+      "description": "Search rooms by partial name (case-insensitive). Includes archived + private rooms.",
+      "sub": {
+        "<name>": "Show every room whose name contains 'tav' (case-insensitive)."
+      }
+    },
+    "forums": {
+      "description": "Open the Forums Catalog. Add a forum's slug to land on it directly (e.g. /forums spire), or `create` to apply for your own."
+    },
+    "friend": {
+      "description": "Send a friend request. The friendship is tied to whoever's active right now, if you're in-character, the request comes from that character; the other party never sees your OOC handle through this request."
+    },
+    "friends": {
+      "description": "List your accepted friendships for the active identity. Switch character to see that character's list."
+    },
+    "games": {
+      "description": "Private quick reference of every social game and how to start one. Handy when you can't remember the cue word."
+    },
+    "give": {
+      "description": "Hand `num` units of an item to another user in the room. The item leaves your inventory and lands in theirs (whichever identity they're currently voicing). Quantity defaults to 1. Item can be the slug (cookie) or display name (cookies). Each identity (OOC + each character) has its own inventory, `/give` is the only legal way to move items across the partition.",
+      "sub": {
+        "<name> <item>": "Give one of the named item to a user. Item can be its slug, display name, plural, or any admin-set alias.",
+        "<name> <num> <item>": "Give a specific quantity. Caps at what your active identity actually owns."
+      }
+    },
+    "go": {
+      "description": "Join a room (creating it if needed). With a password, behaves like /private: creates a password-protected room or joins an existing private room without a separate prompt.",
+      "sub": {
+        "<room>": "Join an existing room, or create a new PUBLIC room with this name. Multi-word names allowed.",
+        "<room> <password>": "Create a private room with this password if it doesn't exist, or join an existing private room with it. Same effect as /private. First whitespace-separated token is the name; everything after is the password."
+      }
+    },
+    "help": {
+      "description": "Open the help modal. With an argument, jump straight to that command."
+    },
+    "icon": {
+      "description": "Set the room's icon (an emoji or an image URL) shown beside its name in the Room Info bar. /icon clear removes it. Owner/mod only.",
+      "sub": {
+        "<emoji>": "Use an emoji as the room icon.",
+        "<image-url>": "Use a small image as the room icon.",
+        "clear": "Remove the room icon."
+      }
+    },
+    "ignore": {
+      "description": "Toggle ignoring a user (one-way: silences their messages for you). Runs again to undo. Persists on your account across all characters. For a stronger, mutual block use /block.",
+      "sub": {
+        "<name>": "Ignore (or, if already ignored, unignore) this user.",
+        "clear": "Clear your entire ignore list."
+      }
+    },
+    "incognito": {
+      "description": "Disappear from the userlist and observe rooms unseen. Mod/admin only.",
+      "sub": {
+        "(no args)": "Toggle incognito on or off.",
+        "on": "Explicitly go incognito.",
+        "off": "Explicitly leave incognito.",
+        "<alias>": "Go incognito and use <alias> as your message-author name (default \"System\").",
+        "alias": "Change the alias without flipping mode.",
+        "exit": "Set the custom leave-message broadcast when you go incognito.",
+        "return": "Set the custom join-message broadcast when you come back.",
+        "clear": "Reset alias + exit/return messages to defaults."
+      }
+    },
+    "initiative": {
+      "description": "Roll 1d20 for initiative, with an optional flat modifier. If the room has a difficulty set (/roll dc), the result is marked pass/fail."
+    },
+    "invite": {
+      "description": "Invite a user to this room. For private rooms they can join without the password. For public rooms it sends them a heads-up notification."
+    },
+    "item": {
+      "description": "Open the full-screen view of a catalog item by name or alias (same as tapping a profile pin). Matches the canonical slug, display name, plural, or any admin-set alias.",
+      "sub": {
+        "<name>": "Look up by display name. Matches case-insensitively.",
+        "<alias>": "Look up by an admin-defined alias. Same matching as /give / /throw / /drop."
+      }
+    },
+    "kick": {
+      "description": "Room owner/mod: boot a user from the current room (back to the landing room). Site admin: log the user out of the Spire entirely.",
+      "sub": {
+        "<username>": "Kick with no reason. Owners/mods boot from the room (they can rejoin - use /ban to keep them out); admins log them out of the site.",
+        "[reason]": "Optional reason shown to the kicked user (on the login screen for admin kicks) and posted as a system notice."
+      }
+    },
+    "list": {
+      "description": "Show every public room (name + topic + member count)."
+    },
+    "me": {
+      "description": "Send an action - renders as 'YourName does the thing.' with no brackets. Shortcut: start a line with `:` and skip the rest. `:walks in casually` is the same as `/me walks in casually`."
+    },
+    "mood": {
+      "description": "Set a free-text mood/expression that renders next to your name (e.g. /mood angry). /mood with no args clears it.",
+      "sub": {
+        "<text>": "Set your mood (max 32 chars).",
+        "(no args)": "Clear your mood."
+      }
+    },
+    "mute": {
+      "description": "Silence a user in the current room for a duration. Mod/owner/admin only.",
+      "sub": {
+        "<duration>": "Duration formats: s/m/h/d. Combine for compound (e.g. 1h20m). Examples: 30s, 5m, 2h, 1h20m, 7d.",
+        "[reason]": "Optional reason - shown in the system notice posted when the mute is issued."
+      }
+    },
+    "myrooms": {
+      "description": "List the rooms you own that have gone quiet (archived). Each one becomes a tap-to-fill /go link so you can bring it back - private rooms return private with their original password."
+    },
+    "npc": {
+      "description": "Voice an NPC by name in the current room. The line shows who voiced it. Room owner can disable /npc for themed games.",
+      "sub": {
+        "<Name> <text>": "Voice an NPC saying something.",
+        "<Name> /me <act>": "Voice an NPC performing an action (no quotes)."
+      }
+    },
+    "npcmode": {
+      "description": "Toggle whether /npc is allowed in the current room. Owner/mod only. Useful for themed games where everyone must voice their own character."
+    },
+    "nsfw": {
+      "description": "Show or set this room's 18+ setting (owner/mod only to set; adults only).",
+      "sub": {
+        "(no args)": "Show whether this room is 18+.",
+        "on": "Mark the room 18+. Members under 18 can no longer see or join it.",
+        "off": "Clear the 18+ setting. Messages written while it was 18+ stay hidden from members under 18."
+      }
+    },
+    "pets": {
+      "description": "Open your pinned-pet showcase (Earnings ▸ Items ▸ Pets)."
+    },
+    "poll": {
+      "description": "Start a poll. Separate the question and each option with | . Flags: --multi (pick several), --secret (hide who voted), --for 2h (auto-close).",
+      "sub": {
+        "basic": "Single-choice poll; voters' names show after they vote.",
+        "--multi": "Let voters pick more than one option.",
+        "--secret": "Hide who voted for what (counts only).",
+        "--for": "Auto-close after the duration (30m, 2h, 1d). You can also close it manually."
+      }
+    },
+    "private": {
+      "description": "Create a password-protected room. Equivalent to /go <name> <password> when no room with that name exists. First whitespace-separated token is the name; everything after is the password."
+    },
+    "profile": {
+      "description": "Open the editor for your active profile (master or current character)."
+    },
+    "promote": {
+      "description": "Promote a user to room mod (room owner only)."
+    },
+    "promoteadmin": {
+      "description": "Promote a user to site admin (admin only)."
+    },
+    "raffle": {
+      "description": "Put an item or Currency up for a 60-second room raffle. People run /claim to enter. At expiry one entrant is drawn at random and wins the prize; with no claimants the prize returns to you. The prize leaves your inventory / wallet immediately.",
+      "sub": {
+        "item": "Raffle one (or N) of an item from your active inventory. Item can be slug, display name, or alias, same parsing as /give.",
+        "currency": "Raffle a Currency amount from your active wallet (master or character pool, whichever you're voicing).",
+        "cancel": "End your active raffle early and refund the prize. Host only.",
+        "status": "Show the current room's active raffle (prize, claimants, seconds left)."
+      }
+    },
+    "refresh": {
+      "description": "Refresh the userlist + topic. With a number, turns on slow mode — pauses real-time userlist/typing churn and resyncs every N seconds to ease load on slower devices.",
+      "sub": {
+        "(none)": "One-shot: re-fetch this room's state right now.",
+        "<seconds>": "Slow mode: pause real-time userlist/typing updates; resync every N seconds (5-3600). Chat stays live.",
+        "off": "Disable auto-refresh."
+      }
+    },
+    "reply": {
+      "description": "Reply to a specific message. The reply renders with a small quote of the original above it. Click a message's timestamp to pre-fill this command."
+    },
+    "replymode": {
+      "description": "Show or set how replies render in this room (owner/mod only to set).",
+      "sub": {
+        "(no args)": "Show the current reply mode.",
+        "flat": "Replies appear at the end of chat in chronological order (default).",
+        "nested": "Replies group under their parent in a thread container; latest 5 visible by default."
+      }
+    },
+    "request": {
+      "description": "Propose a mutual title (marriage, partner, mate, bestfriend, etc.). The other party gets an Accept | Decline prompt. View available kinds with /request list.",
+      "sub": {
+        "list": "List available title kinds you can request."
+      }
+    },
+    "roll": {
+      "description": "Roll dice. NdM = N dice with M sides each. Optional ±X adds a flat modifier to the total. Result is broadcast to the room.",
+      "sub": {
+        "1dM": "Roll one die with M sides. Output: 'rolls 1d20: 14'.",
+        "NdM": "Roll N dice with M sides each. Output shows individual rolls and total.",
+        "dM": "Shorthand for 1dM (count defaults to 1).",
+        "NdM±X": "Add (or subtract) a flat modifier. Output appends ' + 3 = 17' after the dice total.",
+        "dc <n>": "Owner/mod/admin: set the room's Difficulty Class. /roll dc shows it; /roll dc clear removes it. When set, every roll is tagged pass/fail against it."
+      }
+    },
+    "rps": {
+      "description": "Start a rock-paper-scissors round in this room (30s window), or enter your throw when a round is live. With 3+ players the standard rule scales: throws are grouped, and the group whose throw beats the other wins.",
+      "sub": {
+        "(no args)": "Open a round so others can join. You can /rps <throw> any time before the timer ends.",
+        "rock | paper | scissors": "Enter your throw. If no round is live, starts one with your throw counted."
+      }
+    },
+    "scene": {
+      "description": "Mark a scene start or end with a banner. Optional image URL after a `|` separator. Visible to everyone in the room. Owner/mod only.",
+      "sub": {
+        "<title>": "Open a new scene with a banner.",
+        "<title> | <url>": "Open a new scene with a banner and a centered hero image (click the banner to collapse it).",
+        "end": "Close the current scene with a banner."
+      }
+    },
+    "scramble": {
+      "description": "Open a Word Scramble round in this room. The game picks a word, scrambles its letters, and the room races to find as many dictionary words as they can from the letters. Points scale with word length; an exact match on the source word doubles the score. Multi-round games chain automatically. The host can also supply their own source words to control the puzzle, otherwise the game picks for them.",
+      "sub": {
+        "(no args)": "Start a 3-round game in this room. Words are picked for you.",
+        "<rounds>": "Start a game with the given number of rounds (1 to 5).",
+        "<rounds> <words___>": "Start a multi-round game using your own source words for each round. Provide one word per round (or fewer, and the rest are picked for you).",
+        "<words___>": "Start a game where the round count matches the number of words you provided.",
+        "<word>": "During a live round, claim points for a word you spotted. Must be at least 3 letters, in the dictionary, and made from the scramble's letters.",
+        "status": "Private reminder of the current letters and how much time is left.",
+        "cancel": "Host-only. End the game early; current standings still post."
+      }
+    },
+    "scriptorium": {
+      "description": "Open the Scriptorium catalog. The Spire's library of long-form fiction.",
+      "sub": {
+        "(no args)": "Browse all public stories.",
+        "find": "Browse all public stories.",
+        "my": "Open your own stories (drafts + published).",
+        "reading": "Stories you're partway through.",
+        "following": "Stories you've subscribed to."
+      }
+    },
+    "shop": {
+      "description": "Open the item shop (Earnings ▸ Items ▸ Shop)."
+    },
+    "slug": {
+      "description": "Show or set the room's link handle for {room:…} chips (owner/mod only to set).",
+      "sub": {
+        "(no args)": "Show the room's link handle and its {room:…} chip token.",
+        "<handle>": "Set the room's link handle (owner/mod/admin only). Letters, numbers, and hyphens."
+      }
+    },
+    "story": {
+      "description": "Open a story in the reader. Pass `chapter N` to jump to a specific chapter.",
+      "sub": {
+        "(slug)": "Open the story landing page.",
+        "chapter": "Jump to chapter N (1-indexed)."
+      }
+    },
+    "storydice": {
+      "description": "Open or play a Story Dice round. With no args, opens a 3-minute round; the server picks four random prompt words. Any free-form text becomes your submission for the round, a short IC paragraph weaving all four prompts in. Your submission posts to chat as a stylized entry (bolded header + indented body) so it stands apart from chatter, and the system seeds a 📖 reaction so the voting chip is right there. The room votes by adding their own 📖 reactions; whichever submission collects the most wins. One submission per identity (no resubmits).",
+      "sub": {
+        "(no args)": "Open a round. The four prompts are revealed in the start line.",
+        "<your post>": "Submit a Story Dice post. Lands as a stylized chat entry with a seeded 📖 reaction so the room can vote."
+      }
+    },
+    "theater": {
+      "description": "Set up a synchronized video watch-party panel for this room (owner/mod only to change).",
+      "sub": {
+        "(no args)": "Show the current playlist and theater settings.",
+        "on": "Turn theater mode on - shows the video panel above chat. Requires theater access (an admin grants it).",
+        "off": "Turn theater mode off and reset playback.",
+        "add": "Append a video to the playlist (direct file/HLS, YouTube, or Vimeo).",
+        "live": "Append a live stream (e.g. your VLC/OBS broadcast over https). No rewind; everyone watches the live edge. See the Theater streaming guide in Help.",
+        "remove": "Remove playlist item #2 (1-based).",
+        "clear": "Empty the playlist.",
+        "loop": "End-of-source behavior: off (stop) | one (repeat) | all (advance + loop, default).",
+        "list": "Show the current playlist and theater settings."
+      }
+    },
+    "throw": {
+      "description": "Consume an item to toss it at someone in the room, flavor only, target gets nothing. Quantity defaults to 1. Item can be the slug or display name. Each item ships its own random `/throw` lines; if an item has none, /throw isn't allowed on it. Subject to a 4-second per-sender cooldown.",
+      "sub": {
+        "<name> <item>": "Throw one of the named item at a user. Consumed from your inventory; target gets nothing.",
+        "<name> <num> <item>": "Throw a specific quantity. Caps at what your active identity actually owns."
+      }
+    },
+    "titles": {
+      "description": "List mutual titles for yourself, or someone else by name.",
+      "sub": {
+        "(no args)": "List your own titles (for your active identity - master or current character).",
+        "<name>": "List the accepted titles on someone else's profile."
+      }
+    },
+    "topic": {
+      "description": "Show or set the current room's topic (owner/mod only to set).",
+      "sub": {
+        "(no args)": "Show the current room's topic.",
+        "<text>": "Set the room's topic (owner/mod/admin only). Topic is the short headline above the chat."
+      }
+    },
+    "trash": {
+      "description": "Delete this room's most recent messages by age (mod/admin only). Irreversible.",
+      "sub": {
+        "<duration>": "Hard-delete every message from the last N. Formats: 30s, 5m, 2h, 1h30m, 1d."
+      }
+    },
+    "trivia": {
+      "description": "Open a 60-second trivia round in this room. The question is broadcast; the answer is hidden until someone guesses it (or the timer runs out). Players race to /answer <text>; first correct match wins. The answer match is forgiving, case-insensitive with leading articles stripped, so 'the eiffel tower' and 'Eiffel Tower' both count.",
+      "sub": {
+        "<q> | <a>": "Open a round. The pipe (|) separates question from answer."
+      }
+    },
+    "unban": {
+      "description": "Lift a /ban from the current room. Owner/admin only, pairs with /ban, which room mods can't issue."
+    },
+    "unblock": {
+      "description": "Lift a block you created. Their account and characters become visible to you again (unless they've also blocked you)."
+    },
+    "unfriend": {
+      "description": "End a friendship OR cancel a pending request, in either direction. Operates on your active identity only."
+    },
+    "unignore": {
+      "description": "Stop ignoring a user; their messages will reach you again."
+    },
+    "unmute": {
+      "description": "Lift a /mute on a user in the current room."
+    },
+    "users": {
+      "description": "Open the directory of registered users (master + characters)."
+    },
+    "whisper": {
+      "description": "Send a private 1:1 message. The recipient is resolved by master username OR their currently-active character name. Whispers are persisted for sender and recipient scrollback only - they're never visible to admins or other users.",
+      "sub": {
+        "<name> <text>": "Send a private message. Use a master username (always works) or a character name (only if they're currently active as that character)."
+      }
+    },
+    "whois": {
+      "description": "View someone's profile (their active character, or master if none). With no name, opens a random profile.",
+      "sub": {
+        "<name>": "View this user's profile. Master usernames win over character names if both exist.",
+        "(no args)": "Open a uniformly-random profile from all active masters and characters."
+      }
+    },
+    "world": {
+      "description": "Show, link, or join a world (wiki). Pass a slug to open any visible world directly.",
+      "sub": {
+        "(no args)": "Open the linked world's wiki, if any.",
+        "(slug)": "Open any visible world by slug.",
+        "view": "Explicit form of the slug shortcut.",
+        "link": "Link one of YOUR worlds to this room. (Owner/mod/admin only.)",
+        "unlink": "Remove the linked world. (Owner/mod/admin only.)",
+        "catalog": "Browse the world catalog (open worlds usable in any room).",
+        "join": "Join an open world; opens the application form if the world requires one; tells you if the world is invite-only.",
+        "leave": "Leave a world as your current identity."
+      }
+    },
+    "worlds": {
+      "description": "Open the manager listing the worlds you've built."
+    },
+    "write": {
+      "description": "Open the Scriptorium editor on a draft or start a new story.",
+      "sub": {
+        "(no args)": "Open the editor on your most recently-edited draft.",
+        "new": "Open the New Story wizard.",
+        "(slug)": "Edit one of your stories by slug."
+      }
+    },
+    "_flags": {
+      "asymmetric": "asymmetric",
+      "exclusive": "exclusive, one accepted at a time"
+    },
+    "_custom": "(custom - {{kind}})"
+  }
+}

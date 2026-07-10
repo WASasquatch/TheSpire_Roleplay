@@ -24,6 +24,8 @@
  * fetch helpers against the documented /servers/:id/events endpoints).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { CalendarDays, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
 import type {
   ServerEvent,
@@ -31,6 +33,7 @@ import type {
   ServerEventRsvpStatus,
 } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDate, formatDateTime } from "../../lib/intlFormat.js";
 import { EventIcon } from "../../lib/eventIcons.js";
 import { useChat } from "../../state/store.js";
 import { Modal } from "../cosmetics/Modal.js";
@@ -53,27 +56,27 @@ interface EventRow {
 }
 
 /** A friendly local datetime; open-ended events omit the end. */
-function formatWhen(startsAt: number, endsAt: number | null): string {
-  const start = new Date(startsAt).toLocaleString([], {
+function formatWhen(t: TFunction<"servers">, startsAt: number, endsAt: number | null): string {
+  const start = formatDateTime(startsAt, {
     weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
   });
   if (endsAt == null) return start;
   const sameDay = new Date(startsAt).toDateString() === new Date(endsAt).toDateString();
-  const end = new Date(endsAt).toLocaleString([], sameDay
+  const end = formatDateTime(endsAt, sameDay
     ? { hour: "numeric", minute: "2-digit" }
     : { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return `${start} – ${end}`;
+  return t("eventsPanel.whenRange", { start, end });
 }
 
 /** Compact "in 3h" / "in 2d" / "started" relative label for the start time. */
-function relativeStart(startsAt: number): string {
+function relativeStart(t: TFunction<"servers">, startsAt: number): string {
   const ms = startsAt - Date.now();
-  if (ms <= 0) return "in progress";
+  if (ms <= 0) return t("eventsPanel.inProgress");
   const mins = Math.round(ms / 60_000);
-  if (mins < 60) return `in ${mins}m`;
+  if (mins < 60) return t("eventsPanel.inMinutes", { n: mins });
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `in ${hours}h`;
-  return `in ${Math.round(hours / 24)}d`;
+  if (hours < 24) return t("eventsPanel.inHours", { n: hours });
+  return t("eventsPanel.inDays", { n: Math.round(hours / 24) });
 }
 
 /** Local YYYY-MM-DD key for grouping events + marking calendar days. */
@@ -84,7 +87,7 @@ function dayKey(ms: number): string {
 /** "Saturday, July 4" heading for a day group. */
 function formatDayHeader(key: string): string {
   const [y = 1970, m = 1, d = 1] = key.split("-").map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+  return formatDate(new Date(y, m - 1, d).getTime(), { weekday: "long", month: "long", day: "numeric" });
 }
 
 /**
@@ -130,6 +133,7 @@ function useIsEventsPanelOwner(): boolean {
 }
 
 export function ServerEventsPanel() {
+  const { t } = useTranslation("servers");
   const serversEnabled = useChat((s) => s.branding.serversEnabled);
   const serverId = useChat((s) => s.currentServerId);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
@@ -162,10 +166,10 @@ export function ServerEventsPanel() {
       const j = (await r.json()) as { events: EventRow[] };
       setRows(j.events);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't load events.");
+      setError(e instanceof Error ? e.message : t("eventsPanel.loadError"));
       setRows([]);
     }
-  }, [serverId]);
+  }, [serverId, t]);
 
   // Load on mount and whenever the server changes, so the header badge shows the
   // upcoming count WITHOUT the panel ever being opened. Also reload on open to
@@ -252,7 +256,7 @@ export function ServerEventsPanel() {
       setRows((prev) => (prev ?? []).map((x) =>
         x.event.id === row.event.id ? { ...x, counts: j.counts, myRsvps: j.myRsvps } : x));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't save your RSVP.");
+      setError(e instanceof Error ? e.message : t("eventsPanel.rsvpError"));
     } finally {
       setBusyId(null);
     }
@@ -290,15 +294,15 @@ export function ServerEventsPanel() {
               <EventIcon name={ev.icon} className="h-4 w-4 shrink-0 text-keep-muted" />
               <span className="truncate">{ev.title}</span>
               {ev.status === "live" ? (
-                <span className="shrink-0 rounded bg-keep-accent px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-bg">Live</span>
+                <span className="shrink-0 rounded bg-keep-accent px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-bg">{t("eventsPanel.live")}</span>
               ) : null}
               {cancelled ? (
-                <span className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-accent">Cancelled</span>
+                <span className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-accent">{t("eventsPanel.cancelled")}</span>
               ) : null}
             </h3>
             <p className="mt-0.5 text-xs text-keep-muted">
-              {formatWhen(ev.startsAt, ev.endsAt)}
-              {!closed ? <span className="ml-2 text-keep-action">{relativeStart(ev.startsAt)}</span> : null}
+              {formatWhen(t, ev.startsAt, ev.endsAt)}
+              {!closed ? <span className="ml-2 text-keep-action">{relativeStart(t, ev.startsAt)}</span> : null}
             </p>
           </div>
         </div>
@@ -313,14 +317,14 @@ export function ServerEventsPanel() {
         {ev.linkedRoomId ? (
           <p className="mt-2 flex items-center gap-1 text-[11px] text-keep-muted">
             <MapPin className="h-3 w-3" aria-hidden="true" />
-            <span>Happens in a linked room.</span>
+            <span>{t("eventsPanel.linkedRoom")}</span>
           </p>
         ) : null}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {(["going", "maybe", "declined"] as const).map((status) => {
             const active = mine === status;
-            const label = status === "going" ? "Going" : status === "maybe" ? "Maybe" : "Can't make it";
+            const label = status === "going" ? t("eventsPanel.going") : status === "maybe" ? t("eventsPanel.maybe") : t("eventsPanel.cantMakeIt");
             return (
               <button
                 key={status}
@@ -338,8 +342,8 @@ export function ServerEventsPanel() {
             );
           })}
           <span className="ml-auto text-[11px] text-keep-muted">
-            {row.counts.going} going
-            {row.counts.maybe ? ` · ${row.counts.maybe} maybe` : ""}
+            {t("eventsPanel.goingCount", { n: row.counts.going })}
+            {row.counts.maybe ? t("eventsPanel.maybeCountSuffix", { n: row.counts.maybe }) : ""}
           </span>
         </div>
       </li>
@@ -358,14 +362,14 @@ export function ServerEventsPanel() {
             new CustomEvent<OpenServerEventDetail>(OPEN_SERVER_EVENT, { detail: { eventId: "" } }),
           )
         }
-        title="Community events"
-        aria-label={upcomingCount > 0 ? `Community events (${upcomingCount} upcoming)` : "Community events"}
+        title={t("eventsPanel.title")}
+        aria-label={upcomingCount > 0 ? t("eventsPanel.titleWithCount", { n: upcomingCount }) : t("eventsPanel.title")}
         className="relative flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-keep-muted hover:text-keep-text"
       >
         <CalendarDays className="h-4 w-4" aria-hidden="true" />
         {upcomingCount > 0 ? (
           <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-keep-action px-1 text-[10px] font-bold leading-none text-keep-bg">
-            {upcomingCount > 9 ? "9+" : upcomingCount}
+            {upcomingCount > 9 ? t("eventsPanel.badgeOverflow") : upcomingCount}
           </span>
         ) : null}
       </button>
@@ -378,7 +382,7 @@ export function ServerEventsPanel() {
           >
             <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule px-4 py-3">
               <CalendarDays className="h-5 w-5 text-keep-action" aria-hidden="true" />
-              <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-keep-text">Community events</h2>
+              <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-keep-text">{t("eventsPanel.title")}</h2>
               <IconCloseButton onClick={() => setOpen(false)} shrink />
             </header>
 
@@ -402,7 +406,7 @@ export function ServerEventsPanel() {
                   otherwise every upcoming event grouped by date (soonest first). */}
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
                 {rows === null ? (
-                  <p className="text-sm italic text-keep-muted">Loading…</p>
+                  <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>
                 ) : selectedDay ? (
                   <div>
                     <div className="mb-3 flex items-center gap-2">
@@ -411,12 +415,12 @@ export function ServerEventsPanel() {
                         onClick={() => setSelectedDay(null)}
                         className="shrink-0 rounded border border-keep-rule px-2 py-1 text-[11px] text-keep-muted hover:text-keep-text"
                       >
-                        ‹ All upcoming
+                        {t("eventsPanel.allUpcoming")}
                       </button>
                       <h4 className="min-w-0 truncate text-sm font-semibold text-keep-text">{formatDayHeader(selectedDay)}</h4>
                     </div>
                     {(eventsByDay.get(selectedDay) ?? []).length === 0 ? (
-                      <p className="text-sm italic text-keep-muted">No events on this day.</p>
+                      <p className="text-sm italic text-keep-muted">{t("eventsPanel.noneOnDay")}</p>
                     ) : (
                       <ul className="space-y-3">
                         {(eventsByDay.get(selectedDay) ?? []).map((row) => renderEventCard(row))}
@@ -424,7 +428,7 @@ export function ServerEventsPanel() {
                     )}
                   </div>
                 ) : rows.length === 0 ? (
-                  <p className="text-sm italic text-keep-muted">No upcoming events yet. Pick a day above, or check back soon.</p>
+                  <p className="text-sm italic text-keep-muted">{t("eventsPanel.noneUpcoming")}</p>
                 ) : (
                   <div className="space-y-4">
                     {sortedDays.map((key) => (
@@ -462,11 +466,12 @@ function MonthCalendar({
   selectedDay: string | null;
   onSelectDay: (key: string) => void;
 }) {
+  const { t } = useTranslation("servers");
   const first = new Date(year, month, 1);
   const startWeekday = first.getDay(); // 0 = Sunday
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const todayKey = dayKey(Date.now());
-  const monthLabel = first.toLocaleDateString([], { month: "long", year: "numeric" });
+  const monthLabel = formatDate(first.getTime(), { month: "long", year: "numeric" });
   const cells: (number | null)[] = [];
   for (let i = 0; i < startWeekday; i++) cells.push(null);
   for (let d = 1; d <= daysInMonth; d++) cells.push(d);
@@ -475,18 +480,22 @@ function MonthCalendar({
   return (
     <div>
       <div className="mb-2 flex items-center justify-between">
-        <button type="button" onClick={onPrev} title="Previous month" aria-label="Previous month"
+        <button type="button" onClick={onPrev} title={t("eventsPanel.prevMonth")} aria-label={t("eventsPanel.prevMonth")}
           className="rounded p-1 text-keep-muted hover:bg-keep-panel hover:text-keep-text">
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         </button>
         <span className="text-sm font-semibold text-keep-text">{monthLabel}</span>
-        <button type="button" onClick={onNext} title="Next month" aria-label="Next month"
+        <button type="button" onClick={onNext} title={t("eventsPanel.nextMonth")} aria-label={t("eventsPanel.nextMonth")}
           className="rounded p-1 text-keep-muted hover:bg-keep-panel hover:text-keep-text">
           <ChevronRight className="h-4 w-4" aria-hidden="true" />
         </button>
       </div>
       <div className="grid grid-cols-7 gap-1 text-center text-[10px] uppercase tracking-widest text-keep-muted">
-        {["S", "M", "T", "W", "T", "F", "S"].map((w, i) => <div key={i}>{w}</div>)}
+        {[
+          t("eventsPanel.weekdaySun"), t("eventsPanel.weekdayMon"), t("eventsPanel.weekdayTue"),
+          t("eventsPanel.weekdayWed"), t("eventsPanel.weekdayThu"), t("eventsPanel.weekdayFri"),
+          t("eventsPanel.weekdaySat"),
+        ].map((w, i) => <div key={i}>{w}</div>)}
       </div>
       <div className="mt-1 grid grid-cols-7 gap-1">
         {cells.map((d, i) => {
@@ -501,8 +510,8 @@ function MonthCalendar({
               key={key}
               type="button"
               onClick={() => onSelectDay(key)}
-              title={has ? `${count} event${count === 1 ? "" : "s"}` : "No events"}
-              aria-label={`${monthLabel} ${d}${has ? `, ${count} event${count === 1 ? "" : "s"}` : ""}`}
+              title={has ? t("eventsPanel.dayEvents", { count }) : t("eventsPanel.noEvents")}
+              aria-label={`${monthLabel} ${d}${has ? t("eventsPanel.dayEventsSuffix", { count }) : ""}`}
               className={`relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded text-xs transition-colors ${
                 isSelected
                   ? "bg-keep-action/20 font-semibold text-keep-action ring-1 ring-keep-action"

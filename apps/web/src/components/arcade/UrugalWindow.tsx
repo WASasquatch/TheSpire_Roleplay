@@ -21,6 +21,7 @@
  * the latest milestone for visibility while we wire things up.
  */
 import React, { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Modal, MODAL_CARD_CONTENT } from "../cosmetics/Modal";
 import { endUrugalRun, reportUrugalEvent, startUrugalRun } from "../../lib/urugal";
 
@@ -41,6 +42,7 @@ interface UrugalEvent {
 }
 
 export function UrugalWindow({ characterId, onClose }: { characterId: string | null; onClose: () => void }): React.JSX.Element {
+  const { t } = useTranslation("arcade");
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const runIdRef = useRef<string | null>(null);
   const frameLoadedRef = useRef(false);
@@ -130,16 +132,16 @@ export function UrugalWindow({ characterId, onClose }: { characterId: string | n
           style={{ background: "rgb(var(--keep-panel) / 1)", borderBottom: "1px solid rgb(var(--keep-border) / .6)" }}
         >
           <span className="flex-1 truncate" style={{ fontSize: 13, fontWeight: 600, letterSpacing: 0.5 }}>
-            🗡 Urugal&apos;s Descent
+            {t("arcade.urugal.windowTitle")}
           </span>
           {last ? (
             <span className="hidden sm:inline" style={{ fontSize: 11, opacity: 0.5 }}>
-              {last.type}{typeof last.floor === "number" ? ` · floor ${last.floor}` : ""}
+              {last.type}{typeof last.floor === "number" ? ` · ${t("arcade.urugal.floor", { floor: last.floor })}` : ""}
             </span>
           ) : null}
           <button
             onClick={onClose}
-            aria-label="Close"
+            aria-label={t("common:close")}
             style={{
               width: 28, height: 28, borderRadius: 8, lineHeight: 1, fontSize: 13, cursor: "pointer",
               background: "rgb(var(--keep-panel) / 1)", border: "1px solid rgb(var(--keep-border) / .7)",
@@ -151,7 +153,7 @@ export function UrugalWindow({ characterId, onClose }: { characterId: string | n
         </div>
         <iframe
           ref={iframeRef}
-          title="Urugal's Descent"
+          title={t("arcade.games.urugal")}
           src={GAME_SRC}
           onLoad={onFrameLoad}
           sandbox="allow-scripts allow-same-origin"

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { Socket } from "socket.io-client";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { Modal } from "./cosmetics/Modal.js";
@@ -23,6 +24,7 @@ interface Props {
  * navigating back to the rail.
  */
 export function RoomPasswordModal({ roomId, roomName, socket, onClose }: Props) {
+  const { t } = useTranslation("common");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -63,9 +65,11 @@ export function RoomPasswordModal({ roomId, roomName, socket, onClose }: Props) 
         onClick={(e) => e.stopPropagation()}
         className="keep-frame w-full rounded bg-keep-bg p-5 text-keep-text md:w-[min(440px,78vw)]"
       >
-        <h2 className="font-action text-lg">Private room</h2>
+        <h2 className="font-action text-lg">{t("roomPassword.title")}</h2>
         <p className="mt-1 text-sm text-keep-muted">
-          <b>{roomName}</b> requires a password to join.
+          <Trans t={t} i18nKey="roomPassword.prompt" values={{ name: roomName }}>
+            <b>{roomName}</b> requires a password to join.
+          </Trans>
         </p>
         <input
           ref={inputRef}
@@ -74,7 +78,7 @@ export function RoomPasswordModal({ roomId, roomName, socket, onClose }: Props) 
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"
           className="mt-3 block w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-base outline-none focus:border-keep-action md:text-sm"
-          placeholder="Password"
+          placeholder={t("password")}
         />
         {error ? (
           <div className="mt-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">
@@ -87,14 +91,14 @@ export function RoomPasswordModal({ roomId, roomName, socket, onClose }: Props) 
             onClick={onClose}
             className="keep-button rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm hover:bg-keep-banner"
           >
-            Cancel
+            {t("cancel")}
           </button>
           <button
             type="submit"
             disabled={submitting || !password}
             className="rounded border border-keep-action/60 bg-keep-action/10 px-3 py-1 text-sm font-semibold text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
           >
-            {submitting ? "Joining…" : "Join"}
+            {submitting ? t("roomPassword.joining") : t("roomPassword.join")}
           </button>
         </div>
       </form>

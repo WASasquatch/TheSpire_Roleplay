@@ -61,6 +61,26 @@ export const servers = sqliteTable(
     /** Anonymous visitors on /s/<slug> may READ the server's public rooms
      *  without an account (mirrors forums.publicBrowsing). Off by default. */
     publicBrowsing: integer("public_browsing", { mode: "boolean" }).notNull().default(false),
+    /**
+     * "18+ community" flag (migration 0335, age-restriction plan). When
+     * true, minors can't see or join the server anywhere — the age check
+     * folds into serverAuthority.canParticipate beside the moderation
+     * gate, so every chokepoint (discover, detail, by-slug, visit, join,
+     * room deep-link, socket join) inherits it — and every room inside is
+     * effectively 18+ (`server.is_nsfw OR room.is_nsfw`). The
+     * system/default server can NEVER be 18+ (route rejection + seed
+     * invariant); the official adult partition is a sibling server.
+     */
+    isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Optional public-safe banner variant (migration 0335, decision #10).
+     * Surfaces shown to viewers who can't see NSFW (discovery cards, the
+     * /s/<slug> share page, OG meta) render THIS instead of
+     * `bannerImageUrl` when the server is 18+; NULL falls back to an
+     * art-less name/colors card. SFW servers never need it — their real
+     * banner must be safe for all audiences by site rule.
+     */
+    sfwBannerUrl: text("sfw_banner_url"),
     /** Owner-set prompt above the membership application's answer field. */
     applicationPrompt: text("application_prompt"),
     /** Stable per-server landing room (server-scoped mirror of rooms.isDefault).

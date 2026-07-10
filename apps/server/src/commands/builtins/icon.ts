@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { rooms } from "../../db/schema.js";
 import { addMessage, broadcastRoomState } from "../../realtime/broadcast.js";
 import { callerCanEditRoom } from "../../auth/roomPermissions.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -62,12 +63,12 @@ export const iconCommand: CommandHandler = {
   ],
   async run(ctx) {
     if (!(await callerCanEditRoom(ctx.db, ctx.user, ctx.roomId))) {
-      notice(ctx, "PERM", "Only the room owner or a mod can set the room icon.");
+      notice(ctx, "PERM", tFor(ctx.user.locale, "commands:icon.permission"));
       return;
     }
     const raw = ctx.argsText.trim();
     if (!raw) {
-      notice(ctx, "ICON_USAGE", "Usage: /icon <emoji or image URL>  (or /icon clear)");
+      notice(ctx, "ICON_USAGE", tFor(ctx.user.locale, "commands:icon.usage"));
       return;
     }
 
@@ -83,7 +84,7 @@ export const iconCommand: CommandHandler = {
       notice(
         ctx,
         "ICON_INVALID",
-        "Give a single emoji, a short glyph, or an http(s) image URL (max 500 chars).",
+        tFor(ctx.user.locale, "commands:icon.invalid"),
       );
       return;
     }

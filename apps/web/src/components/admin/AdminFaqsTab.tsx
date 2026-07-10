@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import DOMPurify from "dompurify";
 import { markdownToHtml, normalizeFaqSlug, type FaqAdminEntry } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
@@ -27,6 +28,7 @@ const inputClass = "w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 
 const btnClass = "rounded border border-keep-rule px-2 py-0.5 text-xs text-keep-muted hover:text-keep-text";
 
 export function AdminFaqsTab() {
+  const { t } = useTranslation("admin");
   const canManage = useChat((s) => s.me?.permissions.includes("manage_faqs") ?? false);
   const [faqs, setFaqs] = useState<FaqAdminEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export function AdminFaqsTab() {
       const j = (await r.json()) as { faqs: FaqAdminEntry[] };
       setFaqs(j.faqs);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("loadFailed"));
     }
   }
   useEffect(() => { void load(); }, []);
@@ -59,12 +61,12 @@ export function AdminFaqsTab() {
 
   async function checkSlug() {
     const norm = normalizeFaqSlug(form.slug);
-    if (!norm) { setSlugStatus("Invalid slug (3–40 chars: a–z, 0–9, _)."); return; }
+    if (!norm) { setSlugStatus(t("faqs.slugInvalidFormat")); return; }
     try {
       const exceptId = editing && editing !== "new" ? `&exceptId=${editing}` : "";
       const r = await fetch(`/admin/faqs/slug-availability?slug=${encodeURIComponent(norm)}${exceptId}`, { credentials: "include" });
       const j = (await r.json()) as { available: boolean; reason?: string | null };
-      setSlugStatus(j.available ? `✓ "${norm}" is available` : j.reason === "invalid" ? "Invalid slug." : `"${norm}" is already taken.`);
+      setSlugStatus(j.available ? t("faqs.slugAvailable", { slug: norm }) : j.reason === "invalid" ? t("faqs.slugInvalid") : t("faqs.slugTaken", { slug: norm }));
     } catch { setSlugStatus(null); }
   }
 
@@ -93,7 +95,7 @@ export function AdminFaqsTab() {
       setEditing(null); setForm(EMPTY); setSlugStatus(null);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "save failed");
+      setError(e instanceof Error ? e.message : t("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -108,31 +110,36 @@ export function AdminFaqsTab() {
       });
       if (!r.ok) throw new Error(await readError(r));
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "toggle failed"); }
+    } catch (e) { setError(e instanceof Error ? e.message : t("toggleFailed")); }
   }
 
   async function remove(f: FaqAdminEntry) {
-    if (!window.confirm(`Delete the FAQ "${f.question}"? The /faq/${f.slug} link will 404.`)) return;
+    if (!window.confirm(t("faqs.deleteConfirm", { question: f.question, slug: f.slug }))) return;
     try {
       const r = await fetch(`/admin/faqs/${f.id}`, { method: "DELETE", credentials: "include" });
       if (!r.ok) throw new Error(await readError(r));
       await load();
-    } catch (e) { setError(e instanceof Error ? e.message : "delete failed"); }
+    } catch (e) { setError(e instanceof Error ? e.message : t("deleteFailed")); }
   }
 
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h2 className="mb-1 text-xs font-semibold uppercase tracking-widest text-keep-muted">FAQ entries</h2>
+          <h2 className="mb-1 text-xs font-semibold uppercase tracking-widest text-keep-muted">{t("faqs.title")}</h2>
           <p className="text-xs text-keep-muted">
-            Public question/answer entries, each with a shareable link at <code>/faq/&lt;slug&gt;</code> and listed at <code>/faqs</code>.
-            Visible to anyone, signed in or not. Answers accept Markdown or HTML.
+            <Trans t={t} i18nKey="faqs.description" shouldUnescape>
+              {"Public question/answer entries, each with a shareable link at "}
+              <code>/faq/&lt;slug&gt;</code>
+              {" and listed at "}
+              <code>/faqs</code>
+              {". Visible to anyone, signed in or not. Answers accept Markdown or HTML."}
+            </Trans>
           </p>
         </div>
         {canManage && editing === null ? (
           <button type="button" onClick={startNew} className="shrink-0 rounded border border-keep-action/50 bg-keep-action/10 px-2 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/20">
-            + New FAQ
+            {t("faqs.new")}
           </button>
         ) : null}
       </div>
@@ -143,67 +150,67 @@ export function AdminFaqsTab() {
         <form onSubmit={submit} className="space-y-2 rounded border border-keep-action/40 bg-keep-bg/40 p-3">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="text-xs text-keep-muted">
-              Slug (the URL)
-              <input className={inputClass} value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} onBlur={() => void checkSlug()} placeholder="how_worlds_work" maxLength={40} required />
+              {t("faqs.slugLabel")}
+              <input className={inputClass} value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} onBlur={() => void checkSlug()} placeholder={t("faqs.slugPlaceholder")} maxLength={40} required />
               {slugStatus ? <span className="mt-0.5 block text-[11px] text-keep-muted">{slugStatus}</span> : null}
             </label>
             <label className="text-xs text-keep-muted">
-              Category (optional)
-              <input className={inputClass} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="Getting started" maxLength={60} />
+              {t("faqs.categoryLabel")}
+              <input className={inputClass} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder={t("faqs.categoryPlaceholder")} maxLength={60} />
             </label>
           </div>
           <label className="block text-xs text-keep-muted">
-            Question
+            {t("faqs.questionLabel")}
             <input className={inputClass} value={form.question} onChange={(e) => setForm({ ...form, question: e.target.value })} maxLength={200} required />
           </label>
           <label className="block text-xs text-keep-muted">
-            Answer (Markdown or HTML)
+            {t("faqs.answerLabel")}
             <textarea className={`${inputClass} min-h-[6rem] font-mono`} value={form.answer} onChange={(e) => setForm({ ...form, answer: e.target.value })} maxLength={8000} required />
           </label>
           {form.answer.trim() ? (
             <div className="rounded border border-keep-rule bg-keep-panel/20 p-2">
-              <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Preview</div>
+              <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("common:preview")}</div>
               <div className="prose prose-sm max-w-none text-keep-text" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(markdownToHtml(form.answer)) }} />
             </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
             <label className="flex items-center gap-1 text-xs text-keep-muted">
               <input type="checkbox" checked={form.enabled} onChange={(e) => setForm({ ...form, enabled: e.target.checked })} />
-              Published
+              {t("faqs.published")}
             </label>
             <label className="flex items-center gap-1 text-xs text-keep-muted">
-              Sort
+              {t("faqs.sort")}
               <input className={`${inputClass} w-16`} type="number" value={form.sortOrder} onChange={(e) => setForm({ ...form, sortOrder: e.target.value })} />
             </label>
             <div className="ml-auto flex gap-2">
               <button type="submit" disabled={saving} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50">
-                {saving ? "Saving…" : editing === "new" ? "Create" : "Save"}
+                {saving ? t("common:saving") : editing === "new" ? t("create") : t("common:save")}
               </button>
-              <button type="button" onClick={() => { setEditing(null); setForm(EMPTY); setSlugStatus(null); }} className={btnClass}>Cancel</button>
+              <button type="button" onClick={() => { setEditing(null); setForm(EMPTY); setSlugStatus(null); }} className={btnClass}>{t("common:cancel")}</button>
             </div>
           </div>
         </form>
       ) : null}
 
       {faqs === null ? (
-        <p className="text-xs italic text-keep-muted">Loading…</p>
+        <p className="text-xs italic text-keep-muted">{t("common:loading")}</p>
       ) : faqs.length === 0 ? (
-        <p className="text-xs italic text-keep-muted">No FAQ entries yet.</p>
+        <p className="text-xs italic text-keep-muted">{t("faqs.empty")}</p>
       ) : (
         <ul className="space-y-2">
           {faqs.map((f) => (
             <li key={f.id} className="rounded border border-keep-rule bg-keep-panel/30 p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
-                {!f.enabled ? <span className="rounded bg-keep-muted/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-keep-muted">draft</span> : null}
+                {!f.enabled ? <span className="rounded bg-keep-muted/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-keep-muted">{t("faqs.draft")}</span> : null}
                 <span className="font-semibold text-keep-text">{f.question}</span>
                 <a href={`/faq/${f.slug}`} target="_blank" rel="noreferrer" className="text-[11px] text-keep-action hover:underline">/faq/{f.slug}</a>
                 {f.category ? <span className="text-[11px] text-keep-muted">· {f.category}</span> : null}
               </div>
               {canManage ? (
                 <div className="mt-2 flex flex-wrap gap-2">
-                  <button type="button" onClick={() => startEdit(f)} className={btnClass}>Edit</button>
-                  <button type="button" onClick={() => void toggleEnabled(f)} className={btnClass}>{f.enabled ? "Unpublish" : "Publish"}</button>
-                  <button type="button" onClick={() => void remove(f)} className="rounded border border-keep-accent/40 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/10">Delete</button>
+                  <button type="button" onClick={() => startEdit(f)} className={btnClass}>{t("edit")}</button>
+                  <button type="button" onClick={() => void toggleEnabled(f)} className={btnClass}>{f.enabled ? t("faqs.unpublish") : t("faqs.publish")}</button>
+                  <button type="button" onClick={() => void remove(f)} className="rounded border border-keep-accent/40 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/10">{t("common:delete")}</button>
                 </div>
               ) : null}
             </li>

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import type { EmoticonSheet, UnicodeEmoji } from "@thekeep/shared";
 import { COMMUNITY_EMOTICON_USE_COST, UNICODE_EMOJI_CATEGORIES, UNICODE_EMOJI_FLAT, isEmoticonCellEmpty } from "@thekeep/shared";
 import { useEmoticons } from "../../state/emoticons.js";
@@ -83,6 +84,7 @@ function setAckedSpend(): void {
  * close.
  */
 export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props) {
+  const { t } = useTranslation("arcade");
   const sheets = useEmoticons((s) => s.sheets);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
   const me = useChat((s) => s.me);
@@ -274,9 +276,7 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
     }
     if (!hasAckedSpend()) {
       const ok = window.confirm(
-        `Use this community emoticon for ${COMMUNITY_EMOTICON_USE_COST} Currency? ` +
-          `${COMMUNITY_EMOTICON_USE_COST} Currency goes to the sheet's creator. ` +
-          `You won't be asked again this session.`,
+        t("emoticons.picker.confirmSpend", { cost: COMMUNITY_EMOTICON_USE_COST }),
       );
       if (!ok) return;
       setAckedSpend();
@@ -287,7 +287,7 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
       onPick(sheet.slug, cellIndex);
       onClose();
     } catch (e) {
-      setSpendError(e instanceof Error ? e.message : "could not charge");
+      setSpendError(e instanceof Error ? e.message : t("emoticons.picker.chargeFailed"));
     }
   }
 
@@ -386,7 +386,7 @@ export function EmoticonPicker({ onPick, onPickUnicode, onClose, anchor }: Props
           activeSystem ? (
             <PickerGrid sheet={activeSystem} onPick={onPick} />
           ) : (
-            <p className="p-3 text-xs italic text-keep-muted">No emoticon sheets installed.</p>
+            <p className="p-3 text-xs italic text-keep-muted">{t("emoticons.picker.noSheets")}</p>
           )
         ) : view.kind === "unicode" && onPickUnicode ? (
           <UnicodeGrid
@@ -445,6 +445,7 @@ function SheetToolbar({
   unicodeActive: boolean;
   onPickUnicodeTab: () => void;
 }) {
+  const { t } = useTranslation("arcade");
   return (
     <div className="keep-section-header flex shrink-0 items-center gap-1 border-b border-keep-rule px-2 py-1.5">
       {/* Left side: horizontally scrolling/swipable strip of system
@@ -491,7 +492,7 @@ function SheetToolbar({
         <button
           type="button"
           onClick={onPickUnicodeTab}
-          title="Unicode emoji (system font)"
+          title={t("emoticons.picker.unicodeTabTitle")}
           className={`ml-2 inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 text-[10px] font-action uppercase tracking-widest transition ${
             unicodeActive
               ? "border-keep-action bg-keep-action/15 text-keep-action"
@@ -499,7 +500,7 @@ function SheetToolbar({
           }`}
         >
           <span aria-hidden>😀</span>
-          <span className="sr-only">Unicode emoji</span>
+          <span className="sr-only">{t("emoticons.picker.unicodeTabLabel")}</span>
         </button>
       ) : null}
       {/* Right side: anchored Community button. Always visible. Hides
@@ -508,7 +509,7 @@ function SheetToolbar({
       <button
         type="button"
         onClick={onPickCommunity}
-        title="Community emoticons (1 Currency per use, paid to the creator)"
+        title={t("emoticons.picker.communityTabTitle")}
         className={`ml-2 inline-flex shrink-0 items-center gap-1 rounded border px-2 py-1 text-[10px] font-action uppercase tracking-widest transition ${
           communityActive
             ? "border-keep-action bg-keep-action/15 text-keep-action"
@@ -541,7 +542,7 @@ function SheetToolbar({
             though the design is icon-only. The `title` above gives
             sighted users a tooltip; sr-only keeps everyone else
             served without adding visual weight back. */}
-        <span className="sr-only">Community</span>
+        <span className="sr-only">{t("emoticons.picker.communityTabLabel")}</span>
         {communityCount > 0 ? (
           <span className="rounded-full bg-keep-panel-200/40 px-1 text-[9px] text-keep-text">{communityCount}</span>
         ) : null}
@@ -565,11 +566,12 @@ function RecentRow({
   myUserId: string | null;
   onPick: (sheetSlug: string, cellIndex: number) => void;
 }) {
+  const { t } = useTranslation("arcade");
   const getSheetBySlug = useEmoticons((s) => s.getSheetBySlug);
   return (
     <section className="border-b border-keep-rule/60">
       <header className="keep-section-header bg-keep-panel-200/30 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-muted">
-        Recent
+        {t("emoticons.picker.recent")}
       </header>
       <div className="grid grid-cols-6 gap-1 p-2">
         {recents.slice(0, MAX_VISIBLE_RECENT).map((r) => {
@@ -589,8 +591,8 @@ function RecentRow({
           const isOwnSheet = !!sheet && !!myUserId && sheet.creatorUserId === myUserId;
           const titleText = showsCost
             ? isOwnSheet
-              ? `${label ?? ""} (${COMMUNITY_EMOTICON_USE_COST} Currency per use for visitors; free for you)`.trim()
-              : `${label ?? ""} (${COMMUNITY_EMOTICON_USE_COST} Currency per use)`.trim()
+              ? t("emoticons.picker.cellCostOwner", { label: label ?? "", cost: COMMUNITY_EMOTICON_USE_COST }).trim()
+              : t("emoticons.picker.cellCostVisitor", { label: label ?? "", cost: COMMUNITY_EMOTICON_USE_COST }).trim()
             : (label ?? undefined);
           return (
             <button
@@ -631,12 +633,13 @@ function RecentRow({
  *  Picker grid - the active sheet's non-empty cells (system view)
  * ============================================================= */
 function PickerGrid({ sheet, onPick }: { sheet: EmoticonSheet; onPick: (slug: string, cellIndex: number) => void }) {
+  const { t } = useTranslation("arcade");
   const cells: Array<{ cellIndex: number; label: string }> = [];
   sheet.cells.forEach((label, i) => {
     if (!isEmoticonCellEmpty(label)) cells.push({ cellIndex: i, label });
   });
   if (cells.length === 0) {
-    return <p className="p-3 text-xs italic text-keep-muted">This sheet has no labeled cells yet.</p>;
+    return <p className="p-3 text-xs italic text-keep-muted">{t("emoticons.picker.noLabeledCellsYet")}</p>;
   }
   return (
     <section>
@@ -674,12 +677,12 @@ function CommunityIndex({
   onChangeSort: (next: "new" | "old" | "top") => void;
   onSelect: (id: string) => void;
 }) {
+  const { t } = useTranslation("arcade");
   if (sheets.length === 0) {
     return (
       <section className="p-3 text-xs text-keep-muted">
         <p className="italic">
-          No community sheets yet. Approved user-submitted sheets show up here. Paid sheets cost {COMMUNITY_EMOTICON_USE_COST} Currency
-          per use (goes to the creator); free sheets are marked Free.
+          {t("emoticons.picker.communityEmpty", { cost: COMMUNITY_EMOTICON_USE_COST })}
         </p>
       </section>
     );
@@ -687,7 +690,7 @@ function CommunityIndex({
   return (
     <section>
       <header className="keep-section-header flex flex-wrap items-center justify-between gap-1 bg-keep-panel-200/30 px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-muted">
-        <span>Community sheets</span>
+        <span>{t("emoticons.picker.communityHeader")}</span>
         {/* Sort control. Three small segmented pills, keeps the
             header compact and lets the viewer flip cheaply. The
             "Top" sort reads from the server-side useCount tally. */}
@@ -703,12 +706,12 @@ function CommunityIndex({
                   : "text-keep-muted hover:bg-keep-panel-200/40 hover:text-keep-text"
               }`}
               title={
-                key === "new" ? "Newest first" :
-                key === "old" ? "Oldest first" :
-                "Most-used first"
+                key === "new" ? t("emoticons.picker.sortNewTitle") :
+                key === "old" ? t("emoticons.picker.sortOldTitle") :
+                t("emoticons.picker.sortTopTitle")
               }
             >
-              {key === "top" ? "Top" : key === "new" ? "New" : "Old"}
+              {key === "top" ? t("emoticons.picker.sortTop") : key === "new" ? t("emoticons.picker.sortNew") : t("emoticons.picker.sortOld")}
             </button>
           ))}
         </div>
@@ -723,11 +726,11 @@ function CommunityIndex({
               onClick={() => onSelect(s.id)}
               title={
                 `${s.name}` +
-                (s.creatorUsername ? ` by @${s.creatorUsername}` : "") +
+                (s.creatorUsername ? ` ${t("emoticons.picker.byAuthor", { name: s.creatorUsername })}` : "") +
                 (s.commerceEnabled
-                  ? ` · ${COMMUNITY_EMOTICON_USE_COST} Currency per use`
-                  : " · Free") +
-                ` · ${s.useCount} uses`
+                  ? ` · ${t("emoticons.picker.costPerUse", { cost: COMMUNITY_EMOTICON_USE_COST })}`
+                  : ` · ${t("emoticons.picker.free")}`) +
+                ` · ${t("emoticons.picker.uses", { count: s.useCount })}`
               }
               className="group relative flex flex-col items-center gap-1 rounded border border-keep-rule p-2 hover:border-keep-action hover:bg-keep-action/10"
             >
@@ -741,7 +744,7 @@ function CommunityIndex({
               <span className="line-clamp-1 w-full text-center text-[10px] text-keep-text">{s.name}</span>
               {s.creatorUsername ? (
                 <span className="line-clamp-1 w-full text-center text-[9px] italic text-keep-muted">
-                  by @{s.creatorUsername}
+                  {t("emoticons.picker.byAuthor", { name: s.creatorUsername })}
                 </span>
               ) : null}
               {/* Hover cost / free overlay, matches the per-cell
@@ -768,7 +771,7 @@ function CommunityIndex({
                   </span>
                 ) : (
                   <span className="rounded-full bg-keep-bg/85 px-1.5 text-[10px] font-semibold uppercase tracking-widest text-keep-muted shadow-sm">
-                    Free
+                    {t("emoticons.picker.free")}
                   </span>
                 )}
               </span>
@@ -795,6 +798,7 @@ function CommunityGrid({
   onPick: (cellIndex: number) => void;
   onBack: () => void;
 }) {
+  const { t } = useTranslation("arcade");
   const cells: Array<{ cellIndex: number; label: string }> = [];
   sheet.cells.forEach((label, i) => {
     if (!isEmoticonCellEmpty(label)) cells.push({ cellIndex: i, label });
@@ -806,15 +810,15 @@ function CommunityGrid({
           type="button"
           onClick={onBack}
           className="rounded px-1 text-keep-muted hover:bg-keep-panel-200/40 hover:text-keep-text"
-          title="Back to community sheets"
+          title={t("emoticons.picker.backTitle")}
         >
-          {"← Back"}
+          {t("emoticons.picker.back")}
         </button>
         <div className="flex flex-col items-end">
           <span>{sheet.name}</span>
           {sheet.creatorUsername ? (
             <span className="font-normal normal-case tracking-normal italic text-[9px]">
-              by @{sheet.creatorUsername}
+              {t("emoticons.picker.byAuthor", { name: sheet.creatorUsername })}
               {/* Subtitle reflects the SHEET's commerce setting (the
                   thumbnail in the index uses the same flag), with an
                   extra owner-only note about who actually pays. A
@@ -824,17 +828,17 @@ function CommunityGrid({
                   contradiction the thumbnail's coin badge revealed. */}
               {sheet.commerceEnabled
                 ? isOwnSheet
-                  ? ` - ${COMMUNITY_EMOTICON_USE_COST} Currency per use (free for you)`
-                  : ` - ${COMMUNITY_EMOTICON_USE_COST} Currency per use`
+                  ? ` - ${t("emoticons.picker.costPerUseOwner", { cost: COMMUNITY_EMOTICON_USE_COST })}`
+                  : ` - ${t("emoticons.picker.costPerUse", { cost: COMMUNITY_EMOTICON_USE_COST })}`
                 : isOwnSheet
-                  ? " - Free (yours)"
-                  : " - Free"}
+                  ? ` - ${t("emoticons.picker.freeYours")}`
+                  : ` - ${t("emoticons.picker.free")}`}
             </span>
           ) : null}
         </div>
       </header>
       {cells.length === 0 ? (
-        <p className="p-3 text-xs italic text-keep-muted">This sheet has no labeled cells.</p>
+        <p className="p-3 text-xs italic text-keep-muted">{t("emoticons.picker.noLabeledCells")}</p>
       ) : (
         <div className="grid grid-cols-4 gap-1 p-2">
           {cells.map((c) => {
@@ -856,8 +860,8 @@ function CommunityGrid({
                 title={
                   showsCost
                     ? isOwnSheet
-                      ? `${c.label} (${COMMUNITY_EMOTICON_USE_COST} Currency per use for visitors; free for you)`
-                      : `${c.label} (${COMMUNITY_EMOTICON_USE_COST} Currency per use)`
+                      ? t("emoticons.picker.cellCostOwner", { label: c.label, cost: COMMUNITY_EMOTICON_USE_COST })
+                      : t("emoticons.picker.cellCostVisitor", { label: c.label, cost: COMMUNITY_EMOTICON_USE_COST })
                     : c.label
                 }
                 className={`emoticon-picker-cell ${animationClassForLabel(c.label)} group relative flex items-center justify-center rounded p-1 hover:bg-keep-action/10`}
@@ -900,6 +904,7 @@ function CommunityGrid({
  *  emoji.
  * ============================================================= */
 function UnicodeGrid({ onPick }: { onPick: (char: string) => void }) {
+  const { t } = useTranslation("arcade");
   const [query, setQuery] = useState("");
   const trimmed = query.trim().toLowerCase();
   // Pre-compute the search index once per query so the render path
@@ -923,15 +928,15 @@ function UnicodeGrid({ onPick }: { onPick: (char: string) => void }) {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search emoji…"
+          placeholder={t("emoticons.picker.searchPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
-          aria-label="Search Unicode emoji"
+          aria-label={t("emoticons.picker.searchAria")}
         />
       </header>
       {searchResults !== null ? (
         searchResults.length === 0 ? (
           <p className="p-3 text-xs italic text-keep-muted">
-            No emoji match &ldquo;{query}&rdquo;. Try a synonym like &ldquo;happy&rdquo; or &ldquo;love&rdquo;.
+            {t("emoticons.picker.noMatch", { query })}
           </p>
         ) : (
           <UnicodeRow emoji={searchResults} onPick={onPick} />

@@ -20,6 +20,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import DOMPurify from "dompurify";
 import type { PermissionKey } from "@thekeep/shared";
 import { formatDurationCompact } from "@thekeep/shared";
@@ -28,6 +29,8 @@ import { BorderedAvatar } from "../cosmetics/BorderedAvatar.js";
 import { TabBtn as SubTabBtn } from "../shared/TabBtn.js";
 import { UsernameAutocomplete } from "../UsernameAutocomplete.js";
 import { useEarning } from "../../state/earning.js";
+import { i18n } from "../../lib/i18n.js";
+import { formatDateTime, formatNumber } from "../../lib/intlFormat.js";
 import { applyNameStylePlaceholders } from "../../lib/nameStyleTemplate.js";
 import { createNonceStyleTag } from "../../lib/injectStyle.js";
 import { identityEquals } from "../../lib/identity.js";
@@ -98,27 +101,28 @@ type SubTab = "awards" | "ranks" | "styles" | "borders" | "cosmetics" | "items" 
  *  permission carry `requires`; everything else is visible to any
  *  user who already cleared the AdminPanel's view_admin_earning tab
  *  gate. */
-const SUB_TABS: ReadonlyArray<{ id: SubTab; label: string; requires?: PermissionKey }> = [
-  { id: "awards", label: "Awards" },
-  { id: "ranks", label: "Ranks" },
-  { id: "styles", label: "Name Styles" },
-  { id: "borders", label: "Borders" },
-  { id: "cosmetics", label: "Flair" },
-  { id: "items", label: "Items" },
-  { id: "flashsale", label: "Flash Sale" },
-  { id: "transfer", label: "Backup" },
+const SUB_TABS: ReadonlyArray<{ id: SubTab; labelKey: string; requires?: PermissionKey }> = [
+  { id: "awards", labelKey: "earning.subTab.awards" },
+  { id: "ranks", labelKey: "earning.subTab.ranks" },
+  { id: "styles", labelKey: "earning.subTab.styles" },
+  { id: "borders", labelKey: "earning.subTab.borders" },
+  { id: "cosmetics", labelKey: "earning.subTab.cosmetics" },
+  { id: "items", labelKey: "earning.subTab.items" },
+  { id: "flashsale", labelKey: "earning.subTab.flashsale" },
+  { id: "transfer", labelKey: "earning.subTab.transfer" },
   // Test grants targets a real user's pool and pushes XP / Currency /
   // ownership rows that aren't undoable, gated on the matrix's
   // `grant_earning_award` key (masteradmin-default per seed, but a
   // masteradmin can hand it to a trusted admin via the matrix).
-  { id: "grants", label: "Test grants", requires: "grant_earning_award" },
+  { id: "grants", labelKey: "earning.subTab.grants", requires: "grant_earning_award" },
 ];
 
 export function AdminEarningTab() {
+  const { t } = useTranslation("admin");
   const mePermissions = useChat((s) => s.me?.permissions ?? []);
   const canGrant = mePermissions.includes("grant_earning_award");
   const [subTab, setSubTab] = useState<SubTab>("awards");
-  const visible = SUB_TABS.filter((t) => !t.requires || mePermissions.includes(t.requires));
+  const visible = SUB_TABS.filter((tab) => !tab.requires || mePermissions.includes(tab.requires));
   return (
     <div className="space-y-3">
       {/* Mobile: dropdown picker, same pattern as the top-level admin
@@ -128,18 +132,18 @@ export function AdminEarningTab() {
         <select
           value={subTab}
           onChange={(e) => setSubTab(e.target.value as SubTab)}
-          aria-label="Earning section"
+          aria-label={t("earning.sectionAria")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         >
-          {visible.map((t) => (
-            <option key={t.id} value={t.id}>{t.label}</option>
+          {visible.map((tab) => (
+            <option key={tab.id} value={tab.id}>{t(tab.labelKey)}</option>
           ))}
         </select>
       </div>
       {/* Desktop: row of chips, wraps if needed. */}
       <div className="hidden flex-wrap gap-2 border-b border-keep-rule pb-2 text-xs uppercase tracking-widest md:flex">
-        {visible.map((t) => (
-          <SubTabBtn key={t.id} active={subTab === t.id} onClick={() => setSubTab(t.id)}>{t.label}</SubTabBtn>
+        {visible.map((tab) => (
+          <SubTabBtn key={tab.id} active={subTab === tab.id} onClick={() => setSubTab(tab.id)}>{t(tab.labelKey)}</SubTabBtn>
         ))}
       </div>
       {subTab === "awards" ? <AwardsSection /> : null}
@@ -157,6 +161,7 @@ export function AdminEarningTab() {
 
 
 function AwardsSection() {
+  const { t } = useTranslation("admin");
   // The two gated fields (`multiCharacterEarnDivisor`,
   // `backfill.xpPerHistoricalMessage`) are seeded masteradmin-only
   // via the matrix but matrix-grantable; gate on the granular key so
@@ -181,7 +186,7 @@ function AwardsSection() {
         setDefaults(r.defaults);
       })
       .catch((e) => {
-        if (!cancelled) setErr(e instanceof Error ? e.message : "Failed to load Awards");
+        if (!cancelled) setErr(e instanceof Error ? e.message : t("earning.awardsLoadFailed"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -205,7 +210,7 @@ function AwardsSection() {
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
     } catch (e) {
-      const message = e instanceof Error ? e.message : "Save failed";
+      const message = e instanceof Error ? e.message : t("earning.saveFailedCap");
       const fields = (e as Error & { fields?: string[] }).fields;
       setErr(message);
       if (fields) setGatedFields(fields);
@@ -216,66 +221,65 @@ function AwardsSection() {
 
   function resetToDefaults() {
     if (!defaults) return;
-    if (!window.confirm("Reset Awards to defaults? Any unsaved changes will be discarded.")) return;
+    if (!window.confirm(t("earning.resetDefaultsConfirm"))) return;
     setConfig({ ...defaults });
   }
 
-  if (loading) return <p className="text-sm text-keep-muted">Loading Awards…</p>;
-  if (!config) return <p className="text-sm text-keep-accent">{err ?? "Failed to load Awards."}</p>;
+  if (loading) return <p className="text-sm text-keep-muted">{t("earning.loadingAwards")}</p>;
+  if (!config) return <p className="text-sm text-keep-accent">{err ?? t("earning.awardsLoadFailedDot")}</p>;
 
   return (
     <div className="space-y-5">
       <header className="space-y-1">
-        <h3 className="font-action text-base">Awards</h3>
+        <h3 className="font-action text-base">{t("earning.awardsTitle")}</h3>
         <p className="text-xs text-keep-muted">
-          Every numeric value the XP / Currency engine reads. Changes take effect on the next earn.
-          Body floor and whisper amounts apply per message; presence amounts are per 5-minute block.
+          {t("earning.awardsDescription")}
         </p>
       </header>
 
       <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
         <ToggleRow
-          label="Earning enabled"
-          help="Master kill-switch for the entire XP / Currency system. When off, no source awards anything."
+          label={t("earning.enabledLabel")}
+          help={t("earning.enabledHelp")}
           value={config.enabled}
           onChange={(v) => setConfig({ ...config, enabled: v })}
         />
       </section>
 
-      <SectionFrame title="Per-source enable matrix"
-        description="Toggle XP and Currency awards independently for each source. Either flag off → that pool earns zero from that source even if the amount below is non-zero.">
+      <SectionFrame title={t("earning.sourceMatrixTitle")}
+        description={t("earning.sourceMatrixDescription")}>
         <SourceMatrix
           flags={config.enabledSources}
           onChange={(next) => setConfig({ ...config, enabledSources: next })}
         />
       </SectionFrame>
 
-      <SectionFrame title="Award amounts"
-        description="Per-message and per-block credit amounts.">
+      <SectionFrame title={t("earning.awardAmountsTitle")}
+        description={t("earning.awardAmountsDescription")}>
         <div className="space-y-3">
           <SourceGroup
-            heading="Chat messages"
+            heading={t("earning.chatMessagesHeading")}
             rows={[
-              { key: "say", label: "Say (regular chat)" },
-              { key: "action", label: "Action (/me, /scene, /npc, /announce)" },
-              { key: "whisper", label: "Whisper (private)" },
+              { key: "say", label: t("earning.rowSay") },
+              { key: "action", label: t("earning.rowAction") },
+              { key: "whisper", label: t("earning.rowWhisper") },
             ]}
             values={config.awards.message}
             onChange={(next) => setConfig({ ...config, awards: { ...config.awards, message: next } })}
           />
           <SourceGroup
-            heading="Forum posts"
+            heading={t("earning.forumPostsHeading")}
             rows={[
-              { key: "topic", label: "New topic" },
-              { key: "reply", label: "Reply" },
+              { key: "topic", label: t("earning.rowTopic") },
+              { key: "reply", label: t("earning.rowReply") },
             ]}
             values={config.awards.forum}
             onChange={(next) => setConfig({ ...config, awards: { ...config.awards, forum: next } })}
           />
           <SourceGroup
-            heading="Presence"
+            heading={t("earning.presenceHeading")}
             rows={[
-              { key: "perBlock", label: "Per active 5-min block" },
+              { key: "perBlock", label: t("earning.rowPerBlock") },
             ]}
             values={config.awards.presence}
             onChange={(next) => setConfig({ ...config, awards: { ...config.awards, presence: next } })}
@@ -283,26 +287,26 @@ function AwardsSection() {
         </div>
       </SectionFrame>
 
-      <SectionFrame title="Floors and caps">
+      <SectionFrame title={t("earning.floorsCapsTitle")}>
         <div className="grid gap-3 sm:grid-cols-3">
           <NumberRow
-            label="Body floor (chars)"
-            help="Messages shorter than this earn nothing."
+            label={t("earning.bodyFloorLabel")}
+            help={t("earning.bodyFloorHelp")}
             value={config.bodyFloorChars}
             min={0}
             onChange={(v) => setConfig({ ...config, bodyFloorChars: v })}
           />
           <NumberRow
-            label="Presence block (min)"
-            help="Length of one presence-award block. Takes effect on next server boot."
+            label={t("earning.presenceBlockLabel")}
+            help={t("earning.presenceBlockHelp")}
             value={config.presenceBlockMinutes}
             min={1}
             max={60}
             onChange={(v) => setConfig({ ...config, presenceBlockMinutes: v })}
           />
           <NumberRow
-            label="Presence daily cap"
-            help="Max blocks per pool per day. Past the cap, presence still records activity but earns 0."
+            label={t("earning.presenceCapLabel")}
+            help={t("earning.presenceCapHelp")}
             value={config.presenceDailyBlockCap}
             min={0}
             onChange={(v) => setConfig({ ...config, presenceDailyBlockCap: v })}
@@ -310,11 +314,11 @@ function AwardsSection() {
         </div>
       </SectionFrame>
 
-      <SectionFrame title="Multi-character divisor"
-        description="Multiplier applied to per-character IC awards when the user has more than one logged-in character. 1.0 = each character earns the full configured rate (current spec). Lower throttles multi-character earning."
-        {...(!canEditSensitive ? { masterOnlyHint: "Requires edit_earning_sensitive permission." } : {})}>
+      <SectionFrame title={t("earning.divisorTitle")}
+        description={t("earning.divisorDescription")}
+        {...(!canEditSensitive ? { masterOnlyHint: t("earning.sensitiveHint") } : {})}>
         <NumberRow
-          label="Divisor"
+          label={t("earning.divisorLabel")}
           value={config.multiCharacterEarnDivisor}
           min={0}
           max={10}
@@ -326,8 +330,8 @@ function AwardsSection() {
       </SectionFrame>
 
       <SectionFrame
-        title="Message length bonus"
-        description="Reward longer effortful posts with a multiplier on the per-kind XP+Currency. Linear interpolation from 1.0× at Floor up to Max× at Ceil; above Ceil clamps to Max. Disable per-kind to keep that source on the flat base rate."
+        title={t("earning.lengthBonusTitle")}
+        description={t("earning.lengthBonusDescription")}
       >
         <div className="grid gap-3 lg:grid-cols-3">
           {(["say", "action", "whisper"] as const).map((kind) => {
@@ -352,29 +356,29 @@ function AwardsSection() {
                       checked={spec.enabled}
                       onChange={(e) => update({ enabled: e.target.checked })}
                     />
-                    Enabled
+                    {t("enabled")}
                   </label>
                 </div>
                 <div className="grid gap-2">
                   <NumberRow
-                    label="Floor (chars)"
-                    help="At or below this length: 1.0× (base rate)."
+                    label={t("earning.floorCharsLabel")}
+                    help={t("earning.floorCharsHelp")}
                     value={spec.floorChars}
                     min={0}
                     disabled={!spec.enabled}
                     onChange={(v) => update({ floorChars: v })}
                   />
                   <NumberRow
-                    label="Ceil (chars)"
-                    help="At or above this length: Max multiplier (clamped)."
+                    label={t("earning.ceilCharsLabel")}
+                    help={t("earning.ceilCharsHelp")}
                     value={spec.ceilChars}
                     min={spec.floorChars + 1}
                     disabled={!spec.enabled}
                     onChange={(v) => update({ ceilChars: v })}
                   />
                   <NumberRow
-                    label="Max multiplier"
-                    help="Cap on the multiplier at or above Ceil. 1.0–10.0."
+                    label={t("earning.maxMultiplierLabel")}
+                    help={t("earning.maxMultiplierHelp")}
                     value={spec.maxMultiplier}
                     min={1}
                     max={10}
@@ -390,11 +394,11 @@ function AwardsSection() {
       </SectionFrame>
 
       <SectionFrame
-        title="Spam detection"
-        description="Heuristics that drop the award to zero on suspect messages. Each check has its own threshold; setting any to 0 disables that check individually. Master switch (Enabled) bypasses every check at once. Flagged messages still post normally, only the award is denied, and the ledger metadata records why so admins can audit and tune."
+        title={t("earning.spamTitle")}
+        description={t("earning.spamDescription")}
       >
         <ToggleRow
-          label="Spam detection enabled"
+          label={t("earning.spamEnabledLabel")}
           value={config.messageQuality.spam.enabled}
           onChange={(v) => setConfig({
             ...config,
@@ -403,8 +407,8 @@ function AwardsSection() {
         />
         <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <NumberRow
-            label="Min length to check"
-            help="Skip every heuristic below this length, short messages are not flagged."
+            label={t("earning.minLengthLabel")}
+            help={t("earning.minLengthHelp")}
             value={config.messageQuality.spam.minLengthToCheck}
             min={0}
             disabled={!config.messageQuality.spam.enabled}
@@ -414,8 +418,8 @@ function AwardsSection() {
             })}
           />
           <NumberRow
-            label="Unique-char floor"
-            help='Flag if unique-chars / total-chars is below this. 0.18 catches "aaaaaaaaaa" and "!!!!!!!". 0 disables.'
+            label={t("earning.uniqueCharLabel")}
+            help={t("earning.uniqueCharHelp")}
             value={config.messageQuality.spam.uniqueCharRatioFloor}
             min={0}
             max={1}
@@ -427,8 +431,8 @@ function AwardsSection() {
             })}
           />
           <NumberRow
-            label="Dominant-token cap"
-            help='Flag if any single word repeats > this share of total tokens. 0.55 catches "spam spam spam spam". 0 disables.'
+            label={t("earning.dominantTokenLabel")}
+            help={t("earning.dominantTokenHelp")}
             value={config.messageQuality.spam.dominantTokenRatioCap}
             min={0}
             max={1}
@@ -440,8 +444,8 @@ function AwardsSection() {
             })}
           />
           <NumberRow
-            label="Echo lookback"
-            help="How many recent messages-per-user to compare for exact-duplicate detection. 0 disables."
+            label={t("earning.echoLookbackLabel")}
+            help={t("earning.echoLookbackHelp")}
             value={config.messageQuality.spam.echoLookback}
             min={0}
             max={20}
@@ -454,46 +458,46 @@ function AwardsSection() {
         </div>
       </SectionFrame>
 
-      <SectionFrame title="Currency transfers (/currency send)"
-        description="Anti-abuse gates on user-to-user Currency transfers.">
+      <SectionFrame title={t("earning.transfersTitle")}
+        description={t("earning.transfersDescription")}>
         <ToggleRow
-          label="Transfers enabled"
+          label={t("earning.transfersEnabledLabel")}
           value={config.currencyTransfer.enabled}
           onChange={(v) => setConfig({ ...config, currencyTransfer: { ...config.currencyTransfer, enabled: v } })}
         />
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           <NumberRow
-            label="Daily send cap"
+            label={t("earning.dailySendCap")}
             value={config.currencyTransfer.dailySendCap}
             min={0}
             onChange={(v) => setConfig({ ...config, currencyTransfer: { ...config.currencyTransfer, dailySendCap: v } })}
           />
           <NumberRow
-            label="Daily receive cap"
+            label={t("earning.dailyReceiveCap")}
             value={config.currencyTransfer.dailyReceiveCap}
             min={0}
             onChange={(v) => setConfig({ ...config, currencyTransfer: { ...config.currencyTransfer, dailyReceiveCap: v } })}
           />
           <NumberRow
-            label="Min sender account age (days)"
+            label={t("earning.minSenderAge")}
             value={config.currencyTransfer.minSenderAccountAgeDays}
             min={0}
             onChange={(v) => setConfig({ ...config, currencyTransfer: { ...config.currencyTransfer, minSenderAccountAgeDays: v } })}
           />
           <NumberRow
-            label="Min recipient account age (days)"
+            label={t("earning.minRecipientAge")}
             value={config.currencyTransfer.minRecipientAccountAgeDays}
             min={0}
             onChange={(v) => setConfig({ ...config, currencyTransfer: { ...config.currencyTransfer, minRecipientAccountAgeDays: v } })}
           />
           <NumberRow
-            label="Min single transfer"
+            label={t("earning.minTransfer")}
             value={config.currencyTransfer.minTransferAmount}
             min={0}
             onChange={(v) => setConfig({ ...config, currencyTransfer: { ...config.currencyTransfer, minTransferAmount: v } })}
           />
           <NumberRow
-            label="Max single transfer"
+            label={t("earning.maxTransfer")}
             value={config.currencyTransfer.maxTransferAmount}
             min={0}
             onChange={(v) => setConfig({ ...config, currencyTransfer: { ...config.currencyTransfer, maxTransferAmount: v } })}
@@ -501,12 +505,12 @@ function AwardsSection() {
         </div>
       </SectionFrame>
 
-      <SectionFrame title="One-shot backfill (historical messages)"
-        description="At first boot the engine credited XP per pre-existing message at the rate below. `completedAt` is set automatically by the backfill job; editing it is not exposed."
-        {...(!canEditSensitive ? { masterOnlyHint: "Requires edit_earning_sensitive permission." } : {})}>
+      <SectionFrame title={t("earning.backfillTitle")}
+        description={t("earning.backfillDescription")}
+        {...(!canEditSensitive ? { masterOnlyHint: t("earning.sensitiveHint") } : {})}>
         <div className="grid gap-3 sm:grid-cols-2">
           <NumberRow
-            label="XP per historical message"
+            label={t("earning.xpPerHistorical")}
             value={config.backfill.xpPerHistoricalMessage}
             min={0}
             step={0.1}
@@ -515,11 +519,11 @@ function AwardsSection() {
             onChange={(v) => setConfig({ ...config, backfill: { ...config.backfill, xpPerHistoricalMessage: v } })}
           />
           <div className="self-end text-xs text-keep-muted">
-            <span className="block uppercase tracking-widest">Backfill status</span>
+            <span className="block uppercase tracking-widest">{t("earning.backfillStatus")}</span>
             <span>
               {config.backfill.completedAt
-                ? `Completed ${new Date(config.backfill.completedAt).toLocaleString()}`
-                : "Not yet run, will fire on next boot."}
+                ? t("earning.backfillCompleted", { time: formatDateTime(config.backfill.completedAt) })
+                : t("earning.backfillNotRun")}
             </span>
           </div>
         </div>
@@ -533,7 +537,7 @@ function AwardsSection() {
 
       <div className="flex items-center justify-between">
         <div className="text-xs text-keep-muted">
-          {savedFlash ? <span className="text-keep-system">Saved.</span> : (dirty ? "Unsaved changes." : "")}
+          {savedFlash ? <span className="text-keep-system">{t("saved")}</span> : (dirty ? t("earning.unsavedChanges") : "")}
         </div>
         <div className="flex gap-2">
           <button
@@ -541,7 +545,7 @@ function AwardsSection() {
             onClick={resetToDefaults}
             className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm text-keep-muted hover:bg-keep-banner hover:text-keep-text"
           >
-            Reset to defaults
+            {t("earning.resetDefaults")}
           </button>
           <button
             type="button"
@@ -549,7 +553,7 @@ function AwardsSection() {
             disabled={saving}
             className="rounded border border-keep-action bg-keep-action/15 px-4 py-1 text-sm font-semibold text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
           >
-            {saving ? "Saving…" : "Save"}
+            {saving ? t("common:saving") : t("common:save")}
           </button>
         </div>
       </div>
@@ -667,6 +671,7 @@ function SourceMatrix({
   flags: { message: SourceEnableFlags; forum: SourceEnableFlags; presence: SourceEnableFlags };
   onChange: (next: { message: SourceEnableFlags; forum: SourceEnableFlags; presence: SourceEnableFlags }) => void;
 }) {
+  const { t } = useTranslation("admin");
   function set<K extends keyof typeof flags>(source: K, pool: "xp" | "currency", val: boolean) {
     onChange({ ...flags, [source]: { ...flags[source], [pool]: val } });
   }
@@ -674,15 +679,15 @@ function SourceMatrix({
     <table className="w-full text-sm">
       <thead className="text-xs uppercase tracking-widest text-keep-muted">
         <tr>
-          <th className="py-1 text-left">Source</th>
-          <th className="py-1 text-center">XP</th>
-          <th className="py-1 text-center">Currency</th>
+          <th className="py-1 text-left">{t("earning.colSource")}</th>
+          <th className="py-1 text-center">{t("earning.colXp")}</th>
+          <th className="py-1 text-center">{t("earning.colCurrency")}</th>
         </tr>
       </thead>
       <tbody>
         {(["message", "forum", "presence"] as const).map((source) => (
           <tr key={source} className="border-t border-keep-rule/40">
-            <td className="py-1 capitalize">{source}</td>
+            <td className="py-1 capitalize">{t(`earning.source.${source}`)}</td>
             <td className="py-1 text-center">
               <input
                 type="checkbox"
@@ -715,6 +720,7 @@ function SourceGroup<K extends string>({
   values: Record<K, AwardAmount>;
   onChange: (next: Record<K, AwardAmount>) => void;
 }) {
+  const { t } = useTranslation("admin");
   function set(key: K, pool: "xp" | "currency", v: number) {
     onChange({ ...values, [key]: { ...values[key], [pool]: v } });
   }
@@ -725,8 +731,8 @@ function SourceGroup<K extends string>({
         <thead className="text-[10px] uppercase tracking-widest text-keep-muted">
           <tr>
             <th className="py-1 text-left"></th>
-            <th className="py-1 text-right">XP</th>
-            <th className="py-1 text-right">Currency</th>
+            <th className="py-1 text-right">{t("earning.colXp")}</th>
+            <th className="py-1 text-right">{t("earning.colCurrency")}</th>
           </tr>
         </thead>
         <tbody>
@@ -780,6 +786,7 @@ function SourceGroup<K extends string>({
  * ========================================================= */
 
 function RanksSection() {
+  const { t } = useTranslation("admin");
   const [ranks, setRanks] = useState<AdminRankRow[]>([]);
   const [tiers, setTiers] = useState<AdminTierRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -796,7 +803,7 @@ function RanksSection() {
       setRanks(r.ranks);
       setTiers(r.tiers);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to load ranks");
+      setErr(e instanceof Error ? e.message : t("earning.ranksLoadFailed"));
     } finally {
       setLoading(false);
     }
@@ -813,21 +820,19 @@ function RanksSection() {
       setCreating(false);
       await refresh();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Create failed");
+      setErr(e instanceof Error ? e.message : t("earning.createFailedCap"));
     }
   }
 
-  if (loading) return <p className="text-sm text-keep-muted">Loading ranks…</p>;
+  if (loading) return <p className="text-sm text-keep-muted">{t("earning.loadingRanks")}</p>;
 
   return (
     <div className="space-y-4">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h3 className="font-action text-base">Ranks &amp; Tiers</h3>
+          <h3 className="font-action text-base">{t("earning.ranksTitle")}</h3>
           <p className="text-xs text-keep-muted">
-            Edit thresholds, asset URLs, and enable flags. Saved changes take effect immediately;
-            threshold edits re-place every earning row automatically. Disabling a rank is a soft close
-           , existing rank-holders keep their rank, but new earners skip past it.
+            {t("earning.ranksDescription")}
           </p>
         </div>
         <button
@@ -835,7 +840,7 @@ function RanksSection() {
           onClick={() => setCreating((v) => !v)}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-sm text-keep-action hover:bg-keep-action/25"
         >
-          {creating ? "Cancel" : "Add rank"}
+          {creating ? t("common:cancel") : t("earning.addRank")}
         </button>
       </header>
 
@@ -843,18 +848,18 @@ function RanksSection() {
         <form onSubmit={onCreateRank} className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-2">
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="block text-xs">
-              <span className="mb-1 block uppercase tracking-widest text-keep-muted">Key (slug)</span>
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.keySlugLabel")}</span>
               <input
                 value={newKey}
                 onChange={(e) => setNewKey(e.target.value)}
                 pattern="[a-z][a-z0-9_]*"
-                title="Lowercase letters, digits, underscores. Must start with a letter."
+                title={t("earning.keySlugTitle")}
                 required
                 className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
               />
             </label>
             <label className="block text-xs">
-              <span className="mb-1 block uppercase tracking-widest text-keep-muted">Display name</span>
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.displayNameLabel")}</span>
               <input
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
@@ -864,14 +869,13 @@ function RanksSection() {
             </label>
           </div>
           <p className="text-[10px] text-keep-muted">
-            Four default tiers (I, II, III, IV: Verified) are created automatically with zero thresholds.
-            Edit them below after creating.
+            {t("earning.defaultTiersNote")}
           </p>
           <button
             type="submit"
             className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-sm text-keep-action hover:bg-keep-action/25"
           >
-            Create
+            {t("create")}
           </button>
         </form>
       ) : null}
@@ -906,6 +910,7 @@ function RankCard({
   onChanged: () => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("admin");
   const [name, setName] = useState(rank.name);
   const [enabled, setEnabled] = useState(rank.enabled);
   const [saving, setSaving] = useState(false);
@@ -917,7 +922,7 @@ function RankCard({
       await patchAdminRank(rank.key, { name, enabled });
       onChanged();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Save failed");
+      onError(e instanceof Error ? e.message : t("earning.saveFailedCap"));
     } finally {
       setSaving(false);
     }
@@ -925,15 +930,15 @@ function RankCard({
 
   async function removeRank() {
     if (inUse) {
-      onError(`Cannot delete: ${rank.users} users + ${rank.characters} characters currently hold this rank. Disable it instead.`);
+      onError(t("earning.rankInUse", { users: rank.users, characters: rank.characters }));
       return;
     }
-    if (!window.confirm(`Delete rank "${rank.name}"? This is permanent.`)) return;
+    if (!window.confirm(t("earning.deleteRankConfirm", { name: rank.name }))) return;
     try {
       await deleteAdminRank(rank.key);
       onChanged();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Delete failed");
+      onError(e instanceof Error ? e.message : t("earning.deleteFailedCap"));
     }
   }
 
@@ -948,10 +953,10 @@ function RankCard({
         />
         <label className="flex items-center gap-1 text-xs">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          enabled
+          {t("earning.enabledLower")}
         </label>
         <span className="text-[10px] text-keep-muted">
-          {rank.users} users · {rank.characters} chars
+          {t("earning.usersChars", { users: rank.users, characters: rank.characters })}
         </span>
         <button
           type="button"
@@ -959,16 +964,16 @@ function RankCard({
           disabled={saving}
           className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          Save
+          {t("common:save")}
         </button>
         <button
           type="button"
           onClick={() => void removeRank()}
           disabled={inUse}
-          title={inUse ? "Disable instead, users currently hold this rank." : "Delete rank"}
+          title={inUse ? t("earning.disableInsteadTitle") : t("earning.deleteRankTitle")}
           className="rounded border border-keep-rule px-2 py-0.5 text-xs text-keep-muted hover:text-keep-accent disabled:opacity-30 disabled:cursor-not-allowed"
         >
-          Delete
+          {t("common:delete")}
         </button>
       </header>
 
@@ -990,6 +995,7 @@ function TierRow({
   onChanged: () => void;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("admin");
   const [label, setLabel] = useState(tier.label);
   const [threshold, setThreshold] = useState(tier.xpThreshold);
   const [sigilUrl, setSigilUrl] = useState(tier.sigilImageUrl);
@@ -1014,7 +1020,7 @@ function TierRow({
       });
       onChanged();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Save failed");
+      onError(e instanceof Error ? e.message : t("earning.saveFailedCap"));
     } finally {
       setSaving(false);
     }
@@ -1028,7 +1034,7 @@ function TierRow({
       if (kind === "sigil") setSigilUrl(url);
       else setBorderUrl(url);
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Upload failed");
+      onError(e instanceof Error ? e.message : t("earning.uploadFailedCap"));
     } finally {
       setUploading(null);
     }
@@ -1038,16 +1044,16 @@ function TierRow({
     <div className="rounded border border-keep-rule/60 bg-keep-bg/60 p-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <span className="shrink-0 rounded bg-keep-banner/40 px-1.5 py-0.5 font-action uppercase tracking-widest text-keep-muted">
-          Tier {tier.tier}
+          {t("earning.tierN", { tier: tier.tier })}
         </span>
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
-          placeholder="Label"
+          placeholder={t("earning.labelPlaceholder")}
           className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-0.5"
         />
         <label className="flex items-center gap-1">
-          <span className="text-keep-muted">XP ≥</span>
+          <span className="text-keep-muted">{t("earning.xpGte")}</span>
           <input
             type="number"
             min={0}
@@ -1058,7 +1064,7 @@ function TierRow({
         </label>
         <label className="flex items-center gap-1">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          enabled
+          {t("earning.enabledLower")}
         </label>
         <button
           type="button"
@@ -1066,13 +1072,13 @@ function TierRow({
           disabled={saving}
           className="ml-auto rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          Save
+          {t("common:save")}
         </button>
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-keep-muted">Sigil:</span>
-        {sigilUrl ? <img src={sigilUrl} alt="" className="h-7 w-7 select-none" draggable={false} /> : <span className="text-keep-muted">(none)</span>}
+        <span className="text-keep-muted">{t("earning.sigilLabel")}</span>
+        {sigilUrl ? <img src={sigilUrl} alt="" className="h-7 w-7 select-none" draggable={false} /> : <span className="text-keep-muted">{t("noneParen")}</span>}
         <input
           value={sigilUrl}
           onChange={(e) => setSigilUrl(e.target.value)}
@@ -1080,7 +1086,7 @@ function TierRow({
           className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px]"
         />
         <label className="rounded border border-keep-rule bg-keep-banner/40 px-2 py-0.5 text-keep-muted hover:bg-keep-banner cursor-pointer">
-          {uploading === "sigil" ? "Uploading…" : "Upload PNG"}
+          {uploading === "sigil" ? t("branding.uploading") : t("earning.uploadPng")}
           <input
             type="file"
             accept="image/png"
@@ -1096,16 +1102,16 @@ function TierRow({
 
       {isCapstone ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <span className="text-keep-muted">Border:</span>
-          {borderUrl ? <img src={borderUrl} alt="" className="h-7 w-7 select-none" draggable={false} /> : <span className="text-keep-muted">(none)</span>}
+          <span className="text-keep-muted">{t("earning.borderColonLabel")}</span>
+          {borderUrl ? <img src={borderUrl} alt="" className="h-7 w-7 select-none" draggable={false} /> : <span className="text-keep-muted">{t("noneParen")}</span>}
           <input
             value={borderUrl}
             onChange={(e) => setBorderUrl(e.target.value)}
-            placeholder="(optional, capstone border)"
+            placeholder={t("earning.capstonePlaceholder")}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[11px]"
           />
           <label className="rounded border border-keep-rule bg-keep-banner/40 px-2 py-0.5 text-keep-muted hover:bg-keep-banner cursor-pointer">
-            {uploading === "border" ? "Uploading…" : "Upload PNG"}
+            {uploading === "border" ? t("branding.uploading") : t("earning.uploadPng")}
             <input
               type="file"
               accept="image/png"
@@ -1119,7 +1125,7 @@ function TierRow({
           </label>
           {borderUrl ? (
             <label className="flex items-center gap-1">
-              <span className="text-keep-muted">Cost</span>
+              <span className="text-keep-muted">{t("earning.costLabel")}</span>
               <input
                 type="number"
                 min={0}
@@ -1127,7 +1133,7 @@ function TierRow({
                 onChange={(e) => setBorderCost(Number(e.target.value) || 0)}
                 className="w-24 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-right"
               />
-              <span className="text-keep-muted">Currency</span>
+              <span className="text-keep-muted">{t("earning.currencyWord")}</span>
             </label>
           ) : null}
         </div>
@@ -1139,7 +1145,7 @@ function TierRow({
 function fileToDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error ?? new Error("read failed"));
+    reader.onerror = () => reject(reader.error ?? new Error(i18n.t("admin:earning.readFailed")));
     reader.onload = () => resolve(reader.result as string);
     reader.readAsDataURL(file);
   });
@@ -1157,6 +1163,7 @@ function fileToDataUrl(file: File): Promise<string> {
  * ========================================================= */
 
 function NameStylesSection() {
+  const { t } = useTranslation("admin");
   const [rows, setRows] = useState<AdminNameStyleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -1173,7 +1180,7 @@ function NameStylesSection() {
         setSelectedKey(null);
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to load styles");
+      setErr(e instanceof Error ? e.message : t("earning.stylesLoadFailed"));
     } finally {
       setLoading(false);
     }
@@ -1185,15 +1192,19 @@ function NameStylesSection() {
     [rows, selectedKey],
   );
 
-  if (loading) return <p className="text-sm text-keep-muted">Loading styles…</p>;
+  if (loading) return <p className="text-sm text-keep-muted">{t("earning.loadingStyles")}</p>;
 
   return (
     <div className="space-y-3">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h3 className="font-action text-base">Name Styles</h3>
+          <h3 className="font-action text-base">{t("earning.stylesTitle")}</h3>
           <p className="text-xs text-keep-muted">
-            HTML + CSS templates with a <code>{"{username}"}</code> placeholder. Edits go live on the next /earning/me fetch (every user sees the new CSS without a reload). Built-in seed styles can be rewritten but not deleted.
+            <Trans t={t} i18nKey="earning.stylesDescription" shouldUnescape>
+              {"HTML + CSS templates with a "}
+              <code>{"{username}"}</code>
+              {" placeholder. Edits go live on the next /earning/me fetch (every user sees the new CSS without a reload). Built-in seed styles can be rewritten but not deleted."}
+            </Trans>
           </p>
         </div>
         <button
@@ -1201,7 +1212,7 @@ function NameStylesSection() {
           onClick={() => { setCreating(true); setSelectedKey(null); }}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-sm text-keep-action hover:bg-keep-action/25"
         >
-          New style
+          {t("earning.newStyle")}
         </button>
       </header>
 
@@ -1222,10 +1233,10 @@ function NameStylesSection() {
             >
               <div className="flex items-baseline justify-between gap-2">
                 <span className="font-semibold">{r.name}</span>
-                {r.isBuiltin ? <span className="text-[10px] uppercase tracking-widest text-keep-muted">builtin</span> : null}
+                {r.isBuiltin ? <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("earning.builtinChip")}</span> : null}
               </div>
               <div className="text-[10px] text-keep-muted">
-                {r.cost} Currency · {r.owners} owners · {r.equipped} equipped {r.enabled ? "" : " · disabled"}
+                {t("earning.styleStats", { cost: r.cost, owners: r.owners, equipped: r.equipped })}{r.enabled ? "" : t("earning.disabledSuffix")}
               </div>
             </button>
           ))}
@@ -1275,7 +1286,7 @@ function NameStylesSection() {
               onError={setErr}
             />
           ) : (
-            <p className="text-sm text-keep-muted">Select a style from the list or create a new one.</p>
+            <p className="text-sm text-keep-muted">{t("earning.selectStyleHint")}</p>
           )}
         </div>
       </div>
@@ -1393,6 +1404,7 @@ function StyleEditor({
   onSaved: (key: string) => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("admin");
   const [key, setKey] = useState(initial.key);
   const [name, setName] = useState(initial.name);
   const [description, setDescription] = useState(initial.description);
@@ -1433,20 +1445,20 @@ function StyleEditor({
         await onSaved(initial.key);
       }
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Save failed");
+      onError(e instanceof Error ? e.message : t("earning.saveFailedCap"));
     } finally {
       setSaving(false);
     }
   }
 
   async function remove() {
-    if (!window.confirm(`Delete "${initial.name}"? Users who own it will lose access.`)) return;
+    if (!window.confirm(t("earning.deleteStyleConfirm", { name: initial.name }))) return;
     try {
       await deleteAdminNameStyle(initial.key);
       onCancel();
       await onSaved(initial.key);
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Delete failed");
+      onError(e instanceof Error ? e.message : t("earning.deleteFailedCap"));
     }
   }
 
@@ -1454,7 +1466,7 @@ function StyleEditor({
     <div className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Key</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.keyLabel")}</span>
           <input
             value={key}
             onChange={(e) => setKey(e.target.value)}
@@ -1464,7 +1476,7 @@ function StyleEditor({
           />
         </label>
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Display name</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.displayNameLabel")}</span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -1473,7 +1485,7 @@ function StyleEditor({
         </label>
       </div>
       <label className="block text-xs">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Description</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.descriptionLabel")}</span>
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -1482,7 +1494,13 @@ function StyleEditor({
       </label>
       <label className="block text-xs">
         <span className="mb-1 block uppercase tracking-widest text-keep-muted">
-          HTML template (include <code>{"{username}"}</code> or <code>{"{username-span}"}</code>)
+          <Trans t={t} i18nKey="earning.templateLabel">
+            {"HTML template (include "}
+            <code>{"{username}"}</code>
+            {" or "}
+            <code>{"{username-span}"}</code>
+            {")"}
+          </Trans>
         </span>
         <textarea
           value={template}
@@ -1491,17 +1509,22 @@ function StyleEditor({
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-sm"
         />
         <span className="mt-1 block text-[10px] normal-case tracking-normal text-keep-muted">
-          <code>{"{username}"}</code> drops the name as one text run.
-          {" "}
-          <code>{"{username-span}"}</code> wraps each character in its own
-          <code>&lt;span data-i="N"&gt;</code> so per-character CSS works,
-          target via <code>{"span[data-i=\"0\"]"}</code> or
-          <code>:nth-child()</code> for alternating colors, per-letter
-          animations, etc.
+          <Trans t={t} i18nKey="earning.templateHelp" shouldUnescape>
+            <code>{"{username}"}</code>
+            {" drops the name as one text run. "}
+            <code>{"{username-span}"}</code>
+            {" wraps each character in its own"}
+            <code>{'<span data-i="N">'}</code>
+            {" so per-character CSS works, target via "}
+            <code>{'span[data-i="0"]'}</code>
+            {" or"}
+            <code>:nth-child()</code>
+            {" for alternating colors, per-letter animations, etc."}
+          </Trans>
         </span>
       </label>
       <label className="block text-xs">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">CSS (scoped to your wrapper class)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.cssLabel")}</span>
         <textarea
           value={styleCss}
           onChange={(e) => setStyleCss(e.target.value)}
@@ -1511,7 +1534,7 @@ function StyleEditor({
       </label>
       <div className="flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-1 text-xs">
-          <span className="text-keep-muted">Cost</span>
+          <span className="text-keep-muted">{t("earning.costLabel")}</span>
           <input
             type="number"
             min={0}
@@ -1519,17 +1542,17 @@ function StyleEditor({
             onChange={(e) => setCost(Number(e.target.value) || 0)}
             className="w-24 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-right text-sm"
           />
-          <span className="text-keep-muted">Currency</span>
+          <span className="text-keep-muted">{t("earning.currencyWord")}</span>
         </label>
         <label className="flex items-center gap-1 text-xs">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          enabled
+          {t("earning.enabledLower")}
         </label>
-        {initial.isBuiltin ? <span className="text-[10px] uppercase tracking-widest text-keep-muted">built-in (delete protected)</span> : null}
+        {initial.isBuiltin ? <span className="text-[10px] uppercase tracking-widest text-keep-muted">{t("earning.builtinProtected")}</span> : null}
       </div>
 
       <div className="rounded border border-keep-rule/60 bg-keep-bg/60 p-3">
-        <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">Live preview</div>
+        <div className="mb-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("earning.livePreview")}</div>
         {/* `text-2xl font-bold` mirrors the EarningDashboard's
             Available card preview sizing, at smaller weight the 1px
             text-stroke a lot of styles use overwhelms the fill, so
@@ -1539,7 +1562,7 @@ function StyleEditor({
           <NameStylePreview
             template={template}
             styleCss={styleCss}
-            displayName="Username"
+            displayName={t("earning.previewUsername")}
           />
         </div>
       </div>
@@ -1551,7 +1574,7 @@ function StyleEditor({
             onClick={() => void remove()}
             className="rounded border border-keep-rule px-3 py-1 text-sm text-keep-muted hover:text-keep-accent"
           >
-            Delete
+            {t("common:delete")}
           </button>
         ) : null}
         <button
@@ -1559,7 +1582,7 @@ function StyleEditor({
           onClick={onCancel}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm text-keep-muted hover:bg-keep-banner hover:text-keep-text"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="button"
@@ -1567,7 +1590,7 @@ function StyleEditor({
           disabled={saving}
           className="rounded border border-keep-action bg-keep-action/15 px-4 py-1 text-sm text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          {saving ? "Saving…" : "Save"}
+          {saving ? t("common:saving") : t("common:save")}
         </button>
       </div>
     </div>
@@ -1591,6 +1614,7 @@ function StyleEditor({
  * ========================================================= */
 
 function FreeformBordersSection() {
+  const { t } = useTranslation("admin");
   const [rows, setRows] = useState<AdminFreeformBorderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -1625,7 +1649,7 @@ function FreeformBordersSection() {
       const r = await fetchAdminFreeformBorders();
       setRows(r.borders);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to load borders");
+      setErr(e instanceof Error ? e.message : t("earning.bordersLoadFailed"));
     } finally {
       setLoading(false);
     }
@@ -1701,25 +1725,25 @@ function FreeformBordersSection() {
       cancelEdit();
       await refresh();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Save failed");
+      setErr(e instanceof Error ? e.message : t("earning.saveFailedCap"));
     }
   }
 
   async function remove(row: AdminFreeformBorderRow) {
     if (row.isBuiltin) {
-      setErr("Built-in borders cannot be deleted; disable instead");
+      setErr(t("earning.builtinDeleteError"));
       return;
     }
     const msg = row.owners > 0 || row.equipped > 0
-      ? `Delete "${row.name}"? ${row.owners} owner(s), ${row.equipped} equip(s) will be cleared.`
-      : `Delete "${row.name}"?`;
+      ? t("earning.deleteBorderConfirmInUse", { name: row.name, owners: row.owners, equipped: row.equipped })
+      : t("earning.deleteBorderConfirm", { name: row.name });
     if (!window.confirm(msg)) return;
     setErr(null);
     try {
       await deleteAdminFreeformBorder(row.key);
       await refresh();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Delete failed");
+      setErr(e instanceof Error ? e.message : t("earning.deleteFailedCap"));
     }
   }
 
@@ -1729,7 +1753,7 @@ function FreeformBordersSection() {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="font-action text-sm uppercase tracking-widest text-keep-muted">
-          Free-form Borders
+          {t("earning.freeformTitle")}
         </h3>
         {!showEditor ? (
           <button
@@ -1737,7 +1761,7 @@ function FreeformBordersSection() {
             onClick={beginCreate}
             className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25"
           >
-            + New border
+            {t("earning.newBorder")}
           </button>
         ) : null}
       </div>
@@ -1754,9 +1778,9 @@ function FreeformBordersSection() {
         />
       ) : null}
       {loading ? (
-        <div className="text-sm text-keep-muted">Loading…</div>
+        <div className="text-sm text-keep-muted">{t("common:loading")}</div>
       ) : rows.length === 0 ? (
-        <div className="text-sm text-keep-muted">No free-form borders yet.</div>
+        <div className="text-sm text-keep-muted">{t("earning.noBorders")}</div>
       ) : (
         // Card grid, one tile per border, with a live preview using
         // BorderedAvatar's freeformOverride path so disabled rows
@@ -1790,7 +1814,7 @@ function FreeformBordersSection() {
                     }}
                   />
                 ) : (
-                  <span className="text-xs italic text-keep-muted">(no template / image)</span>
+                  <span className="text-xs italic text-keep-muted">{t("earning.noTemplateImage")}</span>
                 )}
               </div>
               <div className="min-w-0">
@@ -1804,20 +1828,20 @@ function FreeformBordersSection() {
                   </span>
                   {!r.enabled ? (
                     <span className="rounded border border-keep-accent/40 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-keep-accent">
-                      Disabled
+                      {t("earning.disabledChip")}
                     </span>
                   ) : null}
                   {r.isBuiltin ? (
                     <span className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-keep-muted">
-                      Built-in
+                      {t("earning.builtinCap")}
                     </span>
                   ) : null}
                   <span className="rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-keep-muted">
-                    {r.template ? "Template" : r.imageUrl ? "Image" : "Empty"}
+                    {r.template ? t("earning.modeTemplate") : r.imageUrl ? t("earning.modeImage") : t("earning.modeEmpty")}
                   </span>
                 </div>
                 <div className="mt-1 text-[11px] text-keep-muted">
-                  Cost {r.cost} · Owners {r.owners} · Equipped {r.equipped}
+                  {t("earning.costOwnersEquipped", { cost: r.cost, owners: r.owners, equipped: r.equipped })}
                 </div>
               </div>
               <div className="mt-auto flex justify-end gap-1">
@@ -1826,16 +1850,16 @@ function FreeformBordersSection() {
                   onClick={() => beginEdit(r)}
                   className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner"
                 >
-                  Edit
+                  {t("edit")}
                 </button>
                 <button
                   type="button"
                   onClick={() => void remove(r)}
                   disabled={r.isBuiltin}
-                  title={r.isBuiltin ? "Built-in, disable instead" : "Delete border"}
+                  title={r.isBuiltin ? t("earning.builtinDisableTitle") : t("earning.deleteBorderTitle")}
                   className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-0.5 text-xs text-keep-accent hover:bg-keep-accent/20 disabled:opacity-40"
                 >
-                  Delete
+                  {t("common:delete")}
                 </button>
               </div>
             </div>
@@ -1859,6 +1883,7 @@ function FreeformBorderEditor({
   onCancel: () => void;
   onSave: () => void;
 }) {
+  const { t } = useTranslation("admin");
   // Local helper to update a single field without losing the
   // unspecified fields. Lets the input handlers stay terse.
   function set<K extends keyof AdminFreeformBorderRow>(k: K, v: AdminFreeformBorderRow[K]) {
@@ -1882,7 +1907,7 @@ function FreeformBorderEditor({
     <div className="space-y-2 rounded border border-keep-rule bg-keep-bg/40 p-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="text-sm font-semibold">
-          {creating ? "New free-form border" : `Editing: ${draft.key}`}
+          {creating ? t("earning.newFreeformBorder") : t("earning.editingKey", { key: draft.key })}
         </div>
         {/* Live editor preview, feeds the draft through the same
             BorderedAvatar override path the card grid uses, so the
@@ -1891,7 +1916,7 @@ function FreeformBorderEditor({
           <div className="flex items-center justify-center rounded border border-keep-rule bg-keep-banner/40 p-2">
             <BorderedAvatar
               avatarUrl={previewAvatarUrl}
-              name={draft.name ?? draft.key ?? "Preview"}
+              name={draft.name ?? draft.key ?? t("common:preview")}
               size="xl"
               freeformOverride={{
                 key: draft.key ?? "preview",
@@ -1906,7 +1931,7 @@ function FreeformBorderEditor({
       <div className="grid gap-2 md:grid-cols-2">
         {creating ? (
           <label className="text-xs">
-            <span className="text-keep-muted">Key (lowercase, a-z 0-9 _ -)</span>
+            <span className="text-keep-muted">{t("earning.borderKeyLabel")}</span>
             <input
               type="text"
               value={draft.key ?? ""}
@@ -1916,7 +1941,7 @@ function FreeformBorderEditor({
           </label>
         ) : null}
         <label className="text-xs">
-          <span className="text-keep-muted">Name</span>
+          <span className="text-keep-muted">{t("earning.nameLabel")}</span>
           <input
             type="text"
             value={draft.name ?? ""}
@@ -1925,17 +1950,17 @@ function FreeformBorderEditor({
           />
         </label>
         <label className="text-xs">
-          <span className="text-keep-muted">Rarity (open string)</span>
+          <span className="text-keep-muted">{t("earning.rarityLabel")}</span>
           <input
             type="text"
             value={draft.rarity ?? ""}
             onChange={(e) => set("rarity", e.target.value)}
-            placeholder="common / rare / epic / legendary / mythic / exotic / atmospheric"
+            placeholder={t("earning.rarityPlaceholder")}
             className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
           />
         </label>
         <label className="text-xs">
-          <span className="text-keep-muted">Cost (Currency)</span>
+          <span className="text-keep-muted">{t("earning.costCurrencyLabel")}</span>
           <input
             type="number"
             min={0}
@@ -1945,7 +1970,7 @@ function FreeformBorderEditor({
           />
         </label>
         <label className="text-xs">
-          <span className="text-keep-muted">Order</span>
+          <span className="text-keep-muted">{t("earning.orderLabel")}</span>
           <input
             type="number"
             value={draft.order ?? 0}
@@ -1954,7 +1979,7 @@ function FreeformBorderEditor({
           />
         </label>
         <label className="text-xs">
-          <span className="text-keep-muted">Enabled</span>
+          <span className="text-keep-muted">{t("enabled")}</span>
           <input
             type="checkbox"
             checked={!!draft.enabled}
@@ -1964,7 +1989,7 @@ function FreeformBorderEditor({
         </label>
       </div>
       <label className="block text-xs">
-        <span className="text-keep-muted">Description (optional)</span>
+        <span className="text-keep-muted">{t("earning.descriptionOptionalLabel")}</span>
         <textarea
           rows={2}
           value={draft.description ?? ""}
@@ -1976,7 +2001,7 @@ function FreeformBorderEditor({
           XOR. The UI lets the admin clear one to switch to the
           other. */}
       <label className="block text-xs">
-        <span className="text-keep-muted">Image URL (PNG / APNG / WebP, transparent center). Leave blank if using a template.</span>
+        <span className="text-keep-muted">{t("earning.imageUrlLabel")}</span>
         <input
           type="text"
           value={draft.imageUrl ?? ""}
@@ -1985,7 +2010,7 @@ function FreeformBorderEditor({
         />
       </label>
       <label className="block text-xs">
-        <span className="text-keep-muted">Template (HTML, uses literal `&#123;avatar&#125;` for the avatar slot). Leave blank if using an image URL.</span>
+        <span className="text-keep-muted">{t("earning.borderTemplateLabel")}</span>
         <textarea
           rows={4}
           value={draft.template ?? ""}
@@ -1995,7 +2020,7 @@ function FreeformBorderEditor({
         />
       </label>
       <label className="block text-xs">
-        <span className="text-keep-muted">Style CSS (scoped to the `.b-&lt;key&gt;` chain referenced by the template)</span>
+        <span className="text-keep-muted">{t("earning.borderCssLabel")}</span>
         <textarea
           rows={6}
           value={draft.styleCss ?? ""}
@@ -2009,14 +2034,14 @@ function FreeformBorderEditor({
           onClick={onCancel}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-xs text-keep-muted hover:bg-keep-banner"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="button"
           onClick={onSave}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25"
         >
-          Save
+          {t("common:save")}
         </button>
       </div>
     </div>
@@ -2040,6 +2065,7 @@ function FreeformBorderEditor({
  * ========================================================= */
 
 function CosmeticsSection() {
+  const { t } = useTranslation("admin");
   const [rows, setRows] = useState<AdminCosmeticRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -2051,21 +2077,21 @@ function CosmeticsSection() {
       const r = await fetchAdminCosmetics();
       setRows(r.cosmetics);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to load cosmetics");
+      setErr(e instanceof Error ? e.message : t("earning.cosmeticsLoadFailed"));
     } finally {
       setLoading(false);
     }
   }
   useEffect(() => { void refresh(); }, []);
 
-  if (loading) return <p className="text-sm text-keep-muted">Loading cosmetics…</p>;
+  if (loading) return <p className="text-sm text-keep-muted">{t("earning.loadingCosmetics")}</p>;
 
   return (
     <div className="space-y-3">
       <header>
-        <h3 className="font-action text-base">Flair</h3>
+        <h3 className="font-action text-base">{t("earning.flairTitle")}</h3>
         <p className="text-xs text-keep-muted">
-          Edit the buyable cosmetics catalog. Rank borders are priced per-rank in the Ranks tab; this surface covers everything else.
+          {t("earning.flairDescription")}
         </p>
       </header>
       {err ? (
@@ -2100,36 +2126,37 @@ function CosmeticsSection() {
  *  `typing_phrase_clear` audit row with the optional reason.
  * ========================================================= */
 function FlairModerationSection() {
+  const { t } = useTranslation("admin");
   return (
     <section className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
       <header>
         <h4 className="font-action text-sm uppercase tracking-widest text-keep-muted">
-          Moderation
+          {t("earning.moderationTitle")}
         </h4>
         <p className="text-xs text-keep-muted">
-          Wipe a user's free-form Flair content (banner URL, typing phrase) without touching their ownership of the cosmetic.
+          {t("earning.moderationDescription")}
         </p>
       </header>
       <div className="grid gap-2 md:grid-cols-2">
         <ClearFlairCard
-          title="Clear profile banner"
+          title={t("earning.clearBannerTitle")}
           kind="banner"
-          hint="Empties the banner-URL slot for the target identity. Use after a hotlinked image report."
+          hint={t("earning.clearBannerHint")}
         />
         <ClearFlairCard
-          title="Clear typing phrase"
+          title={t("earning.clearTypingTitle")}
           kind="typing-phrase"
-          hint="Empties the custom typing phrase for the target identity. Use after a harassment / language report."
+          hint={t("earning.clearTypingHint")}
         />
         <ClearFlairCard
-          title="Clear room entrance / exit"
+          title={t("earning.clearRoomPresenceTitle")}
           kind="room-presence"
-          hint="Wipes both the join and leave room broadcast templates for the target identity. Use after an abusive room-presence flair report."
+          hint={t("earning.clearRoomPresenceHint")}
         />
         <ClearFlairCard
-          title="Clear session greeting"
+          title={t("earning.clearSessionTitle")}
           kind="session-presence"
-          hint="Wipes both the login and logout broadcast templates. Master-only; character id is ignored."
+          hint={t("earning.clearSessionHint")}
         />
       </div>
     </section>
@@ -2145,6 +2172,7 @@ function ClearFlairCard({
   kind: "banner" | "typing-phrase" | "room-presence" | "session-presence";
   hint: string;
 }) {
+  const { t } = useTranslation("admin");
   const [username, setUsername] = useState("");
   const [characterId, setCharacterId] = useState("");
   const [reason, setReason] = useState("");
@@ -2173,13 +2201,13 @@ function ClearFlairCard({
       } else {
         await adminClearSessionPresence({ username: args.username, ...(reason.trim() ? { reason: reason.trim() } : {}) });
       }
-      setStatus({ kind: "ok", message: "Cleared." });
+      setStatus({ kind: "ok", message: t("earning.cleared") });
       // Leave the username field populated so a moderator can clear
       // the same user's other slot without retyping. Wipe the reason
       // so the next click doesn't carry it forward unintentionally.
       setReason("");
     } catch (e) {
-      setStatus({ kind: "err", message: e instanceof Error ? e.message : "Clear failed" });
+      setStatus({ kind: "err", message: e instanceof Error ? e.message : t("earning.clearFailed") });
     } finally {
       setBusy(false);
     }
@@ -2191,7 +2219,7 @@ function ClearFlairCard({
       <div className="font-semibold">{title}</div>
       <p className="text-[10px] text-keep-muted">{hint}</p>
       <label className="block">
-        <span className="text-keep-muted">Target account</span>
+        <span className="text-keep-muted">{t("earning.targetAccount")}</span>
         {/* Identity autocomplete (same source as the chat @mention picker) so
             names with NBSP "fake spaces" resolve reliably instead of being
             retyped. On pick we store the exact `masterUsername`; for the
@@ -2204,13 +2232,13 @@ function ClearFlairCard({
               setUsername(s.masterUsername);
               if (supportsCharacterScope) setCharacterId(s.characterId ?? "");
             }}
-            placeholder="search by name"
+            placeholder={t("earning.searchByName")}
           />
         </div>
       </label>
       {supportsCharacterScope ? (
         <label className="block">
-          <span className="text-keep-muted">Character id (optional, leave blank to clear master/OOC)</span>
+          <span className="text-keep-muted">{t("earning.characterIdLabel")}</span>
           <input
             type="text"
             value={characterId}
@@ -2221,12 +2249,12 @@ function ClearFlairCard({
         </label>
       ) : null}
       <label className="block">
-        <span className="text-keep-muted">Reason (optional, recorded in audit log)</span>
+        <span className="text-keep-muted">{t("earning.reasonAuditLabel")}</span>
         <input
           type="text"
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="e.g. hotlinked NSFW"
+          placeholder={t("earning.reasonPlaceholder")}
           className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
         />
       </label>
@@ -2248,7 +2276,7 @@ function ClearFlairCard({
           disabled={!canSubmit}
           className="rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/20 disabled:opacity-50"
         >
-          {busy ? "Clearing…" : "Clear"}
+          {busy ? t("earning.clearing") : t("common:clear")}
         </button>
       </div>
     </div>
@@ -2264,6 +2292,7 @@ function CosmeticRow({
   onChanged: () => void;
   onError: (m: string) => void;
 }) {
+  const { t } = useTranslation("admin");
   const [name, setName] = useState(row.name);
   const [description, setDescription] = useState(row.description);
   const [cost, setCost] = useState(row.cost);
@@ -2278,7 +2307,7 @@ function CosmeticRow({
       await patchAdminCosmetic(row.key, { name, description, cost, enabled });
       onChanged();
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Save failed");
+      onError(e instanceof Error ? e.message : t("earning.saveFailedCap"));
     } finally {
       setSaving(false);
     }
@@ -2295,7 +2324,7 @@ function CosmeticRow({
         />
         <label className="flex items-center gap-1 text-xs">
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-          enabled
+          {t("earning.enabledLower")}
         </label>
         <button
           type="button"
@@ -2303,11 +2332,11 @@ function CosmeticRow({
           disabled={saving}
           className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          Save
+          {t("common:save")}
         </button>
       </header>
       <label className="block text-xs">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Description</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.descriptionLabel")}</span>
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -2316,11 +2345,15 @@ function CosmeticRow({
       </label>
       {isRankBorderPlaceholder ? (
         <p className="rounded border border-keep-rule/60 bg-keep-banner/20 p-2 text-[11px] text-keep-muted">
-          The cost field for <code>rank_border</code> is ignored, actual per-rank prices live on each rank's Tier IV row in the Ranks tab.
+          <Trans t={t} i18nKey="earning.rankBorderNote">
+            {"The cost field for "}
+            <code>rank_border</code>
+            {" is ignored, actual per-rank prices live on each rank's Tier IV row in the Ranks tab."}
+          </Trans>
         </p>
       ) : (
         <label className="flex items-center gap-1 text-xs">
-          <span className="text-keep-muted">Cost</span>
+          <span className="text-keep-muted">{t("earning.costLabel")}</span>
           <input
             type="number"
             min={0}
@@ -2328,7 +2361,7 @@ function CosmeticRow({
             onChange={(e) => setCost(Number(e.target.value) || 0)}
             className="w-24 rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-right text-sm"
           />
-          <span className="text-keep-muted">Currency</span>
+          <span className="text-keep-muted">{t("earning.currencyWord")}</span>
         </label>
       )}
     </section>
@@ -2352,6 +2385,7 @@ function CosmeticRow({
  * ========================================================= */
 
 function ItemsSection() {
+  const { t } = useTranslation("admin");
   const [rows, setRows] = useState<AdminItemRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -2376,7 +2410,7 @@ function ItemsSection() {
         setSelectedKey(null);
       }
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to load items");
+      setErr(e instanceof Error ? e.message : t("earning.itemsLoadFailed"));
     } finally {
       setLoading(false);
     }
@@ -2402,7 +2436,7 @@ function ItemsSection() {
     });
   }, [rows, filterCategory, query]);
 
-  if (loading) return <p className="text-sm text-keep-muted">Loading items…</p>;
+  if (loading) return <p className="text-sm text-keep-muted">{t("earning.loadingItems")}</p>;
 
   // EDIT MODE, full-width editor with a back-to-catalog button.
   // We swap the entire view rather than splitting because the editor
@@ -2419,12 +2453,12 @@ function ItemsSection() {
               type="button"
               onClick={() => { setCreating(false); setSelectedKey(null); }}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-              title="Back to the catalog grid"
+              title={t("earning.backTitle")}
             >
-              ← Back
+              {t("earning.back")}
             </button>
             <h3 className="font-action text-base">
-              {creating ? "New item" : selected?.name}
+              {creating ? t("earning.newItem") : selected?.name}
             </h3>
           </div>
         </header>
@@ -2487,9 +2521,9 @@ function ItemsSection() {
     <div className="space-y-3">
       <header className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <h3 className="font-action text-base">Items</h3>
+          <h3 className="font-action text-base">{t("earning.itemsTitle")}</h3>
           <p className="text-xs text-keep-muted">
-            Catalog of collectible items users buy with Currency, hand to each other via /give, or toss at each other via /throw and /drop. Every identity (OOC master + each character) keeps an independent inventory; nothing is shared across identities.
+            {t("earning.itemsDescription")}
           </p>
         </div>
         <button
@@ -2497,7 +2531,7 @@ function ItemsSection() {
           onClick={() => { setCreating(true); setSelectedKey(null); }}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-sm text-keep-action hover:bg-keep-action/25"
         >
-          + New item
+          {t("earning.newItemButton")}
         </button>
       </header>
 
@@ -2513,15 +2547,15 @@ function ItemsSection() {
         <select
           value={filterCategory}
           onChange={(e) => setFilterCategory(e.target.value as ItemCategory | "all")}
-          aria-label="Filter by category"
+          aria-label={t("earning.filterCategoryAria")}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         >
-          <option value="all">All categories ({rows.length})</option>
+          <option value="all">{t("earning.allCategories", { count: rows.length })}</option>
           {ITEM_CATEGORIES
             .filter((c) => rows.some((r) => r.category === c))
             .map((c) => (
               <option key={c} value={c}>
-                {ITEM_CATEGORY_LABELS[c]} ({rows.filter((r) => r.category === c).length})
+                {t(`earning:items.category.${c}`, { defaultValue: ITEM_CATEGORY_LABELS[c] })} ({rows.filter((r) => r.category === c).length})
               </option>
             ))}
         </select>
@@ -2529,11 +2563,11 @@ function ItemsSection() {
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search by name, key, or alias…"
+          placeholder={t("earning.itemSearchPlaceholder")}
           className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         />
         <span className="text-xs text-keep-muted">
-          Showing {filteredRows.length} of {rows.length}
+          {t("earning.showingOf", { shown: filteredRows.length, total: rows.length })}
         </span>
       </div>
 
@@ -2541,7 +2575,7 @@ function ItemsSection() {
           shows many items per row. Each card is icon-first so the
           admin scans visually instead of reading every name. */}
       {filteredRows.length === 0 ? (
-        <p className="text-sm text-keep-muted">No items match the current filter.</p>
+        <p className="text-sm text-keep-muted">{t("earning.noItemMatches")}</p>
       ) : (
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {filteredRows.map((r) => (
@@ -2578,19 +2612,20 @@ function ItemCard({
   row: AdminItemRow;
   onClick: () => void;
 }) {
+  const { t } = useTranslation("admin");
   const now = Date.now();
   // Pick ONE status to surface on the card. Disabled wins over "not
   // for sale" wins over the sale-window chips. Builtin is shown
   // separately as a tiny corner badge to free up the status slot.
   let status: { label: string; tone: "muted" | "warn" | "info" } | null = null;
-  if (!row.enabled) status = { label: "disabled", tone: "warn" };
-  else if (!row.forSale) status = { label: "not for sale", tone: "muted" };
+  if (!row.enabled) status = { label: t("earning.statusDisabled"), tone: "warn" };
+  else if (!row.forSale) status = { label: t("earning.statusNotForSale"), tone: "muted" };
   else if (row.saleStartsAt && now < row.saleStartsAt) {
-    status = { label: `opens in ${formatDurationShort(row.saleStartsAt - now)}`, tone: "info" };
+    status = { label: t("earning.statusOpensIn", { duration: formatDurationShort(row.saleStartsAt - now) }), tone: "info" };
   } else if (row.saleEndsAt && now >= row.saleEndsAt) {
-    status = { label: "sale ended", tone: "warn" };
+    status = { label: t("earning.statusSaleEnded"), tone: "warn" };
   } else if (row.saleEndsAt && now < row.saleEndsAt) {
-    status = { label: `ends in ${formatDurationShort(row.saleEndsAt - now)}`, tone: "info" };
+    status = { label: t("earning.statusEndsIn", { duration: formatDurationShort(row.saleEndsAt - now) }), tone: "info" };
   }
   const statusToneClass =
     status?.tone === "warn" ? "border-keep-accent/40 bg-keep-accent/10 text-keep-accent" :
@@ -2601,13 +2636,13 @@ function ItemCard({
     <button
       type="button"
       onClick={onClick}
-      title={`${row.name}, ${row.description || "(no description)"}`}
+      title={t("earning.itemCardTitle", { name: row.name, description: row.description || t("earning.noDescription") })}
       className="group relative flex flex-col items-center gap-1 rounded border border-keep-rule bg-keep-bg/40 p-2 text-center text-xs hover:border-keep-action hover:bg-keep-banner"
     >
       {row.isBuiltin ? (
         <span
           className="absolute right-1 top-1 rounded border border-keep-rule/60 bg-keep-bg/80 px-1 text-[8px] uppercase tracking-widest text-keep-muted"
-          title="Seeded built-in. Delete-protected; every field still editable."
+          title={t("earning.builtinBadgeTitle")}
         >
           B
         </span>
@@ -2635,7 +2670,7 @@ function ItemCard({
         {row.name}
       </span>
       <span className="text-[10px] uppercase tracking-widest text-keep-muted">
-        {row.price.toLocaleString()} · {ITEM_CATEGORY_LABELS[row.category]}
+        {formatNumber(row.price)} · {t(`earning:items.category.${row.category}`, { defaultValue: ITEM_CATEGORY_LABELS[row.category] })}
       </span>
       {status ? (
         <span className={`rounded border px-1.5 py-0 text-[9px] uppercase tracking-widest ${statusToneClass}`}>
@@ -2672,6 +2707,7 @@ function ItemEditor({
   onSaved: (key: string) => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
+  const { t } = useTranslation("admin");
   const [key, setKey] = useState(initial.key);
   const [name, setName] = useState(initial.name);
   const [namePlural, setNamePlural] = useState(initial.namePlural ?? "");
@@ -2745,7 +2781,7 @@ function ItemEditor({
         await onSaved(initial.key);
       }
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Save failed");
+      onError(e instanceof Error ? e.message : t("earning.saveFailedCap"));
     } finally {
       setSaving(false);
     }
@@ -2754,15 +2790,15 @@ function ItemEditor({
   async function remove() {
     if (!window.confirm(
       initial.owners > 0
-        ? `Delete "${initial.name}"? ${initial.owners} identit${initial.owners === 1 ? "y owns" : "ies own"} it, every stack will be wiped.`
-        : `Delete "${initial.name}"?`,
+        ? t("earning.deleteItemConfirmOwners", { name: initial.name, count: initial.owners })
+        : t("earning.deleteItemConfirm", { name: initial.name }),
     )) return;
     try {
       await deleteAdminItem(initial.key);
       onCancel();
       await onSaved(initial.key);
     } catch (e) {
-      onError(e instanceof Error ? e.message : "Delete failed");
+      onError(e instanceof Error ? e.message : t("earning.deleteFailedCap"));
     }
   }
 
@@ -2771,29 +2807,29 @@ function ItemEditor({
   // server-side `purchasable` computation so the admin sees exactly
   // what users will see when the row saves.
   const availabilitySummary = useMemo(() => {
-    if (!enabled) return "Hidden everywhere (enabled = off).";
-    if (!forSale) return "Exists, but not in the shop right now.";
+    if (!enabled) return t("earning.availHidden");
+    if (!forSale) return t("earning.availNotInShop");
     const now = Date.now();
     if (saleStartsAt && now < saleStartsAt) {
-      return `Sale starts ${new Date(saleStartsAt).toLocaleString()} (in ${formatDurationShort(saleStartsAt - now)}).`;
+      return t("earning.availStarts", { time: formatDateTime(saleStartsAt), duration: formatDurationShort(saleStartsAt - now) });
     }
     if (saleEndsAt && now >= saleEndsAt) {
-      return `Sale ended ${new Date(saleEndsAt).toLocaleString()}.`;
+      return t("earning.availEnded", { time: formatDateTime(saleEndsAt) });
     }
     if (saleEndsAt) {
-      return `On sale until ${new Date(saleEndsAt).toLocaleString()} (in ${formatDurationShort(saleEndsAt - now)}).`;
+      return t("earning.availUntil", { time: formatDateTime(saleEndsAt), duration: formatDurationShort(saleEndsAt - now) });
     }
     if (saleStartsAt) {
-      return `On sale since ${new Date(saleStartsAt).toLocaleString()}. No end date.`;
+      return t("earning.availSince", { time: formatDateTime(saleStartsAt) });
     }
-    return "On sale (no time limit).";
-  }, [enabled, forSale, saleStartsAt, saleEndsAt]);
+    return t("earning.availNoLimit");
+  }, [enabled, forSale, saleStartsAt, saleEndsAt, t]);
 
   return (
     <div className="space-y-3 rounded border border-keep-rule bg-keep-bg/40 p-3">
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Key</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.keyLabel")}</span>
           <input
             value={key}
             onChange={(e) => setKey(e.target.value)}
@@ -2803,7 +2839,7 @@ function ItemEditor({
           />
         </label>
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Display name</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.displayNameLabel")}</span>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -2811,7 +2847,7 @@ function ItemEditor({
           />
         </label>
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Plural (optional)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.pluralLabel")}</span>
           <input
             value={namePlural}
             onChange={(e) => setNamePlural(e.target.value)}
@@ -2820,7 +2856,7 @@ function ItemEditor({
           />
         </label>
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Icon URL</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.iconUrlLabel")}</span>
           <input
             value={iconUrl}
             onChange={(e) => setIconUrl(e.target.value)}
@@ -2830,7 +2866,7 @@ function ItemEditor({
         </label>
       </div>
       <label className="block text-xs">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Description</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.descriptionLabel")}</span>
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -2838,20 +2874,20 @@ function ItemEditor({
         />
       </label>
       <label className="block text-xs">
-        <span className="mb-1 block uppercase tracking-widest text-keep-muted">Aliases (comma-separated)</span>
+        <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.aliasesLabel")}</span>
         <input
           value={aliasesText}
           onChange={(e) => setAliasesText(e.target.value)}
-          placeholder="e.g. knife, blade"
+          placeholder={t("earning.aliasesPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
         />
         <span className="mt-0.5 block text-[10px] text-keep-muted">
-          Casual names users can type instead of the canonical name. Whitespace + case ignored, duplicates dropped.
+          {t("earning.aliasesHelp")}
         </span>
       </label>
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Price (Currency)</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.priceLabel")}</span>
           <input
             type="number"
             min={0}
@@ -2862,7 +2898,10 @@ function ItemEditor({
         </label>
         <label className="block text-xs">
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">
-            Stack limit <span className="text-keep-accent normal-case tracking-normal">(not enforced)</span>
+            <Trans t={t} i18nKey="earning.stackLimitLabel">
+              {"Stack limit "}
+              <span className="text-keep-accent normal-case tracking-normal">(not enforced)</span>
+            </Trans>
           </span>
           <input
             type="number"
@@ -2870,37 +2909,41 @@ function ItemEditor({
             value={stackLimit}
             onChange={(e) => setStackLimit(Math.max(1, Number(e.target.value) || 1))}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
-            title="Vestigial. Players accumulate without ceiling, /give, /raffle, and the Shop ignore this value. Kept for future re-introduction."
+            title={t("earning.stackLimitTitle")}
           />
         </label>
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Category</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.categoryLabel")}</span>
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value as ItemCategory)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
           >
             {ITEM_CATEGORIES.map((c) => (
-              <option key={c} value={c}>{ITEM_CATEGORY_LABELS[c]}</option>
+              <option key={c} value={c}>{t(`earning:items.category.${c}`, { defaultValue: ITEM_CATEGORY_LABELS[c] })}</option>
             ))}
           </select>
           <span className="mt-0.5 block text-[10px] text-keep-muted">
-            Drives the shop bucket. <code>pet</code> routes to the 5-slot Pet Collection; everything else to the 10-slot Item Collection.
+            <Trans t={t} i18nKey="earning.categoryHelp">
+              {"Drives the shop bucket. "}
+              <code>pet</code>
+              {" routes to the 5-slot Pet Collection; everything else to the 10-slot Item Collection."}
+            </Trans>
           </span>
         </label>
       </div>
 
       {/* Availability block, layered switches with a live summary. */}
       <fieldset className="space-y-2 rounded border border-keep-rule/60 bg-keep-banner/20 p-2">
-        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">Availability</legend>
+        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("earning.availabilityLegend")}</legend>
         <div className="flex flex-wrap items-center gap-4">
           <label className="flex items-center gap-1 text-xs">
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            enabled (item exists at all)
+            {t("earning.enabledExists")}
           </label>
           <label className="flex items-center gap-1 text-xs">
             <input type="checkbox" checked={forSale} onChange={(e) => setForSale(e.target.checked)} disabled={!enabled} />
-            for sale (shop visibility)
+            {t("earning.forSaleLabel")}
           </label>
         </div>
         <SaleWindowControls
@@ -2917,16 +2960,16 @@ function ItemEditor({
 
       {/* Per-command message tables. Empty array = command disabled. */}
       <fieldset className="space-y-3 rounded border border-keep-rule/60 bg-keep-banner/20 p-2">
-        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">Command messages, one template per line. Placeholders: {"{sender}"} {"{target}"} {"{num}"} {"{item_name}"} {"{icon}"} (inline image of this item's icon). Leave blank to disable that command for this item.</legend>
-        <CommandMessageEditor label="/give" hint="Transfers the item to the target's inventory." value={giveMessages} onChange={setGiveMessages} />
-        <CommandMessageEditor label="/throw" hint="Consumes the item as a silly weapon, target gets nothing." value={throwMessages} onChange={setThrowMessages} />
-        <CommandMessageEditor label="/drop" hint="Consumes the item as a 'drop on someone' gag, target gets nothing." value={dropMessages} onChange={setDropMessages} />
+        <legend className="px-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("earning.commandMessagesLegend")}</legend>
+        <CommandMessageEditor label="/give" hint={t("earning.giveHint")} value={giveMessages} onChange={setGiveMessages} />
+        <CommandMessageEditor label="/throw" hint={t("earning.throwHint")} value={throwMessages} onChange={setThrowMessages} />
+        <CommandMessageEditor label="/drop" hint={t("earning.dropHint")} value={dropMessages} onChange={setDropMessages} />
       </fieldset>
 
       {initial.isBuiltin ? (
-        <p className="text-[10px] uppercase tracking-widest text-keep-muted">built-in (delete protected) · {initial.owners} owner{initial.owners === 1 ? "" : "s"}</p>
+        <p className="text-[10px] uppercase tracking-widest text-keep-muted">{t("earning.builtinProtected")} · {t("earning.ownersCount", { count: initial.owners })}</p>
       ) : (
-        <p className="text-[10px] uppercase tracking-widest text-keep-muted">{initial.owners} owner{initial.owners === 1 ? "" : "s"}</p>
+        <p className="text-[10px] uppercase tracking-widest text-keep-muted">{t("earning.ownersCount", { count: initial.owners })}</p>
       )}
 
       <div className="flex flex-wrap justify-end gap-2">
@@ -2936,7 +2979,7 @@ function ItemEditor({
             onClick={() => void remove()}
             className="rounded border border-keep-rule px-3 py-1 text-sm text-keep-muted hover:text-keep-accent"
           >
-            Delete
+            {t("common:delete")}
           </button>
         ) : null}
         <button
@@ -2944,7 +2987,7 @@ function ItemEditor({
           onClick={onCancel}
           className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-sm text-keep-muted hover:bg-keep-banner hover:text-keep-text"
         >
-          Cancel
+          {t("common:cancel")}
         </button>
         <button
           type="button"
@@ -2952,7 +2995,7 @@ function ItemEditor({
           disabled={saving || (kind === "create" && !key.match(/^[a-z][a-z0-9_]*$/)) || !name.trim()}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-sm text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          {saving ? "Saving…" : kind === "create" ? "Create" : "Save"}
+          {saving ? t("common:saving") : kind === "create" ? t("create") : t("common:save")}
         </button>
       </div>
     </div>
@@ -2973,6 +3016,7 @@ function CommandMessageEditor({
   value: string;
   onChange: (s: string) => void;
 }) {
+  const { t } = useTranslation("admin");
   const lines = value.split("\n").map((l) => l.trim()).filter(Boolean);
   return (
     <div className="space-y-1">
@@ -2980,7 +3024,7 @@ function CommandMessageEditor({
         <code className="text-xs font-mono text-keep-action">{label}</code>
         <span className="text-[11px] text-keep-muted">{hint}</span>
         <span className="ml-auto text-[10px] uppercase tracking-widest text-keep-muted">
-          {lines.length === 0 ? "disabled" : `${lines.length} template${lines.length === 1 ? "" : "s"}`}
+          {lines.length === 0 ? t("earning.statusDisabled") : t("earning.templateCount", { count: lines.length })}
         </span>
       </div>
       <textarea
@@ -3011,6 +3055,7 @@ function SaleWindowControls({
   onChangeEnd: (v: number | null) => void;
   disabled: boolean;
 }) {
+  const { t } = useTranslation("admin");
   const [quickN, setQuickN] = useState(7);
   const [quickUnit, setQuickUnit] = useState<"hours" | "days">("days");
 
@@ -3030,16 +3075,16 @@ function SaleWindowControls({
     <div className={`space-y-2 ${disabled ? "opacity-50 pointer-events-none" : ""}`}>
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="block text-[11px]">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Sale starts at</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.saleStartsAt")}</span>
           <DateTimeInput value={saleStartsAt} onChange={onChangeStart} />
         </label>
         <label className="block text-[11px]">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Sale ends at</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.saleEndsAt")}</span>
           <DateTimeInput value={saleEndsAt} onChange={onChangeEnd} />
         </label>
       </div>
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
-        <span className="text-keep-muted">Sell for the next</span>
+        <span className="text-keep-muted">{t("earning.sellForNext")}</span>
         <input
           type="number"
           min={1}
@@ -3052,22 +3097,22 @@ function SaleWindowControls({
           onChange={(e) => setQuickUnit(e.target.value as "hours" | "days")}
           className="rounded border border-keep-rule bg-keep-bg px-1.5 py-0.5"
         >
-          <option value="hours">hours</option>
-          <option value="days">days</option>
+          <option value="hours">{t("earning.hours")}</option>
+          <option value="days">{t("earning.days")}</option>
         </select>
         <button
           type="button"
           onClick={applyQuick}
           className="rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-keep-action hover:bg-keep-action/25"
         >
-          Apply
+          {t("earning.apply")}
         </button>
         <button
           type="button"
           onClick={clearWindow}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-keep-muted hover:text-keep-text"
         >
-          Clear window
+          {t("earning.clearWindow")}
         </button>
       </div>
     </div>
@@ -3120,6 +3165,7 @@ function DateTimeInput({
  * ========================================================= */
 
 function TestGrantsSection() {
+  const { t } = useTranslation("admin");
   const me = useChat((s) => s.me);
   const [target, setTarget] = useState(me?.username ?? "");
   const [busy, setBusy] = useState(false);
@@ -3141,11 +3187,11 @@ function TestGrantsSection() {
       fetchAdminNameStyles().then((r) => setStyles(r.styles)),
       fetchAdminItems().then((r) => setItemsCatalog(r.items)),
       fetchAdminFreeformBorders().then((r) => setFreeformBorders(r.borders)),
-    ]).catch((e) => setErr(e instanceof Error ? e.message : "Failed to load catalogs"));
+    ]).catch((e) => setErr(e instanceof Error ? e.message : t("earning.catalogsLoadFailed")));
   }, []);
 
   async function run(label: string, op: () => Promise<void>) {
-    if (!target.trim()) { setErr("Enter a target username."); return; }
+    if (!target.trim()) { setErr(t("earning.enterTargetError")); return; }
     setBusy(true);
     setErr(null);
     try {
@@ -3159,30 +3205,27 @@ function TestGrantsSection() {
       }
       window.setTimeout(() => setSavedFlash(null), 1500);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : `${label} failed`);
+      setErr(e instanceof Error ? e.message : t("earning.labelFailed", { label }));
     } finally {
       setBusy(false);
     }
   }
 
   const tier4ByRank = new Map<string, AdminTierRow>();
-  for (const t of tiers) if (t.tier === 4) tier4ByRank.set(t.rankKey, t);
+  for (const tierRow of tiers) if (tierRow.tier === 4) tier4ByRank.set(tierRow.rankKey, tierRow);
 
   return (
     <div className="space-y-4">
       <header className="space-y-1">
-        <h3 className="font-action text-base">Test grants</h3>
+        <h3 className="font-action text-base">{t("earning.testGrantsTitle")}</h3>
         <p className="text-xs text-keep-muted">
-          Quick path to preview ranks, borders, and styles in chat /
-          userlist / profile without grinding XP. Every grant goes
-          through the live engine (ledger + socket events), so the
-          recipient's dashboard updates immediately. Owner only.
+          {t("earning.testGrantsDescription")}
         </p>
       </header>
 
       <section className="rounded border border-keep-rule bg-keep-bg/40 p-3 space-y-3">
         <label className="block text-xs">
-          <span className="mb-1 block uppercase tracking-widest text-keep-muted">Target account</span>
+          <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("earning.targetAccount")}</span>
           {/* Identity autocomplete (same source as the chat @mention picker)
               instead of a raw username field: typing a name with NBSP "fake
               spaces" by hand never matched. Grants target the master pool, so
@@ -3193,72 +3236,74 @@ function TestGrantsSection() {
             value={target}
             onChange={setTarget}
             onPick={(s) => setTarget(s.masterUsername)}
-            placeholder={me?.username ?? "search by name"}
+            placeholder={me?.username ?? t("earning.searchByName")}
           />
         </label>
         {err ? (
           <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">{err}</div>
         ) : null}
         {savedFlash ? (
-          <div className="text-xs text-keep-system">{savedFlash}, done.</div>
+          <div className="text-xs text-keep-system">{t("earning.doneFlash", { label: savedFlash })}</div>
         ) : null}
       </section>
 
       <GrantAmountRow
-        label="Currency"
-        help="Positive amount credits, negative debits. Goes to master pool."
+        label={t("earning.currencyWord")}
+        help={t("earning.grantCurrencyHelp")}
         busy={busy}
-        onSubmit={(amount) => run(`Grant ${amount} Currency`, () => adminGrantCurrency(target, amount))}
+        onSubmit={(amount) => run(t("earning.grantCurrencyLabel", { amount }), () => adminGrantCurrency(target, amount))}
       />
       <GrantAmountRow
-        label="XP"
-        help="Recomputes rank/tier via the resolver after the credit. Negative XP doesn't decrease peak rank."
+        label={t("earning.xpWord")}
+        help={t("earning.grantXpHelp")}
         busy={busy}
-        onSubmit={(amount) => run(`Grant ${amount} XP`, () => adminGrantXp(target, amount))}
+        onSubmit={(amount) => run(t("earning.grantXpLabel", { amount }), () => adminGrantXp(target, amount))}
       />
 
-      <SectionFrame title="Set rank / tier" description="Direct rank-tier override. Bumps XP to the tier's threshold so the next earn doesn't drop the user back. Also bumps the eligibility peak so all lower-rank borders unlock for purchase.">
+      <SectionFrame title={t("earning.setRankTitle")} description={t("earning.setRankDescription")}>
         <SetRankRow
           ranks={ranks}
           tiers={tiers}
           busy={busy}
-          onSet={(rankKey, tier) => run(`Set rank ${rankKey} ${tier}`, () => adminSetRank(target, rankKey, tier))}
-          onClear={() => run("Clear rank override", () => adminSetRank(target, null, null))}
+          onSet={(rankKey, tier) => run(t("earning.setRankLabel", { rank: rankKey, tier }), () => adminSetRank(target, rankKey, tier))}
+          onClear={() => run(t("earning.clearRankLabel"), () => adminSetRank(target, null, null))}
         />
       </SectionFrame>
 
-      <SectionFrame title="Grant border" description="Inserts ownership for the chosen rank's border. Bypasses the normal Tier IV eligibility gate, handy for previewing every frame without climbing.">
+      <SectionFrame title={t("earning.grantBorderTitle")} description={t("earning.grantBorderDescription")}>
         <GrantPickerRow
           options={ranks
             .filter((r) => tier4ByRank.has(r.key) && tier4ByRank.get(r.key)!.borderImageUrl)
             .map((r) => ({ value: r.key, label: r.name }))}
-          placeholder="Pick a rank…"
+          placeholder={t("earning.pickRank")}
           busy={busy}
-          buttonLabel="Grant border"
-          onPick={(rankKey) => run(`Grant border ${rankKey}`, () => adminGrantBorder(target, rankKey))}
+          buttonLabel={t("earning.grantBorderButton")}
+          onPick={(rankKey) => run(t("earning.grantBorderLabel", { key: rankKey }), () => adminGrantBorder(target, rankKey))}
         />
       </SectionFrame>
 
-      <SectionFrame title="Grant name style" description="Inserts ownership for the chosen style without a Currency charge. Recipient still needs to equip it from the dashboard.">
+      <SectionFrame title={t("earning.grantStyleTitle")} description={t("earning.grantStyleDescription")}>
         <GrantPickerRow
           options={styles.map((s) => ({ value: s.key, label: s.name }))}
-          placeholder="Pick a style…"
+          placeholder={t("earning.pickStyle")}
           busy={busy}
-          buttonLabel="Grant style"
-          onPick={(styleKey) => run(`Grant style ${styleKey}`, () => adminGrantStyle(target, styleKey))}
+          buttonLabel={t("earning.grantStyleButton")}
+          onPick={(styleKey) => run(t("earning.grantStyleLabel", { key: styleKey }), () => adminGrantStyle(target, styleKey))}
         />
       </SectionFrame>
 
       <SectionFrame
-        title="Grant item"
-        description="Deposit (positive) or revoke (negative) units of an item into the target's OOC master inventory. Bypasses the shop's enabled / forSale / sale-window checks so admins can pre-seed testers with items that aren't yet on sale. Character-scoped grants live on the character's own inventory; this row only writes the OOC pool. Stack-cap enforced server-side; overflow returns a 409."
+        title={t("earning.grantItemTitle")}
+        description={t("earning.grantItemDescription")}
       >
         <GrantItemRow
           items={itemsCatalog}
           busy={busy}
           onSubmit={(itemKey, quantity) =>
             run(
-              `${quantity > 0 ? "Grant" : "Revoke"} ${Math.abs(quantity)} ${itemKey}`,
+              quantity > 0
+                ? t("earning.grantItemLabel", { count: Math.abs(quantity), item: itemKey })
+                : t("earning.revokeItemLabel", { count: Math.abs(quantity), item: itemKey }),
               async () => { await adminGrantItem(target, itemKey, quantity); },
             )
           }
@@ -3267,57 +3312,57 @@ function TestGrantsSection() {
 
       {/* ---- Free-form border grant / revoke (Phase 1 catalog) ---- */}
       <SectionFrame
-        title="Grant free-form border"
-        description="Inserts ownership for the chosen free-form border (master pool). Idempotent. Auto-equips on first acquisition if the identity has no freeform border equipped, matches the user-facing purchase behavior."
+        title={t("earning.grantFreeformTitle")}
+        description={t("earning.grantFreeformDescription")}
       >
         <GrantPickerRow
           options={freeformBorders.map((b) => ({ value: b.key, label: `${b.name} (${b.rarity})` }))}
-          placeholder={freeformBorders.length === 0 ? "No free-form borders defined" : "Pick a border…"}
+          placeholder={freeformBorders.length === 0 ? t("earning.noFreeformDefined") : t("earning.pickBorder")}
           busy={busy}
-          buttonLabel="Grant border"
-          onPick={(key) => run(`Grant freeform border ${key}`, () => adminGrantFreeformBorder(target, key))}
+          buttonLabel={t("earning.grantBorderButton")}
+          onPick={(key) => run(t("earning.grantFreeformLabel", { key }), () => adminGrantFreeformBorder(target, key))}
         />
       </SectionFrame>
 
       <SectionFrame
-        title="Revoke free-form border"
-        description="Removes ownership of the chosen free-form border from the target's master pool. If they had it equipped, the equip slot clears too. Idempotent on unowned."
+        title={t("earning.revokeFreeformTitle")}
+        description={t("earning.revokeFreeformDescription")}
       >
         <GrantPickerRow
           options={freeformBorders.map((b) => ({ value: b.key, label: `${b.name} (${b.rarity})` }))}
-          placeholder={freeformBorders.length === 0 ? "No free-form borders defined" : "Pick a border…"}
+          placeholder={freeformBorders.length === 0 ? t("earning.noFreeformDefined") : t("earning.pickBorder")}
           busy={busy}
-          buttonLabel="Revoke border"
-          onPick={(key) => run(`Revoke freeform border ${key}`, () => adminRevokeFreeformBorder(target, key))}
+          buttonLabel={t("earning.revokeBorderButton")}
+          onPick={(key) => run(t("earning.revokeFreeformLabel", { key }), () => adminRevokeFreeformBorder(target, key))}
         />
       </SectionFrame>
 
       {/* ---- Revoke for the existing rank-tier catalog rows ---- */}
       <SectionFrame
-        title="Revoke rank border"
-        description="Removes the chosen rank-tier border from the target's owned set. Clears the equip slot if it pointed at this border."
+        title={t("earning.revokeRankBorderTitle")}
+        description={t("earning.revokeRankBorderDescription")}
       >
         <GrantPickerRow
           options={ranks
             .filter((r) => tier4ByRank.has(r.key) && tier4ByRank.get(r.key)!.borderImageUrl)
             .map((r) => ({ value: r.key, label: r.name }))}
-          placeholder="Pick a rank…"
+          placeholder={t("earning.pickRank")}
           busy={busy}
-          buttonLabel="Revoke border"
-          onPick={(rankKey) => run(`Revoke border ${rankKey}`, () => adminRevokeBorder(target, rankKey))}
+          buttonLabel={t("earning.revokeBorderButton")}
+          onPick={(rankKey) => run(t("earning.revokeBorderLabel", { key: rankKey }), () => adminRevokeBorder(target, rankKey))}
         />
       </SectionFrame>
 
       <SectionFrame
-        title="Revoke name style"
-        description="Removes the chosen name-style ownership row. Clears the active-cosmetics slot if the style was equipped."
+        title={t("earning.revokeStyleTitle")}
+        description={t("earning.revokeStyleDescription")}
       >
         <GrantPickerRow
           options={styles.map((s) => ({ value: s.key, label: s.name }))}
-          placeholder="Pick a style…"
+          placeholder={t("earning.pickStyle")}
           busy={busy}
-          buttonLabel="Revoke style"
-          onPick={(styleKey) => run(`Revoke style ${styleKey}`, () => adminRevokeStyle(target, styleKey))}
+          buttonLabel={t("earning.revokeStyleButton")}
+          onPick={(styleKey) => run(t("earning.revokeStyleLabel", { key: styleKey }), () => adminRevokeStyle(target, styleKey))}
         />
       </SectionFrame>
     </div>
@@ -3337,12 +3382,13 @@ function GrantItemRow({
   busy: boolean;
   onSubmit: (itemKey: string, quantity: number) => void;
 }) {
+  const { t } = useTranslation("admin");
   const [itemKey, setItemKey] = useState<string>("");
   const [quantity, setQuantity] = useState<number>(1);
   if (items.length === 0) {
     return (
       <p className="text-xs text-keep-muted">
-        No items in the catalog yet, create one in the Items sub-tab first.
+        {t("earning.noItemsInCatalog")}
       </p>
     );
   }
@@ -3353,10 +3399,10 @@ function GrantItemRow({
         onChange={(e) => setItemKey(e.target.value)}
         className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
       >
-        <option value="">Pick an item…</option>
+        <option value="">{t("earning.pickItem")}</option>
         {items.map((i) => (
           <option key={i.key} value={i.key}>
-            {i.name}{i.enabled ? "" : " (disabled)"}
+            {i.name}{i.enabled ? "" : t("earning.disabledParenSuffix")}
           </option>
         ))}
       </select>
@@ -3372,7 +3418,7 @@ function GrantItemRow({
         disabled={busy || !itemKey || quantity === 0}
         className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
       >
-        {quantity >= 0 ? "Grant" : "Revoke"}
+        {quantity >= 0 ? t("users.grant") : t("users.revoke")}
       </button>
     </div>
   );
@@ -3389,6 +3435,7 @@ function GrantAmountRow({
   busy: boolean;
   onSubmit: (amount: number) => void;
 }) {
+  const { t } = useTranslation("admin");
   const [amount, setAmount] = useState(1000);
   return (
     <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
@@ -3407,7 +3454,7 @@ function GrantAmountRow({
             disabled={busy || amount === 0}
             className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
           >
-            Grant
+            {t("users.grant")}
           </button>
         </div>
       </header>
@@ -3429,10 +3476,11 @@ function SetRankRow({
   onSet: (rankKey: string, tier: number) => void;
   onClear: () => void;
 }) {
+  const { t } = useTranslation("admin");
   const [rankKey, setRankKey] = useState<string>("");
   const [tier, setTier] = useState<number>(1);
   const tiersForRank = tiers
-    .filter((t) => t.rankKey === rankKey)
+    .filter((row) => row.rankKey === rankKey)
     .sort((a, b) => a.tier - b.tier);
 
   return (
@@ -3442,7 +3490,7 @@ function SetRankRow({
         onChange={(e) => { setRankKey(e.target.value); setTier(1); }}
         className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
       >
-        <option value="">Pick a rank…</option>
+        <option value="">{t("earning.pickRank")}</option>
         {ranks.map((r) => (
           <option key={r.key} value={r.key}>{r.name}</option>
         ))}
@@ -3454,9 +3502,9 @@ function SetRankRow({
         className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm disabled:opacity-50"
       >
         {tiersForRank.length === 0 ? (
-          <option value={1}>Tier…</option>
-        ) : tiersForRank.map((t) => (
-          <option key={t.id} value={t.tier}>Tier {t.tier}, {t.label}</option>
+          <option value={1}>{t("earning.tierEllipsis")}</option>
+        ) : tiersForRank.map((row) => (
+          <option key={row.id} value={row.tier}>{t("earning.tierOption", { tier: row.tier, label: row.label })}</option>
         ))}
       </select>
       <button
@@ -3465,7 +3513,7 @@ function SetRankRow({
         disabled={busy || !rankKey}
         className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
       >
-        Set
+        {t("common:set")}
       </button>
       <button
         type="button"
@@ -3473,7 +3521,7 @@ function SetRankRow({
         disabled={busy}
         className="rounded border border-keep-rule bg-keep-bg px-3 py-1 text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:opacity-50"
       >
-        Clear override
+        {t("earning.clearOverride")}
       </button>
     </div>
   );
@@ -3532,6 +3580,7 @@ function GrantPickerRow({
  *  toggles + the global default discount %.
  * ============================================================ */
 function FlashSaleSection() {
+  const { t } = useTranslation("admin");
   const [data, setData] = useState<AdminFlashSaleResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -3557,15 +3606,15 @@ function FlashSaleSection() {
       setAllCosmetics(cos.cosmetics);
       setAllFreeformBorders(fb.borders);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Load failed");
+      setErr(e instanceof Error ? e.message : t("earning.loadFailedCap"));
     } finally {
       setLoading(false);
     }
   }
   useEffect(() => { void refresh(); }, []);
 
-  if (loading) return <p className="text-sm text-keep-muted">Loading flash-sale state…</p>;
-  if (!data) return <p className="text-sm text-keep-accent">{err ?? "Load failed."}</p>;
+  if (loading) return <p className="text-sm text-keep-muted">{t("earning.loadingFlashSale")}</p>;
+  if (!data) return <p className="text-sm text-keep-accent">{err ?? t("earning.loadFailedDot")}</p>;
 
   // The "for_date" the override form starts at, tomorrow. Admins
   // can edit the date input to queue further out, but tomorrow is
@@ -3573,34 +3622,30 @@ function FlashSaleSection() {
   return (
     <div className="space-y-5">
       <header className="space-y-1">
-        <h3 className="font-action text-base">Flash Sale</h3>
+        <h3 className="font-action text-base">{t("earning.flashSaleTitle")}</h3>
         <p className="text-xs text-keep-muted">
-          One row per category goes on sale each UTC day. Today's picks are read-only, the
-          resolver has already chosen. Queue a specific row for any future date, or leave a
-          date un-queued to keep it random. Override targets that get disabled in the catalog
-          before resolution day still get picked (admin intent wins over availability).
+          {t("earning.flashSaleDescription")}
         </p>
       </header>
 
       <FlashSaleSettings settings={data.settings} onSaved={refresh} />
 
       <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
-        <h4 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">Today</h4>
+        <h4 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">{t("earning.todayHeading")}</h4>
         <div className="grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
-          <FlashSaleTodayCell label="Name Style" keyVal={data.today.nameStyleKey} discount={data.today.nameStyleDiscountPct} />
-          <FlashSaleTodayCell label="Border" keyVal={data.today.freeformBorderKey} discount={data.today.freeformBorderDiscountPct} />
-          <FlashSaleTodayCell label="Item" keyVal={data.today.itemKey} discount={data.today.itemDiscountPct} />
-          <FlashSaleTodayCell label="Cosmetic" keyVal={data.today.cosmeticKey} discount={data.today.cosmeticDiscountPct} />
+          <FlashSaleTodayCell label={t("earning.cellNameStyle")} keyVal={data.today.nameStyleKey} discount={data.today.nameStyleDiscountPct} />
+          <FlashSaleTodayCell label={t("earning.cellBorder")} keyVal={data.today.freeformBorderKey} discount={data.today.freeformBorderDiscountPct} />
+          <FlashSaleTodayCell label={t("earning.cellItem")} keyVal={data.today.itemKey} discount={data.today.itemDiscountPct} />
+          <FlashSaleTodayCell label={t("earning.cellCosmetic")} keyVal={data.today.cosmeticKey} discount={data.today.cosmeticDiscountPct} />
         </div>
       </section>
 
       <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
         <h4 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">
-          Queue for {data.tomorrow} or later
+          {t("earning.queueHeading", { date: data.tomorrow })}
         </h4>
         <p className="mb-2 text-xs text-keep-muted">
-          Pick a row + an optional per-pick discount. Click Save to queue. Setting target to
-          "(random)" removes any existing queue for that slot.
+          {t("earning.queueDescription")}
         </p>
         <div className="space-y-2">
           {(["name_style", "freeform_border", "item", "cosmetic"] as const).map((cat) => (
@@ -3620,7 +3665,7 @@ function FlashSaleSection() {
         {data.overrides.length > 0 ? (
           <div className="mt-3 border-t border-keep-rule pt-3">
             <h5 className="mb-2 text-[10px] uppercase tracking-widest text-keep-muted">
-              All queued ({data.overrides.length})
+              {t("earning.allQueued", { count: data.overrides.length })}
             </h5>
             <ul className="space-y-1 text-xs">
               {data.overrides.map((o) => (
@@ -3644,12 +3689,13 @@ function FlashSaleSection() {
 }
 
 function FlashSaleTodayCell({ label, keyVal, discount }: { label: string; keyVal: string | null; discount: number | null }) {
+  const { t } = useTranslation("admin");
   return (
     <div className="rounded border border-keep-rule bg-keep-bg p-2">
       <div className="text-[10px] uppercase tracking-widest text-keep-muted">{label}</div>
-      <div className="mt-1 truncate font-mono text-xs text-keep-text">{keyVal ?? "(none)"}</div>
+      <div className="mt-1 truncate font-mono text-xs text-keep-text">{keyVal ?? t("noneParen")}</div>
       {discount != null ? (
-        <div className="text-[10px] text-keep-action">-{discount}% off</div>
+        <div className="text-[10px] text-keep-action">{t("earning.percentOff", { discount })}</div>
       ) : null}
     </div>
   );
@@ -3662,6 +3708,7 @@ function FlashSaleSettings({
   settings: AdminFlashSaleResponse["settings"];
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("admin");
   const [draft, setDraft] = useState(settings);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -3674,7 +3721,7 @@ function FlashSaleSettings({
       await patchAdminFlashSaleSettings(draft);
       onSaved();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Save failed");
+      setErr(e instanceof Error ? e.message : t("earning.saveFailedCap"));
     } finally {
       setSaving(false);
     }
@@ -3682,10 +3729,10 @@ function FlashSaleSettings({
 
   return (
     <section className="rounded border border-keep-rule bg-keep-bg/40 p-3">
-      <h4 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">Settings</h4>
+      <h4 className="mb-2 font-action text-sm uppercase tracking-widest text-keep-muted">{t("earning.settingsHeading")}</h4>
       <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
         <label className="flex items-center gap-2">
-          <span className="text-xs text-keep-muted">Default discount %</span>
+          <span className="text-xs text-keep-muted">{t("earning.defaultDiscountLabel")}</span>
           <input
             type="number"
             min={1}
@@ -3695,10 +3742,10 @@ function FlashSaleSettings({
             className="w-16 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm"
           />
         </label>
-        <ToggleLabel checked={draft.stylesEnabled} onChange={(v) => setDraft({ ...draft, stylesEnabled: v })} label="Name Styles" />
-        <ToggleLabel checked={draft.freeformBordersEnabled} onChange={(v) => setDraft({ ...draft, freeformBordersEnabled: v })} label="Borders" />
-        <ToggleLabel checked={draft.itemsEnabled} onChange={(v) => setDraft({ ...draft, itemsEnabled: v })} label="Items" />
-        <ToggleLabel checked={draft.cosmeticsEnabled} onChange={(v) => setDraft({ ...draft, cosmeticsEnabled: v })} label="Flair" />
+        <ToggleLabel checked={draft.stylesEnabled} onChange={(v) => setDraft({ ...draft, stylesEnabled: v })} label={t("earning.stylesTitle")} />
+        <ToggleLabel checked={draft.freeformBordersEnabled} onChange={(v) => setDraft({ ...draft, freeformBordersEnabled: v })} label={t("earning.subTab.borders")} />
+        <ToggleLabel checked={draft.itemsEnabled} onChange={(v) => setDraft({ ...draft, itemsEnabled: v })} label={t("earning.itemsTitle")} />
+        <ToggleLabel checked={draft.cosmeticsEnabled} onChange={(v) => setDraft({ ...draft, cosmeticsEnabled: v })} label={t("earning.flairTitle")} />
       </div>
       <div className="mt-2 flex items-center justify-end gap-2">
         {err ? <span className="mr-auto text-xs text-keep-accent">{err}</span> : null}
@@ -3708,7 +3755,7 @@ function FlashSaleSettings({
           disabled={saving}
           className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          {saving ? "Saving…" : "Save settings"}
+          {saving ? t("common:saving") : t("saveSettings")}
         </button>
       </div>
     </section>
@@ -3743,6 +3790,7 @@ function FlashSaleOverrideRow({
   freeformBorders: AdminFreeformBorderRow[];
   onSaved: () => void;
 }) {
+  const { t } = useTranslation("admin");
   const [date, setDate] = useState<string>(defaultDate);
   // `existing` is derived from the CURRENT date state, not a static
   // prop, so when the admin types a different future date into the
@@ -3796,16 +3844,16 @@ function FlashSaleOverrideRow({
       });
       onSaved();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "Save failed");
+      setErr(e instanceof Error ? e.message : t("earning.saveFailedCap"));
     } finally {
       setBusy(false);
     }
   }
 
-  const label = category === "name_style" ? "Name Style"
-    : category === "item" ? "Item"
-    : category === "cosmetic" ? "Cosmetic"
-    : "Border";
+  const label = category === "name_style" ? t("earning.cellNameStyle")
+    : category === "item" ? t("earning.cellItem")
+    : category === "cosmetic" ? t("earning.cellCosmetic")
+    : t("earning.cellBorder");
 
   return (
     <div className="grid items-center gap-2 rounded border border-keep-rule bg-keep-bg p-2 text-xs sm:grid-cols-[120px_140px_1fr_80px_auto]">
@@ -3821,7 +3869,7 @@ function FlashSaleOverrideRow({
         onChange={(e) => setTarget(e.target.value)}
         className="rounded border border-keep-rule bg-keep-bg px-2 py-1"
       >
-        <option value="">(random)</option>
+        <option value="">{t("earning.randomOption")}</option>
         {options.map((o) => (
           <option key={o.key} value={o.key}>{o.name}, {o.key}</option>
         ))}
@@ -3834,7 +3882,7 @@ function FlashSaleOverrideRow({
         value={discount}
         onChange={(e) => setDiscount(e.target.value)}
         className="w-16 rounded border border-keep-rule bg-keep-bg px-2 py-1"
-        title="Optional per-pick discount %"
+        title={t("earning.discountTitle")}
       />
       <button
         type="button"
@@ -3842,7 +3890,7 @@ function FlashSaleOverrideRow({
         disabled={busy}
         className="rounded border border-keep-action bg-keep-action/15 px-2 py-1 text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
       >
-        {busy ? "…" : (target ? "Queue" : "Clear")}
+        {busy ? "…" : (target ? t("earning.queueButton") : t("common:clear"))}
       </button>
       {err ? <span className="col-span-full text-keep-accent">{err}</span> : null}
     </div>
@@ -3858,22 +3906,24 @@ function FlashSaleOverrideRow({
  *  apps/server/src/admin/earningTransfer.ts for the semantics.
  * ============================================================ */
 function CatalogTransferSection() {
+  const { t } = useTranslation("admin");
   const kinds: ReadonlyArray<{ id: EarningTransferKind; label: string; help: string }> = [
-    { id: "name-styles", label: "Name Styles", help: "Templates + CSS. No image assets." },
-    { id: "items", label: "Items", help: "Catalog rows + icon images." },
-    { id: "borders", label: "Borders", help: "Border image + cost on each Tier IV. Surgical: only border columns are touched on import." },
-    { id: "freeform-borders", label: "Free-form Borders", help: "Non-rank-tied border catalog (image-mode and template+CSS-mode). Ownership ledgers are NOT exported." },
-    { id: "ranks", label: "Ranks", help: "Full rank hierarchy: ranks + tiers + sigils + borders." },
+    { id: "name-styles", label: t("earning.transferStyles"), help: t("earning.transferStylesHelp") },
+    { id: "items", label: t("earning.transferItems"), help: t("earning.transferItemsHelp") },
+    { id: "borders", label: t("earning.transferBorders"), help: t("earning.transferBordersHelp") },
+    { id: "freeform-borders", label: t("earning.transferFreeform"), help: t("earning.transferFreeformHelp") },
+    { id: "ranks", label: t("earning.transferRanks"), help: t("earning.transferRanksHelp") },
   ];
   return (
     <div className="space-y-4">
       <header className="space-y-1">
-        <h3 className="font-action text-base">Catalog Backup</h3>
+        <h3 className="font-action text-base">{t("earning.catalogBackupTitle")}</h3>
         <p className="text-xs text-keep-muted">
-          Per-catalog ZIP export + import. Imports are <strong>upsert by key</strong>, rows you
-          didn't include keep their existing values. Bundled `/uploads/*` images extract back to
-          their original paths so a round-trip restores custom art too. Re-importing a file you
-          just exported is a clean no-op.
+          <Trans t={t} i18nKey="earning.catalogBackupDescription">
+            {"Per-catalog ZIP export + import. Imports are "}
+            <strong>upsert by key</strong>
+            {", rows you didn't include keep their existing values. Bundled `/uploads/*` images extract back to their original paths so a round-trip restores custom art too. Re-importing a file you just exported is a clean no-op."}
+          </Trans>
         </p>
       </header>
       {kinds.map((k) => (
@@ -3884,6 +3934,7 @@ function CatalogTransferSection() {
 }
 
 function TransferRow({ kind, label, help }: { kind: EarningTransferKind; label: string; help: string }) {
+  const { t } = useTranslation("admin");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [result, setResult] = useState<CatalogImportResult | null>(null);
@@ -3895,9 +3946,9 @@ function TransferRow({ kind, label, help }: { kind: EarningTransferKind; label: 
     setResult(null);
     try {
       await downloadCatalogExport(kind);
-      setStatus({ kind: "ok", text: "Export downloaded." });
+      setStatus({ kind: "ok", text: t("earning.exportDownloaded") });
     } catch (e) {
-      setStatus({ kind: "error", text: e instanceof Error ? e.message : "Export failed" });
+      setStatus({ kind: "error", text: e instanceof Error ? e.message : t("earning.exportFailed") });
     } finally {
       setBusy(false);
     }
@@ -3907,7 +3958,7 @@ function TransferRow({ kind, label, help }: { kind: EarningTransferKind; label: 
     const f = e.target.files?.[0];
     e.target.value = ""; // allow re-picking the same file later
     if (!f) return;
-    if (!window.confirm(`Import ${f.name} into ${label}? This UPSERTS by key, existing rows with matching keys will be overwritten.`)) return;
+    if (!window.confirm(t("earning.importConfirm", { file: f.name, catalog: label }))) return;
     setBusy(true);
     setStatus(null);
     setResult(null);
@@ -3916,10 +3967,10 @@ function TransferRow({ kind, label, help }: { kind: EarningTransferKind; label: 
       setResult(r);
       setStatus({
         kind: "ok",
-        text: `Import done. Inserted ${r.inserted}, updated ${r.updated}, ${r.writtenAssets.length} asset(s) written.`,
+        text: t("earning.importDone", { inserted: r.inserted, updated: r.updated, assets: r.writtenAssets.length }),
       });
     } catch (err) {
-      setStatus({ kind: "error", text: err instanceof Error ? err.message : "Import failed" });
+      setStatus({ kind: "error", text: err instanceof Error ? err.message : t("earning.importFailed") });
     } finally {
       setBusy(false);
     }
@@ -3938,7 +3989,7 @@ function TransferRow({ kind, label, help }: { kind: EarningTransferKind; label: 
           disabled={busy}
           className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs hover:bg-keep-banner disabled:opacity-50"
         >
-          {busy ? "Working…" : "Export ZIP"}
+          {busy ? t("earning.working") : t("earning.exportZip")}
         </button>
         <button
           type="button"
@@ -3946,7 +3997,7 @@ function TransferRow({ kind, label, help }: { kind: EarningTransferKind; label: 
           disabled={busy}
           className="rounded border border-keep-action bg-keep-action/15 px-2 py-1 text-xs text-keep-action hover:bg-keep-action/25 disabled:opacity-50"
         >
-          Import ZIP…
+          {t("earning.importZip")}
         </button>
         <input
           ref={fileRef}

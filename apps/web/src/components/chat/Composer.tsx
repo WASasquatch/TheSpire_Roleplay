@@ -8,6 +8,8 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   Bold,
   Code,
@@ -40,6 +42,7 @@ import {
   useIdentityTokensCache,
 } from "../../state/identityTokens.js";
 import { getSocket } from "../../lib/socket.js";
+import { formatNumber } from "../../lib/intlFormat.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 
 interface Props {
@@ -144,11 +147,11 @@ const MAX_COMPLETIONS = 8;
 const HISTORY_MAX = 50;
 
 /** Short label for the "Replying to" indicator: title if present, else a body excerpt. */
-function topicLabel(t: { title: string | null; body: string }): string {
-  const title = t.title?.trim();
+function topicLabel(t: TFunction<"chat">, topic: { title: string | null; body: string }): string {
+  const title = topic.title?.trim();
   if (title) return title;
-  const body = t.body.trim();
-  if (body.length <= 60) return body || "(untitled topic)";
+  const body = topic.body.trim();
+  if (body.length <= 60) return body || t("composer.untitledTopic");
   return `${body.slice(0, 60)}…`;
 }
 
@@ -410,6 +413,7 @@ export function Composer({
   preferredCategoryId,
   onOpenEarning,
 }: Props) {
+  const { t } = useTranslation("chat");
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   // Hidden native color picker + the textarea selection captured the moment
   // the color button is clicked. We snapshot the selection because opening
@@ -644,7 +648,7 @@ export function Composer({
               out.push({
                 name: c.name,
                 online: u.online,
-                sublabel: u.activeCharacterId === c.id ? `${u.username} (active)` : u.username,
+                sublabel: u.activeCharacterId === c.id ? t("composer.activeSuffix", { name: u.username }) : u.username,
               });
             }
           }
@@ -778,7 +782,7 @@ export function Composer({
         for (const o of occupants) {
           if (trigger.query.length > 0
             && !o.displayName.toLowerCase().startsWith(trigger.query)) continue;
-          pushIdentity(o.userId, o.characterId, o.displayName, o.away ? "in room, away" : "in room");
+          pushIdentity(o.userId, o.characterId, o.displayName, o.away ? t("composer.inRoomAway") : t("composer.inRoom"));
         }
       }
       out.sort((a, b) => a.label.localeCompare(b.label));
@@ -788,8 +792,8 @@ export function Composer({
       // occupants alone seed the picker until the user types a letter.
       for (const s of identitySuggestions) {
         const sublabel = s.kind === "character"
-          ? `character of ${s.masterUsername}`
-          : "user";
+          ? t("identity.characterOf", { name: s.masterUsername })
+          : t("composer.user");
         pushIdentity(s.userId, s.characterId, s.displayName, sublabel);
       }
       return out.slice(0, MAX_COMPLETIONS);
@@ -816,7 +820,7 @@ export function Composer({
             out.push({
               value: o.displayName.replace(/ /g, NBSP_ITEM),
               label: o.displayName,
-              ...(o.away ? { sublabel: "away" } : {}),
+              ...(o.away ? { sublabel: t("composer.away") } : {}),
             });
           }
         }
@@ -850,7 +854,9 @@ export function Composer({
         out.push({
           value: row.name,
           label: row.name,
-          sublabel: `× ${entry.quantity.toLocaleString()}${row.description ? `, ${row.description}` : ""}`,
+          sublabel: row.description
+            ? t("composer.itemQuantityDesc", { quantity: formatNumber(entry.quantity), description: row.description })
+            : t("composer.itemQuantity", { quantity: formatNumber(entry.quantity) }),
         });
       }
       out.sort((a, b) => a.label.localeCompare(b.label));
@@ -884,12 +890,12 @@ export function Composer({
       if (occupants) {
         for (const o of occupants) {
           if (trigger.query.length > 0 && !o.displayName.toLowerCase().startsWith(trigger.query)) continue;
-          pushIdentity(o.userId, o.characterId, o.displayName, o.away ? "in room, away" : "in room");
+          pushIdentity(o.userId, o.characterId, o.displayName, o.away ? t("composer.inRoomAway") : t("composer.inRoom"));
         }
       }
       out.sort((a, b) => a.label.localeCompare(b.label));
       for (const s of identitySuggestions) {
-        const sublabel = s.kind === "character" ? `character of ${s.masterUsername}` : "user";
+        const sublabel = s.kind === "character" ? t("identity.characterOf", { name: s.masterUsername }) : t("composer.user");
         pushIdentity(s.userId, s.characterId, s.displayName, sublabel);
       }
       return out.slice(0, MAX_COMPLETIONS);
@@ -930,7 +936,7 @@ export function Composer({
     if (occupants) {
       for (const o of occupants) {
         if (o.displayName.toLowerCase().startsWith(trigger.query)) {
-          push(o.displayName, o.away ? "away" : undefined);
+          push(o.displayName, o.away ? t("composer.away") : undefined);
         }
       }
     }
@@ -942,7 +948,7 @@ export function Composer({
       push(s.name, s.sublabel);
     }
     return out.slice(0, MAX_COMPLETIONS);
-  }, [trigger, commands, occupants, serverSuggestions, identitySuggestions, inventoryForActiveIdentity, itemCatalogByKey]);
+  }, [trigger, commands, occupants, serverSuggestions, identitySuggestions, inventoryForActiveIdentity, itemCatalogByKey, t]);
 
   const [selectedIndex, setSelectedIndex] = useState(0);
   // The popup never steals Enter until the user has opted in by pressing
@@ -1030,11 +1036,11 @@ export function Composer({
     ) {
       setNotice({
         code: "VERIFY_EMAIL",
-        message: "Verify your email to chat — check your inbox for the link (resend it from the banner up top).",
+        message: t("composer.verifyEmailNotice"),
       });
       return;
     }
-    const t = value.trimEnd();
+    const outgoing = value.trimEnd();
     // Length gate. chat:input is fire-and-forget, by the time the
     // server's TOO_LONG `error:notice` echoes back, the call site
     // below has already cleared the input and the user's text is
@@ -1042,16 +1048,18 @@ export function Composer({
     // notice but LEAVES the draft in place for the user to trim
     // and resend. Counter in the toolbar (below) tracks the same
     // value so over-cap is visible before the user even hits send.
-    if (t.length > effectiveMaxLength) {
+    if (outgoing.length > effectiveMaxLength) {
       setNotice({
         code: "TOO_LONG",
-        message: `${isForumRoom ? "Post" : "Message"} is ${t.length} chars; limit is ${effectiveMaxLength}. Trim it and try again.`,
+        message: isForumRoom
+          ? t("composer.tooLongPost", { length: outgoing.length, max: effectiveMaxLength })
+          : t("composer.tooLongMessage", { length: outgoing.length, max: effectiveMaxLength }),
       });
       return;
     }
     const buf = historyRef.current;
-    if (buf[buf.length - 1] !== t) {
-      buf.push(t);
+    if (buf[buf.length - 1] !== outgoing) {
+      buf.push(outgoing);
       if (buf.length > HISTORY_MAX) buf.shift();
     }
     // Close any open history popup on send (the user committed; the
@@ -1066,7 +1074,7 @@ export function Composer({
     if (isForumRoom && topicCreateMode) {
       const title = topicTitle.trim();
       if (!title) return; // submit-button is disabled in this case too
-      onSend(t, {
+      onSend(outgoing, {
         threadTitle: title,
         threadCategoryId: effectiveCategoryId,
       });
@@ -1076,7 +1084,7 @@ export function Composer({
       return;
     }
     if (isForumRoom && activeTopic) {
-      onSend(t, { replyToId: activeTopic.id });
+      onSend(outgoing, { replyToId: activeTopic.id });
       onChange("");
       setCaret(0);
       return;
@@ -1085,7 +1093,7 @@ export function Composer({
     // Flat-room / non-forum path. threadCategoryId only forwards when
     // the picker is visible (i.e. a categorized nested room before the
     // forum rewrite; defensively kept for installs in flat mode).
-    onSend(t, showCategoryPicker ? { threadCategoryId: effectiveCategoryId } : undefined);
+    onSend(outgoing, showCategoryPicker ? { threadCategoryId: effectiveCategoryId } : undefined);
     onChange("");
     setCaret(0);
   }
@@ -1325,13 +1333,13 @@ export function Composer({
    * caret around the placeholder so the user can immediately type
    * over it. Used by the formatting buttons (Bold / Italic / etc).
    */
-  function wrapSelection(before: string, after: string, placeholder: string = "text"): void {
+  function wrapSelection(before: string, after: string, placeholder?: string): void {
     const el = inputRef.current;
     if (!el) return;
     const start = el.selectionStart ?? value.length;
     const end = el.selectionEnd ?? start;
     const selected = value.slice(start, end);
-    const content = selected || placeholder;
+    const content = selected || placeholder || t("composer.ph.text");
     const inserted = `${before}${content}${after}`;
     const next = value.slice(0, start) + inserted + value.slice(end);
     onChange(next);
@@ -1392,7 +1400,7 @@ export function Composer({
   function applyColor(hex: string): void {
     const sel = colorSelRef.current ?? { start: value.length, end: value.length };
     const selected = value.slice(sel.start, sel.end);
-    const content = selected || "text";
+    const content = selected || t("composer.ph.text");
     const before = `<font color="${hex}">`;
     const inserted = `${before}${content}</font>`;
     const next = value.slice(0, sel.start) + inserted + value.slice(sel.end);
@@ -1465,16 +1473,16 @@ export function Composer({
    * before/after model, then patches the URL into the suffix.
    */
   function insertLinkOrImage(kind: "link" | "image"): void {
-    const url = window.prompt(kind === "image" ? "Image URL (http:// or https://):" : "Link URL (http:// or https://):");
+    const url = window.prompt(kind === "image" ? t("composer.imageUrlPrompt") : t("composer.linkUrlPrompt"));
     if (!url) return;
     const trimmed = url.trim();
     if (!/^https?:\/\//i.test(trimmed)) {
-      window.alert("URL must start with http:// or https://");
+      window.alert(t("composer.urlSchemeAlert"));
       return;
     }
     const before = kind === "image" ? "![" : "[";
     const after = `](${trimmed})`;
-    wrapSelection(before, after, kind === "image" ? "alt" : "link text");
+    wrapSelection(before, after, kind === "image" ? t("composer.ph.alt") : t("composer.ph.linkText"));
   }
 
   // Forum-mode state derivations. The composer has four distinct
@@ -1553,14 +1561,14 @@ export function Composer({
               which means "as wide as the intrinsic content", and a
               one-line sentence in English has no good wrap point, so
               without this it forces horizontal overflow on mobile. */}
-          <span className="min-w-0 flex-1">This room is a forum, pick a topic to reply, or start a new one.</span>
+          <span className="min-w-0 flex-1">{t("composer.forumHint")}</span>
           {onStartTopicCreate ? (
             <button
               type="button"
               onClick={onStartTopicCreate}
               className="shrink-0 rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
             >
-              + New Topic
+              {t("forum.newTopic")}
             </button>
           ) : null}
         </div>
@@ -1574,16 +1582,21 @@ export function Composer({
         <div className="flex items-center justify-between gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-1 text-xs text-keep-muted">
           <span className="min-w-0 truncate">
             <span className="mr-1" aria-hidden>🔒</span>
-            <b>{topicLabel(activeTopic!)}</b> is locked, no new replies.
+            <Trans
+              t={t}
+              i18nKey="composer.lockedNotice"
+              values={{ topic: topicLabel(t, activeTopic!) }}
+              components={{ 1: <b /> }}
+            />
           </span>
           {onLeaveThread ? (
             <button
               type="button"
               onClick={onLeaveThread}
               className="keep-button shrink-0 rounded border border-keep-rule/60 bg-keep-bg px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-              title="Leave this topic"
+              title={t("composer.leaveTopicTitle")}
             >
-              Leave thread
+              {t("composer.leaveThread")}
             </button>
           ) : null}
         </div>
@@ -1600,34 +1613,34 @@ export function Composer({
           <div className="flex items-center justify-between gap-2 rounded border border-keep-accent/40 bg-keep-accent/10 px-2 py-1 text-xs text-keep-accent">
             <span className="min-w-0 truncate">
               <span className="mr-1" aria-hidden>🔒</span>
-              <span className="mr-1 text-[10px] uppercase tracking-widest opacity-70">Locked, replying as moderator</span>
-              <b>{topicLabel(activeTopic!)}</b>
+              <span className="mr-1 text-[10px] uppercase tracking-widest opacity-70">{t("composer.lockedModOverride")}</span>
+              <b>{topicLabel(t, activeTopic!)}</b>
             </span>
             {onLeaveThread ? (
               <button
                 type="button"
                 onClick={onLeaveThread}
                 className="keep-button shrink-0 rounded border border-keep-rule/60 bg-keep-bg px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-                title="Leave this topic"
+                title={t("composer.leaveTopicTitle")}
               >
-                Leave thread
+                {t("composer.leaveThread")}
               </button>
             ) : null}
           </div>
         ) : (
           <div className="flex items-center justify-between gap-2 rounded border border-keep-action/40 bg-keep-action/10 px-2 py-1 text-xs text-keep-action">
             <span className="min-w-0 truncate">
-              <span className="mr-1 text-[10px] uppercase tracking-widest opacity-70">Replying to</span>
-              <b>{topicLabel(activeTopic!)}</b>
+              <span className="mr-1 text-[10px] uppercase tracking-widest opacity-70">{t("composer.replyingTo")}</span>
+              <b>{topicLabel(t, activeTopic!)}</b>
             </span>
             {onLeaveThread ? (
               <button
                 type="button"
                 onClick={onLeaveThread}
                 className="keep-button shrink-0 rounded border border-keep-rule/60 bg-keep-bg px-2 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text"
-                title="Stop replying to this topic"
+                title={t("composer.stopReplyingTitle")}
               >
-                Leave thread
+                {t("composer.leaveThread")}
               </button>
             ) : null}
           </div>
@@ -1639,7 +1652,7 @@ export function Composer({
       {forumCreating ? (
         <div className="flex flex-col gap-1 rounded border border-keep-action/40 bg-keep-action/5 p-2">
           <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-widest text-keep-action">
-            <span>New topic</span>
+            <span>{t("composer.newTopicHeader")}</span>
             {onCancelTopicCreate ? (
               <button
                 type="button"
@@ -1649,7 +1662,7 @@ export function Composer({
                 // compact since pointer precision is higher.
                 className="keep-button flex h-8 items-center rounded border border-keep-rule/60 bg-keep-bg px-3 normal-case tracking-normal text-keep-muted hover:bg-keep-banner hover:text-keep-text lg:h-6 lg:px-2"
               >
-                Cancel
+                {t("common:cancel")}
               </button>
             ) : null}
           </div>
@@ -1658,20 +1671,20 @@ export function Composer({
             value={topicTitle}
             onChange={(e) => setTopicTitle(e.target.value)}
             maxLength={maxTopicTitleLength}
-            placeholder="Topic title"
+            placeholder={t("composer.topicTitlePlaceholder")}
             className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action"
             // eslint-disable-next-line jsx-a11y/no-autofocus
             autoFocus
           />
           {threadCategories && threadCategories.length > 0 ? (
             <label className="flex items-center gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
-              <span>Category:</span>
+              <span>{t("composer.categoryLabel")}</span>
               <select
                 value={effectiveCategoryId ?? ""}
                 onChange={(e) => setAndPersistCategory(e.target.value || null)}
                 className="rounded border border-keep-rule bg-keep-bg px-1 py-0.5 normal-case tracking-normal text-keep-text"
               >
-                <option value="">Uncategorized</option>
+                <option value="">{t("composer.uncategorized")}</option>
                 {threadCategories.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
@@ -1691,13 +1704,13 @@ export function Composer({
           {/* Threaded-conversation glyph (lucide, currentColor — replaces the
               old board.png). */}
           <MessagesSquare aria-hidden className="h-3.5 w-3.5 shrink-0" />
-          <span>Thread:</span>
+          <span>{t("composer.threadLabel")}</span>
           <select
             value={effectiveCategoryId ?? ""}
             onChange={(e) => setAndPersistCategory(e.target.value || null)}
             className="rounded border border-keep-rule bg-keep-bg px-1 py-0.5 normal-case tracking-normal text-keep-text"
           >
-            <option value="">Uncategorized</option>
+            <option value="">{t("composer.uncategorized")}</option>
             {threadCategories!.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
@@ -1734,11 +1747,11 @@ export function Composer({
             <button
               type="button"
               onClick={onOpenRail}
-              aria-label="Open menu"
-              title="Menu - rooms, servers, and people"
+              aria-label={t("composer.openMenuAria")}
+              title={t("composer.menuTitle")}
               className="keep-button ml-auto flex h-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 px-3 text-[11px] font-semibold uppercase tracking-widest leading-none hover:bg-keep-banner"
             >
-              Menu
+              {t("composer.menu")}
             </button>
           ) : null}
         </div>
@@ -1749,10 +1762,10 @@ export function Composer({
         // first item is the Bold button at every width and the input row
         // below reclaims the width the old drawer column was eating.
         <div className="flex flex-wrap items-center gap-0.5 text-xs">
-          <FmtButton title="Bold (Ctrl+B)" onClick={() => wrapSelection("**", "**", "bold")}>
+          <FmtButton title={t("composer.fmt.bold")} onClick={() => wrapSelection("**", "**", t("composer.ph.bold"))}>
             <Bold className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title="Italic (Ctrl+I)" onClick={() => wrapSelection("*", "*", "italic")}>
+          <FmtButton title={t("composer.fmt.italic")} onClick={() => wrapSelection("*", "*", t("composer.ph.italic"))}>
             <Italic className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           {/* Underline has no markdown equivalent (CommonMark reserves
@@ -1760,16 +1773,16 @@ export function Composer({
               and the inline parser recognizes the HTML tag as an alias.
               Same render path as the markdown buttons; the stored body
               just happens to keep the tag. */}
-          <FmtButton title="Underline" onClick={() => wrapSelection("<u>", "</u>", "underline")}>
+          <FmtButton title={t("composer.fmt.underline")} onClick={() => wrapSelection("<u>", "</u>", t("composer.ph.underline"))}>
             <Underline className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title="Strikethrough" onClick={() => wrapSelection("~~", "~~", "strikethrough")}>
+          <FmtButton title={t("composer.fmt.strikethrough")} onClick={() => wrapSelection("~~", "~~", t("composer.ph.strikethrough"))}>
             <Strikethrough className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           {/* Color: opens the OS color picker, wraps the selection in
               <font color="#hex">. The input is visually hidden and driven
               by openColorPicker()'s programmatic click. */}
-          <FmtButton title="Color selected text" onClick={openColorPicker}>
+          <FmtButton title={t("composer.fmt.color")} onClick={openColorPicker}>
             <Palette className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           <input
@@ -1781,19 +1794,19 @@ export function Composer({
             className="pointer-events-none absolute h-0 w-0 opacity-0"
             onChange={(e) => applyColor(e.target.value)}
           />
-          <FmtButton title="Inline code" onClick={() => wrapSelection("`", "`", "code")}>
+          <FmtButton title={t("composer.fmt.code")} onClick={() => wrapSelection("`", "`", t("composer.ph.code"))}>
             <Code className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title="Spoiler (click to reveal)" onClick={() => wrapSelection("||", "||", "spoiler")}>
+          <FmtButton title={t("composer.fmt.spoiler")} onClick={() => wrapSelection("||", "||", t("composer.ph.spoiler"))}>
             <Eye className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title="Blockquote, prefixes selected lines with '> '" onClick={() => prefixLines("> ")}>
+          <FmtButton title={t("composer.fmt.blockquote")} onClick={() => prefixLines("> ")}>
             <Quote className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title="Link, wraps selection as [text](url)" onClick={() => insertLinkOrImage("link")}>
+          <FmtButton title={t("composer.fmt.link")} onClick={() => insertLinkOrImage("link")}>
             <LinkIcon className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title="Image, inserts ![alt](url)" onClick={() => insertLinkOrImage("image")}>
+          <FmtButton title={t("composer.fmt.image")} onClick={() => insertLinkOrImage("image")}>
             <ImageIcon className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           {/* Inline emoticon: pops the picker, then inserts the
@@ -1847,7 +1860,7 @@ export function Composer({
           "unknown identity" so a stale/bad token is obvious. */}
       {tokenHints.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1 px-0.5 text-[11px] text-keep-muted">
-          <span className="opacity-70">Mentioning:</span>
+          <span className="opacity-70">{t("composer.mentioning")}</span>
           {tokenHints.map((h) => (
             h.name ? (
               <span
@@ -1863,7 +1876,7 @@ export function Composer({
                 className="rounded border border-keep-rule/50 bg-keep-bg/60 px-1.5 py-0.5"
                 title={`@${h.kind}:${h.id}`}
               >
-                {h.unknown ? "unknown identity" : "resolving…"}
+                {h.unknown ? t("composer.unknownIdentity") : t("composer.resolving")}
               </span>
             )
           ))}
@@ -1893,11 +1906,11 @@ export function Composer({
         {historyOpen && historyRef.current.length > 0 ? (
           <ul
             role="listbox"
-            aria-label="Recent sends"
+            aria-label={t("composer.recentSendsAria")}
             className={`absolute bottom-full left-0 z-30 mb-1 max-h-56 w-full overflow-y-auto rounded border border-keep-rule bg-keep-bg shadow-2xl${reduceMotion ? " tk-slide-up-in" : ""}`}
           >
             <li className="border-b border-keep-rule/40 bg-keep-banner/40 px-2 py-1 text-[10px] uppercase tracking-widest text-keep-muted">
-              Recent sends, Enter to insert
+              {t("composer.recentSendsHeader")}
             </li>
             {historyRef.current
               .slice()
@@ -1980,16 +1993,16 @@ export function Composer({
           placeholder={
             placeholder ??
             (forumDisabled
-              ? "Pick a topic or start a new one to post."
+              ? t("composer.phForumDisabled")
               : forumLockedForViewer
-                ? "This topic is locked, no new replies."
+                ? t("forum.lockedTitle")
                 : forumCreating
-                  ? "First post of the new topic..."
+                  ? t("composer.phCreating")
                   : forumLockedModOverride
-                    ? `Post a moderator reply to "${topicLabel(activeTopic!)}"...`
+                    ? t("composer.phModReply", { topic: topicLabel(t, activeTopic!) })
                     : forumReplying
-                      ? `Reply to "${topicLabel(activeTopic!)}"...`
-                      : "Type a message... (Shift+Enter for a new line)")
+                      ? t("composer.phReply", { topic: topicLabel(t, activeTopic!) })
+                      : t("composer.phDefault"))
           }
           // text-base on mobile prevents iOS Safari from auto-zooming on focus
           // (anything below 16px triggers zoom). md+ keeps our compact size.
@@ -2036,8 +2049,8 @@ export function Composer({
           type="button"
           onClick={insertNewline}
           disabled={inputDisabled}
-          aria-label="Insert line break"
-          title="Insert line break"
+          aria-label={t("composer.insertLineBreak")}
+          title={t("composer.insertLineBreak")}
           className="keep-button flex h-6 items-center justify-center rounded border border-keep-rule bg-keep-bg px-2 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 lg:hidden"
         >
           ↵
@@ -2057,7 +2070,7 @@ export function Composer({
           // mobile sizing to match.
           className="keep-button h-10 shrink-0 rounded border border-keep-rule bg-keep-bg px-4 text-sm hover:bg-keep-banner disabled:cursor-not-allowed disabled:opacity-50 lg:h-8"
         >
-          {forumCreating ? "Post topic" : forumReplying ? "Reply" : "Send"}
+          {forumCreating ? t("composer.postTopic") : forumReplying ? t("composer.reply") : t("composer.send")}
         </button>
       </div>
       </div>
@@ -2084,6 +2097,7 @@ function ComposerCharCount({
   max: number;
   className?: string;
 }) {
+  const { t } = useTranslation("chat");
   const over = length > max;
   const near = !over && length > max * 0.8;
   const tint = over
@@ -2094,14 +2108,14 @@ function ComposerCharCount({
   return (
     <span
       aria-live="polite"
-      aria-label={`Character count: ${length} of ${max}`}
-      title={`${length} / ${max} characters`}
+      aria-label={t("common:formatting.charCountAria", { length, max })}
+      title={t("common:formatting.charCountTitle", { length, max })}
       className={`select-none whitespace-nowrap text-[11px] tabular-nums ${tint} ${className ?? ""}`}
     >
       {length} / {max}
       {/* "Chars" suffix hidden on narrow viewports to keep the
        *  counter compact when toolbar real estate is tight. */}
-      <span className="ml-1 hidden lg:inline">Chars</span>
+      <span className="ml-1 hidden lg:inline">{t("common:formatting.chars")}</span>
     </span>
   );
 }

@@ -1,3 +1,4 @@
+import { Trans, useTranslation } from "react-i18next";
 import type { Theme } from "@thekeep/shared";
 import { DEFAULT_THEME, THEME_PRESETS } from "@thekeep/shared";
 
@@ -7,15 +8,17 @@ interface Props {
   onReset: () => void;
 }
 
-const SLOTS: Array<{ key: keyof Theme; label: string; hint: string }> = [
-  { key: "bg",     label: "Background", hint: "Main chat backdrop" },
-  { key: "panel",  label: "Panel",      hint: "Banner, side rails, modal headers" },
-  { key: "border", label: "Border",     hint: "Rule lines and frame edges" },
-  { key: "text",   label: "Text",       hint: "Primary readable text" },
-  { key: "muted",  label: "Muted",      hint: "Timestamps, hints, secondary text" },
-  { key: "action", label: "Action",     hint: "Highlights, current room, links" },
-  { key: "accent", label: "Accent",     hint: "Strong call-to-action / Exit button" },
-  { key: "system", label: "System",     hint: "Italic system messages" },
+// Labels/hints resolve through t() at render time (not module scope) so a
+// live language switch re-renders the slot grid in the new language.
+const SLOTS: Array<{ key: keyof Theme; labelKey: string; hintKey: string }> = [
+  { key: "bg",     labelKey: "themePicker.slots.bg.label",     hintKey: "themePicker.slots.bg.hint" },
+  { key: "panel",  labelKey: "themePicker.slots.panel.label",  hintKey: "themePicker.slots.panel.hint" },
+  { key: "border", labelKey: "themePicker.slots.border.label", hintKey: "themePicker.slots.border.hint" },
+  { key: "text",   labelKey: "themePicker.slots.text.label",   hintKey: "themePicker.slots.text.hint" },
+  { key: "muted",  labelKey: "themePicker.slots.muted.label",  hintKey: "themePicker.slots.muted.hint" },
+  { key: "action", labelKey: "themePicker.slots.action.label", hintKey: "themePicker.slots.action.hint" },
+  { key: "accent", labelKey: "themePicker.slots.accent.label", hintKey: "themePicker.slots.accent.hint" },
+  { key: "system", labelKey: "themePicker.slots.system.label", hintKey: "themePicker.slots.system.hint" },
 ];
 
 /**
@@ -24,6 +27,7 @@ const SLOTS: Array<{ key: keyof Theme; label: string; hint: string }> = [
  * mock chat row so the user sees the result without leaving the editor.
  */
 export function ThemePicker({ theme, onChange, onReset }: Props) {
+  const { t } = useTranslation("common");
   function setSlot(slot: keyof Theme, hex: string) {
     onChange({ ...theme, [slot]: hex });
   }
@@ -36,7 +40,7 @@ export function ThemePicker({ theme, onChange, onReset }: Props) {
             key={p.name}
             type="button"
             onClick={() => onChange(p.theme)}
-            title={`Apply preset: ${p.name}`}
+            title={t("themePicker.applyPreset", { name: p.name })}
             // Each chip renders in its OWN theme so users see what they're
             // about to apply at a glance.
             style={{
@@ -61,26 +65,26 @@ export function ThemePicker({ theme, onChange, onReset }: Props) {
         <button
           type="button"
           onClick={onReset}
-          title="Revert to system default"
+          title={t("themePicker.revertTitle")}
           className="keep-button ml-auto rounded border border-keep-border bg-keep-bg px-2 py-1 text-xs text-keep-muted hover:text-keep-text"
         >
-          Default
+          {t("default")}
         </button>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        {SLOTS.map(({ key, label, hint }) => (
+        {SLOTS.map(({ key, labelKey, hintKey }) => (
           <label key={key} className="flex items-center gap-2 text-xs">
             <input
               type="color"
               value={theme[key]}
               onChange={(e) => setSlot(key, e.target.value)}
               className="h-6 w-8 cursor-pointer border border-keep-border"
-              aria-label={label}
+              aria-label={t(labelKey)}
             />
             <span className="flex-1">
-              <span className="block uppercase tracking-widest text-keep-muted">{label}</span>
-              <span className="block text-[10px] text-keep-muted">{hint}</span>
+              <span className="block uppercase tracking-widest text-keep-muted">{t(labelKey)}</span>
+              <span className="block text-[10px] text-keep-muted">{t(hintKey)}</span>
             </span>
             <input
               type="text"
@@ -100,6 +104,7 @@ export function ThemePicker({ theme, onChange, onReset }: Props) {
 }
 
 function ThemePreview({ theme }: { theme: Theme }) {
+  const { t } = useTranslation("common");
   // Every color is set inline so the preview can't accidentally pick up the
   // editor's CSS vars and lie about what the theme will look like.
   return (
@@ -118,22 +123,25 @@ function ThemePreview({ theme }: { theme: Theme }) {
           borderBottom: `1px solid ${theme.border}`,
         }}
       >
-        <span className="font-action text-sm" style={{ color: theme.text }}>The Spire</span>{" "}
-        <span style={{ color: theme.muted }}>· preview</span>
+        <span className="font-action text-sm" style={{ color: theme.text }}>{t("appName")}</span>{" "}
+        <span style={{ color: theme.muted }}>{t("themePicker.preview.caption")}</span>
       </div>
       <div>
         <span style={{ color: theme.muted }}>14:30:00 </span>
-        [<span className="font-semibold" style={{ color: theme.text }}>Sigrid</span>]{" "}
-        <span style={{ color: theme.text }}>hello there.</span>
+        [<span className="font-semibold" style={{ color: theme.text }}>{t("themePicker.preview.sampleName")}</span>]{" "}
+        <span style={{ color: theme.text }}>{t("themePicker.preview.sampleMessage")}</span>
       </div>
       <div className="font-action" style={{ color: theme.action }}>
-        14:30:01 <span className="font-semibold">Sigrid</span> draws her sword.
+        14:30:01{" "}
+        <Trans t={t} i18nKey="themePicker.preview.actionLine">
+          <span className="font-semibold">Sigrid</span> draws her sword.
+        </Trans>
       </div>
       <div style={{ color: theme.system }} className="italic">
-        14:30:02 * Topic set: Welcome to The Spire.
+        14:30:02 {t("themePicker.preview.sampleSystem")}
       </div>
       <div style={{ color: theme.accent }} className="font-bold">
-        14:30:03 📣 Announcement!
+        14:30:03 {t("themePicker.preview.sampleAnnouncement")}
       </div>
     </div>
   );

@@ -1,0 +1,672 @@
+{
+  "saved": "Guardado.",
+  "errors": {
+    "loadFailed": "error al cargar",
+    "saveFailed": "error al guardar",
+    "saveFailedShort": "Error al guardar",
+    "createFailed": "error al crear",
+    "deleteFailed": "error al eliminar",
+    "addFailed": "error al agregar",
+    "reorderFailed": "error al reordenar",
+    "switchFailed": "error al cambiar",
+    "failedToSave": "No se pudo guardar",
+    "failedToLoad": "No se pudo cargar",
+    "failedToRemove": "No se pudo quitar",
+    "failedToUnlink": "No se pudo desvincular",
+    "failedToUpdate": "No se pudo actualizar.",
+    "passwordSaveFailed": "No se pudo guardar tu contraseña",
+    "enableFailed": "error al activar",
+    "disableFailed": "error al desactivar"
+  },
+  "fields": {
+    "characterName": "Nombre del personaje"
+  },
+  "gender": {
+    "glyph": {
+      "male": "masculino",
+      "female": "femenino",
+      "nonbinary": "no binario",
+      "other": "otro",
+      "undisclosed": "sin especificar"
+    },
+    "options": {
+      "undisclosed": "Sin especificar",
+      "male": "Masculino",
+      "female": "Femenino",
+      "nonbinary": "No binario",
+      "other": "Otro"
+    }
+  },
+  "vibe": {
+    "combat": { "low": "Pacifista", "high": "Combativo" },
+    "cunning": { "low": "Honesto", "high": "Astuto" },
+    "warmth": { "low": "Frío", "high": "Cálido" },
+    "order": { "low": "Caos", "high": "Orden" },
+    "caution": { "low": "Temerario", "high": "Cauteloso" },
+    "outlook": { "low": "Cínico", "high": "Idealista" },
+    "social": { "low": "Reservado", "high": "Extrovertido" },
+    "boldness": { "low": "Recatado", "high": "Atrevido" }
+  },
+  "statFields": {
+    "age": "Edad",
+    "race": "Raza",
+    "gender": "Género",
+    "height": "Altura",
+    "weight": "Peso",
+    "alignment": "Alineamiento",
+    "occupation": "Ocupación"
+  },
+  "birthDate": {
+    "title": "Fecha de nacimiento",
+    "notSet": "Sin definir",
+    "hint": "Tu fecha de nacimiento se define al crear tu cuenta y solo tú puedes verla. Si hace falta corregirla, contacta al equipo."
+  },
+  "createCharacter": {
+    "title": "Nuevo personaje",
+    "namePlaceholder": "p. ej. Juan_Perez",
+    "nameRules": "1-40 caracteres: letras, números, _ - ' o un espacio de no separación (Alt+0160). Los nombres de personaje no se pueden cambiar, elige con cuidado.",
+    "spaceWarning": "Un espacio normal no está permitido, rompe comandos de chat como <cmd>/whisper</cmd>. Usa en su lugar un guion bajo (<mono>_</mono>) o un espacio de no separación (<key>Alt+0160</key>).",
+    "replaceSpaces": "Reemplazar espacios por _",
+    "creating": "Creando...",
+    "create": "Crear"
+  },
+  "displayPrivacy": {
+    "legend": "Privacidad de visualización y métricas",
+    "intro": "Controles por sección de lo que otros usuarios ven en tus filas y en tu perfil. Se guardan al cambiarlos.",
+    "rankUserlist": {
+      "label": "Mostrar mi ícono de rango en la lista de usuarios",
+      "hint": "Cuando está desactivado, tu fila muestra el símbolo de género en lugar de la gema de rango. Se aplica de inmediato para todos."
+    },
+    "rankChat": {
+      "label": "Mostrar mi ícono de rango en los mensajes de chat",
+      "hint": "Cuando está desactivado, tus próximos mensajes omiten la gema de rango en la línea. Los mensajes anteriores conservan el rango que se mostraba en ese momento."
+    },
+    "countersIntro": "Oculta contadores de actividad individuales en tu perfil público. Cada uno es independiente.",
+    "hideChat": "Ocultar mi conteo de mensajes de chat",
+    "hideTopics": "Ocultar mi conteo de temas de foro",
+    "hideReplies": "Ocultar mi conteo de respuestas de foro",
+    "rendersPrivate": "El perfil muestra \"privado\" en lugar del número."
+  },
+  "editBio": {
+    "title": "Editar biografía",
+    "sourcePlaceholder": "<p>HTML de la biografía…</p>",
+    "saveBio": "Guardar bio"
+  },
+  "bioMode": {
+    "designer": "Diseñador",
+    "source": "Código",
+    "loadingDesigner": "Cargando el diseñador…"
+  },
+  "designer": {
+    "categories": {
+      "text": "Texto",
+      "cards": "Tarjetas",
+      "layout": "Estructura",
+      "media": "Multimedia"
+    },
+    "blocks": {
+      "heading": "Encabezado",
+      "paragraph": "Párrafo",
+      "quote": "Cita",
+      "divider": "Separador",
+      "spacer": "Espaciador",
+      "card": "Tarjeta",
+      "labeledField": "Campo con etiqueta",
+      "listCard": "Tarjeta de lista",
+      "bioContainer": "Contenedor de biografía",
+      "twoColumns": "Dos columnas",
+      "image": "Imagen",
+      "youtube": "YouTube"
+    },
+    "seed": {
+      "sectionHeading": "Encabezado de sección",
+      "storyPlaceholder": "Escribe tu historia aquí…",
+      "quote": "Una frase digna de citar.",
+      "cardTitle": "Título de la tarjeta",
+      "cardBody": "Texto de la tarjeta.",
+      "label": "Etiqueta",
+      "value": "Valor",
+      "traits": "Rasgos",
+      "firstTrait": "Primer rasgo",
+      "secondTrait": "Segundo rasgo",
+      "thirdTrait": "Tercer rasgo",
+      "columnOne": "Columna uno",
+      "columnTwo": "Columna dos",
+      "name": "Nombre",
+      "yourName": "Tu nombre",
+      "about": "Acerca de",
+      "aboutBody": "Escribe aquí unas líneas sobre ti o tu personaje.",
+      "section": "Sección",
+      "firstParagraph": "Primer párrafo.",
+      "secondParagraph": "Segundo párrafo."
+    },
+    "templates": {
+      "ml": "Luz de luna",
+      "pg": "Pergamino",
+      "nt": "Terminal neón",
+      "rs": "Rosa",
+      "cg": "Carmesí",
+      "gr": "Arboleda",
+      "mn": "Minimalista"
+    },
+    "templateBlocks": {
+      "dossier": "Expediente {{name}}",
+      "label": "Etiqueta {{name}}",
+      "section": "Sección {{name}}",
+      "list": "Lista {{name}}"
+    }
+  },
+  "modal": {
+    "hero": {
+      "experienceTitle": "Experiencia",
+      "currencyTitle": "Monedas",
+      "xp": "XP"
+    },
+    "meta": {
+      "character": "Personaje",
+      "masterAccount": "Cuenta principal",
+      "joined": "se unió el {{date}}"
+    },
+    "languages": {
+      "aria": "Idiomas que habla"
+    },
+    "role": {
+      "admin": "Admin",
+      "globalModerator": "Moderador global",
+      "trusted": "De confianza",
+      "trustedTitle": "Cuenta de confianza - límites de envío más amplios, ganados con la participación."
+    },
+    "scriptorium": {
+      "publishedTitle_one": "{{count}} historia publicada en el Scriptorium",
+      "publishedTitle_other": "{{count}} historias publicadas en el Scriptorium",
+      "publishedTitle_many": "{{count}} historias publicadas en el Scriptorium"
+    },
+    "scriptoriumTier": {
+      "author": "Autor",
+      "storyteller": "Narrador",
+      "loremaster": "Maestro del lore"
+    },
+    "mod": {
+      "badge": "Mod",
+      "visibleToModsOnly": "Visible solo para moderadores.",
+      "ownedBy": "Propiedad de",
+      "openMasterProfile": "Abrir el perfil principal de {{name}}",
+      "userIdLabel": "id de usuario",
+      "charIdLabel": "id de personaje",
+      "editBioTitle": "Editar la biografía de {{name}}"
+    },
+    "copy": {
+      "copied": "¡copiado!",
+      "tokenPrompt": "Copia este token:",
+      "linkPrompt": "Copia este enlace:",
+      "idPrompt": "Copia este id:",
+      "tokenTitle": "Copiar {{token}}. Pégalo en /whisper, /currency send, /friend, /title, etc.",
+      "valueTitle": "Copiar {{value}}"
+    },
+    "actions": {
+      "switchIdentityTitle": "Cambia tu identidad activa - el nombre de chat y el tema se actualizan de inmediato.",
+      "message": "Mensaje",
+      "messageTitle": "Abre un hilo de mensajes directos con este usuario.",
+      "whisper": "Susurrar",
+      "whisperTitle": "Envía un mensaje privado puntual en el chat.",
+      "ignore": "Ignorar",
+      "ignoreTitle": "Oculta para ti los mensajes de este usuario (unidireccional, reversible).",
+      "ignoreConfirm": "¿Ignorar a {{name}}? No verás sus mensajes hasta que uses /unignore.",
+      "block": "Bloquear",
+      "blockTitle": "Bloquear: tú y este usuario se vuelven invisibles el uno para el otro en todas partes.",
+      "blockConfirm": "¿Bloquear a {{name}}? No se verán en ningún lugar - chat, lista de usuarios, susurros, MD, amigos o búsqueda. Puedes deshacerlo luego en Perfil -> Privacidad.",
+      "report": "Reportar perfil",
+      "reportTitle": "Reporta este perfil para revisión de los moderadores"
+    },
+    "sections": {
+      "bonds": "Vínculos",
+      "familiar": "Familiar",
+      "worlds": "Mundos",
+      "stats": "Datos",
+      "activity": "Actividad",
+      "disposition": "Temperamento",
+      "attributes": "Atributos",
+      "links": "Enlaces",
+      "collection": "Colección",
+      "pets": "Mascotas",
+      "library": "Biblioteca",
+      "bio": "Biografía",
+      "journal": "Diario"
+    },
+    "bonds": {
+      "viewProfileTitle": "Ver el perfil de {{name}}"
+    },
+    "familiar": {
+      "prismatic": "Prismático",
+      "careStreak_one": "Racha de cuidado de {{count}} día",
+      "careStreak_other": "Racha de cuidado de {{count}} días",
+      "careStreak_many": "Racha de cuidado de {{count}} días",
+      "level": "Nv {{level}}",
+      "dormant": "dormido",
+      "pet": "mascota",
+      "patTitle": "Mima a este familiar, una pequeña alegría, una vez al día",
+      "pat": "Mimar ♥",
+      "patted": "Mimado ♥",
+      "pattedToday": "Mimado hoy"
+    },
+    "statKeys": {
+      "age": "edad",
+      "race": "raza",
+      "gender": "género",
+      "height": "altura",
+      "weight": "peso",
+      "alignment": "alineamiento",
+      "occupation": "ocupación"
+    },
+    "activity": {
+      "chatMessages": "Mensajes de chat",
+      "forumTopics": "Temas de foro",
+      "forumReplies": "Respuestas de foro",
+      "hiddenByUser": "{{label}}: cifra oculta por el usuario",
+      "private": "privado"
+    },
+    "vibe": {
+      "dotAria": "{{value}} entre {{low}} y {{high}}"
+    },
+    "worlds": {
+      "openTitle": "Abrir {{world}} (de {{owner}})",
+      "byOwner": "de {{owner}}"
+    },
+    "bio": {
+      "empty": "{{name}} todavía no ha escrito una biografía."
+    },
+    "journal": {
+      "untitled": "sin título"
+    },
+    "library": {
+      "pinTitle": "{{title}}, de {{author}}",
+      "byAuthor": "de {{author}}"
+    },
+    "avatar": {
+      "noImageTitle": "{{name}} todavía no ha elegido una imagen principal de perfil."
+    },
+    "gallery": {
+      "empty": "Aún no hay retratos adicionales. El dueño del perfil puede agregar más desde la pestaña Galería del editor.",
+      "portraitFallback": "Retrato",
+      "portraitAlt": "Retrato de {{name}}",
+      "censoredTitleNsfw": "{{label}} (NSFW, haz clic para mostrar)",
+      "censoredTitleHidden": "{{label}} (oculto, haz clic para mostrar)",
+      "nsfw": "NSFW",
+      "hidden": "Oculto",
+      "clickToReveal": "haz clic para mostrar",
+      "censorForYou": "Censurar esta imagen para ti",
+      "censorForYouTitle": "Censura esta imagen para ti (seguirá oculta cuando vuelvas a ver este perfil)",
+      "markNsfw": "Marcar NSFW",
+      "markNsfwTitle": "Marca esta imagen como NSFW (se difumina para quienes la vean)",
+      "unmarkNsfw": "Desmarcar NSFW",
+      "unmarkNsfwTitle": "Quitar la marca NSFW de esta imagen"
+    },
+    "lightbox": {
+      "fullSizeAria": "{{name}}, tamaño completo",
+      "closeTitle": "Cerrar (Esc)",
+      "closeAria": "Cerrar la vista a tamaño completo"
+    },
+    "nsfwGate": {
+      "heading": "Perfil NSFW",
+      "bodyCharacter": "El perfil de personaje de {{name}} contiene contenido marcado como <b>NSFW</b>. ¿Quieres continuar? Si cierras esta ventana y la vuelves a abrir, se te preguntará otra vez.",
+      "bodyMaster": "El perfil de {{name}} contiene contenido marcado como <b>NSFW</b>. ¿Quieres continuar? Si cierras esta ventana y la vuelves a abrir, se te preguntará otra vez.",
+      "goBack": "Volver",
+      "proceed": "Continuar"
+    },
+    "ageRestricted": {
+      "body": "Este perfil está marcado como 18+ y no se puede ver desde tu cuenta."
+    },
+    "report": {
+      "heading": "Reportar a {{name}}",
+      "thanks": "Gracias. Este perfil se envió a los moderadores para su revisión.",
+      "hint": "Marca este perfil para revisión de los moderadores (p. ej. imágenes explícitas o contenido que rompe las reglas). Cuéntanos qué pasa, es opcional pero ayuda.",
+      "placeholder": "¿Qué problema tiene este perfil?",
+      "reporting": "Reportando…",
+      "submit": "Enviar reporte",
+      "failed": "El reporte falló."
+    },
+    "hiddenFromOthers": {
+      "label": "Oculto para los demás",
+      "title": "Puedes ver esto porque es tu perfil. Está oculto para todos los demás."
+    },
+    "empty": {
+      "character": "{{name}} todavía no ha completado su perfil de personaje.",
+      "master": "{{name}} todavía no ha completado su perfil principal.",
+      "characterHint": "Podría agregar datos, una biografía y una imagen principal de perfil para darle vida a este personaje."
+    }
+  },
+  "editor": {
+    "loadingLower": "cargando...",
+    "enable": "Activar",
+    "disable": "Desactivar",
+    "header": {
+      "title": "Editar perfil",
+      "masterOoc": "Principal OOC",
+      "masterOocWithName": "Principal OOC - {{name}}",
+      "adminEditTitle": "Editando como admin: {{name}} (propiedad de {{owner}})",
+      "adminEditPrefix": "edición de admin:",
+      "ownedBy": "(propiedad de {{owner}})",
+      "loadingWord": "cargando",
+      "newCharacter": "+ Nuevo",
+      "newCharacterTitle": "Crea un nuevo personaje en tu cuenta",
+      "switch": "Cambiar",
+      "switching": "Cambiando...",
+      "switchTitle": "Cambia a este personaje - tu nombre de chat y tu tema se actualizan de inmediato.",
+      "deleting": "Eliminando...",
+      "deleteTitle": "Elimina este personaje. El historial de mensajes conserva el nombre registrado.",
+      "deleteConfirm": "¿Eliminar \"{{name}}\"? El historial de chat conserva el nombre; el personaje no se puede restaurar.",
+      "thisCharacterFallback": "este personaje"
+    },
+    "tabs": {
+      "description": "Descripción",
+      "profile": "Perfil",
+      "appearance": "Apariencia",
+      "privacy": "Privacidad",
+      "links": "Enlaces",
+      "gallery": "Galería",
+      "flair": "Adornos",
+      "journal": "Diario",
+      "sectionAria": "Sección del editor de perfil"
+    },
+    "description": {
+      "characterBio": "Biografía del personaje",
+      "oocBio": "Biografía OOC",
+      "showTour": "Mostrar el recorrido del Diseñador",
+      "htmlHint": "Se admiten HTML y CSS completos. Consulta Ayuda → Formato para ver etiquetas, colores del tema y el atajo <youtube>.",
+      "characterPlaceholder": "<p>Un mercenario curtido por la intemperie, llegado del Confín...</p>",
+      "oocPlaceholder": "<p>Zona horaria, preferencias de contacto, límites de RP, cualquier cosa OOC.</p>"
+    },
+    "profileTab": {
+      "masterUsername": "Nombre de usuario principal",
+      "renameBlockedHint": "No se puede cambiar el nombre - el historial de mensajes registra el nombre al momento del envío.",
+      "setAtRegistration": "Se define al registrarte.",
+      "genderOoc": "Género (OOC)",
+      "genderHint": "Se muestra como un ícono junto a tu nombre de usuario cuando no hay un personaje activo.",
+      "languages": "Idiomas",
+      "languagesAdd": "Añadir un idioma…",
+      "languagesRemove": "Quitar {{language}}",
+      "languagesMax": "Puedes añadir hasta {{max}} idiomas.",
+      "languagesHint": "Los idiomas que conoces y en los que roleas. Se muestran como etiquetas con bandera en la parte superior de tu perfil y de los perfiles de tus personajes.",
+      "mainImageLabel": "URL de la imagen principal de perfil",
+      "imageUrlPlaceholder": "https://example.com/portrait.png",
+      "mainImageHint": "Define el ícono en la lista de usuarios y la cabecera del perfil.",
+      "includeInGallery": "Incluir en la galería",
+      "includeInGalleryHint": "Muestra esta imagen como primer recuadro de tu galería, junto a los demás retratos que hayas agregado. Requiere una URL de imagen principal de perfil arriba."
+    },
+    "statsSection": {
+      "hint": "Haz clic en el ojo junto a un campo para ocultarlo en tu perfil público. El valor queda guardado de todas formas."
+    },
+    "crop": {
+      "title": "Posición del avatar",
+      "dragToPan": "Arrastra para mover",
+      "loadError": "No se pudo cargar esa imagen, revisa la URL de arriba.",
+      "needUrl": "Pega arriba una URL de imagen principal de perfil para recortar.",
+      "zoom": "Zoom",
+      "zoomValue": "{{value}}x",
+      "reset": "Restablecer recorte",
+      "resetTitle": "Volver al predeterminado: centrado y sin zoom"
+    },
+    "visibilityToggle": {
+      "showTitle": "Mostrar \"{{label}}\" en tu perfil",
+      "hideTitle": "Ocultar \"{{label}}\" en tu perfil (el valor queda guardado)",
+      "showAria": "Mostrar {{label}}",
+      "hideAria": "Ocultar {{label}}"
+    },
+    "vibe": {
+      "hint": "¿Dónde se ubica tu personaje en cada uno de estos rasgos? Arrastra una barra para definir el eje; los ejes sin definir no aparecen en tu perfil.",
+      "notSet": "Sin definir",
+      "rangeAria": "{{low}} a {{high}}",
+      "clearAxis": "Borrar eje",
+      "setAxis": "Definir este eje"
+    },
+    "attributes": {
+      "hint": "Bloque de estadísticas numéricas: puntuaciones de característica de D&D (\"STR 14\"), HP o cualquier atributo personalizado que quieras junto a tu perfil. Cada fila define su propio mín. / máx. para que distintos sistemas convivan lado a lado.",
+      "empty": "Aún no hay atributos. Agrega uno para empezar un bloque de estadísticas.",
+      "label": "Etiqueta",
+      "labelPlaceholder": "p. ej. STR",
+      "min": "Mín",
+      "value": "Valor",
+      "max": "Máx",
+      "moveUpTitle": "Subir este atributo",
+      "moveUpAria": "Subir {{label}}",
+      "moveDownTitle": "Bajar este atributo",
+      "moveDownAria": "Bajar {{label}}",
+      "removeTitle": "Quitar este atributo",
+      "removeAria": "Quitar {{label}}",
+      "rowFallback": "fila",
+      "add": "+ Agregar atributo",
+      "addMax": "(máx. {{max}})"
+    },
+    "chatColor": {
+      "legend": "Color de chat",
+      "masterHint": "Define tus mensajes OOC y sirve de respaldo para cualquier personaje sin color propio.",
+      "characterHint": "Fija los mensajes de este personaje a este color, sin importar el estado de /color de la pestaña. Déjalo en \"heredar\" para usar tu color OOC.",
+      "defaultPlaceholder": "(predeterminado)",
+      "inheritPlaceholder": "(heredar OOC)",
+      "useDefault": "Usar predeterminado",
+      "useDefaultTitle": "Volver al color predeterminado del sistema",
+      "inheritOoc": "Heredar OOC",
+      "inheritTitle": "Heredar el color principal / OOC",
+      "sample": "El veloz zorro marrón salta."
+    },
+    "appearance": {
+      "characterTheme": "Tema del personaje",
+      "oocTheme": "Tema OOC",
+      "characterThemeHint": "Al cambiar a este personaje, este tema se aplica a tu chat. Quienes vean el perfil de este personaje lo verán con este tema.",
+      "oocThemeHint": "Se aplica a tu chat cuando no hay un personaje activo y a la ventana de tu perfil principal.",
+      "usingDefault": "Ahora mismo usas el predeterminado del sistema - cambia un color o elige un preajuste para empezar a personalizar.",
+      "themeStyle": "Estilo del tema",
+      "themeStyleCharacterHint": "Tratamiento visual, ornamentos, bordes, texturas, aplicado cuando este personaje está activo. Déjalo en \"usar predeterminado\" para heredar primero el de tu cuenta principal, luego el diseño fijado del tema y por último el predeterminado del sitio.",
+      "themeStyleOocHint": "Tratamiento visual, ornamentos, bordes, texturas. Independiente de la paleta de arriba; el mismo estilo funciona con cualquier color. Déjalo en \"usar predeterminado\" para seguir el diseño fijado del tema (configurado por los admins por paleta) y, al final, el predeterminado del sitio."
+    },
+    "bg": {
+      "legend": "Fondo del perfil público",
+      "characterHint": "Imagen que se pinta detrás de la ventana de perfil de este personaje para cualquier visitante. Deja la URL vacía para usar el fondo predeterminado. Es por personaje: cada personaje puede llevar su propia escena.",
+      "oocHint": "Imagen que se pinta detrás de la ventana de tu perfil principal / OOC para cualquier visitante. Deja la URL vacía para usar el fondo predeterminado.",
+      "imageUrl": "URL de la imagen",
+      "urlPlaceholder": "https://… (déjalo en blanco para el predeterminado)",
+      "displayMode": "Modo de visualización",
+      "modeCover": "Cubrir, llena la pantalla, recorta para ajustar",
+      "modeContain": "Contener, entra completa en la pantalla, con franjas",
+      "modeTile": "Mosaico, se repite por toda la pantalla",
+      "modeStretch": "Estirar, llena las dimensiones exactas"
+    },
+    "banner": {
+      "legend": "Banner del perfil",
+      "hint": "Las imágenes anchas se ven mejor. Lo que pase de unos 220 píxeles de alto se recorta para ajustarse.",
+      "imageLink": "Enlace de la imagen",
+      "urlPlaceholder": "https://… (déjalo en blanco para quitarlo)",
+      "save": "Guardar banner"
+    },
+    "fonts": {
+      "legend": "Lectura y accesibilidad",
+      "hint": "Elige una fuente y un tamaño para reemplazar los predeterminados si la interfaz normal te resulta difícil de leer. Las fuentes web de Google se cargan automáticamente; el resto son fuentes del sistema que cualquier sistema operativo incluye. Déjalo en \"Predeterminada\" para usar la fuente propia del sitio.",
+      "family": "Fuente",
+      "defaultSiteFont": "Predeterminada (fuente del sitio)",
+      "groupSans": "Sans-serif (Google)",
+      "groupSerif": "Serif (Google)",
+      "groupAccessibility": "Accesibilidad",
+      "groupSystem": "Fuentes del sistema",
+      "comicSans": "Comic Sans (apta para dislexia)",
+      "systemSans": "Sans-serif del sistema",
+      "size": "Tamaño de letra",
+      "sizeDefault": "Predeterminado (mediano)",
+      "sizeSmall": "Pequeño (14px escritorio / 12px celular)",
+      "sizeMedium": "Mediano (16px escritorio / 14px celular)",
+      "sizeLarge": "Grande (18px escritorio / 16px celular)",
+      "sizeXl": "Extra grande (20px escritorio / 18px celular)"
+    },
+    "language": {
+      "legend": "Idioma",
+      "hint": "Se aplica de inmediato y acompaña a tu cuenta en todos tus dispositivos - no hace falta guardar. \"Predeterminado del sistema\" sigue el idioma de tu dispositivo. Lo que escribieron otros miembros se queda en el idioma en que lo escribieron.",
+      "interfaceLanguage": "Idioma de la interfaz"
+    },
+    "visibilityRow": {
+      "legend": "Visibilidad",
+      "public": "Público",
+      "publicHintMaster": "Cualquiera (incluidos visitantes sin sesión) puede ver tu perfil principal en <code>{{path}}</code>. Desmárcalo para exigir inicio de sesión.",
+      "publicHintCharacter": "Cualquiera (incluidos visitantes sin sesión) puede ver el perfil de este personaje en <code>{{path}}</code>. Desmárcalo para exigir inicio de sesión.",
+      "minorNsfwNote": "Un moderador marcó este perfil como 18+, así que no puede ser público. Contacta al equipo si crees que es un error.",
+      "nsfwLabel": "NSFW (todo el perfil)",
+      "nsfwHint": "Lo vuelve no público para visitantes anónimos y muestra una advertencia con un botón de \"Ver perfil\" a quienes tienen sesión iniciada, antes de mostrar el contenido. Úsalo cuando el perfil en sí es explícito (independiente de marcar imágenes sueltas de la galería como NSFW)."
+    },
+    "dm": {
+      "legend": "Mensajería directa",
+      "label": "Se puede contactar a este personaje",
+      "hint": "Cuando está activado, otros jugadores pueden enviar una solicitud de amistad a este personaje por su nombre e iniciar un hilo de MD con esta identidad. Cuando está desactivado, este personaje no aparece en la búsqueda de amigos ni en los selectores de destinatario de MD; los amigos existentes y el historial de conversaciones quedan intactos, pero los mensajes nuevos no llegarán a este personaje hasta que lo vuelvas a activar."
+    },
+    "notifications": {
+      "legend": "Notificaciones de escritorio",
+      "hint": "Los avisos aparecen cuando esta pestaña está oculta - minimizada, en otra pestaña o en otra app.",
+      "notifyMe": "Notificarme",
+      "off": "Desactivado - nunca",
+      "mentions": "Solo susurros y anuncios",
+      "all": "Todos los mensajes de las salas donde estoy",
+      "permissionLabel": "Permiso del navegador:",
+      "unsupported": "no compatible",
+      "denied": "Denegado - reactívalo en los permisos de sitio de tu navegador."
+    },
+    "push": {
+      "unsupported": "Las notificaciones push no están disponibles en este navegador.",
+      "title": "Push del navegador (sin conexión)",
+      "hint": "Te avisa incluso con esta pestaña cerrada. Privacidad: los avisos no llevan el texto del mensaje, solo \"susurro en espera\" / \"mención en espera\".",
+      "denied": "Permiso denegado"
+    },
+    "sounds": {
+      "legend": "Efectos de sonido",
+      "hint": "Sonidos por evento. Se guardan con el resto de tu perfil.",
+      "dm": "Mensajes directos (ping)",
+      "dmHint": "Suena cuando alguien te envía un MD, en cualquier parte de la app.",
+      "whisper": "Susurros (susurro)",
+      "whisperHint": "Suena cuando alguien te susurra en el chat. Es distinto al de los MD, así un susurro en la sala suena diferente a un ping de otra sala.",
+      "chat": "Mensajes de chat (toque)",
+      "chatHint": "Suena con los mensajes entrantes de la sala y las acciones /me.",
+      "alert": "Anuncios (alerta)",
+      "alertHint": "Suena con los anuncios de los admins y otros eventos del sistema."
+    },
+    "input": {
+      "legend": "Comportamiento al escribir",
+      "hint": "Silencia las funciones del cuadro de mensaje que no quieras ver mientras escribes.",
+      "history": "Desactivar el historial de comandos y mensajes",
+      "historyHint": "Desactiva la función de recuperar con ArrowUp / ArrowDown los mensajes y comandos enviados hace poco en el cuadro de mensaje.",
+      "thesaurus": "Desactivar la ventana de sinónimos al resaltar palabras",
+      "thesaurusHint": "Evita que aparezca la lista de sinónimos cuando seleccionas una palabra dentro del cuadro de mensaje."
+    },
+    "flair": {
+      "legend": "Adornos visuales",
+      "hint": "Desactiva los cosméticos animados de otras personas para una experiencia más fluida y ligera en dispositivos antiguos. Solo cambia lo que tú ves; los demás siguen mostrando sus adornos.",
+      "nameStyles": "Desactivar estilos de nombre",
+      "nameStylesHint": "Muestra el nombre de todos como texto plano en lugar de sus estilos con degradado, brillo o animación.",
+      "borders": "Desactivar bordes de avatar",
+      "bordersHint": "Quita los marcos decorativos alrededor de los avatares. El avatar se sigue mostrando, solo que sin el borde.",
+      "inlineAvatars": "Desactivar miniaturas de avatar",
+      "inlineAvatarsHint": "Muestra el ícono de género o de rango junto a los nombres en el chat y la lista de usuarios en lugar de miniaturas de avatar."
+    },
+    "earning": {
+      "legend": "Recompensas",
+      "unranked": "Sin rango",
+      "hint": "El rango, el grado y el emblema siempre se ven en tu perfil. Los totales de XP y Monedas se pueden ocultar por separado.",
+      "hideCurrency": "Ocultar mi total de Monedas a otros usuarios",
+      "hideCurrencyHint": "Otros usuarios ven \"privado\" en lugar de tu saldo en las consultas de /currency y en tu perfil público.",
+      "hideXp": "Ocultar mi total de XP a otros usuarios",
+      "hideXpHint": "Otros usuarios ven \"privado\" en lugar de tu XP en tu perfil y en las consultas de /exp."
+    },
+    "nsfwPref": {
+      "legend": "Contenido 18+",
+      "label": "Ocultar contenido 18+",
+      "hint": "Oculta los temas de foro y los resultados de búsqueda 18+, y deja fuera de los catálogos los mundos, foros y comunidades 18+. Puedes cambiarlo en cualquier momento."
+    },
+    "isolation": {
+      "legend": "Menores de 18",
+      "label": "Ver solo a miembros menores de 18 y al equipo",
+      "hint": "Oculta a los miembros adultos para ti, y te oculta a ti de ellos. Cubre el chat, los perfiles, los mensajes directos, los amigos, los foros y la búsqueda. El equipo siempre puede verte y ayudarte. Las salas pueden verse mucho más tranquilas con esto activado. Se desactiva solo cuando cumples 18."
+    },
+    "blocked": {
+      "legend": "Usuarios bloqueados",
+      "hint": "El bloqueo es mutuo y global: tú y el usuario bloqueado (con todos los personajes de ambos) no se ven en ningún lugar - chat, lista de usuarios, susurros, MD, amigos o búsqueda. Quita un bloqueo aquí para restaurar la visibilidad.",
+      "empty": "No has bloqueado a nadie.",
+      "remove": "Quitar"
+    },
+    "password": {
+      "legend": "Contraseña",
+      "setLegend": "Crear una contraseña",
+      "oauthOnly": "Inicias sesión con Google y todavía no tienes contraseña. Crea una ahora para poder entrar si algún día pierdes el acceso a tu cuenta de Google — ahora mismo es tu única forma de entrar.",
+      "changeHint": "Cambia la contraseña con la que inicias sesión. Aquí seguirás con la sesión iniciada; en cualquier otro lugar hará falta la contraseña nueva.",
+      "saved": "Contraseña guardada.",
+      "currentPlaceholder": "Contraseña actual",
+      "newPlaceholder": "Contraseña nueva (mínimo 8 caracteres)",
+      "confirmPlaceholder": "Confirma la contraseña nueva",
+      "set": "Crear contraseña",
+      "change": "Cambiar contraseña",
+      "tooShort": "Tu contraseña nueva debe tener al menos 8 caracteres.",
+      "mismatch": "Las contraseñas nuevas no coinciden.",
+      "needCurrent": "Escribe tu contraseña actual."
+    },
+    "connected": {
+      "legend": "Cuentas conectadas",
+      "hint": "Vincula Google para iniciar sesión con un toque. Vincular no cambia el correo ni la contraseña de tu cuenta, solo es otra forma de entrar.",
+      "linkedFallback": "vinculada",
+      "notLinked": "sin vincular",
+      "unlink": "Desvincular",
+      "link": "Vincular cuenta de Google"
+    },
+    "links": {
+      "legend": "Enlaces del perfil",
+      "hint": "Hasta {{max}} enlaces externos que se muestran como etiquetas con estilo en este perfil. Útiles para perfiles de personaje en otros sitios, documentos de mundos, referencias. Se abren en una pestaña nueva.",
+      "empty": "Aún no hay enlaces.",
+      "removeConfirm": "¿Quitar este enlace?",
+      "removeLink": "Quitar enlace",
+      "titlePlaceholder": "Título (p. ej. 'Perfil de F-List')",
+      "urlPlaceholder": "https://example.com/your-profile",
+      "customizeColors": "Personalizar colores de la etiqueta",
+      "border": "Borde",
+      "background": "Fondo",
+      "text": "Texto",
+      "previewLabel": "Vista previa:",
+      "sampleLink": "Enlace de muestra",
+      "adding": "Agregando...",
+      "add": "Agregar",
+      "addLink": "+ Agregar enlace",
+      "limitTitle": "Límite de {{max}} enlaces por perfil."
+    },
+    "gallery": {
+      "hint": "Retratos que se muestran en este perfil debajo de la Colección fijada y la Biografía. La imagen principal de perfil de arriba define el ícono de la lista de usuarios y la cabecera de la ventana; marca \"Incluir en la galería\" en la pestaña Perfil para mostrar también el avatar como primer recuadro aquí sin duplicar su URL. Marca una tarjeta como NSFW para difuminarla ante los visitantes; arrastra el control ⠿ o usa los botones ↑ ↓ para reordenar. Hasta {{max}} retratos.",
+      "full": "La galería está llena ({{max}} retratos). Quita uno para agregar otro.",
+      "removeConfirm": "¿Quitar este retrato de la galería?",
+      "portraitAltFallback": "retrato",
+      "wontLoad": "no carga",
+      "previewPlaceholder": "vista previa",
+      "dragToReorder": "Arrastra para reordenar",
+      "moveUp": "Subir",
+      "moveDown": "Bajar",
+      "removePortrait": "Quitar retrato",
+      "labelPlaceholder": "Etiqueta (opcional, p. ej. 'transformado')",
+      "nsfwLabel": "NSFW (se ve difuminado hasta que el visitante decida revelarlo)",
+      "imgError": "Esta imagen no carga, puede que la URL esté rota, que el servidor bloquee el hotlinking o que exija un referrer que el navegador elimina. Prueba con un enlace directo de CDN.",
+      "draftUrlPlaceholder": "Pega la URL de una imagen para agregar un retrato…",
+      "draftLabelPlaceholder": "Etiqueta (opcional)",
+      "draftImgError": "La vista previa no carga. El retrato se guardará igual, pero puede que los demás tampoco lo vean, prueba con un enlace directo de CDN."
+    },
+    "journal": {
+      "hint": "Escritura personal ligada a este personaje. Trasfondo, diario dentro del mundo, notas del mundo. Las entradas públicas aparecen en el perfil en orden cronológico. Las privadas solo las ves tú.",
+      "deleteConfirm": "¿Eliminar esta entrada del diario?",
+      "loadingEntries": "Cargando entradas...",
+      "noEntries": "Aún no hay entradas.",
+      "privacyChip": {
+        "public": "pública",
+        "private": "privada"
+      },
+      "edit": "Editar",
+      "addEntry": "+ Agregar entrada",
+      "titlePlaceholder": "Título (opcional)",
+      "bodyPlaceholder": "<p>Escribe tu entrada aquí. Se aplica la misma lista de HTML permitido que en tu biografía (b, i, em, p, ul/ol/li, blockquote, h3-h6, etc.).</p>",
+      "visibilityLabel": "Visibilidad:",
+      "publicOption": "Pública (en el perfil)",
+      "privateOption": "Privada (solo tú)"
+    },
+    "footer": {
+      "viewProfile": "Ver perfil",
+      "viewProfileTitle": "Previsualiza este perfil como lo verán otros usuarios (usa tus cambios sin guardar)."
+    }
+  }
+}

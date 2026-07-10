@@ -1,0 +1,215 @@
+{
+  "coach": {
+    "skipTour": "Saltar el recorrido",
+    "back": "Atrás",
+    "skip": "Saltar",
+    "next": "Siguiente",
+    "gotIt": "Entendido"
+  },
+  "designer": {
+    "welcome": {
+      "title": "Te damos la bienvenida al Diseñador",
+      "body": "Arma tu perfil arrastrando piezas a la página. No necesitas código. Aquí va un recorrido rápido."
+    },
+    "blocks": {
+      "title": "Tus bloques de construcción",
+      "body": "Arrastra cualquiera de estos a la página. Las plantillas temáticas son secciones con estilo listas para usar; los bloques simples te permiten armar las tuyas. Pasa el cursor sobre uno para ver qué es."
+    },
+    "canvas": {
+      "title": "Tu página de perfil",
+      "body": "Suelta los bloques aquí y luego haz clic en cualquier texto para escribir el tuyo. Selecciona una pieza para moverla o cambiarle el estilo."
+    },
+    "mode": {
+      "title": "Diseñador o código",
+      "body": "¿Prefieres escribir tu propio HTML y CSS? Cambia a la vista de código fuente cuando quieras. Tu trabajo se conserva en ambos modos."
+    },
+    "save": {
+      "title": "Guarda cuando lo tengas listo",
+      "body": "¿Te gusta cómo quedó? Presiona Guardar para publicar tu perfil. Puedes volver a ajustarlo cuando quieras."
+    }
+  },
+  "site": {
+    "welcome": {
+      "title": "Te damos la bienvenida a The Spire",
+      "body": "Este es un recorrido rápido por la pantalla para que sepas dónde está todo. Toma alrededor de un minuto y puedes repetirlo cuando quieras desde Ayuda."
+    },
+    "identity": {
+      "title": "Tú y tus personajes",
+      "body": "Este botón al final de la barra muestra la identidad con la que publicas. Haz clic en él para cambiar a un personaje, crear uno o volver a ser tú. Para abrir tu propio perfil, usa el Menú justo debajo o escribe /profile."
+    },
+    "menu": {
+      "title": "El Menú lo tiene todo",
+      "body": "Abre el Menú para tu perfil, mundos, foros, mensajes, amigos y Ayuda. Cuando no sepas dónde está algo, busca aquí primero."
+    },
+    "composer": {
+      "title": "Di algo",
+      "body": "Escribe aquí y presiona Enter para hablar. Empieza una línea con / para comandos, @ para mencionar a alguien o : para escribir una acción."
+    },
+    "rooms": {
+      "title": "Muévete entre salas",
+      "body": "Todas las salas disponibles para ti aparecen aquí con su número de personas. Haz clic en el nombre de una sala para entrar. Las salas privadas piden contraseña."
+    },
+    "communities": {
+      "title": "Explora comunidades",
+      "body": "Estos íconos son las comunidades a las que te has unido. Usa el botón de abajo para descubrir más o para solicitar crear la tuya."
+    },
+    "forums": {
+      "title": "Foros, y este recorrido otra vez",
+      "body": "Los foros, para la escritura que quieres conservar, viven en el Menú y arriba de la lista de salas. Puedes repetir todo este recorrido cuando quieras desde Ayuda."
+    }
+  },
+  "forumsBrowse": {
+    "welcome": {
+      "title": "Te damos la bienvenida a los foros",
+      "body": "Los foros son para la escritura larga que quieres conservar — tableros y temas que se quedan en su lugar en vez de perderse como el chat."
+    },
+    "discover": {
+      "title": "Descubre más foros",
+      "body": "Toca la brújula para explorar los foros de otras comunidades y buscar cualquiera por nombre o etiqueta."
+    },
+    "startYourOwn": {
+      "title": "Crea el tuyo",
+      "body": "¿Quieres reunir a tu propia comunidad? Busca el botón Crea tu foro para enviar tu solicitud, y un guardián la revisará."
+    }
+  },
+  "forumPosting": {
+    "startTopic": {
+      "title": "Inicia un tema",
+      "body": "Cada sección de un tablero tiene un botón Nuevo tema. Haz clic para abrir un tema nuevo justo donde lo quieres."
+    },
+    "giveTitle": {
+      "title": "Ponle un título",
+      "body": "Cuando el tema se abra, nómbralo en la parte de arriba y luego escribe tu publicación inicial justo debajo."
+    },
+    "tag": {
+      "title": "Etiquétalo",
+      "body": "Agrega una etiqueta para que la gente sepa de un vistazo de qué trata un tema. Encontrarás el selector de etiquetas en el tema una vez abierto."
+    },
+    "sayOrAct": {
+      "title": "Habla o actúa",
+      "body": "Las respuestas son diálogo de forma predeterminada. Cambia una respuesta a Acción para describir lo que hace tu personaje en vez de lo que dice."
+    },
+    "npc": {
+      "title": "Dale voz a un NPC",
+      "body": "Si el guardián lo permite, cambia una respuesta a NPC para publicar como uno de tus personajes guardados y darle vida a la escena."
+    },
+    "post": {
+      "title": "Publícalo",
+      "body": "Cuando estés conforme, envía tu respuesta y se sumará al tema para que todos la lean."
+    }
+  },
+  "forumCreate": {
+    "name": {
+      "title": "Ponle nombre a tu foro",
+      "body": "Esto es lo que todos verán en el catálogo. Elige algo que encaje con tu comunidad."
+    },
+    "address": {
+      "title": "Elige una dirección",
+      "body": "Este es el enlace corto que la gente usa para encontrarte. Debe estar libre, y te avisaremos si ya está ocupado."
+    },
+    "purpose": {
+      "title": "Cuéntanos el propósito",
+      "body": "Explica qué reúne tu foro y qué contendrán sus tableros. Los revisores leen esto antes de aprobarlo."
+    },
+    "submit": {
+      "title": "Envía tu solicitud",
+      "body": "Envía la solicitud cuando la tengas lista. Un moderador del sitio la revisa, y recibirás noticias aquí y en el chat."
+    }
+  },
+  "forumAdmin": {
+    "settings": {
+      "title": "La configuración de tu foro",
+      "body": "Todo lo que necesitas para administrar el lugar vive en estas pestañas. Elige una para abrir sus herramientas."
+    },
+    "basics": {
+      "title": "Lo básico",
+      "body": "Resumen define el nombre de tu foro, su propósito y quién puede unirse o publicar. En Tableros agregas y reordenas los tableros que contiene."
+    },
+    "team": {
+      "title": "Tu equipo",
+      "body": "En Roles asciendes a miembros de confianza a moderadores y eliges exactamente qué puede hacer cada uno."
+    },
+    "keepOrder": {
+      "title": "Mantén el orden",
+      "body": "Baneos te permite quitar a quienes causan problemas, por un tiempo o para siempre, y levantar un baneo después."
+    },
+    "modLog": {
+      "title": "Todo queda registrado",
+      "body": "El registro de mods guarda lo que han hecho tus moderadores, así nada ocurre a escondidas."
+    }
+  },
+  "serverCreate": {
+    "name": {
+      "title": "Ponle nombre a tu servidor",
+      "body": "Dale a tu comunidad un nombre que la gente reconozca. Su apariencia la puedes cambiar después."
+    },
+    "address": {
+      "title": "Elige una dirección",
+      "body": "Este es el enlace corto que la gente usa para llegar a tu servidor. Verificamos que esté libre mientras escribes."
+    },
+    "purpose": {
+      "title": "Di para qué es",
+      "body": "Cuéntales a nuestros revisores para quién es tu comunidad y qué contendrán sus salas."
+    },
+    "submit": {
+      "title": "Envía tu solicitud",
+      "body": "Envía la solicitud y nuestros moderadores se encargan desde ahí. Recibirás noticias aquí y en el chat cuando se decida."
+    }
+  },
+  "serverAdmin": {
+    "controlRoom": {
+      "title": "La sala de control de tu servidor",
+      "body": "Todo lo de esta comunidad vive detrás de estas pestañas. Elige una para trabajar en ella, y tus cambios se guardan aquí mismo."
+    },
+    "overview": {
+      "title": "El nombre y cómo se une la gente",
+      "body": "La pestaña Resumen define el nombre de tu servidor, su lema y si la gente se une al instante, envía solicitud o necesita invitación."
+    },
+    "appearance": {
+      "title": "Hazlo tuyo",
+      "body": "La pestaña Apariencia es para tu ícono, banner y colores, para que los miembros siempre sepan en qué servidor están."
+    },
+    "rooms": {
+      "title": "Agrega tus salas",
+      "body": "Abre la pestaña Salas y usa Nueva sala para agregar un lugar donde hablar. Ponle un nombre y aparecerá para tus miembros."
+    },
+    "members": {
+      "title": "Dale una mano a alguien",
+      "body": "En la pestaña Miembros, Hacer mod le entrega a un miembro de confianza las herramientas para ayudarte a administrar el lugar."
+    },
+    "roles": {
+      "title": "Decide quién puede hacer qué",
+      "body": "En la pestaña Roles nombras a tu equipo y eliges exactamente qué poderes tienen. Otorga solo lo que cada persona necesita."
+    },
+    "save": {
+      "title": "Nada se pierde",
+      "body": "Cada pestaña tiene su propio botón Guardar. Haz tus cambios, presiona Guardar y listo. Puedes reabrir este recorrido cuando quieras desde el signo de interrogación de arriba."
+    }
+  },
+  "siteAdmin": {
+    "welcome": {
+      "title": "Te damos la bienvenida al panel de administración",
+      "body": "Esta es tu sala de control para todo el sitio. Todo está ordenado en pestañas en la parte superior, agrupadas según su función."
+    },
+    "monitor": {
+      "title": "Échale un ojo a todo",
+      "body": "Resumen te da una instantánea en vivo, y las pestañas vecinas te permiten explorar las analíticas, los reportes y los registros de Acciones del equipo y Casos de mod."
+    },
+    "people": {
+      "title": "Personas y acceso",
+      "body": "Administra a los miembros aquí y define qué puede hacer cada rol en Roles y permisos."
+    },
+    "content": {
+      "title": "Contenido y comunidad",
+      "body": "Supervisa los servidores comunitarios, los foros y el Scriptorium. Abre un servidor para administrar sus salas, rangos y recompensas."
+    },
+    "configure": {
+      "title": "Configura el sitio",
+      "body": "Configuración, Marca y Reglas definen cómo se ve y se comporta todo el sitio. Los cambios aquí llegan a todos, así que tómate tu tiempo."
+    },
+    "done": {
+      "title": "Todo listo",
+      "body": "Puedes repetir este recorrido cuando quieras desde el signo de interrogación junto a las pestañas. Echa un vistazo."
+    }
+  }
+}

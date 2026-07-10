@@ -340,6 +340,13 @@ export interface CharacterProfile {
   portraits: CharacterPortrait[];
   /** Owner-set external links (other profiles, world docs, refs). */
   links: ProfileLink[];
+  /**
+   * The OWNING PLAYER's language tags (account-level; see
+   * `MasterProfile.languages`). A character profile shows the same flag
+   * chips as its owner's OOC profile — the tags describe the human you'd
+   * be roleplaying with, not the character.
+   */
+  languages: string[];
   /** Public-visibility journal entries in chronological order (oldest first). Private entries are NEVER included in this array - they only surface in the owner's editor. */
   journalEntries: CharacterJournalEntry[];
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
@@ -597,6 +604,12 @@ export interface MasterProfile {
   portraits: CharacterPortrait[];
   /** OOC gender, surfaced as the icon next to the username when no character is active. */
   gender: "male" | "female" | "nonbinary" | "other" | "undisclosed";
+  /**
+   * Predefined language-tag keys (see `languageTags.ts`) — the languages
+   * this player knows and roleplays in, in the owner's chosen order.
+   * Rendered as flag chips in the profile hero. Empty = row hidden.
+   */
+  languages: string[];
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
   /** Resolved design style key, same semantics as `CharacterProfile.styleKey`. */

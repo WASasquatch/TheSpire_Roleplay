@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { characters, users } from "../../db/schema.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const HEX_RX = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
@@ -68,13 +69,19 @@ export const colorCommand: CommandHandler = {
     }
 
     if (!arg) {
-      const where = scope === "character" ? " for this character" : " for your OOC account";
       notice(
         ctx,
         "COLOR_HELP",
         currentColor
-          ? `Current color${where}: ${currentColor}. Usage: /color <hex>  |  /color clear`
-          : `No color set${where}. Usage: /color <hex>  (e.g. /color 990000)`,
+          ? tFor(
+              ctx.user.locale,
+              scope === "character" ? "commands:color.currentCharacter" : "commands:color.currentOoc",
+              { color: currentColor },
+            )
+          : tFor(
+              ctx.user.locale,
+              scope === "character" ? "commands:color.noneCharacter" : "commands:color.noneOoc",
+            ),
       );
       return;
     }
@@ -88,9 +95,10 @@ export const colorCommand: CommandHandler = {
       notice(
         ctx,
         "COLOR_CLEARED",
-        scope === "character"
-          ? "Character chat color cleared. Falls back to your OOC color."
-          : "OOC chat color cleared.",
+        tFor(
+          ctx.user.locale,
+          scope === "character" ? "commands:color.clearedCharacter" : "commands:color.clearedOoc",
+        ),
       );
       const { broadcastPresence } = await import("../../realtime/broadcast.js");
       await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
@@ -100,7 +108,7 @@ export const colorCommand: CommandHandler = {
       notice(
         ctx,
         "BAD_COLOR",
-        "Color must be a hex value: e.g. /color 990000 or /color #abc.",
+        tFor(ctx.user.locale, "commands:color.invalidHex"),
       );
       return;
     }
@@ -114,9 +122,11 @@ export const colorCommand: CommandHandler = {
     notice(
       ctx,
       "COLOR_SET",
-      scope === "character"
-        ? `Character chat color set to ${normalized}.`
-        : `OOC chat color set to ${normalized}.`,
+      tFor(
+        ctx.user.locale,
+        scope === "character" ? "commands:color.setCharacter" : "commands:color.setOoc",
+        { color: normalized },
+      ),
     );
 
     // Refresh occupant list so other clients see the new color metadata.

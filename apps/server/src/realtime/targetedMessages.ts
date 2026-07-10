@@ -47,15 +47,33 @@ const SYSTEM_USERNAME = "system";
  * DEFAULT_SERVER_ID` (they already hold the room row). With the servers flag
  * off every room resolves to the default server, so the predicate matches all
  * whispers — byte-identical to before. Omitting it (legacy) skips the scope.
+ *
+ * `viewerCanSeeNsfw` (age-restriction plan, Phase 2) filters rows STAMPED
+ * `is_nsfw` at write time (server OR room was 18+ when the line was sent).
+ * Chat surfaces pass the HARD tier (`viewer.isAdult` — the adult hide
+ * preference does NOT hide chat history); softer surfaces may pass
+ * `canSeeNsfw(viewer)`. For a room that is CURRENTLY 18+ this is
+ * belt-and-braces (minors can't enter at all); it is what keeps a
+ * flipped-back room's 18+-era history — and, in Phase 3, NSFW forum
+ * topics — hidden from minors. Required so no call site can forget it.
  */
-export function roomVisibilityWhere(roomId: string, viewerUserId: string, targetServerId?: string) {
+export function roomVisibilityWhere(
+  roomId: string,
+  viewerUserId: string,
+  targetServerId: string | undefined,
+  viewerCanSeeNsfw: boolean,
+) {
   return or(
     // 1. Ordinary public rows in this room. `targetUserId IS NULL` excludes
     //    the per-user notifications so they never show to the whole room.
+    //    Rows stamped 18+ at write time are withheld from viewers who can't
+    //    see NSFW (whispers and targeted rows are never stamped — whispers
+    //    are participant-scoped and minors can't be party to 18+-room ones).
     and(
       sql`${messages.kind} != 'whisper'`,
       eq(messages.roomId, roomId),
       isNull(messages.targetUserId),
+      ...(viewerCanSeeNsfw ? [] : [eq(messages.isNsfw, false)]),
     ),
     // 2. Whispers the viewer sent or received — overlaid across this server's
     //    rooms only. The same-server predicate compares the whisper's ORIGIN

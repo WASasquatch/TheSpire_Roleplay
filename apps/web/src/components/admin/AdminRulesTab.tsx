@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import DOMPurify from "dompurify";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
 import { readError } from "../../lib/http.js";
@@ -17,6 +18,7 @@ import { AdminSaveFooter, useAdminShell, type SettingsRow } from "./adminShell.j
  * Both go through the same sanitizeBio() allow-list as profile bios on save.
  */
 export function RulesTab() {
+  const { t } = useTranslation("admin");
   const setBranding = useChat((s) => s.setBranding);
   // Rules saves through PUT /admin/settings (the same endpoint that
   // backs Settings + Branding), so the gate is `edit_site_settings`.
@@ -46,7 +48,7 @@ export function RulesTab() {
       setForumRegRulesHtml(j.forumRegistrationRulesHtml ?? "");
       setWelcomeHtml(j.newUserWelcomeHtml ?? "");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "load failed");
+      setError(err instanceof Error ? err.message : t("loadFailed"));
     }
   }
   useEffect(() => { load(); }, []);
@@ -112,7 +114,7 @@ export function RulesTab() {
       setSavedFlash(true);
       window.setTimeout(() => setSavedFlash(false), 1500);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -130,141 +132,125 @@ export function RulesTab() {
         savedFlash={savedFlash}
         lastUpdatedAt={data?.updatedAt ?? null}
         error={error}
-        saveLabel="Save rules"
+        saveLabel={t("rules.saveLabel")}
         canEdit={canEditSiteSettings}
-        readOnlyHint="Read-only, needs edit_site_settings to save."
+        readOnlyHint={t("readOnlyNeedsSiteSettings")}
       />,
     );
     return () => shell.setFooter(null);
-  }, [shell, saving, savedFlash, error, data?.updatedAt, canEditSiteSettings]);
+  }, [shell, saving, savedFlash, error, data?.updatedAt, canEditSiteSettings, t]);
 
   if (!data) {
-    return <div className="text-keep-muted text-xs">{error ?? "loading..."}</div>;
+    return <div className="text-keep-muted text-xs">{error ?? t("loading")}</div>;
   }
 
   return (
     <form id="admin-rules-form" onSubmit={save} className="space-y-4">
       <p className="text-xs text-keep-muted">
-        The app-wide governing rules and the privacy notice shown when users
-        click the Rules button. The rules here apply everywhere and show on
-        every server and on the site. Each server can also post its own
-        Server Rules in Server Admin, Settings. Both fields accept the same
-        HTML allow-list as profile bios: formatting tags, links, lists, and
-        headings (h3 to h6).
+        {t("rules.description")}
       </p>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">App rules (governing, shown everywhere)</legend>
+      <fieldset data-admin-anchor="rules.appRulesLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("rules.appRulesLegend")}</legend>
         <textarea
           value={rulesHtml}
           onChange={(e) => setRulesHtml(e.target.value)}
           rows={14}
           maxLength={1_000_000}
-          placeholder="<h3>App Rules</h3><ol><li>...</li></ol>"
+          placeholder={t("rules.appRulesPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          The app-wide governing rules. They apply on every server and on the
-          site, and always appear under the App Rules tab. A server's own
-          Server Rules are written separately in Server Admin, Settings, and
-          sit beside these in their own tab. Defaults seed an 8-point baseline
-          covering consent, godmodding, OOC and IC separation, and reporting.
-          Cap is 1MB of HTML, enough for a fully comprehensive multi-section
-          ruleset.
+          {t("rules.appRulesHelp")}
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Privacy &amp; safety notice</legend>
+      <fieldset data-admin-anchor="rules.securityLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("rules.securityLegend")}</legend>
         <textarea
           value={securityHtml}
           onChange={(e) => setSecurityHtml(e.target.value)}
           rows={8}
           maxLength={500_000}
-          placeholder="<h3>Privacy &amp; Safety</h3><p>...</p>"
+          placeholder={t("rules.securityPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          Shown alongside the rules. Defaults explain the privacy contract:
-          admins cannot read private/whispered messages, so users should
-          self-govern and report problems with screenshots. 500KB cap fits a
-          full privacy disclosure with ample headroom.
+          {t("rules.securityHelp")}
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Registration disclaimer</legend>
+      <fieldset data-admin-anchor="rules.disclaimerLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("rules.disclaimerLegend")}</legend>
         <textarea
           value={disclaimerHtml}
           onChange={(e) => setDisclaimerHtml(e.target.value)}
           rows={10}
           maxLength={500_000}
-          placeholder="<p>This is a free-form roleplay chat...</p>"
+          placeholder={t("rules.disclaimerPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          Rendered above the registration form on the splash. Users must tick
-          an "I agree" checkbox before <code>/auth/register</code> succeeds.
-          Empty disclaimer = no checkbox shown (registration unblocked).
-          500KB cap fits a full Terms-of-Service document.
+          <Trans t={t} i18nKey="rules.disclaimerHelp">
+            {'Rendered above the registration form on the splash. Users must tick an "I agree" checkbox before '}
+            <code>/auth/register</code>
+            {" succeeds. Empty disclaimer = no checkbox shown (registration unblocked). 500KB cap fits a full Terms-of-Service document."}
+          </Trans>
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Server registration rules</legend>
+      <fieldset data-admin-anchor="rules.serverRegLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("rules.serverRegLegend")}</legend>
         <textarea
           value={serverRegRulesHtml}
           onChange={(e) => setServerRegRulesHtml(e.target.value)}
           rows={10}
           maxLength={500_000}
-          placeholder="<h3>Before you register a server</h3><ol><li>...</li></ol>"
+          placeholder={t("rules.serverRegPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          Shown with an "I agree" checkbox when someone applies to register a
-          server. Empty = no agreement gate shown.
+          {t("rules.serverRegHelp")}
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Forum registration rules</legend>
+      <fieldset data-admin-anchor="rules.forumRegLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("rules.forumRegLegend")}</legend>
         <textarea
           value={forumRegRulesHtml}
           onChange={(e) => setForumRegRulesHtml(e.target.value)}
           rows={10}
           maxLength={500_000}
-          placeholder="<h3>Before you create a forum</h3><ol><li>...</li></ol>"
+          placeholder={t("rules.forumRegPlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          Shown with an "I agree" checkbox when someone applies to create a
-          forum. Empty = no agreement gate shown.
+          {t("rules.forumRegHelp")}
         </p>
       </fieldset>
 
-      <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">New-user welcome (post-login)</legend>
+      <fieldset data-admin-anchor="rules.welcomeLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("rules.welcomeLegend")}</legend>
         <textarea
           value={welcomeHtml}
           onChange={(e) => setWelcomeHtml(e.target.value)}
           rows={10}
           maxLength={500_000}
-          placeholder="<h3>Welcome to The Spire</h3><p>Quick orientation...</p>"
+          placeholder={t("rules.welcomePlaceholder")}
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono"
         />
         <p className="mt-1 text-keep-muted">
-          Onboarding modal shown once to users who register <b>after</b> the most
-          recent save here. Existing users (registered before the welcome was
-          set or last edited) never see it - this is for fresh accounts only,
-          not a broadcast channel. Re-saving with the same text doesn't
-          re-shift the audience cutoff; only changing the text does. Empty
-          text = no welcome shown.
+          <Trans t={t} i18nKey="rules.welcomeHelp">
+            {"Onboarding modal shown once to users who register "}
+            <b>after</b>
+            {" the most recent save here. Existing users (registered before the welcome was set or last edited) never see it - this is for fresh accounts only, not a broadcast channel. Re-saving with the same text doesn't re-shift the audience cutoff; only changing the text does. Empty text = no welcome shown."}
+          </Trans>
         </p>
       </fieldset>
 
       {/* Live preview */}
       <fieldset className="rounded border border-keep-rule p-3 text-xs">
-        <legend className="px-1 uppercase tracking-widest text-keep-muted">Preview</legend>
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("common:preview")}</legend>
         <div className="space-y-3 rounded border border-keep-rule bg-keep-bg p-3">
           {securityHtml.trim() ? (
             <div
@@ -278,12 +264,12 @@ export function RulesTab() {
               dangerouslySetInnerHTML={{ __html: sanitizeUserHtml(rulesHtml) }}
             />
           ) : (
-            <p className="italic text-keep-muted">(no rules set)</p>
+            <p className="italic text-keep-muted">{t("rules.noRulesSet")}</p>
           )}
           {disclaimerHtml.trim() ? (
             <div className="rounded border border-keep-border/60 bg-keep-bg/50 p-2">
               <div className="mb-1 text-[10px] uppercase tracking-[0.25em] text-keep-muted">
-                register disclaimer (shown on the splash)
+                {t("rules.previewDisclaimerCaption")}
               </div>
               <div
                 className="prose prose-sm max-w-none"
@@ -291,14 +277,14 @@ export function RulesTab() {
               />
               <label className="mt-1 flex items-start gap-2 text-[11px] text-keep-muted">
                 <input type="checkbox" disabled checked className="mt-0.5" />
-                <span>I have read and accept the disclaimer above and the house rules.</span>
+                <span>{t("rules.previewAgree")}</span>
               </label>
             </div>
           ) : null}
           {welcomeHtml.trim() ? (
             <div className="rounded border border-keep-action/40 bg-keep-action/5 p-2">
               <div className="mb-1 text-[10px] uppercase tracking-[0.25em] text-keep-muted">
-                new-user welcome modal (shown only to accounts registered after this is saved)
+                {t("rules.previewWelcomeCaption")}
               </div>
               <div
                 className="prose prose-sm max-w-none"
@@ -308,9 +294,7 @@ export function RulesTab() {
           ) : null}
         </div>
         <p className="mt-1 text-[10px] text-keep-muted">
-          Preview is run through DOMPurify, but tags outside the server's
-          allow-list will still disappear on save (server uses sanitize-html
-          with a stricter list than DOMPurify's default).
+          {t("rules.previewNote")}
         </p>
       </fieldset>
 

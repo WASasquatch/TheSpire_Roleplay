@@ -1,4 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   StoryCollaborator,
   StoryCollaboratorRole,
@@ -9,6 +10,7 @@ import {
   permissionsForCollaboratorRole,
 } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
+import { formatDateTime } from "../../lib/intlFormat.js";
 import { useChat } from "../../state/store.js";
 
 interface Props {
@@ -26,6 +28,7 @@ interface Props {
  * enforces.
  */
 export function StoryCollaboratorsTab({ detail }: Props) {
+  const { t } = useTranslation("scriptorium");
   const me = useChat((s) => s.me);
   const storyId = detail.story.id;
   const isOwner = !!me && me.id === detail.story.author.userId;
@@ -41,7 +44,7 @@ export function StoryCollaboratorsTab({ detail }: Props) {
       const j = (await r.json()) as { collaborators: StoryCollaborator[] };
       setCollaborators(j.collaborators);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "load failed");
+      setError(e instanceof Error ? e.message : t("errors.loadFailed"));
     }
   }
   useEffect(() => { void load(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [storyId]);
@@ -60,12 +63,12 @@ export function StoryCollaboratorsTab({ detail }: Props) {
       ) : null}
 
       <section>
-        <h3 className="mb-2 font-action text-base">Current collaborators</h3>
+        <h3 className="mb-2 font-action text-base">{t("collab.current")}</h3>
         {collaborators === null ? (
-          <p className="italic text-keep-muted">Loading…</p>
+          <p className="italic text-keep-muted">{t("common:loading")}</p>
         ) : collaborators.length === 0 ? (
           <p className="text-sm italic text-keep-muted">
-            No collaborators yet. {isOwner ? "Invite someone above to share the story." : ""}
+            {t("collab.noneYet")} {isOwner ? t("collab.inviteHint") : ""}
           </p>
         ) : (
           <ul className="space-y-2">
@@ -90,28 +93,29 @@ export function StoryCollaboratorsTab({ detail }: Props) {
  * ============================================================= */
 
 function RoleMatrix() {
+  const { t } = useTranslation("scriptorium");
   const perms = STORY_COLLABORATOR_ROLES.map((r) => ({ role: r, ...permissionsForCollaboratorRole(r) }));
   return (
     <details className="rounded border border-keep-rule/40 bg-keep-panel/30">
       <summary className="cursor-pointer px-3 py-1.5 text-xs uppercase tracking-widest text-keep-muted">
-        Role matrix
+        {t("collab.roleMatrix")}
       </summary>
       <div className="overflow-x-auto px-3 pb-3">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="text-left text-keep-muted">
-              <th className="py-1 pr-3 font-normal">Role</th>
-              <th className="py-1 pr-3 font-normal">Read drafts</th>
-              <th className="py-1 pr-3 font-normal">Edit chapters</th>
-              <th className="py-1 pr-3 font-normal">Add chapters</th>
-              <th className="py-1 pr-3 font-normal">Manage codex</th>
-              <th className="py-1 pr-3 font-normal">Publish</th>
+              <th className="py-1 pr-3 font-normal">{t("collab.matrix.role")}</th>
+              <th className="py-1 pr-3 font-normal">{t("collab.matrix.readDrafts")}</th>
+              <th className="py-1 pr-3 font-normal">{t("collab.matrix.editChapters")}</th>
+              <th className="py-1 pr-3 font-normal">{t("collab.matrix.addChapters")}</th>
+              <th className="py-1 pr-3 font-normal">{t("collab.matrix.manageCodex")}</th>
+              <th className="py-1 pr-3 font-normal">{t("collab.matrix.publish")}</th>
             </tr>
           </thead>
           <tbody>
             {perms.map((p) => (
               <tr key={p.role}>
-                <td className="py-1 pr-3 font-semibold">{labelForRole(p.role)}</td>
+                <td className="py-1 pr-3 font-semibold">{t(`roles.${p.role}`)}</td>
                 <Cell on={p.readDrafts} />
                 <Cell on={p.editChapters} />
                 <Cell on={p.addChapters} />
@@ -120,13 +124,13 @@ function RoleMatrix() {
               </tr>
             ))}
             <tr>
-              <td className="py-1 pr-3 font-semibold text-keep-action">Owner</td>
+              <td className="py-1 pr-3 font-semibold text-keep-action">{t("common:owner")}</td>
               <Cell on /><Cell on /><Cell on /><Cell on /><Cell on />
             </tr>
           </tbody>
         </table>
         <p className="mt-2 text-[10px] text-keep-muted">
-          The owner is the only role that can manage collaborators and delete the story.
+          {t("collab.ownerNote")}
         </p>
       </div>
     </details>
@@ -146,6 +150,7 @@ function Cell({ on }: { on?: boolean }) {
  * ============================================================= */
 
 function InviteForm({ storyId, onInvited }: { storyId: string; onInvited: () => void }) {
+  const { t } = useTranslation("scriptorium");
   const [username, setUsername] = useState("");
   const [role, setRole] = useState<StoryCollaboratorRole>("editor");
   const [busy, setBusy] = useState(false);
@@ -167,14 +172,14 @@ function InviteForm({ storyId, onInvited }: { storyId: string; onInvited: () => 
       if (!r.ok) throw new Error(await readError(r));
       const j = (await r.json()) as { ok: true; status: "invited" | "pending" | "role_changed" };
       setOkMsg(
-        j.status === "invited" ? `Invite sent to ${username.trim()}.` :
-        j.status === "pending" ? `Already-pending invite to ${username.trim()} updated.` :
-        `Role changed for ${username.trim()}.`,
+        j.status === "invited" ? t("collab.inviteSent", { name: username.trim() }) :
+        j.status === "pending" ? t("collab.invitePendingUpdated", { name: username.trim() }) :
+        t("collab.roleChangedFor", { name: username.trim() }),
       );
       setUsername("");
       onInvited();
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "invite failed");
+      setErr(e2 instanceof Error ? e2.message : t("errors.inviteFailed"));
     } finally {
       setBusy(false);
     }
@@ -182,27 +187,27 @@ function InviteForm({ storyId, onInvited }: { storyId: string; onInvited: () => 
 
   return (
     <section className="rounded border border-keep-rule/40 bg-keep-panel/30 p-3">
-      <h3 className="mb-2 font-action text-base">Invite a collaborator</h3>
+      <h3 className="mb-2 font-action text-base">{t("collab.inviteTitle")}</h3>
       <form onSubmit={submit} className="flex flex-wrap items-end gap-2">
         <div className="flex-1 min-w-[10rem]">
-          <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Username</label>
+          <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("collab.username")}</label>
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             maxLength={40}
-            placeholder="their master username"
+            placeholder={t("collab.usernamePlaceholder")}
             className="mt-1 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5"
           />
         </div>
         <div>
-          <label className="block text-[10px] uppercase tracking-widest text-keep-muted">Role</label>
+          <label className="block text-[10px] uppercase tracking-widest text-keep-muted">{t("collab.role")}</label>
           <select
             value={role}
             onChange={(e) => setRole(e.target.value as StoryCollaboratorRole)}
             className="mt-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm"
           >
             {STORY_COLLABORATOR_ROLES.map((r) => (
-              <option key={r} value={r}>{labelForRole(r)}</option>
+              <option key={r} value={r}>{t(`roles.${r}`)}</option>
             ))}
           </select>
         </div>
@@ -211,7 +216,7 @@ function InviteForm({ storyId, onInvited }: { storyId: string; onInvited: () => 
           disabled={busy || !username.trim()}
           className="rounded border border-keep-action bg-keep-action px-4 py-1.5 text-sm font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
         >
-          {busy ? "Sending…" : "Invite"}
+          {busy ? t("collab.sending") : t("collab.invite")}
         </button>
       </form>
       {err ? <p className="mt-2 text-xs text-keep-accent">{err}</p> : null}
@@ -235,6 +240,7 @@ function CollaboratorRow({
   isOwner: boolean;
   onChanged: () => void;
 }) {
+  const { t } = useTranslation("scriptorium");
   const me = useChat((s) => s.me);
   const isSelf = !!me && me.id === collaborator.userId;
   const pending = collaborator.acceptedAt == null;
@@ -253,15 +259,19 @@ function CollaboratorRow({
       if (!r.ok) throw new Error(await readError(r));
       onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "role change failed");
+      setErr(e instanceof Error ? e.message : t("errors.roleChangeFailed"));
     } finally {
       setBusy(false);
     }
   }
 
   async function remove() {
-    const verb = pending ? "Rescind the invite to" : isSelf ? "Leave this collaboration as" : "Remove";
-    if (!window.confirm(`${verb} ${collaborator.username}?`)) return;
+    const confirmMsg = pending
+      ? t("collab.confirmRescind", { name: collaborator.username })
+      : isSelf
+        ? t("collab.confirmLeave", { name: collaborator.username })
+        : t("collab.confirmRemove", { name: collaborator.username });
+    if (!window.confirm(confirmMsg)) return;
     setBusy(true);
     setErr(null);
     try {
@@ -271,7 +281,7 @@ function CollaboratorRow({
       if (!r.ok) throw new Error(await readError(r));
       onChanged();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "remove failed");
+      setErr(e instanceof Error ? e.message : t("errors.removeFailed"));
     } finally {
       setBusy(false);
     }
@@ -289,18 +299,19 @@ function CollaboratorRow({
           <div className="flex items-center gap-2 text-sm">
             <b>{collaborator.username}</b>
             <span className={`rounded px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${roleBadgeClass(collaborator.role)}`}>
-              {labelForRole(collaborator.role)}
+              {t(`roles.${collaborator.role}`)}
             </span>
             {pending ? (
               <span className="rounded bg-keep-accent/15 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent">
-                pending
+                {t("collab.pending")}
               </span>
             ) : null}
-            {isSelf ? <span className="text-[10px] italic text-keep-muted">(you)</span> : null}
+            {isSelf ? <span className="text-[10px] italic text-keep-muted">{t("collab.you")}</span> : null}
           </div>
           <div className="text-[10px] text-keep-muted">
-            Invited {new Date(collaborator.invitedAt).toLocaleString()}
-            {collaborator.invitedByUsername ? <> by {collaborator.invitedByUsername}</> : null}
+            {collaborator.invitedByUsername
+              ? t("collab.invitedAtBy", { date: formatDateTime(collaborator.invitedAt), name: collaborator.invitedByUsername })
+              : t("collab.invitedAt", { date: formatDateTime(collaborator.invitedAt) })}
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-1 text-xs">
@@ -312,7 +323,7 @@ function CollaboratorRow({
               className="rounded border border-keep-rule bg-keep-bg px-1 py-0.5 text-xs"
             >
               {STORY_COLLABORATOR_ROLES.map((r) => (
-                <option key={r} value={r}>{labelForRole(r)}</option>
+                <option key={r} value={r}>{t(`roles.${r}`)}</option>
               ))}
             </select>
           ) : null}
@@ -322,9 +333,9 @@ function CollaboratorRow({
               onClick={remove}
               disabled={busy}
               className="rounded border border-keep-accent/40 bg-keep-accent/5 px-2 py-0.5 text-keep-accent"
-              title={pending ? "Rescind invite" : isSelf ? "Leave" : "Remove"}
+              title={pending ? t("collab.rescindInviteTitle") : isSelf ? t("collab.leave") : t("remove")}
             >
-              {pending ? "Rescind" : isSelf ? "Leave" : "Remove"}
+              {pending ? t("collab.rescind") : isSelf ? t("collab.leave") : t("remove")}
             </button>
           ) : null}
         </div>
@@ -337,10 +348,6 @@ function CollaboratorRow({
 /* =============================================================
  *  Helpers
  * ============================================================= */
-
-function labelForRole(role: StoryCollaboratorRole): string {
-  return role === "co_author" ? "Co-author" : role.charAt(0).toUpperCase() + role.slice(1);
-}
 
 function roleBadgeClass(role: StoryCollaboratorRole): string {
   switch (role) {

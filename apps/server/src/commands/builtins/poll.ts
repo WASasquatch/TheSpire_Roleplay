@@ -1,6 +1,7 @@
 import { POLL_MAX_OPTIONS, POLL_MIN_OPTIONS } from "@thekeep/shared";
 import { addMessage } from "../../realtime/broadcast.js";
 import { buildPollData } from "../../polls.js";
+import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 function notice(ctx: CommandContext, code: string, message: string) {
@@ -32,6 +33,7 @@ function parseFlags(argsText: string): {
   showVoters: boolean;
   closesAt: number | null;
   rest: string;
+  /** i18n key for a flag-parse failure; rendered via tFor at the emit site. */
   error?: string;
 } {
   let allowMultiple = false;
@@ -45,9 +47,9 @@ function parseFlags(argsText: string): {
     if (t === "--secret" || t === "--anon" || t === "--anonymous") { showVoters = false; continue; }
     if (t === "--for" || t === "--deadline") {
       const val = tokens[i + 1];
-      if (!val) return { allowMultiple, showVoters, closesAt, rest: "", error: "Add a duration after --for, e.g. --for 2h." };
+      if (!val) return { allowMultiple, showVoters, closesAt, rest: "", error: "commands:poll.forMissing" };
       const at = parseDeadline(val);
-      if (at === null) return { allowMultiple, showVoters, closesAt, rest: "", error: "Bad --for duration. Use 30m, 2h, or 1d." };
+      if (at === null) return { allowMultiple, showVoters, closesAt, rest: "", error: "commands:poll.forInvalid" };
       closesAt = at;
       i++;
       continue;
@@ -79,25 +81,25 @@ export const pollCommand: CommandHandler = {
   async run(ctx) {
     const argsText = ctx.argsText.trim();
     if (!argsText) {
-      notice(ctx, "POLL_HELP", "Usage: /poll <question> | <option1> | <option2>. Try --multi, --secret, or --for 2h.");
+      notice(ctx, "POLL_HELP", tFor(ctx.user.locale, "commands:poll.usage"));
       return;
     }
     const flags = parseFlags(argsText);
-    if (flags.error) { notice(ctx, "POLL_BAD_FLAG", flags.error); return; }
+    if (flags.error) { notice(ctx, "POLL_BAD_FLAG", tFor(ctx.user.locale, flags.error)); return; }
 
     const parts = flags.rest.split("|").map((s) => s.trim());
     const question = parts[0] ?? "";
     const optionTexts = parts.slice(1);
     if (!question) {
-      notice(ctx, "POLL_NO_QUESTION", "Start with the question, then the options: /poll Question? | A | B");
+      notice(ctx, "POLL_NO_QUESTION", tFor(ctx.user.locale, "commands:poll.noQuestion"));
       return;
     }
     if (optionTexts.length < POLL_MIN_OPTIONS) {
-      notice(ctx, "POLL_TOO_FEW", `A poll needs at least ${POLL_MIN_OPTIONS} options, separated by | . Example: /poll ${question} | A | B`);
+      notice(ctx, "POLL_TOO_FEW", tFor(ctx.user.locale, "commands:poll.tooFew", { min: POLL_MIN_OPTIONS, question }));
       return;
     }
     if (optionTexts.length > POLL_MAX_OPTIONS) {
-      notice(ctx, "POLL_TOO_MANY", `A poll can have at most ${POLL_MAX_OPTIONS} options.`);
+      notice(ctx, "POLL_TOO_MANY", tFor(ctx.user.locale, "commands:poll.tooMany", { max: POLL_MAX_OPTIONS }));
       return;
     }
 
@@ -107,6 +109,7 @@ export const pollCommand: CommandHandler = {
       showVoters: flags.showVoters,
       closesAt: flags.closesAt,
       question,
+      locale: ctx.user.locale,
     });
     if (!built.ok) { notice(ctx, "POLL_INVALID", built.error); return; }
 

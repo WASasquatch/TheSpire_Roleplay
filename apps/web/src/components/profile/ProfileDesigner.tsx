@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import GjsEditor from "@grapesjs/react";
 import grapesjs, { type Editor, type Panel, type Button } from "grapesjs";
 // Side-effect import: Vite bundles this into a linked stylesheet in prod
@@ -179,59 +181,67 @@ const CARD_STYLE =
 const LABEL_STYLE =
   "font-size:.78rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--theme-accent)";
 
-const BIO_BLOCKS = [
-  // ---- Text ----
-  {
-    id: "b-heading", label: "Heading", category: "Text",
-    content: '<h2 style="margin:0 0 .6rem;font-family:Georgia,serif;color:var(--theme-text);border-bottom:2px solid var(--theme-accent);padding-bottom:.35rem">Section Heading</h2>',
-  },
-  {
-    id: "b-text", label: "Paragraph", category: "Text", activate: true,
-    content: '<p style="margin:0 0 1rem;color:var(--theme-text);line-height:1.65">Write your story here…</p>',
-  },
-  {
-    id: "b-quote", label: "Quote", category: "Text",
-    content: '<blockquote style="margin:0 0 1rem;padding:.55rem 1rem;border-left:3px solid var(--theme-accent);background:rgb(var(--theme-accent-rgb) / .08);color:var(--theme-muted);font-style:italic">A line worth quoting.</blockquote>',
-  },
-  {
-    id: "b-divider", label: "Divider", category: "Text",
-    content: '<hr style="border:0;height:1px;margin:1.25rem 0;background:linear-gradient(90deg,transparent,rgb(var(--theme-accent-rgb) / .6),transparent)"/>',
-  },
-  { id: "b-spacer", label: "Spacer", category: "Text", content: '<div style="height:1.5rem"></div>' },
+/** Translate fn for the "profile" namespace. Labels/categories AND the starter
+ *  text baked into each block's seed markup resolve through it, so blocks are
+ *  built at render time (`useMemo` below) rather than module scope — the
+ *  catalog language at open time wins. */
+type Translate = TFunction<"profile">;
 
-  // ---- Cards (the header-label look from popular profiles) ----
-  {
-    id: "b-card", label: "Card", category: "Cards",
-    content: `<div style="${CARD_STYLE}"><h3 style="margin:0 0 .5rem;color:var(--theme-text);font-family:Georgia,serif">Card title</h3><p style="margin:0;color:var(--theme-muted);line-height:1.6">Card body text.</p></div>`,
-  },
-  {
-    id: "b-field", label: "Labeled field", category: "Cards",
-    content: `<div style="${CARD_STYLE}"><div style="${LABEL_STYLE};margin-bottom:.35rem">Label</div><p style="margin:0;color:var(--theme-text)">Value</p></div>`,
-  },
-  {
-    id: "b-listcard", label: "List card", category: "Cards",
-    content: `<div style="${CARD_STYLE}"><div style="${LABEL_STYLE};margin-bottom:.5rem">Traits</div><ul style="margin:0;padding-left:1.15rem;color:var(--theme-muted);line-height:1.6"><li>First trait</li><li>Second trait</li><li>Third trait</li></ul></div>`,
-  },
+function bioBlocks(t: Translate) {
+  return [
+    // ---- Text ----
+    {
+      id: "b-heading", label: t("designer.blocks.heading"), category: t("designer.categories.text"),
+      content: `<h2 style="margin:0 0 .6rem;font-family:Georgia,serif;color:var(--theme-text);border-bottom:2px solid var(--theme-accent);padding-bottom:.35rem">${t("designer.seed.sectionHeading")}</h2>`,
+    },
+    {
+      id: "b-text", label: t("designer.blocks.paragraph"), category: t("designer.categories.text"), activate: true,
+      content: `<p style="margin:0 0 1rem;color:var(--theme-text);line-height:1.65">${t("designer.seed.storyPlaceholder")}</p>`,
+    },
+    {
+      id: "b-quote", label: t("designer.blocks.quote"), category: t("designer.categories.text"),
+      content: `<blockquote style="margin:0 0 1rem;padding:.55rem 1rem;border-left:3px solid var(--theme-accent);background:rgb(var(--theme-accent-rgb) / .08);color:var(--theme-muted);font-style:italic">${t("designer.seed.quote")}</blockquote>`,
+    },
+    {
+      id: "b-divider", label: t("designer.blocks.divider"), category: t("designer.categories.text"),
+      content: '<hr style="border:0;height:1px;margin:1.25rem 0;background:linear-gradient(90deg,transparent,rgb(var(--theme-accent-rgb) / .6),transparent)"/>',
+    },
+    { id: "b-spacer", label: t("designer.blocks.spacer"), category: t("designer.categories.text"), content: '<div style="height:1.5rem"></div>' },
 
-  // ---- Layout ----
-  {
-    id: "b-wrap", label: "Bio container", category: "Layout",
-    // A wrapper you drop OTHER blocks into. min-height makes it a visible drop
-    // target (an empty container is otherwise a hard-to-grab hairline).
-    content: '<div style="max-width:100%;margin:0 auto;padding:1.25rem;min-height:80px;color:var(--theme-text);background:rgb(var(--theme-panel-rgb) / .3);border:1px solid rgb(var(--theme-border-rgb) / .4);border-radius:1.1rem"></div>',
-  },
-  {
-    id: "b-2col", label: "Two columns", category: "Layout",
-    content: '<div style="display:flex;gap:1rem;margin:0 0 1rem;flex-wrap:wrap"><div style="flex:1;min-width:140px;color:var(--theme-text)">Column one</div><div style="flex:1;min-width:140px;color:var(--theme-text)">Column two</div></div>',
-  },
+    // ---- Cards (the header-label look from popular profiles) ----
+    {
+      id: "b-card", label: t("designer.blocks.card"), category: t("designer.categories.cards"),
+      content: `<div style="${CARD_STYLE}"><h3 style="margin:0 0 .5rem;color:var(--theme-text);font-family:Georgia,serif">${t("designer.seed.cardTitle")}</h3><p style="margin:0;color:var(--theme-muted);line-height:1.6">${t("designer.seed.cardBody")}</p></div>`,
+    },
+    {
+      id: "b-field", label: t("designer.blocks.labeledField"), category: t("designer.categories.cards"),
+      content: `<div style="${CARD_STYLE}"><div style="${LABEL_STYLE};margin-bottom:.35rem">${t("designer.seed.label")}</div><p style="margin:0;color:var(--theme-text)">${t("designer.seed.value")}</p></div>`,
+    },
+    {
+      id: "b-listcard", label: t("designer.blocks.listCard"), category: t("designer.categories.cards"),
+      content: `<div style="${CARD_STYLE}"><div style="${LABEL_STYLE};margin-bottom:.5rem">${t("designer.seed.traits")}</div><ul style="margin:0;padding-left:1.15rem;color:var(--theme-muted);line-height:1.6"><li>${t("designer.seed.firstTrait")}</li><li>${t("designer.seed.secondTrait")}</li><li>${t("designer.seed.thirdTrait")}</li></ul></div>`,
+    },
 
-  // ---- Media ----
-  { id: "b-image", label: "Image", category: "Media", select: true, content: { type: "image" } },
-  {
-    id: "b-youtube", label: "YouTube", category: "Media",
-    content: "<youtube>https://youtu.be/dQw4w9WgXcQ</youtube>",
-  },
-];
+    // ---- Layout ----
+    {
+      id: "b-wrap", label: t("designer.blocks.bioContainer"), category: t("designer.categories.layout"),
+      // A wrapper you drop OTHER blocks into. min-height makes it a visible drop
+      // target (an empty container is otherwise a hard-to-grab hairline).
+      content: '<div style="max-width:100%;margin:0 auto;padding:1.25rem;min-height:80px;color:var(--theme-text);background:rgb(var(--theme-panel-rgb) / .3);border:1px solid rgb(var(--theme-border-rgb) / .4);border-radius:1.1rem"></div>',
+    },
+    {
+      id: "b-2col", label: t("designer.blocks.twoColumns"), category: t("designer.categories.layout"),
+      content: `<div style="display:flex;gap:1rem;margin:0 0 1rem;flex-wrap:wrap"><div style="flex:1;min-width:140px;color:var(--theme-text)">${t("designer.seed.columnOne")}</div><div style="flex:1;min-width:140px;color:var(--theme-text)">${t("designer.seed.columnTwo")}</div></div>`,
+    },
+
+    // ---- Media ----
+    { id: "b-image", label: t("designer.blocks.image"), category: t("designer.categories.media"), select: true, content: { type: "image" } },
+    {
+      id: "b-youtube", label: t("designer.blocks.youtube"), category: t("designer.categories.media"),
+      content: "<youtube>https://youtu.be/dQw4w9WgXcQ</youtube>",
+    },
+  ];
+}
 
 /* ----------------------------------------------------------------------------
  * Block thumbnails. GrapesJS shows only a label by default; a `media` SVG gives
@@ -415,22 +425,23 @@ const TEMPLATES: ReadonlyArray<{ key: string; label: string; accent: string; css
 ];
 
 /** Per-template blocks: a full scaffold + label / section / list cards, each
- *  pre-filled with editable text and an accent-tinted thumbnail. */
-function templateBlocks(t: { key: string; label: string; accent: string }) {
-  const p = t.key, cat = t.label, a = t.accent;
+ *  pre-filled with editable text and an accent-tinted thumbnail. The template
+ *  NAME resolves through `designer.templates.<key>` so the palette relabels
+ *  per language while the class prefix / CSS stay byte-stable. */
+function templateBlocks(t: Translate, tpl: { key: string; label: string; accent: string }) {
+  const p = tpl.key, a = tpl.accent;
+  const cat = t(`designer.templates.${p}`);
   return [
-    { id: `tpl-${p}`, label: `${t.label} dossier`, category: cat, media: stackIcon(a),
-      content: `<div class="${p}-bio"><div class="${p}-card"><div class="${p}-hd">Name</div><p class="${p}-val">Your name</p></div><div class="${p}-card"><div class="${p}-hd">About</div><p class="${p}-txt">Write a few lines about yourself or your character here.</p></div></div>` },
-    { id: `tpl-${p}-label`, label: `${t.label} label`, category: cat, media: labelIcon(a),
-      content: `<div class="${p}-card"><div class="${p}-hd">Label</div><p class="${p}-val">Value</p></div>` },
-    { id: `tpl-${p}-section`, label: `${t.label} section`, category: cat, media: cardIcon(a),
-      content: `<div class="${p}-card"><div class="${p}-hd">Section</div><p class="${p}-txt">First paragraph.</p><p class="${p}-txt">Second paragraph.</p></div>` },
-    { id: `tpl-${p}-list`, label: `${t.label} list`, category: cat, media: listIcon(a),
-      content: `<div class="${p}-card"><div class="${p}-hd">Traits</div><ul class="${p}-list"><li>First trait</li><li>Second trait</li><li>Third trait</li></ul></div>` },
+    { id: `tpl-${p}`, label: t("designer.templateBlocks.dossier", { name: cat }), category: cat, media: stackIcon(a),
+      content: `<div class="${p}-bio"><div class="${p}-card"><div class="${p}-hd">${t("designer.seed.name")}</div><p class="${p}-val">${t("designer.seed.yourName")}</p></div><div class="${p}-card"><div class="${p}-hd">${t("designer.seed.about")}</div><p class="${p}-txt">${t("designer.seed.aboutBody")}</p></div></div>` },
+    { id: `tpl-${p}-label`, label: t("designer.templateBlocks.label", { name: cat }), category: cat, media: labelIcon(a),
+      content: `<div class="${p}-card"><div class="${p}-hd">${t("designer.seed.label")}</div><p class="${p}-val">${t("designer.seed.value")}</p></div>` },
+    { id: `tpl-${p}-section`, label: t("designer.templateBlocks.section", { name: cat }), category: cat, media: cardIcon(a),
+      content: `<div class="${p}-card"><div class="${p}-hd">${t("designer.seed.section")}</div><p class="${p}-txt">${t("designer.seed.firstParagraph")}</p><p class="${p}-txt">${t("designer.seed.secondParagraph")}</p></div>` },
+    { id: `tpl-${p}-list`, label: t("designer.templateBlocks.list", { name: cat }), category: cat, media: listIcon(a),
+      content: `<div class="${p}-card"><div class="${p}-hd">${t("designer.seed.traits")}</div><ul class="${p}-list"><li>${t("designer.seed.firstTrait")}</li><li>${t("designer.seed.secondTrait")}</li><li>${t("designer.seed.thirdTrait")}</li></ul></div>` },
   ];
 }
-
-const TEMPLATE_BLOCKS = TEMPLATES.flatMap((t) => templateBlocks(t));
 
 /**
  * A template's stylesheet, detected by the class PREFIX it uses in the markup
@@ -464,12 +475,19 @@ function stripTemplateSheets(css: string): string {
 
 // Templates first (richest, most discoverable), then the plain building blocks
 // with their thumbnails applied.
-const ALL_BLOCKS = [
-  ...TEMPLATE_BLOCKS,
-  ...BIO_BLOCKS.map((b) => (BASIC_ICONS[b.id] ? { ...b, media: BASIC_ICONS[b.id] } : b)),
-];
+function allBlocks(t: Translate) {
+  return [
+    ...TEMPLATES.flatMap((tpl) => templateBlocks(t, tpl)),
+    ...bioBlocks(t).map((b) => (BASIC_ICONS[b.id] ? { ...b, media: BASIC_ICONS[b.id] } : b)),
+  ];
+}
 
 export default function ProfileDesigner({ value, onChange }: Props) {
+  const { t } = useTranslation("profile");
+  // Rebuilt when the language changes; GrapesJS reads the list once at init,
+  // so a mid-session switch relabels on the next Designer open (the caller
+  // remounts this component per open).
+  const blocks = useMemo(() => allBlocks(t), [t]);
   const editorRef = useRef<Editor | null>(null);
   const lastEmitted = useRef<string>("");
   // Author CSS, preserved byte-for-byte (never parsed by GrapesJS). Fed to the
@@ -594,7 +612,7 @@ export default function ProfileDesigner({ value, onChange }: Props) {
         // disable the external fetch entirely (kills the CSP error + the dead
         // request, and removes the CDN dependency).
         cssIcons: "",
-        blockManager: { blocks: ALL_BLOCKS },
+        blockManager: { blocks },
       }}
       onEditor={onEditor}
       onReady={setupCanvas}

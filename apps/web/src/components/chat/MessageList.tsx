@@ -1,4 +1,5 @@
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { BarChart3, Flag, FolderInput, Lock } from "lucide-react";
 import { resolveMessageColor, type ChatMessage, type ForumTopicCard, type RoomOccupant, type ThreadCategory } from "@thekeep/shared";
 import { extractMentions , prefixAppliesToCategory } from "@thekeep/shared";
@@ -18,6 +19,8 @@ import { identityKey } from "../../lib/identity.js";
 import { LinkPreviewCard } from "../LinkPreviewCard.js";
 import { useMentionsCache, requestMentionResolve } from "../../state/mentions.js";
 import { readError } from "../../lib/http.js";
+import { i18n } from "../../lib/i18n.js";
+import { formatNumber, formatTime } from "../../lib/intlFormat.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { fmtForumTime, fmtFullTimestamp } from "../messageTime.js";
 import { TopicManageModal } from "../forums/forumTopicAdmin.js";
@@ -68,6 +71,19 @@ function topicCardFlair(topic: unknown): {
     authorNameStyleKey: t.authorNameStyleKey ?? null,
     authorNameStyleConfig: t.authorNameStyleConfig ?? null,
   };
+}
+
+/**
+ * NSFW topic tag (age-restriction plan Phase 3). Like the flair above, the
+ * flag rides the topics-route payload on the shared `ForumTopicCard` shape
+ * while the store buckets are typed `ChatMessage`, so read it off whatever
+ * topic object the render site holds. Absent = untagged. The server never
+ * sends tagged topics to viewers who can't see NSFW, so a `true` here only
+ * ever reaches viewers allowed to open the topic.
+ */
+function topicIsNsfw(topic: unknown): boolean {
+  if (!topic || typeof topic !== "object") return false;
+  return (topic as Partial<ForumTopicCard>).isNsfw === true;
 }
 
 interface Props {
@@ -256,6 +272,16 @@ interface Props {
   /** Anonymous forum reader (/f/ landing): hide every action toolbar —
    *  read-only browsing, copy-link only. */
   readOnly?: boolean;
+  /**
+   * Stamp the forum-posting tour's `data-tour="forum-new-topic-btn"` anchor
+   * on the per-section "+ New Topic" buttons. ONLY the Forums Catalog passes
+   * true: the tour fires inside the catalog modal, but this component also
+   * renders for legacy threaded CHAT rooms, which stay mounted BEHIND the
+   * modal and precede it in document order — an unconditional stamp made
+   * CoachTour's first `querySelector` match spotlight the hidden chat
+   * button's rect instead of the catalog's.
+   */
+  forumTourAnchors?: boolean;
   /** Permalink builders (forum surfaces). When present, topic cards and
    *  post toolbars grow a copy-link button. */
   postPermalink?: (messageId: string) => string;
@@ -269,6 +295,7 @@ const REPLIES_PER_PAGE = 20;
 /** Tiny copy-permalink button (topic cards + post toolbars). Flashes a
  *  check for a beat after copying. */
 function CopyLinkButton({ url, compact = false }: { url: string; compact?: boolean }) {
+  const { t } = useTranslation("chat");
   const { copied, copy } = useCopyToClipboard({ resetMs: 1200 });
   return (
     <button
@@ -278,15 +305,15 @@ function CopyLinkButton({ url, compact = false }: { url: string; compact?: boole
         /* clipboard unavailable; nothing to show */
         void copy(url);
       }}
-      title={copied ? "Link copied" : "Copy link to this"}
-      aria-label="Copy link"
+      title={copied ? t("forum.linkCopied") : t("forum.copyLink")}
+      aria-label={t("forum.copyLinkAria")}
       className={compact
         ? "shrink-0 rounded border border-keep-rule/60 bg-keep-bg/60 px-1.5 py-0.5 text-xs text-keep-muted hover:border-keep-action hover:text-keep-action"
         : "keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-keep-muted hover:bg-keep-banner hover:text-keep-text"}
     >
       <span aria-hidden>{copied ? "✓" : "🔗"}</span>
       {compact ? null : (
-        <span className="ml-1 text-[10px]">{copied ? "Copied" : "Link"}</span>
+        <span className="ml-1 text-[10px]">{copied ? t("common:copied") : t("forum.link")}</span>
       )}
     </button>
   );
@@ -377,7 +404,7 @@ const STICK_BOTTOM_PX = 24;
 const FLAT_BUFFER_SOFT_CAP = 200;
 const FLAT_BUFFER_HARD_CAP = 300;
 
-export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canPinMessage = false, pinnedMessageIds, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, postPermalink }: Props) {
+export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canPinMessage = false, pinnedMessageIds, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, forumTourAnchors = false, postPermalink }: Props) {
   const ref = useRef<HTMLDivElement | null>(null);
   /**
    * The flat feed's content box (wraps the loader + every message row).
@@ -921,6 +948,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         {...(watchedTopicIds ? { watchedTopicIds } : {})}
         {...(onToggleTopicWatch ? { onToggleTopicWatch } : {})}
         readOnly={readOnly}
+        forumTourAnchors={forumTourAnchors}
         {...(postPermalink ? { postPermalink } : {})}
         highlightMessageId={highlightMessageId ?? null}
         genderByUser={genderByUser}
@@ -988,6 +1016,7 @@ function FlatMessageView({
   fontStep: 0 | 1 | 2 | 3;
   lineFor: (m: ChatMessage) => ReactNode;
 }) {
+  const { t } = useTranslation("chat");
   const hasMore = useChat((s) => (roomId ? (s.roomHistoryHasMore[roomId] ?? false) : false));
   const prependMessages = useChat((s) => s.prependMessages);
   const setRoomHistoryHasMore = useChat((s) => s.setRoomHistoryHasMore);
@@ -1017,12 +1046,12 @@ function FlatMessageView({
       prependMessages(roomId, j.messages);
       setRoomHistoryHasMore(roomId, j.hasMore);
     } catch (e) {
-      setOlderError(e instanceof Error ? e.message : "load failed");
+      setOlderError(e instanceof Error ? e.message : t("feed.loadFailed"));
     } finally {
       inflightRef.current = false;
       setLoadingOlder(false);
     }
-  }, [roomId, hasMore, prependMessages, setRoomHistoryHasMore]);
+  }, [roomId, hasMore, prependMessages, setRoomHistoryHasMore, t]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     if (!hasMore || inflightRef.current) return;
@@ -1089,7 +1118,7 @@ function FlatMessageView({
       {hasMore || loadingOlder ? (
         <div className="mb-1 flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
           {loadingOlder ? (
-            <span>Loading earlier messages…</span>
+            <span>{t("feed.loadingEarlier")}</span>
           ) : olderError ? (
             <button
               type="button"
@@ -1097,7 +1126,7 @@ function FlatMessageView({
               className="rounded border border-keep-accent/40 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
               title={olderError}
             >
-              Retry loading earlier messages
+              {t("feed.retryEarlier")}
             </button>
           ) : (
             // Clickable so a touch user whose viewport can't scroll
@@ -1109,13 +1138,13 @@ function FlatMessageView({
               onClick={() => { void loadOlder(); }}
               className="rounded px-2 py-0.5 hover:text-keep-text"
             >
-              Tap or scroll up for earlier messages
+              {t("feed.tapForEarlier")}
             </button>
           )}
         </div>
       ) : messages.length > 0 ? (
         <div className="mb-1 flex items-center justify-center text-[10px] uppercase tracking-widest text-keep-muted/60">
-          start of history
+          {t("feed.startOfHistory")}
         </div>
       ) : null}
       {messages.map((m) => (
@@ -1141,7 +1170,9 @@ export function topicHeading(m: ChatMessage): string {
   const t = m.title?.trim();
   if (t) return t;
   const body = m.body.trim();
-  if (!body) return "(untitled)";
+  // i18n instance (not a hook): this helper is exported to non-chat
+  // callers (ThreadModal) whose signature must stay `(m) => string`.
+  if (!body) return i18n.t("chat:forum.untitled");
   return body.length <= 80 ? body : `${body.slice(0, 80)}…`;
 }
 
@@ -1202,11 +1233,12 @@ function ForumPaginationStrip({
   isLoading: boolean;
   onGoToPage: (page: number) => void;
 }) {
+  const { t } = useTranslation("chat");
   const pageList = buildForumPageList(currentPage, totalPages);
   return (
     <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-keep-rule/30 pt-2">
       <nav
-        aria-label={`Page navigation for ${sectionKey === "_uncat" ? "Uncategorized" : "category"}`}
+        aria-label={sectionKey === "_uncat" ? t("forum.pageNavUncategorized") : t("forum.pageNavCategory")}
         className="flex flex-wrap items-center gap-1"
       >
         <button
@@ -1214,9 +1246,9 @@ function ForumPaginationStrip({
           onClick={() => onGoToPage(currentPage - 1)}
           disabled={isLoading || currentPage <= 1}
           className="rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:cursor-not-allowed disabled:opacity-40"
-          title="Previous page"
+          title={t("forum.prevPageTitle")}
         >
-          ‹ Prev
+          {t("forum.prev")}
         </button>
         {pageList.map((entry, i) =>
           entry === "ellipsis" ? (
@@ -1239,7 +1271,7 @@ function ForumPaginationStrip({
                   ? "rounded border border-keep-action bg-keep-action/15 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-keep-action"
                   : "rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-[11px] tabular-nums text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:cursor-not-allowed disabled:opacity-50"
               }
-              title={`Go to page ${entry}`}
+              title={t("forum.goToPage", { page: entry })}
             >
               {entry}
             </button>
@@ -1250,13 +1282,13 @@ function ForumPaginationStrip({
           onClick={() => onGoToPage(currentPage + 1)}
           disabled={isLoading || currentPage >= totalPages}
           className="rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 text-[11px] uppercase tracking-widest text-keep-muted hover:bg-keep-banner hover:text-keep-text disabled:cursor-not-allowed disabled:opacity-40"
-          title="Next page"
+          title={t("forum.nextPageTitle")}
         >
-          Next ›
+          {t("forum.next")}
         </button>
       </nav>
       <span className="text-[10px] uppercase tracking-widest text-keep-muted tabular-nums">
-        Page {currentPage} of {totalPages} · {totalCount.toLocaleString()} {totalCount === 1 ? "topic" : "topics"}
+        {t("forum.pageOfTopics", { page: currentPage, pages: totalPages, total: formatNumber(totalCount), count: totalCount })}
       </span>
     </div>
   );
@@ -1326,6 +1358,7 @@ function ForumView({
   watchedTopicIds,
   onToggleTopicWatch,
   readOnly = false,
+  forumTourAnchors = false,
   postPermalink,
   highlightMessageId,
 }: {
@@ -1383,11 +1416,14 @@ function ForumView({
   onToggleTopicWatch?: (topicId: string, watch: boolean) => void;
   /** See MessageList Props — anonymous read-only mode + permalinks. */
   readOnly?: boolean;
+  /** See MessageList Props — Forums Catalog stamps the posting-tour anchor. */
+  forumTourAnchors?: boolean;
   postPermalink?: (messageId: string) => string;
   /** Jump-highlight target (quote references); TopicCards expand their
    *  reply cap when it's one of their hidden replies. */
   highlightMessageId?: string | null;
 }) {
+  const { t } = useTranslation("chat");
   // Index replies by parent topic id. Replies that don't match any
   // currently-loaded topic just don't render (they'll appear when the
   // user loads the topic page that contains their parent). Sorted
@@ -1441,10 +1477,10 @@ function ForumView({
     const uncatBucket = buckets["_uncat"];
     const uncatVisible = uncatBucket && (uncatBucket.topics.length > 0 || uncatBucket.pending.length > 0 || uncatBucket.hasMore);
     if (uncatVisible || categories.length === 0) {
-      out.push({ key: "_uncat", label: categories.length > 0 ? "Uncategorized" : null, subtitle: null, iconUrl: null, membersOnly: false, locked: false, children: [] });
+      out.push({ key: "_uncat", label: categories.length > 0 ? t("forum.uncategorized") : null, subtitle: null, iconUrl: null, membersOnly: false, locked: false, children: [] });
     }
     return out;
-  }, [categories, buckets]);
+  }, [categories, buckets, t]);
 
   // Section collapse state, persisted per room.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
@@ -1494,9 +1530,9 @@ function ForumView({
             type="button"
             onClick={() => onFlushPendingTopics(key)}
             className="self-start rounded-full border border-keep-action/60 bg-keep-action/10 px-3 py-0.5 text-[11px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
-            title="Show the topics that arrived while you were reading"
+            title={t("forum.newTopicsTitle")}
           >
-            ↓ {pendingCount} new {pendingCount === 1 ? "topic" : "topics"}
+            {t("forum.newTopics", { count: pendingCount })}
           </button>
         ) : null}
 
@@ -1509,9 +1545,9 @@ function ForumView({
             page, show a skeleton hint instead of "No topics yet". */}
         {items.length === 0 ? (
           isLoading ? (
-            <div className="px-1 py-2 text-xs italic text-keep-muted">Loading topics…</div>
+            <div className="px-1 py-2 text-xs italic text-keep-muted">{t("forum.loadingTopics")}</div>
           ) : (
-            <div className="px-1 py-2 text-xs italic text-keep-muted">No topics yet.</div>
+            <div className="px-1 py-2 text-xs italic text-keep-muted">{t("forum.noTopics")}</div>
           )
         ) : (
           items.map((topic) => (
@@ -1665,7 +1701,7 @@ function ForumView({
                 // the two diverged (md vs lg) and headers overflowed the
                 // chat container at 768–1023px widths.
                 className="keep-section-header mb-2 flex w-full cursor-pointer items-center justify-between gap-3 border-y border-keep-rule px-4 py-2 text-left text-[1.1rem] font-semibold uppercase tracking-widest text-keep-text shadow-sm hover:brightness-95 lg:-mx-4 lg:w-[calc(100%+2rem)]"
-                title={isCollapsed ? "Expand category" : "Collapse category"}
+                title={isCollapsed ? t("forum.expandCategory") : t("forum.collapseCategory")}
               >
                 {/* Left span: name + chevron. min-w-0 + truncate so a
                     long section name (or a small viewport) shrinks the
@@ -1685,7 +1721,7 @@ function ForumView({
                   <span className="min-w-0">
                     <span className="flex min-w-0 items-center gap-1.5 truncate">
                       {s.membersOnly ? (
-                        <Lock className="h-3.5 w-3.5 shrink-0 text-keep-accent" aria-label="Members only" />
+                        <Lock className="h-3.5 w-3.5 shrink-0 text-keep-accent" aria-label={t("forum.membersOnly")} />
                       ) : null}
                       <span className="truncate">{s.label}</span>
                     </span>
@@ -1707,9 +1743,9 @@ function ForumView({
                   {s.locked ? (
                     <span
                       className="rounded border border-keep-rule/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-muted"
-                      title="Members only: join the forum to post here"
+                      title={t("forum.membersOnlyTitle")}
                     >
-                      Members only
+                      {t("forum.membersOnly")}
                     </span>
                   ) : (
                   <button
@@ -1734,10 +1770,11 @@ function ForumView({
                       });
                       onStartTopicInCategory(s.key === "_uncat" ? null : s.key);
                     }}
+                    data-tour={forumTourAnchors ? "forum-new-topic-btn" : undefined}
                     className="keep-button rounded border border-keep-action/50 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
-                    title={`Start a new topic in ${s.label}`}
+                    title={t("forum.startTopicIn", { name: s.label })}
                   >
-                    + New Topic
+                    {t("forum.newTopic")}
                   </button>
                   )}
                 </span>
@@ -1776,7 +1813,7 @@ function ForumView({
                           }
                         }}
                         className="mb-1.5 flex w-full cursor-pointer items-center justify-between gap-3 rounded border border-keep-rule bg-keep-panel/70 px-3 py-1.5 text-left text-[0.92rem] font-semibold uppercase tracking-widest text-keep-text hover:brightness-95"
-                        title={subCollapsed ? "Expand subcategory" : "Collapse subcategory"}
+                        title={subCollapsed ? t("forum.expandSubcategory") : t("forum.collapseSubcategory")}
                       >
                         <span className="flex min-w-0 items-baseline">
                           <span aria-hidden className="mr-2 inline-block w-3 shrink-0 text-keep-muted">{subCollapsed ? "▶" : "▼"}</span>
@@ -1786,7 +1823,7 @@ function ForumView({
                           <span className="min-w-0">
                             <span className="flex min-w-0 items-center gap-1.5 truncate">
                               {sub.membersOnly ? (
-                                <Lock className="h-3 w-3 shrink-0 text-keep-accent" aria-label="Members only" />
+                                <Lock className="h-3 w-3 shrink-0 text-keep-accent" aria-label={t("forum.membersOnly")} />
                               ) : null}
                               <span className="truncate">{sub.label}</span>
                             </span>
@@ -1802,9 +1839,9 @@ function ForumView({
                           {sub.locked ? (
                             <span
                               className="rounded border border-keep-rule/60 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-muted"
-                              title="Members only: join the forum to post here"
+                              title={t("forum.membersOnlyTitle")}
                             >
-                              Members only
+                              {t("forum.membersOnly")}
                             </span>
                           ) : (
                           <button
@@ -1821,10 +1858,11 @@ function ForumView({
                               });
                               onStartTopicInCategory(sub.key);
                             }}
+                            data-tour={forumTourAnchors ? "forum-new-topic-btn" : undefined}
                             className="keep-button rounded border border-keep-action/50 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-keep-action hover:bg-keep-action/20"
-                            title={`Start a new topic in ${sub.label}`}
+                            title={t("forum.startTopicIn", { name: sub.label })}
                           >
-                            + New Topic
+                            {t("forum.newTopic")}
                           </button>
                           )}
                         </span>
@@ -1867,11 +1905,15 @@ function ForumView({
  *  catalog provided via context; renders nothing outside a prefix-enabled
  *  forum or when the topic has no prefix and the viewer can't assign one. */
 function TopicPrefix({ topic, selfUserId }: { topic: ChatMessage; selfUserId: string | null }) {
+  const { t } = useTranslation("chat");
   // Nudge the tag's ink toward legibility against the viewer's theme bg (same
   // pass the chat author colors use) so a pale tag survives a light theme and
   // a dark tag survives a dark one. The faint bg/border tints keep the raw hue.
   const themeBg = useActiveTheme().bg;
   const ctx = useContext(ForumPrefixContext);
+  // Cosmetic mirror of the NSFW re-tag write gate (adults only); the picker
+  // and the server re-check. Hook runs before the early return (hook order).
+  const viewerIsAdult = useChat((s) => s.viewerAge.isAdult);
   if (!ctx || topic.replyToId) return null;
   const prefix = topic.prefixId ? ctx.byId.get(topic.prefixId) : null;
   // A staff-only tag is manager-controlled: only manage_prefixes may set it,
@@ -1880,14 +1922,21 @@ function TopicPrefix({ topic, selfUserId }: { topic: ChatMessage; selfUserId: st
   // current tag is staff-only.
   const isManager = ctx.canManagePrefixes;
   const currentIsStaffOnly = !!prefix?.staffOnly;
-  const canAssign = isManager || (!!selfUserId && topic.userId === selfUserId && !currentIsStaffOnly);
+  const isAuthor = !!selfUserId && topic.userId === selfUserId;
+  const canAssign = isManager || (isAuthor && !currentIsStaffOnly);
+  // NSFW re-tag (age plan Phase 3) rides the same picker: adult author /
+  // owner / manage_prefixes. Independent of the staff-only prefix rule —
+  // the NSFW tag is a separate system from the owner's prefix catalog.
+  const canTagNsfw = viewerIsAdult && (isManager || isAuthor);
   // Tags this topic's category can actually be given (global + matching-scope).
   // Members don't count staff-only tags toward "is there anything to assign".
   const categoryId = topic.threadCategoryId ?? null;
   const hasApplicable = ctx.all.some((p) => prefixAppliesToCategory(p, categoryId) && (isManager || !p.staffOnly));
   // Hide the whole affordance when there's nothing to assign and no way to
-  // mint one — "no tags + custom off ⇒ don't show the tag system".
-  if (!prefix && (!canAssign || (!hasApplicable && !ctx.canCreateCustom))) return null;
+  // mint one — "no tags + custom off ⇒ don't show the tag system" — unless
+  // the viewer can NSFW-tag, which needs a path into the picker even in a
+  // forum with no prefix catalog at all.
+  if (!prefix && !canTagNsfw && (!canAssign || (!hasApplicable && !ctx.canCreateCustom))) return null;
   const chip = prefix ? (
     <span
       className="shrink-0 rounded px-1.5 py-0 text-[10px] font-bold uppercase tracking-wide"
@@ -1897,14 +1946,20 @@ function TopicPrefix({ topic, selfUserId }: { topic: ChatMessage; selfUserId: st
       {prefix.label}
     </span>
   ) : (
-    <span className="shrink-0 rounded border border-dashed border-keep-rule px-1.5 py-0 text-[10px] uppercase tracking-wide text-keep-muted">+ tag</span>
+    <span className="shrink-0 rounded border border-dashed border-keep-rule px-1.5 py-0 text-[10px] uppercase tracking-wide text-keep-muted">{t("forum.addTag")}</span>
   );
-  if (!canAssign) return chip;
+  if (!canAssign && !canTagNsfw) return chip;
   return (
     <button
       type="button"
-      onClick={(e) => { e.stopPropagation(); ctx.onAssign(topic.id, topic.prefixId ?? null, topic.threadCategoryId ?? null); }}
-      title="Set this topic's prefix"
+      onClick={(e) => {
+        e.stopPropagation();
+        ctx.onAssign(topic.id, topic.prefixId ?? null, topic.threadCategoryId ?? null, {
+          current: topicIsNsfw(topic),
+          authorUserId: topic.userId,
+        });
+      }}
+      title={t("forum.setTags")}
       className="shrink-0"
     >
       {chip}
@@ -2013,6 +2068,7 @@ function TopicCard({
     authorNameStyleConfig?: Record<string, unknown> | null;
   } | null;
 }) {
+  const { t } = useTranslation("chat");
   // Reply pagination (classic forum navigation): short chains render
   // whole; past REPLIES_PER_PAGE the chain pages, defaulting to the LAST
   // page (the live end of the conversation, matching the old tail-cap
@@ -2045,39 +2101,39 @@ function TopicCard({
         disabled={currentReplyPage <= 1}
         onClick={() => setReplyPage(1)}
         className="rounded border border-keep-rule px-1.5 py-0.5 hover:text-keep-text disabled:opacity-30"
-        title="First page of replies"
+        title={t("forum.firstPageTitle")}
       >
-        « First
+        {t("forum.first")}
       </button>
       <button
         type="button"
         disabled={currentReplyPage <= 1}
         onClick={() => setReplyPage(currentReplyPage - 1)}
         className="rounded border border-keep-rule px-1.5 py-0.5 hover:text-keep-text disabled:opacity-30"
-        title="Previous page of replies"
+        title={t("forum.prevRepliesTitle")}
       >
-        ‹ Prev
+        {t("forum.prev")}
       </button>
       <span className="px-1 tabular-nums">
-        Page {currentReplyPage} of {totalReplyPages} · {replies.length} replies
+        {t("forum.pageOfReplies", { page: currentReplyPage, pages: totalReplyPages, n: replies.length })}
       </span>
       <button
         type="button"
         disabled={currentReplyPage >= totalReplyPages}
         onClick={() => setReplyPage(currentReplyPage + 1)}
         className="rounded border border-keep-rule px-1.5 py-0.5 hover:text-keep-text disabled:opacity-30"
-        title="Next page of replies"
+        title={t("forum.nextRepliesTitle")}
       >
-        Next ›
+        {t("forum.next")}
       </button>
       <button
         type="button"
         disabled={currentReplyPage >= totalReplyPages}
         onClick={() => setReplyPage(totalReplyPages)}
         className="rounded border border-keep-rule px-1.5 py-0.5 hover:text-keep-text disabled:opacity-30"
-        title="Newest page of replies"
+        title={t("forum.newestRepliesTitle")}
       >
-        Last »
+        {t("forum.last")}
       </button>
     </div>
   ) : null;
@@ -2129,7 +2185,7 @@ function TopicCard({
           }
         }}
         className="flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-left hover:bg-keep-muted/10"
-        title={isActive ? "Collapse this topic" : "Open this topic"}
+        title={isActive ? t("forum.collapseTopic") : t("forum.openTopic")}
       >
         <ForumAvatar
           src={topic.avatarUrl ?? null}
@@ -2170,15 +2226,15 @@ function TopicCard({
                 last opened this topic. Cleared when the topic opens. */}
             {isUnread ? (
               <span
-                aria-label="New activity"
-                title="New activity since you last read this topic"
+                aria-label={t("forum.newActivity")}
+                title={t("forum.newActivityTitle")}
                 className="h-2 w-2 shrink-0 self-center rounded-full bg-keep-action"
               />
             ) : null}
             {topic.isSticky ? (
               <span
-                aria-label="Pinned"
-                title="Pinned by an admin, stays at the top of this category."
+                aria-label={t("forum.pinned")}
+                title={t("forum.pinnedTitle")}
                 className="shrink-0 text-keep-action"
               >
                 📌
@@ -2186,11 +2242,25 @@ function TopicCard({
             ) : null}
             {topic.lockedAt ? (
               <span
-                aria-label="Locked"
-                title="This topic is locked, no new replies."
+                aria-label={t("forum.locked")}
+                title={t("forum.lockedTitle")}
                 className="shrink-0 text-keep-muted"
               >
                 🔒
+              </span>
+            ) : null}
+            {/* Built-in NSFW tag (age-restriction plan Phase 3). Deliberately
+                NOT a prefix chip: fixed warning red (the RatingChip color, a
+                concrete value so it reads as a warning on every palette)
+                instead of the owner's custom prefix colors. The server holds
+                tagged topics back from viewers who can't see NSFW, so this
+                only ever renders for viewers allowed to open the topic. */}
+            {topicIsNsfw(topic) ? (
+              <span
+                title={t("forum.nsfwTitle")}
+                className="inline-flex shrink-0 items-center self-center rounded border border-[#e06070] bg-[#e06070]/10 px-1.5 py-0 text-[10px] font-bold uppercase leading-none tracking-widest text-[#e06070]"
+              >
+                {t("forum.nsfw")}
               </span>
             ) : null}
             <TopicPrefix topic={topic} selfUserId={selfUserId} />
@@ -2206,7 +2276,7 @@ function TopicCard({
             >
               {topic.kind === "poll" ? (
                 <span className="mr-1.5 inline-flex items-center gap-1 rounded-full border border-keep-accent/50 bg-keep-accent/10 px-1.5 py-0 align-middle text-[10px] font-semibold uppercase tracking-widest text-keep-accent">
-                  <BarChart3 className="h-3 w-3" aria-hidden="true" /> Poll
+                  <BarChart3 className="h-3 w-3" aria-hidden="true" /> {t("forum.pollChip")}
                 </span>
               ) : null}
               {parseInline(headingText)}
@@ -2219,7 +2289,7 @@ function TopicCard({
             {flair?.authorRankKey ? (
               <RankSigil rankKey={flair.authorRankKey} tier={flair.authorTier ?? null} size="sm" variant="gem" />
             ) : null}
-            <span>by</span>
+            <span>{t("forum.by")}</span>
             <button
               type="button"
               onClick={(e) => {
@@ -2260,7 +2330,7 @@ function TopicCard({
                   until opened. */}
               {(() => {
                 const n = Math.max(topic.replyCount ?? 0, replies.length);
-                return `· ${n} ${n === 1 ? "reply" : "replies"}`;
+                return t("forum.replyCount", { count: n });
               })()}
             </span>
           </div>
@@ -2274,8 +2344,8 @@ function TopicCard({
               e.stopPropagation();
               onToggleWatch();
             }}
-            aria-label={isWatched ? "Stop watching this topic" : "Watch this topic"}
-            title={isWatched ? "Watching - you're notified of new replies. Click to stop." : "Watch this topic - get notified of new replies."}
+            aria-label={isWatched ? t("forum.stopWatching") : t("forum.watchTopic")}
+            title={isWatched ? t("forum.watchingTitle") : t("forum.watchTitle")}
             className={
               "shrink-0 rounded border px-1.5 py-0.5 text-xs " +
               (isWatched
@@ -2293,8 +2363,8 @@ function TopicCard({
               e.stopPropagation();
               onPopout();
             }}
-            aria-label="Open in focused view"
-            title="Open in focused view"
+            aria-label={t("forum.openFocused")}
+            title={t("forum.openFocused")}
             className="shrink-0 rounded border border-keep-rule/60 bg-keep-bg/60 px-1.5 py-0.5 text-xs text-keep-muted hover:border-keep-action hover:bg-keep-action/10 hover:text-keep-action"
           >
             ⤢
@@ -2438,6 +2508,7 @@ export function ForumAvatar({
    *  forum's server, not the author's current live equip. */
   forceBorder?: boolean;
 }) {
+  const { t } = useTranslation("chat");
   // Tuple-aware occupant matcher used by every cache lookup below.
   // (userId, characterId) pins a specific identity, the same way
   // `cosmeticsByIdentity` in the chat path does, so two characters
@@ -2530,7 +2601,7 @@ export function ForumAvatar({
       avatarCrop={effectiveCrop}
       size={mappedSize}
       {...(onClick ? { onClick } : {})}
-      title={`View ${name}'s profile`}
+      title={t("actions.viewProfile", { name })}
     />
   );
 }
@@ -2603,6 +2674,7 @@ export function ForumPostBody({
   /** Permalink builder for this post (forum surfaces). */
   postPermalink?: (messageId: string) => string;
 }) {
+  const { t } = useTranslation("chat");
   // Forum posts use the block-level body renderer so blockquotes
   // (`> quoted text` line prefix) render as styled <blockquote>
   // elements, needed by the Quote-reply flow. Flat-chat lines still
@@ -2670,12 +2742,12 @@ export function ForumPostBody({
     const isSelfDelete = !!msg.deletedByUserId && msg.deletedByUserId === msg.userId;
     const actorBlurb = msg.deletedByUserId
       ? (isSelfDelete
-          ? "self-deleted"
-          : `deleted by ${msg.deletedByDisplayName ?? "unknown"}`)
+          ? t("row.selfDeleted")
+          : t("row.deletedBy", { name: msg.deletedByDisplayName ?? t("row.unknown") }))
       : null;
     return (
       <div className="rounded border border-dashed border-keep-rule/40 px-2 py-1 text-xs italic text-keep-muted/70">
-        [message removed]
+        {t("row.messageRemoved")}
         {/* Admin-only audit reveal. See the chat-line variant for the
             same rationale: server only emits `originalBody` to admin
             viewers, so this block stays inert for mods + ordinary
@@ -2684,9 +2756,9 @@ export function ForumPostBody({
           <blockquote className="mt-1 border-l-2 border-keep-accent/30 bg-keep-panel/20 px-2 py-0.5 text-[11px] italic text-keep-muted/60">
             <span
               className="mr-1 select-none text-[9px] uppercase not-italic tracking-widest text-keep-accent/70"
-              title="Original body, visible to site admins only for audit"
+              title={t("row.adminAuditTitle")}
             >
-              admin audit
+              {t("row.adminAudit")}
               <span className="ml-1 normal-case tracking-normal">
                , {msg.displayName}
                 {actorBlurb ? ` · ${actorBlurb}` : ""}
@@ -2711,9 +2783,9 @@ export function ForumPostBody({
   const editedBadge = msg.editedAt ? (
     <span
       className="ml-1 text-[10px] italic text-keep-muted"
-      title={`edited ${new Date(msg.editedAt).toLocaleTimeString()}`}
+      title={t("row.editedAt", { time: formatTime(msg.editedAt) })}
     >
-      (edited)
+      {t("row.edited")}
     </span>
   ) : null;
 
@@ -2739,7 +2811,7 @@ export function ForumPostBody({
       useChat.getState().bumpForumActionTick();
       setEditing(false);
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : "edit failed");
+      setEditError(err instanceof Error ? err.message : t("row.editFailed"));
     } finally {
       setEditBusy(false);
     }
@@ -2807,7 +2879,7 @@ export function ForumPostBody({
               type="button"
               onClick={() => onTimeClick(msg.id)}
               className="rounded text-keep-muted tabular-nums hover:text-keep-action hover:underline"
-              title={`Reply to this post, posted ${fmtFullTimestamp(msg.createdAt)}`}
+              title={t("forum.replyToPostTitle", { time: fmtFullTimestamp(msg.createdAt) })}
             >
               {fmtForumTime(msg.createdAt)}
             </button>
@@ -2817,7 +2889,7 @@ export function ForumPostBody({
                   type="button"
                   onClick={() => onJumpToReply(msg.replyToId!)}
                   className="truncate rounded italic text-keep-muted hover:text-keep-action hover:underline focus:outline-none focus:ring-1 focus:ring-keep-action"
-                  title={`Jump to ${msg.replyToDisplayName}'s post`}
+                  title={t("forum.jumpToUsersPost", { name: msg.replyToDisplayName })}
                 >
                   ↪ {msg.replyToDisplayName}
                 </button>
@@ -2853,7 +2925,7 @@ export function ForumPostBody({
                 onClick={() => { setEditing(false); setDraft(msg.body); setEditError(null); }}
                 className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-xs hover:bg-keep-banner"
               >
-                Cancel
+                {t("common:cancel")}
               </button>
               <button
                 type="button"
@@ -2861,7 +2933,7 @@ export function ForumPostBody({
                 disabled={editBusy}
                 className="rounded border border-keep-action bg-keep-action/10 px-2 py-0.5 text-xs text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
               >
-                {editBusy ? "Saving…" : "Save"}
+                {editBusy ? t("common:saving") : t("common:save")}
               </button>
             </div>
           </div>
@@ -2909,7 +2981,7 @@ export function ForumPostBody({
               </div>
             ) : null}
             {msg.npcVoicedBy ? (
-              <div className="mt-1 text-[10px] italic text-keep-muted">voiced by {msg.npcVoicedBy}</div>
+              <div className="mt-1 text-[10px] italic text-keep-muted">{t("row.voicedBy", { name: msg.npcVoicedBy })}</div>
             ) : null}
           </div>
         ) : (
@@ -2976,8 +3048,8 @@ export function ForumPostBody({
                   targetId={msg.id}
                   asCharacterId={viewerActiveCharacterIdForForum}
                   className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 normal-case hover:bg-keep-banner hover:text-keep-text"
-                  title="Add reaction"
-                  label={<><span aria-hidden>+ 😊</span> <span className="text-[10px]">React</span></>}
+                  title={t("reactions.add")}
+                  label={<><span aria-hidden>+ 😊</span> <span className="text-[10px]">{t("forum.react")}</span></>}
                 />
               ) : null
             }
@@ -3055,6 +3127,7 @@ function PostToolbar({
    *  below them. */
   extraActions?: React.ReactNode;
 }) {
+  const { t } = useTranslation("chat");
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [lockBusy, setLockBusy] = useState(false);
   const [pinBusy, setPinBusy] = useState(false);
@@ -3094,8 +3167,8 @@ function PostToolbar({
     // The confirm copy differs slightly for moderators so they know
     // the body remains recoverable from the admin audit view.
     const prompt = canModerate && !isOwn
-      ? `Delete this post by ${msg.displayName}? It will be hidden from users but the original content stays available in the admin audit view.`
-      : "Delete this post? It will be hidden from other users but admins can still review it if reported.";
+      ? t("forum.deleteOtherConfirm", { name: msg.displayName })
+      : t("forum.deleteOwnConfirm");
     if (!window.confirm(prompt)) return;
     setDeleteBusy(true);
     setActionError(null);
@@ -3107,7 +3180,7 @@ function PostToolbar({
       }
       useChat.getState().bumpForumActionTick();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "delete failed");
+      setActionError(err instanceof Error ? err.message : t("row.deleteFailed"));
     } finally {
       setDeleteBusy(false);
     }
@@ -3129,7 +3202,7 @@ function PostToolbar({
       }
       useChat.getState().bumpForumActionTick();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "lock failed");
+      setActionError(err instanceof Error ? err.message : t("forum.lockFailed"));
     } finally {
       setLockBusy(false);
     }
@@ -3151,7 +3224,7 @@ function PostToolbar({
       }
       useChat.getState().bumpForumActionTick();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : "pin failed");
+      setActionError(err instanceof Error ? err.message : t("row.pinFailed"));
     } finally {
       setPinBusy(false);
     }
@@ -3165,7 +3238,7 @@ function PostToolbar({
     // the user a place to type their reply after the quote. The
     // "wrote:" is a msg: reference link (see lib/markdown.tsx) so
     // readers can jump back to the quoted post.
-    const attribution = `**${msg.displayName}** [wrote:](msg:${msg.id})`;
+    const attribution = t("forum.quoteAttribution", { name: msg.displayName, id: msg.id });
     const bodyLines = msg.body.split("\n").map((l) => `> ${l}`).join("\n");
     const quote = `> ${attribution}\n${bodyLines}\n\n`;
     onQuotePost(quote);
@@ -3181,9 +3254,9 @@ function PostToolbar({
           type="button"
           onClick={onReply}
           className="keep-button rounded border border-keep-action/40 bg-keep-action/5 px-2 py-0.5 text-keep-action hover:bg-keep-action/15"
-          title={`Reply to this thread`}
+          title={t("forum.replyPillTitle")}
         >
-          ↩ Reply
+          {t("forum.replyPill")}
         </button>
       ) : null}
       {showQuote ? (
@@ -3191,9 +3264,9 @@ function PostToolbar({
           type="button"
           onClick={doQuote}
           className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-banner hover:text-keep-text"
-          title={`Quote ${msg.displayName}'s post in your reply`}
+          title={t("forum.quoteTitle", { name: msg.displayName })}
         >
-          ❝ Quote
+          {t("forum.quotePill")}
         </button>
       ) : null}
       {showEdit ? (
@@ -3202,7 +3275,7 @@ function PostToolbar({
           onClick={() => {
             if (isAdminEdit) {
               const ok = window.confirm(
-                `Edit this post by ${msg.displayName} as an admin? The (edited) badge will appear to all viewers; the original body is preserved server-side for audit.`,
+                t("forum.adminEditConfirm", { name: msg.displayName }),
               );
               if (!ok) return;
             }
@@ -3213,9 +3286,9 @@ function PostToolbar({
               ? "keep-button rounded border border-keep-accent/40 bg-keep-bg/60 px-2 py-0.5 text-keep-accent/80 hover:bg-keep-accent/10 hover:text-keep-accent"
               : "keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-banner hover:text-keep-text"
           }
-          title={isAdminEdit ? `Admin: edit ${msg.displayName}'s post` : "Edit this post"}
+          title={isAdminEdit ? t("forum.adminEditTitle", { name: msg.displayName }) : t("forum.editTitle")}
         >
-          Edit
+          {t("forum.edit")}
         </button>
       ) : null}
       {showPin ? (
@@ -3224,9 +3297,9 @@ function PostToolbar({
           onClick={togglePin}
           disabled={pinBusy}
           className="keep-button rounded border border-keep-action/40 bg-keep-bg/60 px-2 py-0.5 text-keep-action/80 hover:bg-keep-action/10 hover:text-keep-action disabled:opacity-50"
-          title={isSticky ? "Unpin this topic" : "Pin this topic to the top of its category"}
+          title={isSticky ? t("forum.unpinTopic") : t("forum.pinTopicTitle")}
         >
-          {pinBusy ? "…" : isSticky ? "📌 Unpin" : "📌 Pin"}
+          {pinBusy ? "…" : isSticky ? t("forum.unpinLabel") : t("forum.pinLabel")}
         </button>
       ) : null}
       {showLock ? (
@@ -3235,9 +3308,9 @@ function PostToolbar({
           onClick={toggleLock}
           disabled={lockBusy}
           className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-banner hover:text-keep-text disabled:opacity-50"
-          title={isLocked ? "Reopen this topic to new replies" : "Lock this topic against new replies"}
+          title={isLocked ? t("forum.unlockTitle") : t("forum.lockTitle")}
         >
-          {lockBusy ? "…" : isLocked ? "🔓 Unlock" : "🔒 Lock"}
+          {lockBusy ? "…" : isLocked ? t("forum.unlockLabel") : t("forum.lockLabel")}
         </button>
       ) : null}
       {showDelete ? (
@@ -3246,9 +3319,9 @@ function PostToolbar({
           onClick={doDelete}
           disabled={deleteBusy}
           className="keep-button rounded border border-keep-accent/40 bg-keep-bg/60 text-keep-accent/80 px-2 py-0.5 hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
-          title={canModerate && !isOwn ? "Moderator: hide this post" : "Hide this post"}
+          title={canModerate && !isOwn ? t("forum.modHideTitle") : t("forum.hideTitle")}
         >
-          {deleteBusy ? "…" : "Delete"}
+          {deleteBusy ? "…" : t("common:delete")}
         </button>
       ) : null}
       {showMove ? (
@@ -3256,9 +3329,9 @@ function PostToolbar({
           type="button"
           onClick={() => setManageOpen(true)}
           className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-banner hover:text-keep-text"
-          title="Move this topic to another category or board, or merge it into another topic"
+          title={t("forum.moveTitle")}
         >
-          <FolderInput className="mr-1 inline h-3 w-3" aria-hidden="true" />Move
+          <FolderInput className="mr-1 inline h-3 w-3" aria-hidden="true" />{t("forum.move")}
         </button>
       ) : null}
       {showBookmark ? <InlineBookmark msg={msg} /> : null}
@@ -3270,9 +3343,9 @@ function PostToolbar({
           type="button"
           onClick={() => forumReport!(msg.id, msg.displayName)}
           className="keep-button flex items-center gap-1 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-banner hover:text-keep-text"
-          title={`Report ${msg.displayName}'s post to the forum's moderators`}
+          title={t("forum.reportToForumTitle", { name: msg.displayName })}
         >
-          <Flag className="h-3 w-3" aria-hidden="true" /> Report
+          <Flag className="h-3 w-3" aria-hidden="true" /> {t("forum.report")}
         </button>
       ) : null}
       {showReport && !showForumReport ? <InlineReport msg={msg} /> : null}
@@ -3300,6 +3373,7 @@ function PostToolbar({
 
 
 function InlineBookmark({ msg }: { msg: ChatMessage }) {
+  const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
   const [category, setCategory] = useState("");
   const [note, setNote] = useState("");
@@ -3352,7 +3426,7 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
       setOpen(false);
       window.setTimeout(() => setDone(false), 1200);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "save failed");
+      setError(err instanceof Error ? err.message : t("bookmarks.saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -3363,10 +3437,10 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
       <button
         type="button"
         onClick={openPopover}
-        title="Bookmark this post"
+        title={t("bookmarks.bookmarkPost")}
         className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-action/10 hover:text-keep-action"
       >
-        {done ? "✓ Saved" : "🔖 Bookmark"}
+        {done ? t("bookmarks.savedCheck") : t("bookmarks.bookmarkLabel")}
       </button>
       {open ? (
         <div
@@ -3379,16 +3453,16 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
           // viewports (e.g. landscape phone with the keyboard open).
           className={`fixed inset-x-2 bottom-2 z-30 max-h-[80vh] overflow-y-auto rounded border border-keep-rule bg-keep-bg p-2 text-xs normal-case tracking-normal shadow-lg md:absolute md:inset-x-auto md:bottom-auto md:left-0 md:top-full md:mt-1 md:max-h-none md:min-w-[16rem]${reduceMotion ? " tk-fade-in" : ""}`}
         >
-          <div className="mb-1 font-semibold text-keep-text">Bookmark</div>
+          <div className="mb-1 font-semibold text-keep-text">{t("bookmarks.header")}</div>
           <label className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">
-            Category
+            {t("bookmarks.category")}
             <input
               type="text"
               list={`bookmark-cats-inline-${msg.id}`}
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               maxLength={60}
-              placeholder="leave empty for Uncategorized"
+              placeholder={t("bookmarks.categoryEmptyPlaceholder")}
               className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 normal-case tracking-normal text-keep-text"
               // eslint-disable-next-line jsx-a11y/no-autofocus
               autoFocus
@@ -3416,7 +3490,7 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
                         ? "border-keep-action bg-keep-action/15 text-keep-action"
                         : "border-keep-rule/60 bg-keep-bg/60 text-keep-muted hover:border-keep-action/40 hover:bg-keep-action/10 hover:text-keep-action")
                     }
-                    title={`Use category "${c}"`}
+                    title={t("bookmarks.useCategory", { name: c })}
                   >
                     {c}
                   </button>
@@ -3425,13 +3499,13 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
             </div>
           ) : null}
           <label className="mb-2 block text-[10px] uppercase tracking-widest text-keep-muted">
-            Note (optional)
+            {t("bookmarks.noteOptional")}
             <input
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               maxLength={500}
-              placeholder="why you're saving this"
+              placeholder={t("bookmarks.whySaving")}
               className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 normal-case tracking-normal text-keep-text"
             />
           </label>
@@ -3442,7 +3516,7 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
               onClick={() => { setOpen(false); setError(null); }}
               className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 text-[10px] hover:bg-keep-banner"
             >
-              Cancel
+              {t("common:cancel")}
             </button>
             <button
               type="button"
@@ -3450,7 +3524,7 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
               disabled={busy}
               className="rounded border border-keep-action/60 bg-keep-action/10 px-2 py-0.5 text-[10px] font-semibold text-keep-action hover:bg-keep-action/20 disabled:opacity-50"
             >
-              {busy ? "saving…" : "Save"}
+              {busy ? t("bookmarks.saving") : t("common:save")}
             </button>
           </div>
         </div>
@@ -3466,13 +3540,14 @@ function InlineBookmark({ msg }: { msg: ChatMessage }) {
  * hover-revealed corner flag.
  */
 function InlineReport({ msg }: { msg: ChatMessage }) {
+  const { t } = useTranslation("chat");
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
 
   async function file() {
     if (done || busy) return;
     const reason = window.prompt(
-      `Report this post from ${msg.displayName}? Optional reason (admins see it):`,
+      t("report.postPrompt", { name: msg.displayName }),
       "",
     );
     if (reason === null) return;
@@ -3486,12 +3561,12 @@ function InlineReport({ msg }: { msg: ChatMessage }) {
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({} as { error?: string }));
-        window.alert(j.error ?? `Couldn't file report (HTTP ${res.status}).`);
+        window.alert(j.error ?? t("report.fileFailed", { status: res.status }));
         return;
       }
       setDone(true);
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "report failed");
+      window.alert(err instanceof Error ? err.message : t("report.failed"));
     } finally {
       setBusy(false);
     }
@@ -3502,10 +3577,10 @@ function InlineReport({ msg }: { msg: ChatMessage }) {
       type="button"
       onClick={file}
       disabled={busy || done}
-      title={done ? "Reported, admins will review." : "Report this post to admins"}
+      title={done ? t("report.reportedTitle") : t("report.reportPostTitle")}
       className="keep-button rounded border border-keep-rule/60 bg-keep-bg/60 px-2 py-0.5 hover:bg-keep-accent/10 hover:text-keep-accent disabled:opacity-50"
     >
-      {done ? "✓ Reported" : "🚩 Report"}
+      {done ? t("report.reportedLabel") : t("report.reportLabel")}
     </button>
   );
 }

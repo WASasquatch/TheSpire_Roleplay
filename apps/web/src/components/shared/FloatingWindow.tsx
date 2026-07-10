@@ -100,6 +100,13 @@ interface Props {
    *  up an owner's design from an element above it. Spread first — the
    *  window's own props always win. */
   outerAttrs?: Record<string, string>;
+  /** Raise the window whenever this value CHANGES. For windows whose one
+   *  mounted instance swaps content in place (the profile window showing
+   *  a different profile): without this, clicking person B inside another
+   *  window raises THAT window at pointerdown, the profile swaps behind
+   *  it, and "nothing happens". Mount already raises, so a constant key
+   *  is a no-op. */
+  raiseKey?: string | number;
   children: ReactNode;
 }
 
@@ -141,6 +148,7 @@ export function FloatingWindow({
   style,
   onKeyDown,
   outerAttrs,
+  raiseKey,
   children,
 }: Props) {
   const { t } = useTranslation("common");
@@ -184,6 +192,12 @@ export function FloatingWindow({
       renumberStack();
     }
   }, []);
+  // Content-swap raise (see the raiseKey prop doc). Mount is already
+  // top-of-stack, so the initial run is a no-op.
+  useEffect(() => {
+    if (mobile || raiseKey === undefined) return;
+    bringToFront();
+  }, [mobile, raiseKey, bringToFront]);
 
   // Mobile keeps the classic Modal Escape-to-close; desktop deliberately
   // does not (see file comment).

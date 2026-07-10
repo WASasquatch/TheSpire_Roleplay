@@ -4638,11 +4638,9 @@ function Chat() {
         <ProfileModal
           profile={openProfile}
           onClose={() => setOpenProfile(null)}
-          // Stack above MessagesModal (z=50) so opening a profile from
-          // inside a DM (avatar/name click in the thread header or a
-          // message bubble) lands on TOP of the messenger instead of
-          // behind it. Other entry points (chat avatar tile, mentions)
-          // open against a modal-free canvas where 60 is still fine.
+          // MOBILE plane only (desktop is the shared window registry +
+          // raiseKey): 60 keeps the fullscreen profile above the
+          // messenger's mobile sheet (50) when opened from inside a DM.
           zIndex={60}
           // The owner + admin-tier moderators skip the NSFW gate
           // splash. Owners wouldn't gain anything from being warned

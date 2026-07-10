@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { Ban, EyeOff, Flag, MessageSquare, Send, X } from "lucide-react";
@@ -113,10 +113,11 @@ interface Props {
    */
   onModerated?: () => void;
   /**
-   * Stacking override for the modal backdrop. Defaults to the Modal
-   * baseline (40). Bumped above 50 when the profile is opened from
-   * inside the admin panel so it sits on top of the admin shell
-   * instead of being hidden underneath it.
+   * MOBILE stacking plane only (the fullscreen fallback's backdrop);
+   * defaults to the Modal baseline (40). On desktop the profile is a
+   * FloatingWindow — its position comes from the shared window registry
+   * (30..39, always under true modals), and this prop is ignored, so
+   * raising it can never lift the window above a backdropped dialog.
    */
   zIndex?: number;
 }
@@ -217,15 +218,11 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
     && journal.length === 0
     && portraitCount === 0;
 
-  // Owner-configured public-profile background. When set, the Modal's
-  // backdrop (the area outside the card) paints this image with the
-  // chosen sizing strategy. The backdrop's own `onClick={onClose}`
-  // stays intact, clicking outside the card still dismisses the
-  // modal exactly like the default backdrop, so logged-in viewers
-  // landing on a profile from chat can still tap-out back to the
-  // shell. Backdrop also keeps its `bg-black/40` darken color, which
-  // CSS paints UNDER the inline backgroundImage; we don't double
-  // that up with a gradient so vivid BGs come through clean.
+  // Owner-configured public-profile background. When set, it paints the
+  // WINDOW SHELL with the chosen sizing strategy (there's no full-screen
+  // backdrop anymore — the profile is a floating window and the page
+  // behind stays usable). The card surface above it drops to 92% fill so
+  // the image ghosts through the whole card; see the card style below.
   const profileBgUrl = profile.profile.publicProfileBgUrl?.trim() ?? "";
   const profileBgMode = profile.profile.publicProfileBgMode ?? "cover";
   const backdropStyle: React.CSSProperties | undefined = profileBgUrl
@@ -290,6 +287,11 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
     <FloatingWindow
       onClose={onClose}
       title={name}
+      // Raise on identity swap: this one mounted window shows whichever
+      // profile is open, so clicking person B from inside another window
+      // must bring it forward again (the launcher window raised itself at
+      // pointerdown).
+      raiseKey={`${profile.profile.userId}:${profile.kind === "character" ? profile.profile.id : ""}`}
       // Conditional spread, not `prop={maybeUndef}`, `exactOptionalPropertyTypes`
       // in tsconfig rejects `undefined` as a value for optional props.
       // zIndex is the MOBILE plane only (desktop stacking is the window
@@ -324,19 +326,13 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
       className="keep-frame bg-keep-bg text-keep-text lg:rounded"
     >
       <div
-        // Inline-style override scopes the theme to this card only. The
+        // Inline-style override scopes the theme to this card surface (the
+        // FloatingWindow owns size/position; this div fills its body). The
         // explicit bg/color use rgb(var()) because the variables now hold
         // RGB triples (see lib/theme.ts), not direct color values.
         //
-        // Mobile: full-viewport sheet (h-dvh handles the iOS address-bar
-        // shrink so the close button stays reachable). No border / rounded
-        // corners since we sit edge-to-edge. Dismiss is via the close
-        // button only, backdrop tap doesn't reach us at this size.
-        // Desktop (md+): 75vw on widescreens with a ceiling so it doesn't
-        // become absurd on ultra-wide monitors, capped at 85vh tall, with
-        // the original border / rounded / shadow treatment.
         // Inline `backgroundColor` defeats the scifi `.keep-frame`
-        // rule that paints the modal at 50% panel-alpha, that bleed
+        // rule that paints the shell at 50% panel-alpha, that bleed
         // was the source of the "viewer's theme leaks through and
         // collapses contrast" bug. Inline beats every `[data-theme-
         // style="…"] .keep-frame` selector since none of them use
@@ -344,11 +340,6 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
         // the override is a no-op there. The legibility-nudged text
         // in `legibleThemePalette` then computes against the bg the
         // user actually sees, not a blend.
-        //
-        // Applied UNCONDITIONALLY — including when the profile has a BG
-        // image. The image lives on the modal backdrop (around the card);
-        // the card stays opaque so the owner's text never lands on a
-        // washed-out, image-tinted surface (the white-on-near-white bug).
         style={{
           ...themeStyle(ownerTheme),
           ...ownerOrnaments.vars,
@@ -611,18 +602,41 @@ function ProfileBody({
   // hero band. Falls through to nothing when the URL is null (slot
   // empty, cosmetic not owned, or admin cleared an abusive link).
   const bannerUrl = profile.profile.profileBannerUrl?.trim() ?? "";
+  // Pinned-hero vs single-scroll layout discriminator (see the wrapper
+  // comment below). MEASURED, not a viewport media query: the profile is
+  // a resizable floating window now, so its height and the viewport's are
+  // decoupled — a 500px-tall window on a 1080p screen must single-scroll.
+  // 620px ≈ the old `min-height:700px` viewport rule × the classic card's
+  // 90vh. Defaults true so tall windows never flash the single-scroll
+  // layout on first paint.
+  const [pinnedHero, setPinnedHero] = useState(true);
+  const heightRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = heightRef.current;
+    if (!el) return;
+    const measure = () => setPinnedHero(el.clientHeight >= 620);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
     <>
-      {/* On SHORT viewports (notably landscape phones) the hero band alone can
-          exceed the card height; with the hero pinned (shrink-0) and only the
-          body scrolling, the body collapses to ~0 and the bio/gallery become
-          unreachable. This wrapper makes the WHOLE content one scroll container
-          so the header scrolls away. The discriminator is viewport HEIGHT, not
-          width — a wide-but-short landscape window must single-scroll too. At
-          >=700px tall, `contents` dissolves the wrapper to restore the pinned-
-          hero + independently-scrolling-body layout (the body's matching
-          min-height variants re-enable its own scroll). */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto [@media(min-height:700px)]:contents">
+      {/* When the content box is SHORT (landscape phones — or, now that the
+          profile is a resizable floating window, a window dragged short)
+          the hero band alone can exceed the card height; with the hero
+          pinned (shrink-0) and only the body scrolling, the body collapses
+          to ~0 and the bio/gallery become unreachable. In that case this
+          wrapper makes the WHOLE content one scroll container so the header
+          scrolls away. The discriminator is the wrapper's own MEASURED
+          height (ResizeObserver, `pinnedHero` above) — a viewport media
+          query would miss a short-resized window on a tall screen. When
+          tall enough, the pinned-hero + independently-scrolling-body layout
+          engages (the body div flips its own scroll classes to match). */}
+      <div
+        ref={heightRef}
+        className={`flex min-h-0 flex-1 flex-col ${pinnedHero ? "" : "overflow-y-auto"}`}
+      >
       {bannerUrl ? (
         // Standalone hero strip - desktop only. On mobile the same
         // banner image gets re-used as the hero band's background
@@ -1154,11 +1168,12 @@ function ProfileBody({
           profileUserId={profile.profile.userId}
         />
 
-        {/* Body. On tall viewports (>=700px) it scrolls independently beneath
-            the pinned hero; on short viewports the parent wrapper is the
-            scroller (see above), so here it's just a padded block that grows
-            with its content. Matches the wrapper's height breakpoint. */}
-        <div className="px-5 py-4 [@media(min-height:700px)]:min-h-0 [@media(min-height:700px)]:flex-1 [@media(min-height:700px)]:overflow-y-auto">
+        {/* Body. In pinned-hero mode (window tall enough) it scrolls
+            independently beneath the pinned hero; in short windows the
+            parent wrapper is the scroller (see above), so here it's just a
+            padded block that grows with its content. Driven by the same
+            measured `pinnedHero` flag as the wrapper. */}
+        <div className={`px-5 py-4 ${pinnedHero ? "min-h-0 flex-1 overflow-y-auto" : ""}`}>
           {isCompletelyBlank ? (
             <EmptyProfile name={name} kind={isChar ? "character" : "master"} />
           ) : (
@@ -1508,11 +1523,11 @@ function ProfileBody({
           )}
         </div>
       </div>
-      {/* Tap-to-zoom overlay. Mounted at the fragment's end so it's
-          a sibling of the scrolling body, fixed positioning + z:60
-          puts it above the profile card (z:50) regardless of where
-          it sits in the DOM. Closes on any click, Esc, or when the
-          parent modal unmounts. */}
+      {/* Tap-to-zoom overlay. Mounted at the fragment's end so it's a
+          sibling of the scrolling body; it portals itself to <body> at
+          z:60, above the profile WINDOW (plane 30..39) and every other
+          window. Closes on any click, Esc, or when the parent window
+          unmounts. */}
       {zoomedPin ? (
         <ItemZoomView entry={zoomedPin} onClose={() => setZoomedPin(null)} />
       ) : null}
@@ -2225,10 +2240,10 @@ function PortraitGallery({
 /* ----------------------------------------------------------------------------
  * Full-size image lightbox. A dark, glass-blurred overlay that shows the image
  * at its NATURAL pixel size and lets the viewer scroll the overlay when the
- * image is larger than the viewport. Sits at z:70 — above the profile card
- * (z:50) and the item-zoom overlay (z:60). Closes on backdrop click, the close
- * button, or Esc. Body scroll is locked while open so the page behind doesn't
- * move under the glass.
+ * image is larger than the viewport. Sits at z:70 — above the profile WINDOW
+ * (plane 30..39) and the item-zoom overlay (z:60). Closes on backdrop click,
+ * the close button, or Esc. Body scroll is locked while open so the page
+ * behind doesn't move under the glass.
  * ------------------------------------------------------------------------- */
 function PortraitLightbox({
   url,

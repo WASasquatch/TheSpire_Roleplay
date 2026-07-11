@@ -18,6 +18,7 @@ import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import {
+  rooms,
   serverCreationApplications,
   serverInvites,
   serverMembers,
@@ -32,6 +33,7 @@ import { serverAuthority } from "../servers/authority.js";
 import { isServerModerationActive, serverModerationNotice } from "../servers/moderation.js";
 import { notifyUser, emitServersChanged } from "../servers/notifications.js";
 import {
+  emitTreeChanged,
   findServerLanding,
 } from "../realtime/broadcast.js";
 import { tFor } from "../i18n.js";
@@ -379,6 +381,19 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
     // Hand back the server's landing room so the client can navigate there on
     // an icon click (the web rail's onServerSelect consumes `landingRoomId`).
     const landing = await findServerLanding(db, req.params.id);
+    // FRONT-DOOR HEAL: a parked (auto-archived) default room made the whole
+    // server unenterable — the join 404'd the archived id and bounced every
+    // visitor (global staff included) back to the home server. The default
+    // room is the server's structure, so revive it in place for anyone who
+    // passed the gates above; new servers seed it `persistent` and the sweep
+    // now skips `isDefault`, so this is the lazy repair for pre-fix rows.
+    if (landing?.archivedAt) {
+      await db
+        .update(rooms)
+        .set({ archivedAt: null, archiveHiddenAt: null })
+        .where(eq(rooms.id, landing.id));
+      emitTreeChanged(io, req.params.id);
+    }
     return { ok: true, landingRoomId: landing?.id ?? null };
   });
 

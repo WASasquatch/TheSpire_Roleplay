@@ -423,19 +423,41 @@ export async function findServerLanding(
   db: Db,
   serverId: string,
 ): Promise<typeof rooms.$inferSelect | null> {
+  // NOTE: the default room may come back ARCHIVED (pre-fix servers whose
+  // front door got auto-parked). Callers that hand the id to a client for
+  // joining must heal it first (see the /visit route) — a parked landing
+  // 404s the join and bounces the visitor back to the home server.
   const defaulted = (await db
     .select()
     .from(rooms)
     .where(and(eq(rooms.isDefault, true), eq(rooms.serverId, serverId)))
     .limit(1))[0];
   if (defaulted) return defaulted;
+  // Fallbacks must be LIVE rooms: an archived non-default row can't be
+  // healed by the visit path (only the default room is unambiguously the
+  // server's structure), so it would be a guaranteed dead landing.
   const fallback = (await db
     .select()
     .from(rooms)
-    .where(and(eq(rooms.isSystem, true), eq(rooms.serverId, serverId)))
+    .where(and(eq(rooms.isSystem, true), eq(rooms.serverId, serverId), isNull(rooms.archivedAt)))
     .orderBy(asc(rooms.name))
     .limit(1))[0];
-  return fallback ?? null;
+  if (fallback) return fallback;
+  // Last resort: ANY live public room in the server, so a server whose
+  // owner unset/deleted the default still has a working front door.
+  const anyLive = (await db
+    .select()
+    .from(rooms)
+    .where(and(
+      eq(rooms.serverId, serverId),
+      eq(rooms.type, "public"),
+      isNull(rooms.archivedAt),
+      isNull(rooms.forumId),
+      isNull(rooms.linkedRoomId),
+    ))
+    .orderBy(asc(rooms.name))
+    .limit(1))[0];
+  return anyLive ?? null;
 }
 
 /**
@@ -1633,6 +1655,12 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
   // Persistent rooms (server channels by default) survive an empty moment the
   // same way system rooms do — they're the server's structure, not throwaways.
   if (room.persistent) return false;
+  // A server's DEFAULT room is its front door: /visit hands its id to every
+  // entering member, so parking it makes the whole server unenterable (the
+  // "clicking Enter boots me back to the Spire" report). Belt-and-braces
+  // beside the `persistent` seed — pre-fix servers may carry a default room
+  // without the flag.
+  if (room.isDefault) return false;
   // Forum boards live entirely in the Forums Catalog: chat joins are refused
   // outright (see the FORUM_BOARD refusal in `join`), so a board NEVER holds
   // sockets — zero occupants is its permanent steady state, not a sign of

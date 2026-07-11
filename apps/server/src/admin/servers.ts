@@ -228,6 +228,12 @@ export async function registerAdminServerRoutes(app: FastifyInstance, db: Db, io
             lastOwnerUserId: appRow.applicantUserId,
             topic: "Welcome",
             isDefault: true,
+            // The server's FRONT DOOR is structure, not a throwaway room:
+            // without this the empty-room sweep parked a brand-new server's
+            // only room the moment its owner stepped out, and every visit
+            // (members, discover clicks, even global staff) bounced off a
+            // dead landing id back to the home server.
+            persistent: true,
             serverId,
           }).run();
           // Point the server's landing room at the starter room.

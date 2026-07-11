@@ -2499,19 +2499,45 @@ function Chat() {
     });
     socket.on("message:bulk", (msgs: ChatMessage[]) => {
       if (msgs.length) {
-        const roomId = msgs[0]!.roomId;
-        setMessages(roomId, msgs);
-        // Seed the paginator optimistically. The authoritative value
-        // lands a beat later via `room:history_meta` (sent by the
-        // server immediately after the bulk). Defaulting to TRUE
-        // here means the brief gap between the two events never
-        // shows a false "start of history", at worst the user
-        // sees a "Scroll up for earlier messages" hint that the
-        // meta event then clears. Counting msgs.length >= 50 used
-        // to seed this and was unreliable: server-side filtering
-        // (ignores + whispers) regularly trimmed the visible count
-        // below 50 even when older history existed.
-        useChat.getState().setRoomHistoryHasMore(roomId, true);
+        // Bucket rows by their OWN roomId: a staff pair-oversight backlog
+        // carries BOTH channels' rows in one bulk (each under its true
+        // room), and the merged renderer reads the two buckets back
+        // sorted. Ordinary backlogs are single-room, so this is the same
+        // setMessages(roomId, msgs) as before.
+        const byRoom = new Map<string, ChatMessage[]>();
+        for (const m of msgs) {
+          const list = byRoom.get(m.roomId);
+          if (list) list.push(m);
+          else byRoom.set(m.roomId, [m]);
+        }
+        for (const [roomId, rows] of byRoom) {
+          setMessages(roomId, rows);
+          // Seed the paginator optimistically. The authoritative value
+          // lands a beat later via `room:history_meta` (sent by the
+          // server immediately after the bulk). Defaulting to TRUE
+          // here means the brief gap between the two events never
+          // shows a false "start of history", at worst the user
+          // sees a "Scroll up for earlier messages" hint that the
+          // meta event then clears. Counting msgs.length >= 50 used
+          // to seed this and was unreliable: server-side filtering
+          // (ignores + whispers) regularly trimmed the visible count
+          // below 50 even when older history existed.
+          useChat.getState().setRoomHistoryHasMore(roomId, true);
+        }
+        // Staff pair oversight: a (re)join's bulk REPLACES the buffer
+        // wholesale — for a merged pair that must cover BOTH buckets.
+        // A side with zero rows in the merged window (e.g. its recent
+        // rows were /trash-ed while this client was offline) would
+        // otherwise keep its stale ghost rows forever.
+        const st = useChat.getState();
+        const joined = st.currentRoomId;
+        const joinedRoom = joined ? st.rooms[joined] : undefined;
+        if (joinedRoom?.pairStaffView) {
+          const sib = joinedRoom.linkedNsfwRoomId ?? joinedRoom.linkedSfwRoomId;
+          for (const rid of [joined, sib]) {
+            if (rid && !byRoom.has(rid)) setMessages(rid, []);
+          }
+        }
       }
     });
     socket.on("room:history_meta", ({ roomId, hasMore }) => {
@@ -4004,7 +4030,36 @@ function Chat() {
   }
 
   const room = currentRoomId ? rooms[currentRoomId] : undefined;
-  const messages = currentRoomId ? messagesByRoom[currentRoomId] ?? [] : [];
+  // Staff pair oversight (server-granted `pairStaffView`): the chat feed
+  // is the pair's TWO buckets merged chronologically, so a staffer sees
+  // both channels without toggling; the 18+ channel's rows get a red wash
+  // in MessageList (`pairNsfwSideId`). Sending is untouched — the composer
+  // still speaks into the side they're standing in. Flat rooms only: a
+  // nested (forum-style) room renders topics from a per-room endpoint the
+  // merge can't cover, so it falls back to the single feed.
+  const pairMergeSiblingId =
+    room?.pairStaffView && room.replyMode !== "nested"
+      ? room.linkedNsfwRoomId ?? room.linkedSfwRoomId ?? null
+      : null;
+  const pairNsfwSideId = pairMergeSiblingId
+    ? room!.linkedNsfwRoomId ?? room!.id
+    : null;
+  const ownBucket = currentRoomId ? messagesByRoom[currentRoomId] ?? [] : [];
+  const siblingBucket = pairMergeSiblingId ? messagesByRoom[pairMergeSiblingId] ?? [] : [];
+  const messages = useMemo(() => {
+    if (!pairMergeSiblingId || siblingBucket.length === 0) return ownBucket;
+    // Merge + stable sort by time (id tiebreak), deduped by id in case a
+    // row ever lands in both buckets (reconnect replays).
+    const seen = new Set<string>();
+    const merged: ChatMessage[] = [];
+    for (const m of [...ownBucket, ...siblingBucket]) {
+      if (seen.has(m.id)) continue;
+      seen.add(m.id);
+      merged.push(m);
+    }
+    merged.sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
+    return merged;
+  }, [ownBucket, siblingBucket, pairMergeSiblingId]);
   const occ = currentRoomId ? occupants[currentRoomId] ?? [] : [];
   // Per-room banner dismissals. Keyed by (roomId, kind) in
   // localStorage; the stored value is the world id or topic text the
@@ -4441,6 +4496,8 @@ function Chat() {
             canPinMessage={canPinMessage}
             pinnedMessageIds={pinnedMessageIdsForRoom}
             canAdminEdit={canAdminEdit}
+            nsfwTintRoomId={pairNsfwSideId}
+            pairSiblingRoomId={pairMergeSiblingId}
             onQuotePost={(quoteText) => {
               // Inline forum-view quote: pre-fill the MAIN composer.
               // Append to whatever's already typed so the user can

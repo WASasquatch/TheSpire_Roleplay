@@ -31,7 +31,10 @@ import { useReducedMotion } from "../../lib/reducedMotion.js";
 
 export interface CoachStep {
   title: string;
-  body: string;
+  /** Step copy. Usually a plain t() string; a ReactNode is allowed so a
+   *  step can carry parsed inline chips (the site tour's adult-channels
+   *  step links the rules via a live `{rules}` chip). */
+  body: ReactNode;
   /** Candidate selectors, first match wins. Omit for a centered step. */
   targets?: string[];
 }

@@ -285,6 +285,14 @@ interface Props {
   /** Permalink builders (forum surfaces). When present, topic cards and
    *  post toolbars grow a copy-link button. */
   postPermalink?: (messageId: string) => string;
+  /** Staff pair oversight: rows whose roomId matches this id (the pair's
+   *  18+ channel) get a red row wash in the merged feed. Null for
+   *  everyone who isn't staff viewing a paired room. */
+  nsfwTintRoomId?: string | null;
+  /** Staff pair oversight: the pair's OTHER room, so the buffer trim can
+   *  cap the sibling bucket the merged feed renders from. Null when not
+   *  merging. */
+  pairSiblingRoomId?: string | null;
 }
 
 /** Replies per page inside an expanded topic. Chains at or under this
@@ -404,7 +412,8 @@ const STICK_BOTTOM_PX = 24;
 const FLAT_BUFFER_SOFT_CAP = 200;
 const FLAT_BUFFER_HARD_CAP = 300;
 
-export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canPinMessage = false, pinnedMessageIds, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, forumTourAnchors = false, postPermalink }: Props) {
+export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canPinMessage = false, pinnedMessageIds, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, forumTourAnchors = false, postPermalink, nsfwTintRoomId = null, pairSiblingRoomId = null }: Props) {
+  const { t } = useTranslation("chat");
   const ref = useRef<HTMLDivElement | null>(null);
   /**
    * The flat feed's content box (wraps the loader + every message row).
@@ -746,7 +755,13 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     if (!stickRef.current) return;
     if (messages.length <= FLAT_BUFFER_HARD_CAP) return;
     trimRoomToRecent(roomId, FLAT_BUFFER_SOFT_CAP);
-  }, [messages, roomId, replyMode, trimRoomToRecent]);
+    // Staff pair oversight: the rendered feed is TWO buckets merged, and
+    // mirrored live rows keep appending to the sibling's. Trim it too, or
+    // a staffer parked in one side of a busy pair grows the sibling
+    // bucket without bound (and the cap check above, driven by the merged
+    // length, would keep no-op trimming just the joined room).
+    if (pairSiblingRoomId) trimRoomToRecent(pairSiblingRoomId, FLAT_BUFFER_SOFT_CAP);
+  }, [messages, roomId, replyMode, trimRoomToRecent, pairSiblingRoomId]);
 
   // Jump-to-message flash. When `highlightMessageId` flips to a value
   // present in the current buffer, find the row's DOM node, scroll it to
@@ -861,7 +876,15 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     // A miss here means the identity isn't in the current occupant
     // list, falls through to plain rendering, same as gender.
     const idKey = identityKey(m.userId, m.characterId);
-    return (
+    // Staff pair oversight: rows merged in from the 18+ channel carry a
+    // red wash (the RatingChip red at hover-row opacity) so a staffer
+    // scanning the combined feed can tell the channels apart at a glance.
+    // Whispers are excluded: the wire RE-KEYS every whisper the viewer is
+    // party to onto the loaded room, so a private exchange from a SFW
+    // lobby would otherwise wear the 18+ wash while the staffer stands
+    // in the annex — mislabeling where it actually happened.
+    const nsfwChannelRow = nsfwTintRoomId != null && m.roomId === nsfwTintRoomId && m.kind !== "whisper";
+    const line = (
       <Line
         msg={m}
         gender={genderByIdentity.get(idKey) ?? genderByUser.get(m.userId) ?? "undisclosed"}
@@ -892,6 +915,11 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         selfNames={effectiveSelfNames}
       />
     );
+    return nsfwChannelRow ? (
+      <div className="rounded bg-[#e06070]/10" title={t("feed.nsfwChannelRow")}>
+        {line}
+      </div>
+    ) : line;
   }
 
   // Nested-mode rooms render as a forum. The TOPIC list comes from
@@ -1031,8 +1059,11 @@ function FlatMessageView({
     if (!roomId) return;
     if (inflightRef.current) return;
     if (!hasMore) return;
-    const buf = useChat.getState().messagesByRoom[roomId] ?? [];
-    const oldest = buf[0];
+    // Cursor from the RENDERED feed (the `messages` prop), not the raw
+    // room bucket: under staff pair oversight the feed is the pair's two
+    // buckets merged, and the true "oldest visible" row may live in the
+    // sibling bucket.
+    const oldest = messages[0];
     if (!oldest) return;
     inflightRef.current = true;
     setLoadingOlder(true);
@@ -1043,7 +1074,16 @@ function FlatMessageView({
       });
       if (!r.ok) throw new Error(await readError(r));
       const j = (await r.json()) as { messages: ChatMessage[]; hasMore: boolean };
-      prependMessages(roomId, j.messages);
+      // Bucket by each row's OWN roomId: a staff pair-oversight page mixes
+      // both channels' rows. Ordinary pages are single-room, so this is
+      // the same single prepend as before.
+      const byRoom = new Map<string, ChatMessage[]>();
+      for (const m of j.messages) {
+        const list = byRoom.get(m.roomId);
+        if (list) list.push(m);
+        else byRoom.set(m.roomId, [m]);
+      }
+      for (const [rid, rows] of byRoom) prependMessages(rid, rows);
       setRoomHistoryHasMore(roomId, j.hasMore);
     } catch (e) {
       setOlderError(e instanceof Error ? e.message : t("feed.loadFailed"));
@@ -1051,7 +1091,7 @@ function FlatMessageView({
       inflightRef.current = false;
       setLoadingOlder(false);
     }
-  }, [roomId, hasMore, prependMessages, setRoomHistoryHasMore, t]);
+  }, [roomId, hasMore, messages, prependMessages, setRoomHistoryHasMore, t]);
 
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
     if (!hasMore || inflightRef.current) return;

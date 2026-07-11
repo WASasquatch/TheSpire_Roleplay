@@ -110,7 +110,8 @@
       "profileLookupRateLimit": "Más despacio - demasiadas consultas de perfiles.",
       "profileNotFound": "No se encontró.",
       "characterNotFound": "Personaje no encontrado.",
-      "couldNotRespond": "No se pudo responder."
+      "couldNotRespond": "No se pudo responder.",
+      "inviteMinorNsfw": "{{name}} es menor de 18 años y no puede ser invitado a una sala 18+."
     },
     "auth": {
       "registrationClosed": "el registro está cerrado",

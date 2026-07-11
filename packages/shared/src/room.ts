@@ -44,6 +44,16 @@ export interface RoomSummary {
    */
   linkedSfwRoomId?: string | null;
   linkedNsfwRoomId?: string | null;
+  /**
+   * Staff pair oversight (per-viewer, set only on the room the viewer is
+   * standing in). True when the viewer is an ADULT global/server staffer
+   * of a paired room: the server is delivering them BOTH channels' feeds
+   * (merged backlog + live mirror), and the client should render the two
+   * buckets merged by timestamp with 18+-side rows tinted. Sending still
+   * targets the side the viewer stands in. Never set for minors, plain
+   * members, or room owners/mods.
+   */
+  pairStaffView?: boolean;
   /** World linked to this room (one per room). Surfaced as a banner in chat. Null when no world is linked. */
   linkedWorld: LinkedWorldRef | null;
   /**

@@ -110,7 +110,8 @@
       "profileLookupRateLimit": "Slow down - too many profile lookups.",
       "profileNotFound": "Not found.",
       "characterNotFound": "Character not found.",
-      "couldNotRespond": "Could not respond."
+      "couldNotRespond": "Could not respond.",
+      "inviteMinorNsfw": "{{name}} is under 18 and can't be invited to an 18+ room."
     },
     "auth": {
       "registrationClosed": "registration is closed",

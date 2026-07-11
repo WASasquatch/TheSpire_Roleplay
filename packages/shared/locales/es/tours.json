@@ -56,6 +56,10 @@
     "forums": {
       "title": "Foros, y este recorrido otra vez",
       "body": "Los foros, para la escritura que quieres conservar, viven en el Menú y arriba de la lista de salas. Puedes repetir todo este recorrido cuando quieras desde Ayuda."
+    },
+    "channels": {
+      "title": "Salas con lado 18+",
+      "body": "Algunas salas tienen un canal aparte solo para adultos. Busca el selector SFW / 18+ junto al nombre de la sala aquí y haz clic en un lado para cambiarte. Las mismas reglas aplican en ambos lados: {rules}"
     }
   },
   "forumsBrowse": {

@@ -58,11 +58,17 @@ const SYSTEM_USERNAME = "system";
  * topics — hidden from minors. Required so no call site can forget it.
  */
 export function roomVisibilityWhere(
-  roomId: string,
+  // A single room, or BOTH rooms of an 18+ channel pair for the staff
+  // merged-oversight view (lib/pairStaffView.ts) — callers must qualify
+  // the viewer via canSeePairFeeds before passing two ids.
+  roomId: string | readonly string[],
   viewerUserId: string,
   targetServerId: string | undefined,
   viewerCanSeeNsfw: boolean,
 ) {
+  const roomMatch = Array.isArray(roomId)
+    ? inArray(messages.roomId, roomId as string[])
+    : eq(messages.roomId, roomId as string);
   return or(
     // 1. Ordinary public rows in this room. `targetUserId IS NULL` excludes
     //    the per-user notifications so they never show to the whole room.
@@ -71,7 +77,7 @@ export function roomVisibilityWhere(
     //    are participant-scoped and minors can't be party to 18+-room ones).
     and(
       sql`${messages.kind} != 'whisper'`,
-      eq(messages.roomId, roomId),
+      roomMatch,
       isNull(messages.targetUserId),
       ...(viewerCanSeeNsfw ? [] : [eq(messages.isNsfw, false)]),
     ),
@@ -87,7 +93,7 @@ export function roomVisibilityWhere(
     ),
     // 3. Targeted system notifications: this room, recipient only.
     and(
-      eq(messages.roomId, roomId),
+      roomMatch,
       isNotNull(messages.targetUserId),
       eq(messages.targetUserId, viewerUserId),
     ),
@@ -141,6 +147,13 @@ export async function persistTargetedSystemMessageToActiveRooms(
   db: Db,
   targetUserIds: string | Iterable<string>,
   body: string,
+  // emitLive: ALSO deliver the persisted rows to the recipients' open
+  // sockets as live system lines. Default OFF — the legacy callers
+  // (friend requests etc.) pair this with a client-synthesized live copy
+  // for old-bundle compat, and emitting here too would double the line.
+  // New notification kinds with NO client synthesis (room invites) pass
+  // true so the line lands in-chat immediately, not only after a refetch.
+  opts: { emitLive?: boolean } = {},
 ): Promise<void> {
   const targets = new Set(typeof targetUserIds === "string" ? [targetUserIds] : targetUserIds);
   if (targets.size === 0) return;
@@ -186,7 +199,30 @@ export async function persistTargetedSystemMessageToActiveRooms(
       });
     }
   }
-  if (rows.length > 0) await db.insert(messages).values(rows);
+  if (rows.length > 0) {
+    await db.insert(messages).values(rows);
+    if (opts.emitLive) {
+      const now = Date.now();
+      for (const row of rows) {
+        for (const s of sockets) {
+          const uid = (s.data as { userId?: string }).userId;
+          if (uid !== row.targetUserId) continue;
+          if ((s.data as { roomId?: string }).roomId !== row.roomId) continue;
+          s.emit("message:new", {
+            id: row.id,
+            roomId: row.roomId,
+            userId: row.userId,
+            characterId: null,
+            displayName: row.displayName,
+            kind: "system",
+            body: row.body,
+            color: null,
+            createdAt: now,
+          });
+        }
+      }
+    }
+  }
 }
 
 /**

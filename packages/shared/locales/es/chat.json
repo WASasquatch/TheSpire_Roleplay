@@ -294,7 +294,8 @@
     "pairSfw": "SFW",
     "pairNsfw": "18+",
     "pairToSfwTitle": "Cambiar al canal para todas las edades de esta sala",
-    "pairToNsfwTitle": "Cambiar al canal 18+ de esta sala (solo adultos)"
+    "pairToNsfwTitle": "Cambiar al canal 18+ de esta sala (solo adultos)",
+    "otherSideTitle": "En el otro canal de esta sala"
   },
   "staff": {
     "roomOwner": "Propietario de la sala",
@@ -361,7 +362,8 @@
     "loadingEarlier": "Cargando mensajes anteriores…",
     "retryEarlier": "Reintentar cargar mensajes anteriores",
     "tapForEarlier": "Toca o desplázate hacia arriba para ver mensajes anteriores",
-    "startOfHistory": "inicio del historial"
+    "startOfHistory": "inicio del historial",
+    "nsfwChannelRow": "Enviado en el canal 18+"
   },
   "forum": {
     "untitled": "(sin título)",

@@ -32,6 +32,7 @@ import {
   users,
 } from "../../db/schema.js";
 import { isAdultUser } from "../../auth/ageGate.js";
+import { canSeePairFeeds, emitToPairStaff, findPairSibling } from "../../lib/pairStaffView.js";
 import { isIsolatedBetween, isolationActiveFor, isolationVisibleSql } from "../../auth/ageIsolation.js";
 import { maskForMinors, maskMessageForMinors } from "../minorLanguageFilter.js";
 import { pushToUser } from "../../push.js";
@@ -988,12 +989,23 @@ export async function emitFiltered(
   // Computed at most once per message; null = clean (or filter disabled),
   // in which case minors receive the original like everyone else.
   const minorVariant = anyMinorRecipient ? maskMessageForMinors(msg) : null;
+  const hide = new Set<string>([...ignorerRows.map((r) => r.userId), ...blockedWithSender]);
+  // Staff pair oversight (lib/pairStaffView.ts): mirror public room lines
+  // to the ADULT global/server staff standing in the pair's OTHER side, so
+  // their merged view stays live. Whispers and targeted rows never mirror
+  // (participant-scoped privacy); the sender's hide-set carries over so an
+  // ignore/block filters identically on both sides. The mirrored payload
+  // keeps its true roomId — the client buckets it under the sibling and
+  // tints it in the merged render.
+  const mirror = msg.kind !== "whisper" && !msg.toUserId
+    ? emitToPairStaff(io, db, roomId, (s) => s.emit("message:new", msg), hide, sender)
+    : Promise.resolve();
   if (!roomIsNsfw && !senderMayIsolate && ignorerRows.length === 0
     && blockedWithSender.size === 0 && !minorVariant) {
     io.to(`room:${roomId}`).emit("message:new", msg);
+    await mirror;
     return;
   }
-  const hide = new Set<string>([...ignorerRows.map((r) => r.userId), ...blockedWithSender]);
   for (const s of sockets) {
     const uid = (s.data as { userId?: string }).userId;
     if (uid && hide.has(uid)) continue;
@@ -1005,6 +1017,7 @@ export async function emitFiltered(
     if (senderMayIsolate && recipient && uid !== senderUserId && isIsolatedBetween(sender, recipient)) continue;
     s.emit("message:new", minorVariant && !recipient?.isAdult ? minorVariant : msg);
   }
+  await mirror;
 }
 
 /**
@@ -1204,6 +1217,10 @@ export async function addMessageDirect(opts: {
     ...(bodyHtml ? { bodyHtml } : {}),
   };
   io.to(`room:${roomId}`).emit("message:new", wire);
+  // Staff pair oversight: announce/system lines are public rows the merged
+  // BACKLOG already includes, so mirror them live too — otherwise the
+  // other channel's mod-action summaries only appear after a refetch.
+  await emitToPairStaff(io, db, roomId, (s) => s.emit("message:new", wire));
 }
 
 /** Server-authored system message (no associated user/character). */
@@ -1229,7 +1246,7 @@ export async function addSystemMessage(
     kind: "system",
     body,
   });
-  io.to(`room:${roomId}`).emit("message:new", {
+  const wire: ChatMessage = {
     id,
     roomId,
     userId: sysUser.id,
@@ -1237,8 +1254,14 @@ export async function addSystemMessage(
     displayName: "system",
     kind: "system",
     body,
+    color: null,
     createdAt: +now,
-  });
+  };
+  io.to(`room:${roomId}`).emit("message:new", wire);
+  // Staff pair oversight: same live mirror as addMessageDirect above —
+  // join/leave/topic/moderation summaries from the other channel must not
+  // wait for a refetch in the merged view.
+  await emitToPairStaff(io, db, roomId, (s) => s.emit("message:new", wire));
 }
 /**
  * Send the per-viewer-filtered recent backlog for `roomId` to a single
@@ -1316,11 +1339,23 @@ export async function sendRoomBacklogTo(
   // see it, hide preference or not (a minor can't be IN an 18+ room, so
   // this only bites on flipped-back rooms and Phase 3 NSFW topics).
   const viewerIsAdult = viewerRow ? isAdultUser(viewerRow) : false;
+  // Staff pair oversight (lib/pairStaffView.ts): an ADULT global/server
+  // staffer standing in one side of an 18+ channel pair gets BOTH sides'
+  // rows in one backlog (each under its true roomId; the client buckets
+  // per row and renders them merged). Everyone else gets exactly this
+  // room, byte-identical to before.
+  let backlogRoomIds: string | string[] = roomId;
+  if (viewerRow && viewerIsAdult) {
+    const pair = await findPairSibling(db, roomId);
+    if (pair && await canSeePairFeeds(db, { id: viewerUserId, role: viewerRow.role, isAdult: viewerIsAdult }, pair.serverId)) {
+      backlogRoomIds = [roomId, pair.siblingId];
+    }
+  }
   const recentPlusOne = await db
     .select()
     .from(messages)
     .where(and(
-      roomVisibilityWhere(roomId, viewerUserId, backlogServerId, viewerIsAdult),
+      roomVisibilityWhere(backlogRoomIds, viewerUserId, backlogServerId, viewerIsAdult),
       clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
       // Isolation (Phase 5): scrollback authored by an account this viewer
       // is isolated with drops, exactly like the blocked-author filter

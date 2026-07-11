@@ -527,7 +527,7 @@ export function ForumsCatalogModal({ initialKey, initialTopic, initialCreate, on
                     }`}
                   >
                     <Compass className="h-4 w-4" aria-hidden="true" />
-                    <span className="hidden sm:inline">{t("chrome.discover")}</span>
+                    <span className="hidden [@container(min-width:640px)]:inline">{t("chrome.discover")}</span>
                   </button>
                   {/* Set / unset this forum as your default landing spot. */}
                   {view.kind === "forum" && detail ? (
@@ -1298,7 +1298,7 @@ function ForumDiscoverView({ activeId, onOpenForum }: {
           <p className="py-6 text-center text-sm italic text-keep-muted">{t("discoverView.gathering")}</p>
         ) : (
           /* ── Default browse: Popular / New, side-by-side on desktop ── */
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 [@container(min-width:768px)]:grid-cols-2">
             <ForumDiscoverColumn
               icon={<Star className="h-3.5 w-3.5" aria-hidden="true" />}
               title={t("discoverView.popular")}
@@ -1561,7 +1561,7 @@ function ForumFooter({ detail }: { detail: ForumDetail }) {
           online" and vitals bands are hidden to reclaim vertical space (the
           user's "footer takes too much room on mobile" report); the stats row
           already carries the online count. Everything returns at `md`. */}
-      <div className="hidden truncate border-b border-keep-rule/50 pb-1.5 md:block">
+      <div className="hidden truncate border-b border-keep-rule/50 pb-1.5 [@container(min-width:768px)]:block">
         <span className="font-semibold uppercase tracking-widest">{t("footer.whosOnline")}</span>{" "}
         {onlineTotal === 0 ? (
           <span className="italic">{t("footer.quiet")}</span>
@@ -1579,7 +1579,7 @@ function ForumFooter({ detail }: { detail: ForumDetail }) {
           </>
         )}
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-keep-rule/50 py-1.5 md:border-b">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-0.5 border-keep-rule/50 py-1.5 [@container(min-width:768px)]:border-b">
         <span className="font-semibold uppercase tracking-widest">{t("footer.boardStatistics")}</span>
         <span><Trans t={t} i18nKey="footer.statTopics" values={{ value: formatNumber(s.topics) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
         <span><Trans t={t} i18nKey="footer.statReplies" values={{ value: formatNumber(s.replies) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
@@ -1594,7 +1594,7 @@ function ForumFooter({ detail }: { detail: ForumDetail }) {
         </span>
         <span><Trans t={t} i18nKey="footer.statOnline" values={{ value: formatNumber(onlineTotal) }} components={{ n: <b className="tabular-nums text-keep-text" /> }} /></span>
       </div>
-      <div className="hidden flex-wrap items-center gap-x-4 gap-y-0.5 pt-1.5 md:flex">
+      <div className="hidden flex-wrap items-center gap-x-4 gap-y-0.5 pt-1.5 [@container(min-width:768px)]:flex">
         <span>{t("footer.posting")} <span className="text-keep-text">{detail.postingMode === "application" ? t("footer.byApplication") : t("shared.openToAll")}</span></span>
         <span>{t("footer.keeperLabel")} <span className="text-keep-text">{detail.ownerUsername}</span></span>
         {detail.linkedWorld ? (
@@ -2847,7 +2847,7 @@ function ForumNotifPanel({ onOpen, onClose }: {
             {t("notif.markAllRead")}
           </button>
         </div>
-        <div className="max-h-[60vh] overflow-y-auto">
+        <div className="max-h-[min(60vh,22rem)] overflow-y-auto">
           {err ? (
             <p className="px-3 py-4 text-xs text-keep-accent">{err}</p>
           ) : !rows ? (
@@ -3609,7 +3609,7 @@ function PermissionCheckboxes({ value, onChange, grantable, disabled }: {
   const { t } = useTranslation("forums");
   const has = new Set(value);
   return (
-    <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-1 [@container(min-width:640px)]:grid-cols-2">
       {FORUM_MOD_PERMISSIONS.map((key) => {
         const meta = FORUM_MOD_PERMISSION_META[key];
         const canGrant = grantable.has(key);
@@ -3665,7 +3665,7 @@ function ForumPermissionCheckboxes({ value, onChange, grantable, disabled }: {
       {sections.map((sec) => (
         <div key={sec.title}>
           <p className="mb-0.5 text-[10px] uppercase tracking-widest text-keep-muted">{sec.title}</p>
-          <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-1 [@container(min-width:640px)]:grid-cols-2">
             {sec.keys.map((key) => {
               const meta = FORUM_PERMISSION_META[key];
               const canGrant = grantable.has(key);

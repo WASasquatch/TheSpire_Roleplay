@@ -290,7 +290,8 @@
     "pairSfw": "SFW",
     "pairNsfw": "18+",
     "pairToSfwTitle": "Switch to this room's all-ages channel",
-    "pairToNsfwTitle": "Switch to this room's 18+ channel (adults only)"
+    "pairToNsfwTitle": "Switch to this room's 18+ channel (adults only)",
+    "otherSideTitle": "In this room's other channel"
   },
   "staff": {
     "roomOwner": "Room owner",
@@ -357,7 +358,8 @@
     "loadingEarlier": "Loading earlier messages…",
     "retryEarlier": "Retry loading earlier messages",
     "tapForEarlier": "Tap or scroll up for earlier messages",
-    "startOfHistory": "start of history"
+    "startOfHistory": "start of history",
+    "nsfwChannelRow": "Sent in the 18+ channel"
   },
   "forum": {
     "untitled": "(untitled)",

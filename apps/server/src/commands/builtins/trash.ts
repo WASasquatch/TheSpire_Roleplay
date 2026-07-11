@@ -90,6 +90,10 @@ export const trashCommand: CommandHandler = {
     // Live-remove from every client's buffer, then post a system summary
     // (the summary's own row is newer than the cutoff, so it survives).
     ctx.io.to(`room:${ctx.roomId}`).emit("message:bulk-delete", { roomId: ctx.roomId, ids });
+    // Staff pair oversight: hard-trashed rows also vanish from the merged
+    // view of staff standing in the pair's other channel.
+    const { emitToPairStaff } = await import("../../lib/pairStaffView.js");
+    await emitToPairStaff(ctx.io, ctx.db, ctx.roomId, (s) => s.emit("message:bulk-delete", { roomId: ctx.roomId, ids }));
     const { addMessage } = await import("../../realtime/broadcast.js");
     await addMessage(ctx, {
       kind: "system",

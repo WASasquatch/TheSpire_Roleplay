@@ -1658,7 +1658,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                       <p className="mb-2 text-[10px] text-keep-muted">
                         {t("editor.statsSection.hint")}
                       </p>
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      <div className="grid grid-cols-1 gap-2 [@container(min-width:640px)]:grid-cols-2 [@container(min-width:1024px)]:grid-cols-3">
                         {STAT_FIELDS.map((key) => {
                           const label = t(`statFields.${key}`);
                           const hidden = stats.visibility?.[key] === false;
@@ -3399,7 +3399,7 @@ function VibeAxesEditor({
       <p className="mb-3 text-[10px] text-keep-muted">
         {t("editor.vibe.hint")}
       </p>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 [@container(min-width:640px)]:grid-cols-2">
         {CHARACTER_VIBE_AXES.map((axis) => {
           const value = stats.vibe?.[axis.key] ?? null;
           const isSet = value !== null;
@@ -5029,7 +5029,10 @@ function JournalEditor({ characterId }: { characterId: string }) {
               ) : (
                 <>
                   <header className="flex items-baseline justify-between gap-2">
-                    <span className="font-semibold">
+                    {/* min-w-0 + break-words: the title is user-typed (up
+                        to 120 chars, possibly one unbroken word) — without
+                        containment it forces the row past the window edge. */}
+                    <span className="min-w-0 break-words font-semibold">
                       {e.title || <span className="italic text-keep-muted">{t("modal.journal.untitled")}</span>}
                       <span
                         className={`ml-2 rounded px-1 text-[10px] uppercase tracking-widest ${

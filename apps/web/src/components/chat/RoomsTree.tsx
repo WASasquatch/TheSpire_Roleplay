@@ -922,6 +922,11 @@ function RoomGroup({
             // (one per identity). Keying on userId alone would
             // dup-React-key in that case.
             const chip = resolveStaffChip(t, o, theme, siteName);
+            // Pair channels: while the viewer stands in one side, people
+            // who are only in the OTHER channel dim harder than idle and
+            // wear a side tag — they share the room's roster but can't
+            // see what's said on this side.
+            const otherSide = !!pairSide && !currentSideKeys.has(`${o.userId}:${o.characterId ?? ""}`);
             return (
                     <li
                       key={`${o.userId}:${o.characterId ?? ""}`}
@@ -931,8 +936,10 @@ function RoomGroup({
                       // and live+/away rows stay at full opacity, the
                       // /away message is shown via the existing
                       // UserNameTag tooltip, so we don't compound the
-                      // signals.
-                      className={`keep-occupant-row flex items-center justify-between gap-2 px-3 py-1.5 pl-5 lg:py-0.5 ${o.idle ? "opacity-50" : ""}`}
+                      // signals. Other-side pair occupants dim harder
+                      // (30%) so "not in this channel" reads stronger
+                      // than "inactive".
+                      className={`keep-occupant-row flex items-center justify-between gap-2 px-3 py-1.5 pl-5 lg:py-0.5 ${otherSide ? "opacity-30" : o.idle ? "opacity-50" : ""}`}
                     >
                       {/* Scale the username + its em-sized icons down
                           a touch relative to the rail's font-size so
@@ -1010,14 +1017,22 @@ function RoomGroup({
                         />
                       </div>
                       {/* Right-edge identity/status cluster, inline + right-
-                          aligned: [character mask?] [status sphere] [staff
-                          crown?]. Replaces the old (ooc)/(idle)/[away] text
-                          suffixes:
+                          aligned: [other-channel tag?] [character mask?]
+                          [status sphere] [staff crown?]. Replaces the old
+                          (ooc)/(idle)/[away] text suffixes:
                             - mask present  → voicing a CHARACTER; absent → OOC
                             - sphere colour → green online / grey idle / yellow away
                           The sphere always renders, so the row always has a
                           right anchor for `justify-between`. */}
                       <div className="flex shrink-0 items-center gap-1.5">
+                        {otherSide ? (
+                          <span
+                            title={t("rooms.otherSideTitle")}
+                            className="inline-flex shrink-0 items-center rounded border border-keep-rule/60 px-1 py-0.5 text-[9px] uppercase leading-none tracking-widest text-keep-muted"
+                          >
+                            {pairSide === "nsfw" ? t("rooms.pairSfw") : t("rooms.pairNsfw")}
+                          </span>
+                        ) : null}
                         {o.characterId !== null ? (
                           <CharacterMaskIcon
                             className="h-4 w-4 text-keep-muted"

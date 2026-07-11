@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import { Compass } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useChat } from "../../state/store.js";
+import { parseInline } from "../../lib/markdown.js";
 import { CoachTour, type CoachStep } from "./CoachTour.js";
 
 /**
@@ -33,6 +34,7 @@ import { CoachTour, type CoachStep } from "./CoachTour.js";
 export function SiteTour({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation("tours");
   const serversEnabled = useChat((s) => s.branding.serversEnabled === true);
+  const isAdult = useChat((s) => s.viewerAge.isAdult === true);
   const setSiteTourForced = useChat((s) => s.setSiteTourForced);
 
   // Copy follows the help-content voice: plain, friendly, no dev jargon.
@@ -65,6 +67,17 @@ export function SiteTour({ onClose }: { onClose: () => void }) {
         targets: ['[data-tour="rooms-tree"]'],
       },
     ];
+    if (isAdult) {
+      // Adults only: minors never see an 18+ channel (the toggle doesn't
+      // render for them), so this step would describe an invisible
+      // control. The body runs through parseInline so its {rules} token
+      // renders as the live rules chip.
+      list.push({
+        title: t("site.channels.title"),
+        body: parseInline(t("site.channels.body")),
+        targets: ['[data-tour="rooms-tree"]'],
+      });
+    }
     if (serversEnabled) {
       list.push({
         title: t("site.communities.title"),
@@ -78,7 +91,7 @@ export function SiteTour({ onClose }: { onClose: () => void }) {
       targets: ['[data-tour="menu-button"]'],
     });
     return list;
-  }, [serversEnabled, t]);
+  }, [serversEnabled, isAdult, t]);
 
   const handleClose = useCallback(() => {
     // Record the seen version so the server stops auto-opening the tour.

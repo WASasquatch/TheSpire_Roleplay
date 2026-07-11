@@ -3,6 +3,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { nanoid } from "nanoid";
 import { eq } from "drizzle-orm";
+import type { ChatMessage } from "@thekeep/shared";
 import * as schema from "../src/db/schema.js";
 import type { Db } from "../src/db/index.js";
 import { enableAdultChannel, disableAdultChannel } from "../src/lib/adultChannel.js";
@@ -200,5 +201,179 @@ describe("whole-room 18+ flag lock", () => {
       await enableAdultChannel(db, (await refetch(db, base.id))!),
       { ok: false, error: "ROOM_IS_NSFW" },
     );
+  });
+});
+
+/* =========================================================
+ *  Staff pair oversight — merged two-channel feeds
+ *  (lib/pairStaffView.ts + sendRoomBacklogTo + emitToPairStaff)
+ * ========================================================= */
+
+import { canSeePairFeeds, emitToPairStaff, findPairSibling } from "../src/lib/pairStaffView.js";
+import { sendRoomBacklogTo } from "../src/realtime/broadcast.js";
+import { DEFAULT_SERVER_ID } from "../src/earning/pool.js";
+
+const MINOR_BD = new Date(Date.now() - 15 * 365.25 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+
+async function seedMsg(db: Db, roomId: string, userId: string, body: string): Promise<void> {
+  await db.insert(schema.messages).values({
+    id: nanoid(), roomId, userId, characterId: null,
+    displayName: "author", kind: "say", body,
+  });
+}
+
+function backlogSocket() {
+  const emitted: { event: string; payload: unknown }[] = [];
+  return {
+    emitted,
+    emit(event: string, payload: unknown) { emitted.push({ event, payload }); },
+  };
+}
+
+async function ensurePairServerRows(db: Db, staffId?: string) {
+  // The system server row is seeded at BOOT (ensureSystemServer), not by
+  // migrations, so a bare harness DB needs it before serverMembers rows
+  // can reference it. Owner = a throwaway user.
+  const sysOwner = await createUser(db);
+  await db.insert(schema.servers)
+    .values({ id: DEFAULT_SERVER_ID, slug: "the-spire", name: "The Spire", ownerUserId: sysOwner.id, isSystem: true, isDefault: true })
+    .onConflictDoNothing();
+  if (staffId) {
+    await db.insert(schema.serverMembers)
+      .values({ serverId: DEFAULT_SERVER_ID, userId: staffId, role: "mod" })
+      .onConflictDoNothing();
+  }
+}
+
+describe("staff pair oversight — merged feeds", () => {
+  test("findPairSibling resolves both directions; parked pair resolves to null", async () => {
+    const { db } = makeTestDb();
+    const owner = await createUser(db);
+    const base = await mkRoom(db, owner.id);
+    const on = await enableAdultChannel(db, base);
+    assert.ok(on.ok && on.channelRoomId);
+    const fromBase = await findPairSibling(db, base.id);
+    assert.equal(fromBase?.siblingId, on.channelRoomId);
+    assert.equal(fromBase?.annexId, on.channelRoomId);
+    const fromAnnex = await findPairSibling(db, on.channelRoomId!);
+    assert.equal(fromAnnex?.siblingId, base.id);
+    assert.equal(fromAnnex?.annexId, on.channelRoomId);
+    await disableAdultChannel(db, ioWithChannelSockets(on.channelRoomId!, 0), (await refetch(db, base.id))!);
+    assert.equal(await findPairSibling(db, base.id), null);
+  });
+
+  test("qualification: adult site/server staff only — never minors, never plain members", async () => {
+    const { db } = makeTestDb();
+    const siteMod = await createUser(db, { role: "mod" });
+    const plainAdult = await createUser(db);
+    const minorSiteAdmin = await createUser(db, { role: "admin", birthdate: MINOR_BD });
+    const serverStaffAdult = await createUser(db);
+    await ensurePairServerRows(db, serverStaffAdult.id);
+    assert.equal(await canSeePairFeeds(db, { id: siteMod.id, role: "mod", isAdult: true }, DEFAULT_SERVER_ID), true);
+    assert.equal(await canSeePairFeeds(db, { id: plainAdult.id, role: "user", isAdult: true }, DEFAULT_SERVER_ID), false);
+    assert.equal(await canSeePairFeeds(db, { id: minorSiteAdmin.id, role: "admin", isAdult: false }, DEFAULT_SERVER_ID), false);
+    assert.equal(await canSeePairFeeds(db, { id: serverStaffAdult.id, role: "user", isAdult: true }, DEFAULT_SERVER_ID), true);
+  });
+
+  test("backlog: staff joining either side gets BOTH channels' rows; plain adults and minors get one side", async () => {
+    const { db } = makeTestDb();
+    const owner = await createUser(db);
+    const siteAdmin = await createUser(db, { role: "admin" });
+    const plainAdult = await createUser(db);
+    const minor = await createUser(db, { birthdate: MINOR_BD });
+    const base = await mkRoom(db, owner.id);
+    const on = await enableAdultChannel(db, base);
+    assert.ok(on.ok && on.channelRoomId);
+    const annexId = on.channelRoomId!;
+    await seedMsg(db, base.id, owner.id, "sfw side line");
+    await seedMsg(db, annexId, owner.id, "adult side line");
+
+    async function backlogFor(viewerId: string, joinRoomId: string): Promise<ChatMessage[]> {
+      const sock = backlogSocket();
+      await sendRoomBacklogTo(sock as never, db, joinRoomId, viewerId);
+      const bulk = sock.emitted.find((e) => e.event === "message:bulk");
+      return (bulk?.payload as ChatMessage[]) ?? [];
+    }
+
+    // Site staff in the SFW side sees both feeds (annex rows keep their id).
+    const staffRows = await backlogFor(siteAdmin.id, base.id);
+    assert.ok(staffRows.some((m) => m.body === "sfw side line"));
+    assert.ok(staffRows.some((m) => m.body === "adult side line" && m.roomId === annexId));
+    // ...and standing in the 18+ side sees the SFW rows too.
+    const staffRowsAnnex = await backlogFor(siteAdmin.id, annexId);
+    assert.ok(staffRowsAnnex.some((m) => m.body === "sfw side line" && m.roomId === base.id));
+    // A plain adult member sees only the side they joined.
+    const plainRows = await backlogFor(plainAdult.id, base.id);
+    assert.ok(plainRows.some((m) => m.body === "sfw side line"));
+    assert.ok(!plainRows.some((m) => m.body === "adult side line"));
+    // A minor in the base gets the base only (belt + braces: the annex is
+    // join-blocked for them anyway).
+    const minorRows = await backlogFor(minor.id, base.id);
+    assert.ok(minorRows.some((m) => m.body === "sfw side line"));
+    assert.ok(!minorRows.some((m) => m.body === "adult side line"));
+  });
+
+  test("live mirror: only adult staff sockets in the sibling room receive the event", async () => {
+    const { db } = makeTestDb();
+    const owner = await createUser(db);
+    const siteMod = await createUser(db, { role: "mod" });
+    const serverStaff = await createUser(db);
+    const plainAdult = await createUser(db);
+    const minorAdmin = await createUser(db, { role: "admin", birthdate: MINOR_BD });
+    await ensurePairServerRows(db, serverStaff.id);
+    const base = await mkRoom(db, owner.id);
+    const on = await enableAdultChannel(db, base);
+    assert.ok(on.ok && on.channelRoomId);
+    const annexId = on.channelRoomId!;
+
+    function staffSock(user: { id: string; role: string }, isAdult: boolean) {
+      const emitted: string[] = [];
+      // Mirror the REAL session snapshot shape (commands/types.ts): the
+      // isolation guard reads birthdate (null = legacy adult) and
+      // isolateFromAdults off socket.data.user.
+      return {
+        data: {
+          userId: user.id,
+          user: { id: user.id, role: user.role, isAdult, birthdate: isAdult ? null : MINOR_BD, isolateFromAdults: false },
+        },
+        emit(event: string) { emitted.push(event); },
+        emitted,
+      };
+    }
+    const sMod = staffSock(siteMod, true);
+    const sServerStaff = staffSock(serverStaff, true);
+    const sPlain = staffSock(plainAdult, true);
+    const sMinorAdmin = staffSock(minorAdmin, false);
+    const io = {
+      in(band: string) {
+        return {
+          async fetchSockets() {
+            return band === `room:${base.id}` ? [sMod, sServerStaff, sPlain, sMinorAdmin] : [];
+          },
+        };
+      },
+    };
+    // A line lands in the ANNEX; staff standing in the BASE get the mirror.
+    await emitToPairStaff(io as never, db, annexId, (s) => s.emit("message:new"));
+    assert.deepEqual(sMod.emitted, ["message:new"]);
+    assert.deepEqual(sServerStaff.emitted, ["message:new"]);
+    assert.deepEqual(sPlain.emitted, []);
+    assert.deepEqual(sMinorAdmin.emitted, []);
+    // The sender's hide-set suppresses the mirror for that staffer too.
+    await emitToPairStaff(io as never, db, annexId, (s) => s.emit("message:new"), new Set([siteMod.id]));
+    assert.deepEqual(sMod.emitted, ["message:new"]);
+    assert.equal(sServerStaff.emitted.length, 2);
+    // Phase-5 isolation: an actively-isolated minor's line must NOT mirror
+    // to adult SERVER staff (site role "user" — not isolation-exempt),
+    // while site staff (exempt by design) still receive it.
+    const isolatedMinorSender = {
+      id: owner.id,
+      role: "user" as const,
+      birthdate: MINOR_BD,
+      isolateFromAdults: true,
+    };
+    await emitToPairStaff(io as never, db, annexId, (s) => s.emit("message:new"), undefined, isolatedMinorSender);
+    assert.equal(sMod.emitted.length, 2, "site staff stay exempt from isolation");
+    assert.equal(sServerStaff.emitted.length, 2, "isolated minor's line must not reach adult server staff");
   });
 });

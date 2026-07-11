@@ -225,6 +225,10 @@ export const clearCommand: CommandHandler = {
     // "[message removed]" tombstones; admins still see the originals), then a
     // system summary whose own row is newer than the cutoff, so it survives.
     ctx.io.to(`room:${ctx.roomId}`).emit("message:bulk-delete", { roomId: ctx.roomId, ids });
+    // Staff pair oversight: the soft-clear also drops the rows from the
+    // merged view of staff standing in the pair's other channel.
+    const { emitToPairStaff } = await import("../../lib/pairStaffView.js");
+    await emitToPairStaff(ctx.io, ctx.db, ctx.roomId, (s) => s.emit("message:bulk-delete", { roomId: ctx.roomId, ids }));
     const { addMessage } = await import("../../realtime/broadcast.js");
     await addMessage(ctx, {
       kind: "system",

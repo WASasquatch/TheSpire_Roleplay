@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer, Socket } from "socket.io";
 import type {
@@ -60,6 +60,7 @@ import { DEFAULT_SERVER_ID, resolveRoomServerId } from "../../earning/pool.js";
 import { serverAuthority } from "../../servers/authority.js";
 import { effectiveRoomNsfw } from "../../lib/nsfwRooms.js";
 import { findLinkedAnnex } from "../../lib/roomLinks.js";
+import { stampPairStaffView } from "../../lib/pairStaffView.js";
 import { tFor } from "../../i18n.js";
 import { addSystemMessage, sendRoomBacklogTo } from "./persistence.js";
 import { isHiddenIncognitoIdentity } from "./incognito.js";
@@ -626,7 +627,9 @@ async function joinRoomBody(
 
   // Private rooms: owner always in; otherwise need either a valid password OR
   // an outstanding /invite. /invite acts as a per-user whitelist that lets the
-  // user skip the password prompt.
+  // user skip the password prompt. UNEXPIRED invites only: the row carries a
+  // 24h expiresAt that this gate previously never read, which quietly made
+  // every invite a forever-key (a re-invite refreshes the window).
   if (room.type === "private" && room.ownerId !== user.id) {
     const invite = opts.passwordOk
       ? null
@@ -634,7 +637,11 @@ async function joinRoomBody(
           .select()
           .from(roomInvites)
           .where(
-            and(eq(roomInvites.roomId, roomId), eq(roomInvites.invitedUserId, user.id)),
+            and(
+              eq(roomInvites.roomId, roomId),
+              eq(roomInvites.invitedUserId, user.id),
+              gt(roomInvites.expiresAt, new Date()),
+            ),
           )
           .limit(1))[0];
     const member = (await db
@@ -764,6 +771,13 @@ async function joinRoomBody(
   }
 
   socket.join(`room:${roomId}`);
+
+  // Staff pair oversight (lib/pairStaffView.ts): stamp whether THIS socket,
+  // standing in THIS room, gets the merged two-channel view. Cached on
+  // socket.data so the hot summary paths (summaryFor / sendRoomStateTo)
+  // read it without queries; recomputed on every join, so toggling sides
+  // or switching rooms refreshes it.
+  await stampPairStaffView(db, socket, user, roomId);
 
   // Multi-server socket banding (plan §7). Each socket joins a
   // `server:<serverId>` band alongside its `room:` band so server-scoped
@@ -1322,11 +1336,21 @@ async function emitRoomStateWith(
   // base, so a summary carrying one forces the per-socket fan-out and nulls
   // the pointer for non-adult viewers.
   const summaryFor = (s: (typeof sockets)[number]) => {
-    if (!summary.linkedNsfwRoomId) return summary;
-    const su = (s.data as { user?: { isAdult?: boolean } }).user;
-    return su?.isAdult ? summary : { ...summary, linkedNsfwRoomId: null };
+    const sd = s.data as { user?: { isAdult?: boolean }; pairStaffView?: boolean };
+    // Staff pair oversight flag (per-viewer; stamped on socket.data at
+    // join): tells the client to render the pair's two message buckets
+    // merged. Only meaningful on paired rooms; adults only (the stamp
+    // itself requires isAdult, so no minor can carry it).
+    const withFlag = sd.pairStaffView && (summary.linkedNsfwRoomId || summary.linkedSfwRoomId)
+      ? { ...summary, pairStaffView: true }
+      : summary;
+    if (!withFlag.linkedNsfwRoomId) return withFlag;
+    return sd.user?.isAdult ? withFlag : { ...withFlag, linkedNsfwRoomId: null };
   };
-  if (blockGraph.size === 0 && !summary.linkedNsfwRoomId) {
+  // Fast path only when NO per-viewer variance is possible: any pair
+  // pointer (either direction) can require the per-socket staff flag or
+  // the minor scrub, so paired rooms always take the fan-out.
+  if (blockGraph.size === 0 && !summary.linkedNsfwRoomId && !summary.linkedSfwRoomId) {
     io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
   } else {
     for (const s of sockets) {
@@ -1695,9 +1719,22 @@ export async function sendRoomStateTo(
   const view = blocked.size ? occupants.filter((o) => !blocked.has(o.userId)) : occupants;
   // Linked-pair scrub (same contract as GET /rooms + emitRoomStateWith):
   // never hand a non-adult viewer the base room's pointer to its 18+ annex.
-  const scrubbedSummary = summary.linkedNsfwRoomId && !viewerSnapshot?.isAdult
-    ? { ...summary, linkedNsfwRoomId: null }
+  // Staff pair oversight: the per-socket flag rides the same summary so
+  // the client knows to merge the pair's buckets. RE-STAMPED here (not
+  // just read) because the relocate paths (kick/ban/boot) land a socket
+  // via this function without a joinRoom pass — the join-time stamp would
+  // still describe the PREVIOUS room. Gated on the pair pointers so
+  // normal rooms pay no queries.
+  if ((summary.linkedNsfwRoomId || summary.linkedSfwRoomId) && viewerSnapshot) {
+    await stampPairStaffView(db, socket, viewerSnapshot, roomId);
+  }
+  const staffFlagged = (socket.data as { pairStaffView?: boolean }).pairStaffView
+    && (summary.linkedNsfwRoomId || summary.linkedSfwRoomId)
+    ? { ...summary, pairStaffView: true }
     : summary;
+  const scrubbedSummary = staffFlagged.linkedNsfwRoomId && !viewerSnapshot?.isAdult
+    ? { ...staffFlagged, linkedNsfwRoomId: null }
+    : staffFlagged;
   socket.emit("room:state", { room: scrubbedSummary, occupants: view });
   socket.emit("presence:update", { roomId, occupants: view });
   // Re-snap to live theater playback on resync (reconnect, tab wake).

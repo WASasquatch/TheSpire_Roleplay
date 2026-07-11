@@ -251,5 +251,5 @@ export async function unfurlAndAttach(db: Db, io: Io, args: {
   // Viewer-aware broadcast: an 18+-stamped row's card+body must not reach
   // minor occupants of a flipped-back room (see emitMessageUpdate).
   const { emitMessageUpdate } = await import("./routes/messages.js");
-  await emitMessageUpdate(io, row);
+  await emitMessageUpdate(io, db, row);
 }

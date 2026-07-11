@@ -28,7 +28,7 @@ import {
 import { escapeLike } from "../lib/nameLookup.js";
 import { getClearedAt } from "../lib/roomClears.js";
 import { hasPermission } from "../auth/permissions.js";
-import { exportReceipts, forums, ignores, messages, roomMembers, roomThreadCategories, rooms, users } from "../db/schema.js";
+import { exportReceipts, forums, ignores, messages, roomInvites, roomMembers, roomThreadCategories, rooms, serverMembers, users } from "../db/schema.js";
 import { parseNpcList } from "../lib/roomStats.js";
 import { forumBoardReadGate } from "../forums/authority.js";
 import { loadPollState } from "../polls.js";
@@ -44,6 +44,7 @@ import { canSeeNsfw } from "../auth/ageGate.js";
 import { isolationHiddenSetFor, isolationVisibleSql } from "../auth/ageIsolation.js";
 import { maskForMinors, maskMessageForMinors } from "../realtime/minorLanguageFilter.js";
 import { effectiveRoomNsfwWith, nsfwServerIds } from "../lib/nsfwRooms.js";
+import { canSeePairFeeds, findPairSibling } from "../lib/pairStaffView.js";
 import { boardAgeDenied, nsfwForumIds } from "../forums/nsfw.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
@@ -203,7 +204,27 @@ export async function registerRoomsRoutes(
       me,
       assembled.flatMap((a) => a.occupants.map((o) => o.userId)),
     );
-    const result: RoomWithOccupants[] = assembled.map(({ summary, occupants }) => ({
+    // Staff pair oversight (lib/pairStaffView.ts): the per-viewer merged-
+    // feeds flag must ALSO ride this route, or the rail refetch (fired on
+    // every rooms:tree-changed) would overwrite the room:state summary and
+    // strip the flag mid-session. Computed once per request: site staff
+    // qualify everywhere; otherwise one serverMembers read resolves which
+    // servers this adult holds staff on.
+    const staffServerIds = new Set<string>();
+    let siteStaff = false;
+    if (me?.isAdult && assembled.some(({ summary }) => summary.linkedNsfwRoomId || summary.linkedSfwRoomId)) {
+      siteStaff = isModeratorRole(me.role);
+      if (!siteStaff) {
+        for (const r of await db
+          .select({ serverId: serverMembers.serverId })
+          .from(serverMembers)
+          .where(and(
+            eq(serverMembers.userId, me.id),
+            inArray(serverMembers.role, ["owner", "admin", "mod"]),
+          ))) staffServerIds.add(r.serverId);
+      }
+    }
+    const result: RoomWithOccupants[] = assembled.map(({ room, summary, occupants }) => ({
       ...summary,
       // Linked-pair scrub for under-18 (and anonymous) viewers: the 18+
       // annex row is already dropped by the age gate above; also blank the
@@ -211,6 +232,10 @@ export async function registerRoomsRoutes(
       // with no SFW/18+ toggle (the toggle's join would be refused anyway —
       // this keeps the dead control from ever rendering).
       ...(me?.isAdult ? {} : { linkedNsfwRoomId: null }),
+      ...((summary.linkedNsfwRoomId || summary.linkedSfwRoomId)
+        && (siteStaff || staffServerIds.has(room.serverId ?? DEFAULT_SERVER_ID))
+        ? { pairStaffView: true }
+        : {}),
       occupants: occupants
         .filter((o) => !blocked.has(o.userId) && !isolationHidden.has(o.userId))
         .slice()
@@ -265,8 +290,10 @@ export async function registerRoomsRoutes(
     const openToAll = room.type === "public" && !room.forumMembersOnly;
     if (!openToAll) {
       // Gated room: require a logged-in viewer who is staff, the owner,
-      // or a member. A 404 (not 403) keeps a gated room's existence from
-      // leaking via the status code.
+      // a member, or the holder of an UNEXPIRED /invite (the invite's
+      // in-chat {room:slug} chip must resolve for the invitee — they are
+      // by definition not a member yet). A 404 (not 403) keeps a gated
+      // room's existence from leaking via the status code.
       if (!me) { reply.code(404); return { error: "not found" }; }
       const isStaff = isModeratorRole(me.role);
       let allowed = isStaff || room.ownerId === me.id;
@@ -277,6 +304,18 @@ export async function registerRoomsRoutes(
           .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, me.id)))
           .limit(1))[0];
         allowed = !!m;
+      }
+      if (!allowed) {
+        const inv = (await db
+          .select({ roomId: roomInvites.roomId })
+          .from(roomInvites)
+          .where(and(
+            eq(roomInvites.roomId, room.id),
+            eq(roomInvites.invitedUserId, me.id),
+            gt(roomInvites.expiresAt, new Date()),
+          ))
+          .limit(1))[0];
+        allowed = !!inv;
       }
       if (!allowed) { reply.code(404); return { error: "not found" }; }
     }
@@ -745,7 +784,17 @@ export async function registerRoomsRoutes(
     // sendRoomBacklogTo. Non-whisper rows are scoped to THIS room;
     // whisper rows the caller is a party to are pulled regardless of
     // their original room. HARD tier on stamped 18+ history.
-    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult);
+    // Staff pair oversight (lib/pairStaffView.ts): adult global/server
+    // staff paging a paired room's history get BOTH channels' rows in
+    // one chronological stream, matching their merged live view.
+    let pageRoomIds: string | string[] = room.id;
+    if (me.isAdult) {
+      const pair = await findPairSibling(db, room.id);
+      if (pair && await canSeePairFeeds(db, me, pair.serverId)) {
+        pageRoomIds = [room.id, pair.siblingId];
+      }
+    }
+    const roomOrPartyWhisper = roomVisibilityWhere(pageRoomIds, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult);
 
     // Per-viewer `/clear` marker: never page back past the point this
     // user cleared the room. Keeps the scroll-up loader from resurrecting

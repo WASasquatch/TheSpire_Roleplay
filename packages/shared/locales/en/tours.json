@@ -56,6 +56,10 @@
     "forums": {
       "title": "Forums, and this tour again",
       "body": "Forums, for writing you want to keep, live in the Menu and above the room list. You can replay this whole tour any time from Help."
+    },
+    "channels": {
+      "title": "Rooms with an 18+ side",
+      "body": "Some rooms have a separate adults-only channel. Look for the SFW / 18+ switch beside the room's name here and click a side to hop between them. The same rules apply on both sides: {rules}"
     }
   },
   "forumsBrowse": {

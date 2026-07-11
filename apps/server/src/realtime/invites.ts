@@ -4,8 +4,11 @@ import type { CommandContext } from "../commands/types.js";
 import { emitAmbiguousIdentityModal, resolveIdentityArg } from "../commands/identityArg.js";
 import { isBlockedBetween } from "../auth/blocks.js";
 import { isIsolatedBetweenIds } from "../auth/ageIsolation.js";
+import { isAdultUser } from "../auth/ageGate.js";
+import { effectiveRoomNsfw } from "../lib/nsfwRooms.js";
 import { tFor } from "../i18n.js";
 import { addMessage } from "./broadcast.js";
+import { persistTargetedSystemMessageToActiveRooms } from "./targetedMessages.js";
 
 export async function invite(ctx: CommandContext, raw: string): Promise<void> {
   const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
@@ -58,15 +61,40 @@ export async function invite(ctx: CommandContext, raw: string): Promise<void> {
     return;
   }
 
+  // Age gate: an under-18 account can never enter an 18+ room (or a
+  // room's 18+ channel), so an invite there would be a dead end — worse,
+  // the invitee toast would name an adult room to a minor. Refuse with an
+  // HONEST message (unlike blocks/isolation above, age isn't a secret).
+  const targetRow = (await ctx.db
+    .select({ birthdate: users.birthdate, locale: users.locale })
+    .from(users)
+    .where(eq(users.id, target.userId))
+    .limit(1))[0];
+  const roomIsAdult = room.linkedRoomId != null || await effectiveRoomNsfw(ctx.db, room);
+  if (roomIsAdult && targetRow && !isAdultUser(targetRow)) {
+    ctx.socket.emit("error:notice", {
+      code: "INVITE_MINOR",
+      message: tFor(ctx.user.locale, "errors:server.realtime.inviteMinorNsfw", { name: target.displayName }),
+    });
+    return;
+  }
+
+  // Upsert so a RE-invite refreshes the 24h window (the join gate now
+  // enforces expiresAt; the old onConflictDoNothing left a stale row that
+  // would refuse a freshly re-invited guest).
+  const inviteExpiry = new Date(Date.now() + 1000 * 60 * 60 * 24); // 24h
   await ctx.db
     .insert(roomInvites)
     .values({
       roomId: ctx.roomId,
       invitedUserId: target.userId,
       invitedById: ctx.user.id,
-      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24), // 24h
+      expiresAt: inviteExpiry,
     })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [roomInvites.roomId, roomInvites.invitedUserId],
+      set: { invitedById: ctx.user.id, expiresAt: inviteExpiry },
+    });
 
   await addMessage(ctx, {
     kind: "system",
@@ -84,12 +112,9 @@ export async function invite(ctx: CommandContext, raw: string): Promise<void> {
   // contract as /kick and /ignore.
   const sockets = await ctx.io.fetchSockets();
   // Localize the toast to the TARGET's saved language (this is a transient
-  // per-recipient notice, not room content). One bounded read; null = en.
-  const targetLocale = (await ctx.db
-    .select({ locale: users.locale })
-    .from(users)
-    .where(eq(users.id, target.userId))
-    .limit(1))[0]?.locale ?? null;
+  // per-recipient notice, not room content). Row fetched with the age
+  // guard above; null = en.
+  const targetLocale = targetRow?.locale ?? null;
   const inviteMsg = room.type === "private"
     ? tFor(targetLocale, "errors:server.realtime.invitedYouPrivate", { name: ctx.user.displayName, room: room.name })
     : tFor(targetLocale, "errors:server.realtime.invitedYou", { name: ctx.user.displayName, room: room.name });
@@ -99,4 +124,20 @@ export async function invite(ctx: CommandContext, raw: string): Promise<void> {
       s.emit("error:notice", { code: "INVITED", message: inviteMsg });
     }
   }
+
+  // The toast above lives for ~6 seconds — a look-away and the invite is
+  // gone (the "invites do nothing" report). Also drop a DURABLE system
+  // line into whatever room(s) the invitee is looking at right now, with
+  // a {room:<slug>} chip they can click to join. Persisted with
+  // targetUserId (only they ever see it, it survives refetch) AND
+  // live-emitted so it lands in their chat immediately. Persisted chat
+  // rows stay English by convention; the localized copy is the toast.
+  const chip = room.slug ? ` {room:${room.slug}}` : "";
+  await persistTargetedSystemMessageToActiveRooms(
+    ctx.io,
+    ctx.db,
+    target.userId,
+    `${ctx.user.displayName} invited you to join "${room.name}".${chip}`,
+    { emitLive: true },
+  );
 }

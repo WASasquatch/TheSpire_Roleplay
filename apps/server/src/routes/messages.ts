@@ -19,6 +19,7 @@ import { recordAudit } from "../audit.js";
 import { messages, rooms, roomThreadCategories, roomMembers, pinnedMessages, users } from "../db/schema.js";
 import { callerCanEditRoom } from "../auth/roomPermissions.js";
 import { effectiveRoomNsfw } from "../lib/nsfwRooms.js";
+import { emitToPairStaff } from "../lib/pairStaffView.js";
 import { boardAgeDenied } from "../forums/nsfw.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import { maskForMinors, maskMessageForMinors } from "../realtime/minorLanguageFilter.js";
@@ -460,17 +461,25 @@ export function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): 
  * byte-identical. The cheap room-wide emit is kept when the row is
  * unstamped and no connected minor needs a mask.
  */
-export async function emitMessageUpdate(io: Io, row: typeof messages.$inferSelect): Promise<void> {
+export async function emitMessageUpdate(io: Io, db: Db, row: typeof messages.$inferSelect): Promise<void> {
   const wire = toWire(row);
   const sockets = await io.in(`room:${row.roomId}`).fetchSockets();
   const anyMinor = sockets.some(
     (s) => !(s.data as { user?: { isAdult?: boolean } }).user?.isAdult,
   );
+  // Staff pair oversight (lib/pairStaffView.ts): edits/tombstones of public
+  // room lines mirror to the ADULT staff standing in the pair's other side,
+  // so their merged view never shows a stale body. Whispers/targeted rows
+  // never mirror; staff recipients are adults, so they get the plain wire.
+  const mirror = row.kind !== "whisper" && !row.targetUserId
+    ? emitToPairStaff(io, db, row.roomId, (s) => s.emit("message:update", wire))
+    : Promise.resolve();
   // §J: at most one mask compute per update; null = clean (or filter off).
   // An 18+-stamped row skips the compute — minors never receive it at all.
   const minorVariant = anyMinor && !row.isNsfw ? maskMessageForMinors(wire) : null;
   if (!row.isNsfw && !minorVariant) {
     io.to(`room:${row.roomId}`).emit("message:update", wire);
+    await mirror;
     return;
   }
   for (const s of sockets) {
@@ -478,6 +487,7 @@ export async function emitMessageUpdate(io: Io, row: typeof messages.$inferSelec
     if (row.isNsfw && !adult) continue;
     s.emit("message:update", adult ? wire : minorVariant ?? wire);
   }
+  await mirror;
 }
 
 export async function registerMessageRoutes(
@@ -585,7 +595,7 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
-    await emitMessageUpdate(io, updated);
+    await emitMessageUpdate(io, db, updated);
     // Cross-room whisper overlay: the recipient may be viewing the
     // whisper from another room (their bucket holds it under a
     // different roomId). Fan the update out to their sockets too so
@@ -728,6 +738,16 @@ export async function registerMessageRoutes(
       if (minorPlainWire === undefined) minorPlainWire = maskMessageForMinors(plainWire);
       return minorPlainWire ?? plainWire;
     };
+    // Staff pair oversight: the tombstone mirror must run BEFORE the
+    // empty-room early return — the headline oversight flow is a staffer
+    // standing in the pair's OTHER side deleting a row from the merged
+    // view while the row's own room is empty (0 sockets). Without this,
+    // the deleted body kept rendering in every overseer's merged feed
+    // until a rejoin. Plain adult tombstone; the originalBody reveal
+    // stays scoped to the room's own fanout below.
+    if (updated.kind !== "whisper" && !updated.targetUserId) {
+      await emitToPairStaff(io, db, m.roomId, (s) => s.emit("message:update", plainWireFor(true)));
+    }
     const roomSockets = await io.in(`room:${m.roomId}`).fetchSockets();
     if (roomSockets.length === 0) return { ok: true };
     // Look the viewer roles up in one batch, typical room has ≤ 50
@@ -871,7 +891,7 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
-    await emitMessageUpdate(io, updated);
+    await emitMessageUpdate(io, db, updated);
     // Mod Log: only when a moderator acts on someone ELSE's topic (an author
     // locking their own thread isn't moderation).
     if (m.userId !== me.id) {
@@ -921,7 +941,7 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
-    await emitMessageUpdate(io, updated);
+    await emitMessageUpdate(io, db, updated);
     await auditForumTopic(db, me.id, m.roomId, m.id, "forum_topic_sticky", { sticky: parsed.sticky, title: m.title ?? null }, m.userId);
     return { ok: true };
   });
@@ -977,7 +997,7 @@ export async function registerMessageRoutes(
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
     if (!updated) { reply.code(404); return { error: "not found" }; }
-    await emitMessageUpdate(io, updated);
+    await emitMessageUpdate(io, db, updated);
     await auditForumTopic(db, me.id, m.roomId, m.id, "forum_topic_move", { from: m.threadCategoryId ?? null, to: parsed.categoryId, title: m.title ?? null }, m.userId);
     return { ok: true };
   });
@@ -1028,7 +1048,7 @@ export async function registerMessageRoutes(
     }
     await db.update(messages).set({ prefixId: parsed.prefixId }).where(eq(messages.id, m.id));
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
-    if (updated) await emitMessageUpdate(io, updated);
+    if (updated) await emitMessageUpdate(io, db, updated);
     return { ok: true };
   });
 
@@ -1087,7 +1107,7 @@ export async function registerMessageRoutes(
     }
     await auditForumTopic(db, me.id, m.roomId, m.id, "topic_nsfw_update", { isNsfw: value, title: m.title ?? null }, m.userId);
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
-    if (updated) await emitMessageUpdate(io, updated);
+    if (updated) await emitMessageUpdate(io, db, updated);
     return { ok: true, isNsfw: value };
   });
 
@@ -1204,7 +1224,7 @@ export async function registerMessageRoutes(
       .set({ linkPreviewJson: JSON.stringify({ hidden: true }) })
       .where(eq(messages.id, m.id));
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
-    if (updated) await emitMessageUpdate(io, updated);
+    if (updated) await emitMessageUpdate(io, db, updated);
     return { ok: true };
   });
 

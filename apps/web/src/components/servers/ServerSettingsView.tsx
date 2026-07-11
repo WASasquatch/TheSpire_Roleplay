@@ -498,7 +498,7 @@ function ModPermissionCheckboxes({ value, onChange, grantable, disabled }: {
   const { t } = useTranslation("servers");
   const has = new Set(value);
   return (
-    <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-1 [@container(min-width:640px)]:grid-cols-2">
       {SERVER_GRANTABLE_MOD_PERMISSIONS.map((key) => {
         const meta = SERVER_MOD_PERMISSION_META[key];
         const canGrant = grantable.has(key);
@@ -544,7 +544,7 @@ function ServerFeatureCheckboxes({ value, onChange, grantable, disabled }: {
     onChange([...next]);
   }
   return (
-    <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+    <div className="grid grid-cols-1 gap-1 [@container(min-width:640px)]:grid-cols-2">
       {SERVER_FEATURE_PERMISSIONS.map((key) => {
         const meta = SERVER_FEATURE_PERMISSION_META[key];
         const canGrant = grantable.has(key);
@@ -1723,7 +1723,7 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
                 <p className="text-sm text-keep-text"><Trans t={t} i18nKey="console.roles.appointAs" values={{ name: pendingHit.username }} components={{ user: <span className="font-semibold" /> }} /></p>
 
                 {/* Tier cards */}
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2 [@container(min-width:640px)]:grid-cols-2">
                   <button
                     type="button" disabled={busy}
                     onClick={() => { setPendingTier("mod"); setShowAdvanced(false); setPendingPerms(SERVER_MOD_DEFAULT_PERMISSIONS.filter((p) => grantable.has(p))); }}

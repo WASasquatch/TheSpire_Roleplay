@@ -11,6 +11,7 @@ import { markLoginIntent } from "../lib/socket.js";
 import { formatNumber } from "../lib/intlFormat.js";
 import { resolveSplashTheme, splashBgClass, themeStyle } from "../lib/theme.js";
 import { GoogleFinishSignup } from "./GoogleFinishSignup.js";
+import { SplashLanguagePicker } from "./marketing/SplashLanguagePicker.js";
 import { readReturnForum } from "./forums/ForumPublicLanding.js";
 
 /**
@@ -113,6 +114,10 @@ export function SplashShell({
       style={themeStyle(splashTheme)}
       className="relative min-h-screen w-full overflow-hidden text-keep-text"
     >
+      {/* Language picker (shared with SplashLanding) — visitors pick
+          their language BEFORE registering, so the whole sign-up flow
+          reads in it. */}
+      <SplashLanguagePicker />
       {/* Background art, portaled to <body> so it is a TRUE viewport-fixed
           layer (mirrors SplashLanding). `position: fixed` only resolves against
           the viewport when NO ancestor establishes a containing block; a

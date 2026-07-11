@@ -201,7 +201,8 @@
     "writersSteppedIn_other": "writers have stepped in",
     "onlineRightNow": "online right now",
     "publicRoomsOpen_one": "public room open",
-    "publicRoomsOpen_other": "public rooms open"
+    "publicRoomsOpen_other": "public rooms open",
+    "languagePicker": "Language"
   },
   "features": {
     "kicker": "What you can do here",

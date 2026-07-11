@@ -212,7 +212,8 @@
     "onlineRightNow": "en línea ahora mismo",
     "publicRoomsOpen_one": "sala pública abierta",
     "publicRoomsOpen_other": "salas públicas abiertas",
-    "publicRoomsOpen_many": "salas públicas abiertas"
+    "publicRoomsOpen_many": "salas públicas abiertas",
+    "languagePicker": "Idioma"
   },
   "features": {
     "kicker": "Lo que puedes hacer aquí",

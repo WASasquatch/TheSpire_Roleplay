@@ -24,6 +24,7 @@ import { resolveSplashTheme, splashBgClass, themeStyle } from "../../lib/theme.j
 import { SPLASH_GLOW, SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 import { BookshelfStrip } from "../scriptorium/BookshelfStrip.js";
 import { SplashNav, type SplashTab } from "./SplashNav.js";
+import { SplashLanguagePicker } from "./SplashLanguagePicker.js";
 import { FeatureShowcase } from "./FeatureShowcase.js";
 import { FeaturedWorldCards } from "./FeaturedWorldCards.js";
 import { PopularCommunities } from "./PopularCommunities.js";
@@ -269,6 +270,8 @@ export function SplashLanding({ onNavigate }: Props) {
       )}
 
       <div className="relative z-10 flex min-h-screen flex-col items-center justify-start py-8 lg:py-10">
+        {/* Language picker (shared with the login/register SplashShell). */}
+        <SplashLanguagePicker />
         {/* HERO, over the spire BG, ABOVE the card. The wordmark
             reads as the page banner this way instead of feeling
             tucked into the card content. */}

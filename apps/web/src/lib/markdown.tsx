@@ -1157,15 +1157,58 @@ function SpoilerSpan({ children }: { children: ReactNode }) {
 }
 
 /**
+ * Block-level line grouping shared by the forum body renderer and the
+ * flat-chat body renderer (messageRow). Splits a body into runs of
+ * `> `-prefixed quote lines, `- `-prefixed bullet lines, closed
+ * ```fenced``` blocks, and everything else, so both feeds can render
+ * the same block conventions the composer's WYSIWYG editor previews.
+ */
+export type BodyBlockGroup = { kind: "quote" | "bullet" | "normal" | "fence"; lines: string[] };
+
+export function groupBodyBlocks(body: string): BodyBlockGroup[] {
+  const rawLines = body.split("\n");
+  const groups: BodyBlockGroup[] = [];
+  const isFenceDelim = (l: string) => /^\s*```/.test(l);
+  const pushLine = (kind: "quote" | "bullet" | "normal", line: string) => {
+    const last = groups[groups.length - 1];
+    if (last && last.kind === kind) last.lines.push(line);
+    else groups.push({ kind, lines: [line] });
+  };
+  for (let li = 0; li < rawLines.length; li++) {
+    const line = rawLines[li]!;
+    if (isFenceDelim(line)) {
+      // Opening fence — only when a CLOSING fence exists later; an
+      // unmatched ``` stays a normal/quote line so a stray triple-backtick
+      // doesn't swallow the rest of the post.
+      let close = -1;
+      for (let lj = li + 1; lj < rawLines.length; lj++) {
+        if (isFenceDelim(rawLines[lj]!)) { close = lj; break; }
+      }
+      if (close !== -1) {
+        groups.push({ kind: "fence", lines: rawLines.slice(li, close + 1) });
+        li = close;
+        continue;
+      }
+    }
+    // Bullet detection matches the composer serializer exactly: a
+    // literal `- ` prefix, no indentation. Quote wins when both could
+    // apply (`> - x` is a quoted line).
+    pushLine(/^\s*>/.test(line) ? "quote" : line.startsWith("- ") ? "bullet" : "normal", line);
+  }
+  return groups;
+}
+
+/**
  * Block-level body renderer for forum posts. Splits the body by
  * newlines and groups consecutive lines that start with `> ` (or just
  * `>`) into a single `<blockquote>` element so quoted replies render
- * with the usual left-border / muted-bg styling. Non-quote lines
- * render inline via parseInline + the mention splitter, same as
- * before.
+ * with the usual left-border / muted-bg styling, and consecutive
+ * `- ` lines into a `<ul>` — the same blocks the composer previews.
+ * Other lines render inline via parseInline + the mention splitter,
+ * same as before.
  *
- * Chat lines (flat-room rendering) deliberately don't use this, they
- * stay single-visual-line. Forum posts opt in via ForumPostBody.
+ * Flat-chat rows apply the same grouping through their own part
+ * renderer (messageRow's block pass over `groupBodyBlocks`).
  *
  * Why a manual pre-pass instead of upgrading parseInline:
  *   - parseInline is inline-only by design (no block-level state). It
@@ -1219,36 +1262,9 @@ export function renderForumBody(
 ): ReactNode {
   const out: ReactNode[] = [];
   // Block-level grouping over the RAW body lines (see the header note on
-  // why we don't pre-split on inline code). Three group kinds: "quote"
-  // (`>`-prefixed lines), "fence" (a closed multi-line ```block```), and
-  // "normal" (everything else). Inline `` `code` `` stays within its line.
-  const rawLines = body.split("\n");
-  type Group = { kind: "quote" | "normal" | "fence"; lines: string[] };
-  const groups: Group[] = [];
-  const isFenceDelim = (l: string) => /^\s*```/.test(l);
-  const pushLine = (kind: "quote" | "normal", line: string) => {
-    const last = groups[groups.length - 1];
-    if (last && last.kind === kind) last.lines.push(line);
-    else groups.push({ kind, lines: [line] });
-  };
-  for (let li = 0; li < rawLines.length; li++) {
-    const line = rawLines[li]!;
-    if (isFenceDelim(line)) {
-      // Opening fence — only when a CLOSING fence exists later; an
-      // unmatched ``` stays a normal/quote line so a stray triple-backtick
-      // doesn't swallow the rest of the post.
-      let close = -1;
-      for (let lj = li + 1; lj < rawLines.length; lj++) {
-        if (isFenceDelim(rawLines[lj]!)) { close = lj; break; }
-      }
-      if (close !== -1) {
-        groups.push({ kind: "fence", lines: rawLines.slice(li, close + 1) });
-        li = close;
-        continue;
-      }
-    }
-    pushLine(/^\s*>/.test(line) ? "quote" : "normal", line);
-  }
+  // why we don't pre-split on inline code); shared with flat chat via
+  // groupBodyBlocks. Inline `` `code` `` stays within its line.
+  const groups = groupBodyBlocks(body);
   groups.forEach((g, idx) => {
     if (g.kind === "fence") {
       // Hand the raw fence to parseInline so the same <pre>/<code> styling
@@ -1270,6 +1286,21 @@ export function renderForumBody(
         >
           {renderPartsInline(parts, onMentionClick, onWorldClick, selfNames, knownMentions, mentions)}
         </blockquote>,
+      );
+      return;
+    }
+    if (g.kind === "bullet") {
+      // `- ` lines render as a real bulleted list, matching the
+      // composer's WYSIWYG preview. Each line is one <li>; the `- `
+      // prefix is stripped before the inline parser runs.
+      out.push(
+        <ul key={`b${idx}`} className="my-1 list-disc pl-6">
+          {g.lines.map((l, bi) => (
+            <li key={bi} className="whitespace-pre-wrap">
+              {renderPartsInline(splitMentions(l.slice(2)), onMentionClick, onWorldClick, selfNames, knownMentions, mentions)}
+            </li>
+          ))}
+        </ul>,
       );
       return;
     }

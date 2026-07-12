@@ -25,6 +25,7 @@ import { refreshCommand } from "./refresh.js";
 import { initiativeCommand, rollCommand } from "./roll.js";
 import { checkCommand } from "./check.js";
 import { pollCommand } from "./poll.js";
+import { roleSelectCommand } from "./roleselect.js";
 import { whisperCommand } from "./whisper.js";
 import { replyCommand } from "./reply.js";
 import { moodCommand } from "./mood.js";
@@ -40,7 +41,7 @@ import {
 import { worldCommand, worldsCommand } from "./world.js";
 import { forumsCommand } from "./forums.js";
 import { scriptoriumCommand, storyCommand, writeCommand } from "./scriptorium.js";
-import { expiryCommand, nsfwCommand, replyModeCommand } from "./room_modes.js";
+import { expiryCommand, nsfwCommand, postModeCommand, replyModeCommand } from "./room_modes.js";
 import { goPairCommand } from "./room_link.js";
 import { iconCommand } from "./icon.js";
 import { theaterCommand } from "./theater.js";
@@ -112,6 +113,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(initiativeCommand);
   reg.registerBuiltin(checkCommand);
   reg.registerBuiltin(pollCommand);
+  reg.registerBuiltin(roleSelectCommand);
   reg.registerBuiltin(whisperCommand);
   reg.registerBuiltin(replyCommand);
   reg.registerBuiltin(moodCommand);
@@ -132,6 +134,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(scriptoriumCommand);
   reg.registerBuiltin(expiryCommand);
   reg.registerBuiltin(replyModeCommand);
+  reg.registerBuiltin(postModeCommand);
   reg.registerBuiltin(nsfwCommand);
   reg.registerBuiltin(goPairCommand);
   reg.registerBuiltin(theaterCommand);

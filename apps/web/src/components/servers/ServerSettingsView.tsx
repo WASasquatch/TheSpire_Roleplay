@@ -32,10 +32,10 @@
  * own fetch helpers against the documented /servers endpoints rather than
  * widening that module.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { HelpCircle, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, GripVertical, HelpCircle, Search } from "lucide-react";
 import {
   DEFAULT_THEME,
   SERVER_MOD_PERMISSIONS,
@@ -65,8 +65,10 @@ import {
   type OnboardingPrompt,
   type OnboardingOption,
   type ProfileView,
+  type RoomCategorySummary,
 } from "@thekeep/shared";
 import { FloatingWindow } from "../shared/FloatingWindow.js";
+import { safeCssColor } from "../shared/RoleBadgeChips.js";
 import { ContextualTour } from "../tours/ContextualTour.js";
 import { BanModal } from "../moderation/BanModal.js";
 import { ProfileModal } from "../profile/ProfileModal.js";
@@ -140,6 +142,10 @@ interface ServerConsoleDetail {
   /** Public-safe banner variant for an 18+ server (shown to viewers who
    *  can't see NSFW on discovery/share surfaces). Null/absent = none. */
   sfwBannerUrl?: string | null;
+  /** Community world link (migration 0346), resolved through the world's
+   *  own visibility gates for the viewer. Null/absent = none — or a world
+   *  this viewer can't open (fails toward "none" rather than leaking). */
+  world?: { id: string; slug: string; name: string } | null;
   ownerUserId: string;
   ownerUsername: string;
   roomCount: number;
@@ -178,6 +184,9 @@ interface ServerUsergroupWire {
   memberSelectable: boolean;
   /** Member-facing blurb shown next to the self-role toggle / onboarding option. */
   description: string | null;
+  /** Userlist badge opt-in (migration 0348): members wear the group's
+   *  name/color as a chip in the server userlist. */
+  showBadge: boolean;
 }
 
 interface ServerUsergroupMemberWire {
@@ -262,6 +271,14 @@ interface RoomListRow {
    *  a room with `linkedNsfwRoomId` HAS one (the editor's checkbox). */
   linkedSfwRoomId?: string | null;
   linkedNsfwRoomId?: string | null;
+  /** Room icon: http(s) image URL or a short emoji glyph (dual form). */
+  icon?: string | null;
+  /** Rail section (migration 0344); null = the uncategorized bucket. */
+  categoryId?: string | null;
+  /** Who can post (migration 0345/0349); absent = "everyone". */
+  postMode?: "everyone" | "staff" | "roles";
+  /** "Never expire" opt-out (migration 0347); absent = false. */
+  retentionExempt?: boolean;
   occupants?: unknown[];
 }
 
@@ -296,6 +313,18 @@ async function apiSetServerImage(id: string, kind: "logo" | "banner" | "horizont
     body: JSON.stringify(imageDataUrl ? { imageDataUrl } : { clear: true }),
   }));
   return j.url;
+}
+/** One option in the Overview tab's community-world picker. */
+interface MyWorldOption {
+  id: string;
+  name: string;
+  visibility: "private" | "public" | "open";
+}
+/** Worlds the caller owns or collaborates on (GET /me/worlds?collab=1) —
+ *  the eligible set for the community-world picker; the route re-checks. */
+async function apiGetMyWorlds(): Promise<MyWorldOption[]> {
+  const j = await jsonOrThrow<{ worlds: MyWorldOption[] }>(await fetch("/me/worlds?collab=1", { credentials: "include" }));
+  return j.worlds;
 }
 async function apiGetSettings(id: string): Promise<ServerSettingsWire> {
   const j = await jsonOrThrow<{ settings: ServerSettingsWire }>(await fetch(`/servers/${sid(id)}/settings`, { credentials: "include" }));
@@ -397,11 +426,12 @@ async function apiTransfer(id: string, target: string): Promise<void> {
     method: "POST", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify({ target }),
   }));
 }
-async function apiGetRooms(serverId: string): Promise<RoomListRow[]> {
+async function apiGetRooms(serverId: string): Promise<{ rooms: RoomListRow[]; categories: RoomCategorySummary[] }> {
   // /rooms?serverId returns this server's rooms (NULL-tolerant for the default
-  // server); rows carry serverId so the tab filters precisely.
-  const j = await jsonOrThrow<{ rooms: RoomListRow[] }>(await fetch(`/rooms?serverId=${sid(serverId)}`, { credentials: "include" }));
-  return j.rooms;
+  // server) plus its rail sections (categories block, migration 0344); rows
+  // carry serverId so the tab filters precisely.
+  const j = await jsonOrThrow<{ rooms: RoomListRow[]; categories?: RoomCategorySummary[] }>(await fetch(`/rooms?serverId=${sid(serverId)}`, { credentials: "include" }));
+  return { rooms: j.rooms, categories: j.categories ?? [] };
 }
 /** Per-server room admin (manage_rooms) — POST/PATCH/DELETE /servers/:id/rooms. */
 async function apiCreateServerRoom(serverId: string, body: Record<string, unknown>): Promise<void> {
@@ -414,8 +444,39 @@ async function apiPatchServerRoom(serverId: string, roomId: string, body: Record
     method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
   }));
 }
+/** One usergroup option for the room editor's role pickers. */
+interface RoomRoleGateGroup { id: string; name: string; color: string | null }
+/** The room's current role gates (room_role_gates, migration 0349) plus the
+ *  server's named usergroups to pick from. manage_rooms route. */
+async function apiGetRoomRoleGates(serverId: string, roomId: string): Promise<{ groups: RoomRoleGateGroup[]; access: string[]; post: string[] }> {
+  return jsonOrThrow(await fetch(`/servers/${sid(serverId)}/rooms/${sid(roomId)}/role-gates`, { credentials: "include" }));
+}
 async function apiDeleteServerRoom(serverId: string, roomId: string): Promise<void> {
   await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/rooms/${sid(roomId)}`, { method: "DELETE", credentials: "include" }));
+}
+/** Room categories (rail sections, migration 0344) — manage_rooms routes. */
+async function apiCreateRoomCategory(serverId: string, body: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/room-categories`, {
+    method: "POST", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
+  }));
+}
+async function apiPatchRoomCategory(serverId: string, catId: string, body: Record<string, unknown>): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/room-categories/${sid(catId)}`, {
+    method: "PATCH", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
+  }));
+}
+async function apiDeleteRoomCategory(serverId: string, catId: string): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/room-categories/${sid(catId)}`, { method: "DELETE", credentials: "include" }));
+}
+async function apiOrderRoomCategories(serverId: string, categoryIds: string[]): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/room-categories/order`, {
+    method: "PUT", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify({ categoryIds }),
+  }));
+}
+async function apiOrderServerRooms(serverId: string, roomIds: string[]): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/rooms/order`, {
+    method: "PUT", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify({ roomIds }),
+  }));
 }
 
 /* ============================================================
@@ -527,9 +588,10 @@ function ModPermissionCheckboxes({ value, onChange, grantable, disabled }: {
   );
 }
 
-/** Member-FEATURE checkbox grid for usergroups. Usergroups grant member
- *  features only — moderation power comes from the role tier (Roles tab), never
- *  from a group, so a group can't silently mint a moderator. */
+/** Member-FEATURE checkbox grid for usergroups (the user-facing "Roles" tab).
+ *  Usergroups grant member features only — moderation power comes from the
+ *  staff tier (the Staff tab, id `roles`), never from a group, so a group
+ *  can't silently mint a moderator. */
 function ServerFeatureCheckboxes({ value, onChange, grantable, disabled }: {
   value: ServerFeaturePermission[];
   onChange: (next: ServerFeaturePermission[]) => void;
@@ -707,6 +769,27 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
   const [prompt, setPrompt] = useState(detail.applicationPrompt ?? "");
   const [publicBrowsing, setPublicBrowsing] = useState(detail.publicBrowsing);
   const [isNsfw, setIsNsfw] = useState(detail.isNsfw ?? false);
+  // Community world picker (migration 0346). Options = worlds the viewer
+  // owns or collaborates on; the current link is seeded from the detail
+  // (already resolved through the world's visibility gates server-side).
+  const [worldId, setWorldId] = useState<string | null>(detail.world?.id ?? null);
+  const [myWorlds, setMyWorlds] = useState<MyWorldOption[] | null>(null);
+  // A failed fetch must not read as "you have no worlds": keep myWorlds null
+  // (the select stays rendered-but-disabled, current link preserved) and
+  // show a distinct load-error line instead of the empty-state copy.
+  const [myWorldsError, setMyWorldsError] = useState(false);
+  // Retry tick (the RoomEditForm gatesTick pattern): an inline "Try again"
+  // re-runs the fetch without closing settings, which would drop unsaved
+  // Overview edits.
+  const [myWorldsTick, setMyWorldsTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    setMyWorldsError(false);
+    apiGetMyWorlds()
+      .then((w) => { if (alive) setMyWorlds(w); })
+      .catch(() => { if (alive) setMyWorldsError(true); });
+    return () => { alive = false; };
+  }, [myWorldsTick]);
   // Under-18 accounts never see the 18+ toggle at all (no dead control); the
   // server rejects the write regardless. Cosmetic mirror of the server gate.
   const isAdultViewer = useChat((s) => s.viewerAge.isAdult);
@@ -714,6 +797,7 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
   const initialTags = detail.tags ?? [];
   const tagsDirty = tags.length !== initialTags.length || tags.some((t, i) => t !== initialTags[i]);
   const nsfwDirty = isNsfw !== (detail.isNsfw ?? false);
+  const worldDirty = worldId !== (detail.world?.id ?? null);
   const dirty = name !== detail.name
     || tagline !== (detail.tagline ?? "")
     || description !== (detail.descriptionHtml ?? "")
@@ -721,7 +805,8 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
     || joinMode !== detail.joinMode
     || prompt !== (detail.applicationPrompt ?? "")
     || publicBrowsing !== detail.publicBrowsing
-    || nsfwDirty;
+    || nsfwDirty
+    || worldDirty;
 
   return (
     <div className="max-w-xl space-y-3">
@@ -748,6 +833,48 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
         <span className="mt-0.5 block text-[10px] text-keep-muted">
           {t("console.overview.tagsHint")}
         </span>
+      </div>
+
+      {/* Community world (migration 0346): feature one of the viewer's own
+          (or collaborated) worlds as the server's lore. The route re-checks
+          ownership; a private pick simply won't show to people who can't
+          open the world. data-admin-anchor = Find-a-setting jump target. */}
+      <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5" data-admin-anchor="console.overview.world">
+        <span className="mb-1 block text-xs uppercase tracking-widest text-keep-muted">{t("console.overview.world")}</span>
+        {myWorldsError && !detail.world ? (
+          <p className="text-xs text-keep-muted">
+            {t("console.overview.worldLoadError")}{" "}
+            <button type="button" onClick={() => setMyWorldsTick((n) => n + 1)}
+              className="underline hover:text-keep-text">{t("console.rooms.roleGates.retry")}</button>
+          </p>
+        ) : myWorlds !== null && myWorlds.length === 0 && !detail.world ? (
+          <p className="text-xs text-keep-muted">{t("console.overview.worldEmpty")}</p>
+        ) : (
+          <>
+            <select
+              value={worldId ?? ""}
+              onChange={(e) => setWorldId(e.target.value || null)}
+              disabled={busy || myWorlds === null}
+              className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action"
+            >
+              <option value="">{t("console.overview.worldNone")}</option>
+              {/* Keep the CURRENT link selectable even when it isn't in the
+                  picker set (e.g. staff-set), so opening the tab never
+                  silently clears it. */}
+              {detail.world && !(myWorlds ?? []).some((w) => w.id === detail.world!.id) ? (
+                <option value={detail.world.id}>{detail.world.name}</option>
+              ) : null}
+              {(myWorlds ?? []).map((w) => (
+                <option key={w.id} value={w.id}>
+                  {w.name} · {t(`worlds:visibilityValue.${w.visibility}`)}
+                </option>
+              ))}
+            </select>
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              {t("console.overview.worldHint")}
+            </span>
+          </>
+        )}
       </div>
 
       <div className="rounded border border-keep-rule bg-keep-panel/20 p-2.5">
@@ -848,6 +975,9 @@ function OverviewTab({ detail, busy, run, onSaved }: TabProps) {
               // non-system servers), so an untouched save can never trip the
               // route's adult/system-server rejections.
               ...(nsfwDirty ? { isNsfw } : {}),
+              // Only on change, so an untouched save never trips the route's
+              // owns-or-collaborates world check on a staff-set link.
+              ...(worldDirty ? { worldId } : {}),
             });
             onSaved();
           });
@@ -1114,9 +1244,302 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
  * Tab: Rooms (read-only list)
  * ============================================================ */
 
+/** Small up/down arrow pair used by the category strip and the per-room
+ *  reorder controls. Icon-only, so each button carries title + aria-label. */
+function MoveArrows({ busy, canUp, canDown, onMove, upLabel, downLabel }: {
+  busy: boolean; canUp: boolean; canDown: boolean; onMove: (dir: -1 | 1) => void; upLabel: string; downLabel: string;
+}) {
+  const cls = "shrink-0 rounded border border-keep-rule p-0.5 text-keep-muted hover:border-keep-action hover:text-keep-action disabled:opacity-40 disabled:hover:border-keep-rule disabled:hover:text-keep-muted";
+  return (
+    <span className="flex shrink-0 items-center gap-0.5">
+      <button type="button" disabled={busy || !canUp} onClick={() => onMove(-1)} title={upLabel} aria-label={upLabel} className={cls}>
+        <ArrowUp className="h-3 w-3" aria-hidden="true" />
+      </button>
+      <button type="button" disabled={busy || !canDown} onClick={() => onMove(1)} title={downLabel} aria-label={downLabel} className={cls}>
+        <ArrowDown className="h-3 w-3" aria-hidden="true" />
+      </button>
+    </span>
+  );
+}
+
+/** Nearest scrollable ancestor — the container edge-scrolled mid-drag so a
+ *  long list can be traversed in one gesture. */
+function findScrollParent(el: HTMLElement | null): HTMLElement | null {
+  for (let n = el; n; n = n.parentElement) {
+    if (n.scrollHeight > n.clientHeight) {
+      const oy = getComputedStyle(n).overflowY;
+      if (oy === "auto" || oy === "scroll") return n;
+    }
+  }
+  return null;
+}
+
+/**
+ * Pointer-drag reordering for the category strip and the room buckets — the
+ * desktop upgrade over MoveArrows (which stay: they are the keyboard /
+ * mobile / screen-reader path). One gesture owned by a single pointerId,
+ * driven by WINDOW-level move/up/cancel listeners rather than pointer
+ * capture: the drag reorders the keyed row list in place, so React moves
+ * the dragged row's DOM node mid-gesture, and a moved node loses pointer
+ * capture (the spec clears capture on removal) — element-level handlers
+ * would strand the drag. The listeners detach when the gesture ends (any
+ * outcome) and on unmount, so a lost gesture can't linger. While dragging,
+ * the list reorders in place immediately (no animation, so it's calm under
+ * Reduce Motion by construction) and the new order persists ONCE on drop,
+ * through the same PUT route the arrows use. Gestures are hit-tested per
+ * `scope` (one per bucket) so a drag can never cross from one bucket into
+ * another.
+ */
+function useDragReorder({ disabled, onDrop }: {
+  disabled: boolean;
+  onDrop: (scope: string, ids: string[]) => void;
+}) {
+  // The optimistic display order for the bucket that owns it. Kept after the
+  // drop until the parent's refetch lands (see reset) so the list doesn't
+  // snap back to the stale order while the PUT + refetch are in flight.
+  const [preview, setPreview] = useState<{ scope: string; order: string[] } | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const gestureRef = useRef<{ pointerId: number; scope: string; id: string; order: string[]; base: string; moved: boolean; scroller: HTMLElement | null; detach: () => void } | null>(null);
+  // The window listeners outlive the render that attached them; route the
+  // drop through a ref so it never fires a stale closure.
+  const onDropRef = useRef(onDrop);
+  onDropRef.current = onDrop;
+
+  /** Adopt a refetch: the server order now includes the drop, so the
+   *  optimistic preview is redundant. No-op while a gesture is live. */
+  const reset = useCallback(() => {
+    if (!gestureRef.current) { setPreview(null); setDraggingId(null); }
+  }, []);
+
+  // Unmount mid-drag must not leave window listeners behind.
+  useEffect(() => () => { gestureRef.current?.detach(); gestureRef.current = null; }, []);
+
+  const finish = useCallback((e: PointerEvent, commit: boolean) => {
+    const g = gestureRef.current;
+    if (!g || e.pointerId !== g.pointerId) return;
+    gestureRef.current = null;
+    g.detach();
+    setDraggingId(null);
+    if (commit && g.moved && g.order.join("\n") !== g.base) onDropRef.current(g.scope, g.order);
+    else setPreview(null);
+  }, []);
+
+  const onWindowMove = useCallback((e: PointerEvent) => {
+    const g = gestureRef.current;
+    if (!g || e.pointerId !== g.pointerId) return;
+    // Edge auto-scroll: browsers only auto-scroll native HTML5 drags, so
+    // nudge the scrollable ancestor while the pointer rides its edges to
+    // let long-distance drags finish in one gesture.
+    if (g.scroller) {
+      const r = g.scroller.getBoundingClientRect();
+      if (e.clientY < r.top + 24) g.scroller.scrollTop -= 8;
+      else if (e.clientY > r.bottom - 24) g.scroller.scrollTop += 8;
+    }
+    // elementFromPoint sees the row under the cursor; matching on this
+    // gesture's scope keeps the reorder inside its own bucket.
+    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest(`[data-drag-scope="${g.scope}"]`);
+    const overId = over?.getAttribute("data-drag-id");
+    if (!overId || overId === g.id) return;
+    const from = g.order.indexOf(g.id);
+    const to = g.order.indexOf(overId);
+    if (from < 0 || to < 0 || from === to) return;
+    const next = [...g.order];
+    next.splice(from, 1);
+    next.splice(to, 0, g.id);
+    g.order = next;
+    g.moved = true;
+    setPreview({ scope: g.scope, order: next });
+  }, []);
+  const onWindowUp = useCallback((e: PointerEvent) => finish(e, true), [finish]);
+  const onWindowCancel = useCallback((e: PointerEvent) => finish(e, false), [finish]);
+
+  return {
+    draggingId,
+    reset,
+    /** The bucket's display order: the live/optimistic preview when this
+     *  scope owns it, else the server order the caller passed. */
+    orderFor: (scope: string, ids: string[]) => (preview && preview.scope === scope ? preview.order : ids),
+    /** Hit-test markers; stamp on every row of the bucket. */
+    rowProps: (scope: string, id: string) => ({ "data-drag-scope": scope, "data-drag-id": id }),
+    gripProps: (scope: string, ids: string[], id: string) => ({
+      onPointerDown: (e: ReactPointerEvent<HTMLElement>) => {
+        // Primary button only, never mid-gesture (a second pointer can't
+        // hijack or strand an active drag).
+        if (disabled || gestureRef.current || e.button !== 0) return;
+        const detach = () => {
+          window.removeEventListener("pointermove", onWindowMove);
+          window.removeEventListener("pointerup", onWindowUp);
+          window.removeEventListener("pointercancel", onWindowCancel);
+        };
+        gestureRef.current = {
+          pointerId: e.pointerId, scope, id, order: [...ids], base: ids.join("\n"), moved: false,
+          scroller: findScrollParent(e.currentTarget as HTMLElement), detach,
+        };
+        window.addEventListener("pointermove", onWindowMove);
+        window.addEventListener("pointerup", onWindowUp);
+        window.addEventListener("pointercancel", onWindowCancel);
+        setDraggingId(id);
+        setPreview({ scope, order: [...ids] });
+        e.preventDefault();
+      },
+    }),
+  };
+}
+
+/** The drag affordance: a subtle grip glyph. A span, not a button —
+ *  keyboard users reorder with the MoveArrows beside it — and desktop-only
+ *  (hidden below sm) since touch keeps the arrows. touch-none stops a
+ *  stray touch-drag from scrolling mid-gesture. */
+function DragGrip({ title, active, handlers }: {
+  title: string;
+  active: boolean;
+  handlers: {
+    onPointerDown: (e: ReactPointerEvent<HTMLElement>) => void;
+  };
+}) {
+  // aria-hidden, not aria-label: the span is unfocusable and role-less, so a
+  // label is invalid ARIA — assistive tech reorders via the MoveArrows.
+  return (
+    <span
+      {...handlers}
+      title={title}
+      aria-hidden="true"
+      className={`hidden shrink-0 touch-none select-none rounded p-0.5 sm:inline-flex ${active ? "cursor-grabbing text-keep-action" : "cursor-grab text-keep-muted/60 hover:text-keep-action"}`}
+    >
+      <GripVertical className="h-3.5 w-3.5" aria-hidden />
+    </span>
+  );
+}
+
+/** Room/category icon preview — the same URL-vs-glyph duality the rail and
+ *  Room Info bar apply to `rooms.icon`. */
+function RoomIconGlyph({ icon }: { icon: string | null | undefined }) {
+  if (!icon) return null;
+  return /^https?:\/\//i.test(icon) ? (
+    <img src={icon} alt="" className="h-4 w-4 shrink-0 rounded object-cover" referrerPolicy="no-referrer" />
+  ) : (
+    <span aria-hidden className="shrink-0 text-sm leading-none">{icon}</span>
+  );
+}
+
+/** One editable category row: rename + icon + save/delete. Reordering is
+ *  handled by the parent (it owns the strip order). */
+function RoomCategoryRow({ detail, cat, busy, run, onChanged }: {
+  detail: ServerConsoleDetail; cat: RoomCategorySummary; busy: boolean;
+  run: (fn: () => Promise<void>) => Promise<void>; onChanged: () => void;
+}) {
+  const { t } = useTranslation("servers");
+  const [name, setName] = useState(cat.name);
+  const [icon, setIcon] = useState(cat.icon ?? "");
+  // Resync after a parent refetch replaces the row (the key is cat.id, so a
+  // rename saved elsewhere must land in these fields too).
+  useEffect(() => { setName(cat.name); setIcon(cat.icon ?? ""); }, [cat.name, cat.icon]);
+  const dirty = name.trim() !== cat.name || (icon.trim() || null) !== (cat.icon ?? null);
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      <RoomIconGlyph icon={cat.icon} />
+      <input value={name} onChange={(e) => setName(e.target.value)} maxLength={40}
+        aria-label={t("console.rooms.categories.nameLabel")}
+        className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
+      <input value={icon} onChange={(e) => setIcon(e.target.value)} maxLength={500}
+        aria-label={t("console.rooms.iconLabel")} title={t("console.rooms.iconHint")}
+        placeholder={t("console.rooms.iconPlaceholder")}
+        className="w-28 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action" />
+      <button type="button" disabled={busy || !dirty || !name.trim()}
+        onClick={() => void run(async () => {
+          await apiPatchRoomCategory(detail.id, cat.id, { name: name.trim(), icon: icon.trim() ? icon.trim() : null });
+          onChanged();
+        })}
+        className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action disabled:opacity-40">
+        {t("shared.save")}
+      </button>
+      <button type="button" disabled={busy}
+        onClick={() => { if (window.confirm(t("console.rooms.categories.deleteConfirm", { name: cat.name }))) void run(async () => { await apiDeleteRoomCategory(detail.id, cat.id); onChanged(); }); }}
+        className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">
+        {t("shared.delete")}
+      </button>
+    </div>
+  );
+}
+
+/** Category strip manager: create / rename / re-icon / delete / reorder the
+ *  rail sections (room_categories, migration 0344). manage_rooms routes. */
+function RoomCategoriesManager({ detail, categories, busy, run, onChanged }: {
+  detail: ServerConsoleDetail; categories: RoomCategorySummary[]; busy: boolean;
+  run: (fn: () => Promise<void>) => Promise<void>; onChanged: () => void;
+}) {
+  const { t } = useTranslation("servers");
+  const [newName, setNewName] = useState("");
+  const [newIcon, setNewIcon] = useState("");
+  // Drag-to-reorder (desktop) alongside the arrows (keyboard/mobile). Both
+  // persist through the same PUT /room-categories/order route. The refetch
+  // runs on failure too (run() swallows the rejection into the error banner)
+  // so a rejected PUT snaps the optimistic preview back to server order.
+  const drag = useDragReorder({
+    disabled: busy,
+    onDrop: (_scope, ids) => { void run(async () => { await apiOrderRoomCategories(detail.id, ids); }).finally(() => onChanged()); },
+  });
+  const dragReset = drag.reset;
+  useEffect(() => { dragReset(); }, [categories, dragReset]);
+  const catScope = `cats:${detail.id}`;
+  const catById = new Map(categories.map((c) => [c.id, c]));
+  const ordered = drag.orderFor(catScope, categories.map((c) => c.id))
+    .map((id) => catById.get(id))
+    .filter((c): c is RoomCategorySummary => !!c);
+  const moveCategory = (index: number, dir: -1 | 1) => {
+    const ids = ordered.map((c) => c.id);
+    const [id] = ids.splice(index, 1);
+    ids.splice(index + dir, 0, id!);
+    void run(async () => { await apiOrderRoomCategories(detail.id, ids); onChanged(); });
+  };
+  return (
+    <div data-admin-anchor="console.rooms.categories.title" className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
+      <p className="text-[11px] font-semibold uppercase tracking-widest text-keep-muted">{t("console.rooms.categories.title")}</p>
+      <p className="text-[10px] text-keep-muted">{t("console.rooms.categories.hint")}</p>
+      {ordered.length === 0 ? (
+        <p className="text-xs italic text-keep-muted">{t("console.rooms.categories.none")}</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {ordered.map((c, i) => (
+            <li key={c.id} {...drag.rowProps(catScope, c.id)}
+              className={`flex items-center gap-1.5 rounded ${drag.draggingId === c.id ? "bg-keep-action/10" : ""}`}>
+              <DragGrip title={t("console.rooms.dragToReorder")} active={drag.draggingId === c.id}
+                handlers={drag.gripProps(catScope, ordered.map((x) => x.id), c.id)} />
+              <MoveArrows busy={busy} canUp={i > 0} canDown={i < ordered.length - 1}
+                onMove={(dir) => moveCategory(i, dir)}
+                upLabel={t("console.rooms.categories.moveUp")} downLabel={t("console.rooms.categories.moveDown")} />
+              <RoomCategoryRow detail={detail} cat={c} busy={busy} run={run} onChanged={onChanged} />
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex items-center gap-1.5 border-t border-keep-rule/60 pt-2">
+        <input value={newName} onChange={(e) => setNewName(e.target.value)} maxLength={40}
+          placeholder={t("console.rooms.categories.namePlaceholder")}
+          aria-label={t("console.rooms.categories.nameLabel")}
+          className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
+        <input value={newIcon} onChange={(e) => setNewIcon(e.target.value)} maxLength={500}
+          placeholder={t("console.rooms.iconPlaceholder")}
+          aria-label={t("console.rooms.iconLabel")} title={t("console.rooms.iconHint")}
+          className="w-28 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action" />
+        <button type="button" disabled={busy || !newName.trim()}
+          onClick={() => void run(async () => {
+            await apiCreateRoomCategory(detail.id, { name: newName.trim(), ...(newIcon.trim() ? { icon: newIcon.trim() } : {}) });
+            setNewName(""); setNewIcon("");
+            onChanged();
+          })}
+          className="shrink-0 rounded border border-keep-action bg-keep-action px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
+          {t("console.rooms.categories.add")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function RoomsTab({ detail, busy, run }: TabProps) {
   const { t } = useTranslation("servers");
   const [rooms, setRooms] = useState<RoomListRow[] | null>(null);
+  const [categories, setCategories] = useState<RoomCategorySummary[]>([]);
   const [tick, setTick] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -1124,7 +1547,7 @@ function RoomsTab({ detail, busy, run }: TabProps) {
   useEffect(() => {
     let alive = true;
     apiGetRooms(detail.id)
-      .then((rs) => {
+      .then(({ rooms: rs, categories: cats }) => {
         if (!alive) return;
         // Two partitions stay OUT of this tab: forum BOARDS (rooms with a
         // forumId — the forums system manages those, and deleting one here
@@ -1133,80 +1556,178 @@ function RoomsTab({ detail, busy, run }: TabProps) {
         const managed = rs.filter((r) => !r.forumId && !r.linkedSfwRoomId);
         const tagged = managed.filter((r) => r.serverId != null);
         setRooms(tagged.length ? tagged.filter((r) => r.serverId === detail.id) : managed);
+        setCategories(cats);
       })
-      .catch(() => { if (alive) setRooms([]); });
+      .catch(() => { if (alive) { setRooms([]); setCategories([]); } });
     return () => { alive = false; };
   }, [detail.id, tick]);
 
   const refresh = () => setTick((t) => t + 1);
 
+  // Group the list the way the rail does: uncategorized bucket FIRST, then
+  // each category in strip order. /rooms already delivers rows sorted by
+  // (category, manual order, name), so each bucket keeps the server's order.
+  const buckets = useMemo(() => {
+    const catIds = new Set(categories.map((c) => c.id));
+    const by = new Map<string, RoomListRow[]>();
+    for (const r of rooms ?? []) {
+      const key = r.categoryId && catIds.has(r.categoryId) ? r.categoryId : "";
+      const arr = by.get(key);
+      if (arr) arr.push(r);
+      else by.set(key, [r]);
+    }
+    return by;
+  }, [rooms, categories]);
+
+  // Move a room one slot within its bucket by re-stamping the whole bucket's
+  // manual order (sortOrder = index) in one request.
+  const moveRoom = (bucket: RoomListRow[], index: number, dir: -1 | 1) => {
+    const ids = bucket.map((r) => r.id);
+    const [id] = ids.splice(index, 1);
+    ids.splice(index + dir, 0, id!);
+    void run(async () => { await apiOrderServerRooms(detail.id, ids); refresh(); });
+  };
+
+  // Drag-to-reorder within a bucket (desktop) alongside the arrows; persists
+  // through the same PUT /rooms/order route (sortOrder = index). The refetch
+  // runs on failure too (run() swallows the rejection into the error banner)
+  // so a rejected PUT snaps the optimistic preview back to server order.
+  const drag = useDragReorder({
+    disabled: busy,
+    onDrop: (_scope, ids) => { void run(async () => { await apiOrderServerRooms(detail.id, ids); }).finally(() => refresh()); },
+  });
+  const dragReset = drag.reset;
+  useEffect(() => { dragReset(); }, [rooms, dragReset]);
+  const bucketScope = (categoryId: string) => `bucket:${detail.id}:${categoryId}`;
+  const orderedBucket = (scope: string, bucket: RoomListRow[]) => {
+    const byId = new Map(bucket.map((r) => [r.id, r]));
+    return drag.orderFor(scope, bucket.map((r) => r.id))
+      .map((id) => byId.get(id))
+      .filter((r): r is RoomListRow => !!r);
+  };
+
+  const roomRow = (r: RoomListRow, bucket: RoomListRow[], i: number, scope: string) => (
+    <li key={r.id} {...drag.rowProps(scope, r.id)}
+      className={`rounded border bg-keep-panel/30 px-2.5 py-1.5 ${drag.draggingId === r.id ? "border-keep-action" : "border-keep-rule"}`}>
+      <div className="flex items-center gap-2">
+        <DragGrip title={t("console.rooms.dragToReorder")} active={drag.draggingId === r.id}
+          handlers={drag.gripProps(scope, bucket.map((x) => x.id), r.id)} />
+        <MoveArrows busy={busy} canUp={i > 0} canDown={i < bucket.length - 1}
+          onMove={(dir) => moveRoom(bucket, i, dir)}
+          upLabel={t("console.rooms.moveUp")} downLabel={t("console.rooms.moveDown")} />
+        <RoomIconGlyph icon={r.icon} />
+        <span className="min-w-0 flex-1 truncate text-sm text-keep-text">
+          {r.name}
+          {r.type === "private" ? <span className="ml-1.5 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">{t("console.rooms.privateChip")}</span> : null}
+          {/* 18+ marker (age-restriction plan, Phase 2) so a flip is
+              visible in this list the moment it saves. Mirrors the
+              admin Banned badge red — a warning on every palette. */}
+          {r.isNsfw ? <span className="ml-1.5 rounded border border-[#e06070] px-1 text-[9px] font-semibold uppercase tracking-widest text-[#e06070]">{t("console.rooms.nsfwChip")}</span> : null}
+          {/* The room carries a hidden 18+ channel behind its
+              SFW/18+ toggle (managed via the editor's checkbox). */}
+          {r.linkedNsfwRoomId ? <span className="ml-1.5 rounded border border-[#e06070]/60 px-1 text-[9px] font-semibold uppercase tracking-widest text-[#e06070]/80">{t("console.rooms.adultChannelChip")}</span> : null}
+        </span>
+        {Array.isArray(r.occupants) ? <span className="shrink-0 text-[10px] text-keep-muted">{t("console.rooms.occupantsHere", { count: r.occupants.length })}</span> : null}
+        <button type="button" disabled={busy} onClick={() => { setEditingId((id) => (id === r.id ? null : r.id)); setCreating(false); }}
+          className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">
+          {editingId === r.id ? t("console.rooms.done") : t("shared.edit")}</button>
+        <button type="button" disabled={busy}
+          onClick={() => { if (window.confirm(t("console.rooms.deleteConfirm", { name: r.name }))) void run(async () => { await apiDeleteServerRoom(detail.id, r.id); refresh(); }); }}
+          className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.delete")}</button>
+      </div>
+      {editingId === r.id ? (
+        <RoomEditForm detail={detail} room={r} categories={categories} busy={busy} run={run}
+          onSaved={() => { setEditingId(null); refresh(); }} />
+      ) : null}
+    </li>
+  );
+
+  const uncategorized = buckets.get("") ?? [];
+
   return (
     <div className="max-w-xl space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[11px] text-keep-muted">
-          <Trans t={t} i18nKey="console.rooms.blurb" components={{ cmd: <span className="text-keep-text" /> }} />
-        </p>
-        <button type="button" data-tour="server-settings-rooms-create" onClick={() => { setCreating((c) => !c); setEditingId(null); }}
-          className="shrink-0 rounded border border-keep-action bg-keep-action px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg">
-          {creating ? t("shared.cancel") : t("console.rooms.newRoom")}
-        </button>
-      </div>
+      <p className="text-[11px] text-keep-muted">
+        <Trans t={t} i18nKey="console.rooms.blurb" components={{ cmd: <span className="text-keep-text" /> }} />
+      </p>
 
+      <RoomCategoriesManager detail={detail} categories={categories} busy={busy} run={run} onChanged={refresh} />
+
+      {/* The find-a-setting anchor lives on this always-mounted wrapper (not
+          the loaded list) so the search jump's scroll+flash has a target even
+          while the room fetch is in flight or comes back empty — and the
+          heading gives the search hit a visible on-page counterpart. */}
+      <div data-admin-anchor="console.rooms.orderTitle" className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-widest text-keep-muted">{t("console.rooms.orderTitle")}</p>
+          <button type="button" data-tour="server-settings-rooms-create" onClick={() => { setCreating((c) => !c); setEditingId(null); }}
+            className="shrink-0 rounded border border-keep-action bg-keep-action px-2.5 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg">
+            {creating ? t("shared.cancel") : t("console.rooms.newRoom")}
+          </button>
+        </div>
       {creating ? (
-        <RoomCreateForm detail={detail} busy={busy} run={run}
+        <RoomCreateForm detail={detail} categories={categories} busy={busy} run={run}
           onCreated={() => { setCreating(false); refresh(); }} />
       ) : null}
-
       {!rooms ? (
         <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>
       ) : rooms.length === 0 ? (
         <p className="text-xs italic text-keep-muted">{t("console.rooms.none")}</p>
       ) : (
-        <ul className="space-y-1.5">
-          {rooms.map((r) => (
-            <li key={r.id} className="rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5">
-              <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-sm text-keep-text">
-                  {r.name}
-                  {r.type === "private" ? <span className="ml-1.5 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">{t("console.rooms.privateChip")}</span> : null}
-                  {/* 18+ marker (age-restriction plan, Phase 2) so a flip is
-                      visible in this list the moment it saves. Mirrors the
-                      admin Banned badge red — a warning on every palette. */}
-                  {r.isNsfw ? <span className="ml-1.5 rounded border border-[#e06070] px-1 text-[9px] font-semibold uppercase tracking-widest text-[#e06070]">{t("console.rooms.nsfwChip")}</span> : null}
-                  {/* The room carries a hidden 18+ channel behind its
-                      SFW/18+ toggle (managed via the editor's checkbox). */}
-                  {r.linkedNsfwRoomId ? <span className="ml-1.5 rounded border border-[#e06070]/60 px-1 text-[9px] font-semibold uppercase tracking-widest text-[#e06070]/80">{t("console.rooms.adultChannelChip")}</span> : null}
-                </span>
-                {Array.isArray(r.occupants) ? <span className="shrink-0 text-[10px] text-keep-muted">{t("console.rooms.occupantsHere", { count: r.occupants.length })}</span> : null}
-                <button type="button" disabled={busy} onClick={() => { setEditingId((id) => (id === r.id ? null : r.id)); setCreating(false); }}
-                  className="shrink-0 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted hover:border-keep-action hover:text-keep-action">
-                  {editingId === r.id ? t("console.rooms.done") : t("shared.edit")}</button>
-                <button type="button" disabled={busy}
-                  onClick={() => { if (window.confirm(t("console.rooms.deleteConfirm", { name: r.name }))) void run(async () => { await apiDeleteServerRoom(detail.id, r.id); refresh(); }); }}
-                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10">{t("shared.delete")}</button>
-              </div>
-              {editingId === r.id ? (
-                <RoomEditForm detail={detail} room={r} busy={busy} run={run}
-                  onSaved={() => { setEditingId(null); refresh(); }} />
+        <div className="space-y-3">
+          {/* Uncategorized bucket first (headerless in the rail; labeled here
+              so the console reads unambiguously), then each category in strip
+              order — the exact grouping members see. */}
+          {uncategorized.length > 0 ? (
+            <div className="space-y-1.5">
+              {categories.length > 0 ? (
+                <p className="text-[10px] uppercase tracking-widest text-keep-muted">{t("console.rooms.categories.uncategorized")}</p>
               ) : null}
-            </li>
-          ))}
-        </ul>
+              {(() => {
+                const scope = bucketScope("");
+                const bucket = orderedBucket(scope, uncategorized);
+                return <ul className="space-y-1.5">{bucket.map((r, i) => roomRow(r, bucket, i, scope))}</ul>;
+              })()}
+            </div>
+          ) : null}
+          {categories.map((c) => {
+            const scope = bucketScope(c.id);
+            const bucket = orderedBucket(scope, buckets.get(c.id) ?? []);
+            return (
+              <div key={c.id} className="space-y-1.5">
+                <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-keep-muted">
+                  <RoomIconGlyph icon={c.icon} />
+                  <span className="min-w-0 truncate">{c.name}</span>
+                </p>
+                {bucket.length === 0 ? (
+                  <p className="text-[10px] italic text-keep-muted">{t("console.rooms.categories.emptyBucket")}</p>
+                ) : (
+                  <ul className="space-y-1.5">{bucket.map((r, i) => roomRow(r, bucket, i, scope))}</ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
+      </div>
     </div>
   );
 }
 
 /** Inline "new room" form for the Rooms tab. */
-function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsoleDetail; busy: boolean; run: (fn: () => Promise<void>) => Promise<void>; onCreated: () => void }) {
+function RoomCreateForm({ detail, categories, busy, run, onCreated }: { detail: ServerConsoleDetail; categories: RoomCategorySummary[]; busy: boolean; run: (fn: () => Promise<void>) => Promise<void>; onCreated: () => void }) {
   const { t } = useTranslation("servers");
   const [name, setName] = useState("");
   const [type, setType] = useState<"public" | "private">("public");
   const [password, setPassword] = useState("");
   const [topic, setTopic] = useState("");
+  const [icon, setIcon] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [persistent, setPersistent] = useState(true);
   const [nsfw, setNsfw] = useState(false);
   const [adultChannel, setAdultChannel] = useState(false);
+  // Who can post (migration 0345): "staff" creates an announcements-style
+  // info room where only staff post and everyone else reads + reacts.
+  const [postMode, setPostMode] = useState<"everyone" | "staff">("everyone");
   // 18+ room checkbox (age-restriction plan, Phase 2): hidden from under-18
   // viewers entirely (the route rejects the write regardless), and moot
   // inside an 18+ community, where every room is 18+ by the server flag.
@@ -1230,6 +1751,31 @@ function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsol
       ) : null}
       <input value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={200} placeholder={t("console.rooms.topicPlaceholder")}
         className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={icon} onChange={(e) => setIcon(e.target.value)} maxLength={500}
+          placeholder={t("console.rooms.iconPlaceholder")} title={t("console.rooms.iconHint")}
+          aria-label={t("console.rooms.iconLabel")}
+          className="w-40 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
+        {categories.length > 0 ? (
+          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
+            aria-label={t("console.rooms.categoryLabel")} title={t("console.rooms.categoryHint")}
+            className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
+            <option value="">{t("console.rooms.categories.uncategorized")}</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        ) : null}
+      </div>
+      <label className="block text-xs">
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.postModeLabel")}</span>
+        <select value={postMode} onChange={(e) => setPostMode(e.target.value as "everyone" | "staff")}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
+          <option value="everyone">{t("console.rooms.postModeEveryone")}</option>
+          <option value="staff">{t("console.rooms.postModeStaff")}</option>
+        </select>
+        {/* Hint shown unconditionally, matching the room editor's rendering
+            of the same setting. */}
+        <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.postModeHint")}</span>
+      </label>
       <label className="flex items-start gap-2 text-xs text-keep-text">
         <input type="checkbox" className="mt-0.5" checked={persistent} onChange={(e) => setPersistent(e.target.checked)} />
         <span>
@@ -1262,7 +1808,7 @@ function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsol
       <div className="flex justify-end">
         <button type="button" disabled={busy || !canSave}
           onClick={() => void run(async () => {
-            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(nsfw ? { isNsfw: true } : {}), ...(adultChannel && !nsfw && type === "public" ? { adultChannel: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}) });
+            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(postMode === "staff" ? { postMode } : {}), ...(nsfw ? { isNsfw: true } : {}), ...(adultChannel && !nsfw && type === "public" ? { adultChannel: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}), ...(icon.trim() ? { icon: icon.trim() } : {}), ...(categoryId ? { categoryId } : {}) });
             onCreated();
           })}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.rooms.createRoom")}</button>
@@ -1271,12 +1817,114 @@ function RoomCreateForm({ detail, busy, run, onCreated }: { detail: ServerConsol
   );
 }
 
-/** Inline per-room editor (name / topic / message expiry). */
-function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerConsoleDetail; room: RoomListRow; busy: boolean; run: (fn: () => Promise<void>) => Promise<void>; onSaved: () => void }) {
+/** Checkbox strip of the server's named usergroups, shared by the room
+ *  editor's two role pickers (who-can-see / who-can-post). Each chip shows
+ *  the group's color dot; empty servers get a pointer to the Usergroups
+ *  tab instead of a dead control. */
+function RoleGateCheckList({ groups, selected, onToggle, ariaLabel }: {
+  groups: RoomRoleGateGroup[]; selected: Set<string>; onToggle: (id: string) => void; ariaLabel: string;
+}) {
+  const { t } = useTranslation("servers");
+  if (groups.length === 0) {
+    return <p className="mt-1 text-[10px] italic text-keep-muted">{t("console.rooms.roleGates.noGroups")}</p>;
+  }
+  return (
+    <div className="mt-1 flex flex-wrap gap-1.5" role="group" aria-label={ariaLabel}>
+      {groups.map((g) => {
+        const color = safeCssColor(g.color);
+        return (
+          <label
+            key={g.id}
+            className={`inline-flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-xs ${
+              selected.has(g.id)
+                ? "border-keep-action bg-keep-action/10 text-keep-text"
+                : "border-keep-rule bg-keep-bg text-keep-muted hover:border-keep-action/60 hover:text-keep-text"
+            }`}
+          >
+            <input
+              type="checkbox"
+              className="h-3 w-3"
+              checked={selected.has(g.id)}
+              onChange={() => onToggle(g.id)}
+            />
+            <span
+              aria-hidden
+              className="h-2 w-2 shrink-0 rounded-full bg-keep-muted/60"
+              style={color ? { background: color } : undefined}
+            />
+            {g.name}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Inline per-room editor (name / topic / icon / category / who-can-see /
+ *  who-can-post / message lifetime). */
+function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail: ServerConsoleDetail; room: RoomListRow; categories: RoomCategorySummary[]; busy: boolean; run: (fn: () => Promise<void>) => Promise<void>; onSaved: () => void }) {
   const { t } = useTranslation("servers");
   const [name, setName] = useState(room.name);
   const [topic, setTopic] = useState(room.topic ?? "");
-  const [expiry, setExpiry] = useState<string>(room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "");
+  const [icon, setIcon] = useState(room.icon ?? "");
+  const [categoryId, setCategoryId] = useState(room.categoryId ?? "");
+  // Message lifetime is a 3-way policy (migration 0347): inherit the server
+  // retention window / a custom per-room minutes value / never expire. The
+  // minutes input only applies to the custom mode.
+  const initialLifetime: "inherit" | "custom" | "never" = room.retentionExempt
+    ? "never"
+    : room.messageExpiryMinutes != null && room.messageExpiryMinutes > 0
+      ? "custom"
+      : "inherit";
+  const [lifetime, setLifetime] = useState<"inherit" | "custom" | "never">(initialLifetime);
+  const [expiry, setExpiry] = useState<string>(
+    room.messageExpiryMinutes != null && room.messageExpiryMinutes > 0 ? String(room.messageExpiryMinutes) : "",
+  );
+  // Who can post (migrations 0345/0349).
+  const [postMode, setPostMode] = useState<"everyone" | "staff" | "roles">(room.postMode ?? "everyone");
+  // Per-role room gates (room_role_gates, migration 0349), lazily fetched
+  // with the editor: the server's named usergroups + this room's current
+  // access/post rows. `gates` null = still loading (role controls hidden).
+  const [gates, setGates] = useState<{ groups: RoomRoleGateGroup[]; access: string[]; post: string[] } | null>(null);
+  const [gatesFailed, setGatesFailed] = useState(false);
+  const [gatesTick, setGatesTick] = useState(0);
+  const [accessMode, setAccessMode] = useState<"everyone" | "roles">("everyone");
+  const [accessIds, setAccessIds] = useState<Set<string>>(new Set());
+  const [postIds, setPostIds] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    let alive = true;
+    setGatesFailed(false);
+    apiGetRoomRoleGates(detail.id, room.id)
+      .then((g) => {
+        if (!alive) return;
+        setGates(g);
+        setAccessIds(new Set(g.access));
+        setPostIds(new Set(g.post));
+        setAccessMode(g.access.length > 0 ? "roles" : "everyone");
+      })
+      // Surface the failure instead of silently hiding the role controls —
+      // the rest of the editor still works.
+      .catch(() => { if (alive) setGatesFailed(true); });
+    return () => { alive = false; };
+  }, [detail.id, room.id, gatesTick]);
+  const toggleIn = (set: (fn: (cur: Set<string>) => Set<string>) => void) => (id: string) =>
+    set((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  const sameIds = (a: Set<string>, b: string[]) => a.size === b.length && b.every((x) => a.has(x));
+  const effectiveAccessIds = accessMode === "roles" ? accessIds : new Set<string>();
+  const accessDirty = !!gates && !sameIds(effectiveAccessIds, gates.access);
+  const postRolesDirty = !!gates && !sameIds(postIds, gates.post);
+  // "Specific roles" with nothing picked would silently save a public room —
+  // block Save and say so instead.
+  const accessInvalid = accessMode === "roles" && accessIds.size === 0;
+  // Same for posting: "Specific roles" with zero roles checked is effectively
+  // staff-only while the editor claims roles can post. Only enforced once the
+  // gate fetch has seeded postIds, so a load failure can't dead-lock Save on
+  // an already-roles room.
+  const postRolesInvalid = !!gates && postMode === "roles" && postIds.size === 0;
   const [persistent, setPersistent] = useState(room.persistent ?? true);
   const [nsfw, setNsfw] = useState(room.isNsfw ?? false);
   // 18+ CHANNEL: an adults-only side feed behind a SFW/18+ toggle on the
@@ -1289,7 +1937,14 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
   const serverIsNsfw = detail.isNsfw ?? false;
   const nsfwDirty = nsfw !== (room.isNsfw ?? false);
   const channelDirty = adultChannel !== !!room.linkedNsfwRoomId;
-  const dirty = name !== room.name || topic !== (room.topic ?? "") || expiry !== (room.messageExpiryMinutes != null ? String(room.messageExpiryMinutes) : "") || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty;
+  const iconDirty = (icon.trim() || null) !== (room.icon ?? null);
+  const categoryDirty = (categoryId || null) !== (room.categoryId ?? null);
+  const postModeDirty = postMode !== (room.postMode ?? "everyone");
+  const lifetimeDirty = lifetime !== initialLifetime
+    || (lifetime === "custom" && expiry !== String(room.messageExpiryMinutes ?? ""));
+  // Custom mode needs an actual minutes value before Save makes sense.
+  const lifetimeInvalid = lifetime === "custom" && !(Number(expiry) >= 1);
+  const dirty = name !== room.name || topic !== (room.topic ?? "") || lifetimeDirty || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty || iconDirty || categoryDirty || postModeDirty || accessDirty || postRolesDirty;
   return (
     <div className="mt-2 space-y-2 border-t border-keep-rule/60 pt-2">
       <label className="block text-xs">
@@ -1303,9 +1958,108 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
           className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
       </label>
       <label className="block text-xs">
-        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.expiryLabel")}</span>
-        <input type="number" min={0} value={expiry} onChange={(e) => setExpiry(e.target.value)} placeholder={t("console.rooms.defaultPlaceholder")}
-          className="w-32 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.iconLabel")}</span>
+        <input value={icon} onChange={(e) => setIcon(e.target.value)} maxLength={500} placeholder={t("console.rooms.iconPlaceholder")}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action" />
+        <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.iconHint")}</span>
+      </label>
+      {categories.length > 0 ? (
+        <label className="block text-xs">
+          <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.categoryLabel")}</span>
+          <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
+            <option value="">{t("console.rooms.categories.uncategorized")}</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.categoryHint")}</span>
+        </label>
+      ) : null}
+      {/* Who can SEE the room (room_role_gates kind='access'). Rendered once
+          the gate fetch lands so the picker never lies about current state;
+          a failed fetch says so (with a retry) instead of vanishing. */}
+      {!gates && gatesFailed ? (
+        <p className="text-[10px] text-keep-accent/90">
+          {t("console.rooms.roleGates.loadFailed")}{" "}
+          <button type="button" onClick={() => setGatesTick((n) => n + 1)}
+            className="underline hover:text-keep-text">{t("console.rooms.roleGates.retry")}</button>
+        </p>
+      ) : null}
+      {gates ? (
+        <label className="block text-xs" data-admin-anchor="console.rooms.accessLabel">
+          <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.accessLabel")}</span>
+          <select value={accessMode} onChange={(e) => setAccessMode(e.target.value as "everyone" | "roles")}
+            className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
+            <option value="everyone">{t("console.rooms.accessEveryone")}</option>
+            <option value="roles">{t("console.rooms.accessRoles")}</option>
+          </select>
+          {accessMode === "roles" ? (
+            <>
+              <RoleGateCheckList groups={gates.groups} selected={accessIds}
+                onToggle={toggleIn(setAccessIds)} ariaLabel={t("console.rooms.accessLabel")} />
+              {accessInvalid ? (
+                <span className="mt-0.5 block text-[10px] text-keep-accent/90">{t("console.rooms.accessNeedsRole")}</span>
+              ) : null}
+              <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.accessHint")}</span>
+              {/* Deleting a role deletes its gate rows — the room can turn
+                  public again without anyone touching this editor. */}
+              <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.accessDeleteWarn")}</span>
+              {room.linkedNsfwRoomId ? (
+                <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.accessAdultChannelNote")}</span>
+              ) : null}
+            </>
+          ) : null}
+        </label>
+      ) : null}
+      <label className="block text-xs" data-admin-anchor="console.rooms.postModeLabel">
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.postModeLabel")}</span>
+        <select value={postMode} onChange={(e) => setPostMode(e.target.value as "everyone" | "staff" | "roles")}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
+          <option value="everyone">{t("console.rooms.postModeEveryone")}</option>
+          <option value="staff">{t("console.rooms.postModeStaff")}</option>
+          {/* Always rendered so a room already saved as "roles" never
+              displays as "Everyone" while the gate fetch is pending or has
+              failed; picking it just waits for the checklist below. */}
+          <option value="roles" disabled={!gates}>{t("console.rooms.postModeRoles")}</option>
+        </select>
+        <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.postModeHint")}</span>
+        {gates && postMode === "roles" ? (
+          <>
+            <RoleGateCheckList groups={gates.groups} selected={postIds}
+              onToggle={toggleIn(setPostIds)} ariaLabel={t("console.rooms.postModeRoles")} />
+            {postRolesInvalid ? (
+              <span className="mt-0.5 block text-[10px] text-keep-accent/90">{t("console.rooms.postNeedsRole")}</span>
+            ) : null}
+            <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.postRolesHint")}</span>
+          </>
+        ) : null}
+      </label>
+      <label className="block text-xs" data-admin-anchor="console.rooms.lifetimeLabel">
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.lifetimeLabel")}</span>
+        <select value={lifetime} onChange={(e) => setLifetime(e.target.value as "inherit" | "custom" | "never")}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
+          <option value="inherit">{t("console.rooms.lifetimeInherit")}</option>
+          <option value="custom">{t("console.rooms.lifetimeCustom")}</option>
+          <option value="never">{t("console.rooms.lifetimeNever")}</option>
+        </select>
+        {lifetime === "custom" ? (
+          <>
+            <input type="number" min={1} value={expiry} onChange={(e) => setExpiry(e.target.value)}
+              placeholder={t("console.rooms.lifetimeMinutesPlaceholder")}
+              aria-label={t("console.rooms.lifetimeCustom")}
+              className={`mt-1 w-32 rounded border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action ${lifetimeInvalid ? "border-keep-accent" : "border-keep-rule"}`} />
+            {/* A blank/zero minutes value disables Save; say so inline instead
+                of leaving a dead button with no marked blocker. */}
+            {lifetimeInvalid ? (
+              <span className="mt-0.5 block text-[10px] text-keep-accent/90">{t("console.rooms.lifetimeMinutesRequired")}</span>
+            ) : null}
+            <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.lifetimeCustomHint")}</span>
+          </>
+        ) : null}
+        {/* Storage guardrail: an exempt room's history grows forever —
+            curating it is the owner's job (Discord posture). */}
+        {lifetime === "never" ? (
+          <span className="mt-0.5 block text-[10px] text-keep-accent/90">{t("console.rooms.lifetimeNeverWarn")}</span>
+        ) : null}
       </label>
       <label className="flex items-start gap-2 text-xs text-keep-text">
         <input type="checkbox" className="mt-0.5" checked={persistent} onChange={(e) => setPersistent(e.target.checked)} />
@@ -1337,13 +2091,24 @@ function RoomEditForm({ detail, room, busy, run, onSaved }: { detail: ServerCons
         </label>
       ) : null}
       <div className="flex justify-end">
-        <button type="button" disabled={busy || !dirty}
+        <button type="button" disabled={busy || !dirty || lifetimeInvalid || accessInvalid || postRolesInvalid}
           onClick={() => void run(async () => {
             await apiPatchServerRoom(detail.id, room.id, {
               name: name.trim(),
               topic: topic.trim() ? topic.trim() : null,
-              messageExpiryMinutes: expiry.trim() === "" ? null : Math.max(0, Number(expiry)),
+              // The 3-way lifetime select maps onto TWO columns: custom →
+              // minutes, never → retention_exempt, inherit → neither. Both
+              // are always sent so the pair can never contradict.
+              messageExpiryMinutes: lifetime === "custom" ? Math.max(1, Number(expiry)) : null,
+              retentionExempt: lifetime === "never",
               persistent,
+              ...(postModeDirty ? { postMode } : {}),
+              // Role gates: full-replace lists, sent only when touched
+              // ("Everyone" saves as an empty list = clear the lock).
+              ...(accessDirty ? { accessRoleIds: [...effectiveAccessIds] } : {}),
+              ...(postRolesDirty ? { postRoleIds: [...postIds] } : {}),
+              ...(iconDirty ? { icon: icon.trim() ? icon.trim() : null } : {}),
+              ...(categoryDirty ? { categoryId: categoryId || null } : {}),
               // Only on change, and the control only renders for adults, so a
               // plain rename can never trip the route's adult-only rejection.
               ...(nsfwDirty ? { isNsfw: nsfw } : {}),
@@ -1622,7 +2387,26 @@ function UsersTab({ detail, viewer, busy, run }: TabProps) {
  * Tab: Roles (owner line, appoint admin/mod, edit grants)
  * ============================================================ */
 
-function RolesTab({ detail, viewer, busy, run }: TabProps) {
+/** Muted wayfinding line linking to a sibling console tab (Staff ↔ Roles,
+ *  which owners kept confusing before the rename). Rendered only when the
+ *  viewer's permission set can actually open the target tab — switching to
+ *  a hidden tab would mount a body whose loads 403. */
+function TabPointer({ i18nKey, target, viewer, switchTab }: {
+  i18nKey: string;
+  target: ServerSettingsTab;
+  viewer: ServerViewerState;
+  switchTab: ((tab: ServerSettingsTab) => void) | undefined;
+}) {
+  const { t } = useTranslation("servers");
+  if (!switchTab || !visibleConsoleTabs(viewer).some((item) => item.id === target)) return null;
+  return (
+    <p className="text-[11px] text-keep-muted">
+      <Trans t={t} i18nKey={i18nKey} components={{ link: <button type="button" onClick={() => switchTab(target)} className="underline decoration-dotted underline-offset-2 hover:text-keep-action" /> }} />
+    </p>
+  );
+}
+
+function RolesTab({ detail, viewer, busy, run, switchTab }: TabProps) {
   const { t } = useTranslation("servers");
   const [data, setData] = useState<{ managerPermissions: ServerPermission[]; members: ServerMemberWire[] } | null>(null);
   const [tick, setTick] = useState(0);
@@ -1647,6 +2431,7 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
         <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>
       ) : (
         <>
+          <TabPointer i18nKey="console.roles.rolesPointer" target="usergroups" viewer={viewer} switchTab={switchTab} />
           <p className="text-sm text-keep-text">
             <span className="text-xs uppercase tracking-widest text-keep-muted">{t("console.roles.owner")}</span>{" "}
             <span className="font-semibold">{detail.ownerUsername}</span>
@@ -1698,8 +2483,10 @@ function RolesTab({ detail, viewer, busy, run }: TabProps) {
             )}
           </div>
 
-          {/* Appoint flow — pick a person, then a tier (preset), not a blank grid. */}
-          <div data-tour="server-settings-roles-appoint" className="rounded border border-keep-rule p-3">
+          {/* Appoint flow — pick a person, then a tier (preset), not a blank grid.
+              Anchor for find-a-setting; the key doubles as the search entry in
+              serverConsoleSearchIndex. */}
+          <div data-tour="server-settings-roles-appoint" data-admin-anchor="console.roles.appointStaff" className="rounded border border-keep-rule p-3">
             <p className="mb-2 text-xs uppercase tracking-widest text-keep-muted">{t("console.roles.appointStaff")}</p>
             {!pendingHit ? (
               <ServerUserPicker
@@ -1875,13 +2662,15 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
   // The default group applies to everyone, so it can't be self-selectable.
   const [memberSelectable, setMemberSelectable] = useState(group?.memberSelectable ?? false);
   const [description, setDescription] = useState(group?.description ?? "");
+  // Userlist badge opt-in (migration 0348) — named groups only.
+  const [showBadge, setShowBadge] = useState(group?.showBadge ?? false);
   const [rooms, setRooms] = useState<RoomListRow[]>([]);
 
   // Rooms power the `posted_in_room` auto-rule selector (non-default only).
   useEffect(() => {
     if (isDefault) return;
     let alive = true;
-    apiGetRooms(detail.id).then((r) => { if (alive) setRooms(r); }).catch(() => { if (alive) setRooms([]); });
+    apiGetRooms(detail.id).then(({ rooms: r }) => { if (alive) setRooms(r); }).catch(() => { if (alive) setRooms([]); });
     return () => { alive = false; };
   }, [detail.id, isDefault]);
 
@@ -1894,6 +2683,9 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
         // to everyone, so it can't be member-selectable).
         payload.memberSelectable = memberSelectable;
         payload.description = description.trim() ? description.trim() : null;
+        // Userlist badge only applies to named groups too (a badge on
+        // everyone says nothing; the server forces it off on the default).
+        payload.showBadge = showBadge;
       }
       if (group) await apiPatchUsergroup(detail.id, group.id, payload);
       else await apiCreateUsergroup(detail.id, payload);
@@ -1940,6 +2732,21 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
       ) : null}
       {!isDefault ? (
         <div>
+          <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.usergroups.badgeSection")}</p>
+          {/* Userlist badge opt-in (migration 0348). Anchor for find-a-setting;
+              the key doubles as the search entry in serverConsoleSearchIndex. */}
+          <label data-admin-anchor="console.usergroups.showBadgeLabel" className="flex items-start gap-2 rounded border border-keep-rule/60 px-2 py-1.5 text-sm">
+            <input type="checkbox" className="mt-0.5" checked={showBadge} disabled={busy}
+              onChange={(e) => setShowBadge(e.target.checked)} />
+            <span className="min-w-0">
+              <span className="block text-keep-text">{t("console.usergroups.showBadgeLabel")}</span>
+              <span className="block text-[11px] text-keep-muted">{t("console.usergroups.showBadgeHint")}</span>
+            </span>
+          </label>
+        </div>
+      ) : null}
+      {!isDefault ? (
+        <div>
           <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.usergroups.autoJoinRules")}</p>
           <p className="mb-1.5 text-[11px] text-keep-muted">{t("console.usergroups.autoJoinHint")}</p>
           <ServerAutoRulesEditor rules={autoRules} onChange={setAutoRules} rooms={rooms} disabled={busy} />
@@ -1955,7 +2762,7 @@ function UsergroupEditor({ detail, group, grantable, busy, run, onClose, onSaved
   );
 }
 
-function UsergroupsTab({ detail, busy, run }: TabProps) {
+function UsergroupsTab({ detail, viewer, busy, run, switchTab }: TabProps) {
   const { t } = useTranslation("servers");
   const [data, setData] = useState<{ managerPermissions: ServerPermission[]; groups: ServerUsergroupWire[] } | null>(null);
   const [tick, setTick] = useState(0);
@@ -1969,6 +2776,28 @@ function UsergroupsTab({ detail, busy, run }: TabProps) {
 
   const grantable = useMemo(() => new Set(data?.managerPermissions ?? []), [data?.managerPermissions]);
 
+  // Named groups in display order (sortOrder asc; the default group always
+  // sorts first and never moves). Order is user-meaningful: the userlist
+  // badge pick takes the member's badge group LOWEST in this list, so the
+  // arrows below let owners control the winner.
+  const named = useMemo(() => (data?.groups ?? []).filter((g) => !g.isDefault), [data?.groups]);
+  const moveGroup = (index: number, dir: -1 | 1) => {
+    const ids = named.map((g) => g.id);
+    const [id] = ids.splice(index, 1);
+    ids.splice(index + dir, 0, id!);
+    void run(async () => {
+      // Re-stamp each named group's slot (sortOrder = index) through the
+      // existing PATCH route; rows already in place are skipped so a simple
+      // swap stays two requests.
+      const byId = new Map(named.map((g) => [g.id, g]));
+      for (let i = 0; i < ids.length; i++) {
+        const g = byId.get(ids[i]!)!;
+        if (g.sortOrder !== i) await apiPatchUsergroup(detail.id, g.id, { sortOrder: i });
+      }
+      setTick((t2) => t2 + 1);
+    });
+  };
+
   if (!data) return <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>;
 
   if (editing) {
@@ -1980,17 +2809,26 @@ function UsergroupsTab({ detail, busy, run }: TabProps) {
 
   return (
     <div className="max-w-2xl space-y-3">
+      <TabPointer i18nKey="console.usergroups.staffPointer" target="roles" viewer={viewer} switchTab={switchTab} />
       <p className="text-[11px] text-keep-muted">
         {t("console.usergroups.blurb")}
       </p>
       <ul className="space-y-1.5">
-        {data.groups.map((g) => (
+        {data.groups.map((g) => {
+          const ni = named.findIndex((n) => n.id === g.id);
+          return (
           <li key={g.id} className="rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5">
             <div className="flex items-center gap-2">
+              {!g.isDefault ? (
+                <MoveArrows busy={busy} canUp={ni > 0} canDown={ni >= 0 && ni < named.length - 1}
+                  onMove={(dir) => moveGroup(ni, dir)}
+                  upLabel={t("console.usergroups.moveUp")} downLabel={t("console.usergroups.moveDown")} />
+              ) : null}
               <span className="inline-flex min-w-0 flex-1 items-center gap-1.5">
                 {g.color ? <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: g.color }} /> : null}
                 <span className="truncate text-sm font-semibold text-keep-text">{g.name}</span>
                 {g.isDefault ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted">{t("console.usergroups.defaultChip")}</span> : null}
+                {g.showBadge ? <span className="shrink-0 rounded border border-keep-rule px-1 text-[9px] uppercase tracking-widest text-keep-muted" title={t("console.usergroups.showBadgeLabel")}>{t("console.usergroups.badgeChip")}</span> : null}
               </span>
               <span className="shrink-0 text-[10px] text-keep-muted">
                 {t("console.usergroups.features", { count: g.permissions.length })}
@@ -2007,7 +2845,8 @@ function UsergroupsTab({ detail, busy, run }: TabProps) {
               ) : null}
             </div>
           </li>
-        ))}
+          );
+        })}
       </ul>
       <button type="button" disabled={busy} onClick={() => setEditing("new")}
         className="rounded border border-keep-action bg-keep-action/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-widest text-keep-action disabled:opacity-50">{t("console.usergroups.newGroupButton")}</button>
@@ -2681,6 +3520,9 @@ interface TabProps {
   busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>;
   onSaved: () => void;
+  /** Console tab switcher (the shell's changeTab), for the Staff ↔ Roles
+   *  wayfinding links. Optional: tabs render fine without it. */
+  switchTab?: (tab: ServerSettingsTab) => void;
 }
 
 /** Tab label keys in the servers namespace (labels resolve at render time so a
@@ -2767,8 +3609,8 @@ function consoleTabVisible(id: ServerSettingsTab, can: (k: ServerModPermission) 
     case "appearance":
     // Onboarding writes onboarding_config_json on server_settings, which the
     // route gates on manage_appearance (same chair as rules/settings), so gate
-    // the tab identically. The option→usergroup targets come from the Usergroups
-    // tab's "Members can pick this" toggle (manage_usergroups).
+    // the tab identically. The option→usergroup targets come from the Roles
+    // tab's (id `usergroups`) "Members can pick this" toggle (manage_usergroups).
     case "rules":
     case "onboarding":
     case "settings":
@@ -2909,7 +3751,7 @@ function ServerSettingsBody({ detail, viewer, onSaved, findRequest, onFindHandle
     finally { setBusy(false); }
   }
 
-  const props: TabProps = { detail, viewer, busy, run, onSaved };
+  const props: TabProps = { detail, viewer, busy, run, onSaved, switchTab: changeTab };
 
   return (
     <div className="px-4 py-3">
@@ -3171,7 +4013,7 @@ export function ServerSettingsView({ serverId, onClose, onChanged }: { serverId:
           )}
         </div>
         {/* First-run walkthrough of the console — OWNER-only. Its steps tour the
-            Overview/Appearance/Members/Roles tabs, which are owner-gated
+            Overview/Appearance/Members/Staff tabs, which are owner-gated
             (manage_appearance is owner-only), so firing it for a mod/admin with a
             narrower tab set would narrate tabs they can't see. Mounted
             unconditionally, driven by `active` once the body (with its anchors)

@@ -279,7 +279,11 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
                   {info.ownerName ? <Meta label={t("common:owner")} value={info.ownerName} /> : null}
                   <Meta label={t("roomInfo.created")} value={fmtCreated(info.createdAt)} />
                   <Meta label={t("roomInfo.messages")} value={formatNumber(info.messageCount)} />
-                  {info.messageExpiryMinutes && info.messageExpiryMinutes > 0 ? (
+                  {/* "Never expire" (migration 0347) outranks any stale
+                      minutes value — the janitor skips exempt rooms. */}
+                  {info.retentionExempt ? (
+                    <Meta label={t("roomInfo.autoExpire")} value={t("roomInfo.autoExpireNever")} />
+                  ) : info.messageExpiryMinutes && info.messageExpiryMinutes > 0 ? (
                     <Meta label={t("roomInfo.autoExpire")} value={t("roomInfo.autoExpireValue", { count: info.messageExpiryMinutes })} />
                   ) : null}
                   {info.difficultyClass != null ? (

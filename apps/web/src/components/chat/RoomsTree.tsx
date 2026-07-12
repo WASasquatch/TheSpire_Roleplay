@@ -11,14 +11,15 @@ import {
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { legibleAgainstBg, roleRank, type PermissionKey, type RoomOccupant, type RoomSummary, type ServerModPermission, type Theme } from "@thekeep/shared";
-import { Ban, Bell, BellOff, Clapperboard, Landmark, MessagesSquare, Plus, ScrollText, ShieldAlert, UserX, VolumeX } from "lucide-react";
+import { legibleAgainstBg, roleRank, type PermissionKey, type RoomCategorySummary, type RoomOccupant, type RoomSummary, type ServerModPermission, type Theme } from "@thekeep/shared";
+import { Ban, Bell, BellOff, Clapperboard, Landmark, Megaphone, MessagesSquare, Plus, ScrollText, ShieldAlert, UserX, VolumeX } from "lucide-react";
 import { useChat } from "../../state/store.js";
 import { useActiveTheme } from "../../lib/theme.js";
 import { AdminIcon, CharacterMaskIcon, MasterAdminIcon, ModIcon } from "../moderation/StaffIcons.js";
 import { CreateRoomModal } from "../CreateRoomModal.js";
 import { ToolPanel } from "../ToolPanel.js";
 import { RatingChip } from "../shared/RatingChip.js";
+import { RoleBadgeChips } from "../shared/RoleBadgeChips.js";
 import { UserNameTag } from "../UserNameTag.js";
 import { identityArgFor } from "../../lib/commandText.js";
 import { createPersistedDimension } from "../../lib/persistedDimension.js";
@@ -49,8 +50,51 @@ const railWidthDim = createPersistedDimension({
   outOfRange: "reject",
 });
 
+/**
+ * Per-server collapsed-section persistence (room categories, migration 0344).
+ * Key = `tk:railCollapsed:<serverId>` ("default" on the home server / flag
+ * off), value = JSON array of collapsed category ids. Same colon-prefixed
+ * `tk:` family the other per-device prefs use.
+ */
+const railCollapsedKey = (serverId: string | null) => `tk:railCollapsed:${serverId ?? "default"}`;
+
+function loadCollapsedCategories(key: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return new Set();
+    const arr: unknown = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCollapsedCategories(key: string, ids: Set<string>): void {
+  try {
+    if (ids.size === 0) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify([...ids]));
+  } catch {
+    /* storage unavailable — collapse state just won't persist */
+  }
+}
+
+/** Same URL-vs-glyph split the Room Info bar applies to `rooms.icon`; category
+ *  icons share the dual form, so the regex must stay in sync with the server's
+ *  (commands/builtins/icon.ts resolveIcon). */
+function isImageIcon(icon: string): boolean {
+  return /^https?:\/\//i.test(icon);
+}
+
 interface Props {
   rooms: RoomWithOccupants[];
+  /**
+   * Rail sections (room categories, migration 0344) for the current server,
+   * in display order — the `categories` block off GET /rooms. Rooms group
+   * under them via `categoryId`; everything else (or an empty list — the
+   * default) lands in the headerless uncategorized bucket that renders
+   * FIRST, so servers without categories look exactly as before.
+   */
+  categories?: RoomCategorySummary[];
   currentRoomId: string | null;
   /**
    * Viewer's own userId. Threaded through to the per-room flicker
@@ -184,6 +228,47 @@ function RoomUnreadCue({ roomId, pairRoomId }: { roomId: string; pairRoomId?: st
           style={{ boxShadow: "0 0 0 1.5px rgba(0,0,0,.3)" }}
         />
       ) : null}
+    </span>
+  );
+}
+
+/**
+ * Aggregate unread/mention cue on a COLLAPSED section header (room
+ * categories, migration 0344). A collapsed section hides its rooms' own
+ * {@link RoomUnreadCue} glyphs, so the header carries their union instead —
+ * per-room rules unchanged: a mention always pills (even in a muted room),
+ * the ambient dot only counts rooms that aren't muted. `roomIds` includes
+ * linked-pair annex ids so 18+-side activity still surfaces. Renders
+ * nothing when the section is quiet; not mounted at all while expanded
+ * (the per-room cues take over).
+ */
+function SectionCollapsedCue({ roomIds }: { roomIds: string[] }) {
+  const { t } = useTranslation("chat");
+  const mentionUnread = useChat((s) =>
+    roomIds.reduce((sum, id) => (s.roomHasMention[id] ? sum + (s.roomUnread[id] ?? 0) : sum), 0),
+  );
+  const hasMention = useChat((s) => roomIds.some((id) => !!s.roomHasMention[id]));
+  const dotUnread = useChat((s) =>
+    roomIds.reduce((sum, id) => (s.roomMuted[id] ? sum : sum + (s.roomUnread[id] ?? 0)), 0),
+  );
+  if (!hasMention && dotUnread <= 0) return null;
+  return (
+    <span className="ml-auto inline-flex shrink-0 items-center gap-1 pl-1.5">
+      {hasMention ? (
+        <span
+          title={t("rooms.mentioned", { count: mentionUnread })}
+          className="rounded-full bg-keep-accent px-1.5 py-0.5 text-[10px] font-bold leading-none text-keep-bg"
+        >
+          @{mentionUnread > 99 ? "99+" : mentionUnread}
+        </span>
+      ) : (
+        <span
+          title={t("rooms.unreadMessages", { count: dotUnread })}
+          aria-label={t("rooms.unreadAria", { count: dotUnread })}
+          className="h-2.5 w-2.5 rounded-full bg-keep-action"
+          style={{ boxShadow: "0 0 0 1.5px rgba(0,0,0,.3)" }}
+        />
+      )}
     </span>
   );
 }
@@ -333,6 +418,7 @@ export function RoomsTree({
   // inconsistent Vite HMR bundle over the \\wsl mount) must degrade to an empty
   // rail, never white-screen the whole app.
   rooms = [],
+  categories = [],
   currentRoomId,
   selfUserId,
   activeCharacterId,
@@ -394,17 +480,59 @@ export function RoomsTree({
     [rooms, roomsById, currentRoomId],
   );
 
-  // Pin the caller's current room to the top of the rail so it stays
-  // visible on installs with many rooms. The server returns rooms in
-  // alphabetical order; we partition just enough to lift the active
-  // room out and leave the rest in their original order. No-op when
-  // the user isn't in any room or the room isn't in this list.
-  const orderedRooms = useMemo(() => {
-    if (!railCurrentId) return visibleRooms;
-    const idx = visibleRooms.findIndex((r) => r.id === railCurrentId);
-    if (idx <= 0) return visibleRooms;
-    return [visibleRooms[idx]!, ...visibleRooms.slice(0, idx), ...visibleRooms.slice(idx + 1)];
-  }, [visibleRooms, railCurrentId]);
+  // Group the visible rooms into rail sections (room categories, migration
+  // 0344). Grouping happens AFTER the visibleRooms filter, so pair/annex
+  // hiding, forum filtering, and every scrub stay exactly as before. The
+  // uncategorized bucket renders FIRST and HEADERLESS: a server that never
+  // touches categories has one bucket and the rail is identical to today.
+  // Within each bucket the caller's current room is pinned to the top (the
+  // same lift the flat rail always did) so it stays visible on installs with
+  // many rooms; the server already delivers manual-order-then-name sorting.
+  const sections = useMemo(() => {
+    const pin = (list: RoomWithOccupants[]): RoomWithOccupants[] => {
+      if (!railCurrentId) return list;
+      const idx = list.findIndex((r) => r.id === railCurrentId);
+      if (idx <= 0) return list;
+      return [list[idx]!, ...list.slice(0, idx), ...list.slice(idx + 1)];
+    };
+    const catIds = new Set(categories.map((c) => c.id));
+    const buckets = new Map<string, RoomWithOccupants[]>();
+    for (const r of visibleRooms) {
+      // A categoryId pointing at a category we weren't sent (stale row,
+      // cross-server room in an unscoped list) degrades to uncategorized.
+      const key = r.categoryId && catIds.has(r.categoryId) ? r.categoryId : "";
+      const arr = buckets.get(key);
+      if (arr) arr.push(r);
+      else buckets.set(key, [r]);
+    }
+    const out: Array<{ category: RoomCategorySummary | null; rooms: RoomWithOccupants[] }> = [];
+    const uncategorized = buckets.get("");
+    if (uncategorized?.length) out.push({ category: null, rooms: pin(uncategorized) });
+    for (const c of categories) {
+      const list = buckets.get(c.id);
+      // Empty sections are skipped in the rail (navigation, not structure);
+      // the server console still lists every category.
+      if (list?.length) out.push({ category: c, rooms: pin(list) });
+    }
+    return out;
+  }, [visibleRooms, categories, railCurrentId]);
+
+  // Per-user collapsed sections, persisted per server (tk:railCollapsed:<id>).
+  const collapseKey = railCollapsedKey(currentServerId);
+  const [collapsedCats, setCollapsedCats] = useState<Set<string>>(() => loadCollapsedCategories(collapseKey));
+  useEffect(() => {
+    // Switching servers swaps in that server's saved collapse set.
+    setCollapsedCats(loadCollapsedCategories(collapseKey));
+  }, [collapseKey]);
+  const toggleCategoryCollapsed = (catId: string) => {
+    setCollapsedCats((prev) => {
+      const next = new Set(prev);
+      if (next.has(catId)) next.delete(catId);
+      else next.add(catId);
+      saveCollapsedCategories(collapseKey, next);
+      return next;
+    });
+  };
 
   // The viewer's own per-identity room role in the CURRENT room, used to unlock
   // the userlist mod actions for a room owner/mod. Owner shows on the OOC row,
@@ -621,35 +749,92 @@ export function RoomsTree({
         {visibleRooms.length === 0 ? (
           <div className="px-3 py-2 text-xs text-keep-muted">{t("rooms.noRooms")}</div>
         ) : (
-          <ul>
-            {orderedRooms.map((r) => {
-              // Linked pair: hand the base row its 18+ annex (when the viewer
-              // received one — minors and non-linked rooms get none) so the
-              // row can merge occupants and offer the SFW/18+ side toggle.
-              // The adult gate is defense in depth: the server already scrubs
-              // the pointer and drops the annex row for under-18 viewers.
-              const pairAnnex = viewerIsAdult && r.linkedNsfwRoomId ? roomsById.get(r.linkedNsfwRoomId) : undefined;
-              const isCurrent = r.id === railCurrentId;
-              return (
-                <RoomGroup
-                  key={r.id}
-                  room={r}
-                  {...(pairAnnex ? { pairAnnex } : {})}
-                  currentRoomId={currentRoomId ?? null}
-                  isCurrent={isCurrent}
-                  selfUserId={selfUserId}
-                  onIconClick={onIconClick}
-                  onNameClick={onNameClick}
-                  onRoomClick={onRoomClick}
-                  onWorldClick={onWorldClick}
-                  onCommand={onCommand}
-                  // Mod actions only bind to the room the viewer is standing in;
-                  // every other room in the rail renders its userlist read-only.
-                  modCaps={isCurrent ? modCaps : NO_MOD_CAPS}
-                />
-              );
-            })}
-          </ul>
+          sections.map((sec) => {
+            const collapsed = sec.category ? collapsedCats.has(sec.category.id) : false;
+            // A collapsed section still shows the viewer's CURRENT room so
+            // collapsing can never strand them with no rail entry for where
+            // they stand (same escape hatch the forum-board filter keeps).
+            const shownRooms = collapsed ? sec.rooms.filter((r) => r.id === railCurrentId) : sec.rooms;
+            return (
+              <div key={sec.category?.id ?? "uncategorized"}>
+                {sec.category ? (
+                  // Section header — same look as the ROOMS header row, with
+                  // the rail's text-glyph chevron idiom (▾/▸ + aria-expanded).
+                  <button
+                    type="button"
+                    aria-expanded={!collapsed}
+                    onClick={() => toggleCategoryCollapsed(sec.category!.id)}
+                    title={collapsed ? t("rooms.sectionExpandTitle") : t("rooms.sectionCollapseTitle")}
+                    className="flex w-full items-center gap-1.5 border-b border-keep-rule bg-keep-banner/40 px-3 py-2 text-left hover:bg-keep-banner/60 lg:bg-transparent lg:py-1.5 lg:hover:bg-keep-banner/40"
+                  >
+                    <span aria-hidden className="shrink-0 text-base leading-none text-keep-muted">
+                      {collapsed ? "▸" : "▾"}
+                    </span>
+                    {sec.category.icon ? (
+                      isImageIcon(sec.category.icon) ? (
+                        <img
+                          src={sec.category.icon}
+                          alt=""
+                          className="h-5 w-5 shrink-0 rounded object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      ) : (
+                        <span aria-hidden className="shrink-0 text-base leading-none">{sec.category.icon}</span>
+                      )
+                    ) : null}
+                    {/* Section titles must read at least as strong as the
+                        room rows below them (rows are 1.1rem bold accent):
+                        same size, bold, full-ink — the muted ROOMS-header
+                        look inverted the hierarchy. Count stays quiet. */}
+                    <span className="min-w-0 truncate text-[1.1rem] font-bold uppercase tracking-wide text-keep-text">
+                      {sec.category.name} <span className="text-sm font-normal tracking-normal text-keep-muted">({sec.rooms.length})</span>
+                    </span>
+                    {/* Collapsing must not swallow activity: the header takes
+                        over the hidden rows' unread/mention cues (pair annex
+                        ids included, so 18+-side pings still surface). */}
+                    {collapsed ? (
+                      <SectionCollapsedCue
+                        roomIds={sec.rooms.flatMap((r) =>
+                          r.linkedNsfwRoomId ? [r.id, r.linkedNsfwRoomId] : [r.id],
+                        )}
+                      />
+                    ) : null}
+                  </button>
+                ) : null}
+                {shownRooms.length > 0 ? (
+                  <ul>
+                    {shownRooms.map((r) => {
+                      // Linked pair: hand the base row its 18+ annex (when the viewer
+                      // received one — minors and non-linked rooms get none) so the
+                      // row can merge occupants and offer the SFW/18+ side toggle.
+                      // The adult gate is defense in depth: the server already scrubs
+                      // the pointer and drops the annex row for under-18 viewers.
+                      const pairAnnex = viewerIsAdult && r.linkedNsfwRoomId ? roomsById.get(r.linkedNsfwRoomId) : undefined;
+                      const isCurrent = r.id === railCurrentId;
+                      return (
+                        <RoomGroup
+                          key={r.id}
+                          room={r}
+                          {...(pairAnnex ? { pairAnnex } : {})}
+                          currentRoomId={currentRoomId ?? null}
+                          isCurrent={isCurrent}
+                          selfUserId={selfUserId}
+                          onIconClick={onIconClick}
+                          onNameClick={onNameClick}
+                          onRoomClick={onRoomClick}
+                          onWorldClick={onWorldClick}
+                          onCommand={onCommand}
+                          // Mod actions only bind to the room the viewer is standing in;
+                          // every other room in the rail renders its userlist read-only.
+                          modCaps={isCurrent ? modCaps : NO_MOD_CAPS}
+                        />
+                      );
+                    })}
+                  </ul>
+                ) : null}
+              </div>
+            );
+          })
         )}
       </div>
       <ToolPanel
@@ -855,7 +1040,35 @@ function RoomGroup({
                   </span>
                 );
               })()}
+              {/* Restricted-posting glyph (post_mode 'staff'/'roles',
+                  migrations 0345/0349): an announcements-style info room.
+                  Follows the mode glyph above; em-sized so it scales with
+                  the font step. Title says WHO can post. */}
+              {room.postMode === "staff" || room.postMode === "roles" ? (
+                <span
+                  title={room.postMode === "roles" ? t("rooms.rolesOnlyTitle") : t("rooms.staffOnlyTitle")}
+                  className="mr-1 inline-flex shrink-0 align-middle text-keep-muted"
+                >
+                  <Megaphone aria-hidden style={{ width: "1.4em", height: "1.4em" }} />
+                </span>
+              ) : null}
               {isPrivate ? <span title={t("rooms.privateTitle")} className="mr-1">🔒</span> : null}
+              {/* Room icon (`rooms.icon`, /icon command or the console's icon
+                  field) beside the name — same URL-vs-glyph duality the Room
+                  Info bar renders. em-sized so it follows the font step. */}
+              {room.icon ? (
+                isImageIcon(room.icon) ? (
+                  <img
+                    src={room.icon}
+                    alt=""
+                    className="mr-1 inline-block shrink-0 rounded object-cover align-[-0.2em]"
+                    style={{ width: "1.2em", height: "1.2em" }}
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span aria-hidden className="mr-1">{room.icon}</span>
+                )
+              ) : null}
               {room.name}
             </span>
             {/* Rating chip (age-restriction plan, Phase 2): every row is
@@ -1073,6 +1286,17 @@ function RoomGroup({
                           >
                             <chip.Icon className="h-4 w-4" />
                           </span>
+                        ) : null}
+                        {/* Usergroup badge (migration 0348): at most ONE chip —
+                            the member's highest-priority group whose owner
+                            enabled "show badge". Same RoleBadgeChips the
+                            profile's Roles row uses (compact = no leading
+                            glyph); the group color tints the chip only, never
+                            the name (name styling stays a purchasable
+                            cosmetic). Viewer-agnostic data off the shared
+                            occupant payload. */}
+                        {o.badge ? (
+                          <RoleBadgeChips roles={[o.badge]} ariaLabel={t("rooms.roleBadgeAria")} compact />
                         ) : null}
                         {/* Moderator action menu (Kick / Mute / Ban). Rendered
                             only when the viewer can act on THIS target — see

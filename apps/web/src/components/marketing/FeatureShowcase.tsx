@@ -61,7 +61,7 @@ const FEATURES: ReadonlyArray<Feature> = [
   {
     key: "communities",
     icon: Server,
-    pointCount: 3,
+    pointCount: 4,
     cta: { path: "/register" },
     ctaNeedsRegistration: true,
   },

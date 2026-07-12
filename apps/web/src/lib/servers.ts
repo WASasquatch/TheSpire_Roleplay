@@ -99,6 +99,12 @@ export interface ServerSummary {
    *  banner art for viewers who can't see NSFW. Null/absent = no variant
    *  (those surfaces fall back to name/colors). */
   sfwBannerUrl?: string | null;
+  /** The community's lore world (migration 0346), resolved server-side
+   *  through the world's own visibility gates PER VIEWER: null/absent when
+   *  the server has none — or when this viewer can't open it (private
+   *  worlds never leak a name). Drives the Discover card's world link and
+   *  the top bar's book icon. */
+  world?: { id: string; slug: string; name: string } | null;
 }
 
 /**
@@ -181,6 +187,10 @@ export interface PublicServerLanding {
   createdAt: number;
   themeJson: string | null;
   themeStyleKey: string | null;
+  /** The community's lore world, resolved for the ANONYMOUS viewer: only a
+   *  public/open, non-18+ world ever appears here. Null/absent = none (or
+   *  one the public can't read). Renders the "read the lore" card. */
+  world?: { id: string; slug: string; name: string } | null;
 }
 
 export async function fetchPublicServer(slug: string): Promise<PublicServerLanding> {

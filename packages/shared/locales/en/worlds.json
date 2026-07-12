@@ -122,13 +122,13 @@
   },
   "visibilityValue": {
     "private": "private",
-    "public": "public",
-    "open": "open"
+    "public": "unlisted",
+    "open": "public"
   },
   "visibilityOption": {
     "private": "Private (only you)",
-    "public": "Public (anyone with the link)",
-    "open": "Open (catalog-listed, others can link to their rooms)"
+    "public": "Unlisted (anyone with the link, not in the catalog)",
+    "open": "Public (listed in the world catalog, others can link it to their rooms)"
   },
   "linkPicker": {
     "button": "+ Link entry",
@@ -195,7 +195,7 @@
   "myWorlds": {
     "title": "Your worlds",
     "browseCatalog": "Browse catalog",
-    "browseCatalogTitle": "Browse open worlds you can use in your rooms",
+    "browseCatalogTitle": "Browse public worlds you can use in your rooms",
     "newWorld": "+ New world",
     "noWorlds": "No worlds yet. Click \"+ New world\" to start one.",
     "joinedHeading": "Worlds I've joined",
@@ -239,7 +239,7 @@
     "hideLabel": "Hide:",
     "excludeTitle": "Exclude worlds tagged \"{{tag}}\"",
     "noMatches": "No worlds match the current filters.",
-    "noOpenWorlds": "No open worlds yet. Be the first, mark one of yours as “open” in its settings.",
+    "noOpenWorlds": "No public worlds yet. Be the first, mark one of yours as “Public” in its settings.",
     "worldCount_one": "{{count}} world",
     "worldCount_other": "{{count}} worlds",
     "openInViewer": "Open in viewer",
@@ -336,8 +336,8 @@
       },
       "visibility": {
         "private": "Private",
-        "public": "Public",
-        "open": "Open"
+        "public": "Unlisted",
+        "open": "Public"
       },
       "joinMode": {
         "open": "Open",
@@ -354,7 +354,7 @@
     "pending": "Your application is pending the author's review.",
     "acceptsApplications": "This world accepts applications to join.",
     "applyToJoin": "Apply to join",
-    "open": "This world is open. Join as your current identity.",
+    "open": "Anyone can join this world. Join as your current identity.",
     "joinWorld": "Join world"
   },
   "editor": {
@@ -376,9 +376,10 @@
     "confirmDeletePage": "Delete \"{{title}}\"? Cannot be undone.",
     "confirmDeletePageChildren_one": "Delete \"{{title}}\" and its {{count}} child page? Cannot be undone.",
     "confirmDeletePageChildren_other": "Delete \"{{title}}\" and its {{count}} child pages? Cannot be undone.",
-    "metaIntro_one": "{{count}} page. Visibility controls who can read this world: private = only you, public = anyone with the URL, open = also listed in the catalog and linkable from other people's rooms.",
-    "metaIntro_other": "{{count}} pages. Visibility controls who can read this world: private = only you, public = anyone with the URL, open = also listed in the catalog and linkable from other people's rooms.",
+    "metaIntro_one": "{{count}} page. Visibility controls who can read this world: Private = only you, Unlisted = anyone with the URL, Public = also listed in the catalog and linkable from other people's rooms.",
+    "metaIntro_other": "{{count}} pages. Visibility controls who can read this world: Private = only you, Unlisted = anyone with the URL, Public = also listed in the catalog and linkable from other people's rooms.",
     "slugHint": "Used in URLs and the /world link slash command. Lowercase letters, numbers, hyphens; 1-60 chars.",
+    "visibilityHint": "Private = only you. Unlisted = anyone with the link, not in the catalog. Public = listed in the world catalog and usable in other people's rooms.",
     "nsfwLabel": "18+ world",
     "nsfwHint": "18+ worlds are hidden from members under 18.",
     "catalogMetadata": "Catalog metadata",

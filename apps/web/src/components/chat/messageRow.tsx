@@ -7,7 +7,7 @@ import { useActiveTheme } from "../../lib/theme.js";
 import { BorderedAvatar } from "../cosmetics/BorderedAvatar.js";
 import { UserNameTag } from "../UserNameTag.js";
 import type { Gender } from "../../lib/gender.js";
-import { parseInline, solitaryEmoticonToken } from "../../lib/markdown.js";
+import { groupBodyBlocks, parseInline, solitaryEmoticonToken, type BodyBlockGroup } from "../../lib/markdown.js";
 import { sanitizeUserHtml } from "../../lib/userHtml.js";
 import { handleUiRouteClickInHtml } from "../../lib/uiRouteOpen.js";
 import { hydrateDynamicUiRouteChips } from "../../lib/hydrateDynamicUiRouteChips.js";
@@ -22,6 +22,7 @@ import { formatTime } from "../../lib/intlFormat.js";
 import { fmtTime } from "../messageTime.js";
 import { ReactionAddButton, ReactionBar } from "./ReactionBar.js";
 import { PollCard } from "./PollCard.js";
+import { RoleSelectCard } from "./RoleSelectCard.js";
 
 /** Kinds eligible for /reports - mirrors the server's privacy gate. */
 export const REPORTABLE_KINDS = new Set(["say", "me", "ooc", "announce", "npc"]);
@@ -238,6 +239,63 @@ function renderParts(
         </button>,
       );
     }
+  });
+  return out;
+}
+
+/**
+ * Block-level body renderer for flat chat rows. Bodies with `> ` quote
+ * or `- ` bullet lines render them as real <blockquote>/<ul> blocks —
+ * the same blocks the composer's WYSIWYG editor previews — instead of
+ * literal prefixes. Bodies WITHOUT those lines never reach this path
+ * (the caller falls back to the plain renderParts pass), so ordinary
+ * messages render exactly as before. Fence groups go straight to
+ * parseInline, which owns ```code``` styling.
+ */
+function renderBodyBlocks(
+  t: TFunction<"chat">,
+  groups: ReadonlyArray<BodyBlockGroup>,
+  onMentionClick: (name: string) => void,
+  onWorldClick: (slug: string) => void,
+  selfNames: ReadonlyArray<string> = [],
+  knownNames?: ReadonlySet<string> | null,
+  mentions: ReadonlyArray<MentionRef> = [],
+): ReactNode[] {
+  const out: ReactNode[] = [];
+  groups.forEach((g, idx) => {
+    if (g.kind === "fence") {
+      out.push(<Fragment key={`f${idx}`}>{parseInline(g.lines.join("\n"))}</Fragment>);
+      return;
+    }
+    if (g.kind === "quote") {
+      const stripped = g.lines.map((l) => l.replace(/^\s*>\s?/, "")).join("\n");
+      out.push(
+        <blockquote
+          key={`q${idx}`}
+          className="my-0.5 whitespace-pre-wrap border-l-2 border-keep-action/50 bg-keep-banner/40 px-2 py-0.5 text-keep-muted italic"
+        >
+          {renderParts(t, splitMentions(stripped), onMentionClick, onWorldClick, selfNames, knownNames, mentions)}
+        </blockquote>,
+      );
+      return;
+    }
+    if (g.kind === "bullet") {
+      out.push(
+        <ul key={`b${idx}`} className="my-0.5 list-disc pl-5">
+          {g.lines.map((l, bi) => (
+            <li key={bi} className="whitespace-pre-wrap">
+              {renderParts(t, splitMentions(l.slice(2)), onMentionClick, onWorldClick, selfNames, knownNames, mentions)}
+            </li>
+          ))}
+        </ul>,
+      );
+      return;
+    }
+    out.push(
+      <Fragment key={`p${idx}`}>
+        {renderParts(t, splitMentions(g.lines.join("\n")), onMentionClick, onWorldClick, selfNames, knownNames, mentions)}
+      </Fragment>,
+    );
   });
   return out;
 }
@@ -461,63 +519,15 @@ export function Line({
       hideIcon
     />
   );
-  // Soft-deleted messages collapse to a placeholder regardless of kind.
-  // Server strips the body server-side already; this just paints the gap so
-  // the timeline doesn't shift when an in-grace delete fires.
-  if (msg.deletedAt) {
-    // Compute the actor blurb for the admin audit. Three cases:
-    //   * Self-delete (deletedByUserId === userId): "self-deleted", the
-    //     author hit delete within the grace window.
-    //   * Mod/admin action (different deletedByUserId): "deleted by Y".
-    //   * Pre-migration delete (no deletedByUserId snapshot): omit the
-    //     actor blurb entirely; just show "admin audit" so the older
-    //     deletes still surface their body without claiming an actor
-    //     we don't know.
-    const isSelfDelete = !!msg.deletedByUserId && msg.deletedByUserId === msg.userId;
-    const actorBlurb = msg.deletedByUserId
-      ? (isSelfDelete
-          ? t("row.selfDeleted")
-          : t("row.deletedBy", { name: msg.deletedByDisplayName ?? t("row.unknown") }))
-      : null;
-    return (
-      <div className="text-keep-muted/70">
-        <span data-copy-skip className="mr-2 select-none text-xs tabular-nums">{timeText}</span>
-        <span className="italic">{t("row.messageRemoved")}</span>
-        {/* Admin-only audit reveal: when the server attached the
-            pre-delete body on `originalBody` (it only does so for
-            isAdminRole viewers), surface it underneath as a greyed,
-            indented quote so a site admin can see what got hidden.
-            Mods + room-owner mods don't receive the field at all and
-            this block stays inert. */}
-        {msg.originalBody ? (
-          <blockquote className="ml-6 mt-0.5 border-l-2 border-keep-accent/30 bg-keep-panel/20 px-2 py-0.5 text-[11px] italic text-keep-muted/60">
-            <span
-              className="mr-1 select-none text-[9px] uppercase not-italic tracking-widest text-keep-accent/70"
-              title={t("row.adminAuditTitle")}
-            >
-              {t("row.adminAudit")}
-              {/* Surface the author snapshotted on the row + the actor
-                  who performed the delete so admins don't have to
-                  cross-reference timestamps to figure out who hid what.
-                  Author is always present (snapshotted at send time);
-                  actor came in with migration 0084 and falls back
-                  cleanly for older rows. */}
-              <span className="ml-1 normal-case tracking-normal">
-               , {msg.displayName}
-                {actorBlurb ? ` · ${actorBlurb}` : ""}
-              </span>
-              :
-            </span>
-            <span className="whitespace-pre-wrap">{msg.originalBody}</span>
-          </blockquote>
-        ) : null}
-      </div>
-    );
-  }
-
   // Memoize the parsed parts on body so the splitMentions regex doesn't
   // re-run on every parent render (only when the body changes).
-  const bodyParts = useMemo(() => splitMentions(msg.body), [msg.body]);
+  // `bodyBlocks` is non-null ONLY when the body carries `> `/`- ` block
+  // lines; every other message keeps the plain single-pass render.
+  const bodyBlocks = useMemo(() => {
+    const groups = groupBodyBlocks(msg.body);
+    return groups.some((g) => g.kind === "quote" || g.kind === "bullet") ? groups : null;
+  }, [msg.body]);
+  const bodyParts = useMemo(() => (bodyBlocks ? null : splitMentions(msg.body)), [bodyBlocks, msg.body]);
   // Subscribe to the mentions cache version + known set so the render
   // re-fires after a batch resolve lands (the resolver mutates Sets
   // in place; the version bump is what triggers React to re-evaluate).
@@ -532,7 +542,9 @@ export function Line({
     const names = extractMentions(msg.body);
     if (names.length > 0) requestMentionResolve(names);
   }, [msg.body]);
-  const renderedBody = renderParts(t, bodyParts, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? []);
+  const renderedBody = bodyBlocks
+    ? renderBodyBlocks(t, bodyBlocks, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? [])
+    : renderParts(t, bodyParts!, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? []);
   // Resolve the user's stored color once and feed both kind-shaped
   // body styles below. `themeBg` lets resolveMessageColor swap in a
   // legible variant of literal hex colors when the chosen shade would
@@ -595,6 +607,64 @@ export function Line({
   // different colors / labels without two parallel state pairs.
   const [editMode, setEditMode] = useState<null | "own" | "mod">(null);
   const isEditingHere = editMode !== null;
+
+  // Soft-deleted messages collapse to a placeholder regardless of kind.
+  // Server strips the body server-side already; this just paints the gap so
+  // the timeline doesn't shift when an in-grace delete fires.
+  //
+  // This branch MUST sit below every hook above: `deletedAt` flips on a
+  // mounted row via `message:update`, and an earlier return would shrink
+  // the hook count mid-lifetime (React #300, "rendered fewer hooks").
+  if (msg.deletedAt) {
+    // Compute the actor blurb for the admin audit. Three cases:
+    //   * Self-delete (deletedByUserId === userId): "self-deleted", the
+    //     author hit delete within the grace window.
+    //   * Mod/admin action (different deletedByUserId): "deleted by Y".
+    //   * Pre-migration delete (no deletedByUserId snapshot): omit the
+    //     actor blurb entirely; just show "admin audit" so the older
+    //     deletes still surface their body without claiming an actor
+    //     we don't know.
+    const isSelfDelete = !!msg.deletedByUserId && msg.deletedByUserId === msg.userId;
+    const actorBlurb = msg.deletedByUserId
+      ? (isSelfDelete
+          ? t("row.selfDeleted")
+          : t("row.deletedBy", { name: msg.deletedByDisplayName ?? t("row.unknown") }))
+      : null;
+    return (
+      <div className="text-keep-muted/70">
+        <span data-copy-skip className="mr-2 select-none text-xs tabular-nums">{timeText}</span>
+        <span className="italic">{t("row.messageRemoved")}</span>
+        {/* Admin-only audit reveal: when the server attached the
+            pre-delete body on `originalBody` (it only does so for
+            isAdminRole viewers), surface it underneath as a greyed,
+            indented quote so a site admin can see what got hidden.
+            Mods + room-owner mods don't receive the field at all and
+            this block stays inert. */}
+        {msg.originalBody ? (
+          <blockquote className="ml-6 mt-0.5 border-l-2 border-keep-accent/30 bg-keep-panel/20 px-2 py-0.5 text-[11px] italic text-keep-muted/60">
+            <span
+              className="mr-1 select-none text-[9px] uppercase not-italic tracking-widest text-keep-accent/70"
+              title={t("row.adminAuditTitle")}
+            >
+              {t("row.adminAudit")}
+              {/* Surface the author snapshotted on the row + the actor
+                  who performed the delete so admins don't have to
+                  cross-reference timestamps to figure out who hid what.
+                  Author is always present (snapshotted at send time);
+                  actor came in with migration 0084 and falls back
+                  cleanly for older rows. */}
+              <span className="ml-1 normal-case tracking-normal">
+               , {msg.displayName}
+                {actorBlurb ? ` · ${actorBlurb}` : ""}
+              </span>
+              :
+            </span>
+            <span className="whitespace-pre-wrap">{msg.originalBody}</span>
+          </blockquote>
+        ) : null}
+      </div>
+    );
+  }
   const editedBadge = msg.editedAt ? (
     <span
       className="ml-1 text-[10px] italic text-keep-muted"
@@ -892,6 +962,22 @@ export function Line({
       break;
     case "say":
     default:
+      // /roleselect panel rows: the server hydrated live role state onto
+      // this say, so render the interactive picker card instead of the raw
+      // {role:…} token body (mirrors the PollCard mount above). Rows
+      // without hydration (all groups deleted, or an old bundle) fall
+      // through to the plain body.
+      if (msg.roleSelect && !msg.deletedAt) {
+        lineEl = (
+          <div>
+            <div>{time}{inlineAvatar}[{tag}]</div>
+            <div className="mt-1 max-w-md">
+              <RoleSelectCard message={msg} roleSelect={msg.roleSelect} compact />
+            </div>
+          </div>
+        );
+        break;
+      }
       lineEl = (
         <div>
           {time}{inlineAvatar}[{tag}]{" "}
@@ -1311,6 +1397,10 @@ function InlineEditForm({
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body: trimmed }),
+        // The proxy can hold a request open for ~a minute when no healthy
+        // instance is behind it (mid-deploy); time out to a visible,
+        // retryable error instead of an indefinite busy state.
+        signal: AbortSignal.timeout(15_000),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({} as { error?: string }));

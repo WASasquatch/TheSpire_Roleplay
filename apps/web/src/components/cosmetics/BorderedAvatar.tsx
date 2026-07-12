@@ -44,7 +44,7 @@
  * initials chip in the keep-banner color.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import DOMPurify from "dompurify";
 import type { AvatarCrop } from "@thekeep/shared";
 import { extractFreeformBorderVars, freeformBorderInlineVars } from "@thekeep/shared";
@@ -52,6 +52,7 @@ import { useEarning } from "../../state/earning.js";
 import { useChat } from "../../state/store.js";
 import { applyFreeformBorderPlaceholders } from "../../lib/freeformBorderTemplate.js";
 import { cropStyleAttr, cropStyleFor } from "../../lib/avatarCrop.js";
+import { ensureInjectedStyle } from "../../lib/injectStyle.js";
 
 export type BorderedAvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
 type Size = BorderedAvatarSize;
@@ -400,6 +401,19 @@ function TemplateAvatar({
   const scaleFactor = targetAvatarPx / TEMPLATE_NATIVE_PIC;
   const wrapperPx = TEMPLATE_NATIVE_AV * scaleFactor;
 
+  // Override-mode rows ship CSS that isn't in the global injector
+  // preamble, so it must be injected here — but through the nonce
+  // helper, never a raw <style> child: prod CSP (style-src 'nonce-…')
+  // drops un-nonced tags, which silently unstyled these borders on
+  // remote. Keyed by a content hash so repeated renders and identical
+  // catalog duplicates collapse to one head tag.
+  useEffect(() => {
+    if (!styleCss) return;
+    let hash = 5381;
+    for (let i = 0; i < styleCss.length; i++) hash = ((hash << 5) + hash + styleCss.charCodeAt(i)) | 0;
+    ensureInjectedStyle(`ff-border-${(hash >>> 0).toString(36)}`, styleCss);
+  }, [styleCss]);
+
   const merged = applyFreeformBorderPlaceholders(template, {
     avatarUrl,
     name,
@@ -436,11 +450,10 @@ function TemplateAvatar({
       }}
       title={title}
     >
-      {/* Override-mode rows that aren't in the user-facing catalog
-          ship their CSS inline alongside the template; catalog hits
-          rely on the global injector preamble (harmless duplicate
-          when both are present). */}
-      {styleCss ? <style>{styleCss}</style> : null}
+      {/* Override-mode CSS is injected into <head> via the nonce
+          helper in the effect above (CSP: raw <style> children are
+          dropped in prod); catalog hits additionally ride the global
+          injector preamble — harmless duplicate when both present. */}
       <span
         aria-hidden
         style={{

@@ -1,7 +1,9 @@
 import { and, asc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { isModeratorRole } from "@thekeep/shared";
 import { messages, roomMembers, rooms } from "../../db/schema.js";
 import { listArchivedOwnedRooms } from "../../lib/archivedRooms.js";
 import { effectiveRoomNsfwWith, nsfwServerIds } from "../../lib/nsfwRooms.js";
+import { loadRoleGates, roleAccessDeniedWith, staffServerIdsFor, usergroupIdsFor } from "../../lib/roleGates.js";
 import { nsfwForumIds } from "../../forums/nsfw.js";
 import { setRoomCleared } from "../../lib/roomClears.js";
 import { formatDuration, parseDuration } from "../duration.js";
@@ -11,6 +13,29 @@ import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
 const CLEAR_CHUNK = 400; // keep each UPDATE under SQLite's bound-variable cap
+
+/**
+ * Drop rooms the caller's roles deny (room_role_gates kind='access') from a
+ * command listing — role-locked rooms' existence must not leak through /list
+ * or /find when every other surface (rail, join, by-slug) hides them. Same
+ * batched shape as GET /rooms: one gate read, then at most one membership
+ * read and one staff read for the caller.
+ */
+async function dropRoleLockedRooms<
+  T extends { id: string; ownerId: string | null; serverId: string | null },
+>(ctx: CommandContext, rows: T[]): Promise<T[]> {
+  if (rows.length === 0) return rows;
+  const gates = await loadRoleGates(ctx.db, rows.map((r) => r.id));
+  const hasAccess = [...gates.values()].some((g) => g.access.size > 0);
+  if (!hasAccess) return rows;
+  const groupIds = await usergroupIdsFor(ctx.db, ctx.user.id);
+  const staffIds = isModeratorRole(ctx.user.role)
+    ? new Set<string>()
+    : await staffServerIdsFor(ctx.db, ctx.user.id);
+  return rows.filter(
+    (r) => !roleAccessDeniedWith(ctx.user, r, gates.get(r.id)?.access, groupIds, staffIds),
+  );
+}
 
 /**
  * Can the caller moderate (hide for everyone) in THIS room? Mirrors the
@@ -55,6 +80,7 @@ export const listCommand: CommandHandler = {
         type: rooms.type,
         isNsfw: rooms.isNsfw,
         serverId: rooms.serverId,
+        ownerId: rooms.ownerId,
         forumId: rooms.forumId,
       })
       .from(rooms)
@@ -76,6 +102,8 @@ export const listCommand: CommandHandler = {
         !effectiveRoomNsfwWith(r, nsfwServers)
         && !(r.forumId && nsfwForums.has(r.forumId)));
     }
+    // Role-locked rooms are absent for non-holders, matching the rail.
+    allRooms = await dropRoleLockedRooms(ctx, allRooms);
 
     if (allRooms.length === 0) {
       ctx.socket.emit("ui:hint", {
@@ -286,6 +314,7 @@ export const findCommand: CommandHandler = {
         archivedAt: rooms.archivedAt,
         isNsfw: rooms.isNsfw,
         serverId: rooms.serverId,
+        ownerId: rooms.ownerId,
         forumId: rooms.forumId,
       })
       .from(rooms)
@@ -304,6 +333,10 @@ export const findCommand: CommandHandler = {
         !effectiveRoomNsfwWith(r, nsfwServers)
         && !(r.forumId && nsfwForums.has(r.forumId)));
     }
+    // Role-locked rooms don't surface even by name — unlike private rooms
+    // (whose names are safe to list), the access gate's contract is that
+    // existence never leaks to non-holders.
+    matches = await dropRoleLockedRooms(ctx, matches);
 
     if (matches.length === 0) {
       ctx.socket.emit("ui:hint", {

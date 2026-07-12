@@ -1,0 +1,16 @@
+# .git-blame-ignore-revs
+#
+# Revisions listed here are skipped by `git blame` so that large,
+# purely-mechanical commits (formatting-only, no behavior change) don't
+# obscure the real authorship of each line.
+#
+# Enable locally with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# (GitHub honors this file automatically.)
+#
+# Per the codebase cleanup plan (plan_ext.md §5.1 / Phase 3), the single
+# repo-wide `prettier --write` reformat is deferred until AFTER the god-file
+# splits land, so its diff never collides with move diffs. When that commit
+# ships, add its full 40-char SHA below (one per line, with a short comment).
+#
+# --- Phase 3 formatting commit SHA goes here (none yet) ---

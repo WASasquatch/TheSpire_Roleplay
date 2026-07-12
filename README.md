@@ -2,7 +2,11 @@
 
 A roleplay-focused, real-time chat and community platform. Master accounts with
 multiple characters, public rooms and threaded forums, direct messages, per-user
-world wikis, long-form fiction, and a granular admin/moderation toolkit.
+world wikis, long-form fiction, and a granular admin/moderation toolkit. Run your
+own community: multiple servers, organized room categories with icons, staff-only
+info rooms whose history never expires, role-gated rooms with self-select roles,
+your world's lore built in, rich text chat, custom emoji & commands, its own
+economy.
 
 **Live:** <https://thespire.games/>
 

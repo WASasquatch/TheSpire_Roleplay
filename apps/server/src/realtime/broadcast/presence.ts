@@ -25,6 +25,7 @@ import {
   roomMods,
   roomWorldLinks,
   rooms,
+  servers,
   userActiveCosmetics,
   userOwnedFreeformBorders,
   userOwnedNameStyles,
@@ -58,9 +59,12 @@ import {
 } from "../theaterState.js";
 import { DEFAULT_SERVER_ID, resolveRoomServerId } from "../../earning/pool.js";
 import { serverAuthority } from "../../servers/authority.js";
+import { userlistBadgesFor } from "../../servers/usergroups.js";
 import { effectiveRoomNsfw } from "../../lib/nsfwRooms.js";
 import { findLinkedAnnex } from "../../lib/roomLinks.js";
 import { stampPairStaffView } from "../../lib/pairStaffView.js";
+import { stampPostLocked } from "../../lib/postMode.js";
+import { roleLockedRoomIdsForServer, stampAnnexRoleDenied } from "../../lib/roleGates.js";
 import { tFor } from "../../i18n.js";
 import { addSystemMessage, sendRoomBacklogTo } from "./persistence.js";
 import { isHiddenIncognitoIdentity } from "./incognito.js";
@@ -427,25 +431,38 @@ export async function findServerLanding(
   // front door got auto-parked). Callers that hand the id to a client for
   // joining must heal it first (see the /visit route) — a parked landing
   // 404s the join and bounces the visitor back to the home server.
+  //
+  // Role-locked rooms (room_role_gates kind='access', migration 0349) are
+  // skipped at EVERY tier: the landing is where arbitrary members get
+  // placed, so a room most of the server can't even see must never be it.
+  // Tiers resolve LAZILY — the overwhelmingly common case (default room
+  // exists, no access gate) costs one indexed rooms read plus one gate
+  // read, and the wider fallback scans only run when an earlier tier is
+  // missing or fully locked.
   const defaulted = (await db
     .select()
     .from(rooms)
     .where(and(eq(rooms.isDefault, true), eq(rooms.serverId, serverId)))
     .limit(1))[0];
-  if (defaulted) return defaulted;
+  if (defaulted && !(await roleLockedRoomIdsForServer(db, [defaulted.id])).has(defaulted.id)) {
+    return defaulted;
+  }
   // Fallbacks must be LIVE rooms: an archived non-default row can't be
   // healed by the visit path (only the default room is unambiguously the
   // server's structure), so it would be a guaranteed dead landing.
-  const fallback = (await db
+  const fallbacks = await db
     .select()
     .from(rooms)
     .where(and(eq(rooms.isSystem, true), eq(rooms.serverId, serverId), isNull(rooms.archivedAt)))
-    .orderBy(asc(rooms.name))
-    .limit(1))[0];
-  if (fallback) return fallback;
+    .orderBy(asc(rooms.name));
+  if (fallbacks.length > 0) {
+    const locked = await roleLockedRoomIdsForServer(db, fallbacks.map((c) => c.id));
+    const hit = fallbacks.find((c) => !locked.has(c.id));
+    if (hit) return hit;
+  }
   // Last resort: ANY live public room in the server, so a server whose
   // owner unset/deleted the default still has a working front door.
-  const anyLive = (await db
+  const anyLive = await db
     .select()
     .from(rooms)
     .where(and(
@@ -455,9 +472,13 @@ export async function findServerLanding(
       isNull(rooms.forumId),
       isNull(rooms.linkedRoomId),
     ))
-    .orderBy(asc(rooms.name))
-    .limit(1))[0];
-  return anyLive ?? null;
+    .orderBy(asc(rooms.name));
+  if (anyLive.length > 0) {
+    const locked = await roleLockedRoomIdsForServer(db, anyLive.map((c) => c.id));
+    const hit = anyLive.find((c) => !locked.has(c.id));
+    if (hit) return hit;
+  }
+  return null;
 }
 
 /**
@@ -647,6 +668,21 @@ async function joinRoomBody(
     }
   }
 
+  // Role-locked rooms (room_role_gates, migration 0349): any kind='access'
+  // row restricts entry to holders of one of those usergroups (plus site
+  // staff, server staff and the room owner — the helper's built-in
+  // bypasses). Refused with the SAME NO_ROOM shape a nonexistent room
+  // gives, so a role-locked room's existence never leaks — mirroring the
+  // by-slug 404 contract. Composes with every gate above and the private
+  // gate below: each must independently pass.
+  {
+    const { roleAccessDeniedFor } = await import("../../lib/roleGates.js");
+    if (await roleAccessDeniedFor(db, user, room)) {
+      socket.emit("error:notice", { code: "NO_ROOM", message: tFor(user.locale, "errors:server.realtime.roomNotFound") });
+      return;
+    }
+  }
+
   // Private rooms: owner always in; otherwise need either a valid password OR
   // an outstanding /invite. /invite acts as a per-user whitelist that lets the
   // user skip the password prompt. UNEXPIRED invites only: the row carries a
@@ -800,6 +836,19 @@ async function joinRoomBody(
   // read it without queries; recomputed on every join, so toggling sides
   // or switching rooms refreshes it.
   await stampPairStaffView(db, socket, user, roomId);
+
+  // Read-only posting mode (lib/postMode.ts): stamp whether THIS socket may
+  // post in THIS room, cached on socket.data exactly like pairStaffView so
+  // the hot summary paths never re-query. 'everyone' rooms short-circuit
+  // inside the helper (no queries).
+  await stampPostLocked(db, socket, user, room);
+
+  // Role-gated annex scrub (lib/roleGates.ts): stamp whether this viewer is
+  // denied the room's 18+ annex, so the summary paths can null the
+  // `linkedNsfwRoomId` pointer per-socket the way GET /rooms does — the
+  // console can gate the annex alone, and the pointer would otherwise
+  // re-leak the annex's existence on every room:state broadcast.
+  await stampAnnexRoleDenied(db, socket, user, roomId);
 
   // Multi-server socket banding (plan §7). Each socket joins a
   // `server:<serverId>` band alongside its `room:` band so server-scoped
@@ -1173,11 +1222,21 @@ export async function rebroadcastPresenceForUser(io: Io, db: Db, userId: string)
 export async function buildRoomSummary(
   db: Db,
   room: typeof rooms.$inferSelect,
+  // GET /rooms hands one Map for its whole tree so the server→world banner
+  // fallback resolves ONCE per (server, rating) instead of once per room —
+  // the route is the hottest endpoint and a 50-room server would otherwise
+  // pay ~50 identical servers/worlds/users reads per refetch. Single-room
+  // broadcast callers omit it (one room = one resolve, same as before).
+  serverWorldCache?: ServerWorldFallbackCache,
 ): Promise<RoomSummary> {
   const memberCountRows = await db
     .select({ n: sql<number>`count(*)` })
     .from(roomMembers)
     .where(eq(roomMembers.roomId, room.id));
+  // EFFECTIVE 18+ rating (server OR room — age plan, Phase 2). Computed once:
+  // it feeds the summary's own isNsfw field AND the server-world fallback's
+  // rating gate below.
+  const isNsfw = await effectiveRoomNsfw(db, room);
   return {
     id: room.id,
     name: room.name,
@@ -1187,11 +1246,16 @@ export async function buildRoomSummary(
     memberCount: memberCountRows[0]?.n ?? 0,
     npcDisabled: room.npcDisabled,
     persistent: room.persistent,
-    // EFFECTIVE 18+ rating (server OR room — age plan, Phase 2). Drives the
-    // rail/info-bar "18+" chip. Minors never receive a summary with this set
-    // because the /rooms route + join gates drop 18+ rooms for them first.
-    isNsfw: await effectiveRoomNsfw(db, room),
-    linkedWorld: await loadLinkedWorld(db, room.id),
+    // Drives the rail/info-bar "18+" chip. Minors never receive a summary
+    // with this set because the /rooms route + join gates drop 18+ rooms
+    // for them first.
+    isNsfw,
+    // Explicit room link first; a room with NO room_world_links row inherits
+    // its server's community world (migration 0346) so the whole server's
+    // rooms carry the lore banner without per-room linking. The explicit
+    // link always wins; the fallback costs one indexed servers read and only
+    // on the no-link path.
+    linkedWorld: (await loadLinkedWorld(db, room.id)) ?? (await loadServerWorldFallback(db, room, isNsfw, serverWorldCache)),
     messageExpiryMinutes: room.messageExpiryMinutes,
     replyMode: room.replyMode,
     theaterMode: room.theaterMode,
@@ -1220,6 +1284,18 @@ export async function buildRoomSummary(
     createdAt: +room.createdAt,
     messageCount: room.messageCount ?? 0,
     currentSceneTitle: room.currentSceneTitle ?? null,
+    // Rail section (migration 0344). Not per-viewer — categories are pure
+    // presentation, so this rides the room-wide fast path safely. Null = the
+    // headerless uncategorized bucket.
+    categoryId: room.categoryId ?? null,
+    // Read-only posting mode (migration 0345). The MODE itself is not
+    // per-viewer (it drives the rail's megaphone glyph for everyone); the
+    // per-viewer `postLocked` flag is layered on in summaryFor / the /rooms
+    // route from the join-time socket stamp.
+    postMode: room.postMode,
+    // "Never expire" opt-out (migration 0347); the dossier + expiry strips
+    // read it. Not per-viewer.
+    retentionExempt: room.retentionExempt,
   };
 }
 
@@ -1358,21 +1434,32 @@ async function emitRoomStateWith(
   // base, so a summary carrying one forces the per-socket fan-out and nulls
   // the pointer for non-adult viewers.
   const summaryFor = (s: (typeof sockets)[number]) => {
-    const sd = s.data as { user?: { isAdult?: boolean }; pairStaffView?: boolean };
+    const sd = s.data as { user?: { isAdult?: boolean }; pairStaffView?: boolean; postLocked?: boolean; annexRoleDenied?: boolean };
     // Staff pair oversight flag (per-viewer; stamped on socket.data at
     // join): tells the client to render the pair's two message buckets
     // merged. Only meaningful on paired rooms; adults only (the stamp
     // itself requires isAdult, so no minor can carry it).
-    const withFlag = sd.pairStaffView && (summary.linkedNsfwRoomId || summary.linkedSfwRoomId)
+    let withFlag = sd.pairStaffView && (summary.linkedNsfwRoomId || summary.linkedSfwRoomId)
       ? { ...summary, pairStaffView: true }
       : summary;
+    // Read-only posting flag (per-viewer; stamped at join by
+    // stampPostLocked, NEVER computed here): tells the client to swap the
+    // composer for the lock strip. Only meaningful on restricted-post
+    // rooms (post_mode 'staff' or 'roles').
+    if (summary.postMode !== "everyone" && sd.postLocked) {
+      withFlag = { ...withFlag, postLocked: true };
+    }
     if (!withFlag.linkedNsfwRoomId) return withFlag;
-    return sd.user?.isAdult ? withFlag : { ...withFlag, linkedNsfwRoomId: null };
+    // Scrub for non-adults AND for viewers the annex's own access gate
+    // denies (join-time stamp; see stampAnnexRoleDenied) — same contract
+    // as GET /rooms' roleDropped pointer scrub.
+    return sd.user?.isAdult && !sd.annexRoleDenied ? withFlag : { ...withFlag, linkedNsfwRoomId: null };
   };
   // Fast path only when NO per-viewer variance is possible: any pair
   // pointer (either direction) can require the per-socket staff flag or
-  // the minor scrub, so paired rooms always take the fan-out.
-  if (blockGraph.size === 0 && !summary.linkedNsfwRoomId && !summary.linkedSfwRoomId) {
+  // the minor scrub, and a restricted-post room ('staff'/'roles') needs
+  // the per-socket postLocked flag, so those rooms always take the fan-out.
+  if (blockGraph.size === 0 && !summary.linkedNsfwRoomId && !summary.linkedSfwRoomId && summary.postMode === "everyone") {
     io.to(`room:${roomId}`).emit("room:state", { room: summary, occupants });
   } else {
     for (const s of sockets) {
@@ -1487,8 +1574,76 @@ async function broadcastRoomStateAndPresence(io: Io, db: Db, roomId: string): Pr
 async function loadLinkedWorld(db: Db, roomId: string): Promise<LinkedWorldRef | null> {
   const link = (await db.select().from(roomWorldLinks).where(eq(roomWorldLinks.roomId, roomId)).limit(1))[0];
   if (!link) return null;
-  const w = (await db.select().from(worlds).where(eq(worlds.id, link.worldId)).limit(1))[0];
+  return worldRefById(db, link.worldId);
+}
+
+/**
+ * Chat-banner fallback (migration 0346): a room with no explicit
+ * room_world_links row inherits its SERVER's community world, so a server
+ * owner links lore once and every unlinked room carries the banner.
+ * RoomSummary is a room-wide broadcast (no per-viewer resolve is possible),
+ * so the inherited world is gated HERE instead of through resolveWorld:
+ * a private world never inherits (its name/slug/owner would fan out to
+ * viewers the world's own visibility gate denies), and an 18+ world only
+ * inherits into rooms whose effective rating is 18+ (minors never occupy
+ * those, so the name never reaches them). One indexed servers read plus
+ * the world row it already needed, and only when the servers feature is
+ * live: flag-off, summaries stay byte-identical to today.
+ */
+/**
+ * Per-request memo for the server→world fallback, keyed on
+ * `serverId:rating` (the rating gate is per-room, so a mixed-rating server
+ * costs at most two resolves). Values are PROMISES so the /rooms
+ * Promise.all fan-out dedupes even when many rooms of one server race the
+ * first resolve.
+ */
+export type ServerWorldFallbackCache = Map<string, Promise<LinkedWorldRef | null>>;
+
+async function loadServerWorldFallback(
+  db: Db,
+  room: { serverId: string | null },
+  roomIsNsfw: boolean,
+  cache?: ServerWorldFallbackCache,
+): Promise<LinkedWorldRef | null> {
+  if (!areServersEnabledCached()) return null;
+  const serverId = room.serverId ?? DEFAULT_SERVER_ID;
+  if (!cache) return resolveServerWorldFallback(db, serverId, roomIsNsfw);
+  const key = `${serverId}:${roomIsNsfw ? "1" : "0"}`;
+  let p = cache.get(key);
+  if (!p) {
+    p = resolveServerWorldFallback(db, serverId, roomIsNsfw);
+    cache.set(key, p);
+  }
+  return p;
+}
+
+async function resolveServerWorldFallback(
+  db: Db,
+  serverId: string,
+  roomIsNsfw: boolean,
+): Promise<LinkedWorldRef | null> {
+  const s = (await db
+    .select({ worldId: servers.worldId })
+    .from(servers)
+    .where(eq(servers.id, serverId))
+    .limit(1))[0];
+  if (!s?.worldId) return null;
+  const w = (await db.select().from(worlds).where(eq(worlds.id, s.worldId)).limit(1))[0];
   if (!w) return null;
+  if (w.visibility === "private") return null;
+  if (w.isNsfw && !roomIsNsfw) return null;
+  return worldRefFromRow(db, w);
+}
+
+/** Load a world's brief identity record ({@link LinkedWorldRef}) by id. */
+async function worldRefById(db: Db, worldId: string): Promise<LinkedWorldRef | null> {
+  const w = (await db.select().from(worlds).where(eq(worlds.id, worldId)).limit(1))[0];
+  if (!w) return null;
+  return worldRefFromRow(db, w);
+}
+
+/** Map a worlds row to the brief banner identity record (one owner read). */
+async function worldRefFromRow(db: Db, w: typeof worlds.$inferSelect): Promise<LinkedWorldRef> {
   const owner = (await db.select({ username: users.username }).from(users).where(eq(users.id, w.ownerUserId)).limit(1))[0];
   return {
     id: w.id,
@@ -1756,11 +1911,26 @@ export async function sendRoomStateTo(
   if ((summary.linkedNsfwRoomId || summary.linkedSfwRoomId) && viewerSnapshot) {
     await stampPairStaffView(db, socket, viewerSnapshot, roomId);
   }
-  const staffFlagged = (socket.data as { pairStaffView?: boolean }).pairStaffView
+  // Read-only posting flag: RE-STAMPED here for the same relocate-path
+  // reason as pairStaffView above. Gated on the restricted post modes
+  // ('staff'/'roles') so 'everyone' rooms pay no queries.
+  if (summary.postMode !== "everyone" && viewerSnapshot) {
+    await stampPostLocked(db, socket, viewerSnapshot, room);
+  }
+  // Annex role-gate scrub flag: RE-STAMPED for the same relocate-path
+  // reason. Gated on the base→annex pointer so unpaired rooms pay nothing.
+  if (summary.linkedNsfwRoomId && viewerSnapshot) {
+    await stampAnnexRoleDenied(db, socket, viewerSnapshot, roomId);
+  }
+  let staffFlagged = (socket.data as { pairStaffView?: boolean }).pairStaffView
     && (summary.linkedNsfwRoomId || summary.linkedSfwRoomId)
     ? { ...summary, pairStaffView: true }
     : summary;
-  const scrubbedSummary = staffFlagged.linkedNsfwRoomId && !viewerSnapshot?.isAdult
+  if (summary.postMode !== "everyone" && (socket.data as { postLocked?: boolean }).postLocked) {
+    staffFlagged = { ...staffFlagged, postLocked: true };
+  }
+  const scrubbedSummary = staffFlagged.linkedNsfwRoomId
+    && (!viewerSnapshot?.isAdult || (socket.data as { annexRoleDenied?: boolean }).annexRoleDenied)
     ? { ...staffFlagged, linkedNsfwRoomId: null }
     : staffFlagged;
   socket.emit("room:state", { room: scrubbedSummary, occupants: view });
@@ -1938,6 +2108,15 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
         .where(and(eq(characterEarning.serverId, listServerId), inArray(characterEarning.characterId, charIds)))
     : [];
   const charRankByChar = new Map(charEarningRows.map((r) => [r.characterId, { rankKey: r.rankKey, tier: r.tier }]));
+
+  // Usergroup badge (migration 0348): each member's highest-sort_order group
+  // with `showBadge` enabled on THIS room's server, batched over the whole
+  // occupant set like the earning reads above. Viewer-agnostic, so it rides
+  // the shared payload untouched by the per-viewer scrubs. Per-ACCOUNT
+  // (server_usergroup_members keys userId), so a character row wears the
+  // same badge as the account's OOC row — mirroring the profile "Roles"
+  // row, which also shows account groups on character profiles.
+  const badgeByUser = await userlistBadgesFor(db, listServerId, userIds);
 
   // Active name style + inline-avatar toggle. Partitioned per
   // identity (since migration 0085): characters carry their own
@@ -2271,6 +2450,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       masterFreeformBorderConfig,
       masterInlineAvatarEnabled,
       useRankAsUserlistIcon: u.useRankAsUserlistIcon,
+      badge: badgeByUser.get(u.id) ?? null,
     });
   }
   return out;

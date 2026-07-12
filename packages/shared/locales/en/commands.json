@@ -103,6 +103,13 @@
     "tooFew": "A poll needs at least {{min}} options, separated by | . Example: /poll {{question}} | A | B",
     "tooMany": "A poll can have at most {{max}} options."
   },
+  "roleselect": {
+    "usage": "Usage: /roleselect [emoji] <role> [[emoji] <role> ...]. Quote names with spaces: /roleselect \"Night Owls\"",
+    "permission": "Only this server's staff with the roles permission can post a role picker.",
+    "unknownGroup": "No role called \"{{name}}\" exists in this server.",
+    "notSelectable": "\"{{name}}\" isn't a self-role. Turn on \"Members can pick this\" for it in the server console's Roles tab first.",
+    "tooMany": "A role picker can offer at most {{max}} roles."
+  },
   "npc": {
     "usage": "Usage: /npc <Name> <text>  (or /npc <Name> /me <action>)",
     "disabled": "/npc is disabled in this room.",
@@ -230,8 +237,19 @@
   "expiry": {
     "current": "Messages in this room auto-expire after {{minutes}} minutes.",
     "none": "No per-room expiry set; only the global retention setting applies.",
+    "never": "Messages in this room never expire.",
     "permission": "Only the room owner / mod / admin can change the expiry.",
     "invalid": "Expiry must be a whole number of minutes between 1 and 43200 (30 days). Use /expiry off to clear."
+  },
+  "postMode": {
+    "currentEveryone": "Anyone in this room can post.",
+    "currentStaff": "Only staff can post in this room; everyone else can read and react.",
+    "currentRoles": "Only members with certain roles can post in this room; staff always can. Everyone else can read and react.",
+    "usage": "Use /postmode staff or /postmode everyone. Bare /postmode shows the current setting.",
+    "forumBoard": "This room is a forum board - posting there is managed by the forum's own permissions.",
+    "permission": "Only the room owner / mod / admin can change who can post.",
+    "alreadyStaff": "Posting is already limited to staff.",
+    "alreadyEveryone": "Posting is already open to everyone."
   },
   "replyMode": {
     "current": "This room's reply mode: {{mode}}.",
@@ -358,11 +376,11 @@
     "notVisible": "No visible world with slug \"{{slug}}\".",
     "linkPermission": "Only the room owner / mod / admin can link a world.",
     "linkUsage": "Usage: /world link <slug>",
-    "notOwned": "You don't own a world with slug \"{{slug}}\". Browse the catalog with /world catalog to use someone else's open world.",
+    "notOwned": "You don't own a world with slug \"{{slug}}\". Browse the catalog with /world catalog to use someone else's public world.",
     "unlinkPermission": "Only the room owner / mod / admin can unlink the world.",
     "noneLinked": "No world is linked to this room.",
     "joinNoneLinked": "No world is linked to this room. Pass a slug, e.g. /world join darkrealm.",
-    "notOpen": "\"{{name}}\" isn't open for community membership.",
+    "notOpen": "\"{{name}}\" isn't a public (catalog-listed) world, so it doesn't take new members here.",
     "inviteOnly": "\"{{name}}\" is invite-only. The author adds members directly, ask them if you'd like in.",
     "applicationRequired": "\"{{name}}\" accepts new members by application. Opened the form for you.",
     "alreadyMember": "You're already a member of \"{{name}}\" (as this identity).",
@@ -894,6 +912,22 @@
         "--for": "Auto-close after the duration (30m, 2h, 1d). You can also close it manually."
       }
     },
+    "roleselect": {
+      "description": "Post a role picker: members click a role to give it to themselves (or remove it). Roles must be self-roles (with \"Members can pick this\" turned on) in the server console's Roles tab. Quote names with real spaces.",
+      "sub": {
+        "basic": "Offer the listed roles as clickable rows.",
+        "emoji": "Put an emoji before a role name to decorate its row.",
+        "quoted": "Quote a role name that contains real spaces."
+      }
+    },
+    "postmode": {
+      "description": "Show or set who can post in this room (owner/mod only to set).",
+      "sub": {
+        "(no args)": "Show who can currently post in this room.",
+        "staff": "Only staff can post: room owner, room mods, server staff, and site staff. Everyone else can still read and react.",
+        "everyone": "Anyone in the room can post (default)."
+      }
+    },
     "private": {
       "description": "Create a password-protected room. Equivalent to /go <name> <password> when no room with that name exists. First whitespace-separated token is the name; everything after is the password."
     },
@@ -1097,8 +1131,8 @@
         "view": "Explicit form of the slug shortcut.",
         "link": "Link one of YOUR worlds to this room. (Owner/mod/admin only.)",
         "unlink": "Remove the linked world. (Owner/mod/admin only.)",
-        "catalog": "Browse the world catalog (open worlds usable in any room).",
-        "join": "Join an open world; opens the application form if the world requires one; tells you if the world is invite-only.",
+        "catalog": "Browse the world catalog (public worlds usable in any room).",
+        "join": "Join a public world; opens the application form if the world requires one; tells you if the world is invite-only.",
         "leave": "Leave a world as your current identity."
       }
     },

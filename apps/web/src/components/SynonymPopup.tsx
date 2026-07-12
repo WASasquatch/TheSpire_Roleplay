@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useChat } from "../state/store.js";
 import { useReducedMotion } from "../lib/reducedMotion.js";
+import type { ComposerInputAdapter } from "../lib/composerInput.js";
 
 /**
  * Thesaurus popup that activates on text selection inside an input
@@ -23,12 +24,18 @@ import { useReducedMotion } from "../lib/reducedMotion.js";
  */
 export function SynonymPopup({
   inputRef,
+  adapter,
   value,
   onChange,
 }: {
-  inputRef: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>;
+  /** Textarea/input mode (DM composer, forum inputs). */
+  inputRef?: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>;
+  /** Rich-editor mode (main chat composer): selection reads and the
+   *  replace go through the adapter in plain-text coordinates; `value`
+   *  must then be the SAME plain text the adapter reports. */
+  adapter?: ComposerInputAdapter | null;
   value: string;
-  onChange: (next: string) => void;
+  onChange?: (next: string) => void;
 }) {
   const { t } = useTranslation("common");
   // Per-user opt-out, when set, this component does nothing: no
@@ -58,10 +65,21 @@ export function SynonymPopup({
   const WORD_RX = /^[a-zA-Z][a-zA-Z'-]{1,39}$/;
 
   function readSelection(): { start: number; end: number; word: string } | null {
-    const el = inputRef.current;
-    if (!el || el !== document.activeElement) return null;
-    const start = el.selectionStart ?? 0;
-    const end = el.selectionEnd ?? 0;
+    let start: number;
+    let end: number;
+    if (adapter) {
+      const el = adapter.getElement();
+      if (!el || el !== document.activeElement) return null;
+      const sel = adapter.getSelection();
+      if (!sel) return null;
+      start = sel.start;
+      end = sel.end;
+    } else {
+      const el = inputRef?.current;
+      if (!el || el !== document.activeElement) return null;
+      start = el.selectionStart ?? 0;
+      end = el.selectionEnd ?? 0;
+    }
     if (start === end) return null;
     const slice = value.slice(start, end).trim();
     if (!WORD_RX.test(slice)) return null;
@@ -127,7 +145,8 @@ export function SynonymPopup({
       document.removeEventListener("selectionchange", onSelectionChange);
       if (fetchTimerRef.current != null) window.clearTimeout(fetchTimerRef.current);
     };
-  }, [value, inputRef, disableThesaurus]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, inputRef, adapter, disableThesaurus]);
 
   // Keyboard navigation. Attached to the input via capture-phase
   // window listener so the popup can preempt the input's own
@@ -135,7 +154,7 @@ export function SynonymPopup({
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) {
-      const el = inputRef.current;
+      const el = adapter ? adapter.getElement() : inputRef?.current;
       if (!el || el !== document.activeElement) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -157,7 +176,8 @@ export function SynonymPopup({
     }
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [open, synonyms, highlightedIdx, inputRef]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, synonyms, highlightedIdx, inputRef, adapter]);
 
   /**
    * Replace the captured selection with the chosen synonym. We read
@@ -167,12 +187,22 @@ export function SynonymPopup({
    */
   function accept(synonym: string) {
     const sel = selRef.current;
-    const el = inputRef.current;
-    if (!sel || !el) return;
+    if (!sel) return;
+    if (adapter) {
+      // Rich-editor path: one ranged replacement; the adapter restores
+      // focus and parks the caret after the inserted word itself.
+      adapter.replaceRange(sel.start, sel.end, synonym);
+      setOpen(false);
+      setSynonyms([]);
+      selRef.current = null;
+      return;
+    }
+    const el = inputRef?.current;
+    if (!el) return;
     const before = value.slice(0, sel.start);
     const after = value.slice(sel.end);
     const next = before + synonym + after;
-    onChange(next);
+    onChange?.(next);
     setOpen(false);
     setSynonyms([]);
     selRef.current = null;

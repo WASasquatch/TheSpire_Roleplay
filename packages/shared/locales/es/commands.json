@@ -103,6 +103,13 @@
     "tooFew": "Una encuesta necesita al menos {{min}} opciones, separadas por | . Ejemplo: /poll {{question}} | A | B",
     "tooMany": "Una encuesta puede tener {{max}} opciones como máximo."
   },
+  "roleselect": {
+    "usage": "Uso: /roleselect [emoji] <role> [[emoji] <role> ...]. Pon entre comillas los nombres con espacios: /roleselect \"Night Owls\"",
+    "permission": "Solo el equipo de este servidor con el permiso de roles puede publicar un selector de roles.",
+    "unknownGroup": "No existe un rol llamado \"{{name}}\" en este servidor.",
+    "notSelectable": "\"{{name}}\" no es un autorol. Activa primero \"Los miembros pueden elegirlo\" en la pestaña Roles de la consola del servidor.",
+    "tooMany": "Un selector de roles puede ofrecer {{max}} roles como máximo."
+  },
   "npc": {
     "usage": "Uso: /npc <Name> <text>  (o /npc <Name> /me <action>)",
     "disabled": "/npc está desactivado en esta sala.",
@@ -230,8 +237,19 @@
   "expiry": {
     "current": "Los mensajes de esta sala se borran automáticamente después de {{minutes}} minutos.",
     "none": "Esta sala no tiene caducidad propia; solo se aplica la configuración global de retención.",
+    "never": "Los mensajes de esta sala nunca caducan.",
     "permission": "Solo el propietario de la sala / mod / admin pueden cambiar la caducidad.",
     "invalid": "La caducidad debe ser un número entero de minutos entre 1 y 43200 (30 días). Usa /expiry off para quitarla."
+  },
+  "postMode": {
+    "currentEveryone": "Cualquiera en esta sala puede publicar.",
+    "currentStaff": "Solo el equipo puede publicar en esta sala; el resto puede leer y reaccionar.",
+    "currentRoles": "Solo los miembros con ciertos roles pueden publicar en esta sala; el equipo siempre puede. El resto puede leer y reaccionar.",
+    "usage": "Usa /postmode staff o /postmode everyone. /postmode sin argumentos muestra la configuración actual.",
+    "forumBoard": "Esta sala es un tablero de foro - publicar ahí se rige por los permisos del propio foro.",
+    "permission": "Solo el propietario de la sala / mod / admin pueden cambiar quién puede publicar.",
+    "alreadyStaff": "Publicar ya está limitado al equipo.",
+    "alreadyEveryone": "Publicar ya está abierto para todos."
   },
   "replyMode": {
     "current": "Modo de respuestas de esta sala: {{mode}}.",
@@ -360,11 +378,11 @@
     "notVisible": "No hay ningún mundo visible con el slug \"{{slug}}\".",
     "linkPermission": "Solo el propietario de la sala / mod / admin pueden vincular un mundo.",
     "linkUsage": "Uso: /world link <slug>",
-    "notOwned": "No tienes un mundo con el slug \"{{slug}}\". Explora el catálogo con /world catalog para usar el mundo abierto de otra persona.",
+    "notOwned": "No tienes un mundo con el slug \"{{slug}}\". Explora el catálogo con /world catalog para usar el mundo público de otra persona.",
     "unlinkPermission": "Solo el propietario de la sala / mod / admin pueden desvincular el mundo.",
     "noneLinked": "Ningún mundo está vinculado a esta sala.",
     "joinNoneLinked": "Ningún mundo está vinculado a esta sala. Indica un slug, p. ej. /world join darkrealm.",
-    "notOpen": "\"{{name}}\" no está abierto a nuevos miembros.",
+    "notOpen": "\"{{name}}\" no es un mundo público (listado en el catálogo), así que no admite nuevos miembros desde aquí.",
     "inviteOnly": "\"{{name}}\" es solo con invitación. El autor agrega a los miembros directamente, pregúntale si quieres entrar.",
     "applicationRequired": "\"{{name}}\" acepta miembros nuevos por solicitud. Se abrió el formulario para ti.",
     "alreadyMember": "Ya eres miembro de \"{{name}}\" (con esta identidad).",
@@ -896,6 +914,22 @@
         "--for": "Cierre automático tras la duración (30m, 2h, 1d). También puedes cerrarla a mano."
       }
     },
+    "roleselect": {
+      "description": "Publica un selector de roles: los miembros hacen clic en un rol para dárselo (o quitárselo). Los roles deben ser autoroles (con \"Los miembros pueden elegirlo\" activado) en la pestaña Roles de la consola del servidor. Pon entre comillas los nombres con espacios reales.",
+      "sub": {
+        "basic": "Ofrece los roles listados como filas clicables.",
+        "emoji": "Pon un emoji antes del nombre de un rol para decorar su fila.",
+        "quoted": "Pon entre comillas un nombre de rol que contenga espacios reales."
+      }
+    },
+    "postmode": {
+      "description": "Muestra o define quién puede publicar en esta sala (solo propietario/mod para cambiarlo).",
+      "sub": {
+        "(no args)": "Muestra quién puede publicar actualmente en esta sala.",
+        "staff": "Solo el equipo puede publicar: propietario de la sala, mods de la sala, equipo del servidor y equipo del sitio. El resto puede seguir leyendo y reaccionando.",
+        "everyone": "Cualquiera en la sala puede publicar (predeterminado)."
+      }
+    },
     "private": {
       "description": "Crea una sala protegida con contraseña. Equivale a /go <name> <password> cuando no existe una sala con ese nombre. El primer término separado por espacios es el nombre; todo lo demás es la contraseña."
     },
@@ -1099,8 +1133,8 @@
         "view": "Forma explícita del atajo con slug.",
         "link": "Vincula uno de TUS mundos a esta sala. (Solo propietario/mod/admin.)",
         "unlink": "Quita el mundo vinculado. (Solo propietario/mod/admin.)",
-        "catalog": "Explora el catálogo de mundos (mundos abiertos que se pueden usar en cualquier sala).",
-        "join": "Únete a un mundo abierto; abre el formulario de solicitud si el mundo lo requiere; te avisa si el mundo es solo con invitación.",
+        "catalog": "Explora el catálogo de mundos (mundos públicos que se pueden usar en cualquier sala).",
+        "join": "Únete a un mundo público; abre el formulario de solicitud si el mundo lo requiere; te avisa si el mundo es solo con invitación.",
         "leave": "Abandona un mundo con tu identidad actual."
       }
     },

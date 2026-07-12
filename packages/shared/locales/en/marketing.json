@@ -166,17 +166,17 @@
     "google": "Google",
     "signInWithGoogle": "Sign in with Google",
     "hostTitle": "Host your own community",
-    "hostBody": "Run your own chat community and forums, with your own rooms, members, roles, and moderation. Free to start, right in your browser.",
+    "hostBody": "Run your own community: multiple servers, organized room categories with icons, staff-only info rooms whose history never expires, role-gated rooms with roles members pick themselves, your world's lore built in, rich text chat, custom emoji & commands, its own economy. Free to start, right in your browser.",
     "startCommunity": "Start a community",
     "seeLiveForum": "See a live forum →",
     "bringCommunity": "Bring your community to {{siteName}}",
     "bringBody": "Give your game, guild, or fandom a real home, free, with the tools to run it your way.",
     "ownChatTitle": "Your own chat community",
     "ownChat": [
-      "Live rooms for real-time roleplay",
-      "Members, roles, and invites",
-      "Its own economy and cosmetics",
-      "Moderation tools you control"
+      "Rich text chat rooms in organized categories with icons",
+      "Staff-only info rooms whose history never expires, and role-gated rooms with roles members pick themselves",
+      "Your world's lore built in, plus its own economy and cosmetics",
+      "Custom emoji & commands, and moderation tools you control"
     ],
     "ownForumsTitle": "Your own forums",
     "ownForums": [
@@ -227,11 +227,12 @@
       "communities": {
         "title": "Communities",
         "tagline": "Host your own community, or join one",
-        "desc": "Beyond the native Spire, anyone can create their own community: a space with its own chat rooms, members, roles, economy, and moderation. Run it your way, or join communities other people have built.",
+        "desc": "Beyond the native Spire, anyone can run their own community: multiple servers with organized room categories and icons, staff-only info rooms whose history never expires, role-gated rooms with roles members pick themselves, your world's lore built in, rich text chat, custom emoji & commands, and its own economy. Run it your way, or join communities other people have built.",
         "points": [
-          "Your own rooms, members & roles",
-          "Per-community economy & cosmetics",
-          "Moderation tools you control"
+          "Room categories with icons, info rooms & role-gated rooms",
+          "Rich text chat with custom emoji & commands",
+          "Your world's lore built in",
+          "Per-community economy & moderation you control"
         ],
         "ctaLabel": "Start a community"
       },

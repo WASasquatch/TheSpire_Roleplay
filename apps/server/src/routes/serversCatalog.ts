@@ -10,6 +10,7 @@ import {
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import type {
+  Role,
   ServerViewerState,
 } from "@thekeep/shared";
 import {
@@ -31,10 +32,11 @@ import {
   buildServerSummary,
   catalogRank,
   parseCrop,
+  resolveServerWorldRef,
   roomsOfServerWhere,
   SERVER_SUMMARY_COLUMNS,
 } from "./serversShared.js";
-import type { ServerRoutesCtx, ServerSummaryRow, SummaryViewerCtx } from "./serversShared.js";
+import type { ServerRoutesCtx, ServerSummaryRow, ServerWorldRef, SummaryViewerCtx } from "./serversShared.js";
 
 export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
   const { app, db, io, serversLive, requireServerOwner, requireServerPermission, resolveServerTarget, writeServerImage, unlinkServerImage } = ctx;
@@ -64,7 +66,7 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
    *  that {@link buildServerSummary} layers onto each row. One indexed read
    *  each; all null/empty for an anonymous viewer. */
   async function loadSummaryViewerCtx(
-    me: { id: string } | null,
+    me: { id: string; role: Role } | null,
     activityBy: Map<string, number | null>,
     rows: ServerSummaryRow[],
   ): Promise<SummaryViewerCtx> {
@@ -94,7 +96,20 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
       const names = await db.select({ id: users.id, username: users.username }).from(users).where(inArray(users.id, ownerIds));
       for (const n of names) ownerNamesBy.set(n.id, n.username);
     }
-    return { me, rolesBy, visitsBy, myDefaultServerId, activityBy, ownerNamesBy };
+    // Community-world refs (migration 0346), resolved once per DISTINCT world
+    // through the canonical world visibility gate for THIS viewer. Servers
+    // whose world the viewer can't open get no entry (summary emits null).
+    const worldRefsBy = new Map<string, ServerWorldRef>();
+    const refByWorld = new Map<string, ServerWorldRef | null>();
+    for (const r of rows) {
+      if (!r.worldId) continue;
+      if (!refByWorld.has(r.worldId)) {
+        refByWorld.set(r.worldId, await resolveServerWorldRef(db, r.worldId, me));
+      }
+      const ref = refByWorld.get(r.worldId);
+      if (ref) worldRefsBy.set(r.id, ref);
+    }
+    return { me, rolesBy, visitsBy, myDefaultServerId, activityBy, ownerNamesBy, worldRefsBy };
   }
 
   app.get("/servers", async (req, reply) => {
@@ -442,6 +457,11 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
         permissions: a.permissions,
       };
     }
+    // Community world (migration 0346): resolved per viewer through the
+    // canonical world visibility gate. A private world the viewer can't
+    // open reads as null here too — the console then shows "none", which
+    // fails toward hiding rather than leaking a name.
+    const world = await resolveServerWorldRef(db, server.worldId ?? null, me);
     // Pending-application flag so the client shows "applied" rather than a
     // fresh apply button (advisory; the apply route re-checks).
     const pending = me
@@ -486,6 +506,7 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
         sfwBannerUrl: server.sfwBannerUrl ?? null,
         publicBrowsing: !!server.publicBrowsing,
         applicationPrompt: server.applicationPrompt ?? null,
+        world,
         ownerUserId: server.ownerUserId,
         ownerUsername: owner?.username ?? "unknown",
         roomCount,

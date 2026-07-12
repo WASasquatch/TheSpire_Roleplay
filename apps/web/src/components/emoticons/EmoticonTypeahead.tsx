@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { UNICODE_EMOJI_FLAT } from "@thekeep/shared";
 import { useEmoticons } from "../../state/emoticons.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
+import type { ComposerInputAdapter } from "../../lib/composerInput.js";
 import { EmoticonSprite } from "./EmoticonSprite.js";
 
 /**
@@ -97,12 +98,20 @@ const TRIGGER_RE = /(?:^|\s)(:([a-z0-9_+-]{0,32}))$/i;
 
 export function EmoticonTypeahead({
   textareaRef,
+  adapter,
   value,
   onChange,
 }: {
-  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  /** Textarea mode (DM composer): caret + splice via the element. */
+  textareaRef?: React.RefObject<HTMLTextAreaElement | null>;
+  /** Rich-editor mode (main chat composer): caret + replacement go
+   *  through the adapter in plain-text coordinates; `value` must be
+   *  the SAME plain text the adapter reports. Key handling moves to a
+   *  window-capture listener (ProseMirror owns the element's keydown),
+   *  and the caret x comes from the adapter instead of the mirror. */
+  adapter?: ComposerInputAdapter | null;
   value: string;
-  onChange: (next: string) => void;
+  onChange?: (next: string) => void;
 }) {
   const { t } = useTranslation("arcade");
   const sheets = useEmoticons((s) => s.sheets);
@@ -200,15 +209,26 @@ export function EmoticonTypeahead({
   // every input + selection event so the popup tracks the caret in
   // real time (including back-arrow / mouse-click placements).
   const checkTrigger = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    const caret = el.selectionStart ?? 0;
-    // Only consider triggers if there's no selection (a selected
-    // range would conflict with the "replace `:query` text" pick
-    // semantics).
-    if (el.selectionStart !== el.selectionEnd) {
-      setActive(null);
-      return;
+    let caret: number;
+    if (adapter) {
+      const sel = adapter.getSelection();
+      if (!sel) return;
+      // Only consider triggers if there's no selection (a selected
+      // range would conflict with the "replace `:query` text" pick
+      // semantics).
+      if (sel.start !== sel.end) {
+        setActive(null);
+        return;
+      }
+      caret = sel.start;
+    } else {
+      const el = textareaRef?.current;
+      if (!el) return;
+      caret = el.selectionStart ?? 0;
+      if (el.selectionStart !== el.selectionEnd) {
+        setActive(null);
+        return;
+      }
     }
     const upto = value.slice(0, caret);
     const m = TRIGGER_RE.exec(upto);
@@ -228,7 +248,7 @@ export function EmoticonTypeahead({
     // Fresh trigger → no explicit selection yet, so Enter sends the message
     // rather than accepting the auto-highlighted first suggestion.
     setNavigated(false);
-  }, [textareaRef, value]);
+  }, [textareaRef, adapter, value]);
 
   // Track the caret column whenever the trigger appears or moves, measured
   // relative to the composer's positioned wrapper (the popup's offsetParent)
@@ -238,7 +258,18 @@ export function EmoticonTypeahead({
       setPos(null);
       return;
     }
-    const el = textareaRef.current;
+    if (adapter) {
+      // Rich-editor mode: ProseMirror exposes real caret coordinates,
+      // no mirror needed. Clamp inside the wrapper like below.
+      const left = adapter.caretLeftInWrapper();
+      const wrapper = adapter.getElement()?.offsetParent as HTMLElement | null;
+      const wrapperWidth = wrapper?.clientWidth ?? POPUP_WIDTH;
+      setPos({
+        left: Math.max(0, Math.min(left ?? 0, Math.max(0, wrapperWidth - POPUP_WIDTH))),
+      });
+      return;
+    }
+    const el = textareaRef?.current;
     if (!el) return;
     // Caret column approximated via a mirror element. Browsers don't
     // expose a direct API for "give me the caret's pixel coordinates
@@ -253,14 +284,22 @@ export function EmoticonTypeahead({
     const wrapperWidth = (el.offsetParent as HTMLElement | null)?.clientWidth ?? el.clientWidth;
     const rawLeft = el.offsetLeft + caretOffset.left;
     setPos({ left: Math.max(0, Math.min(rawLeft, Math.max(0, wrapperWidth - POPUP_WIDTH))) });
-  }, [active, textareaRef, value]);
+  }, [active, textareaRef, adapter, value]);
 
   // Wire selection/input listeners. We mount these once per textarea
   // ref; the dependency array intentionally only includes the
   // textareaRef identity (callbacks themselves rebuild but the
   // effect re-runs cheaply).
   useEffect(() => {
-    const el = textareaRef.current;
+    if (adapter) {
+      // Rich-editor mode: selectionchange fires for contenteditable
+      // selections too, and doc changes re-run checkTrigger via the
+      // `value` prop dependency below.
+      const handler = () => checkTrigger();
+      document.addEventListener("selectionchange", handler);
+      return () => document.removeEventListener("selectionchange", handler);
+    }
+    const el = textareaRef?.current;
     if (!el) return;
     const handler = () => checkTrigger();
     el.addEventListener("input", handler);
@@ -273,23 +312,38 @@ export function EmoticonTypeahead({
       el.removeEventListener("keyup", handler);
       document.removeEventListener("selectionchange", handler);
     };
-  }, [textareaRef, checkTrigger]);
+  }, [textareaRef, adapter, checkTrigger]);
+
+  // Doc/caret updates that don't surface as DOM events (rich-editor
+  // transactions) still re-check the trigger: the parent re-renders
+  // with a fresh `value`, which rebuilds checkTrigger.
+  useEffect(() => {
+    if (adapter) checkTrigger();
+  }, [adapter, checkTrigger]);
 
   // Accept a suggestion: replace `:query` text with the suggestion's
   // insertion content, advance the caret past it.
   const accept = useCallback(
     (suggestion: Suggestion) => {
       if (!active) return;
-      const el = textareaRef.current;
-      if (!el) return;
       const insert = suggestion.kind === "unicode" ? suggestion.char : suggestion.token;
+      if (adapter) {
+        // Rich-editor path: one ranged replacement; the adapter
+        // restores focus and parks the caret after the insertion.
+        adapter.replaceRange(active.start, active.end, insert);
+        setActive(null);
+        setSelectedIdx(0);
+        return;
+      }
+      const el = textareaRef?.current;
+      if (!el) return;
       const next = value.slice(0, active.start) + insert + value.slice(active.end);
-      onChange(next);
+      onChange?.(next);
       const caret = active.start + insert.length;
       // Schedule the caret move after onChange flushes; setSelectionRange
       // before React re-renders would get clobbered.
       requestAnimationFrame(() => {
-        const el2 = textareaRef.current;
+        const el2 = textareaRef?.current;
         if (!el2) return;
         el2.focus();
         el2.setSelectionRange(caret, caret);
@@ -297,7 +351,7 @@ export function EmoticonTypeahead({
       setActive(null);
       setSelectedIdx(0);
     },
-    [active, onChange, textareaRef, value],
+    [active, onChange, textareaRef, adapter, value],
   );
 
   // Key handler bound directly to the textarea via keydown capture so
@@ -305,9 +359,15 @@ export function EmoticonTypeahead({
   // Tab=mention-accept, etc.). When the popup is closed every key
   // falls through unchanged.
   useEffect(() => {
-    const el = textareaRef.current;
+    // Rich-editor mode listens on WINDOW capture: ProseMirror attaches
+    // its own keydown to the element at creation, so an element-level
+    // listener added later would fire AFTER it and lose the Enter
+    // race. Window capture always precedes element listeners, which
+    // reproduces the textarea layering (popup preempts composer).
+    const el = adapter ? adapter.getElement() : textareaRef?.current;
     if (!el) return;
     const handler = (e: globalThis.KeyboardEvent) => {
+      if (adapter && document.activeElement !== adapter.getElement()) return;
       if (!active || suggestions.length === 0) return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -346,12 +406,16 @@ export function EmoticonTypeahead({
         setActive(null);
       }
     };
+    if (adapter) {
+      window.addEventListener("keydown", handler, true);
+      return () => window.removeEventListener("keydown", handler, true);
+    }
     // Capture phase so we run BEFORE the textarea's own keydown
     // (which routes Enter to submit). React attaches its
     // synthetic handlers in bubble phase so we win.
     el.addEventListener("keydown", handler, true);
     return () => el.removeEventListener("keydown", handler, true);
-  }, [active, suggestions, selectedIdx, navigated, accept, textareaRef]);
+  }, [active, suggestions, selectedIdx, navigated, accept, textareaRef, adapter]);
 
   if (!active || suggestions.length === 0 || !pos) return null;
 

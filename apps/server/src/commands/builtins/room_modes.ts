@@ -43,10 +43,14 @@ export const expiryCommand: CommandHandler = {
     if (!room) return notice(ctx, "NO_ROOM", tFor(ctx.user.locale, "commands:shared.roomNotFound"));
 
     if (!arg) {
+      // "Never expire" (migration 0347) outranks any stale minutes value —
+      // the janitor skips exempt rooms entirely — so report it first.
       const cur = room.messageExpiryMinutes;
-      const msg = cur && cur > 0
-        ? tFor(ctx.user.locale, "commands:expiry.current", { minutes: cur })
-        : tFor(ctx.user.locale, "commands:expiry.none");
+      const msg = room.retentionExempt
+        ? tFor(ctx.user.locale, "commands:expiry.never")
+        : cur && cur > 0
+          ? tFor(ctx.user.locale, "commands:expiry.current", { minutes: cur })
+          : tFor(ctx.user.locale, "commands:expiry.none");
       return notice(ctx, "EXPIRY", msg);
     }
 
@@ -55,7 +59,10 @@ export const expiryCommand: CommandHandler = {
     }
 
     if (/^(off|clear|none|0)$/i.test(arg)) {
-      await ctx.db.update(rooms).set({ messageExpiryMinutes: null }).where(eq(rooms.id, ctx.roomId));
+      // Full reset to "inherit the server retention window": clears the
+      // per-room minutes AND the never-expire exemption, so the reported
+      // "only the global retention applies" is actually true afterwards.
+      await ctx.db.update(rooms).set({ messageExpiryMinutes: null, retentionExempt: false }).where(eq(rooms.id, ctx.roomId));
       const { addMessage, broadcastRoomState } = await import("../../realtime/broadcast.js");
       await addMessage(ctx, { kind: "system", body: "Per-room message expiry cleared." });
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
@@ -66,7 +73,10 @@ export const expiryCommand: CommandHandler = {
     if (!Number.isFinite(n) || n < 1 || n > 43_200) {
       return notice(ctx, "BAD_EXPIRY", tFor(ctx.user.locale, "commands:expiry.invalid"));
     }
-    await ctx.db.update(rooms).set({ messageExpiryMinutes: n }).where(eq(rooms.id, ctx.roomId));
+    // An explicit lifetime supersedes "never expire" — without clearing the
+    // exemption the janitor would keep skipping the room AND the immediate
+    // purge below would contradict the stored policy.
+    await ctx.db.update(rooms).set({ messageExpiryMinutes: n, retentionExempt: false }).where(eq(rooms.id, ctx.roomId));
 
     // Fire the sweep immediately for THIS room so visible old messages don't
     // hang around until the next janitor tick. Bounded by the new cutoff.
@@ -133,6 +143,81 @@ export const replyModeCommand: CommandHandler = {
         : "Reply mode set to flat - replies will appear in chronological order.",
     });
     await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
+  },
+};
+
+/**
+ * /postmode [everyone|staff]
+ *
+ * Show or set who may post in this room (info rooms, migration 0345).
+ * "staff" turns the room read-only for ordinary members: only the room
+ * owner, room mods, the room's server staff, and site staff may post;
+ * everyone else reads and reacts. Whispers and non-posting commands are
+ * unaffected. Boards (rooms inside a forum) are refused — boards carry
+ * their own permission system. Same gate as /nsfw channel
+ * (callerCanEditRoom: owner / room mod / edit_any_room_metadata).
+ */
+export const postModeCommand: CommandHandler = {
+  name: "postmode",
+  aliases: ["postingmode"],
+  usage: "/postmode [everyone|staff]",
+  description: "Show or set who can post in this room (owner/mod only to set).",
+  subcommands: [
+    { verb: "(no args)", usage: "/postmode", description: "Show who can currently post in this room." },
+    { verb: "staff", usage: "/postmode staff", description: "Only staff can post: room owner, room mods, server staff, and site staff. Everyone else can still read and react." },
+    { verb: "everyone", usage: "/postmode everyone", description: "Anyone in the room can post (default).", aliases: ["all", "open"] },
+  ],
+  async run(ctx) {
+    const arg = ctx.argsText.trim().toLowerCase();
+    const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
+    if (!room) return notice(ctx, "NO_ROOM", tFor(ctx.user.locale, "commands:shared.roomNotFound"));
+
+    if (!arg) {
+      // 'roles' is console-only (no subcommand sets it), but the readout
+      // must still report it — falling into "everyone" would tell a mod
+      // the exact opposite of the room's state.
+      return notice(ctx, "POSTMODE", tFor(ctx.user.locale,
+        room.postMode === "staff"
+          ? "commands:postMode.currentStaff"
+          : room.postMode === "roles"
+            ? "commands:postMode.currentRoles"
+            : "commands:postMode.currentEveryone"));
+    }
+    let value: "everyone" | "staff";
+    if (arg === "staff") value = "staff";
+    else if (arg === "everyone" || arg === "all" || arg === "open") value = "everyone";
+    else return notice(ctx, "BAD_POSTMODE", tFor(ctx.user.locale, "commands:postMode.usage"));
+
+    // Boards live in the Forums Catalog and carry their own posting
+    // permissions; this room-level knob must never shadow those.
+    if (room.forumId) {
+      return notice(ctx, "FORUM_BOARD", tFor(ctx.user.locale, "commands:postMode.forumBoard"));
+    }
+    if (!(await callerCanEditRoom(ctx.db, ctx.user, ctx.roomId))) {
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:postMode.permission"));
+    }
+    if (room.postMode === value) {
+      return notice(ctx, "POSTMODE", tFor(ctx.user.locale,
+        value === "staff" ? "commands:postMode.alreadyStaff" : "commands:postMode.alreadyEveryone"));
+    }
+    await ctx.db.update(rooms).set({ postMode: value }).where(eq(rooms.id, ctx.roomId));
+
+    const { addMessage, broadcastRoomState, emitTreeChanged } = await import("../../realtime/broadcast.js");
+    await addMessage(ctx, {
+      kind: "system",
+      body: value === "staff"
+        ? "Posting is now limited to staff - everyone else can read and react."
+        : "Posting is open to everyone again.",
+    });
+    // postLocked is a join-time socket stamp; refresh it for every socket
+    // standing in the room before the summary fan-out reads it, so the flip
+    // repaints occupants' composers without a rejoin.
+    const { restampPostLockedForRoom } = await import("../../lib/postMode.js");
+    await restampPostLockedForRoom(ctx.io, ctx.db, { ...room, postMode: value });
+    await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
+    // broadcastRoomState only reaches occupants; non-occupant rails need a
+    // /rooms refetch to repaint the megaphone glyph + postLocked rows.
+    emitTreeChanged(ctx.io, room.serverId ?? null);
   },
 };
 

@@ -30,7 +30,7 @@ import {
   userServerLastRoom,
   users,
 } from "./db/schema.js";
-import { DEFAULT_SERVER_ID } from "./earning/pool.js";
+import { DEFAULT_SERVER_ID, resolveRoomServerId } from "./earning/pool.js";
 import { hasPermission } from "./auth/permissions.js";
 import { emailContentBlocked } from "./auth/emailGate.js";
 import type { CommandRegistry } from "./commands/registry.js";
@@ -1103,8 +1103,28 @@ export function wireSocketHandlers(
       // their own profile bypasses the hide-count redaction.
       const viewerId = (socket.data as { userId?: string }).userId;
       const profile = await lookupProfile(db, slugToUsername(payload.username), viewerId);
-      if (!profile) ack({ ok: false, code: "NO_USER", message: tFor(user.locale, "errors:server.realtime.profileNotFound") });
-      else ack({ ok: true, profile });
+      if (!profile) {
+        ack({ ok: false, code: "NO_USER", message: tFor(user.locale, "errors:server.realtime.profileNotFound") });
+        return;
+      }
+      // Server-contextual role badges: the VIEWED user's usergroups in the
+      // server the VIEWER is currently standing in (socket.data.serverId is
+      // stamped on every room join; before the first join, derive it from
+      // the room, else the default server). Deliberately NOT the profile
+      // owner's favorite server (resolveProfileServerId anchors cosmetics —
+      // different concept). The HTTP deep-link path has no server context
+      // and omits the field entirely. Best-effort: a lookup failure never
+      // withholds the profile itself.
+      let withRoles = profile;
+      try {
+        const sd = socket.data as { serverId?: string; roomId?: string };
+        const viewerServerId = sd.serverId
+          ?? (sd.roomId ? await resolveRoomServerId(db, sd.roomId) : DEFAULT_SERVER_ID);
+        const { serverRolesFor } = await import("./servers/usergroups.js");
+        const roles = await serverRolesFor(db, viewerServerId, profile.profile.userId);
+        if (roles.length) withRoles = { ...profile, serverRoles: roles };
+      } catch { /* roles are decoration; the profile still ships */ }
+      ack({ ok: true, profile: withRoles });
     });
 
     /**

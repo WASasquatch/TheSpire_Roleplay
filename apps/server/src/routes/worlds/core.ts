@@ -66,7 +66,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
   const browseLimit = { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } } as const;
 
   /* ---------- World list (caller's own) ---------- */
-  app.get("/me/worlds", async (req, reply) => {
+  app.get<{ Querystring: { collab?: string } }>("/me/worlds", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
     // A minor's own list also drops 18+ entries (an adult staffer may
@@ -81,6 +81,29 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
         ? eq(worlds.ownerUserId, me.id)
         : and(eq(worlds.ownerUserId, me.id), eq(worlds.isNsfw, false)))
       .orderBy(asc(worlds.name));
+    // ?collab=1 unions in the worlds the caller COLLABORATES on (the server
+    // console's community-world picker offers "owns or collaborates"). The
+    // bare route stays owned-only so existing pickers are byte-identical.
+    // Same minor 18+ drop as the owned list. PRIVATE collaborations are
+    // excluded: resolveWorld denies private worlds to everyone but their
+    // owner/admin, so such a pick could never read back for its setter (the
+    // console PATCH refuses it for the same reason).
+    if (req.query.collab === "1") {
+      const owned = new Set(rows.map((w) => w.id));
+      const collabRows = await db
+        .select({ w: worlds })
+        .from(worldCollaborators)
+        .innerJoin(worlds, eq(worlds.id, worldCollaborators.worldId))
+        .where(me.isAdult
+          ? eq(worldCollaborators.userId, me.id)
+          : and(eq(worldCollaborators.userId, me.id), eq(worlds.isNsfw, false)))
+        .orderBy(asc(worlds.name));
+      for (const r of collabRows) {
+        if (r.w.visibility === "private") continue;
+        if (!owned.has(r.w.id)) rows.push(r.w);
+      }
+      rows.sort((a, b) => a.name.localeCompare(b.name));
+    }
     const summaries = await Promise.all(rows.map((w) => toSummary(db, w)));
     return { worlds: summaries };
   });

@@ -810,6 +810,97 @@ async function maybeReseedItemTemplates(db: Db): Promise<void> {
  * `io` is optional so test harnesses can pass `null`; in production, the
  * live IoServer is passed in so the session sweep can boot expired sockets.
  */
+/**
+ * The message-retention sweep, extracted from `startJanitor` so tests can
+ * drive it deterministically. Two passes:
+ *   1. per-SERVER retention window (getServerSettings.messageRetentionMs),
+ *   2. per-ROOM expiry (`rooms.message_expiry_minutes`).
+ * Nested-mode rooms and `retention_exempt` rooms (migration 0347) are
+ * excluded from BOTH — an exempt info/lore room keeps its history forever,
+ * whatever the server window or a stale per-room value says.
+ */
+export async function sweepExpiredMessages(
+  db: Db,
+  log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void },
+): Promise<void> {
+  try {
+    // Retention is now PER-SERVER: each server's rooms purge at that server's
+    // own `messageRetentionMs` (NULL override inherits the platform default).
+    // We bucket the live, non-nested rooms by their effective server (a NULL
+    // `rooms.serverId`, legacy/standalone, homes to DEFAULT_SERVER_ID) and run
+    // one scoped DELETE per server with that server's cutoff. With the flag
+    // off there is only the system server, whose seeded settings equal the
+    // platform values, so this purges exactly what the old single global
+    // sweep did — byte-identical.
+    //
+    // Nested-mode rooms are forum threads, by design persistent ("Persistent
+    // forum topics for long-lived games"). Exempt them unconditionally so a
+    // retention sweep can never gut a forum overnight regardless of how short
+    // a server's retention is configured. Flipping a room flat → nested is
+    // the admin's signal that its history must not be auto-purged.
+    // `retention_exempt` rooms are the explicit per-room opt-out.
+    const sweepRooms = await db
+      .select({ id: rooms.id, serverId: rooms.serverId })
+      .from(rooms)
+      .where(and(
+        // Parenthesized: AND binds tighter than OR in SQLite, so without the
+        // wrap `flat != 'nested'` alone would satisfy the whole predicate and
+        // exempt rooms would sweep anyway.
+        sql`(${rooms.replyMode} != 'nested' OR ${rooms.replyMode} IS NULL)`,
+        eq(rooms.retentionExempt, false),
+      ));
+    const roomsByServer = new Map<string, string[]>();
+    for (const room of sweepRooms) {
+      const sid = room.serverId ?? DEFAULT_SERVER_ID;
+      const list = roomsByServer.get(sid);
+      if (list) list.push(room.id);
+      else roomsByServer.set(sid, [room.id]);
+    }
+    for (const [serverId, roomIds] of roomsByServer) {
+      const { messageRetentionMs } = await getServerSettings(db, serverId);
+      if (messageRetentionMs <= 0 || roomIds.length === 0) continue;
+      const cutoff = new Date(Date.now() - messageRetentionMs);
+      const doomed = and(
+        lt(messages.createdAt, cutoff),
+        inArray(messages.roomId, roomIds),
+      );
+      // Snapshot-archive bookmarks BEFORE the hard delete drops the rows.
+      await archiveDoomedBookmarks(db, doomed);
+      const r = await db.delete(messages).where(doomed);
+      if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages older than retention window (server ${serverId})`);
+    }
+
+    // Per-room expiry sweep. Only rooms with messageExpiryMinutes set
+    // participate; the global sweep above already covers the rest.
+    // We process room-by-room because each one has its own cutoff and
+    // the alternative (a CTE / correlated subquery) doesn't buy us much
+    // at chat-size scale and complicates the SQL. Nested-mode and
+    // retention-exempt rooms are still exempt, same invariant as the
+    // global sweep (an exempt room can carry a stale minutes value —
+    // the exemption wins).
+    const expiringRooms = await db
+      .select({ id: rooms.id, name: rooms.name, mins: rooms.messageExpiryMinutes, replyMode: rooms.replyMode })
+      .from(rooms)
+      .where(and(
+        sql`${rooms.messageExpiryMinutes} IS NOT NULL`,
+        eq(rooms.retentionExempt, false),
+      ));
+    for (const room of expiringRooms) {
+      if (room.replyMode === "nested") continue;
+      const mins = room.mins;
+      if (!mins || mins <= 0) continue;
+      const cutoff = new Date(Date.now() - mins * 60 * 1000);
+      const doomed = and(eq(messages.roomId, room.id), lt(messages.createdAt, cutoff));
+      // Snapshot-archive bookmarks BEFORE the hard delete drops the rows.
+      await archiveDoomedBookmarks(db, doomed);
+      const r = await db.delete(messages).where(doomed);
+      if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages from "${room.name}" older than ${mins}m`);
+    }
+  } catch (err) {
+    log.error({ err }, "[janitor] message sweep failed");
+  }
+}
+
 export function startJanitor(
   db: Db,
   log: { info: (...a: unknown[]) => void; error: (...a: unknown[]) => void },
@@ -841,72 +932,9 @@ export function startJanitor(
     }
   }
 
-  async function sweepMessages() {
-    try {
-      // Retention is now PER-SERVER: each server's rooms purge at that server's
-      // own `messageRetentionMs` (NULL override inherits the platform default).
-      // We bucket the live, non-nested rooms by their effective server (a NULL
-      // `rooms.serverId`, legacy/standalone, homes to DEFAULT_SERVER_ID) and run
-      // one scoped DELETE per server with that server's cutoff. With the flag
-      // off there is only the system server, whose seeded settings equal the
-      // platform values, so this purges exactly what the old single global
-      // sweep did — byte-identical.
-      //
-      // Nested-mode rooms are forum threads, by design persistent ("Persistent
-      // forum topics for long-lived games"). Exempt them unconditionally so a
-      // retention sweep can never gut a forum overnight regardless of how short
-      // a server's retention is configured. Flipping a room flat → nested is
-      // the admin's signal that its history must not be auto-purged.
-      const sweepRooms = await db
-        .select({ id: rooms.id, serverId: rooms.serverId })
-        .from(rooms)
-        .where(sql`${rooms.replyMode} != 'nested' OR ${rooms.replyMode} IS NULL`);
-      const roomsByServer = new Map<string, string[]>();
-      for (const room of sweepRooms) {
-        const sid = room.serverId ?? DEFAULT_SERVER_ID;
-        const list = roomsByServer.get(sid);
-        if (list) list.push(room.id);
-        else roomsByServer.set(sid, [room.id]);
-      }
-      for (const [serverId, roomIds] of roomsByServer) {
-        const { messageRetentionMs } = await getServerSettings(db, serverId);
-        if (messageRetentionMs <= 0 || roomIds.length === 0) continue;
-        const cutoff = new Date(Date.now() - messageRetentionMs);
-        const doomed = and(
-          lt(messages.createdAt, cutoff),
-          inArray(messages.roomId, roomIds),
-        );
-        // Snapshot-archive bookmarks BEFORE the hard delete drops the rows.
-        await archiveDoomedBookmarks(db, doomed);
-        const r = await db.delete(messages).where(doomed);
-        if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages older than retention window (server ${serverId})`);
-      }
-
-      // Per-room expiry sweep. Only rooms with messageExpiryMinutes set
-      // participate; the global sweep above already covers the rest.
-      // We process room-by-room because each one has its own cutoff and
-      // the alternative (a CTE / correlated subquery) doesn't buy us much
-      // at chat-size scale and complicates the SQL. Nested-mode rooms are
-      // still exempt, same invariant as the global sweep.
-      const expiringRooms = await db
-        .select({ id: rooms.id, name: rooms.name, mins: rooms.messageExpiryMinutes, replyMode: rooms.replyMode })
-        .from(rooms)
-        .where(sql`${rooms.messageExpiryMinutes} IS NOT NULL`);
-      for (const room of expiringRooms) {
-        if (room.replyMode === "nested") continue;
-        const mins = room.mins;
-        if (!mins || mins <= 0) continue;
-        const cutoff = new Date(Date.now() - mins * 60 * 1000);
-        const doomed = and(eq(messages.roomId, room.id), lt(messages.createdAt, cutoff));
-        // Snapshot-archive bookmarks BEFORE the hard delete drops the rows.
-        await archiveDoomedBookmarks(db, doomed);
-        const r = await db.delete(messages).where(doomed);
-        if (r.changes > 0) log.info(`[janitor] purged ${r.changes} messages from "${room.name}" older than ${mins}m`);
-      }
-    } catch (err) {
-      log.error({ err }, "[janitor] message sweep failed");
-    }
-  }
+  // Extracted above (sweepExpiredMessages) so tests can drive the retention
+  // passes deterministically; the janitor keeps the same name + cadence.
+  const sweepMessages = () => sweepExpiredMessages(db, log);
 
   /**
    * Auto-promote `user` accounts to `trusted` when they pass low-spam, low-

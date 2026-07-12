@@ -11,7 +11,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { LogIn, Server, UserPlus, Users } from "lucide-react";
+import { ArrowRight, BookOpen, LogIn, Server, UserPlus, Users } from "lucide-react";
 import { normalizeTheme } from "@thekeep/shared";
 import { fetchPublicServer, type PublicServerLanding } from "../../lib/servers.js";
 import { formatDate, formatNumber } from "../../lib/intlFormat.js";
@@ -206,6 +206,31 @@ export function ServerPublicLanding({ slug, onNavigate }: {
             className={`border-b border-keep-rule px-5 py-5 text-sm leading-relaxed md:px-8 ${USER_HTML_SCOPE_CLASS}`}
             dangerouslySetInnerHTML={{ __html: descriptionHtml }}
           />
+        ) : null}
+
+        {/* WORLD — the community's lore, readable BEFORE joining. Only ever
+            present when the world is publicly viewable (the server resolves
+            it through the world's own visibility gates for anonymous
+            viewers), so this link never dead-ends on a private world. Plain
+            anchor: /w/<slug> is the canonical shareable world deep-link and
+            works logged-out. The SLUG is required here — the /w URL parser
+            only accepts slug-shaped segments, and nanoid ids (underscores)
+            fail it. */}
+        {detail.world ? (
+          <div className="border-b border-keep-rule px-5 py-5 md:px-8">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-keep-muted">{t("landing.worldTitle")}</p>
+            <a
+              href={`/w/${encodeURIComponent(detail.world.slug)}`}
+              className="group flex items-center gap-3 rounded border border-keep-rule bg-keep-panel/30 p-3 no-underline hover:border-keep-action"
+            >
+              <BookOpen className="h-6 w-6 shrink-0 text-keep-accent" aria-hidden="true" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate font-semibold text-keep-text group-hover:text-keep-action">{detail.world.name}</span>
+                <span className="block text-xs text-keep-muted">{t("landing.worldHint")}</span>
+              </span>
+              <ArrowRight className="h-4 w-4 shrink-0 text-keep-muted group-hover:text-keep-action" aria-hidden="true" />
+            </a>
+          </div>
         ) : null}
 
         <footer className="border-t border-keep-rule bg-keep-banner/30 px-5 py-3 text-[11px] text-keep-muted md:px-8">

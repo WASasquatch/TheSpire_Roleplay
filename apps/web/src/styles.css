@@ -2217,6 +2217,69 @@ aside.margin-note {
 }
 
 /* ============================================================
+ * Chat composer editor (Tiptap), the WYSIWYG chat input
+ * ============================================================
+ *
+ * The composer editor runs with Tiptap's runtime CSS injection OFF
+ * (prod CSP drops un-nonced <style> tags), so the ProseMirror
+ * essentials live here statically. `white-space: pre-wrap` is
+ * load-bearing: leading spaces (the ':' shortcut escape) and NBSP
+ * runs in names must render exactly as typed.
+ */
+.keep-composer-editor {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-height: 100%;
+}
+.keep-composer-editor:focus {
+  outline: none;
+}
+.keep-composer-editor p {
+  margin: 0;
+}
+.keep-composer-editor blockquote {
+  border-left: 3px solid rgb(var(--keep-action) / 0.4);
+  margin: 0.15em 0;
+  padding: 0.1em 0.6em;
+  color: rgb(var(--keep-muted) / 1);
+}
+.keep-composer-editor ul {
+  list-style: disc;
+  margin: 0.15em 0 0.15em 1.25em;
+  padding: 0;
+}
+.keep-composer-editor li > p {
+  margin: 0;
+}
+.keep-composer-editor code {
+  background: rgb(var(--keep-panel) / 0.6);
+  border-radius: 3px;
+  padding: 0 0.25em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95em;
+}
+.keep-composer-editor a {
+  color: rgb(var(--keep-action) / 1);
+  text-decoration: underline;
+}
+/* Spoiler mark preview: readable while composing (the click-to-reveal
+ * treatment belongs to the feed), but clearly flagged. */
+.keep-composer-editor .tk-composer-spoiler {
+  background: rgb(var(--keep-panel) / 0.7);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgb(var(--keep-border) / 0.6);
+  padding: 0 0.15em;
+}
+.keep-composer-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: rgb(var(--keep-muted) / 1);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* ============================================================
  * Reader scheme isolation (Scriptorium reader)
  * ============================================================
  *

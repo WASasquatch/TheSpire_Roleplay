@@ -286,6 +286,15 @@ export interface ChatMessage {
    * every non-poll row.
    */
   poll?: import("./poll.js").PollState | null;
+  /**
+   * Resolved role-picker state for `/roleselect` panel rows (bodies made of
+   * `{role:<usergroupId>}` token lines — see roleSelect.ts). Hydrated
+   * per-viewer like `poll` above: live group names/colors plus whether THIS
+   * viewer holds each role. Tokens with no matching entry render as plain
+   * text (group deleted or no longer self-assignable). Absent on ordinary
+   * rows and on payloads predating the feature.
+   */
+  roleSelect?: import("./roleSelect.js").RoleSelectState | null;
   /* ---------------------------------------------------------------
    * PER-SERVER TOPIC-CARD FLAIR (Servers Lift). Mirrors the
    * `author*` set on `ForumTopicCard`. Present ONLY on the top-level

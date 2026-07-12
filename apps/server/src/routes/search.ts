@@ -18,6 +18,9 @@
  *   2. Private rooms    — included ONLY when the viewer holds a `room_members`
  *      row (site admins are NOT bypassed; private chat stays private, matching
  *      the per-room search + bookmark gates).
+ *   2b. room_role_gates  — a kind='access' row locks the room to holders of
+ *      the gated usergroups (plus room owner / server staff / site staff);
+ *      non-holders' searches never touch it, matching the rail/join/slug 404s.
  *   3. forumBoardReadGate — a members-only board is dropped wholesale; a board
  *      with members-only CATEGORIES is kept, but hits whose topic sits in a
  *      locked category are filtered out (replies inherit their topic's
@@ -35,13 +38,19 @@
  */
 import type { FastifyInstance } from "fastify";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
-import type { MessageSearchHit, Role } from "@thekeep/shared";
+import { isModeratorRole, type MessageSearchHit, type Role } from "@thekeep/shared";
 import { messages, roomMembers, rooms, servers } from "../db/schema.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
 import { isolationVisibleSql } from "../auth/ageIsolation.js";
 import { canSeeNsfw } from "../auth/ageGate.js";
 import { maskForMinors } from "../realtime/minorLanguageFilter.js";
 import { effectiveRoomNsfwWith, nsfwServerIds } from "../lib/nsfwRooms.js";
+import {
+  loadRoleGates,
+  roleAccessDeniedWith,
+  staffServerIdsFor,
+  usergroupIdsFor,
+} from "../lib/roleGates.js";
 import { nsfwForumIds } from "../forums/nsfw.js";
 import { forumBoardReadGate } from "../forums/authority.js";
 import { serverAuthority } from "../servers/authority.js";
@@ -113,6 +122,7 @@ async function visibleRoomsForServer(
       type: rooms.type,
       forumId: rooms.forumId,
       serverId: rooms.serverId,
+      ownerId: rooms.ownerId,
       isNsfw: rooms.isNsfw,
     })
     .from(rooms)
@@ -140,6 +150,19 @@ async function visibleRoomsForServer(
     .where(eq(roomMembers.userId, me.id));
   const myRoomIds = new Set(myMemberRows.map((r) => r.roomId));
 
+  // Role-locked rooms (room_role_gates, migration 0349): a kind='access' row
+  // makes the room invisible to non-holders on EVERY surface (rail, join,
+  // by-slug, messages), so the searchable universe must drop it too or a
+  // cross-room search becomes the one read that leaks its bodies. Same
+  // batched shape as GET /rooms: one gate read for the whole candidate set,
+  // then at most one membership + one staff read for the viewer.
+  const roleGates = await loadRoleGates(db, candidateRows.map((r) => r.id));
+  const hasAccessGates = [...roleGates.values()].some((g) => g.access.size > 0);
+  const viewerGroupIds = hasAccessGates ? await usergroupIdsFor(db, me.id) : new Set<string>();
+  const roleStaffServerIds = hasAccessGates && !isModeratorRole(me.role)
+    ? await staffServerIdsFor(db, me.id)
+    : new Set<string>();
+
   const visible = new Map<string, RoomForSearch>();
   const lockedCatsByRoom = new Map<string, Set<string>>();
 
@@ -147,6 +170,10 @@ async function visibleRoomsForServer(
     if (nsfwServers && effectiveRoomNsfwWith(r, nsfwServers)) continue;
     if (nsfwForums && r.forumId && nsfwForums.has(r.forumId)) continue;
     if (r.type === "private" && !myRoomIds.has(r.id)) continue;
+    if (
+      hasAccessGates
+      && roleAccessDeniedWith(me, r, roleGates.get(r.id)?.access, viewerGroupIds, roleStaffServerIds)
+    ) continue;
 
     if (r.forumId) {
       // Forum board: consult the per-section read gate. A fully members-only

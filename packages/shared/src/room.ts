@@ -131,6 +131,50 @@ export interface RoomSummary {
   muted?: boolean;
   unread?: number;
   hasMention?: boolean;
+  /**
+   * Rail section this room files under (migration 0344). Null (or absent, on
+   * an older bundle) = the headerless uncategorized bucket, which renders
+   * FIRST so servers that never touch categories look identical to before.
+   * The category rows themselves ride the `categories` block on GET /rooms.
+   */
+  categoryId?: string | null;
+  /**
+   * Who may post into this room's chat feed (migration 0345). "staff"
+   * restricts posting to the room owner, room mods, server staff, and site
+   * staff — everyone else reads and reacts only (the rail flags such rooms
+   * with a megaphone glyph). "roles" (migration 0349) widens the staff set
+   * with holders of the room's designated usergroups. Absent (older
+   * bundle) = "everyone".
+   */
+  postMode?: "everyone" | "staff" | "roles";
+  /**
+   * Per-viewer read-only flag for restricted-post rooms (`postMode`
+   * "staff"/"roles"): true when THIS viewer may not post here, so the
+   * composer swaps to a lock strip. UX mirror only — the server enforces
+   * the gate in dispatch regardless. Derived per socket at join time
+   * (never per presence broadcast). Absent for posters and for "everyone"
+   * rooms.
+   */
+  postLocked?: boolean;
+  /**
+   * "Never expire" opt-out (migration 0347). True = the janitor skips this
+   * room in both the server-retention and per-room-expiry sweeps, so its
+   * history is kept forever. Absent (older bundle) = false.
+   */
+  retentionExempt?: boolean;
+}
+
+/**
+ * One rail section (migration 0344), shipped as the per-server `categories`
+ * block on GET /rooms alongside the room list. Rooms point back via
+ * `RoomSummary.categoryId`. `icon` mirrors the `rooms.icon` duality: an
+ * http(s) image URL (rendered as <img>) or a short emoji/text glyph.
+ */
+export interface RoomCategorySummary {
+  id: string;
+  name: string;
+  icon: string | null;
+  sortOrder: number;
 }
 
 /**
@@ -160,6 +204,9 @@ export interface RoomInfo {
   currentScene: { title: string; imageUrl: string | null } | null;
   replyMode: "flat" | "nested";
   messageExpiryMinutes: number | null;
+  /** "Never expire" opt-out (migration 0347): the dossier's auto-expire row
+   *  reads "Never" when set. Absent (older bundle) = false. */
+  retentionExempt?: boolean;
   difficultyClass: number | null;
   theaterMode: boolean;
   /** Effective 18+ rating (same semantics as RoomSummary.isNsfw); absent = all-ages. */
@@ -319,4 +366,15 @@ export interface RoomOccupant {
    * rail without a reload.
    */
   useRankAsUserlistIcon: boolean;
+  /**
+   * Usergroup badge (migration 0348): the member's highest-`sort_order`
+   * named usergroup with `showBadge` enabled on the room's server, or null
+   * when no group opts in. Viewer-agnostic (same for every viewer) so it
+   * rides the shared presence payload. Deliberately a CHIP next to the
+   * name — the group color tints the chip only, never the username
+   * (purchasable cosmetics stay the sole source of name styling).
+   * Per-account, so character rows wear the account's badge too (matching
+   * the profile "Roles" row). Optional for old payloads.
+   */
+  badge?: { name: string; color: string | null } | null;
 }

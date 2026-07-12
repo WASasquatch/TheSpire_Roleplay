@@ -230,6 +230,7 @@ as a protocol token, §3 wins (it stays English).
 | Disposition (personality sliders) | Temperamento | user-facing name; internal "vibe" key never appears in copy |
 | Vibe (world sliders) | Ambiente | "Vibe sliders" → "barras de ambiente" |
 | visibility | visibilidad | |
+| Unlisted (link-only visibility tier) | Oculto/Oculta | agrees with the noun ("historia oculta", "mundo oculto"); never "no listado" — one term across Scriptorium and worlds |
 | journal | diario | |
 | links (profile links) | enlaces | |
 

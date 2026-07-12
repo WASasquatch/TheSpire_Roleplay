@@ -238,6 +238,17 @@ export class CommandRegistry {
     return this.customMatchesServer(k, serverId) ? h : undefined;
   }
 
+  /**
+   * True when `name` resolves to an admin-defined custom command in this
+   * server's scope. Every custom handler posts a `kind: "cmd"` room message
+   * (see `makeCustomHandler`), so callers gating on "does this command put
+   * content into the room" can treat any custom command as a room post.
+   */
+  isCustomCommand(name: string, serverId?: string | null): boolean {
+    const k = name.toLowerCase();
+    return this.customNames.has(k) && this.customMatchesServer(k, serverId);
+  }
+
   /** Best-effort suggestion for unknown commands ("did you mean..."). */
   suggest(name: string, max = 3): string[] {
     const target = name.toLowerCase();

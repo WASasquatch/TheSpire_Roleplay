@@ -511,6 +511,9 @@ function WorldMetaEditor({
           <option value="public">{t("visibilityOption.public")}</option>
           <option value="open">{t("visibilityOption.open")}</option>
         </select>
+        <span className="mt-0.5 block text-[10px] text-keep-muted">
+          {t("editor.visibilityHint")}
+        </span>
       </label>
 
       {canSetNsfw ? (
@@ -868,8 +871,6 @@ function WorldMetaEditor({
         )}
       </fieldset>
 
-      {err ? <div className="text-[11px] text-keep-accent">{err}</div> : null}
-
       <CollaboratorsPanel
         worldId={worldId}
         viewerIsOwner={canManageCollaborators}
@@ -877,7 +878,12 @@ function WorldMetaEditor({
         onChanged={onSaved}
       />
 
-      <div className="flex items-center justify-between border-t border-keep-rule pt-3">
+      {/* Sticky save footer: pins Delete/Save to the bottom of the
+          editor pane's scroll container so a long settings form never
+          hides the Save button below the fold. Same idiom as the
+          StoryCatalogModal pagination bar (negative margins cancel the
+          pane's p-4 so the bar spans edge to edge and rests flush). */}
+      <div className="sticky bottom-0 -mx-4 -mb-4 flex items-center justify-between border-t border-keep-rule bg-keep-bg/95 px-4 py-2 backdrop-blur">
         <button
           type="button"
           onClick={onDelete}
@@ -885,8 +891,12 @@ function WorldMetaEditor({
         >
           {t("editor.deleteWorld")}
         </button>
-        <div className="flex items-center gap-3">
-          {savedAt ? (
+        <div className="flex min-w-0 items-center gap-3">
+          {err ? (
+            <span className="min-w-0 truncate text-[11px] text-keep-accent" title={err}>
+              {err}
+            </span>
+          ) : savedAt ? (
             <span className="text-[10px] text-keep-muted">{t("editor.savedAt", { time: formatTime(savedAt) })}</span>
           ) : null}
           <button
@@ -1159,9 +1169,8 @@ function PageEditor({
         </label>
       </div>
 
-      {err ? <div className="text-[11px] text-keep-accent">{err}</div> : null}
-
-      <div className="flex items-center justify-between border-t border-keep-rule pt-3">
+      {/* Same sticky footer treatment as the world-settings form. */}
+      <div className="sticky bottom-0 -mx-4 -mb-4 flex items-center justify-between border-t border-keep-rule bg-keep-bg/95 px-4 py-2 backdrop-blur">
         <button
           type="button"
           onClick={onDelete}
@@ -1169,8 +1178,12 @@ function PageEditor({
         >
           {t("page.deletePage")}
         </button>
-        <div className="flex items-center gap-3">
-          {savedAt ? (
+        <div className="flex min-w-0 items-center gap-3">
+          {err ? (
+            <span className="min-w-0 truncate text-[11px] text-keep-accent" title={err}>
+              {err}
+            </span>
+          ) : savedAt ? (
             <span className="text-[10px] text-keep-muted">{t("editor.savedAt", { time: formatTime(savedAt) })}</span>
           ) : null}
           <button

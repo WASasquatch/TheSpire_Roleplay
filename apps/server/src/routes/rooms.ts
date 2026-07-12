@@ -7,6 +7,7 @@ import type {
   ChatMessage,
   ClientToServerEvents,
   MessageSearchHit,
+  RoomCategorySummary,
   RoomOccupant,
   RoomInfo,
   RoomSummary,
@@ -28,22 +29,30 @@ import {
 import { escapeLike } from "../lib/nameLookup.js";
 import { getClearedAt } from "../lib/roomClears.js";
 import { hasPermission } from "../auth/permissions.js";
-import { exportReceipts, forums, ignores, messages, roomInvites, roomMembers, roomThreadCategories, rooms, serverMembers, users } from "../db/schema.js";
+import { exportReceipts, forums, ignores, messages, roomCategories, roomInvites, roomMembers, roomThreadCategories, rooms, serverMembers, users } from "../db/schema.js";
 import { parseNpcList } from "../lib/roomStats.js";
 import { forumBoardReadGate } from "../forums/authority.js";
 import { loadPollState } from "../polls.js";
+import { loadRoleSelectState } from "../roleSelect.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import type { Db } from "../db/index.js";
 import { getServerSettings, getSettings, areServersEnabled } from "../settings.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { serverAuthority } from "../servers/authority.js";
 import { isServerModerationActive } from "../servers/moderation.js";
-import { buildRoomSummary, currentOccupants } from "../realtime/broadcast.js";
+import { buildRoomSummary, currentOccupants, type ServerWorldFallbackCache } from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { canSeeNsfw } from "../auth/ageGate.js";
 import { isolationHiddenSetFor, isolationVisibleSql } from "../auth/ageIsolation.js";
 import { maskForMinors, maskMessageForMinors } from "../realtime/minorLanguageFilter.js";
 import { effectiveRoomNsfwWith, nsfwServerIds } from "../lib/nsfwRooms.js";
+import {
+  loadRoleGates,
+  roleAccessDeniedFor,
+  roleAccessDeniedWith,
+  staffServerIdsFor,
+  usergroupIdsFor,
+} from "../lib/roleGates.js";
 import { canSeePairFeeds, findPairSibling } from "../lib/pairStaffView.js";
 import { boardAgeDenied, nsfwForumIds } from "../forums/nsfw.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
@@ -123,11 +132,21 @@ export async function registerRoomsRoutes(
     //    show up via `findRoomByName` on the create path so a same-
     //    name create reactivates the row instead of erroring on the
     //    unique-name index.
-    const publicRows = await db
-      .select()
+    //
+    //    Order = (category position, manual room position, name). The
+    //    COALESCE(-1) files uncategorized rooms BEFORE every category, so a
+    //    server with no categories (all sort_orders 0, no category rows) gets
+    //    the exact alphabetical list it always had.
+    const publicRows = (await db
+      .select({ room: rooms })
       .from(rooms)
+      .leftJoin(roomCategories, eq(rooms.categoryId, roomCategories.id))
       .where(and(eq(rooms.type, "public"), isNull(rooms.archivedAt), serverScope))
-      .orderBy(asc(rooms.name));
+      .orderBy(
+        asc(sql`coalesce(${roomCategories.sortOrder}, -1)`),
+        asc(rooms.sortOrder),
+        asc(rooms.name),
+      )).map((r) => r.room);
 
     // 2. If the caller is logged in, find any private room they're currently
     //    socketed into and include it too. We use the socket-room membership
@@ -171,7 +190,62 @@ export async function registerRoomsRoutes(
         !effectiveRoomNsfwWith(r, nsfwServers)
         && !(r.forumId && nsfwForums.has(r.forumId)));
     }
-    if (allRooms.length === 0) return { rooms: [] };
+    // Role-locked rooms (room_role_gates, migration 0349): drop every room
+    // the viewer holds no access role for — gated rooms are simply ABSENT
+    // per viewer (no scrub flag), the same no-leak posture as private
+    // rooms. ONE batched gate read + at most one membership read and one
+    // staff read per REQUEST (never per-room queries), and the filter runs
+    // BEFORE categories attach below so category scoping sees the
+    // post-filter set. The kind='post' rows ride the same read and feed
+    // the postLocked computation farther down.
+    const roleGates = await loadRoleGates(db, allRooms.map((r) => r.id));
+    const hasAccessGates = [...roleGates.values()].some((g) => g.access.size > 0);
+    const hasRolePostRooms = allRooms.some((r) => r.postMode === "roles" && !r.forumId);
+    const viewerGroupIds = me && (hasAccessGates || hasRolePostRooms)
+      ? await usergroupIdsFor(db, me.id)
+      : new Set<string>();
+    // The viewer's staff-server Set is needed by up to THREE per-request
+    // consumers (this role-gate filter, the pairStaffView stamp, and the
+    // postLocked computation below) — resolve it lazily, at most once.
+    let staffServerIdsMemo: Set<string> | null = null;
+    const getStaffServerIds = async (): Promise<Set<string>> => {
+      if (!me) return new Set<string>();
+      if (!staffServerIdsMemo) staffServerIdsMemo = await staffServerIdsFor(db, me.id);
+      return staffServerIdsMemo;
+    };
+    const roleStaffServerIds = me && hasAccessGates && !isModeratorRole(me.role)
+      ? await getStaffServerIds()
+      : new Set<string>();
+    const roleDropped = new Set<string>();
+    if (hasAccessGates) {
+      allRooms = allRooms.filter((r) => {
+        const denied = roleAccessDeniedWith(
+          me,
+          r,
+          roleGates.get(r.id)?.access,
+          viewerGroupIds,
+          roleStaffServerIds,
+        );
+        if (denied) roleDropped.add(r.id);
+        return !denied;
+      });
+      // An 18+ channel row must never outlive its base here: with the base
+      // role-dropped, the annex would surface as a standalone "<name>_Adult"
+      // row (the rail only hides it behind a PRESENT base). The pair shares
+      // one identity in the UI, so it follows the base's visibility. The
+      // base's stale pointer to a dropped annex is nulled in the result map
+      // below, mirroring the minor scrub.
+      if (roleDropped.size) {
+        allRooms = allRooms.filter((r) => !(r.linkedRoomId && roleDropped.has(r.linkedRoomId)));
+      }
+    }
+    // No early return on an empty list: the assembly below handles zero rooms,
+    // and a scoped request from a MEMBER must still deliver the server's
+    // category strip (the console's Rooms tab reads it from this same
+    // payload — a server whose rooms are all archived or all age-hidden
+    // would otherwise present its owner an empty, uneditable category list).
+    // Non-members with zero surviving rooms get no categories either; see
+    // the scoping block below.
 
     // Hide occupants this viewer is mutually blocked with — the same
     // per-viewer filter the websocket `presence:update` path applies
@@ -187,10 +261,15 @@ export async function registerRoomsRoutes(
     // `presence:update` events. Without unification, fields like
     // `linkedWorld`/`primaryWorld`/`accountRole`/`mood` were silently
     // missing from /rooms and the rail UI lost half its features.
+    // One server→world fallback resolve per (server, rating) for the whole
+    // tree (see buildRoomSummary): without the shared cache every room of a
+    // server repeats the same servers/worlds/users reads on this hottest of
+    // endpoints.
+    const serverWorldCache: ServerWorldFallbackCache = new Map();
     const assembled = await Promise.all(
       allRooms.map(async (r) => ({
         room: r,
-        summary: await buildRoomSummary(db, r),
+        summary: await buildRoomSummary(db, r, serverWorldCache),
         occupants: await currentOccupants(io, db, r.id),
       })),
     );
@@ -210,28 +289,70 @@ export async function registerRoomsRoutes(
     // strip the flag mid-session. Computed once per request: site staff
     // qualify everywhere; otherwise one serverMembers read resolves which
     // servers this adult holds staff on.
-    const staffServerIds = new Set<string>();
+    let staffServerIds = new Set<string>();
     let siteStaff = false;
     if (me?.isAdult && assembled.some(({ summary }) => summary.linkedNsfwRoomId || summary.linkedSfwRoomId)) {
       siteStaff = isModeratorRole(me.role);
-      if (!siteStaff) {
+      if (!siteStaff) staffServerIds = await getStaffServerIds();
+    }
+    // Read-only posting mode (lib/postMode.ts): the per-viewer `postLocked`
+    // flag must ALSO ride this route — the rail refetch (fired on every
+    // rooms:tree-changed) overwrites the room:state summary and would strip
+    // the composer lock mid-session otherwise. Computed once per request
+    // from three bounded reads (mirrors the pairStaffView block above):
+    // site staff qualify everywhere; otherwise one roomMembers read resolves
+    // which staff-post rooms this viewer moderates and one serverMembers
+    // read resolves which servers they hold staff on. Boards are excluded
+    // (their own permission system posts there).
+    const staffPostRooms = assembled.filter(
+      ({ room }) => room.postMode !== "everyone" && !room.forumId,
+    );
+    let postSiteStaff = false;
+    const postModRoomIds = new Set<string>();
+    let postStaffServerIds = new Set<string>();
+    if (me && staffPostRooms.length > 0) {
+      postSiteStaff = isModeratorRole(me.role);
+      if (!postSiteStaff) {
         for (const r of await db
-          .select({ serverId: serverMembers.serverId })
-          .from(serverMembers)
+          .select({ roomId: roomMembers.roomId })
+          .from(roomMembers)
           .where(and(
-            eq(serverMembers.userId, me.id),
-            inArray(serverMembers.role, ["owner", "admin", "mod"]),
-          ))) staffServerIds.add(r.serverId);
+            eq(roomMembers.userId, me.id),
+            inArray(roomMembers.roomId, staffPostRooms.map(({ room }) => room.id)),
+            inArray(roomMembers.role, ["owner", "mod"]),
+          ))) postModRoomIds.add(r.roomId);
+        postStaffServerIds = await getStaffServerIds();
       }
     }
+    const postLockedFor = (room: (typeof assembled)[number]["room"]): boolean => {
+      if (room.postMode === "everyone" || room.forumId) return false;
+      if (!me) return true;
+      if (postSiteStaff || room.ownerId === me.id) return false;
+      if (postModRoomIds.has(room.id)) return false;
+      if (postStaffServerIds.has(room.serverId ?? DEFAULT_SERVER_ID)) return false;
+      // 'roles' mode: holders of any kind='post' gate row post too. The gate
+      // sets + the viewer's memberships were batched above — no queries here.
+      if (room.postMode === "roles") {
+        const gate = roleGates.get(room.id)?.post;
+        if (gate) for (const gid of gate) if (viewerGroupIds.has(gid)) return false;
+      }
+      return true;
+    };
     const result: RoomWithOccupants[] = assembled.map(({ room, summary, occupants }) => ({
       ...summary,
+      ...(postLockedFor(room) ? { postLocked: true } : {}),
       // Linked-pair scrub for under-18 (and anonymous) viewers: the 18+
       // annex row is already dropped by the age gate above; also blank the
       // base's pointer to it so a minor's rail draws a plain single room
       // with no SFW/18+ toggle (the toggle's join would be refused anyway —
       // this keeps the dead control from ever rendering).
       ...(me?.isAdult ? {} : { linkedNsfwRoomId: null }),
+      // Same scrub for a role-dropped annex: the base survives (its own
+      // access rows passed) but its pointer to the dropped 18+ channel
+      // must not paint a toggle whose join would be refused.
+      ...(summary.linkedNsfwRoomId && roleDropped.has(summary.linkedNsfwRoomId)
+        ? { linkedNsfwRoomId: null }
+        : {}),
       ...((summary.linkedNsfwRoomId || summary.linkedSfwRoomId)
         && (siteStaff || staffServerIds.has(room.serverId ?? DEFAULT_SERVER_ID))
         ? { pairStaffView: true }
@@ -242,7 +363,55 @@ export async function registerRoomsRoutes(
         .sort((a, b) => a.displayName.localeCompare(b.displayName)),
     }));
 
-    return { rooms: result };
+    // Rail sections (migration 0344), attached AFTER the minor/annex/blocked
+    // scrubs above — categories are presentation only and never widen what a
+    // viewer receives. Scoped to the requested server when one applies (the
+    // same predicate as the room query). An UNSCOPED request only gets the
+    // categories of servers whose rooms actually survived the filters above:
+    // category rows carry names + icon URLs, so an unconditional read would
+    // leak an 18+ server's (or an otherwise fully-hidden server's) section
+    // labels to viewers whose room rows the age gate just scrubbed.
+    //
+    // A SCOPED request applies the same survival rule — otherwise a minor or
+    // anonymous caller holding an 18+ server's id would still receive its
+    // section labels with rooms:[]. The one legitimate zero-survivor reader
+    // is the console's Rooms tab on an all-archived/all-hidden server, so a
+    // MEMBER of the server (any role; owners/staff are members) and site
+    // staff keep the strip — one bounded serverMembers read, only on the
+    // empty-survivor path.
+    let scopedCategoriesVisible = false;
+    if (serverScope) {
+      scopedCategoriesVisible = allRooms.length > 0
+        || (me
+          ? isModeratorRole(me.role)
+            || !!(await db
+              .select({ userId: serverMembers.userId })
+              .from(serverMembers)
+              .where(and(
+                eq(serverMembers.serverId, wantServerId!),
+                eq(serverMembers.userId, me.id),
+              ))
+              .limit(1))[0]
+          : false);
+    }
+    const categoryServerIds = serverScope
+      ? (scopedCategoriesVisible ? [wantServerId!] : [])
+      : [...new Set(allRooms.map((r) => r.serverId ?? DEFAULT_SERVER_ID))];
+    const categoryRows = categoryServerIds.length
+      ? await db
+          .select()
+          .from(roomCategories)
+          .where(inArray(roomCategories.serverId, categoryServerIds))
+          .orderBy(asc(roomCategories.sortOrder), asc(roomCategories.createdAt))
+      : [];
+    const categories: RoomCategorySummary[] = categoryRows.map((c) => ({
+      id: c.id,
+      name: c.name,
+      icon: c.icon ?? null,
+      sortOrder: c.sortOrder,
+    }));
+
+    return { rooms: result, categories };
   });
 
 
@@ -285,6 +454,12 @@ export async function registerRoomsRoutes(
     // {room:slug} chip degrades to plain text instead of resolving. Board-
     // aware: a board inside an 18+ FORUM 404s the same way (Phase 3).
     if (await boardAgeDenied(db, me, room)) {
+      reply.code(404); return { error: "not found" };
+    }
+    // Role-locked rooms (room_role_gates): a slug link 404s for non-holders
+    // exactly like a private room's — existence never leaks. Site staff,
+    // server staff and the owner pass inside the helper.
+    if (await roleAccessDeniedFor(db, me, room)) {
       reply.code(404); return { error: "not found" };
     }
     const openToAll = room.type === "public" && !room.forumMembersOnly;
@@ -375,6 +550,9 @@ export async function registerRoomsRoutes(
     // HARD age gate: the dossier (name, description, NPC roster) of an 18+
     // room is withheld from minors — 404, matching the by-slug posture.
     if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no room" }; }
+    // Role-locked rooms 404 for non-holders — the id-based dossier must not
+    // leak what the rail / by-slug already withhold. Staff/owner pass inside.
+    if (await roleAccessDeniedFor(db, me, room)) { reply.code(404); return { error: "no room" }; }
     if (room.type === "private") {
       const member = (await db
         .select()
@@ -412,6 +590,9 @@ export async function registerRoomsRoutes(
         : null,
       replyMode: room.replyMode,
       messageExpiryMinutes: room.messageExpiryMinutes,
+      // "Never expire" opt-out (migration 0347): the dossier's auto-expire
+      // row reads "Never" when set.
+      retentionExempt: room.retentionExempt,
       difficultyClass: room.difficultyClass ?? null,
       theaterMode: room.theaterMode,
       // Effective 18+ rating (server OR room) for the info bar's chip. Only
@@ -467,6 +648,10 @@ export async function registerRoomsRoutes(
       // HARD age gate: an 18+ room (or a board of an 18+ forum) isn't
       // searchable by minors at all.
       if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no room" }; }
+
+      // Role-locked rooms aren't searchable by non-holders — same 404 shape
+      // as a missing room so existence never leaks via search.
+      if (await roleAccessDeniedFor(db, me, room)) { reply.code(404); return { error: "no room" }; }
 
       // Private-room membership gate. Site admins are NOT bypassed here
       //, the privacy contract is that admins can't read private room
@@ -614,6 +799,9 @@ export async function registerRoomsRoutes(
     if (!room) { reply.code(404); return { error: "no room" }; }
     // HARD age gate: no jump-window reads out of an 18+ room for minors.
     if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no room" }; }
+    // Role-locked rooms give non-holders no jump-window reads — 404, the
+    // same no-leak shape the rail / by-slug enforce.
+    if (await roleAccessDeniedFor(db, me, room)) { reply.code(404); return { error: "no room" }; }
     if (room.type === "private") {
       const member = (await db
         .select()
@@ -751,6 +939,10 @@ export async function registerRoomsRoutes(
     if (!room) { reply.code(404); return { error: "no room" }; }
     // HARD age gate: no scroll-up history out of an 18+ room for minors.
     if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no room" }; }
+    // Role-locked rooms page no history for non-holders — 404, matching the
+    // rail / join / by-slug no-leak posture (a revoked member's stale room
+    // id must not keep reading).
+    if (await roleAccessDeniedFor(db, me, room)) { reply.code(404); return { error: "no room" }; }
     if (room.type === "private") {
       const member = (await db
         .select()
@@ -871,6 +1063,16 @@ export async function registerRoomsRoutes(
       const state = await loadPollState(db, w.id, me.id, pollJsonById.get(w.id) ?? null);
       if (state) w.poll = state;
     }
+    // Hydrate role-picker panels on older pages too (same per-viewer shape
+    // the live backlog attaches); keyed on the server-stamped isRoleSelect
+    // row marker — never the body tokens, which are forgeable — so ordinary
+    // pages stay free.
+    const roleSelectIds = new Set(window.filter((m) => m.isRoleSelect).map((m) => m.id));
+    for (const w of wire) {
+      if (w.kind !== "say" || !roleSelectIds.has(w.id)) continue;
+      const state = await loadRoleSelectState(db, room.serverId ?? DEFAULT_SERVER_ID, me.id, w.body);
+      if (state) w.roleSelect = state;
+    }
     return { messages: wire, hasMore };
   });
 
@@ -911,6 +1113,9 @@ export async function registerRoomsRoutes(
     // HARD age gate: minors can't export an 18+ room at all. (A flipped-back
     // room exports for them, minus its stamped 18+ era — the clause below.)
     if (await boardAgeDenied(db, me, room)) { reply.code(404); return { error: "no room" }; }
+    // Role-locked rooms can't be exported by non-holders — 404, same shape
+    // as the other id-based reads.
+    if (await roleAccessDeniedFor(db, me, room)) { reply.code(404); return { error: "no room" }; }
     if (room.type === "private") {
       const member = (await db
         .select()
@@ -927,10 +1132,13 @@ export async function registerRoomsRoutes(
     // flag-off is byte-identical to the old `getSettings(db)` read.
     const settings = await getServerSettings(db, room.serverId ?? DEFAULT_SERVER_ID);
     const reqMs = req.query.ms ? parseInt(req.query.ms, 10) : DEFAULT_EXPORT_MS;
+    // A retention-exempt room (migration 0347) keeps its history forever, so
+    // neither the server retention window nor a stale per-room expiry value
+    // should clamp the export (retention 0 reads as "forever" downstream).
     const windowMs = clampExportMs(
       Number.isFinite(reqMs) && reqMs > 0 ? reqMs : DEFAULT_EXPORT_MS,
-      settings.messageRetentionMs,
-      room.messageExpiryMinutes,
+      room.retentionExempt ? 0 : settings.messageRetentionMs,
+      room.retentionExempt ? null : room.messageExpiryMinutes,
     );
     const tzRaw = req.query.tz ? parseInt(req.query.tz, 10) : 0;
     const tzMinutes = Number.isFinite(tzRaw) ? Math.max(-14 * 60, Math.min(14 * 60, tzRaw)) : 0;

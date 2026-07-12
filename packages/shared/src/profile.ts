@@ -685,7 +685,20 @@ export interface MasterProfile {
  */
 export type PublicProfileBgMode = "cover" | "contain" | "tile" | "stretch";
 
-/** What `/profile` returns: either the master, or the active character. */
+/**
+ * One usergroup badge on a profile: name + owner-picked color. The color
+ * tints the CHIP only — purchasable cosmetics stay the sole source of
+ * username styling.
+ */
+export interface ServerRoleBadge {
+  name: string;
+  color: string | null;
+}
+
+/** What `/profile` returns: either the master, or the active character.
+ *  `serverRoles` (socket path only) lists the VIEWED user's usergroups in
+ *  the server the VIEWER is currently standing in; the offsite HTTP
+ *  deep-link path omits it entirely (no server context). */
 export type ProfileView =
-  | { kind: "master"; profile: MasterProfile }
-  | { kind: "character"; profile: CharacterProfile };
+  | { kind: "master"; profile: MasterProfile; serverRoles?: ServerRoleBadge[] }
+  | { kind: "character"; profile: CharacterProfile; serverRoles?: ServerRoleBadge[] };

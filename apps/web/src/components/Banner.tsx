@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { BookOpen } from "lucide-react";
 import type { AvatarCrop } from "@thekeep/shared";
 import { useChat } from "../state/store.js";
 import { useEarning } from "../state/earning.js";
@@ -81,7 +82,15 @@ interface Props {
     /** Server-level 18+ flag (age-restriction plan, Phase 2). Feeds the rating
      *  chip shown in the EXPANDED banner band only. */
     isNsfw: boolean;
+    /** The community's lore world (migration 0346), already visibility-gated
+     *  server-side for this viewer. Non-null renders the book icon beside the
+     *  wordmark that opens the world viewer. */
+    world: { id: string; name: string } | null;
   } | null;
+  /** Open the CURRENT server's lore world in the world viewer (the book icon
+   *  beside the rebranded wordmark). Passed from App so the WorldViewerModal
+   *  mount and URL sync stay there. */
+  onOpenServerWorld?: (worldId: string) => void;
   /** Open the CURRENT server's owner/mod console (the per-server admin). Passed
    *  ONLY when the viewer can manage the server they're in, so the nav shows a
    *  prominent "Server Admin" link — the primary path to the console, replacing
@@ -104,7 +113,7 @@ interface Props {
  * the active theme's panel color / text color / font-action stack when not
  * overridden, so a fresh install still looks coherent.
  */
-export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds, onOpenArcade, onOpenStaff, onOpenAffiliates, serverBrand, onOpenServerAdmin, notificationBell }: Props) {
+export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarning, onOpenScriptorium, onOpenWorlds, onOpenArcade, onOpenStaff, onOpenAffiliates, serverBrand, onOpenServerWorld, onOpenServerAdmin, notificationBell }: Props) {
   const { t } = useTranslation("common");
   const me = useChat((s) => s.me);
   const setMe = useChat((s) => s.setMe);
@@ -476,6 +485,27 @@ export function Banner({ navLinksVersion, onOpenAdmin, onOpenRules, onOpenEarnin
             nav (z-30) without touching that layering. Fixed 10px type, so the
             banner-scaled h1 font-size doesn't inflate it. */}
         {bannerShown ? <RatingChip nsfw={effectiveNsfw} className="ml-3" /> : null}
+        {/* Community-world book (migration 0346): opens this server's lore in
+            the world viewer. Rendered in BOTH banner states (it's a nav entry
+            point, not decoration) and only when the server HAS a world this
+            viewer may open (the summary is visibility-gated server-side).
+            pointer-events-auto punches through the h1's mobile tap-through;
+            fixed icon size so the banner-scaled font doesn't inflate it. */}
+        {serverBrand?.world && onOpenServerWorld ? (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onOpenServerWorld(serverBrand.world!.id); }}
+            title={t("banner.serverWorldTitle", { name: serverBrand.world.name })}
+            aria-label={t("banner.serverWorldTitle", { name: serverBrand.world.name })}
+            className={`pointer-events-auto relative z-10 ml-2 rounded p-1 leading-none ${
+              bannerShown
+                ? "text-white/85 hover:text-white [filter:drop-shadow(0_1px_2px_rgba(0,0,0,.7))]"
+                : "text-keep-muted hover:text-keep-action"
+            }`}
+          >
+            <BookOpen className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
       </h1>
 
       {/* Desktop nav. Hidden below md+; the hamburger button + dropdown

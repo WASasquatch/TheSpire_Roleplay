@@ -42,7 +42,8 @@
 import { createHash } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { and, eq, inArray } from "drizzle-orm";
-import type { OnboardingConfig } from "@thekeep/shared";
+import type { Server as IoServer } from "socket.io";
+import type { ClientToServerEvents, OnboardingConfig, ServerToClientEvents } from "@thekeep/shared";
 import {
   serverUsergroupMembers,
   serverUsergroups,
@@ -51,8 +52,12 @@ import {
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "../routes/auth.js";
 import { areServersEnabled, getServerSettings, getSettings } from "../settings.js";
+import { emitTreeChanged } from "../realtime/broadcast.js";
+import { refreshRoleGatesForUsers } from "../lib/roleGates.js";
 import { tFor } from "../i18n.js";
 import { serverAuthority } from "./authority.js";
+
+type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
 /**
  * Stable short hash of an onboarding config, matching settings.ts' hashWelcome
@@ -165,9 +170,12 @@ async function selectableGroup(db: Db, serverId: string, groupId: string) {
 
 /**
  * Register the member-facing self-roles + onboarding routes. Mounted once by
- * registerServerRoutes (IntB) after the manager usergroup routes.
+ * registerServerRoutes (IntB) after the manager usergroup routes. `io` feeds
+ * the rooms-tree pulse: a membership change can flip which role-gated rooms
+ * (room_role_gates, migration 0349) the caller receives, so every grant/
+ * revoke fires emitTreeChanged for the server.
  */
-export async function registerSelfRolesRoutes(app: FastifyInstance, db: Db): Promise<void> {
+export async function registerSelfRolesRoutes(app: FastifyInstance, db: Db, io: Io): Promise<void> {
   /* =========================================================
    *  Self-roles — member-picked usergroups
    * ========================================================= */
@@ -237,6 +245,13 @@ export async function registerSelfRolesRoutes(app: FastifyInstance, db: Db): Pro
       .values({ groupId: group.id, userId: g.meId, addedBy: g.meId, isAuto: false })
       .onConflictDoNothing();
 
+    // The new role may unlock role-gated rooms — rails re-filter live.
+    emitTreeChanged(io, g.serverId);
+    // If the caller is standing in a restricted-post room this role unlocks
+    // (the /roleselect "grab the role, then post" flow), their join-time
+    // postLocked stamp must refresh now — it is otherwise only recomputed
+    // on join/relocate/post-mode flips.
+    await refreshRoleGatesForUsers(io, db, g.serverId, [g.meId]);
     return { ok: true, member: true };
   });
 
@@ -272,6 +287,13 @@ export async function registerSelfRolesRoutes(app: FastifyInstance, db: Db): Pro
         eq(serverUsergroupMembers.userId, g.meId),
       ))
       .limit(1))[0];
+    // Losing the role may re-hide role-gated rooms — rails re-filter live.
+    if (!still) {
+      emitTreeChanged(io, g.serverId);
+      // Live enforcement: evict the caller from rooms the drop now denies,
+      // and re-lock their composer in restricted-post rooms.
+      await refreshRoleGatesForUsers(io, db, g.serverId, [g.meId]);
+    }
     return { ok: true, member: !!still };
   });
 
@@ -365,6 +387,14 @@ export async function registerSelfRolesRoutes(app: FastifyInstance, db: Db): Pro
             .values({ groupId, userId: g.meId, addedBy: g.meId, isAuto: false })
             .onConflictDoNothing();
         }
+      }
+
+      // Onboarding grants may unlock role-gated rooms — rails re-filter live.
+      if (granted.length) {
+        emitTreeChanged(io, g.serverId);
+        // Refresh the caller's composer lock in any restricted-post room the
+        // grants just unlocked (same posture as the self-roles PUT).
+        await refreshRoleGatesForUsers(io, db, g.serverId, [g.meId]);
       }
 
       // Record what the member actually saw. If the config changed mid-flow the

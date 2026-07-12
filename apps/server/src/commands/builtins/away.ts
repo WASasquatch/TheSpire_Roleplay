@@ -1,7 +1,24 @@
+import { eq } from "drizzle-orm";
 import { addMessage, broadcastPresence } from "../../realtime/broadcast.js";
 import { clearAway, getAway, setAway } from "../../realtime/awayState.js";
+import { rooms } from "../../db/schema.js";
+import { isPostLockedFor } from "../../lib/postMode.js";
 import { tFor } from "../../i18n.js";
-import type { CommandHandler } from "../types.js";
+import type { CommandContext, CommandHandler } from "../types.js";
+
+/**
+ * May this caller land the away/back SYSTEM line in the room? /away carries
+ * arbitrary user text ("… is away: <note>"), so in a restricted-post room
+ * (post_mode 'staff'/'roles') a locked member's line must be suppressed —
+ * otherwise /away is a free bypass of the read-only gate (which runs before
+ * this handler and deliberately lets status commands through). The away
+ * STATE + presence badge still update; only the room line is dropped.
+ */
+async function awayLineAllowed(ctx: CommandContext): Promise<boolean> {
+  const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
+  if (!room) return false;
+  return !(await isPostLockedFor(ctx.db, ctx.user, room));
+}
 
 /**
  * /away [reason]
@@ -44,13 +61,14 @@ export const awayCommand: CommandHandler = {
     const charId = ctx.user.activeCharacterId;
     const wasAway = getAway(ctx.user.id, charId) != null;
 
+    const lineAllowed = await awayLineAllowed(ctx);
     if (!reason && wasAway) {
       clearAway(ctx.user.id, charId);
-      await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is back.` });
+      if (lineAllowed) await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is back.` });
     } else {
       const note = reason || "(no reason given)";
       setAway(ctx.user.id, charId, note);
-      await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is away: ${note}` });
+      if (lineAllowed) await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is away: ${note}` });
     }
     await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
   },
@@ -83,7 +101,9 @@ export const backCommand: CommandHandler = {
       return;
     }
     clearAway(ctx.user.id, charId);
-    await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is back.` });
+    if (await awayLineAllowed(ctx)) {
+      await addMessage(ctx, { kind: "system", body: `${ctx.user.displayName} is back.` });
+    }
     await broadcastPresence(ctx.io, ctx.db, ctx.roomId);
   },
 };

@@ -21,7 +21,7 @@
  * rules take effect on the member's next post past the threshold; memberships
  * are never auto-removed (earned standing sticks).
  */
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import {
   SERVER_FEATURE_PERMISSIONS,
@@ -70,18 +70,83 @@ export async function ensureDefaultUsergroup(db: Db, serverId: string) {
 }
 
 /**
+ * The named (non-default) usergroups `userId` holds in `serverId`, in the
+ * owner's display order — the profile "Roles" badge feed. Server-contextual
+ * by design: the caller resolves WHICH server (the viewer's current one)
+ * and an offsite view simply never calls this. Default groups are excluded
+ * (implicit everyone — a badge on every profile says nothing).
+ */
+export async function serverRolesFor(
+  db: Db,
+  serverId: string,
+  userId: string,
+): Promise<Array<{ name: string; color: string | null }>> {
+  const rows = await db
+    .select({ name: serverUsergroups.name, color: serverUsergroups.color })
+    .from(serverUsergroupMembers)
+    .innerJoin(serverUsergroups, eq(serverUsergroups.id, serverUsergroupMembers.groupId))
+    .where(and(
+      eq(serverUsergroupMembers.userId, userId),
+      eq(serverUsergroups.serverId, serverId),
+      eq(serverUsergroups.isDefault, false),
+    ))
+    .orderBy(asc(serverUsergroups.sortOrder), asc(serverUsergroups.createdAt));
+  return rows.map((r) => ({ name: r.name, color: r.color ?? null }));
+}
+
+/**
+ * Userlist badge pick, batched over a whole occupant set (migration 0348):
+ * for each user in `userIds`, the group with the HIGHEST `sort_order`
+ * (createdAt tie-break — i.e. the last group in the owner's display order)
+ * among this server's named groups with `showBadge` enabled that the user
+ * belongs to. Viewer-agnostic by design so it can ride the shared presence
+ * payload; one query per room so presence broadcasts stay O(1) in queries.
+ * Default groups are excluded (implicit everyone — a badge on every row
+ * says nothing). Empty map when no group opts in.
+ */
+export async function userlistBadgesFor(
+  db: Db,
+  serverId: string,
+  userIds: string[],
+): Promise<Map<string, { name: string; color: string | null }>> {
+  const out = new Map<string, { name: string; color: string | null }>();
+  if (!userIds.length) return out;
+  const rows = await db
+    .select({
+      userId: serverUsergroupMembers.userId,
+      name: serverUsergroups.name,
+      color: serverUsergroups.color,
+    })
+    .from(serverUsergroupMembers)
+    .innerJoin(serverUsergroups, eq(serverUsergroups.id, serverUsergroupMembers.groupId))
+    .where(and(
+      eq(serverUsergroups.serverId, serverId),
+      eq(serverUsergroups.isDefault, false),
+      eq(serverUsergroups.showBadge, true),
+      inArray(serverUsergroupMembers.userId, userIds),
+    ))
+    .orderBy(asc(serverUsergroups.sortOrder), asc(serverUsergroups.createdAt));
+  // Rows arrive in ascending display order; later writes overwrite earlier
+  // ones, so each user ends up with their highest-sort_order badge group.
+  for (const r of rows) out.set(r.userId, { name: r.name, color: r.color ?? null });
+  return out;
+}
+
+/**
  * Re-evaluate a member's automatic usergroup memberships in a server and add
  * them to any group whose every auto-rule they now satisfy. Cheap no-op when
  * the server defines no auto-rule groups. Never removes memberships (earned
- * standing sticks); failures are swallowed by the caller.
+ * standing sticks); failures are swallowed by the caller. Returns true when
+ * at least one membership was granted, so the post path can pulse the rooms
+ * tree — an auto-earned role may unlock role-gated rooms (migration 0349).
  */
-export async function evaluateServerAutoGroups(db: Db, serverId: string, userId: string): Promise<void> {
+export async function evaluateServerAutoGroups(db: Db, serverId: string, userId: string): Promise<boolean> {
   const groups = (await db.select({ id: serverUsergroups.id, autoRulesJson: serverUsergroups.autoRulesJson })
     .from(serverUsergroups)
     .where(and(eq(serverUsergroups.serverId, serverId), eq(serverUsergroups.isDefault, false))))
     .map((g) => ({ id: g.id, rules: parseServerAutoRules(g.autoRulesJson) }))
     .filter((g) => g.rules.length > 0);
-  if (!groups.length) return;
+  if (!groups.length) return false;
 
   // Already-held auto groups don't need re-checking.
   const alreadyIn = new Set(
@@ -90,7 +155,7 @@ export async function evaluateServerAutoGroups(db: Db, serverId: string, userId:
       .map((m) => m.groupId),
   );
   const pending = groups.filter((g) => !alreadyIn.has(g.id));
-  if (!pending.length) return;
+  if (!pending.length) return false;
 
   const roomIds = await serverRoomIds(db, serverId);
   // Lazily compute each metric only if some pending rule needs it.
@@ -137,6 +202,7 @@ export async function evaluateServerAutoGroups(db: Db, serverId: string, userId:
     }
   }
 
+  let granted = false;
   for (const g of pending) {
     let all = true;
     for (const rule of g.rules) {
@@ -146,5 +212,7 @@ export async function evaluateServerAutoGroups(db: Db, serverId: string, userId:
     await db.insert(serverUsergroupMembers)
       .values({ groupId: g.id, userId, isAuto: true })
       .onConflictDoNothing();
+    granted = true;
   }
+  return granted;
 }

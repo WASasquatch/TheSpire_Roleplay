@@ -50,11 +50,12 @@ import { getMood } from "../moodState.js";
 import { linkPreviewFromRow } from "../../unfurl.js";
 import { loadReactionsForTargets } from "../../reactions.js";
 import { emptyPollState, loadPollState } from "../../polls.js";
+import { loadRoleSelectState } from "../../roleSelect.js";
 import { readPoolRank } from "../../earning/resolver.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
 import { routeMessage } from "../../earning/routing.js";
 import { tFor } from "../../i18n.js";
-import { userIsOnline } from "./presence.js";
+import { emitTreeChanged, userIsOnline } from "./presence.js";
 import { isHiddenIncognitoIdentity } from "./incognito.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -182,6 +183,14 @@ export async function addMessage(
      * creation). Ignored on every other kind.
      */
     pollDataJson?: string | null;
+    /**
+     * Server-only role-picker marker. Set exclusively by the /roleselect
+     * command (which already passed the manage_usergroups gate); persisted
+     * as messages.isRoleSelect and required by every roleSelect hydration
+     * point. Never derived from the body — {role:<id>} tokens typed into a
+     * plain say must stay plain text. Ignored on non-"say" kinds.
+     */
+    roleSelectPanel?: boolean;
     /**
      * Compose-time NSFW topic tag (age-restriction plan, Phase 3). Set by
      * the forum:post handler on NEW topics whose author checked "Mark this
@@ -526,6 +535,9 @@ export async function addMessage(
     // Poll definition, gated to `kind: "poll"` for the same reason cmdCss /
     // sceneImageUrl are gated to their kinds.
     pollDataJson: payload.kind === "poll" ? (payload.pollDataJson ?? null) : null,
+    // Role-picker marker, gated to "say" + the server-only payload flag so
+    // a body of {role:<id>} tokens alone can never mint a panel.
+    isRoleSelect: payload.kind === "say" && !!payload.roleSelectPanel,
     mentionsJson: mentionsSnapshot ? JSON.stringify(mentionsSnapshot) : null,
     // Write-time 18+ stamp (see ratingRow above). Never recomputed later.
     isNsfw: messageIsNsfw,
@@ -552,6 +564,16 @@ export async function addMessage(
       .set({ lastActivityAt: now })
       .where(eq(messages.id, payload.replyToId));
   }
+  // Fresh role-picker panel (/roleselect, roleSelect.ts): hydrate the live
+  // group half so the room renders the panel on the creation broadcast.
+  // Viewer-AGNOSTIC like the fresh-poll state above (the fan-out is one
+  // payload): every role reads un-held; each viewer's true membership is
+  // restored on backlog hydration, and the card reconciles from the toggle
+  // response meanwhile. Gated on the server-only roleSelectPanel flag (not
+  // the body tokens) so a forged body never hydrates.
+  const roleSelectState = payload.kind === "say" && payload.roleSelectPanel
+    ? await loadRoleSelectState(ctx.db, messageServerId, null, body)
+    : null;
   const out: ChatMessage = {
     id,
     roomId: ctx.roomId,
@@ -596,6 +618,7 @@ export async function addMessage(
     ...(payload.kind === "poll" && payload.pollDataJson && emptyPollState(payload.pollDataJson)
       ? { poll: emptyPollState(payload.pollDataJson)! }
       : {}),
+    ...(roleSelectState ? { roleSelect: roleSelectState } : {}),
     ...(mentionsSnapshot ? { mentions: mentionsSnapshot } : {}),
   };
   await emitFiltered(ctx.io, ctx.db, ctx.roomId, ctx.user, out, messageIsNsfw);
@@ -737,7 +760,19 @@ export async function addMessage(
   // Mirrors the forum auto-group hook on the forum:post path.
   if (areServersEnabledCached()) {
     void import("../../servers/usergroups.js")
-      .then(({ evaluateServerAutoGroups }) => evaluateServerAutoGroups(ctx.db, messageServerId, ctx.user.id))
+      .then(async ({ evaluateServerAutoGroups }) => {
+        const granted = await evaluateServerAutoGroups(ctx.db, messageServerId, ctx.user.id);
+        // A just-earned auto role may unlock role-gated rooms for this
+        // member (room_role_gates, migration 0349) — pulse their rail, and
+        // refresh their composer lock in any restricted-post room another
+        // tab is standing in. Grant-only path: fires only when a NEW group
+        // row was inserted, so the refresh never rides the ordinary send.
+        if (granted) {
+          emitTreeChanged(ctx.io, messageServerId);
+          const { refreshRoleGatesForUsers } = await import("../../lib/roleGates.js");
+          await refreshRoleGatesForUsers(ctx.io, ctx.db, messageServerId, [ctx.user.id]);
+        }
+      })
       .catch(() => {});
   }
   // Surface the inserted row's id so callers that need to attach
@@ -1458,6 +1493,16 @@ export async function sendRoomBacklogTo(
     if (m.kind !== "poll") continue;
     const state = await loadPollState(db, m.id, viewerUserId, pollJsonById.get(m.id) ?? null);
     if (state) m.poll = state;
+  }
+  // Hydrate role-picker panels per-viewer (live group names/colors + which
+  // roles THIS viewer holds) the same way — keyed on the server-stamped
+  // isRoleSelect row marker (never the body tokens, which are forgeable),
+  // so ordinary backlogs pay nothing.
+  const roleSelectIds = new Set(recent.filter((m) => m.isRoleSelect).map((m) => m.id));
+  for (const m of backlog) {
+    if (m.kind !== "say" || !roleSelectIds.has(m.id)) continue;
+    const state = await loadRoleSelectState(db, backlogServerId, viewerUserId, m.body);
+    if (state) m.roleSelect = state;
   }
   socket.emit("message:bulk", backlog);
   // Authoritative "older messages exist" signal for the scroll-up

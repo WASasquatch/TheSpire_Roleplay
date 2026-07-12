@@ -22,6 +22,7 @@ import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { ForumBanFromProfile } from "../forums/ForumBanFromProfile.js";
 import { LanguageTagChips } from "../flags/LanguageTagChips.js";
+import { RoleBadgeChips } from "../shared/RoleBadgeChips.js";
 import { RankSigil } from "../earning/RankSigil.js";
 import { StyledName } from "../cosmetics/StyledName.js";
 import { useChat } from "../../state/store.js";
@@ -956,6 +957,15 @@ function ProfileBody({
             {profile.profile.languages.length > 0 ? (
               <div className="mt-1.5">
                 <LanguageTagChips keys={profile.profile.languages} />
+              </div>
+            ) : null}
+            {/* Community roles — the viewed user's usergroups in the server
+                the VIEWER is currently standing in (socket path attaches
+                them; the offsite /p/ deep link has no server context and
+                ships none). Hidden entirely when empty. */}
+            {profile.serverRoles && profile.serverRoles.length > 0 ? (
+              <div className="mt-1.5">
+                <RoleBadgeChips roles={profile.serverRoles} ariaLabel={t("modal.roles.aria")} />
               </div>
             ) : null}
             {/* Mod-only attribution + id-copy chips. Two gates:

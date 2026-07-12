@@ -30,7 +30,7 @@
     "scriptoriumInvites_one": "{{count}} pending collaboration invite. Open the Scriptorium to act on it",
     "scriptoriumInvites_other": "{{count}} pending collaboration invites. Open the Scriptorium to act on them",
     "worlds": "Worlds",
-    "worldsTitle": "Worlds catalog. Browse open roleplay worlds, lore, and wikis",
+    "worldsTitle": "Worlds catalog. Browse public roleplay worlds, lore, and wikis",
     "staff": "Staff",
     "staffTitle": "Meet the staff, the mods and admins who run the Spire",
     "topCommunities": "Top Communities",
@@ -43,6 +43,7 @@
     "faqTitle": "Frequently asked questions for this server",
     "serverAdmin": "Server Admin",
     "serverAdminTitle": "Manage this server: settings, rooms, members, moderation",
+    "serverWorldTitle": "Open this community's world: {{name}}",
     "globalAdmin": "Global Admin",
     "globalAdminTitle": "Global Admin: platform settings and cross-community oversight",
     "exit": "Exit",
@@ -68,7 +69,7 @@
       "myWorlds": "My Worlds",
       "myWorldsHint": "Manage your worlds + pages",
       "catalog": "World Catalog",
-      "catalogHint": "Browse open worlds"
+      "catalogHint": "Browse public worlds"
     },
     "writing": {
       "myStories": "My Stories",

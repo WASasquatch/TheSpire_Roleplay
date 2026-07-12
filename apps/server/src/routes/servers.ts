@@ -98,9 +98,10 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
   await registerServerCommandTitleRoutes(app, db, io, registry);
   await registerServerEarningRoutes(app, db, io, uploadsRoot);
   await registerServerEventRoutes(app, db, io);
-  // Member-facing self-roles + onboarding (Batch 2). Takes (app, db) only —
-  // no io. Gated on canParticipate + the servers flag inside the module.
-  await registerSelfRolesRoutes(app, db);
+  // Member-facing self-roles + onboarding (Batch 2). Gated on canParticipate
+  // + the servers flag inside the module; io feeds the rooms-tree pulse a
+  // role grant/revoke fires for role-gated rooms (migration 0349).
+  await registerSelfRolesRoutes(app, db, io);
 
   const serversImgDir = join(uploadsRoot, "servers");
 

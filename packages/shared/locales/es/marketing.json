@@ -175,17 +175,17 @@
     "google": "Google",
     "signInWithGoogle": "Iniciar sesión con Google",
     "hostTitle": "Crea tu propia comunidad",
-    "hostBody": "Administra tu propia comunidad de chat y foros, con tus propias salas, miembros, roles y moderación. Empieza gratis, directo en tu navegador.",
+    "hostBody": "Administra tu propia comunidad: varios servidores, categorías de salas organizadas con íconos, salas informativas solo para el equipo cuyo historial nunca caduca, salas restringidas por rol con roles que los miembros eligen por sí mismos, el lore de tu mundo integrado, chat con texto enriquecido, emojis y comandos personalizados, y su propia economía. Empieza gratis, directo en tu navegador.",
     "startCommunity": "Crea una comunidad",
     "seeLiveForum": "Mira un foro en vivo →",
     "bringCommunity": "Trae tu comunidad a {{siteName}}",
     "bringBody": "Dale a tu juego, gremio o fandom un hogar de verdad, gratis, con las herramientas para administrarlo a tu manera.",
     "ownChatTitle": "Tu propia comunidad de chat",
     "ownChat": [
-      "Salas en vivo para rol en tiempo real",
-      "Miembros, roles e invitaciones",
-      "Economía y cosméticos propios",
-      "Herramientas de moderación que tú controlas"
+      "Salas de chat con texto enriquecido en categorías organizadas con íconos",
+      "Salas informativas solo para el equipo cuyo historial nunca caduca, y salas restringidas por rol con roles que los miembros eligen por sí mismos",
+      "El lore de tu mundo integrado, más economía y cosméticos propios",
+      "Emojis y comandos personalizados, y herramientas de moderación que tú controlas"
     ],
     "ownForumsTitle": "Tus propios foros",
     "ownForums": [
@@ -238,11 +238,12 @@
       "communities": {
         "title": "Comunidades",
         "tagline": "Crea tu propia comunidad o únete a una",
-        "desc": "Además del espacio nativo de The Spire, cualquiera puede crear su propia comunidad: un espacio con sus propias salas de chat, miembros, roles, economía y moderación. Adminístrala a tu manera o únete a comunidades creadas por otros.",
+        "desc": "Además del espacio nativo de The Spire, cualquiera puede administrar su propia comunidad: varios servidores con categorías de salas organizadas con íconos, salas informativas solo para el equipo cuyo historial nunca caduca, salas restringidas por rol con roles que los miembros eligen por sí mismos, el lore de tu mundo integrado, chat con texto enriquecido, emojis y comandos personalizados, y su propia economía. Adminístrala a tu manera o únete a comunidades creadas por otros.",
         "points": [
-          "Tus propias salas, miembros y roles",
-          "Economía y cosméticos por comunidad",
-          "Herramientas de moderación que tú controlas"
+          "Categorías de salas con íconos, salas informativas y salas restringidas por rol",
+          "Chat con texto enriquecido, con emojis y comandos personalizados",
+          "El lore de tu mundo integrado",
+          "Economía por comunidad y moderación que tú controlas"
         ],
         "ctaLabel": "Crea una comunidad"
       },

@@ -183,7 +183,7 @@
     },
     "roles": {
       "title": "Decide quién puede hacer qué",
-      "body": "En la pestaña Roles nombras a tu equipo y eliges exactamente qué poderes tienen. Otorga solo lo que cada persona necesita."
+      "body": "En la pestaña Equipo nombras a tus moderadores y admins y eliges exactamente qué poderes tienen. Otorga solo lo que cada persona necesita."
     },
     "save": {
       "title": "Nada se pierde",

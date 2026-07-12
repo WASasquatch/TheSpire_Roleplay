@@ -170,6 +170,10 @@
     "languages": {
       "aria": "Idiomas que habla"
     },
+    "roles": {
+      "aria": "Roles en esta comunidad",
+      "chipTitle": "{{name}} - un rol en esta comunidad"
+    },
     "role": {
       "admin": "Admin",
       "globalModerator": "Moderador global",

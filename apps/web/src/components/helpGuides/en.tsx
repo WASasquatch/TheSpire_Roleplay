@@ -1022,12 +1022,12 @@ foot of the mountains. Speaks little. Watches everything.</p>
             want shared.
           </li>
           <li>
-            <b>Public</b> - anyone with the URL or a link from a room can read it. Won't appear in
-            the catalog. Good for "share with my group" worlds.
+            <b>Unlisted</b> - anyone with the URL or a link from a room can read it. Won't appear
+            in the catalog. Good for "share with my group" worlds.
           </li>
           <li>
-            <b>Open</b> - public + listed in the World Catalog + others can join your world and
-            link it to their own rooms. Use this for community settings you want others to play in.
+            <b>Public</b> - listed in the World Catalog, and others can join your world and link
+            it to their own rooms. Use this for community settings you want others to play in.
           </li>
         </Bullets>
         <Heading>Make your first world</Heading>
@@ -1251,8 +1251,8 @@ foot of the mountains. Speaks little. Watches everything.</p>
         </Steps>
         <Heading>Attach someone else's world</Heading>
         <P>
-          You can only do this when their world is set to <b>open</b> visibility, so it shows up in
-          the catalog. The slash command intentionally rejects cross-author linking; you go through
+          You can only do this when their world is set to <b>Public</b> visibility, so it shows up
+          in the catalog. The slash command intentionally rejects cross-author linking; you go through
           the catalog instead, which is the gating point:
         </P>
         <Steps>
@@ -1650,7 +1650,7 @@ foot of the mountains. Speaks little. Watches everything.</p>
           </li>
         </Bullets>
 
-        <Heading>Members, roles, and groups</Heading>
+        <Heading>Members, staff, and roles</Heading>
         <P>
           You are the owner, so you hold every power. To share the work, you can appoint helpers and
           organize your members:
@@ -1661,14 +1661,15 @@ foot of the mountains. Speaks little. Watches everything.</p>
             them.
           </li>
           <li>
-            <b>Roles</b> - appoint a Moderator or an Admin. A Moderator is your everyday helper who
+            <b>Staff</b> - appoint a Moderator or an Admin. A Moderator is your everyday helper who
             tends chat; an Admin runs almost everything for you.
           </li>
           <li>
-            <b>Member groups</b> - bundle member perks (like posting, images, or inviting others) and
-            a color, and hand them to people. Everyone starts in a default group; you can add named
-            groups by hand or set rules so people earn a group automatically (for example after so
-            many messages).
+            <b>Roles</b> - bundle member perks (like posting, images, or inviting others) and a
+            color, and hand them to people. Everyone starts with a default role; you can add named
+            roles by hand or set rules so people earn a role automatically (for example after so
+            many messages). Members can pick some roles for themselves, a role can show as a badge
+            in the userlist, and rooms can be limited to certain roles.
           </li>
           <li>
             <b>Applications</b> - when your community is set to join by application, approve or
@@ -1685,8 +1686,8 @@ foot of the mountains. Speaks little. Watches everything.</p>
         </P>
         <P>
           An Admin is a fuller helper who can run day-to-day management for you, members, rooms,
-          groups, and more. The one thing an Admin can never do is change your community's look, and
-          only you can hand out the Admin role or transfer the community.
+          roles, and more. The one thing an Admin can never do is change your community's look, and
+          only you can appoint an Admin or transfer the community.
         </P>
         <P>
           No helper, however you set them up, can ever touch your own messages or change your

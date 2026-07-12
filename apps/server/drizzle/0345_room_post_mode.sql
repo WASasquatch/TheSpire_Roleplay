@@ -1,0 +1,11 @@
+-- Info rooms (read-only posting mode). `rooms.post_mode` gates WHO may post
+-- into the room's chat feed:
+--   'everyone' (default) - today's behavior, any occupant may post.
+--   'staff'              - only the room owner, room mods (room_members.role),
+--                          the room's server staff (owner/admin/mod), and site
+--                          staff may post. Everyone else reads (and reacts)
+--                          only. Enforced in the chat dispatch chokepoint;
+--                          forum boards keep their own permission system.
+-- Text column with NO db-level CHECK on purpose: a later phase widens the
+-- enum with a 'roles' value, and a CHECK would force another migration.
+ALTER TABLE `rooms` ADD COLUMN `post_mode` text NOT NULL DEFAULT 'everyone';

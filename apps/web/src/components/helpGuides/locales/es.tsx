@@ -1031,13 +1031,13 @@ tranquila al pie de las montañas. Habla poco. Lo observa todo.</p>
             quieres compartir.
           </li>
           <li>
-            <b>Público</b> - cualquiera con la URL o con un enlace desde una sala puede leerlo. No
-            aparece en el catálogo. Bueno para mundos de "compartir con mi grupo".
+            <b>Oculto</b> - cualquiera con la URL o con un enlace desde una sala puede leerlo.
+            No aparece en el catálogo. Bueno para mundos de "compartir con mi grupo".
           </li>
           <li>
-            <b>Abierto</b> - público + listado en el Catálogo de mundos + otros pueden unirse a tu
-            mundo y enlazarlo a sus propias salas. Úsalo para ambientaciones comunitarias donde
-            quieres que jueguen otros.
+            <b>Público</b> - listado en el Catálogo de mundos, y otros pueden unirse a tu mundo y
+            enlazarlo a sus propias salas. Úsalo para ambientaciones comunitarias donde quieres
+            que jueguen otros.
           </li>
         </Bullets>
         <Heading>Crea tu primer mundo</Heading>
@@ -1263,7 +1263,7 @@ tranquila al pie de las montañas. Habla poco. Lo observa todo.</p>
         </Steps>
         <Heading>Vincular el mundo de otra persona</Heading>
         <P>
-          Solo puedes hacerlo cuando su mundo tiene visibilidad <b>abierta</b>, de modo que aparece
+          Solo puedes hacerlo cuando su mundo tiene visibilidad <b>pública</b>, de modo que aparece
           en el catálogo. El comando rechaza a propósito vincular mundos ajenos; se hace desde el
           catálogo, que es el punto de control:
         </P>
@@ -1670,7 +1670,7 @@ tranquila al pie de las montañas. Habla poco. Lo observa todo.</p>
           </li>
         </Bullets>
 
-        <Heading>Miembros, roles y grupos</Heading>
+        <Heading>Miembros, equipo y roles</Heading>
         <P>
           Eres el propietario, así que tienes todos los poderes. Para repartir el trabajo puedes
           nombrar ayudantes y organizar a tus miembros:
@@ -1681,14 +1681,16 @@ tranquila al pie de las montañas. Habla poco. Lo observa todo.</p>
             quítalo.
           </li>
           <li>
-            <b>Roles</b> - nombra un Moderador o un Admin. Un Moderador es tu ayudante del día a
+            <b>Equipo</b> - nombra un Moderador o un Admin. Un Moderador es tu ayudante del día a
             día que cuida el chat; un Admin maneja casi todo por ti.
           </li>
           <li>
-            <b>Grupos de miembros</b> - agrupa beneficios (como publicar, imágenes o invitar a
-            otros) y un color, y entrégaselos a la gente. Todos empiezan en un grupo
-            predeterminado; puedes crear grupos con nombre a mano o poner reglas para que la gente
-            gane un grupo automáticamente (por ejemplo, después de cierto número de mensajes).
+            <b>Roles</b> - agrupa beneficios (como publicar, imágenes o invitar a otros) y un
+            color, y entrégaselos a la gente. Todos empiezan con un rol predeterminado; puedes
+            crear roles con nombre a mano o poner reglas para que la gente gane un rol
+            automáticamente (por ejemplo, después de cierto número de mensajes). Los miembros
+            pueden elegir algunos roles por sí mismos, un rol puede verse como insignia en la lista
+            de usuarios y las salas pueden limitarse a ciertos roles.
           </li>
           <li>
             <b>Solicitudes</b> - cuando tu comunidad se une por solicitud, aprueba o rechaza a
@@ -1706,9 +1708,8 @@ tranquila al pie de las montañas. Habla poco. Lo observa todo.</p>
         </P>
         <P>
           Un Admin es un ayudante más completo que puede llevar la administración diaria por ti:
-          miembros, salas, grupos y más. Lo único que un Admin nunca puede hacer es cambiar el
-          estilo de tu comunidad, y solo tú puedes entregar el rol de Admin o transferir la
-          comunidad.
+          miembros, salas, roles y más. Lo único que un Admin nunca puede hacer es cambiar el
+          estilo de tu comunidad, y solo tú puedes nombrar a un Admin o transferir la comunidad.
         </P>
         <P>
           Ningún ayudante, sin importar cómo lo configures, puede tocar tus propios mensajes ni

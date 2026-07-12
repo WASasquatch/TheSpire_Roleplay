@@ -10,7 +10,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 import { id, ts } from "./_helpers.js";
 import { forumPrefixes, forums } from "./forums.js";
-import { servers } from "./servers.js";
+import { servers, serverUsergroups } from "./servers.js";
 import { characters, users } from "./users.js";
 
 /**
@@ -25,6 +25,34 @@ export const presenceSnapshots = sqliteTable("presence_snapshots", {
   payload: text("payload").notNull(),
   savedAt: integer("saved_at").notNull(),
 });
+
+/* ---------- room_categories ---------- */
+/**
+ * Named rail sections for a server's rooms (migration 0344). Each category
+ * belongs to exactly one server (CASCADE — a server delete takes its
+ * categories with it) and orders its bucket via `sortOrder`. Rooms attach via
+ * `rooms.categoryId` (SET NULL — deleting a category never deletes rooms,
+ * they fall back to the headerless uncategorized bucket, which always renders
+ * FIRST so a server that never touches categories looks identical to today).
+ * `icon` mirrors the `rooms.icon` duality: an http(s) image URL or a short
+ * emoji/text glyph; the client picks the render path.
+ */
+export const roomCategories = sqliteTable(
+  "room_categories",
+  {
+    id: id(),
+    serverId: text("server_id")
+      .notNull()
+      .references(() => servers.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    icon: text("icon"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+  },
+  (t) => ({
+    serverIdx: index("room_categories_server_idx").on(t.serverId),
+  }),
+);
 
 /* ---------- rooms ---------- */
 export const rooms = sqliteTable(
@@ -111,6 +139,33 @@ export const rooms = sqliteTable(
      * stale posts. Owners/mods set via /expiry.
      */
     messageExpiryMinutes: integer("message_expiry_minutes"),
+    /**
+     * "Never expire" opt-out (migration 0347). When true, the janitor skips
+     * this room in BOTH sweeps (server retention window and the per-room
+     * expiry above), so its history is kept forever — info/lore rooms.
+     * A separate bool rather than a `0` sentinel on messageExpiryMinutes:
+     * existing sites truthy-check that column (`> 0`), and a sentinel would
+     * silently read as "inherit the server retention window". Setting an
+     * explicit /expiry value clears this flag (an explicit lifetime
+     * supersedes "never"). Console-set via the Rooms editor (manage_rooms).
+     */
+    retentionExempt: integer("retention_exempt", { mode: "boolean" }).notNull().default(false),
+    /**
+     * Who may post into this room's chat feed (migration 0345).
+     *   "everyone" (default) - any occupant may post.
+     *   "staff"              - room owner, room mods (room_members.role),
+     *                          server staff (owner/admin/mod), and site staff
+     *                          only; everyone else reads + reacts. Enforced in
+     *                          the chat dispatch chokepoint; forum boards
+     *                          (forumId set) keep their own permission system.
+     *   "roles"              - the staff set above PLUS holders of any
+     *                          usergroup with a kind='post' row in
+     *                          `room_role_gates` (migration 0349).
+     * Plain text enum with no db-level CHECK, so widening stays schema-free.
+     */
+    postMode: text("post_mode", { enum: ["everyone", "staff", "roles"] })
+      .notNull()
+      .default("everyone"),
     /**
      * Difficulty Class for dice mechanics (migration 0246). When set,
      * `/roll` and `/initiative` report pass/fail against this threshold
@@ -261,6 +316,19 @@ export const rooms = sqliteTable(
      * until the Phase-2 backfill points existing rooms at the default server.
      */
     serverId: text("server_id").references(() => servers.id, { onDelete: "set null" }),
+    /**
+     * Rail section this room files under (migration 0344). Null = the
+     * headerless uncategorized bucket, which renders FIRST — the default for
+     * every room, so untouched servers keep today's rail exactly. ON DELETE
+     * SET NULL: deleting a category never deletes its rooms.
+     */
+    categoryId: text("category_id").references(() => roomCategories.id, { onDelete: "set null" }),
+    /**
+     * Manual within-bucket position (migration 0344), set from the console's
+     * up/down arrows. Ties (the default 0 everywhere) fall back to the
+     * alphabetical name order the rail has always used.
+     */
+    sortOrder: integer("sort_order").notNull().default(0),
   },
   (t) => ({
     nameUq: uniqueIndex("rooms_name_uq").on(sql`lower(${t.name})`),
@@ -356,6 +424,40 @@ export const roomMods = sqliteTable(
   (t) => ({
     pk: primaryKey({ columns: [t.roomId, t.userId, t.characterId] }),
     roomIdx: index("room_mods_room_idx").on(t.roomId),
+  }),
+);
+
+/* ---------- room_role_gates ----------
+ * Per-role room permissions (migration 0349). One row per
+ * (room, usergroup, kind):
+ *   kind='access' — ANY row of this kind makes the room ROLE-LOCKED:
+ *                   non-holders don't receive it in GET /rooms, can't join,
+ *                   and its slug 404s (the same no-leak shape as a private
+ *                   room). Site staff, server staff and the room owner
+ *                   always pass; the gate composes with (never replaces)
+ *                   the 18+ / private / moderation gates.
+ *   kind='post'   — with rooms.post_mode='roles', holders of any row of
+ *                   this kind may post; everyone else gets the read-only
+ *                   composer. post_mode='staff' ignores these rows.
+ * Both FKs cascade: deleting a usergroup removes its gate rows, and a room
+ * whose LAST access row vanishes becomes public again by design (the
+ * console calls this out). An 18+ channel COPIES its base room's access
+ * rows at enable time (lib/adultChannel.ts) and is independent after. */
+export const roomRoleGates = sqliteTable(
+  "room_role_gates",
+  {
+    roomId: text("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    usergroupId: text("usergroup_id")
+      .notNull()
+      .references(() => serverUsergroups.id, { onDelete: "cascade" }),
+    kind: text("kind", { enum: ["access", "post"] }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.roomId, t.usergroupId, t.kind] }),
+    roomIdx: index("room_role_gates_room_idx").on(t.roomId),
+    groupIdx: index("room_role_gates_group_idx").on(t.usergroupId),
   }),
 );
 
@@ -578,6 +680,15 @@ export const messages = sqliteTable(
      * kind. Mirrors the linkPreviewJson / cmdCss JSON-snapshot pattern.
      */
     pollDataJson: text("poll_data_json"),
+    /**
+     * Server-stamped role-picker marker (migration 0350). True only on rows
+     * the /roleselect command wrote; every roleSelect hydration point keys
+     * on it, NOT on the body's {role:<id>} tokens — the body is user-
+     * controlled, so a member typing the tokens into a plain say must render
+     * as plain text, never as an interactive panel. Same gated-write posture
+     * as pollDataJson on kind="poll".
+     */
+    isRoleSelect: integer("is_role_select", { mode: "boolean" }).notNull().default(false),
     /**
      * Resolved @mention snapshot for this message (migration 0243). JSON array
      * of { name, userId, characterId } - one per `@id:`/`@cid:` identity token

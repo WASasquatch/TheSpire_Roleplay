@@ -12,6 +12,7 @@ import { nanoid } from "nanoid";
 import { parseTagsJson } from "@thekeep/shared";
 import type {
   ClientToServerEvents,
+  Role,
   ServerPermission,
   ServerRole,
   ServerToClientEvents,
@@ -20,6 +21,7 @@ import { auditLog, rooms, servers } from "../db/schema.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
 import type { ServerAuthority } from "../servers/authority.js";
+import { resolveWorld } from "./worlds/shared.js";
 import type { getSessionUser } from "./auth.js";
 
 /** Parse a stored icon/banner crop (AvatarCrop JSON) to an object, or null when
@@ -83,6 +85,10 @@ export const SERVER_SUMMARY_COLUMNS = {
   // public/discovery surfaces show in place of the real banner art.
   isNsfw: servers.isNsfw,
   sfwBannerUrl: servers.sfwBannerUrl,
+  // Community world link (migration 0346). The raw column never rides the
+  // wire — buildServerSummary swaps it for the viewer-gated `world` ref
+  // resolved in loadSummaryViewerCtx (private worlds read as null).
+  worldId: servers.worldId,
 } as const;
 
 export type ServerSummaryRow = {
@@ -103,6 +109,36 @@ export interface SummaryViewerCtx {
    *  the owner's profile (e.g. to message them for an invite to a closed
    *  server). */
   ownerNamesBy: Map<string, string>;
+  /** Server id → the VIEWER-VISIBLE ref of its community world (migration
+   *  0346). Resolved once per distinct world through {@link resolveWorld}, so
+   *  a private/unlisted/18+-gated world the viewer can't open simply has no
+   *  entry — the summary emits `world: null` and the name never leaks. */
+  worldRefsBy: Map<string, ServerWorldRef>;
+}
+
+/** The brief world identity a server payload carries (migration 0346). */
+export interface ServerWorldRef {
+  id: string;
+  slug: string;
+  name: string;
+}
+
+/**
+ * Resolve a server's community world to its wire ref FOR a given viewer.
+ * The one rule every /servers payload follows: the world resolves through
+ * {@link resolveWorld} (the canonical world visibility + NSFW gate), so a
+ * private world returns null to anyone but its owner/admin, and an 18+
+ * world returns null to minors and anonymous viewers. Never build the ref
+ * from a raw row read.
+ */
+export async function resolveServerWorldRef(
+  db: Db,
+  worldId: string | null | undefined,
+  viewer: { id: string; role: Role } | null,
+): Promise<ServerWorldRef | null> {
+  if (!worldId) return null;
+  const w = await resolveWorld(db, worldId, viewer?.id ?? null, viewer?.role ?? null);
+  return w ? { id: w.id, slug: w.slug, name: w.name } : null;
 }
 
 /** Map ONE server row + viewer context to the ServerSummary wire shape. The
@@ -164,6 +200,10 @@ export function buildServerSummary(s: ServerSummaryRow, ctx: SummaryViewerCtx) {
     // console; PUBLIC surfaces (share page, OG) swap banners server-side.
     isNsfw: !!s.isNsfw,
     sfwBannerUrl: s.sfwBannerUrl ?? null,
+    // Community world (migration 0346): the viewer-gated ref resolved in
+    // loadSummaryViewerCtx. Null when unset OR when THIS viewer can't open
+    // the world (private/unlisted/18+ posture) — never the raw row.
+    world: (s.worldId ? ctx.worldRefsBy.get(s.id) : null) ?? null,
     // The viewer's chosen favorite/default server (users.default_server_id)
     // — the rail/discover surface marks it + offers the set/clear toggle.
     // Only meaningful for signed-in viewers.

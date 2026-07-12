@@ -346,6 +346,9 @@ function NewWorldForm({
           <option value="public">{t("visibilityOption.public")}</option>
           <option value="open">{t("visibilityOption.open")}</option>
         </select>
+        <span className="mt-0.5 block text-[10px] text-keep-muted">
+          {t("editor.visibilityHint")}
+        </span>
       </label>
       {err ? <div className="mb-1 text-[10px] text-keep-accent">{err}</div> : null}
       <div className="flex justify-end gap-2">

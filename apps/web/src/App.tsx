@@ -1,7 +1,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import { Trans, useTranslation } from "react-i18next";
-import type { ChatMessage, PermissionKey, PinnedMessage, PrivateWorldStub, ProfileView, Role, Theme, ThreadCategory, TourId, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
+import type { ChatMessage, PermissionKey, PinnedMessage, PrivateWorldStub, ProfileView, Role, RoomCategorySummary, Theme, ThreadCategory, TourId, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
 import { arcadeGameByKey, DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
 import { lazyModal } from "./components/shared/lazyModal.js";
 // Heavy, authenticated-only surfaces are code-split (B1, plan.md §3) so
@@ -1400,6 +1400,10 @@ function Chat() {
   // Rooms drawer on mobile (md breakpoint and below). Always-open on desktop.
   const [railOpen, setRailOpen] = useState(false);
   const [roomsTree, setRoomsTree] = useState<RoomWithOccupants[]>([]);
+  // Rail sections (room categories, migration 0344) riding the same /rooms
+  // payload; empty for servers that never touch categories, which keeps the
+  // rail's flat single-bucket rendering byte-identical to before.
+  const [roomCategories, setRoomCategories] = useState<RoomCategorySummary[]>([]);
   const [roomsTreeVersion, setRoomsTreeVersion] = useState(0);
   // Server Rail catalog (Multi-Server Lift). null = not loaded yet; only ever
   // fetched when the servers feature flag is on, so flag-off keeps it null and
@@ -2192,8 +2196,11 @@ function Chat() {
             : "/rooms";
         const r = await fetch(url, { credentials: "include" });
         if (!r.ok) return;
-        const j = (await r.json()) as { rooms: RoomWithOccupants[] };
-        if (!cancelled) setRoomsTree(j.rooms);
+        const j = (await r.json()) as { rooms: RoomWithOccupants[]; categories?: RoomCategorySummary[] };
+        if (!cancelled) {
+          setRoomsTree(j.rooms);
+          setRoomCategories(j.categories ?? []);
+        }
       } catch { /* ignore */ }
     }
     load();
@@ -3870,6 +3877,9 @@ function Chat() {
             // rating chip in the expanded banner band. Minors never receive
             // an 18+ server row, so this is only ever true for adults.
             isNsfw: !!currentServer.isNsfw,
+            // Community world (migration 0346) — already visibility-gated
+            // per viewer server-side; drives the top bar's book icon.
+            world: currentServer.world ?? null,
           }
         : null,
     [currentServer],
@@ -4261,6 +4271,7 @@ function Chat() {
         onOpenStaff={() => setStaffOpen(true)}
         onOpenAffiliates={() => setAffiliatesOpen("list")}
         serverBrand={serverBrand}
+        onOpenServerWorld={(worldId) => setWorldViewerId(worldId)}
         notificationBell={
           // Community events (calendar) + the notification bell sit side by
           // side in the Banner header as first-class siblings. The events
@@ -4395,7 +4406,10 @@ function Chat() {
               }}
             />
           ) : null}
-          {room?.messageExpiryMinutes && room.messageExpiryMinutes > 0 ? (
+          {/* Retention-exempt rooms never expire, so a stale per-room minutes
+              value must not show the auto-expire strip (the janitor skips
+              exempt rooms in both passes). */}
+          {room?.messageExpiryMinutes && room.messageExpiryMinutes > 0 && !room.retentionExempt ? (
             <div className="keep-notice px-4 py-0.5 text-center text-[10px] uppercase tracking-widest text-keep-muted">
               {t("expiry.notice", { window: formatExpiry(room.messageExpiryMinutes) })}
             </div>
@@ -4587,6 +4601,8 @@ function Chat() {
               : {})}
             isForumRoom={!!isForumRoom}
             canModerate={canModerate}
+            postLocked={!!room?.postLocked}
+            postMode={room?.postMode ?? "everyone"}
             activeTopic={activeTopic}
             topicCreateMode={topicCreateMode}
             {...(activeForumCategoryId !== undefined
@@ -4625,6 +4641,7 @@ function Chat() {
         >
         <RoomsTree
           rooms={roomsTree}
+          categories={roomCategories}
           currentRoomId={currentRoomId}
           selfUserId={me?.id ?? null}
           activeCharacterId={activeCharacterId}
@@ -4929,6 +4946,10 @@ function Chat() {
           canApply={!!me?.permissions?.includes("apply_create_server")}
           {...(serverDiscoverOpen.create ? { initialCreate: true } : {})}
           onSelect={(s) => void onServerSelect(s)}
+          // "Read the lore before you join": close the discover modal first —
+          // the world viewer is a floating window BELOW the true-modal plane
+          // and would otherwise be buried under it.
+          onOpenWorld={(worldId) => { setServerDiscoverOpen(null); setWorldViewerId(worldId); }}
           onClose={() => setServerDiscoverOpen(null)}
         />
       ) : null}

@@ -50,11 +50,15 @@ export const exportCommand: CommandHandler = {
 
     const settings = await getSettings(ctx.db);
     const room = (await ctx.db
-      .select({ name: rooms.name, expiry: rooms.messageExpiryMinutes })
+      .select({ name: rooms.name, expiry: rooms.messageExpiryMinutes, retentionExempt: rooms.retentionExempt })
       .from(rooms)
       .where(eq(rooms.id, ctx.roomId))
       .limit(1))[0];
-    const windowMs = clampExportMs(requestedMs, settings.messageRetentionMs, room?.expiry ?? null);
+    // Retention-exempt rooms (migration 0347) keep history forever: skip the
+    // retention/expiry clamps (retention 0 = "forever"), matching the route.
+    const windowMs = room?.retentionExempt
+      ? clampExportMs(requestedMs, 0, null)
+      : clampExportMs(requestedMs, settings.messageRetentionMs, room?.expiry ?? null);
 
     // Relative URL; the client appends its timezone offset and fetches it with
     // credentials, then triggers the download (see the `download-export` hint).

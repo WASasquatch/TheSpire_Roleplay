@@ -183,7 +183,7 @@
     },
     "roles": {
       "title": "Decide who can do what",
-      "body": "The Roles tab is where you appoint staff and choose exactly which powers they hold. Grant only what each person needs."
+      "body": "The Staff tab is where you appoint moderators and admins and choose exactly which powers they hold. Grant only what each person needs."
     },
     "save": {
       "title": "Nothing is lost",

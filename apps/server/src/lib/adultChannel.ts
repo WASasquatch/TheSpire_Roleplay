@@ -25,10 +25,29 @@
 
 import { and, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { roomMembers, rooms } from "../db/schema.js";
+import { roomMembers, roomRoleGates, rooms } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { deriveUniqueRoomSlug } from "./roomSlug.js";
 import { findLinkedAnnex } from "./roomLinks.js";
+
+/**
+ * Copy the base room's kind='access' role gates onto the channel at enable
+ * time (room_role_gates, migration 0349). ONE-TIME copy — after this the
+ * two rooms' gate rows are independent (the console edits the base only;
+ * the channel keeps the snapshot). onConflictDoNothing keeps a re-enable of
+ * a parked channel additive over any rows it already carried.
+ */
+async function copyAccessGates(db: Db, baseRoomId: string, channelRoomId: string): Promise<void> {
+  const rows = await db
+    .select({ usergroupId: roomRoleGates.usergroupId })
+    .from(roomRoleGates)
+    .where(and(eq(roomRoleGates.roomId, baseRoomId), eq(roomRoleGates.kind, "access")));
+  if (rows.length === 0) return;
+  await db
+    .insert(roomRoleGates)
+    .values(rows.map((r) => ({ roomId: channelRoomId, usergroupId: r.usergroupId, kind: "access" as const })))
+    .onConflictDoNothing();
+}
 
 type RoomRow = typeof rooms.$inferSelect;
 /** Structural io surface used here (fetchSockets for the occupancy check). */
@@ -84,6 +103,7 @@ export async function enableAdultChannel(
       .update(rooms)
       .set({ archivedAt: null, archiveHiddenAt: null, isNsfw: true })
       .where(eq(rooms.id, parked.id));
+    await copyAccessGates(db, base.id, parked.id);
     return { ok: true, changed: true, channelRoomId: parked.id };
   }
 
@@ -120,6 +140,7 @@ export async function enableAdultChannel(
   if (ownerId) {
     await db.insert(roomMembers).values({ roomId: id, userId: ownerId, role: "owner" }).onConflictDoNothing();
   }
+  await copyAccessGates(db, base.id, id);
   return { ok: true, changed: true, channelRoomId: id };
 }
 

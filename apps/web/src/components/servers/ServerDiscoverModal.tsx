@@ -22,6 +22,7 @@ import { Trans, useTranslation } from "react-i18next";
 import DOMPurify from "dompurify";
 import {
   ArrowRight,
+  BookOpen,
   Clock,
   Compass,
   Crown,
@@ -92,10 +93,15 @@ interface Props {
   /** Enter a server: resolves its landing room and joins it through the rail's
    *  existing onSelect path. The modal closes after a successful entry. */
   onSelect: (server: ServerSummary) => void;
+  /** Open a community's lore world in the world viewer ("read the lore before
+   *  you join"). The caller closes this modal first so the viewer isn't
+   *  buried under the modal plane. Cards only offer it when the summary
+   *  carries a world the viewer may open (server-side visibility gate). */
+  onOpenWorld?: (worldId: string) => void;
   onClose: () => void;
 }
 
-export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose }: Props) {
+export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onOpenWorld, onClose }: Props) {
   const { t } = useTranslation("servers");
   const [list, setList] = useState<ServerSummary[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -170,7 +176,7 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
                   <SectionLabel icon={<Star className="h-3.5 w-3.5" aria-hidden="true" />} text={t("discover.yourServers")} count={mine.length} />
                   <ul className="space-y-2">
                     {mine.map((s) => (
-                      <ServerCard key={s.id} server={s} onEnter={() => enter(s)} onJoined={refresh} />
+                      <ServerCard key={s.id} server={s} onEnter={() => enter(s)} onJoined={refresh} onOpenWorld={onOpenWorld} />
                     ))}
                   </ul>
                 </section>
@@ -181,6 +187,7 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
                 canApply={canApply}
                 onEnter={enter}
                 onJoined={refresh}
+                onOpenWorld={onOpenWorld}
               />
             </div>
           )}
@@ -213,11 +220,12 @@ export function ServerDiscoverModal({ canApply, initialCreate, onSelect, onClose
  * viewer already belongs to are filtered out so the lists stay "discover only".
  * Mirrors the forum discover UX so the two surfaces match.
  */
-function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
+function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined, onOpenWorld }: {
   mineIds: Set<string>;
   canApply: boolean;
   onEnter: (server: ServerSummary) => void;
   onJoined: () => void;
+  onOpenWorld?: ((worldId: string) => void) | undefined;
 }) {
   const { t } = useTranslation("servers");
   const [discover, setDiscover] = useState<ServerDiscover | null>(null);
@@ -362,7 +370,7 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
               <p className="text-[11px] text-keep-muted">{t("discover.results", { count: resultRows.length })}</p>
               <ul className="space-y-2">
                 {resultRows.map((s) => (
-                  <ServerCard key={s.id} server={s} onEnter={() => onEnter(s)} onJoined={onJoined} />
+                  <ServerCard key={s.id} server={s} onEnter={() => onEnter(s)} onJoined={onJoined} onOpenWorld={onOpenWorld} />
                 ))}
               </ul>
             </>
@@ -384,6 +392,7 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
             emptyText={t("discover.noPopular")}
             onEnter={onEnter}
             onJoined={onJoined}
+            onOpenWorld={onOpenWorld}
           />
           <DiscoverColumn
             icon={<Sparkles className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -392,6 +401,7 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
             emptyText={t("discover.noNew")}
             onEnter={onEnter}
             onJoined={onJoined}
+            onOpenWorld={onOpenWorld}
           />
         </div>
       )}
@@ -400,13 +410,14 @@ function DiscoverBrowse({ mineIds, canApply, onEnter, onJoined }: {
 }
 
 /** One labelled column (Popular / New) in the default browse grid. */
-function DiscoverColumn({ icon, label, rows, emptyText, onEnter, onJoined }: {
+function DiscoverColumn({ icon, label, rows, emptyText, onEnter, onJoined, onOpenWorld }: {
   icon: ReactNode;
   label: string;
   rows: ServerSummary[];
   emptyText: string;
   onEnter: (server: ServerSummary) => void;
   onJoined: () => void;
+  onOpenWorld?: ((worldId: string) => void) | undefined;
 }) {
   return (
     <div>
@@ -416,7 +427,7 @@ function DiscoverColumn({ icon, label, rows, emptyText, onEnter, onJoined }: {
       ) : (
         <ul className="space-y-2">
           {rows.map((s) => (
-            <ServerCard key={s.id} server={s} onEnter={() => onEnter(s)} onJoined={onJoined} />
+            <ServerCard key={s.id} server={s} onEnter={() => onEnter(s)} onJoined={onJoined} onOpenWorld={onOpenWorld} />
           ))}
         </ul>
       )}
@@ -522,11 +533,13 @@ function SectionLabel({ icon, text, count }: { icon: ReactNode; text: string; co
 /** One catalog row: identity (logo/letter + name + tagline + join-mode badge)
  *  and a primary action that adapts to the viewer's relationship and the
  *  server's join mode. Invite/apply expand inline rather than navigating. */
-function ServerCard({ server, onEnter, onJoined }: {
+function ServerCard({ server, onEnter, onJoined, onOpenWorld }: {
   server: ServerSummary;
   onEnter: () => void;
   /** Refetch the catalog after a join/apply so this card's state is honest. */
   onJoined: () => void;
+  /** Open the community's lore world in the world viewer. */
+  onOpenWorld?: ((worldId: string) => void) | undefined;
 }) {
   const { t } = useTranslation("servers");
   const [busy, setBusy] = useState(false);
@@ -707,6 +720,23 @@ function ServerCard({ server, onEnter, onJoined }: {
               <User className="h-3 w-3 shrink-0" aria-hidden="true" />
               <span className="truncate">
                 <Trans t={t} i18nKey="discover.card.byOwner" values={{ name: owner.name }} components={{ owner: <span className="font-medium underline decoration-dotted underline-offset-2" /> }} />
+              </span>
+            </button>
+          ) : null}
+          {/* Lore-world link — "read the lore before you join". Only present
+              when the summary carries a world THIS viewer may open (the
+              server resolves it through the world's visibility gates). */}
+          {server.world && onOpenWorld ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onOpenWorld(server.world!.id); }}
+              title={t("discover.card.worldTitle", { name: server.world.name })}
+              aria-label={t("discover.card.worldTitle", { name: server.world.name })}
+              className={`mt-1 flex max-w-full items-center gap-1 text-[11px] ${hasBanner ? "text-white/85 hover:text-white" : "text-keep-muted hover:text-keep-action"}`}
+            >
+              <BookOpen className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">
+                <Trans t={t} i18nKey="discover.card.world" values={{ name: server.world.name }} components={{ world: <span className="font-medium underline decoration-dotted underline-offset-2" /> }} />
               </span>
             </button>
           ) : null}

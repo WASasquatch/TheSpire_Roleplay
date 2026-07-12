@@ -123,13 +123,13 @@
   },
   "visibilityValue": {
     "private": "privado",
-    "public": "público",
-    "open": "abierto"
+    "public": "oculto",
+    "open": "público"
   },
   "visibilityOption": {
     "private": "Privado (solo tú)",
-    "public": "Público (cualquiera con el enlace)",
-    "open": "Abierto (aparece en el catálogo, otros pueden vincularlo a sus salas)"
+    "public": "Oculto (cualquiera con el enlace, no aparece en el catálogo)",
+    "open": "Público (aparece en el catálogo de mundos, otros pueden vincularlo a sus salas)"
   },
   "linkPicker": {
     "button": "+ Vincular entrada",
@@ -196,7 +196,7 @@
   "myWorlds": {
     "title": "Tus mundos",
     "browseCatalog": "Explorar catálogo",
-    "browseCatalogTitle": "Explora mundos abiertos que puedes usar en tus salas",
+    "browseCatalogTitle": "Explora mundos públicos que puedes usar en tus salas",
     "newWorld": "+ Nuevo mundo",
     "noWorlds": "Aún no hay mundos. Haz clic en \"+ Nuevo mundo\" para empezar uno.",
     "joinedHeading": "Mundos a los que me uní",
@@ -240,7 +240,7 @@
     "hideLabel": "Ocultar:",
     "excludeTitle": "Excluir mundos con la etiqueta \"{{tag}}\"",
     "noMatches": "Ningún mundo coincide con los filtros actuales.",
-    "noOpenWorlds": "Aún no hay mundos abiertos. Sé el primero, marca uno de los tuyos como “abierto” en su configuración.",
+    "noOpenWorlds": "Aún no hay mundos públicos. Sé el primero, marca uno de los tuyos como “público” en su configuración.",
     "worldCount_one": "{{count}} mundo",
     "worldCount_other": "{{count}} mundos",
     "worldCount_many": "{{count}} mundos",
@@ -340,8 +340,8 @@
       },
       "visibility": {
         "private": "Privado",
-        "public": "Público",
-        "open": "Abierto"
+        "public": "Oculto",
+        "open": "Público"
       },
       "joinMode": {
         "open": "Abierto",
@@ -358,7 +358,7 @@
     "pending": "Tu solicitud está pendiente de la revisión del autor.",
     "acceptsApplications": "Este mundo acepta solicitudes para unirse.",
     "applyToJoin": "Solicita unirte",
-    "open": "Este mundo es abierto. Únete como tu identidad actual.",
+    "open": "Cualquiera puede unirse a este mundo. Únete como tu identidad actual.",
     "joinWorld": "Unirse al mundo"
   },
   "editor": {
@@ -381,10 +381,11 @@
     "confirmDeletePageChildren_one": "¿Eliminar \"{{title}}\" y su {{count}} página hija? No se puede deshacer.",
     "confirmDeletePageChildren_other": "¿Eliminar \"{{title}}\" y sus {{count}} páginas hijas? No se puede deshacer.",
     "confirmDeletePageChildren_many": "¿Eliminar \"{{title}}\" y sus {{count}} páginas hijas? No se puede deshacer.",
-    "metaIntro_one": "{{count}} página. La visibilidad controla quién puede leer este mundo: privado = solo tú, público = cualquiera con la URL, abierto = además aparece en el catálogo y se puede vincular desde las salas de otras personas.",
-    "metaIntro_other": "{{count}} páginas. La visibilidad controla quién puede leer este mundo: privado = solo tú, público = cualquiera con la URL, abierto = además aparece en el catálogo y se puede vincular desde las salas de otras personas.",
-    "metaIntro_many": "{{count}} páginas. La visibilidad controla quién puede leer este mundo: privado = solo tú, público = cualquiera con la URL, abierto = además aparece en el catálogo y se puede vincular desde las salas de otras personas.",
+    "metaIntro_one": "{{count}} página. La visibilidad controla quién puede leer este mundo: privado = solo tú, oculto = cualquiera con la URL, público = además aparece en el catálogo y se puede vincular desde las salas de otras personas.",
+    "metaIntro_other": "{{count}} páginas. La visibilidad controla quién puede leer este mundo: privado = solo tú, oculto = cualquiera con la URL, público = además aparece en el catálogo y se puede vincular desde las salas de otras personas.",
+    "metaIntro_many": "{{count}} páginas. La visibilidad controla quién puede leer este mundo: privado = solo tú, oculto = cualquiera con la URL, público = además aparece en el catálogo y se puede vincular desde las salas de otras personas.",
     "slugHint": "Se usa en las URL y en el comando /world link. Letras minúsculas, números y guiones; 1-60 caracteres.",
+    "visibilityHint": "Privado = solo tú. Oculto = cualquiera con el enlace, no aparece en el catálogo. Público = aparece en el catálogo de mundos y se puede usar en las salas de otras personas.",
     "nsfwLabel": "Mundo 18+",
     "nsfwHint": "Los mundos 18+ se ocultan a los miembros menores de 18.",
     "catalogMetadata": "Metadatos del catálogo",

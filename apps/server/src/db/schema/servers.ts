@@ -11,6 +11,7 @@ import { id, ts } from "./_helpers.js";
 import { rooms } from "./chat.js";
 import { forums } from "./forums.js";
 import { characters, users } from "./users.js";
+import { worlds } from "./worlds.js";
 
 /* ===========================================================================
  * Servers Lift, Phase 1 (migrations 0275-0277). A SERVER is the new top-level
@@ -83,6 +84,15 @@ export const servers = sqliteTable(
     sfwBannerUrl: text("sfw_banner_url"),
     /** Owner-set prompt above the membership application's answer field. */
     applicationPrompt: text("application_prompt"),
+    /**
+     * Community world link (migration 0346). The lore world this server
+     * brands itself with. Server payloads resolve it per viewer through the
+     * world's own visibility gates (a private/unlisted world reads as NULL
+     * on the wire for viewers who can't open it); rooms with no explicit
+     * room_world_links row inherit it for the chat world banner. SET NULL
+     * on world delete so the link just disappears.
+     */
+    worldId: text("world_id").references(() => worlds.id, { onDelete: "set null" }),
     /** Stable per-server landing room (server-scoped mirror of rooms.isDefault).
      *  Nullable until provisioning / the Phase-2 backfill points it. No FK
      *  (the ALTER adds none — kept a plain text id). */
@@ -280,6 +290,14 @@ export const serverUsergroups = sqliteTable(
     memberSelectable: integer("member_selectable", { mode: "boolean" }).notNull().default(false),
     /** Member-facing blurb shown next to the self-role toggle / onboarding option (migration 0320). Null = none. */
     description: text("description"),
+    /**
+     * Userlist badge opt-in (migration 0348). When true, members of this
+     * group wear a badge chip (name + color tint) in the server userlist.
+     * Default false keeps untouched servers' userlist payloads identical.
+     * Meaningless on the default group (everyone would wear it) — the badge
+     * pick excludes default groups and the console forces this off there.
+     */
+    showBadge: integer("show_badge", { mode: "boolean" }).notNull().default(false),
     createdAt: ts("created_at"),
   },
   (t) => ({

@@ -31,11 +31,33 @@ import type { ServerSettingsTab } from "./ServerSettingsView.js";
  *  console tab picking it should land on. No subtabs in v1. */
 export type ServerConsoleSearchEntry = FindSettingEntry<ServerSettingsTab>;
 
-/** Curated row-level entries. Empty in v1 (tab-level entries are derived
- *  in ServerSettingsView); future passes append here. Candidate anchors
- *  already stamped: console.settings.retention / maxRooms / maxMessage /
- *  editWindow / maxForumPost. */
-export const SERVER_CONSOLE_SEARCH_ENTRIES: readonly ServerConsoleSearchEntry[] = [];
+/** Curated row-level entries (tab-level entries are derived in
+ *  ServerSettingsView). Every `key` here is stamped as a data-admin-anchor
+ *  by the owning tab. Candidate anchors already stamped but not yet listed:
+ *  console.settings.retention / maxRooms / maxMessage / editWindow /
+ *  maxForumPost. */
+export const SERVER_CONSOLE_SEARCH_ENTRIES: readonly ServerConsoleSearchEntry[] = [
+  // Overview tab: the community-world picker (anchor on its fieldset box).
+  { key: "console.overview.world", tab: "overview", also: ["console.overview.worldHint"] },
+  // Rooms tab: category strip manager + the grouped room list (manual
+  // ordering arrows + per-room icon/category fields live inside it).
+  { key: "console.rooms.categories.title", tab: "rooms", also: ["console.rooms.categories.hint"] },
+  { key: "console.rooms.orderTitle", tab: "rooms", also: ["console.rooms.iconLabel", "console.rooms.categoryLabel"] },
+  // Per-room editor rows (anchors live on the RoomEditForm labels; the form
+  // mounts per-room, so an unopened editor just tab-switches — harmless by
+  // the anchor contract above).
+  { key: "console.rooms.postModeLabel", tab: "rooms", also: ["console.rooms.postModeStaff", "console.rooms.postModeRoles", "console.rooms.postModeHint"] },
+  { key: "console.rooms.accessLabel", tab: "rooms", also: ["console.rooms.accessRoles", "console.rooms.accessHint"] },
+  { key: "console.rooms.lifetimeLabel", tab: "rooms", also: ["console.rooms.lifetimeNever", "console.rooms.lifetimeInherit"] },
+  // Roles tab (id `usergroups`): the per-role userlist badge toggle (anchor
+  // lives on the role editor's label; the editor mounts per-role, so an
+  // unopened editor just tab-switches — harmless by the anchor contract
+  // above).
+  { key: "console.usergroups.showBadgeLabel", tab: "usergroups", also: ["console.usergroups.showBadgeHint", "console.usergroups.badgeSection"] },
+  // Staff tab (id `roles`): the appoint box. Its blurbs carry the
+  // "moderator"/"admin" keywords so those searches land on Staff.
+  { key: "console.roles.appointStaff", tab: "roles", also: ["console.roles.moderatorBlurb", "console.roles.adminBlurb"] },
+];
 
 /** "Not in this console" redirect rows. None curated for v1. */
 export const SERVER_CONSOLE_SEARCH_REDIRECTS: readonly FindSettingRedirect[] = [];

@@ -35,6 +35,8 @@ import type {
 } from "@thekeep/shared";
 import {
   characters,
+  roomCategories,
+  roomRoleGates,
   rooms,
   serverBans,
   serverInvites,
@@ -44,6 +46,7 @@ import {
   serverUsergroups,
   servers,
   users,
+  worlds,
 } from "../db/schema.js";
 import { serverAuthority, serverCan } from "../servers/authority.js";
 import { ensureDefaultUsergroup, serverRoomIds } from "../servers/usergroups.js";
@@ -58,7 +61,9 @@ import {
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
+import { resolveIcon } from "../commands/builtins/icon.js";
 import { tFor } from "../i18n.js";
+import { canEditWorld, resolveWorld } from "./worlds/shared.js";
 import { getSessionUser } from "./auth.js";
 import {
   auditServer,
@@ -202,6 +207,9 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     /** "18+ community" flag (age plan, Phase 2). Adults only to change; the
      *  system server is refused below; flipping ON evicts minor members. */
     isNsfw: z.boolean().optional(),
+    /** Community world link (migration 0346). Must be a world the caller owns
+     *  or collaborates on (canEditWorld); null clears the link. */
+    worldId: z.string().trim().min(1).max(64).nullable().optional(),
     /** Owner-set discovery tags (migration 0301). normalizeTags/serializeTags
      *  do the real sanitizing on persist — the loose array bound just rejects
      *  absurd payloads before we touch the normalizer. */
@@ -277,6 +285,35 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         .where(roomsOfServerWhere(gate.server.id))).map((r) => r.id));
       update.roomOrderJson = JSON.stringify(body.roomOrder.filter((id) => own.has(id)));
     }
+    // Community world link (migration 0346). The picker offers worlds the
+    // caller owns or collaborates on; canEditWorld is exactly that set (plus
+    // the edit_others_world staff override), so it doubles as the write gate.
+    // An 18+ world additionally requires an adult caller — the same no-bypass
+    // posture every other NSFW setting takes.
+    const worldChanging = body.worldId !== undefined && body.worldId !== (gate.server.worldId ?? null);
+    if (body.worldId !== undefined) {
+      if (body.worldId === null) {
+        update.worldId = null;
+      } else {
+        const w = (await db.select().from(worlds).where(eq(worlds.id, body.worldId)).limit(1))[0];
+        if (!w || !(await canEditWorld(db, w, gate.me.id, gate.me.role))) {
+          reply.code(403); return { error: tFor(gate.me.locale, "errors:server.servers.worldNotYours") };
+        }
+        if (w.isNsfw && !gate.me.isAdult) {
+          reply.code(403); return { error: tFor(gate.me.locale, "errors:server.common.nsfwSettingAdultsOnly") };
+        }
+        // Every wire read of the link resolves through resolveWorld, whose
+        // private-world rule admits only the world's owner or a site admin —
+        // collaborators are denied. A pick that cannot read back for its own
+        // setter would show "None" in the console while staying set, so the
+        // write gate additionally requires the world to resolve for the
+        // caller.
+        if (!(await resolveWorld(db, w.id, gate.me.id, gate.me.role))) {
+          reply.code(403); return { error: tFor(gate.me.locale, "errors:server.servers.worldNotYours") };
+        }
+        update.worldId = w.id;
+      }
+    }
     await db.update(servers).set(update).where(eq(servers.id, gate.server.id));
     if (nsfwChanging) {
       // Flip ON: boot minor occupants out of every room this server owns
@@ -297,6 +334,10 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       // Minors' rails drop the whole server subtree on this refetch pulse.
       emitTreeChanged(io, gate.server.id);
     }
+    // A world change alters the inherited chat-banner fallback on every
+    // unlinked room in the server — pulse a tree refetch so open rails pick
+    // up the new linkedWorld without waiting for the next room:state.
+    if (worldChanging) emitTreeChanged(io, gate.server.id);
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_appearance_update",
       metadata: { slug: gate.server.slug, fields: Object.keys(update).filter((k) => k !== "updatedAt") },
@@ -379,7 +420,35 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     /** Create the room with an 18+ channel (lib/adultChannel.ts; adults only,
      *  public all-ages rooms only — mutually exclusive with isNsfw). */
     adultChannel: z.boolean().default(false),
+    /** Room icon: an http(s) image URL or a short emoji glyph (same dual form
+     *  as `/icon`); null/omitted = none. */
+    icon: z.string().max(500).nullable().optional(),
+    /** Rail section to file the room under (migration 0344); must belong to
+     *  this server. Null/omitted = the uncategorized bucket. */
+    categoryId: z.string().nullable().optional(),
+    /** Who can post (migration 0345/0349): 'staff' makes an announcements-
+     *  style info room; 'roles' additionally admits the room's designated
+     *  usergroups (picked in the editor after creation). */
+    postMode: z.enum(["everyone", "staff", "roles"]).optional(),
   }).strict();
+
+  /** Normalize a console icon field: null/blank clears, otherwise the same
+   *  dual-form (http(s) URL | short glyph) validation `/icon` applies. */
+  function resolveConsoleIcon(raw: string | null | undefined):
+    | { ok: true; value: string | null }
+    | { ok: false } {
+    if (raw == null || !raw.trim()) return { ok: true, value: null };
+    const r = resolveIcon(raw);
+    return r.ok ? { ok: true, value: r.value } : { ok: false };
+  }
+
+  /** A category id is valid for a server only when the row exists AND belongs
+   *  to that server — a foreign category must read as "not found". */
+  async function categoryInServer(catId: string, serverId: string) {
+    const cat = (await db.select().from(roomCategories)
+      .where(eq(roomCategories.id, catId)).limit(1))[0];
+    return cat && cat.serverId === serverId ? cat : undefined;
+  }
   app.post<{ Params: { id: string }; Body: unknown }>("/servers/:id/rooms", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
     const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
@@ -394,6 +463,11 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     const dup = (await db.select({ id: rooms.id }).from(rooms)
       .where(sql`lower(${rooms.name}) = ${body.name.toLowerCase()}`).limit(1))[0];
     if (dup) { reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.roomNameExists") }; }
+    const icon = resolveConsoleIcon(body.icon);
+    if (!icon.ok) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.rooms.iconInvalid") }; }
+    if (body.categoryId && !(await categoryInServer(body.categoryId, gate.server.id))) {
+      reply.code(404); return { error: tFor(gate.me.locale, "errors:server.rooms.roomCategoryNotFound") };
+    }
     const id = nanoid();
     const argon2 = (await import("argon2")).default;
     await db.insert(rooms).values({
@@ -413,6 +487,9 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       // moment; without this the zombie sweep parks them within ~60s.
       persistent: body.persistent,
       isNsfw: body.isNsfw,
+      icon: icon.value,
+      categoryId: body.categoryId ?? null,
+      postMode: body.postMode ?? "everyone",
     });
     // Optional 18+ channel alongside the fresh room. Failure here is
     // non-fatal for the create itself (the room exists); surface the
@@ -453,7 +530,60 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
      * `isNsfw` (which makes the WHOLE room 18+). Adults-only write.
      */
     adultChannel: z.boolean().optional(),
+    /** Room icon (dual form: http(s) URL | short emoji glyph); null clears. */
+    icon: z.string().max(500).nullable().optional(),
+    /** Rail section (migration 0344); null files the room back into the
+     *  uncategorized bucket. Must belong to this server when set. */
+    categoryId: z.string().nullable().optional(),
+    /** Manual within-bucket position, stamped by the console's arrows. */
+    sortOrder: z.number().int().min(0).max(100_000).optional(),
+    /** Who can post (migration 0345/0349): 'staff' = info room, staff-only
+     *  posts; 'roles' = staff plus the usergroups in `postRoleIds`. */
+    postMode: z.enum(["everyone", "staff", "roles"]).optional(),
+    /** "Never expire" opt-out (migration 0347): the janitor skips this room in
+     *  both retention passes. The console's lifetime select clears
+     *  messageExpiryMinutes alongside so the two knobs never contradict. */
+    retentionExempt: z.boolean().optional(),
+    /** Who can SEE the room (room_role_gates kind='access', migration 0349).
+     *  Full-replace semantics: the sent list becomes the room's access rows;
+     *  null/[] clears them (the room turns public again). Ids must be this
+     *  server's non-default usergroups. */
+    accessRoleIds: z.array(z.string().min(1).max(64)).max(SERVER_MAX_USERGROUPS).nullable().optional(),
+    /** The usergroups who may post when postMode='roles' (kind='post' rows).
+     *  Same full-replace semantics as accessRoleIds. */
+    postRoleIds: z.array(z.string().min(1).max(64)).max(SERVER_MAX_USERGROUPS).nullable().optional(),
   }).strict();
+
+  /** Resolve gate-role ids against THIS server's named (non-default)
+   *  usergroups. Returns null when any id is foreign/unknown/default — the
+   *  route 404s rather than silently dropping, so a console bug or a stale
+   *  id never half-applies a lock. */
+  async function gateGroupsFor(serverId: string, ids: readonly string[]) {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return [];
+    const rows = await db
+      .select({ id: serverUsergroups.id, name: serverUsergroups.name })
+      .from(serverUsergroups)
+      .where(and(
+        inArray(serverUsergroups.id, unique),
+        eq(serverUsergroups.serverId, serverId),
+        eq(serverUsergroups.isDefault, false),
+      ));
+    return rows.length === unique.length ? rows : null;
+  }
+
+  /** Full-replace one kind's gate rows for a room; returns the group names
+   *  for the audit entry. */
+  async function replaceRoleGates(roomId: string, kind: "access" | "post", groups: Array<{ id: string; name: string }>) {
+    await db.delete(roomRoleGates).where(and(eq(roomRoleGates.roomId, roomId), eq(roomRoleGates.kind, kind)));
+    if (groups.length) {
+      await db
+        .insert(roomRoleGates)
+        .values(groups.map((g) => ({ roomId, usergroupId: g.id, kind })))
+        .onConflictDoNothing();
+    }
+    return groups.map((g) => g.name);
+  }
 
   app.patch<{ Params: { id: string; roomId: string }; Body: unknown }>("/servers/:id/rooms/:roomId", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
@@ -484,6 +614,20 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     if (body.replyMode !== undefined) update.replyMode = body.replyMode;
     if (body.persistent !== undefined) update.persistent = body.persistent;
     if (body.messageExpiryMinutes !== undefined) update.messageExpiryMinutes = body.messageExpiryMinutes;
+    if (body.icon !== undefined) {
+      const icon = resolveConsoleIcon(body.icon);
+      if (!icon.ok) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.rooms.iconInvalid") }; }
+      update.icon = icon.value;
+    }
+    if (body.categoryId !== undefined) {
+      if (body.categoryId && !(await categoryInServer(body.categoryId, gate.server.id))) {
+        reply.code(404); return { error: tFor(gate.me.locale, "errors:server.rooms.roomCategoryNotFound") };
+      }
+      update.categoryId = body.categoryId;
+    }
+    if (body.sortOrder !== undefined) update.sortOrder = body.sortOrder;
+    if (body.postMode !== undefined) update.postMode = body.postMode;
+    if (body.retentionExempt !== undefined) update.retentionExempt = body.retentionExempt;
     // One default room PER server (rooms_one_default_per_server). Flag-on first
     // clears whichever room in THIS server currently holds it.
     if (body.isDefault === true && !room.isDefault) {
@@ -538,15 +682,75 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         await broadcastRoomState(io, db, res.channelRoomId).catch(() => {});
       }
     }
+    // Per-role room gates (room_role_gates, migration 0349). Full-replace
+    // writes, validated against THIS server's named usergroups; the audit
+    // entry names the groups so the Mod Log reads without id-chasing.
+    let accessNames: string[] | null = null;
+    let postNames: string[] | null = null;
+    if (body.accessRoleIds !== undefined) {
+      const groups = await gateGroupsFor(gate.server.id, body.accessRoleIds ?? []);
+      if (!groups) { reply.code(404); return { error: tFor(gate.me.locale, "errors:server.rooms.roleGateUnknownGroup") }; }
+      accessNames = await replaceRoleGates(room.id, "access", groups);
+    }
+    if (body.postRoleIds !== undefined) {
+      const groups = await gateGroupsFor(gate.server.id, body.postRoleIds ?? []);
+      if (!groups) { reply.code(404); return { error: tFor(gate.me.locale, "errors:server.rooms.roleGateUnknownGroup") }; }
+      postNames = await replaceRoleGates(room.id, "post", groups);
+    }
     // An isNsfw-only patch leaves `update` empty; drizzle rejects an empty
     // SET, and the toggle core already broadcast, so skip the generic write.
     if (Object.keys(update).length > 0) {
       await db.update(rooms).set(update).where(eq(rooms.id, room.id));
     }
-    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_update", targetRoomId: room.id, metadata: { fields: [...Object.keys(update), ...(nsfwChanged ? ["isNsfw"] : []), ...(channelChanged ? ["adultChannel"] : [])] } });
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_update", targetRoomId: room.id, metadata: { fields: [...Object.keys(update), ...(nsfwChanged ? ["isNsfw"] : []), ...(channelChanged ? ["adultChannel"] : []), ...(accessNames ? ["accessRoles"] : []), ...(postNames ? ["postRoles"] : [])], ...(accessNames ? { accessRoles: accessNames } : {}), ...(postNames ? { postRoles: postNames } : {}) } });
+    // A live post-mode flip (or a change to WHICH roles may post) must
+    // refresh every occupant socket's join-time `postLocked` stamp BEFORE
+    // the room:state fan-out reads it, or their composers stay stale until
+    // the next rejoin.
+    if ((body.postMode !== undefined && body.postMode !== room.postMode) || postNames !== null) {
+      const { restampPostLockedForRoom } = await import("../lib/postMode.js");
+      await restampPostLockedForRoom(io, db, { ...room, postMode: body.postMode ?? room.postMode });
+    }
+    // An access-gate write can lock the room against CURRENT occupants: the
+    // socket path has no per-message role check, so they must be booted the
+    // way an 18+ flip boots minors (their HTTP reads already 404). One-read
+    // no-op when the write cleared the gates.
+    if (accessNames !== null) {
+      const { evictRoleDeniedFromRoom } = await import("../lib/roleGates.js");
+      await evictRoleDeniedFromRoom(io, db, room);
+    }
     await broadcastRoomState(io, db, room.id);
     emitTreeChanged(io, gate.server.id);
     return { ok: true };
+  });
+
+  /**
+   * GET /servers/:id/rooms/:roomId/role-gates — the room editor's picker
+   * feed: this server's named usergroups plus the room's current access/post
+   * gate rows (room_role_gates, migration 0349). manage_rooms gate — the
+   * group NAMES are visible to any room manager here without requiring the
+   * separate manage_usergroups grant.
+   */
+  app.get<{ Params: { id: string; roomId: string } }>("/servers/:id/rooms/:roomId/role-gates", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const room = (await db.select().from(rooms).where(eq(rooms.id, req.params.roomId)).limit(1))[0];
+    if (!room || !roomInServer(room, gate.server.id)) { reply.code(404); return { error: "no such room in this server" }; }
+    const groups = await db
+      .select({ id: serverUsergroups.id, name: serverUsergroups.name, color: serverUsergroups.color })
+      .from(serverUsergroups)
+      .where(and(eq(serverUsergroups.serverId, gate.server.id), eq(serverUsergroups.isDefault, false)))
+      .orderBy(asc(serverUsergroups.sortOrder), asc(serverUsergroups.createdAt));
+    const gateRows = await db
+      .select({ usergroupId: roomRoleGates.usergroupId, kind: roomRoleGates.kind })
+      .from(roomRoleGates)
+      .where(eq(roomRoleGates.roomId, room.id));
+    return {
+      groups: groups.map((g) => ({ id: g.id, name: g.name, color: g.color ?? null })),
+      access: gateRows.filter((r) => r.kind === "access").map((r) => r.usergroupId),
+      post: gateRows.filter((r) => r.kind === "post").map((r) => r.usergroupId),
+    };
   });
 
   app.delete<{ Params: { id: string; roomId: string } }>("/servers/:id/rooms/:roomId", async (req, reply) => {
@@ -611,6 +815,148 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     await db.delete(rooms).where(eq(rooms.id, room.id));
     await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_delete", metadata: { roomId: room.id, roomName: room.name } });
     if (landing && remoteSockets.length > 0) await broadcastRoomState(io, db, landing.id);
+    emitTreeChanged(io, gate.server.id);
+    return { ok: true };
+  });
+
+  /* =========================================================
+   *  Owner console: room CATEGORIES + manual ordering (manage_rooms)
+   *  Named rail sections (migration 0344). Categories are presentation
+   *  only — visibility scrubbing (minors, annexes, blocks) never consults
+   *  them. Deleting one SET-NULLs its rooms back into the uncategorized
+   *  bucket. Every write ends in emitTreeChanged so rails refetch.
+   * ========================================================= */
+
+  const roomCategoryCreateBody = z.object({
+    name: z.string().trim().min(1).max(40),
+    /** Same dual form as room icons: http(s) URL or short emoji glyph. */
+    icon: z.string().max(500).nullable().optional(),
+  }).strict();
+
+  app.post<{ Params: { id: string }; Body: unknown }>("/servers/:id/room-categories", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    let body: z.infer<typeof roomCategoryCreateBody>;
+    try { body = roomCategoryCreateBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const icon = resolveConsoleIcon(body.icon);
+    if (!icon.ok) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.rooms.iconInvalid") }; }
+    // New categories append to the end of the strip.
+    const maxRow = (await db.select({ n: sql<number>`coalesce(max(${roomCategories.sortOrder}), -1)` })
+      .from(roomCategories).where(eq(roomCategories.serverId, gate.server.id)))[0];
+    const id = nanoid();
+    await db.insert(roomCategories).values({
+      id,
+      serverId: gate.server.id,
+      name: body.name,
+      icon: icon.value,
+      sortOrder: (maxRow?.n ?? -1) + 1,
+    });
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_category_create", metadata: { categoryId: id, name: body.name } });
+    emitTreeChanged(io, gate.server.id);
+    return { ok: true, id };
+  });
+
+  const roomCategoryPatchBody = z.object({
+    name: z.string().trim().min(1).max(40).optional(),
+    icon: z.string().max(500).nullable().optional(),
+    sortOrder: z.number().int().min(0).max(100_000).optional(),
+  }).strict();
+
+  app.patch<{ Params: { id: string; catId: string }; Body: unknown }>("/servers/:id/room-categories/:catId", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const cat = await categoryInServer(req.params.catId, gate.server.id);
+    if (!cat) { reply.code(404); return { error: tFor(gate.me.locale, "errors:server.rooms.roomCategoryNotFound") }; }
+    let body: z.infer<typeof roomCategoryPatchBody>;
+    try { body = roomCategoryPatchBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const update: Partial<typeof roomCategories.$inferInsert> = {};
+    if (body.name !== undefined) update.name = body.name;
+    if (body.icon !== undefined) {
+      const icon = resolveConsoleIcon(body.icon);
+      if (!icon.ok) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.rooms.iconInvalid") }; }
+      update.icon = icon.value;
+    }
+    if (body.sortOrder !== undefined) update.sortOrder = body.sortOrder;
+    if (Object.keys(update).length > 0) {
+      await db.update(roomCategories).set(update).where(eq(roomCategories.id, cat.id));
+    }
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_category_update", metadata: { categoryId: cat.id, fields: Object.keys(update) } });
+    emitTreeChanged(io, gate.server.id);
+    return { ok: true };
+  });
+
+  app.delete<{ Params: { id: string; catId: string } }>("/servers/:id/room-categories/:catId", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const cat = await categoryInServer(req.params.catId, gate.server.id);
+    if (!cat) { reply.code(404); return { error: tFor(gate.me.locale, "errors:server.rooms.roomCategoryNotFound") }; }
+    // ON DELETE SET NULL detaches the category's rooms (they fall back to the
+    // uncategorized bucket); the rooms themselves are never touched.
+    await db.delete(roomCategories).where(eq(roomCategories.id, cat.id));
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_category_delete", metadata: { categoryId: cat.id, name: cat.name } });
+    emitTreeChanged(io, gate.server.id);
+    return { ok: true };
+  });
+
+  /** PUT /servers/:id/room-categories/order — stamp the strip's full order
+   *  (sortOrder = index) in one write; ids must all be this server's. */
+  const categoryOrderBody = z.object({
+    categoryIds: z.array(z.string()).min(1).max(200),
+  }).strict();
+
+  app.put<{ Params: { id: string }; Body: unknown }>("/servers/:id/room-categories/order", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    let body: z.infer<typeof categoryOrderBody>;
+    try { body = categoryOrderBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const owned = new Set((await db.select({ id: roomCategories.id }).from(roomCategories)
+      .where(eq(roomCategories.serverId, gate.server.id))).map((r) => r.id));
+    if (body.categoryIds.some((cid) => !owned.has(cid))) {
+      reply.code(404); return { error: tFor(gate.me.locale, "errors:server.rooms.roomCategoryNotFound") };
+    }
+    for (let i = 0; i < body.categoryIds.length; i++) {
+      await db.update(roomCategories).set({ sortOrder: i }).where(eq(roomCategories.id, body.categoryIds[i]!));
+    }
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_category_reorder", metadata: { count: body.categoryIds.length } });
+    emitTreeChanged(io, gate.server.id);
+    return { ok: true };
+  });
+
+  /** PUT /servers/:id/rooms/order — stamp a bucket's room order (sortOrder =
+   *  index). Callers send just the rooms of ONE bucket; other buckets keep
+   *  their own 0..n runs (buckets are separated by the category tier of the
+   *  /rooms ORDER BY, so runs never interleave). */
+  const roomOrderBody = z.object({
+    roomIds: z.array(z.string()).min(1).max(500),
+  }).strict();
+
+  app.put<{ Params: { id: string }; Body: unknown }>("/servers/:id/rooms/order", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    let body: z.infer<typeof roomOrderBody>;
+    try { body = roomOrderBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const rows = await db.select({ id: rooms.id, serverId: rooms.serverId }).from(rooms)
+      .where(inArray(rooms.id, body.roomIds));
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    for (const rid of body.roomIds) {
+      const row = byId.get(rid);
+      if (!row || !roomInServer(row, gate.server.id)) {
+        reply.code(404); return { error: "no such room in this server" };
+      }
+    }
+    for (let i = 0; i < body.roomIds.length; i++) {
+      await db.update(rooms).set({ sortOrder: i }).where(eq(rooms.id, body.roomIds[i]!));
+    }
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_reorder", metadata: { count: body.roomIds.length } });
     emitTreeChanged(io, gate.server.id);
     return { ok: true };
   });
@@ -979,6 +1325,8 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     // Self-role fields (migration 0320): let members pick this group + a blurb.
     memberSelectable: z.boolean().optional(),
     description: z.string().trim().max(500).nullable().optional(),
+    // Userlist badge opt-in (migration 0348).
+    showBadge: z.boolean().optional(),
   }).strict();
   const patchGroupBody = z.object({
     name: z.string().trim().min(1).max(SERVER_USERGROUP_NAME_MAX).optional(),
@@ -989,6 +1337,8 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     // Self-role fields (migration 0320): let members pick this group + a blurb.
     memberSelectable: z.boolean().optional(),
     description: z.string().trim().max(500).nullable().optional(),
+    // Userlist badge opt-in (migration 0348).
+    showBadge: z.boolean().optional(),
   }).strict();
 
   app.get<{ Params: { id: string } }>("/servers/:id/usergroups", async (req, reply) => {
@@ -1022,6 +1372,9 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         // reads these; the self-roles/onboarding member surfaces consume them.
         memberSelectable: !!g.memberSelectable,
         description: g.description ?? null,
+        // Userlist badge opt-in (migration 0348): whether members of this
+        // group wear its name/color as a chip in the server userlist.
+        showBadge: !!g.showBadge,
       })),
     };
   });
@@ -1047,6 +1400,8 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       // so member_selectable is honored as sent.
       memberSelectable: body.memberSelectable ?? false,
       description: body.description?.trim() ? body.description.trim() : null,
+      // Userlist badge opt-in (migration 0348); never the default group here.
+      showBadge: body.showBadge ?? false,
     });
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_usergroup_change",
@@ -1089,12 +1444,23 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     // client. Named groups honor the flag as sent.
     if (body.memberSelectable !== undefined) update.memberSelectable = group.isDefault ? false : body.memberSelectable;
     if (body.description !== undefined) update.description = body.description?.trim() ? body.description.trim() : null;
+    // Userlist badge opt-in (migration 0348). The default group is everyone,
+    // so a badge there says nothing — force it off regardless of the client.
+    if (body.showBadge !== undefined) update.showBadge = group.isDefault ? false : body.showBadge;
     if (Object.keys(update).length) {
       await db.update(serverUsergroups).set(update).where(eq(serverUsergroups.id, group.id));
       await auditServer(db, {
         serverId: gate.server.id, actorUserId: gate.me.id, action: "server_usergroup_change",
         metadata: { slug: gate.server.slug, op: "edit", group: update.name ?? group.name },
       });
+      // Badge display data (flag, name, color) rides the shared occupant
+      // payload; pulse the rails so open userlists refetch instead of
+      // waiting for the next presence event. sortOrder matters too on badge
+      // groups: the pick takes the highest-sortOrder badge group, so a
+      // reorder can change which badge a member wears.
+      if (update.showBadge !== undefined || (group.showBadge && (update.name !== undefined || update.color !== undefined || update.sortOrder !== undefined))) {
+        emitTreeChanged(io, gate.server.id);
+      }
     }
     return { ok: true };
   });
@@ -1107,11 +1473,39 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       .where(and(eq(serverUsergroups.id, req.params.gid), eq(serverUsergroups.serverId, gate.server.id))).limit(1))[0];
     if (!group) { reply.code(404); return { error: "no such usergroup" }; }
     if (group.isDefault) { reply.code(400); return { error: tFor(gate.me.locale, "errors:server.common.defaultGroupCantDelete") }; }
-    await db.delete(serverUsergroups).where(eq(serverUsergroups.id, group.id)); // cascades members
+    // Capture the rooms whose gates reference this group BEFORE the cascade
+    // wipes the rows — occupants who held ONLY this group may now be denied
+    // access (other gates remain) or lose posting (post_mode='roles').
+    const gatedRooms = await db
+      .select({ roomId: roomRoleGates.roomId, kind: roomRoleGates.kind })
+      .from(roomRoleGates)
+      .where(eq(roomRoleGates.usergroupId, group.id));
+    await db.delete(serverUsergroups).where(eq(serverUsergroups.id, group.id)); // cascades members + room_role_gates
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_usergroup_change",
       metadata: { slug: gate.server.slug, op: "delete", group: group.name },
     });
+    // The cascade may have removed room_role_gates rows: a room whose LAST
+    // access row just vanished became public, so rails must re-filter live.
+    emitTreeChanged(io, gate.server.id);
+    if (gatedRooms.length) {
+      const { evictRoleDeniedFromRoom } = await import("../lib/roleGates.js");
+      const { restampPostLockedForRoom } = await import("../lib/postMode.js");
+      const roomIds = [...new Set(gatedRooms.map((r) => r.roomId))];
+      const roomRows = await db.select().from(rooms).where(inArray(rooms.id, roomIds));
+      const byId = new Map(roomRows.map((r) => [r.id, r]));
+      for (const { roomId, kind } of gatedRooms) {
+        const room = byId.get(roomId);
+        if (!room) continue;
+        if (kind === "access") {
+          // No-op when the deleted group was the last gate (room is open now).
+          await evictRoleDeniedFromRoom(io, db, room);
+        } else if (room.postMode === "roles") {
+          await restampPostLockedForRoom(io, db, room);
+          await broadcastRoomState(io, db, room.id);
+        }
+      }
+    }
     return { ok: true };
   });
 
@@ -1157,6 +1551,14 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_usergroup_change",
       targetUserId: target.userId, metadata: { slug: gate.server.slug, op: "add_member", group: group.name },
     });
+    // A grant can unlock role-gated rooms for the target — rails re-filter.
+    emitTreeChanged(io, gate.server.id);
+    // If the target is standing in a restricted-post room of this server,
+    // their composer lock must track the new role without a rejoin.
+    {
+      const { refreshRoleGatesForUsers } = await import("../lib/roleGates.js");
+      await refreshRoleGatesForUsers(io, db, gate.server.id, [target.userId]);
+    }
     return { ok: true, username: target.username };
   });
 
@@ -1174,6 +1576,14 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_usergroup_change",
       targetUserId: req.params.userId, metadata: { slug: gate.server.slug, op: "remove_member", group: group.name },
     });
+    // A revoke can re-hide role-gated rooms from the target — rails re-filter.
+    emitTreeChanged(io, gate.server.id);
+    // Live enforcement: evict the target from rooms the revoke now denies,
+    // and re-lock their composer in restricted-post rooms.
+    {
+      const { refreshRoleGatesForUsers } = await import("../lib/roleGates.js");
+      await refreshRoleGatesForUsers(io, db, gate.server.id, [req.params.userId]);
+    }
     return { ok: true };
   });
 }

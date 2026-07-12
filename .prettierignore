@@ -1,0 +1,18 @@
+# Build output & deps
+node_modules
+dist
+build
+coverage
+
+# Lockfiles & generated
+pnpm-lock.yaml
+apps/server/drizzle
+
+# Static / vendored assets
+apps/web/public
+
+# Minified files
+*.min.*
+
+# Local DB backups
+backups

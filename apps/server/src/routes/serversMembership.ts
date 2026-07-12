@@ -40,6 +40,7 @@ import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 import {
   auditServer,
+  resolveServerWorldRef,
 } from "./serversShared.js";
 import type { ServerRoutesCtx } from "./serversShared.js";
 
@@ -452,6 +453,7 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
         createdAt: servers.createdAt,
         isNsfw: servers.isNsfw,
         sfwBannerUrl: servers.sfwBannerUrl,
+        worldId: servers.worldId,
       })
       .from(servers)
       .where(eq(servers.slug, slug))
@@ -494,6 +496,11 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
       // Surfaced so the public page can say "18+ community" plainly instead
       // of showing minors a dead join button.
       isNsfw: !!s.isNsfw,
+      // Community world (migration 0346), resolved for the ANONYMOUS viewer:
+      // only a public/open, non-18+ world survives the gate — private worlds
+      // and their names never reach the share page ("read the lore before
+      // you join" only ever points at lore a visitor can actually read).
+      world: await resolveServerWorldRef(db, s.worldId ?? null, null),
       createdAt: +s.createdAt,
       themeJson: s.themeJson,
       themeStyleKey: s.themeStyleKey,

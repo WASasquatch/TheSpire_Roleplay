@@ -1,12 +1,10 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type FormEvent,
-  type KeyboardEvent,
 } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -17,6 +15,8 @@ import {
   Image as ImageIcon,
   Italic,
   Link as LinkIcon,
+  List,
+  Megaphone,
   MessagesSquare,
   Palette,
   Quote,
@@ -44,6 +44,7 @@ import {
 import { getSocket } from "../../lib/socket.js";
 import { formatNumber } from "../../lib/intlFormat.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
+import { ComposerEditor, type ComposerEditorHandle, type ComposerEditorState } from "./ComposerEditor.js";
 
 interface Props {
   value: string;
@@ -121,6 +122,21 @@ interface Props {
    */
   canModerate?: boolean;
   /**
+   * Read-only posting mode (post_mode 'staff'/'roles', per-viewer). True
+   * when the current room restricts posting and THIS viewer doesn't
+   * qualify: the whole input (toolbar, textarea, send) is swapped for a
+   * subtle lock strip. UX mirror only — the server enforces the gate in
+   * dispatch regardless. Reading, reactions, and whispers-from-elsewhere
+   * are unaffected.
+   */
+  postLocked?: boolean;
+  /**
+   * The room's post mode, used only to pick the lock strip's copy: 'roles'
+   * says certain roles can unlock it; anything else keeps the staff-only
+   * line. Absent = 'everyone' (strip never shows anyway).
+   */
+  postMode?: "everyone" | "staff" | "roles";
+  /**
    * Opens the Earning dashboard modal. Click target for the
    * EarningStatsStrip rendered in the composer toolbar area. Set
    * by App and threaded through here so the strip can navigate
@@ -142,7 +158,6 @@ interface Props {
   preferredCategoryId?: string | null;
 }
 
-const MAX_VISIBLE_LINES = 6;
 const MAX_COMPLETIONS = 8;
 const HISTORY_MAX = 50;
 
@@ -382,7 +397,8 @@ function detectTrigger(text: string, caret: number): Trigger | null {
  * Multi-line behaviour:
  *   - Enter submits (matches chat conventions on every other platform).
  *   - Shift+Enter inserts a newline so paragraph posters can write blocks.
- *   - The textarea auto-grows up to MAX_VISIBLE_LINES, then internally scrolls.
+ *   - The editor auto-grows to a capped height (or the user's dragged
+ *     height), then internally scrolls.
  *
  * Autocomplete:
  *   - Typing `/<chars>` at message start, or `@<chars>` anywhere, opens a
@@ -410,18 +426,29 @@ export function Composer({
   onLeaveThread,
   placeholder,
   canModerate,
+  postLocked,
+  postMode,
   preferredCategoryId,
   onOpenEarning,
 }: Props) {
   const { t } = useTranslation("chat");
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
-  // Hidden native color picker + the textarea selection captured the moment
+  // The rich editor's imperative surface (plain-text selection reads,
+  // ranged replacements, mark toggles). Null until the editor mounts.
+  const editorRef = useRef<ComposerEditorHandle | null>(null);
+  // Hidden native color picker + the editor selection captured the moment
   // the color button is clicked. We snapshot the selection because opening
-  // the OS picker blurs the textarea (losing selectionStart/End), so we
+  // the OS picker blurs the editor (losing the live selection), so we
   // re-apply against the saved range when a color comes back.
   const colorInputRef = useRef<HTMLInputElement | null>(null);
   const colorSelRef = useRef<{ start: number; end: number } | null>(null);
-  const lastValueRef = useRef(value);
+  // Mirror of the editor document's VISIBLE text (marks invisible,
+  // lines joined with \n). Trigger detection and every popup operate
+  // in this coordinate space — for command entry it is identical to
+  // what a textarea would have held. `value` stays the SERIALIZED
+  // wire truth (counter, submit, drafts).
+  const [plainText, setPlainText] = useState("");
+  // Which marks/blocks are active at the caret — lights up the toolbar.
+  const [activeFmt, setActiveFmt] = useState<Record<string, boolean>>({});
   // Phase 4 typing indicator, last time this composer fired a
   // `chat:typing` pulse. Throttled to once per 2s so a long
   // sentence costs at most a handful of tiny socket events. The
@@ -596,12 +623,12 @@ export function Composer({
     return () => { cancelled = true; };
   }, [commandsVersion]);
 
-  // Caret-driven trigger detection. We track caret separately because React's
-  // value+onChange flow doesn't carry the caret position; we update it in a
-  // selectionchange handler so popup state stays accurate while the user
-  // navigates with arrow keys.
-  const [caret, setCaret] = useState<number>(value.length);
-  const trigger = useMemo(() => detectTrigger(value, caret), [value, caret]);
+  // Caret-driven trigger detection, in PLAIN-TEXT coordinates. The
+  // editor reports caret moves through onStateChange; Escape force-
+  // closes the popup by snapping this to 0 (a caret with no trigger),
+  // exactly like the old textarea hack.
+  const [caret, setCaret] = useState<number>(0);
+  const trigger = useMemo(() => detectTrigger(plainText, caret), [plainText, caret]);
 
   // Server-backed mention suggestions. Occupant filtering only finds
   // people currently in this room; this hits the existing `/users?q=`
@@ -965,55 +992,10 @@ export function Composer({
     setNavigatedSuggestions(false);
   }, [items.length, trigger?.kind]);
 
-  useEffect(() => {
-    if (value !== lastValueRef.current) {
-      lastValueRef.current = value;
-      const el = inputRef.current;
-      if (el && document.activeElement !== el) {
-        el.focus();
-        const len = el.value.length;
-        el.setSelectionRange(len, len);
-        setCaret(len);
-      }
-    }
-  }, [value]);
-
-  // Auto-grow: re-measure scrollHeight on every value change, capped at the
-  // configured max-height (computed from line-height to stay font-size-aware).
-  // useLayoutEffect avoids a flicker where the textarea briefly shows the old
-  // height before the resize lands.
-  //
-  // The explicit `minHeight` floor closes a cross-browser inconsistency:
-  // some browsers fold CSS min-height into scrollHeight after the
-  // `style.height = "auto"` reset, others don't. Reading the computed
-  // min-height back and flooring the inline style here guarantees the
-  // textarea never collapses below its CSS floor, important for the
-  // mobile layout where the floor is sized to match the ↵+Send right
-  // column so the row has no dead space below the input.
-  useLayoutEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    const cs = window.getComputedStyle(el);
-    const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.4;
-    const padTop = parseFloat(cs.paddingTop) || 0;
-    const padBottom = parseFloat(cs.paddingBottom) || 0;
-    const minHeight = parseFloat(cs.minHeight) || 0;
-    const maxHeight = lineHeight * MAX_VISIBLE_LINES + padTop + padBottom;
-    // Already at max height AND the content still overflows? Typing more
-    // can't change the box height, so SKIP the `height:auto` reset. That
-    // reset forces a reflow that momentarily blows the textarea up to the
-    // full content height (a maxed-out pasted post can be many screens
-    // tall), which resizes the chat feed beside it and snapped the feed up
-    // a whole row and back on every keystroke. Just keep the scrollbar on.
-    if (Math.round(el.offsetHeight) >= Math.round(maxHeight) && el.scrollHeight > maxHeight) {
-      if (el.style.overflowY !== "auto") el.style.overflowY = "auto";
-      return;
-    }
-    el.style.height = "auto";
-    const target = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
-    el.style.height = `${target}px`;
-    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
-  }, [value]);
+  // External-value refocus and textarea auto-grow both moved into
+  // ComposerEditor: the editor syncs external `value` changes itself
+  // (focus + caret-to-end) and its frame auto-grows via CSS max-height
+  // (or the user's dragged height), scrolling internally past that.
 
   function submit(e?: FormEvent) {
     e?.preventDefault();
@@ -1098,20 +1080,12 @@ export function Composer({
     setCaret(0);
   }
 
-  // Replace the composer text with a recalled (or restored) value and park
-  // the caret at the end. Used by ArrowUp/ArrowDown history navigation.
-  // requestAnimationFrame waits for the controlled value to flush before
-  // we reposition the caret, same pattern acceptItem uses.
+  // Replace the composer text with a recalled (or restored) value.
+  // Used by ArrowUp/ArrowDown history navigation. The editor's
+  // external-value sync re-hydrates the document (formatting and all)
+  // and parks the caret at the end.
   const recallText = useCallback((text: string) => {
     onChange(text);
-    requestAnimationFrame(() => {
-      const el = inputRef.current;
-      if (!el) return;
-      el.focus();
-      const len = el.value.length;
-      el.setSelectionRange(len, len);
-      setCaret(len);
-    });
   }, [onChange]);
 
   // Replace the active trigger token with the chosen completion, append a
@@ -1120,9 +1094,10 @@ export function Composer({
     const t = trigger;
     if (!t) return;
     const inserted = `${item.value} `;
-    const next = value.slice(0, t.tokenStart) + inserted + value.slice(caret);
-    onChange(next);
-    const newCaret = t.tokenStart + inserted.length;
+    // One ranged replacement in plain-text coordinates; the editor
+    // keeps surrounding formatting intact and parks the caret after
+    // the inserted token itself, so no rAF caret restore is needed.
+    editorRef.current?.replaceRange(t.tokenStart, caret, inserted);
     // Prime the mentions-validity cache so the resulting `@name`
     // renders as a chip on the FIRST render after send, skips the
     // `/mentions/resolve` round-trip that would otherwise leave the
@@ -1145,18 +1120,13 @@ export function Composer({
       markIdentityTokenKnown(tokKind as "id" | "cid", tokId, item.label);
       markMentionKnown(item.label);
     }
-    // setSelectionRange has to wait for the controlled value to flush, so
-    // schedule it after the next paint.
-    requestAnimationFrame(() => {
-      const el = inputRef.current;
-      if (!el) return;
-      el.focus();
-      el.setSelectionRange(newCaret, newCaret);
-      setCaret(newCaret);
-    });
-  }, [trigger, value, caret, onChange]);
+  }, [trigger, caret]);
 
-  function onKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+  // Key handling, invoked from the rich editor's ProseMirror
+  // handleKeyDown with the NATIVE event — i.e. after the popups'
+  // window-capture listeners and before ProseMirror's own keymaps.
+  // Calling e.preventDefault() marks the key as handled.
+  function onKeyDown(e: globalThis.KeyboardEvent) {
     // Popup-aware navigation comes first: if the popup has items and a
     // navigational key fires, intercept it.
     if (items.length > 0) {
@@ -1186,7 +1156,7 @@ export function Composer({
         navigatedSuggestions &&
         e.key === "Enter" &&
         !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey &&
-        !e.nativeEvent.isComposing
+        !e.isComposing
       ) {
         e.preventDefault();
         const item = items[selectedIndex];
@@ -1246,7 +1216,7 @@ export function Composer({
       if (
         e.key === "Enter" &&
         !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey &&
-        !e.nativeEvent.isComposing
+        !e.isComposing
       ) {
         e.preventDefault();
         const buf = historyRef.current;
@@ -1272,12 +1242,9 @@ export function Composer({
       // First-line gate. With no newlines anywhere, every caret
       // position is on the first line; otherwise the caret must be
       // at or before the first newline to qualify. Read the live
-      // selectionStart in case the controlled-value `caret` lags
-      // behind (e.g. a click-to-position that hasn't yet routed
-      // through onSelect).
-      const el = inputRef.current;
-      const caretPos = el?.selectionStart ?? caret;
-      const firstNewline = value.indexOf("\n");
+      // selection in case the state `caret` lags behind.
+      const caretPos = editorRef.current?.getSelection()?.start ?? caret;
+      const firstNewline = plainText.indexOf("\n");
       const onFirstLine = firstNewline === -1 || caretPos <= firstNewline;
       if (onFirstLine && historyRef.current.length > 0) {
         e.preventDefault();
@@ -1290,77 +1257,18 @@ export function Composer({
     // No popup intercept - fall through to plain Enter/submit.
     if (e.key !== "Enter") return;
     if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return;
-    if (e.nativeEvent.isComposing) return;
+    if (e.isComposing) return;
     e.preventDefault();
     submit();
   }
 
-  // Keep `caret` in sync with native selection changes (mouse clicks,
-  // arrow-key navigation that doesn't pass through onKeyDown intercept,
-  // keyboard shortcuts, etc.). Wired via the textarea's own events to scope
-  // it tightly.
-  function syncCaret() {
-    const el = inputRef.current;
-    if (!el) return;
-    setCaret(el.selectionStart ?? value.length);
-  }
-
   // Mobile newline insertion. On-screen keyboards don't have Shift+Enter,
   // and the Enter key on most mobile keyboards is bound to submit, so
-  // multi-line posters need an explicit button. Inserts at the caret (or
-  // replaces the selection) and restores the caret one char past the
-  // inserted newline. Visible only on mobile via `lg:hidden`.
+  // multi-line posters need an explicit button. Splits the current line
+  // at the caret (a new bullet when inside a list). Visible only on
+  // mobile via `lg:hidden`.
   function insertNewline() {
-    const el = inputRef.current;
-    if (!el) return;
-    const start = el.selectionStart ?? value.length;
-    const end = el.selectionEnd ?? start;
-    const next = value.slice(0, start) + "\n" + value.slice(end);
-    onChange(next);
-    const newCaret = start + 1;
-    requestAnimationFrame(() => {
-      const el2 = inputRef.current;
-      if (!el2) return;
-      el2.focus();
-      el2.setSelectionRange(newCaret, newCaret);
-      setCaret(newCaret);
-    });
-  }
-
-  /**
-   * Wrap the current selection with `before` / `after` markers. If no
-   * selection, insert `before + placeholder + after` and place the
-   * caret around the placeholder so the user can immediately type
-   * over it. Used by the formatting buttons (Bold / Italic / etc).
-   */
-  function wrapSelection(before: string, after: string, placeholder?: string): void {
-    const el = inputRef.current;
-    if (!el) return;
-    const start = el.selectionStart ?? value.length;
-    const end = el.selectionEnd ?? start;
-    const selected = value.slice(start, end);
-    const content = selected || placeholder || t("composer.ph.text");
-    const inserted = `${before}${content}${after}`;
-    const next = value.slice(0, start) + inserted + value.slice(end);
-    onChange(next);
-    // Caret placement: if we used the placeholder (no original
-    // selection), select the placeholder text so the user can type
-    // straight over it. If we wrapped a real selection, place the
-    // caret right after the closing marker.
-    const selStart = start + before.length;
-    const selEnd = selStart + content.length;
-    requestAnimationFrame(() => {
-      const el2 = inputRef.current;
-      if (!el2) return;
-      el2.focus();
-      if (selected) {
-        el2.setSelectionRange(selEnd, selEnd);
-        setCaret(selEnd);
-      } else {
-        el2.setSelectionRange(selStart, selEnd);
-        setCaret(selEnd);
-      }
-    });
+    editorRef.current?.insertNewline();
   }
 
   /**
@@ -1368,12 +1276,7 @@ export function Composer({
    * native color picker. `applyColor` runs when the user picks a color.
    */
   function openColorPicker(): void {
-    const el = inputRef.current;
-    if (el) {
-      const start = el.selectionStart ?? value.length;
-      const end = el.selectionEnd ?? start;
-      colorSelRef.current = { start, end };
-    }
+    colorSelRef.current = editorRef.current?.getSelection() ?? null;
     const picker = colorInputRef.current;
     if (!picker) return;
     // Open via `showPicker()`, the dedicated API for surfacing a native
@@ -1393,55 +1296,13 @@ export function Composer({
   }
 
   /**
-   * Wrap the saved selection in `<font color="#hex">…</font>`. Mirrors
-   * `wrapSelection` but against the snapshot captured in openColorPicker
-   * (the OS picker steals focus, so the live selection is gone by now).
+   * Apply the picked color to the snapshotted selection as a color
+   * mark (serialized as `<font color="#hex">…</font>` on the wire).
+   * When nothing was selected, a colored placeholder is inserted.
    */
   function applyColor(hex: string): void {
-    const sel = colorSelRef.current ?? { start: value.length, end: value.length };
-    const selected = value.slice(sel.start, sel.end);
-    const content = selected || t("composer.ph.text");
-    const before = `<font color="${hex}">`;
-    const inserted = `${before}${content}</font>`;
-    const next = value.slice(0, sel.start) + inserted + value.slice(sel.end);
-    onChange(next);
-    const selStart = sel.start + before.length;
-    const selEnd = selStart + content.length;
-    requestAnimationFrame(() => {
-      const el2 = inputRef.current;
-      if (!el2) return;
-      el2.focus();
-      el2.setSelectionRange(selStart, selEnd);
-      setCaret(selEnd);
-    });
-  }
-
-  /**
-   * Prefix every line of the current selection (or the current line
-   * if no selection) with `prefix`. Used by the Quote button: turns
-   * a multi-line selection into a `> ` blockquote.
-   */
-  function prefixLines(prefix: string): void {
-    const el = inputRef.current;
-    if (!el) return;
-    let start = el.selectionStart ?? value.length;
-    let end = el.selectionEnd ?? start;
-    // Snap selection to whole lines so the prefix applies cleanly.
-    while (start > 0 && value[start - 1] !== "\n") start--;
-    while (end < value.length && value[end] !== "\n") end++;
-    const block = value.slice(start, end);
-    const next = value.slice(0, start)
-      + block.split("\n").map((l) => `${prefix}${l}`).join("\n")
-      + value.slice(end);
-    onChange(next);
-    const newCaret = end + (block.split("\n").length * prefix.length);
-    requestAnimationFrame(() => {
-      const el2 = inputRef.current;
-      if (!el2) return;
-      el2.focus();
-      el2.setSelectionRange(newCaret, newCaret);
-      setCaret(newCaret);
-    });
+    editorRef.current?.applyColor(hex, colorSelRef.current, t("composer.ph.text"));
+    colorSelRef.current = null;
   }
 
   /**
@@ -1450,27 +1311,28 @@ export function Composer({
    * wrap, just paste the token and advance the caret past it.
    */
   function insertAtCursor(literal: string): void {
-    const el = inputRef.current;
-    if (!el) return;
-    const start = el.selectionStart ?? value.length;
-    const end = el.selectionEnd ?? start;
-    const next = value.slice(0, start) + literal + value.slice(end);
-    onChange(next);
-    const caretPos = start + literal.length;
-    requestAnimationFrame(() => {
-      const el2 = inputRef.current;
-      if (!el2) return;
-      el2.focus();
-      el2.setSelectionRange(caretPos, caretPos);
-      setCaret(caretPos);
-    });
+    editorRef.current?.insertText(literal);
   }
 
   /**
-   * Link / image insertion: prompts for a URL (rejects empty),
-   * wraps the selection (or a placeholder) as `[text](url)` or
-   * `![alt](url)` depending on `kind`. Reuses `wrapSelection`'s
-   * before/after model, then patches the URL into the suffix.
+   * Link button / Mod+K: with a link under the caret or selection this
+   * REMOVES it (the markup is invisible in the editor, so without a
+   * toggle there'd be no way to unlink at all); otherwise it prompts
+   * for a URL and applies the mark.
+   */
+  function linkAction(): void {
+    if (activeFmt.link) {
+      editorRef.current?.unsetLink();
+      return;
+    }
+    insertLinkOrImage("link");
+  }
+
+  /**
+   * Link / image insertion: prompts for a URL (rejects empty). Links
+   * become a real link mark on the selection (`[text](url)` on the
+   * wire); images insert the `![alt](url)` markdown literally, using
+   * the selected text as the alt when there is one.
    */
   function insertLinkOrImage(kind: "link" | "image"): void {
     const url = window.prompt(kind === "image" ? t("composer.imageUrlPrompt") : t("composer.linkUrlPrompt"));
@@ -1480,9 +1342,16 @@ export function Composer({
       window.alert(t("composer.urlSchemeAlert"));
       return;
     }
-    const before = kind === "image" ? "![" : "[";
-    const after = `](${trimmed})`;
-    wrapSelection(before, after, kind === "image" ? t("composer.ph.alt") : t("composer.ph.linkText"));
+    const handle = editorRef.current;
+    if (!handle) return;
+    if (kind === "link") {
+      handle.applyLink(trimmed, t("composer.ph.linkText"));
+      return;
+    }
+    const sel = handle.getSelection();
+    const selected = sel ? plainText.slice(sel.start, sel.end) : "";
+    const alt = (selected || t("composer.ph.alt")).replace(/[\n\]]/g, " ");
+    if (sel) handle.replaceRange(sel.start, sel.end, `![${alt}](${trimmed})`);
   }
 
   // Forum-mode state derivations. The composer has four distinct
@@ -1514,6 +1383,51 @@ export function Composer({
     (forumCreating && !topicTitle.trim()) ||
     !value.trim();
 
+  // Contextual placeholder (also the editor's accessible name).
+  const effectivePlaceholder =
+    placeholder ??
+    (forumDisabled
+      ? t("composer.phForumDisabled")
+      : forumLockedForViewer
+        ? t("forum.lockedTitle")
+        : forumCreating
+          ? t("composer.phCreating")
+          : forumLockedModOverride
+            ? t("composer.phModReply", { topic: topicLabel(t, activeTopic!) })
+            : forumReplying
+              ? t("composer.phReply", { topic: topicLabel(t, activeTopic!) })
+              : t("composer.phDefault"));
+
+  // Editor → composer state bridge: the plain-text mirror + caret feed
+  // trigger detection; the active-mark map lights the toolbar.
+  function onEditorState(s: ComposerEditorState) {
+    setPlainText(s.plainText);
+    setCaret(s.caretStart);
+    setActiveFmt(s.active);
+  }
+
+  // Phase 4 typing pulse, fired by the editor on doc-changing
+  // transactions. Skip when:
+  //   - the composer is disabled (forum-disabled / locked)
+  //   - we don't have a roomId to scope to (mid-room-switch)
+  //   - the document is now empty (deleting back to blank is a fine
+  //     moment to let the indicator expire naturally)
+  //   - we already pulsed within the throttle window
+  function onEditorTyped() {
+    if (inputDisabled) return;
+    if (!roomId) return;
+    const text = editorRef.current?.getPlainText() ?? "";
+    if (text.length === 0) return;
+    const now = Date.now();
+    if (now - lastTypingEmitAtRef.current < 2_000) return;
+    lastTypingEmitAtRef.current = now;
+    // Send the per-tab identity claim alongside the pulse so the
+    // server uses THIS tab's voicing for the indicator instead of
+    // falling back to whichever identity a sibling tab last wrote
+    // into the shared session.
+    getSocket().emit("chat:typing", { roomId, asCharacterId: activeCharacterId });
+  }
+
   // Identity tokens currently in the draft (`@id:`/`@cid:`). The composer
   // inserts these so a mention targets an exact identity, but the raw token
   // is an opaque id — resolve each to a display name so the author can see
@@ -1536,6 +1450,53 @@ export function Composer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [draftTokens, tokenCacheVersion],
   );
+
+  // Read-only posting mode: swap the ENTIRE input area (toolbar, textarea,
+  // send) for a subtle lock strip — the same slot the input occupies, so
+  // the chat feed keeps its footing. The mobile MENU button stays so the
+  // rooms/userlist drawer remains reachable on a phone (mirrors the
+  // always-rendered hero row of the normal composer). Placed after every
+  // hook above so the hook order never varies with the lock state.
+  //
+  // Whispers stay allowed server-side in staff-post rooms, and every
+  // in-room whisper entry point (clicking an author name, the userlist /
+  // profile whisper actions) works by prefilling this composer with a
+  // "/whisper <token> " draft. Keep the input rendered while the draft is
+  // a whisper so those flows land somewhere visible instead of mutating a
+  // hidden draft. Alias list mirrors the whisper builtin's name+aliases
+  // (server: commands/builtins/whisper.ts).
+  const whisperDraft = /^\/(whisper|wh|w|to|msg|message|pm)\b/i.test(value.trimStart());
+  if (postLocked && !whisperDraft) {
+    return (
+      <form
+        onSubmit={(e) => e.preventDefault()}
+        data-tour="composer"
+        className="keep-composer flex min-h-[5.25rem] flex-col justify-end gap-1 border-t border-keep-rule bg-keep-banner/50 p-2"
+      >
+        {onOpenRail ? (
+          <div className="mb-1 flex items-center gap-2 lg:hidden">
+            <button
+              type="button"
+              onClick={onOpenRail}
+              aria-label={t("composer.openMenuAria")}
+              title={t("composer.menuTitle")}
+              className="keep-button ml-auto flex h-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 px-3 text-[11px] font-semibold uppercase tracking-widest leading-none hover:bg-keep-banner"
+            >
+              {t("composer.menu")}
+            </button>
+          </div>
+        ) : null}
+        <div className="flex min-h-8 items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/60 px-3 py-2 text-xs text-keep-muted">
+          <Megaphone aria-hidden className="h-4 w-4 shrink-0 opacity-70" />
+          {/* 'roles' mode gets its own line — certain community roles can
+              unlock the composer, and members should learn that. */}
+          <span className="min-w-0 flex-1">
+            {postMode === "roles" ? t("composer.rolesOnlyNotice") : t("composer.staffOnlyNotice")}
+          </span>
+        </div>
+      </form>
+    );
+  }
 
   return (
     <form
@@ -1762,27 +1723,39 @@ export function Composer({
         // first item is the Bold button at every width and the input row
         // below reclaims the width the old drawer column was eating.
         <div className="flex flex-wrap items-center gap-0.5 text-xs">
-          <FmtButton title={t("composer.fmt.bold")} onClick={() => wrapSelection("**", "**", t("composer.ph.bold"))}>
+          {/* WYSIWYG toggles: each button flips a real editor mark at
+              the caret/selection (and lights up while active); the
+              serializer emits the same markdown the buttons used to
+              splice, so the wire format is unchanged. Ctrl/Cmd+B, I,
+              U, Shift+S and K work as shortcuts inside the editor. */}
+          <FmtButton title={t("composer.fmt.bold")} active={!!activeFmt.bold} onClick={() => editorRef.current?.toggleMark("bold")}>
             <Bold className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title={t("composer.fmt.italic")} onClick={() => wrapSelection("*", "*", t("composer.ph.italic"))}>
+          <FmtButton title={t("composer.fmt.italic")} active={!!activeFmt.italic} onClick={() => editorRef.current?.toggleMark("italic")}>
             <Italic className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          {/* Underline has no markdown equivalent (CommonMark reserves
-              `__` for bold-alt), so we wrap selection in literal <u>…</u>
-              and the inline parser recognizes the HTML tag as an alias.
-              Same render path as the markdown buttons; the stored body
-              just happens to keep the tag. */}
-          <FmtButton title={t("composer.fmt.underline")} onClick={() => wrapSelection("<u>", "</u>", t("composer.ph.underline"))}>
+          {/* Underline has no markdown syntax; the serializer emits the
+              literal <u>…</u> alias the inline parser already accepts. */}
+          <FmtButton title={t("composer.fmt.underline")} active={!!activeFmt.underline} onClick={() => editorRef.current?.toggleMark("underline")}>
             <Underline className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title={t("composer.fmt.strikethrough")} onClick={() => wrapSelection("~~", "~~", t("composer.ph.strikethrough"))}>
+          <FmtButton title={t("composer.fmt.strikethrough")} active={!!activeFmt.strike} onClick={() => editorRef.current?.toggleMark("strike")}>
             <Strikethrough className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          {/* Color: opens the OS color picker, wraps the selection in
-              <font color="#hex">. The input is visually hidden and driven
-              by openColorPicker()'s programmatic click. */}
-          <FmtButton title={t("composer.fmt.color")} onClick={openColorPicker}>
+          {/* Color: opens the OS color picker, applies a color mark
+              (<font color="#hex"> on the wire). The input is visually
+              hidden and driven by openColorPicker()'s programmatic
+              click. On an already-colored run the button CLEARS the
+              mark instead — the markup is invisible in the editor, so
+              this is the only un-color affordance. */}
+          <FmtButton
+            title={activeFmt.color ? t("composer.fmt.colorRemove") : t("composer.fmt.color")}
+            active={!!activeFmt.color}
+            onClick={() => {
+              if (activeFmt.color) editorRef.current?.clearColor();
+              else openColorPicker();
+            }}
+          >
             <Palette className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           <input
@@ -1794,16 +1767,23 @@ export function Composer({
             className="pointer-events-none absolute h-0 w-0 opacity-0"
             onChange={(e) => applyColor(e.target.value)}
           />
-          <FmtButton title={t("composer.fmt.code")} onClick={() => wrapSelection("`", "`", t("composer.ph.code"))}>
+          <FmtButton title={t("composer.fmt.code")} active={!!activeFmt.code} onClick={() => editorRef.current?.toggleMark("code")}>
             <Code className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title={t("composer.fmt.spoiler")} onClick={() => wrapSelection("||", "||", t("composer.ph.spoiler"))}>
+          <FmtButton title={t("composer.fmt.spoiler")} active={!!activeFmt.spoiler} onClick={() => editorRef.current?.toggleMark("spoiler")}>
             <Eye className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title={t("composer.fmt.blockquote")} onClick={() => prefixLines("> ")}>
+          <FmtButton title={t("composer.fmt.blockquote")} active={!!activeFmt.quote} onClick={() => editorRef.current?.toggleQuote()}>
             <Quote className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          <FmtButton title={t("composer.fmt.link")} onClick={() => insertLinkOrImage("link")}>
+          <FmtButton title={t("composer.fmt.list")} active={!!activeFmt.bullet} onClick={() => editorRef.current?.toggleBullet()}>
+            <List className="h-4 w-4" aria-hidden="true" />
+          </FmtButton>
+          <FmtButton
+            title={activeFmt.link ? t("composer.fmt.linkRemove") : t("composer.fmt.link")}
+            active={!!activeFmt.link}
+            onClick={linkAction}
+          >
             <LinkIcon className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
           <FmtButton title={t("composer.fmt.image")} onClick={() => insertLinkOrImage("image")}>
@@ -1892,11 +1872,11 @@ export function Composer({
           onAccept={acceptItem}
         />
         {/* Thesaurus popup. Same anchor strategy as CompleterPopup
-            (absolute, bottom-full) so highlighting a word in chat /
-            forum messages pops a list of synonyms above the
-            textarea, Enter or click swaps the highlighted word for
-            the chosen synonym. */}
-        <SynonymPopup inputRef={inputRef} value={value} onChange={onChange} />
+            (absolute, bottom-full) so highlighting a word in the
+            editor pops a list of synonyms above it; Enter or click
+            swaps the highlighted word for the chosen synonym. Driven
+            through the editor adapter in plain-text coordinates. */}
+        <SynonymPopup adapter={editorRef.current} value={plainText} />
         {/* History popup. Opens on ArrowUp (when the caret is on the
             first line of the textarea). Shows most-recent sends first
             without touching the in-progress draft, the user has to
@@ -1941,96 +1921,40 @@ export function Composer({
               ))}
           </ul>
         ) : null}
-        <textarea
-          ref={inputRef}
+        {/* The WYSIWYG editor. Serializes to the exact markdown the old
+            textarea would have sent (onChange carries the wire truth);
+            popups + trigger detection run off the plain-text mirror it
+            reports through onStateChange. enterKeyHint="send" relabels
+            mobile keyboards; the ↵ button below inserts newlines. */}
+        <ComposerEditor
           value={value}
-          onChange={(e) => {
-            onChange(e.target.value);
-            // selectionStart updates synchronously on input, so this stays
-            // in sync with the new value during typing.
-            setCaret(e.target.selectionStart ?? e.target.value.length);
-            // Phase 4 typing pulse. Skip when:
-            //   - the composer is disabled (forum-disabled / locked)
-            //   - we don't have a roomId to scope to (mid-room-switch)
-            //   - the textarea is now empty (deleting back to blank is
-            //     a fine moment to let the indicator expire naturally)
-            //   - we already pulsed within the throttle window
-            if (inputDisabled) return;
-            if (!roomId) return;
-            if (e.target.value.length === 0) return;
-            const now = Date.now();
-            if (now - lastTypingEmitAtRef.current < 2_000) return;
-            lastTypingEmitAtRef.current = now;
-            // Send the per-tab identity claim alongside the pulse so the
-            // server uses THIS tab's voicing for the indicator instead
-            // of falling back to whichever identity a sibling tab last
-            // wrote into the shared session.
-            getSocket().emit("chat:typing", { roomId, asCharacterId: activeCharacterId });
-          }}
-          onKeyUp={syncCaret}
-          onClick={syncCaret}
-          onSelect={syncCaret}
-          onKeyDown={onKeyDown}
-          // Close the history popup if the textarea loses focus. The
+          onChange={onChange}
+          onStateChange={onEditorState}
+          onEditorKeyDown={onKeyDown}
+          onTyped={onEditorTyped}
+          // Close the history popup if the editor loses focus. The
           // popup's accept buttons use onMouseDown + preventDefault to
-          // keep the textarea focused while clicking, so an actual
-          // blur means the user clicked away (or tabbed out). Without
-          // this, the popup would stay visible after focus shift and
-          // re-anchor next time the user types into the textarea.
+          // keep the editor focused while clicking, so an actual blur
+          // means the user clicked away (or tabbed out).
           onBlur={() => {
             if (historyOpen) {
               setHistoryOpen(false);
               setHistoryIndex(0);
             }
           }}
-          rows={1}
-          // enterKeyHint relabels the on-screen keyboard's return key to
-          // "Send" so mobile users see the right affordance, Enter
-          // submits, the dedicated ↵ button (mobile-only) inserts a
-          // newline.
-          enterKeyHint="send"
+          onRequestLink={linkAction}
+          handleRef={editorRef}
           disabled={inputDisabled}
-          placeholder={
-            placeholder ??
-            (forumDisabled
-              ? t("composer.phForumDisabled")
-              : forumLockedForViewer
-                ? t("forum.lockedTitle")
-                : forumCreating
-                  ? t("composer.phCreating")
-                  : forumLockedModOverride
-                    ? t("composer.phModReply", { topic: topicLabel(t, activeTopic!) })
-                    : forumReplying
-                      ? t("composer.phReply", { topic: topicLabel(t, activeTopic!) })
-                      : t("composer.phDefault"))
-          }
-          // text-base on mobile prevents iOS Safari from auto-zooming on focus
-          // (anything below 16px triggers zoom). md+ keeps our compact size.
-          // resize-none + auto-grow effect manages height; leading-snug keeps
-          // line spacing tight so multi-line posts don't waste vertical room.
-          //
-          // Mobile min-height (`min-h-[68px]`) is tuned to match the right
-          // column's natural height, ↵ (h-6 = 24px) + gap-1 (4px) + Send
-          // (h-10 = 40px), so a single-line empty textarea sits flush with
-          // the column instead of leaving dead space below it. md+ keeps
-          // the tight `min-h-8` because the ↵ button is hidden and Send
-          // alone is only 32px tall. The auto-grow effect respects this
-          // min via `el.style.height = "auto"` → scrollHeight measurement,
-          // which folds min-height into the natural metric.
-          className="block min-h-[68px] w-full resize-none rounded border border-keep-rule bg-keep-bg px-3 py-2 text-base leading-snug outline-none focus:border-keep-action disabled:cursor-not-allowed disabled:opacity-50 lg:min-h-8 lg:py-1 lg:text-sm"
-          // eslint-disable-next-line jsx-a11y/no-autofocus
-          autoFocus
+          placeholder={effectivePlaceholder}
+          ariaLabel={effectivePlaceholder}
         />
         {/* `:emoji-name` typeahead. Renders nothing until the user
-            types `:` at a word boundary. The popup itself is portaled
-            to document.body so it can escape the composer's overflow
-            and float over the message list. Hooks into the same
-            `inputRef` + value/onChange triple already managed
-            above. */}
+            types `:` at a word boundary. Driven through the editor
+            adapter (plain-text caret + ProseMirror caret coordinates
+            for the popup's x position). */}
         <EmoticonTypeahead
-          textareaRef={inputRef}
-          value={value}
-          onChange={onChange}
+          adapter={editorRef.current}
+          value={plainText}
         />
       </div>
       {/* Right column. On mobile the ↵ (newline) button stacks compact
@@ -2131,10 +2055,13 @@ function ComposerCharCount({
 function FmtButton({
   title,
   onClick,
+  active,
   children,
 }: {
   title: string;
   onClick: () => void;
+  /** Lights the button while its mark/block is active at the caret. */
+  active?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -2142,6 +2069,7 @@ function FmtButton({
       type="button"
       title={title}
       aria-label={title}
+      aria-pressed={active === undefined ? undefined : active}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       // Square `h-8 w-8` (32px), previously `h-7 min-w-7 px-1.5`,
@@ -2152,7 +2080,11 @@ function FmtButton({
       // the row on mobile (which is where the misalignment was most
       // visible, because mobile renders emoji and text with bigger
       // baseline differences than desktop).
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded border text-sm leading-none ${
+        active
+          ? "border-keep-action bg-keep-action/15 text-keep-action"
+          : "border-keep-rule/60 bg-keep-bg/60 text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+      }`}
     >
       {children}
     </button>

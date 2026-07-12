@@ -160,9 +160,15 @@ importers:
       '@tiptap/core':
         specifier: ^2.10.3
         version: 2.27.2(@tiptap/pm@2.27.2)
+      '@tiptap/extension-blockquote':
+        specifier: ^2.10.3
+        version: 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))
       '@tiptap/extension-link':
         specifier: ^2.10.3
         version: 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))(@tiptap/pm@2.27.2)
+      '@tiptap/extension-list-item':
+        specifier: ^2.10.3
+        version: 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))
       '@tiptap/extension-placeholder':
         specifier: ^2.10.3
         version: 2.27.2(@tiptap/core@2.27.2(@tiptap/pm@2.27.2))(@tiptap/pm@2.27.2)

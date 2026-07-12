@@ -61,6 +61,66 @@ function checkChatRate(userId: string, now: number, max: number): { ok: true } |
   return { ok: true };
 }
 
+/**
+ * Speech-producing input: plain says plus the slash commands that emit a
+ * visible room message. Module-scoped so the pre-rate-limit read-only gate
+ * and the mute / anti-spam / automod blocks below all share one list.
+ */
+function isSpeechCommand(cmd: string | null): boolean {
+  if (cmd === null) return true; // plain say
+  return [
+    "me", "he", "she", "they", "it", "em", "action", "pose", "emote",
+    "whisper", "wh", "w", "to", "msg", "message", "pm",
+    "reply", "re",
+    "roll", "dice",
+    "topic",
+    "scene", "npc",
+  ].includes(cmd);
+}
+
+/**
+ * Whisper / DM commands (kind:"whisper", targeted at one `toUserId`). These
+ * are private, one-to-one sends that never reach the room broadcast, so
+ * content auto-moderation MUST skip them: matching a whisper would (a) police
+ * a private message the room can't see, and (b) — worse — a mute action posts
+ * a PUBLIC room system line naming the sender, leaking the very fact that a
+ * whisper happened. Kept in lockstep with the whisper builtin's name+aliases
+ * (commands/builtins/whisper.ts). The rate limit + mute gates still apply (a
+ * whisper flood is still a flood); only the content matcher — and the
+ * staff-only post-mode gate, which polices ROOM posts — is excluded.
+ */
+function isWhisperCommand(cmd: string | null): boolean {
+  if (cmd === null) return false; // a plain say is never a whisper
+  return ["whisper", "wh", "w", "to", "msg", "message", "pm"].includes(cmd);
+}
+
+/**
+ * Slash commands OUTSIDE the speech list whose handlers still put a visible
+ * message into the room: poll cards, game announcements and submissions,
+ * item flavor lines, the familiar's /me line. The staff-only post-mode gate
+ * must cover these too — otherwise a locked member could land arbitrary
+ * text in a read-only room via `/poll <text> | a | b` or a `/storydice`
+ * submission. Kept SEPARATE from `isSpeechCommand` on purpose: the mute /
+ * anti-spam / automod blocks keep their existing (speech-only) reach.
+ * Names + aliases, lowercase, in lockstep with the builtin registrations.
+ */
+function isRoomPostingCommand(cmd: string | null): boolean {
+  if (cmd === null) return false;
+  return [
+    "poll",
+    "roleselect",
+    "check",
+    "rps",
+    "trivia", "answer",
+    "scramble",
+    "storydice", "story-dice",
+    "duel",
+    "raffle", "claim", "enter",
+    "give", "throw", "drop",
+    "eidolon", "familiar",
+  ].includes(cmd);
+}
+
 export async function dispatchChatInput(args: {
   io: Io;
   socket: Sock;
@@ -122,6 +182,56 @@ export async function dispatchChatInput(args: {
     return;
   }
 
+  // Parsed early (parseInput is pure and side-effect free) so the read-only
+  // gate below can tell a room post from a whisper / non-posting command.
+  // The mute / anti-spam / automod blocks farther down reuse this result.
+  const parsed = parseInput(text);
+
+  // Read-only posting mode (post_mode = 'staff', migration 0345). Runs
+  // BEFORE the rate limit on purpose: a locked member's attempts must not
+  // burn rate budget or escalate the anti-spam ladder — they get the
+  // read-only notice, full stop. Everything that puts a message into the
+  // room is gated: plain says + speech commands, the game / poll / item
+  // commands (`isRoomPostingCommand`), and admin-defined custom commands
+  // (they always emit a `kind: "cmd"` room line). Whispers (private
+  // one-to-one), non-posting commands (/help, /go, theater controls, ...)
+  // and reactions (an HTTP route entirely) stay open. Forum boards are
+  // excluded — boards have their own permission system and never ride
+  // this dispatcher anyway.
+  const wantsRoomPost =
+    (isSpeechCommand(parsed.command) && !isWhisperCommand(parsed.command))
+    || isRoomPostingCommand(parsed.command)
+    || (parsed.command !== null
+      && registry.isCustomCommand(parsed.command, (socket.data as { serverId?: string }).serverId));
+  if (wantsRoomPost) {
+    const gateRoom = (await db
+      .select({
+        id: rooms.id,
+        ownerId: rooms.ownerId,
+        serverId: rooms.serverId,
+        postMode: rooms.postMode,
+        forumId: rooms.forumId,
+      })
+      .from(rooms)
+      .where(eq(rooms.id, roomId))
+      .limit(1))[0];
+    if (gateRoom && gateRoom.postMode !== "everyone" && !gateRoom.forumId) {
+      const { canPostInRestrictedRoom } = await import("../lib/postMode.js");
+      if (!(await canPostInRestrictedRoom(db, user, gateRoom))) {
+        socket.emit("error:notice", {
+          code: "ROOM_READ_ONLY",
+          message: tFor(
+            user.locale,
+            gateRoom.postMode === "roles"
+              ? "errors:server.realtime.roomReadOnlyRoles"
+              : "errors:server.realtime.roomReadOnly",
+          ),
+        });
+        return;
+      }
+    }
+  }
+
   // Per-user rate limit. Site mods and admins are exempt entirely
   // (moderation flurries shouldn't get throttled). Trusted users (auto-
   // promoted by the janitor after the trust thresholds are met) get a 2×
@@ -155,8 +265,6 @@ export async function dispatchChatInput(args: {
     });
     return;
   }
-
-  const parsed = parseInput(text);
 
   // Mute check - applies to plain chat, /me-style emotes, /whisper, and most
   // other speech-producing commands. We deliberately allow some non-speech
@@ -205,30 +313,6 @@ export async function dispatchChatInput(args: {
       if (applies) mutedFor = Math.max(mutedFor ?? 0, remaining);
     }
   }
-  const isSpeechCommand = (cmd: string | null): boolean => {
-    if (cmd === null) return true; // plain say
-    return [
-      "me", "he", "she", "they", "it", "em", "action", "pose", "emote",
-      "whisper", "wh", "w", "to", "msg", "message", "pm",
-      "reply", "re",
-      "roll", "dice",
-      "topic",
-      "scene", "npc",
-    ].includes(cmd);
-  };
-  // Whisper / DM commands (kind:"whisper", targeted at one `toUserId`). These
-  // are private, one-to-one sends that never reach the room broadcast, so
-  // content auto-moderation MUST skip them: matching a whisper would (a) police
-  // a private message the room can't see, and (b) — worse — a mute action posts
-  // a PUBLIC room system line naming the sender, leaking the very fact that a
-  // whisper happened. Kept in lockstep with the whisper builtin's name+aliases
-  // (commands/builtins/whisper.ts). The rate limit + mute gates above still
-  // apply (a whisper flood is still a flood); only the content matcher is
-  // excluded, matching the "exclude whisper-kind from automod entirely" rule.
-  const isWhisperCommand = (cmd: string | null): boolean => {
-    if (cmd === null) return false; // a plain say is never a whisper
-    return ["whisper", "wh", "w", "to", "msg", "message", "pm"].includes(cmd);
-  };
   if (mutedFor !== null && isSpeechCommand(parsed.command)) {
     socket.emit("error:notice", {
       code: "MUTED",

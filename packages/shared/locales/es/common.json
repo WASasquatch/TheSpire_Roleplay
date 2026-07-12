@@ -31,7 +31,7 @@
     "scriptoriumInvites_other": "{{count}} invitaciones de colaboración pendientes. Abre el Scriptorium para responderlas",
     "scriptoriumInvites_many": "{{count}} invitaciones de colaboración pendientes. Abre el Scriptorium para responderlas",
     "worlds": "Mundos",
-    "worldsTitle": "Catálogo de mundos. Explora mundos de rol abiertos, lore y wikis",
+    "worldsTitle": "Catálogo de mundos. Explora mundos de rol públicos, lore y wikis",
     "staff": "Equipo",
     "staffTitle": "Conoce al equipo, los mods y admins que administran The Spire",
     "topCommunities": "Mejores comunidades",
@@ -44,6 +44,7 @@
     "faqTitle": "Preguntas frecuentes de este servidor",
     "serverAdmin": "Admin del servidor",
     "serverAdminTitle": "Administra este servidor: configuración, salas, miembros, moderación",
+    "serverWorldTitle": "Abrir el mundo de esta comunidad: {{name}}",
     "globalAdmin": "Admin global",
     "globalAdminTitle": "Admin global: configuración de la plataforma y supervisión entre comunidades",
     "exit": "Salir",
@@ -69,7 +70,7 @@
       "myWorlds": "Mis mundos",
       "myWorldsHint": "Administra tus mundos + páginas",
       "catalog": "Catálogo de mundos",
-      "catalogHint": "Explora los mundos abiertos"
+      "catalogHint": "Explora los mundos públicos"
     },
     "writing": {
       "myStories": "Mis historias",

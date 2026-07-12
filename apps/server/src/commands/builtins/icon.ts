@@ -21,8 +21,11 @@ const ICON_URL_MAX = 500;
  *     on top of `new URL` so a `javascript:`/`data:` URL can't slip through.
  *   - Glyph: a short run (<= 8 code points) with no whitespace or markup
  *     chars — enough for an emoji (incl. ZWJ sequences) or a 1-2 char mark.
+ *
+ * Exported: the servers-console room/category editors accept the same
+ * dual-form value and must validate it identically.
  */
-function resolveIcon(raw: string): { ok: true; value: string } | { ok: false } {
+export function resolveIcon(raw: string): { ok: true; value: string } | { ok: false } {
   const trimmed = raw.trim();
   if (!trimmed) return { ok: false };
   if (/^https?:\/\//i.test(trimmed)) {

@@ -32,8 +32,8 @@ export const presenceSnapshots = sqliteTable("presence_snapshots", {
  * belongs to exactly one server (CASCADE — a server delete takes its
  * categories with it) and orders its bucket via `sortOrder`. Rooms attach via
  * `rooms.categoryId` (SET NULL — deleting a category never deletes rooms,
- * they fall back to the headerless uncategorized bucket, which always renders
- * FIRST so a server that never touches categories looks identical to today).
+ * they fall back to the uncategorized bucket, which renders LAST so a server
+ * that never touches categories looks identical to today).
  * `icon` mirrors the `rooms.icon` duality: an http(s) image URL or a short
  * emoji/text glyph; the client picks the render path.
  */
@@ -47,10 +47,44 @@ export const roomCategories = sqliteTable(
     name: text("name").notNull(),
     icon: text("icon"),
     sortOrder: integer("sort_order").notNull().default(0),
+    /**
+     * Server-wide default for NEW rooms (migration 0351): a room created
+     * without an explicit category (and by a creator holding no role mapped
+     * in `room_category_role_defaults`) files here. At most one per server —
+     * single winner enforced by the console route (flipping it on clears the
+     * previous holder in the same write), not by an index. Creation-time
+     * only; existing rooms never move.
+     */
+    isDefault: integer("is_default", { mode: "boolean" }).notNull().default(false),
     createdAt: ts("created_at"),
   },
   (t) => ({
     serverIdx: index("room_categories_server_idx").on(t.serverId),
+  }),
+);
+
+/* ---------- room_category_role_defaults ----------
+ * Per-role default category for NEW rooms (migration 0351): a room created
+ * by a holder of `usergroupId` files under `categoryId`, beating the
+ * server-wide `room_categories.is_default` but losing to an explicit
+ * category choice in the create request. One category per role
+ * (usergroup_id is the PK; remapping a role moves it); when the creator
+ * holds several mapped roles the highest-sortOrder one wins (createdAt
+ * tie-break — the userlist-badge pick rule, servers/usergroups.ts). Both
+ * FKs cascade, so deleting a category or a usergroup takes its default
+ * rows with it. Consulted only at creation (lib/roomCategoryDefaults.ts). */
+export const roomCategoryRoleDefaults = sqliteTable(
+  "room_category_role_defaults",
+  {
+    usergroupId: text("usergroup_id")
+      .primaryKey()
+      .references(() => serverUsergroups.id, { onDelete: "cascade" }),
+    categoryId: text("category_id")
+      .notNull()
+      .references(() => roomCategories.id, { onDelete: "cascade" }),
+  },
+  (t) => ({
+    categoryIdx: index("room_category_role_defaults_category_idx").on(t.categoryId),
   }),
 );
 
@@ -318,9 +352,10 @@ export const rooms = sqliteTable(
     serverId: text("server_id").references(() => servers.id, { onDelete: "set null" }),
     /**
      * Rail section this room files under (migration 0344). Null = the
-     * headerless uncategorized bucket, which renders FIRST — the default for
-     * every room, so untouched servers keep today's rail exactly. ON DELETE
-     * SET NULL: deleting a category never deletes its rooms.
+     * uncategorized bucket, which renders LAST (headerless when no category
+     * sections render) — untouched servers keep today's rail exactly. ON
+     * DELETE SET NULL: deleting a category never deletes its rooms. New
+     * rooms may inherit a server/role default (lib/roomCategoryDefaults.ts).
      */
     categoryId: text("category_id").references(() => roomCategories.id, { onDelete: "set null" }),
     /**

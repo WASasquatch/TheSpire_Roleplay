@@ -36,6 +36,7 @@ import type {
 import {
   characters,
   roomCategories,
+  roomCategoryRoleDefaults,
   roomRoleGates,
   rooms,
   serverBans,
@@ -61,6 +62,7 @@ import {
   sendRoomBacklogTo,
 } from "../realtime/broadcast.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
+import { defaultRoomCategoryFor } from "../lib/roomCategoryDefaults.js";
 import { resolveIcon } from "../commands/builtins/icon.js";
 import { tFor } from "../i18n.js";
 import { canEditWorld, resolveWorld } from "./worlds/shared.js";
@@ -424,7 +426,8 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
      *  as `/icon`); null/omitted = none. */
     icon: z.string().max(500).nullable().optional(),
     /** Rail section to file the room under (migration 0344); must belong to
-     *  this server. Null/omitted = the uncategorized bucket. */
+     *  this server. Null = explicitly uncategorized; OMITTED = follow the
+     *  server/role creation defaults (migration 0351). */
     categoryId: z.string().nullable().optional(),
     /** Who can post (migration 0345/0349): 'staff' makes an announcements-
      *  style info room; 'roles' additionally admits the room's designated
@@ -488,7 +491,13 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       persistent: body.persistent,
       isNsfw: body.isNsfw,
       icon: icon.value,
-      categoryId: body.categoryId ?? null,
+      // Explicit choice wins — including an explicit null ("no category").
+      // Only an ABSENT field falls through to the shared creation chokepoint
+      // (role-mapped default, then server default, then null; migration
+      // 0351) — the same rule the /go path applies.
+      categoryId: body.categoryId !== undefined
+        ? body.categoryId
+        : await defaultRoomCategoryFor(db, gate.server.id, gate.me.id),
       postMode: body.postMode ?? "everyone",
     });
     // Optional 18+ channel alongside the fresh room. Failure here is
@@ -825,7 +834,48 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
    *  only — visibility scrubbing (minors, annexes, blocks) never consults
    *  them. Deleting one SET-NULLs its rooms back into the uncategorized
    *  bucket. Every write ends in emitTreeChanged so rails refetch.
+   *  Creation defaults (migration 0351) ride the same gate: a per-server
+   *  default category plus per-role mappings, both consulted only when a
+   *  NEW room arrives without an explicit category.
    * ========================================================= */
+
+  /** GET /servers/:id/room-categories — the console's category-manager feed:
+   *  every category (with its is_default flag), the role→category default
+   *  mappings, and the server's NAMED usergroups for the role multi-select.
+   *  manage_rooms, like the writes: the payload exists to drive them. */
+  app.get<{ Params: { id: string } }>("/servers/:id/room-categories", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const cats = await db.select().from(roomCategories)
+      .where(eq(roomCategories.serverId, gate.server.id))
+      .orderBy(asc(roomCategories.sortOrder), asc(roomCategories.createdAt));
+    const mappings = cats.length
+      ? await db.select({
+          usergroupId: roomCategoryRoleDefaults.usergroupId,
+          categoryId: roomCategoryRoleDefaults.categoryId,
+        })
+          .from(roomCategoryRoleDefaults)
+          .where(inArray(roomCategoryRoleDefaults.categoryId, cats.map((c) => c.id)))
+      : [];
+    // Named groups only: the default group is implicit-everyone (it holds no
+    // membership rows), so a mapping on it could never match a creator.
+    const groups = await db.select({
+      id: serverUsergroups.id,
+      name: serverUsergroups.name,
+      color: serverUsergroups.color,
+    })
+      .from(serverUsergroups)
+      .where(and(eq(serverUsergroups.serverId, gate.server.id), eq(serverUsergroups.isDefault, false)))
+      .orderBy(asc(serverUsergroups.sortOrder), asc(serverUsergroups.createdAt));
+    return {
+      categories: cats.map((c) => ({
+        id: c.id, name: c.name, icon: c.icon ?? null, sortOrder: c.sortOrder, isDefault: c.isDefault,
+      })),
+      roleDefaults: mappings,
+      groups,
+    };
+  });
 
   const roomCategoryCreateBody = z.object({
     name: z.string().trim().min(1).max(40),
@@ -862,6 +912,9 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     name: z.string().trim().min(1).max(40).optional(),
     icon: z.string().max(500).nullable().optional(),
     sortOrder: z.number().int().min(0).max(100_000).optional(),
+    /** Server-wide default for NEW rooms (migration 0351). Single winner:
+     *  turning it on clears the previous holder in the same request. */
+    isDefault: z.boolean().optional(),
   }).strict();
 
   app.patch<{ Params: { id: string; catId: string }; Body: unknown }>("/servers/:id/room-categories/:catId", async (req, reply) => {
@@ -881,6 +934,15 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       update.icon = icon.value;
     }
     if (body.sortOrder !== undefined) update.sortOrder = body.sortOrder;
+    if (body.isDefault !== undefined) {
+      // Single-winner: demote whichever category currently holds the flag
+      // before promoting this one, so the server never has two defaults.
+      if (body.isDefault) {
+        await db.update(roomCategories).set({ isDefault: false })
+          .where(and(eq(roomCategories.serverId, gate.server.id), eq(roomCategories.isDefault, true)));
+      }
+      update.isDefault = body.isDefault;
+    }
     if (Object.keys(update).length > 0) {
       await db.update(roomCategories).set(update).where(eq(roomCategories.id, cat.id));
     }
@@ -896,10 +958,57 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     const cat = await categoryInServer(req.params.catId, gate.server.id);
     if (!cat) { reply.code(404); return { error: tFor(gate.me.locale, "errors:server.rooms.roomCategoryNotFound") }; }
     // ON DELETE SET NULL detaches the category's rooms (they fall back to the
-    // uncategorized bucket); the rooms themselves are never touched.
+    // uncategorized bucket); the rooms themselves are never touched. The
+    // category's role-default mappings (migration 0351) CASCADE away with it.
     await db.delete(roomCategories).where(eq(roomCategories.id, cat.id));
     await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_category_delete", metadata: { categoryId: cat.id, name: cat.name } });
     emitTreeChanged(io, gate.server.id);
+    return { ok: true };
+  });
+
+  /** PUT /servers/:id/room-categories/:catId/role-defaults — replace the set
+   *  of roles whose new rooms default into this category (migration 0351).
+   *  One category per role: a role listed here that was mapped to another
+   *  category MOVES to this one (usergroup_id is the mapping's primary key).
+   *  Groups must be this server's NAMED usergroups — a foreign or default
+   *  group id reads as not-found, the same posture as the role gates. */
+  const roleDefaultsBody = z.object({
+    usergroupIds: z.array(z.string()).max(100),
+  }).strict();
+
+  app.put<{ Params: { id: string; catId: string }; Body: unknown }>("/servers/:id/room-categories/:catId/role-defaults", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_rooms");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const cat = await categoryInServer(req.params.catId, gate.server.id);
+    if (!cat) { reply.code(404); return { error: tFor(gate.me.locale, "errors:server.rooms.roomCategoryNotFound") }; }
+    let body: z.infer<typeof roleDefaultsBody>;
+    try { body = roleDefaultsBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const ids = [...new Set(body.usergroupIds)];
+    if (ids.length) {
+      const owned = new Set((await db.select({ id: serverUsergroups.id }).from(serverUsergroups)
+        .where(and(
+          eq(serverUsergroups.serverId, gate.server.id),
+          eq(serverUsergroups.isDefault, false),
+          inArray(serverUsergroups.id, ids),
+        ))).map((g) => g.id));
+      if (ids.some((gid) => !owned.has(gid))) {
+        reply.code(404); return { error: tFor(gate.me.locale, "errors:server.rooms.roleGateUnknownGroup") };
+      }
+    }
+    // Replace-set semantics: clear this category's mappings, then claim each
+    // listed role — the PK upsert steals a role currently mapped elsewhere.
+    await db.delete(roomCategoryRoleDefaults).where(eq(roomCategoryRoleDefaults.categoryId, cat.id));
+    for (const gid of ids) {
+      await db.insert(roomCategoryRoleDefaults)
+        .values({ usergroupId: gid, categoryId: cat.id })
+        .onConflictDoUpdate({
+          target: roomCategoryRoleDefaults.usergroupId,
+          set: { categoryId: cat.id },
+        });
+    }
+    await auditServer(db, { serverId: gate.server.id, actorUserId: gate.me.id, action: "server_room_category_role_defaults", metadata: { categoryId: cat.id, count: ids.length } });
     return { ok: true };
   });
 

@@ -12,6 +12,7 @@ import { nanoid } from "nanoid";
 import { roomMembers, rooms } from "../../db/schema.js";
 import { enableAdultChannel } from "../../lib/adultChannel.js";
 import { deriveUniqueRoomSlug } from "../../lib/roomSlug.js";
+import { defaultRoomCategoryFor } from "../../lib/roomCategoryDefaults.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
 import { recordAudit } from "../../audit.js";
 import { tFor } from "../../i18n.js";
@@ -60,6 +61,10 @@ export const goPairCommand: CommandHandler = {
       slug: await deriveUniqueRoomSlug(ctx.db, name),
       type: "public",
       serverId,
+      // No explicit category on the command path — server/role default
+      // (migration 0351) or the uncategorized bucket. The 18+ channel row
+      // never shows in the rail, so only the base needs filing.
+      categoryId: await defaultRoomCategoryFor(ctx.db, serverId, ctx.user.id),
       ownerId: ctx.user.id,
       originalOwnerUserId: ctx.user.id,
       lastOwnerUserId: ctx.user.id,

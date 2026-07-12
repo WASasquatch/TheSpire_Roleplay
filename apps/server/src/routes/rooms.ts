@@ -134,16 +134,18 @@ export async function registerRoomsRoutes(
     //    unique-name index.
     //
     //    Order = (category position, manual room position, name). The
-    //    COALESCE(-1) files uncategorized rooms BEFORE every category, so a
-    //    server with no categories (all sort_orders 0, no category rows) gets
-    //    the exact alphabetical list it always had.
+    //    COALESCE sentinel files uncategorized rooms AFTER every category
+    //    (category sort_order is capped at 100000 by the console routes, so
+    //    the sentinel can never collide), and a server with no categories
+    //    (all sort_orders 0, no category rows) gets the exact alphabetical
+    //    list it always had.
     const publicRows = (await db
       .select({ room: rooms })
       .from(rooms)
       .leftJoin(roomCategories, eq(rooms.categoryId, roomCategories.id))
       .where(and(eq(rooms.type, "public"), isNull(rooms.archivedAt), serverScope))
       .orderBy(
-        asc(sql`coalesce(${roomCategories.sortOrder}, -1)`),
+        asc(sql`coalesce(${roomCategories.sortOrder}, 1000000000)`),
         asc(rooms.sortOrder),
         asc(rooms.name),
       )).map((r) => r.room);

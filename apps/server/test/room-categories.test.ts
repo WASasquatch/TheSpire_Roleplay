@@ -161,7 +161,7 @@ before(async () => {
 });
 
 describe("GET /rooms ordering + categories block", () => {
-  test("(category position, room position, name) with uncategorized first", async () => {
+  test("(category position, room position, name) with uncategorized last", async () => {
     // Categories deliberately inserted out of display order.
     catBId = nanoid();
     const catAId = nanoid();
@@ -178,9 +178,9 @@ describe("GET /rooms ordering + categories block", () => {
 
     const j = await fetchRooms(ownerToken);
     const names = j.rooms.map((r) => r.name).filter((n) => n.startsWith("Ord_"));
-    // Uncategorized first (alphabetical, sortOrder ties), then "First"
-    // (manual order, name-tiebreak on the 1/1 pair), then "Second".
-    assert.deepEqual(names, ["Ord_Alpha", "Ord_Zeta", "Ord_A1", "Ord_A2", "Ord_A3", "Ord_B1"]);
+    // "First" (manual order, name-tiebreak on the 1/1 pair), then "Second",
+    // then the uncategorized bucket LAST (alphabetical, sortOrder ties).
+    assert.deepEqual(names, ["Ord_A1", "Ord_A2", "Ord_A3", "Ord_B1", "Ord_Alpha", "Ord_Zeta"]);
 
     // The categories block ships in strip order with the icon duality intact.
     assert.deepEqual(
@@ -207,9 +207,10 @@ describe("GET /rooms ordering + categories block", () => {
     assert.ok(b1, "the category's room still exists");
     assert.equal(b1!.categoryId, null, "room fell back to the uncategorized bucket");
     assert.equal(j.categories.some((c) => c.name === "Second"), false);
-    // Back in the uncategorized head, ordered by name with the others.
+    // Back in the trailing uncategorized bucket, ordered by name with the
+    // others (categorized sections stay in front).
     const names = j.rooms.map((r) => r.name).filter((n) => n.startsWith("Ord_"));
-    assert.deepEqual(names, ["Ord_Alpha", "Ord_B1", "Ord_Zeta", "Ord_A1", "Ord_A2", "Ord_A3"]);
+    assert.deepEqual(names, ["Ord_A1", "Ord_A2", "Ord_A3", "Ord_Alpha", "Ord_B1", "Ord_Zeta"]);
   });
 });
 

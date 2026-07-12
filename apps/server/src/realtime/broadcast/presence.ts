@@ -1286,7 +1286,7 @@ export async function buildRoomSummary(
     currentSceneTitle: room.currentSceneTitle ?? null,
     // Rail section (migration 0344). Not per-viewer — categories are pure
     // presentation, so this rides the room-wide fast path safely. Null = the
-    // headerless uncategorized bucket.
+    // trailing uncategorized bucket.
     categoryId: room.categoryId ?? null,
     // Read-only posting mode (migration 0345). The MODE itself is not
     // per-viewer (it drives the rail's megaphone glyph for everyone); the

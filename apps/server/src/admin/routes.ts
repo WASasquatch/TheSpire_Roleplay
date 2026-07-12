@@ -63,6 +63,7 @@ import { maskForMinors } from "../realtime/minorLanguageFilter.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { globalAuditScopeWhere, recordAudit } from "../audit.js";
 import { deriveUniqueRoomSlug } from "../lib/roomSlug.js";
+import { defaultRoomCategoryFor } from "../lib/roomCategoryDefaults.js";
 import { setRoomNsfw } from "../lib/nsfwRooms.js";
 import { parseLimit } from "../lib/pagination.js";
 import { tFor } from "../i18n.js";
@@ -966,6 +967,9 @@ export async function registerAdminRoutes(
       // room" surface is server-agnostic; per-server rooms come from the owner
       // console (admin/servers.ts), which stamps its own serverId.
       serverId: DEFAULT_SERVER_ID,
+      // Rooms homed on the default server honor its creation-default category
+      // rules (migration 0351), same as the console and command paths.
+      categoryId: await defaultRoomCategoryFor(db, DEFAULT_SERVER_ID, sessionUser.id),
     });
     // The creating admin gets an owner row in case they want to /topic etc
     // from inside the chat without elevating to site-admin every time.

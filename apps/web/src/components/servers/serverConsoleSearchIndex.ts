@@ -42,6 +42,9 @@ export const SERVER_CONSOLE_SEARCH_ENTRIES: readonly ServerConsoleSearchEntry[] 
   // Rooms tab: category strip manager + the grouped room list (manual
   // ordering arrows + per-room icon/category fields live inside it).
   { key: "console.rooms.categories.title", tab: "rooms", also: ["console.rooms.categories.hint"] },
+  // Creation defaults (migration 0351): the per-category "default for new
+  // rooms" toggle + role→category mappings (anchor on the category list).
+  { key: "console.rooms.categories.defaultLabel", tab: "rooms", also: ["console.rooms.categories.defaultHint", "console.rooms.categories.rolesLabel", "console.rooms.categories.rolesHint", "console.rooms.categories.defaultsHint"] },
   { key: "console.rooms.orderTitle", tab: "rooms", also: ["console.rooms.iconLabel", "console.rooms.categoryLabel"] },
   // Per-room editor rows (anchors live on the RoomEditForm labels; the form
   // mounts per-room, so an unopened editor just tab-switches — harmless by

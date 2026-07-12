@@ -58,6 +58,13 @@ const railWidthDim = createPersistedDimension({
  */
 const railCollapsedKey = (serverId: string | null) => `tk:railCollapsed:${serverId ?? "default"}`;
 
+/**
+ * Collapse-map entry for the trailing uncategorized section, stored in the
+ * same per-server id array as the category ids. Category ids are 21-char
+ * nanoids, so this 13-char literal can never collide with one.
+ */
+const UNCATEGORIZED_SENTINEL = "uncategorized";
+
 function loadCollapsedCategories(key: string): Set<string> {
   try {
     const raw = localStorage.getItem(key);
@@ -90,9 +97,10 @@ interface Props {
   /**
    * Rail sections (room categories, migration 0344) for the current server,
    * in display order — the `categories` block off GET /rooms. Rooms group
-   * under them via `categoryId`; everything else (or an empty list — the
-   * default) lands in the headerless uncategorized bucket that renders
-   * FIRST, so servers without categories look exactly as before.
+   * under them via `categoryId`; everything else lands in the uncategorized
+   * bucket that renders LAST — labeled "Uncategorized" when category
+   * sections render above it, headerless otherwise, so servers without
+   * categories (or with an empty list — the default) look exactly as before.
    */
   categories?: RoomCategorySummary[];
   currentRoomId: string | null;
@@ -483,10 +491,13 @@ export function RoomsTree({
   // Group the visible rooms into rail sections (room categories, migration
   // 0344). Grouping happens AFTER the visibleRooms filter, so pair/annex
   // hiding, forum filtering, and every scrub stay exactly as before. The
-  // uncategorized bucket renders FIRST and HEADERLESS: a server that never
-  // touches categories has one bucket and the rail is identical to today.
-  // Within each bucket the caller's current room is pinned to the top (the
-  // same lift the flat rail always did) so it stays visible on installs with
+  // uncategorized bucket renders LAST: when at least one category section
+  // renders above it, it gets its own "Uncategorized" header (a trailing
+  // headerless run would visually blend into the section above); with no
+  // rendered categories it stays HEADERLESS, so a server that never touches
+  // categories has one bucket and the rail is identical to today. Within
+  // each bucket the caller's current room is pinned to the top (the same
+  // lift the flat rail always did) so it stays visible on installs with
   // many rooms; the server already delivers manual-order-then-name sorting.
   const sections = useMemo(() => {
     const pin = (list: RoomWithOccupants[]): RoomWithOccupants[] => {
@@ -505,14 +516,16 @@ export function RoomsTree({
       if (arr) arr.push(r);
       else buckets.set(key, [r]);
     }
-    const out: Array<{ category: RoomCategorySummary | null; rooms: RoomWithOccupants[] }> = [];
-    const uncategorized = buckets.get("");
-    if (uncategorized?.length) out.push({ category: null, rooms: pin(uncategorized) });
+    const out: Array<{ category: RoomCategorySummary | null; labeled: boolean; rooms: RoomWithOccupants[] }> = [];
     for (const c of categories) {
       const list = buckets.get(c.id);
       // Empty sections are skipped in the rail (navigation, not structure);
       // the server console still lists every category.
-      if (list?.length) out.push({ category: c, rooms: pin(list) });
+      if (list?.length) out.push({ category: c, labeled: true, rooms: pin(list) });
+    }
+    const uncategorized = buckets.get("");
+    if (uncategorized?.length) {
+      out.push({ category: null, labeled: out.length > 0, rooms: pin(uncategorized) });
     }
     return out;
   }, [visibleRooms, categories, railCurrentId]);
@@ -750,27 +763,30 @@ export function RoomsTree({
           <div className="px-3 py-2 text-xs text-keep-muted">{t("rooms.noRooms")}</div>
         ) : (
           sections.map((sec) => {
-            const collapsed = sec.category ? collapsedCats.has(sec.category.id) : false;
+            const sectionKey = sec.category?.id ?? UNCATEGORIZED_SENTINEL;
+            const collapsed = sec.labeled ? collapsedCats.has(sectionKey) : false;
             // A collapsed section still shows the viewer's CURRENT room so
             // collapsing can never strand them with no rail entry for where
             // they stand (same escape hatch the forum-board filter keeps).
             const shownRooms = collapsed ? sec.rooms.filter((r) => r.id === railCurrentId) : sec.rooms;
             return (
-              <div key={sec.category?.id ?? "uncategorized"}>
-                {sec.category ? (
+              <div key={sectionKey}>
+                {sec.labeled ? (
                   // Section header — same look as the ROOMS header row, with
                   // the rail's text-glyph chevron idiom (▾/▸ + aria-expanded).
+                  // The trailing uncategorized bucket wears the same header
+                  // (no icon) whenever a category section renders above it.
                   <button
                     type="button"
                     aria-expanded={!collapsed}
-                    onClick={() => toggleCategoryCollapsed(sec.category!.id)}
+                    onClick={() => toggleCategoryCollapsed(sectionKey)}
                     title={collapsed ? t("rooms.sectionExpandTitle") : t("rooms.sectionCollapseTitle")}
                     className="flex w-full items-center gap-1.5 border-b border-keep-rule bg-keep-banner/40 px-3 py-2 text-left hover:bg-keep-banner/60 lg:bg-transparent lg:py-1.5 lg:hover:bg-keep-banner/40"
                   >
                     <span aria-hidden className="shrink-0 text-base leading-none text-keep-muted">
                       {collapsed ? "▸" : "▾"}
                     </span>
-                    {sec.category.icon ? (
+                    {sec.category?.icon ? (
                       isImageIcon(sec.category.icon) ? (
                         <img
                           src={sec.category.icon}
@@ -787,7 +803,7 @@ export function RoomsTree({
                         same size, bold, full-ink — the muted ROOMS-header
                         look inverted the hierarchy. Count stays quiet. */}
                     <span className="min-w-0 truncate text-[1.1rem] font-bold uppercase tracking-wide text-keep-text">
-                      {sec.category.name} <span className="text-sm font-normal tracking-normal text-keep-muted">({sec.rooms.length})</span>
+                      {sec.category?.name ?? t("rooms.uncategorized")} <span className="text-sm font-normal tracking-normal text-keep-muted">({sec.rooms.length})</span>
                     </span>
                     {/* Collapsing must not swallow activity: the header takes
                         over the hidden rows' unread/mention cues (pair annex
@@ -1013,27 +1029,52 @@ function RoomGroup({
                   board.png / scroll.png). A room in Theater Mode shows a
                   clapperboard so the rail flags the watch-party at a glance;
                   otherwise threaded (nested, forum-style) vs flat (chronological,
-                  ephemeral). em-sized so it scales with the Tools-menu font step. */}
+                  ephemeral). em-sized so it scales with the Tools-menu font step.
+                  A custom room icon (`rooms.icon`, /icon command or the console's
+                  icon field) REPLACES this glyph at the same size — it inherits
+                  the mode tooltip so the threaded/flat/theater info isn't lost. */}
               {(() => {
                 const glyphStyle: CSSProperties = { width: "1.4em", height: "1.4em" };
+                const modeTitle = room.theaterMode
+                  ? t("rooms.theaterTitle")
+                  : room.replyMode === "nested"
+                    ? t("rooms.threadedTitle")
+                    : t("rooms.flatTitle");
+                if (room.icon) {
+                  return isImageIcon(room.icon) ? (
+                    <img
+                      src={room.icon}
+                      alt=""
+                      title={modeTitle}
+                      className="mr-1 inline-block shrink-0 rounded object-cover align-[-0.25em]"
+                      style={glyphStyle}
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <span
+                      aria-hidden
+                      title={modeTitle}
+                      className="mr-1 inline-block shrink-0 align-middle"
+                      style={{ fontSize: "1.2em", lineHeight: 1 }}
+                    >
+                      {room.icon}
+                    </span>
+                  );
+                }
                 if (room.theaterMode) {
                   return (
                     <span
-                      title={t("rooms.theaterTitle")}
+                      title={modeTitle}
                       className="mr-1 inline-flex shrink-0 align-middle text-keep-accent"
                     >
                       <Clapperboard aria-hidden style={glyphStyle} />
                     </span>
                   );
                 }
-                const nested = room.replyMode === "nested";
-                const Icon = nested ? MessagesSquare : ScrollText;
-                const title = nested
-                  ? t("rooms.threadedTitle")
-                  : t("rooms.flatTitle");
+                const Icon = room.replyMode === "nested" ? MessagesSquare : ScrollText;
                 return (
                   <span
-                    title={title}
+                    title={modeTitle}
                     className="mr-1 inline-flex shrink-0 align-middle text-keep-muted"
                   >
                     <Icon aria-hidden style={glyphStyle} />
@@ -1053,22 +1094,6 @@ function RoomGroup({
                 </span>
               ) : null}
               {isPrivate ? <span title={t("rooms.privateTitle")} className="mr-1">🔒</span> : null}
-              {/* Room icon (`rooms.icon`, /icon command or the console's icon
-                  field) beside the name — same URL-vs-glyph duality the Room
-                  Info bar renders. em-sized so it follows the font step. */}
-              {room.icon ? (
-                isImageIcon(room.icon) ? (
-                  <img
-                    src={room.icon}
-                    alt=""
-                    className="mr-1 inline-block shrink-0 rounded object-cover align-[-0.2em]"
-                    style={{ width: "1.2em", height: "1.2em" }}
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <span aria-hidden className="mr-1">{room.icon}</span>
-                )
-              ) : null}
               {room.name}
             </span>
             {/* Rating chip (age-restriction plan, Phase 2): every row is

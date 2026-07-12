@@ -376,19 +376,28 @@
       "iconPlaceholder": "Emoji o URL de imagen",
       "iconHint": "Un emoji (como 🎭) o un enlace de imagen https, que aparece junto al nombre de la sala.",
       "categoryLabel": "Categoría",
-      "categoryHint": "La sección donde aparece esta sala en la lista de salas. Las salas sin categoría se muestran arriba, sin encabezado.",
+      "categoryHint": "La sección donde aparece esta sala en la lista de salas. Las salas sin categoría se muestran al final de la lista.",
+      "categoryCreateHint": "La sección donde aparece esta sala en la lista de salas. \"Automática\" sigue las reglas predeterminadas del gestor de Categorías de salas; si no hay ninguna configurada, la sala queda sin categoría y se muestra al final de la lista.",
       "categories": {
         "title": "Categorías de salas",
-        "hint": "Secciones opcionales para la lista de salas, como un índice. Las salas sin categoría se muestran primero, sin encabezado, así que puedes omitir esto por completo.",
+        "hint": "Secciones opcionales para la lista de salas, como un índice. Las salas sin categoría se muestran al final de la lista, así que puedes omitir esto por completo.",
         "none": "Aún no hay categorías. Las salas simplemente se listan en orden.",
         "add": "Agregar categoría",
         "nameLabel": "Nombre de la categoría",
         "namePlaceholder": "Nombre de la categoría",
-        "deleteConfirm": "¿Eliminar la categoría \"{{name}}\"? Sus salas se conservan y vuelven al inicio de la lista.",
+        "deleteConfirm": "¿Eliminar la categoría \"{{name}}\"? Sus salas se conservan y pasan al final de la lista.",
         "moveUp": "Subir categoría",
         "moveDown": "Bajar categoría",
         "uncategorized": "Sin categoría",
-        "emptyBucket": "Aún no hay salas en esta categoría. Elígela en el editor de una sala."
+        "uncategorizedHeading": "Sin categoría",
+        "emptyBucket": "Aún no hay salas en esta categoría. Elígela en el editor de una sala.",
+        "defaultsHint": "Puedes marcar una categoría como el hogar de las salas nuevas, y apuntar roles a una categoría para que las salas creadas por esos miembros caigan ahí.",
+        "defaultChip": "predeterminada",
+        "defaultLabel": "Predeterminada para salas nuevas",
+        "defaultHint": "Las salas nuevas caen en esta categoría salvo que quien las crea elija una. Solo una categoría puede ser la predeterminada.",
+        "rolesLabel": "Predeterminada para salas creadas por estos roles",
+        "rolesHint": "Una sala nueva creada por alguien con uno de estos roles cae en esta categoría. Si marcas un rol que ya apunta a otra categoría, se mueve a esta.",
+        "autoOption": "Automática (usar lo predeterminado)"
       }
     },
     "members": {

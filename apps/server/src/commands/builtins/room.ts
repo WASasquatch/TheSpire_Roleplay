@@ -7,6 +7,7 @@ import { joinRoom } from "../../realtime/broadcast.js";
 import { getServerSettings } from "../../settings.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { deriveUniqueRoomSlug } from "../../lib/roomSlug.js";
+import { defaultRoomCategoryFor } from "../../lib/roomCategoryDefaults.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
 import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
@@ -169,15 +170,19 @@ async function joinOrCreatePublic(ctx: CommandContext, name: string) {
   } else if (!room) {
     if (!(await checkRoomCap(ctx))) return;
     const id = nanoid();
+    // Home the room in the creator's current server (default server when
+    // standalone). Without this the column lands NULL and the room is
+    // invisible to the rail until the next boot-time adoption sweep.
+    const serverId = await resolveRoomServerId(ctx.db, ctx.roomId);
     await ctx.db.insert(rooms).values({
       id,
       name,
       slug: await deriveUniqueRoomSlug(ctx.db, name),
       type: "public",
-      // Home the room in the creator's current server (default server when
-      // standalone). Without this the column lands NULL and the room is
-      // invisible to the rail until the next boot-time adoption sweep.
-      serverId: await resolveRoomServerId(ctx.db, ctx.roomId),
+      serverId,
+      // Commands carry no explicit category, so the server/role default
+      // (migration 0351) applies — null = the uncategorized bucket.
+      categoryId: await defaultRoomCategoryFor(ctx.db, serverId, ctx.user.id),
       ownerId: ctx.user.id,
       // Owner-history seeds: both equal the creator on a fresh room.
       // `originalOwnerUserId` is locked in here and never updated
@@ -225,15 +230,19 @@ async function createPrivateRoom(ctx: CommandContext, name: string, password: st
     return;
   }
   const id = nanoid();
+  // See joinOrCreatePublic: stamp the creator's server so the row is never
+  // NULL (the column has no DB default).
+  const serverId = await resolveRoomServerId(ctx.db, ctx.roomId);
   await ctx.db.insert(rooms).values({
     id,
     name,
     slug: await deriveUniqueRoomSlug(ctx.db, name),
     type: "private",
     passwordHash,
-    // See joinOrCreatePublic: stamp the creator's server so the row is never
-    // NULL (the column has no DB default).
-    serverId: await resolveRoomServerId(ctx.db, ctx.roomId),
+    serverId,
+    // No explicit category on the command path — server/role default
+    // (migration 0351) or the uncategorized bucket.
+    categoryId: await defaultRoomCategoryFor(ctx.db, serverId, ctx.user.id),
     ownerId: ctx.user.id,
     // See joinOrCreatePublic comment, both seed to the creator on a
     // fresh room; only `lastOwnerUserId` ever shifts on transfer.

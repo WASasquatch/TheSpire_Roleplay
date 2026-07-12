@@ -473,6 +473,21 @@ async function apiOrderRoomCategories(serverId: string, categoryIds: string[]): 
     method: "PUT", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify({ categoryIds }),
   }));
 }
+/** Creation defaults (migration 0351): the per-category default flag, the
+ *  role→category mappings, and the server's named usergroups for the picker. */
+interface RoomCategoryDefaultsWire {
+  categories: Array<{ id: string; isDefault: boolean }>;
+  roleDefaults: Array<{ usergroupId: string; categoryId: string }>;
+  groups: RoomRoleGateGroup[];
+}
+async function apiGetRoomCategoryDefaults(serverId: string): Promise<RoomCategoryDefaultsWire> {
+  return jsonOrThrow<RoomCategoryDefaultsWire>(await fetch(`/servers/${sid(serverId)}/room-categories`, { credentials: "include" }));
+}
+async function apiSetRoomCategoryRoleDefaults(serverId: string, catId: string, usergroupIds: string[]): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/room-categories/${sid(catId)}/role-defaults`, {
+    method: "PUT", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify({ usergroupIds }),
+  }));
+}
 async function apiOrderServerRooms(serverId: string, roomIds: string[]): Promise<void> {
   await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/rooms/order`, {
     method: "PUT", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify({ roomIds }),
@@ -1463,7 +1478,9 @@ function RoomCategoryRow({ detail, cat, busy, run, onChanged }: {
 }
 
 /** Category strip manager: create / rename / re-icon / delete / reorder the
- *  rail sections (room_categories, migration 0344). manage_rooms routes. */
+ *  rail sections (room_categories, migration 0344), plus the creation
+ *  defaults (migration 0351): the single server-wide default category and
+ *  the per-role mappings. manage_rooms routes. */
 function RoomCategoriesManager({ detail, categories, busy, run, onChanged }: {
   detail: ServerConsoleDetail; categories: RoomCategorySummary[]; busy: boolean;
   run: (fn: () => Promise<void>) => Promise<void>; onChanged: () => void;
@@ -1471,6 +1488,48 @@ function RoomCategoriesManager({ detail, categories, busy, run, onChanged }: {
   const { t } = useTranslation("servers");
   const [newName, setNewName] = useState("");
   const [newIcon, setNewIcon] = useState("");
+  // Creation defaults ride a separate manage_rooms feed (GET /room-categories).
+  // `categories` is a fresh array on every parent refetch, so keying the
+  // effect on it keeps the defaults in step with strip edits and saves.
+  const [defaults, setDefaults] = useState<RoomCategoryDefaultsWire | null>(null);
+  useEffect(() => {
+    let alive = true;
+    apiGetRoomCategoryDefaults(detail.id)
+      .then((d) => { if (alive) setDefaults(d); })
+      .catch(() => { if (alive) setDefaults(null); });
+    return () => { alive = false; };
+  }, [detail.id, categories]);
+  const isDefaultCat = (catId: string) => !!defaults?.categories.find((c) => c.id === catId)?.isDefault;
+  const roleIdsFor = (catId: string) =>
+    new Set((defaults?.roleDefaults ?? []).filter((m) => m.categoryId === catId).map((m) => m.usergroupId));
+  // Single-winner default: promoting one category demotes the previous
+  // holder optimistically (the route does the same in one request). The
+  // refetch runs on failure too (run() swallows the rejection into the error
+  // banner) so a rejected write snaps the optimistic state back to server
+  // truth.
+  const setDefaultCategory = (catId: string, next: boolean) => {
+    setDefaults((d) => d ? {
+      ...d,
+      categories: d.categories.map((c) => ({ ...c, isDefault: next ? c.id === catId : (c.id === catId ? false : c.isDefault) })),
+    } : d);
+    void run(async () => { await apiPatchRoomCategory(detail.id, catId, { isDefault: next }); }).finally(() => onChanged());
+  };
+  // One category per role: ticking a role here steals it from whichever
+  // category held it (PK upsert server-side; mirrored optimistically). Same
+  // failure-resync `.finally` as above.
+  const toggleRoleDefault = (catId: string, groupId: string) => {
+    const next = roleIdsFor(catId);
+    if (next.has(groupId)) next.delete(groupId);
+    else next.add(groupId);
+    setDefaults((d) => d ? {
+      ...d,
+      roleDefaults: [
+        ...d.roleDefaults.filter((m) => m.usergroupId !== groupId),
+        ...(next.has(groupId) ? [{ usergroupId: groupId, categoryId: catId }] : []),
+      ],
+    } : d);
+    void run(async () => { await apiSetRoomCategoryRoleDefaults(detail.id, catId, [...next]); }).finally(() => onChanged());
+  };
   // Drag-to-reorder (desktop) alongside the arrows (keyboard/mobile). Both
   // persist through the same PUT /room-categories/order route. The refetch
   // runs on failure too (run() swallows the rejection into the error banner)
@@ -1496,19 +1555,65 @@ function RoomCategoriesManager({ detail, categories, busy, run, onChanged }: {
     <div data-admin-anchor="console.rooms.categories.title" className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
       <p className="text-[11px] font-semibold uppercase tracking-widest text-keep-muted">{t("console.rooms.categories.title")}</p>
       <p className="text-[10px] text-keep-muted">{t("console.rooms.categories.hint")}</p>
+      {ordered.length > 0 && defaults ? (
+        <p className="text-[10px] text-keep-muted">{t("console.rooms.categories.defaultsHint")}</p>
+      ) : null}
       {ordered.length === 0 ? (
         <p className="text-xs italic text-keep-muted">{t("console.rooms.categories.none")}</p>
       ) : (
-        <ul className="space-y-1.5">
+        <ul data-admin-anchor="console.rooms.categories.defaultLabel" className="space-y-1.5">
           {ordered.map((c, i) => (
             <li key={c.id} {...drag.rowProps(catScope, c.id)}
-              className={`flex items-center gap-1.5 rounded ${drag.draggingId === c.id ? "bg-keep-action/10" : ""}`}>
-              <DragGrip title={t("console.rooms.dragToReorder")} active={drag.draggingId === c.id}
-                handlers={drag.gripProps(catScope, ordered.map((x) => x.id), c.id)} />
-              <MoveArrows busy={busy} canUp={i > 0} canDown={i < ordered.length - 1}
-                onMove={(dir) => moveCategory(i, dir)}
-                upLabel={t("console.rooms.categories.moveUp")} downLabel={t("console.rooms.categories.moveDown")} />
-              <RoomCategoryRow detail={detail} cat={c} busy={busy} run={run} onChanged={onChanged} />
+              className={`rounded ${drag.draggingId === c.id ? "bg-keep-action/10" : ""}`}>
+              <div className="flex items-center gap-1.5">
+                <DragGrip title={t("console.rooms.dragToReorder")} active={drag.draggingId === c.id}
+                  handlers={drag.gripProps(catScope, ordered.map((x) => x.id), c.id)} />
+                <MoveArrows busy={busy} canUp={i > 0} canDown={i < ordered.length - 1}
+                  onMove={(dir) => moveCategory(i, dir)}
+                  upLabel={t("console.rooms.categories.moveUp")} downLabel={t("console.rooms.categories.moveDown")} />
+                {isDefaultCat(c.id) ? (
+                  <span className="shrink-0 rounded border border-keep-action/60 px-1 text-[9px] uppercase tracking-widest text-keep-action">
+                    {t("console.rooms.categories.defaultChip")}
+                  </span>
+                ) : null}
+                <RoomCategoryRow detail={detail} cat={c} busy={busy} run={run} onChanged={onChanged} />
+              </div>
+              {defaults ? (
+                <div className="mb-1 mt-1 space-y-1 pl-12">
+                  <label className="flex w-fit cursor-pointer items-center gap-1.5 text-[10px] text-keep-muted"
+                    title={t("console.rooms.categories.defaultHint")}>
+                    <input type="checkbox" className="h-3 w-3" disabled={busy}
+                      checked={isDefaultCat(c.id)}
+                      onChange={(e) => setDefaultCategory(c.id, e.target.checked)} />
+                    {t("console.rooms.categories.defaultLabel")}
+                  </label>
+                  {defaults.groups.length > 0 ? (
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-keep-muted"
+                      role="group" aria-label={t("console.rooms.categories.rolesLabel")}
+                      title={t("console.rooms.categories.rolesHint")}>
+                      <span>{t("console.rooms.categories.rolesLabel")}</span>
+                      {defaults.groups.map((g) => {
+                        const color = safeCssColor(g.color);
+                        const on = roleIdsFor(c.id).has(g.id);
+                        return (
+                          <label key={g.id}
+                            className={`inline-flex cursor-pointer items-center gap-1 rounded border px-1.5 py-0.5 ${
+                              on
+                                ? "border-keep-action bg-keep-action/10 text-keep-text"
+                                : "border-keep-rule bg-keep-bg text-keep-muted hover:border-keep-action/60 hover:text-keep-text"
+                            }`}>
+                            <input type="checkbox" className="h-3 w-3" disabled={busy}
+                              checked={on} onChange={() => toggleRoleDefault(c.id, g.id)} />
+                            <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-keep-muted/60"
+                              style={color ? { background: color } : undefined} />
+                            {g.name}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -1564,8 +1669,8 @@ function RoomsTab({ detail, busy, run }: TabProps) {
 
   const refresh = () => setTick((t) => t + 1);
 
-  // Group the list the way the rail does: uncategorized bucket FIRST, then
-  // each category in strip order. /rooms already delivers rows sorted by
+  // Group the list the way the rail does: each category in strip order, then
+  // the uncategorized bucket LAST. /rooms already delivers rows sorted by
   // (category, manual order, name), so each bucket keeps the server's order.
   const buckets = useMemo(() => {
     const catIds = new Set(categories.map((c) => c.id));
@@ -1674,21 +1779,9 @@ function RoomsTab({ detail, busy, run }: TabProps) {
         <p className="text-xs italic text-keep-muted">{t("console.rooms.none")}</p>
       ) : (
         <div className="space-y-3">
-          {/* Uncategorized bucket first (headerless in the rail; labeled here
-              so the console reads unambiguously), then each category in strip
-              order — the exact grouping members see. */}
-          {uncategorized.length > 0 ? (
-            <div className="space-y-1.5">
-              {categories.length > 0 ? (
-                <p className="text-[10px] uppercase tracking-widest text-keep-muted">{t("console.rooms.categories.uncategorized")}</p>
-              ) : null}
-              {(() => {
-                const scope = bucketScope("");
-                const bucket = orderedBucket(scope, uncategorized);
-                return <ul className="space-y-1.5">{bucket.map((r, i) => roomRow(r, bucket, i, scope))}</ul>;
-              })()}
-            </div>
-          ) : null}
+          {/* Each category in strip order, then the uncategorized bucket
+              last (labeled in the rail too whenever categories render) —
+              the exact grouping members see. */}
           {categories.map((c) => {
             const scope = bucketScope(c.id);
             const bucket = orderedBucket(scope, buckets.get(c.id) ?? []);
@@ -1706,6 +1799,18 @@ function RoomsTab({ detail, busy, run }: TabProps) {
               </div>
             );
           })}
+          {uncategorized.length > 0 ? (
+            <div className="space-y-1.5">
+              {categories.length > 0 ? (
+                <p className="text-[10px] uppercase tracking-widest text-keep-muted">{t("console.rooms.categories.uncategorizedHeading")}</p>
+              ) : null}
+              {(() => {
+                const scope = bucketScope("");
+                const bucket = orderedBucket(scope, uncategorized);
+                return <ul className="space-y-1.5">{bucket.map((r, i) => roomRow(r, bucket, i, scope))}</ul>;
+              })()}
+            </div>
+          ) : null}
         </div>
       )}
       </div>
@@ -1757,10 +1862,14 @@ function RoomCreateForm({ detail, categories, busy, run, onCreated }: { detail: 
           aria-label={t("console.rooms.iconLabel")}
           className="w-40 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
         {categories.length > 0 ? (
+          /* "" = automatic (field omitted → the server applies the role /
+             server creation defaults, migration 0351); "none" = an explicit
+             null, which beats every default. */
           <select value={categoryId} onChange={(e) => setCategoryId(e.target.value)}
-            aria-label={t("console.rooms.categoryLabel")} title={t("console.rooms.categoryHint")}
+            aria-label={t("console.rooms.categoryLabel")} title={t("console.rooms.categoryCreateHint")}
             className="min-w-0 flex-1 rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
-            <option value="">{t("console.rooms.categories.uncategorized")}</option>
+            <option value="">{t("console.rooms.categories.autoOption")}</option>
+            <option value="none">{t("console.rooms.categories.uncategorized")}</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         ) : null}
@@ -1808,7 +1917,7 @@ function RoomCreateForm({ detail, categories, busy, run, onCreated }: { detail: 
       <div className="flex justify-end">
         <button type="button" disabled={busy || !canSave}
           onClick={() => void run(async () => {
-            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(postMode === "staff" ? { postMode } : {}), ...(nsfw ? { isNsfw: true } : {}), ...(adultChannel && !nsfw && type === "public" ? { adultChannel: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}), ...(icon.trim() ? { icon: icon.trim() } : {}), ...(categoryId ? { categoryId } : {}) });
+            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(postMode === "staff" ? { postMode } : {}), ...(nsfw ? { isNsfw: true } : {}), ...(adultChannel && !nsfw && type === "public" ? { adultChannel: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}), ...(icon.trim() ? { icon: icon.trim() } : {}), ...(categoryId === "none" ? { categoryId: null } : categoryId ? { categoryId } : {}) });
             onCreated();
           })}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.rooms.createRoom")}</button>

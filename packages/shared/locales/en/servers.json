@@ -371,19 +371,28 @@
       "iconPlaceholder": "Emoji or image URL",
       "iconHint": "An emoji (like 🎭) or an https image link, shown beside the room's name.",
       "categoryLabel": "Category",
-      "categoryHint": "The section this room lists under in the room list. Uncategorized rooms show at the top, without a header.",
+      "categoryHint": "The section this room lists under in the room list. Uncategorized rooms show at the end of the list.",
+      "categoryCreateHint": "The section this room lists under in the room list. \"Automatic\" follows the default rules from the Room categories manager; with no defaults set, the room has no category and shows at the end of the list.",
       "categories": {
         "title": "Room categories",
-        "hint": "Optional sections for the room list, like a table of contents. Rooms without a category show first, without a header, so you can skip this entirely.",
+        "hint": "Optional sections for the room list, like a table of contents. Rooms without a category show at the end of the list, so you can skip this entirely.",
         "none": "No categories yet. Rooms simply list in order.",
         "add": "Add category",
         "nameLabel": "Category name",
         "namePlaceholder": "Category name",
-        "deleteConfirm": "Delete the \"{{name}}\" category? Its rooms are kept and move back to the top of the list.",
+        "deleteConfirm": "Delete the \"{{name}}\" category? Its rooms are kept and move to the end of the list.",
         "moveUp": "Move category up",
         "moveDown": "Move category down",
         "uncategorized": "No category",
-        "emptyBucket": "No rooms in this category yet. Pick it in a room's editor."
+        "uncategorizedHeading": "Uncategorized",
+        "emptyBucket": "No rooms in this category yet. Pick it in a room's editor.",
+        "defaultsHint": "You can mark one category as the home for new rooms, and point roles at a category so rooms created by those members land there.",
+        "defaultChip": "default",
+        "defaultLabel": "Default for new rooms",
+        "defaultHint": "New rooms land in this category unless their creator picks one. Only one category can be the default.",
+        "rolesLabel": "Default for rooms created by these roles",
+        "rolesHint": "A new room made by someone with one of these roles lands in this category. Ticking a role that already points at another category moves it here.",
+        "autoOption": "Automatic (use defaults)"
       }
     },
     "members": {

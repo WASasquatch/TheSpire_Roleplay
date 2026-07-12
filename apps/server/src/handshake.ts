@@ -118,6 +118,7 @@ export function installHandshake(
         tabCharId?: unknown;
         tabRoomId?: unknown;
         tabServerId?: unknown;
+        caps?: unknown;
       } | undefined;
       const raw = typeof a?.token === "string" ? a.token : typeof a?.sid === "string" ? a.sid : "";
       const sid = raw.trim();
@@ -141,6 +142,13 @@ export function installHandshake(
       // mobile suspend / network blip / tab reload no longer spam the
       // chat log; only an actual login produces the announcement.
       (socket.data as { loginIntent?: boolean }).loginIntent = a?.intent === "login";
+      // Client capability flags. `rich-html` marks a bundle that knows
+      // the rich message format (migration 0352); the broadcast path
+      // downgrades 'html' rows to their plaintext mirror for sockets
+      // WITHOUT it, so a stale deploy-window bundle never parseInlines
+      // raw HTML into visible tag soup.
+      (socket.data as { richHtml?: boolean }).richHtml =
+        Array.isArray(a?.caps) && a.caps.includes("rich-html");
       // Per-tab active character. Two seed sources, in order of priority:
       //
       //   1. `auth.tabCharId`, the client's persisted per-tab identity,

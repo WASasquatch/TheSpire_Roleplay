@@ -351,6 +351,15 @@ export const siteSettings = sqliteTable("site_settings", {
    */
   antiSpamEnabled: integer("anti_spam_enabled", { mode: "boolean" }).notNull().default(false),
   /**
+   * Denote unverified users (migration 0353). When true, accounts whose
+   * `users.email_verified_at` is NULL wear a subtle "Unverified" chip in the
+   * room userlist and on profiles. Off by default; the flag only rides the
+   * occupant/profile payloads while it is on (no wire noise when off).
+   * Legacy accounts were backfilled verified by migration 0257, so flipping
+   * this on never marks pre-existing users.
+   */
+  denoteUnverifiedUsers: integer("denote_unverified_users", { mode: "boolean" }).notNull().default(false),
+  /**
    * Registration minimum-age switch (migration 0330) — "the flip" of the
    * age-restriction plan. OFF (default) = new accounts must be 18+ (the
    * historical posture, now enforced by date of birth); ON = 13+. This is

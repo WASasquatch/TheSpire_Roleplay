@@ -201,7 +201,18 @@ export function getSocket(): Socket<ServerToClientEvents, ClientToServerEvents> 
       // `undefined` default on the server.
       const tabChar = loadTabCharacter();
       const tabRoom = loadTabRoom();
-      const auth: { token: string; intent?: "login"; tabCharId?: string | null; tabRoomId?: string } = { token };
+      // Capability flags. `rich-html` marks this bundle as able to
+      // render the rich-HTML message format (migration 0352); during a
+      // deploy window the server downgrades rich rows to their
+      // plaintext mirror for sockets WITHOUT the flag, so a stale
+      // bundle never paints raw markup.
+      const auth: {
+        token: string;
+        intent?: "login";
+        tabCharId?: string | null;
+        tabRoomId?: string;
+        caps: string[];
+      } = { token, caps: ["rich-html"] };
       if (intent) auth.intent = intent;
       if (tabChar !== undefined) auth.tabCharId = tabChar;
       if (tabRoom !== undefined) auth.tabRoomId = tabRoom;

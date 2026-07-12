@@ -44,6 +44,7 @@ import {
   expireIfEmpty,
   exitIncognitoOnCharSwitch,
   findCanonicalLanding,
+  findLiveliestLanding,
   findServerLanding,
   isHiddenIncognitoIdentity,
   joinRoom,
@@ -235,9 +236,34 @@ export function wireSocketHandlers(
         .limit(1))[0];
       initialRoomId = await validateRoomForUser(last?.roomId ?? null, { resurrect: true });
     }
+    // Hoisted above tier 3 so the first-ever-landing tier below can reuse the
+    // same row read to detect a brand-new account.
+    const userRow = !initialRoomId
+      ? (await db.select().from(users).where(eq(users.id, user.id)).limit(1))[0]
+      : undefined;
     if (!initialRoomId) {
-      const userRow = (await db.select().from(users).where(eq(users.id, user.id)).limit(1))[0];
       initialRoomId = await validateRoomForUser(userRow?.lastRoomId ?? null, { resurrect: true });
+    }
+    // FIRST-EVER landing (migration 0353): a brand-new account — no
+    // account-global last room AND no per-server last-room memory, i.e. it
+    // has never landed anywhere — prefers the public default-server room
+    // with the most recent human chat over the fixed canonical lobby, so a
+    // newcomer's first screen shows a live conversation. Returning users
+    // never reach this tier: any prior landing wrote users.lastRoomId (and,
+    // flag-on, a user_server_last_room row), and even a stale/deleted
+    // remembered room leaves those signals set. The winner still runs
+    // through validateRoomForUser so every join gate (age / ban / private)
+    // composes; a failure degrades to the canonical landing below.
+    if (!initialRoomId && !userRow?.lastRoomId) {
+      const everLanded = (await db
+        .select({ roomId: userServerLastRoom.roomId })
+        .from(userServerLastRoom)
+        .where(eq(userServerLastRoom.userId, user.id))
+        .limit(1))[0];
+      if (!everLanded) {
+        const lively = await findLiveliestLanding(db);
+        if (lively) initialRoomId = await validateRoomForUser(lively.id);
+      }
     }
     if (!initialRoomId) {
       // Flag-off keeps the exact canonical resolver; flag-on with a known
@@ -395,6 +421,10 @@ export function wireSocketHandlers(
           io, socket, db, registry, user,
           roomId: payload.roomId,
           text: payload.text,
+          // Rich-HTML format claim (migration 0352). Anything other
+          // than the literal "html" is treated as the historic
+          // markdown pipeline — the value is client-supplied.
+          ...(payload.format === "html" ? { format: "html" as const } : {}),
           threadCategoryId,
           ...(threadTitle ? { threadTitle } : {}),
           ...(replyToId ? { replyToId } : {}),
@@ -654,7 +684,10 @@ export function wireSocketHandlers(
             ack?.({ ok: false, code: "TOPIC_LOCKED", message: tFor(user.locale, "errors:server.realtime.topicLocked") });
             return;
           }
-          const snippet = parent.body.length > 120 ? `${parent.body.slice(0, 120)}…` : parent.body;
+          // Rich-format parents (chat-side topics, migration 0352)
+          // snapshot their VISIBLE text, never raw markup.
+          const parentText = parent.format === "html" ? (parent.bodyText ?? "") : parent.body;
+          const snippet = parentText.length > 120 ? `${parentText.slice(0, 120)}…` : parentText;
           // Streamlined RP format: "action" → emote (kind "me"); "npc" →
           // voice a saved NPC (kind "npc"), gated on the forum's use_npc grant
           // and a npcId the caller owns, snapshotting the NPC's name + stats.

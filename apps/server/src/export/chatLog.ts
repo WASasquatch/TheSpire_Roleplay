@@ -21,15 +21,19 @@
  *   - markdown emphasis: **bold**, *italic*, _italic_, ***both***, ~~strike~~
  *   - the chat's inline HTML aliases (no attributes): <b>/<strong>, <i>/<em>,
  *     <u>, <s>/<strike>/<del>, <code> — un-escaped back to a fixed safe tag set
- *   - <font color="#hex"> with a hex-validated color → a colored <span>
+ *   - <font color="#hex" size="1-4"> with a hex-validated color and/or a
+ *     clamped size bucket → a colored/sized <span> (attribute whitelist via
+ *     the shared matchChatFontOpen; the emitted style values are the resolved
+ *     hex and a fixed em constant, never author bytes)
  *   - http(s) links: [text](url) and bare autolinks, stashed BEFORE the escape
  *     so URL characters survive, then re-inserted as already-built safe <a>
  * Anything else (other tags, attributes, javascript:/data: URLs) stays escaped
  * and renders as literal text. The only HTML that can reach the document is the
  * fixed set above.
  */
-import { resolveMessageColor, escapeHtml as escapeHtmlShared } from "@thekeep/shared";
+import { FONT_SIZE_EM, matchChatFontOpen, resolveMessageColor, escapeHtml as escapeHtmlShared } from "@thekeep/shared";
 import { EXPORT_MANIFEST_DOM_ID, fmtDateTimeUtc, formatDurationShort, type ExportManifest } from "@thekeep/shared";
+import { sanitizeRichMessageHtml } from "../lib/richHtml.js";
 
 export type ExportTheme = "light" | "dark";
 
@@ -84,6 +88,14 @@ export interface ExportMessageRow {
   kind: string;
   displayName: string;
   body: string;
+  /**
+   * Body format (migration 0352). "html" = `body` is a stored rich-HTML
+   * body; the export RE-SANITIZES it through the same strict ingest
+   * whitelist and embeds the result inside a `.rich` container (styled
+   * by the export stylesheet). Absent/"md" = the historic escape-based
+   * text pipeline, byte-identical.
+   */
+  format?: "md" | "html";
   color: string | null;
   createdAt: number;
   toDisplayName?: string | null;
@@ -149,7 +161,7 @@ const SAFE_INLINE_TAG: Record<string, string> = {
  *   5. Re-insert the stashed links.
  * Newlines survive via `white-space: pre-wrap` on the container.
  */
-function renderBody(raw: string): string {
+function renderBody(raw: string, bgHex: string): string {
   // 1. Stash links before escaping (so URL characters survive intact). Each is
   //    keyed by an `@@LK<n>@@` sentinel that carries no markdown / HTML / escape
   //    characters, so it passes untouched through every step below and is
@@ -201,13 +213,73 @@ function renderBody(raw: string): string {
     /&lt;(\/?)(b|strong|i|em|u|s|strike|del|code)&gt;/gi,
     (_m, slash: string, tag: string) => `<${slash}${SAFE_INLINE_TAG[tag.toLowerCase()]}>`,
   );
-  // <font color="#hex"> → colored span (hex-validated; the only attribute the
-  // chat parser accepts on <font>). The escape turned `"` into `&quot;`.
-  s = s.replace(
-    /&lt;font\s+color\s*=\s*(?:&quot;|')?(#(?:[0-9a-fA-F]{3}){1,2})(?:&quot;|')?\s*&gt;/gi,
-    (_m, hex: string) => `<span style="color:${hex}">`,
-  );
-  s = s.replace(/&lt;\/font\s*&gt;/gi, "</span>");
+  // <font color="#hex" size="1-4"> → styled span. The escape turned `"` into
+  // `&quot;`; un-escape the candidate tag and validate it with the SAME
+  // shared matcher the live chat renderer uses (hex-validated color, integer
+  // size clamped into the bucket range; any other attribute rejects the tag,
+  // which then stays escaped literal text). The emitted style is built ONLY
+  // from the resolved color (legibility-nudged against the export theme's
+  // background, matching the live feed) and a fixed em constant — author
+  // bytes never reach the attribute.
+  //
+  // Openers and closers are paired SEQUENTIALLY, mirroring the live
+  // renderer's first-match (not nesting-aware) close search: an accepted
+  // opener converts only while no font span is open AND a closer still
+  // follows; an opener inside an open span, a rejected opener, and any
+  // surplus closer all stay escaped literal text. This is what keeps the
+  // em buckets from compounding across hand-typed nested openers and
+  // keeps unmatched </span>s out of the document.
+  {
+    const fontTagRe =
+      /&lt;font((?:\s+(?:color|size)\s*=\s*(?:&quot;[^&<>]*?&quot;|'[^&<>]*?'|[^\s&<>]+))+)\s*&gt;|&lt;\/font\s*&gt;/gi;
+    const tokens = Array.from(s.matchAll(fontTagRe));
+    // Closer tokens strictly after each index — an opener with no
+    // following closer stays literal, exactly like the live feed.
+    const closersAfter: number[] = new Array(tokens.length).fill(0);
+    let closers = 0;
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      closersAfter[i] = closers;
+      if (tokens[i]![1] === undefined) closers++;
+    }
+    let out = "";
+    let last = 0;
+    let open = false;
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i]!;
+      const at = tok.index ?? 0;
+      out += s.slice(last, at);
+      last = at + tok[0].length;
+      const rawAttrs = tok[1];
+      if (rawAttrs === undefined) {
+        // Closer: consumes the open span, otherwise stays literal.
+        if (open) {
+          out += "</span>";
+          open = false;
+        } else {
+          out += tok[0];
+        }
+        continue;
+      }
+      const match =
+        !open && closersAfter[i]! > 0
+          ? matchChatFontOpen(`<font${rawAttrs.replace(/&quot;/g, '"')}>`)
+          : null;
+      if (!match) {
+        out += tok[0];
+        continue;
+      }
+      const decls: string[] = [];
+      if (match.color) {
+        const resolved = resolveMessageColor(match.color, bgHex);
+        if (resolved) decls.push(`color:${resolved}`);
+      }
+      if (match.size) decls.push(`font-size:${FONT_SIZE_EM[match.size]}`);
+      out += decls.length === 0 ? `<span>` : `<span style="${decls.join(";")}">`;
+      open = true;
+    }
+    out += s.slice(last);
+    s = out;
+  }
 
   // 5. Restore the stashed (already-safe) links.
   s = s.replace(/@@LK(\d+)@@/g, (_m, idx: string) => links[Number(idx)] ?? "");
@@ -244,7 +316,12 @@ function renderLine(m: ExportMessageRow, tzMinutes: number, bgHex: string): stri
   const ts = `<span class="ts">${fmtTimestamp(m.createdAt, tzMinutes)}</span>`;
   const cs = colorStyle(m.color, bgHex);
   const name = escapeHtml(m.displayName);
-  const body = renderBody(m.body);
+  // Rich-format rows embed their (re-sanitized) HTML; the whitelist
+  // sanitizer is the XSS boundary, exactly as it is at ingest and at
+  // live render — defense in depth over an already-sanitized column.
+  const body = m.format === "html"
+    ? `<div class="rich">${sanitizeRichMessageHtml(m.body)}</div>`
+    : renderBody(m.body, bgHex);
 
   switch (m.kind) {
     case "me":
@@ -365,6 +442,32 @@ ${manifestBlock(o.manifest)}`
   /* Bodies keep authored line breaks (pre-wrap) and break long unbroken
      strings (URLs) instead of overflowing. Roomy line-height for prose. */
   .body { white-space: pre-wrap; word-wrap: break-word; overflow-wrap: anywhere; line-height: 1.6; }
+  /* Rich-format bodies (migration 0352): the markup supplies its own
+     structure, so pre-wrap comes OFF and the block set gets chat-scale
+     styling (headers must not dwarf the log). */
+  .body .rich { white-space: normal; }
+  .rich p { margin: 0 0 .2em; }
+  .rich p:last-child { margin-bottom: 0; }
+  .rich h1, .rich h2, .rich h3 { margin: .25em 0 .15em; font-weight: 700; line-height: 1.25; }
+  .rich h1 { font-size: 1.5em; }
+  .rich h2 { font-size: 1.3em; }
+  .rich h3 { font-size: 1.15em; }
+  .rich ul, .rich ol { margin: .2em 0; padding-left: 1.4em; }
+  .rich blockquote {
+    margin: .25em 0; padding: .1em .6em;
+    border-left: 3px solid rgb(var(--keep-action));
+    color: rgb(var(--keep-muted)); font-style: italic;
+  }
+  .rich pre {
+    margin: .25em 0; padding: .4em .6em; border-radius: 4px;
+    border: 1px solid ${pal.ruleStrong}; background: ${pal.rule};
+    overflow-x: auto; white-space: pre-wrap;
+  }
+  .rich code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
+  .rich a { color: rgb(var(--keep-action)); }
+  /* Static-document spoiler: obscured until hovered/selected. */
+  .rich .spoiler { background: rgb(var(--keep-muted)); color: transparent; border-radius: 3px; }
+  .rich .spoiler:hover { background: transparent; color: inherit; }
   .msg.me .body { font-style: italic; color: rgb(var(--keep-action)); }
   .msg.system .body { color: rgb(var(--keep-muted)); font-style: italic; }
   .msg.whisper .body { color: rgb(var(--keep-muted)); font-style: italic; }

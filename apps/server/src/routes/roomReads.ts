@@ -76,7 +76,7 @@ export async function computeRoomUnread(db: Db, userId: string, onlyRoomId?: str
     SELECT m.room_id AS room_id,
            COUNT(*) AS unread,
            SUM(
-             CASE WHEN (lower(m.body) LIKE ${lowerName} OR m.mentions_json LIKE ${mentionJson})
+             CASE WHEN (lower(COALESCE(m.body_text, m.body)) LIKE ${lowerName} OR m.mentions_json LIKE ${mentionJson})
                   THEN 1 ELSE 0 END
            ) AS mentions
     FROM messages m

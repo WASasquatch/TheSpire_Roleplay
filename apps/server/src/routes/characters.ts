@@ -821,6 +821,9 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       // monotonic `tour_seen_version` vs the shared `SITE_TOUR_VERSION`. POST
       // /me/tour/dismiss writes the version back so it doesn't re-show.
       showSiteTour: (u.tourSeenVersion ?? 0) < SITE_TOUR_VERSION,
+      // Account creation time (ms). The client's newcomer "start here"
+      // empty-state panel gates on account age (<48h) with this.
+      accountCreatedAt: userCreatedMs,
       // Contextual per-surface tours the viewer hasn't yet acknowledged at the
       // current catalog version (migration 0321). Surface components mount a
       // <ContextualTour> gated on membership in this list; dismissing one POSTs

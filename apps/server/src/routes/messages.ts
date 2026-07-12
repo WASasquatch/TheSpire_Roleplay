@@ -14,7 +14,7 @@ import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
-import { mentionsField, parseNpcStats } from "@thekeep/shared";
+import { RICH_HTML_MAX_BYTES, mentionsField, parseNpcStats, richHtmlToText } from "@thekeep/shared";
 import { recordAudit } from "../audit.js";
 import { messages, rooms, roomThreadCategories, roomMembers, pinnedMessages, users } from "../db/schema.js";
 import { callerCanEditRoom } from "../auth/roomPermissions.js";
@@ -23,7 +23,9 @@ import { emitToPairStaff } from "../lib/pairStaffView.js";
 import { boardAgeDenied } from "../forums/nsfw.js";
 import { linkPreviewFromRow } from "../unfurl.js";
 import { maskForMinors, maskMessageForMinors } from "../realtime/minorLanguageFilter.js";
+import { messageForSocket } from "../realtime/broadcast.js";
 import { sanitizeBio } from "../auth/html.js";
+import { sanitizeRichMessageHtml } from "../lib/richHtml.js";
 import { areServersEnabled, getServerSettings, getSettings } from "../settings.js";
 import { resolveRoomServerId } from "../earning/pool.js";
 import { hasPermission } from "../auth/permissions.js";
@@ -392,6 +394,11 @@ export function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): 
     displayName: m.displayName,
     kind: m.kind,
     body: m.deletedAt ? "" : m.body,
+    // Rich-format marker + plaintext mirror (migration 0352). Deleted
+    // rows strip the mirror alongside the body.
+    ...(m.format === "html"
+      ? { format: "html" as const, bodyText: m.deletedAt ? "" : m.bodyText }
+      : {}),
     color: m.color,
     createdAt: +m.createdAt,
     ...(m.toUserId ? { toUserId: m.toUserId } : {}),
@@ -426,7 +433,7 @@ export function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): 
     ...(m.isNsfw ? { isNsfw: true } : {}),
     ...(m.senderInlineAvatarEnabled ? { senderInlineAvatarEnabled: true } : {}),
     ...(m.senderSelectedBorderRankKey ? { senderSelectedBorderRankKey: m.senderSelectedBorderRankKey } : {}),
-    ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
+    ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.format === "html" ? (m.bodyText ?? m.body) : m.body } : {}),
     // Admin-only audit snapshot of who performed the delete. Mirrors
     // the originalBody carve-out, site admins see who took the
     // moderation action; mods and ordinary viewers don't. Falls back
@@ -470,14 +477,22 @@ export async function emitMessageUpdate(io: Io, db: Db, row: typeof messages.$in
   // Staff pair oversight (lib/pairStaffView.ts): edits/tombstones of public
   // room lines mirror to the ADULT staff standing in the pair's other side,
   // so their merged view never shows a stale body. Whispers/targeted rows
-  // never mirror; staff recipients are adults, so they get the plain wire.
+  // never mirror; staff recipients are adults, so they get the plain wire —
+  // through the same per-socket rich-HTML capability downgrade as the room
+  // fan-out below, so a pre-rich bundle never receives raw markup.
   const mirror = row.kind !== "whisper" && !row.targetUserId
-    ? emitToPairStaff(io, db, row.roomId, (s) => s.emit("message:update", wire))
+    ? emitToPairStaff(io, db, row.roomId, (s) =>
+        s.emit("message:update", messageForSocket(wire, s.data as { richHtml?: boolean })))
     : Promise.resolve();
   // §J: at most one mask compute per update; null = clean (or filter off).
   // An 18+-stamped row skips the compute — minors never receive it at all.
   const minorVariant = anyMinor && !row.isNsfw ? maskMessageForMinors(wire) : null;
-  if (!row.isNsfw && !minorVariant) {
+  // Rich rows (migration 0352) take the per-socket path while any
+  // recipient runs a pre-rich bundle, mirroring emitFiltered's
+  // deploy-window downgrade so an edit can't hand old bundles tag soup.
+  const anyLegacySocket = row.format === "html"
+    && sockets.some((s) => !(s.data as { richHtml?: boolean }).richHtml);
+  if (!row.isNsfw && !minorVariant && !anyLegacySocket) {
     io.to(`room:${row.roomId}`).emit("message:update", wire);
     await mirror;
     return;
@@ -485,7 +500,8 @@ export async function emitMessageUpdate(io: Io, db: Db, row: typeof messages.$in
   for (const s of sockets) {
     const adult = !!(s.data as { user?: { isAdult?: boolean } }).user?.isAdult;
     if (row.isNsfw && !adult) continue;
-    s.emit("message:update", adult ? wire : minorVariant ?? wire);
+    const base = adult ? wire : minorVariant ?? wire;
+    s.emit("message:update", messageForSocket(base, s.data as { richHtml?: boolean }));
   }
   await mirror;
 }
@@ -570,27 +586,69 @@ export async function registerMessageRoutes(
     const trimmed = body.body.trim();
     if (!trimmed) { reply.code(400); return { error: "empty" }; }
     const effectiveCap = forum ? maxForumPostLength : maxMessageLength;
-    if (trimmed.length > effectiveCap) {
-      reply.code(413);
-      return {
-        error: forum
-          ? tFor(me.locale, "errors:server.realtime.forumPostsCapped", { max: effectiveCap })
-          : tFor(me.locale, "errors:server.realtime.messagesCapped", { max: effectiveCap }),
-      };
-    }
 
-    // Re-sanitise for kinds whose bodies feed renderers that trust them. We
-    // don't currently render body via dangerouslySetInnerHTML on the chat
-    // line, but be defensive, sanitiseBio is the same routine used for bio
-    // HTML and is safe to apply to plain text (it's a no-op for text-only).
-    const safeBody = m.kind === "say" || m.kind === "me" || m.kind === "ooc" || m.kind === "scene"
-      ? trimmed
-      : sanitizeBio(trimmed);
+    // Rich-format rows (migration 0352) keep their format on edit: the
+    // incoming body is the rich editor's HTML serialization, sanitized
+    // against the same strict whitelist as fresh sends, with the same
+    // pair of caps (raw-byte ceiling + visible-character cap) and a
+    // refreshed plaintext mirror. md rows keep the historic path
+    // byte-identically.
+    let safeBody: string;
+    let bodyTextUpdate: string | null = null;
+    if (m.format === "html") {
+      if (Buffer.byteLength(trimmed, "utf8") > RICH_HTML_MAX_BYTES) {
+        reply.code(413);
+        return { error: tFor(me.locale, "errors:server.realtime.richTooLarge") };
+      }
+      // Per-room rich-text toggle (migration 0354): edits into a
+      // rich-disabled room take the same reduced profile as fresh sends —
+      // headings unwrap to paragraphs, alignment strips — so the edit
+      // route can't back-door a construct dispatch would have degraded.
+      const editRoom = (await db
+        .select({ richTextDisabled: rooms.richTextDisabled })
+        .from(rooms)
+        .where(eq(rooms.id, m.roomId))
+        .limit(1))[0];
+      safeBody = sanitizeRichMessageHtml(
+        trimmed,
+        editRoom?.richTextDisabled ? { blocksDisabled: true } : undefined,
+      );
+      bodyTextUpdate = richHtmlToText(safeBody).trim();
+      if (!bodyTextUpdate) { reply.code(400); return { error: "empty" }; }
+      if (bodyTextUpdate.length > effectiveCap) {
+        reply.code(413);
+        return {
+          error: forum
+            ? tFor(me.locale, "errors:server.realtime.forumPostsCapped", { max: effectiveCap })
+            : tFor(me.locale, "errors:server.realtime.messagesCapped", { max: effectiveCap }),
+        };
+      }
+    } else {
+      if (trimmed.length > effectiveCap) {
+        reply.code(413);
+        return {
+          error: forum
+            ? tFor(me.locale, "errors:server.realtime.forumPostsCapped", { max: effectiveCap })
+            : tFor(me.locale, "errors:server.realtime.messagesCapped", { max: effectiveCap }),
+        };
+      }
+      // Re-sanitise for kinds whose bodies feed renderers that trust them. We
+      // don't currently render body via dangerouslySetInnerHTML on the chat
+      // line, but be defensive, sanitiseBio is the same routine used for bio
+      // HTML and is safe to apply to plain text (it's a no-op for text-only).
+      safeBody = m.kind === "say" || m.kind === "me" || m.kind === "ooc" || m.kind === "scene"
+        ? trimmed
+        : sanitizeBio(trimmed);
+    }
 
     const editedAt = new Date(now);
     await db
       .update(messages)
-      .set({ body: safeBody, editedAt })
+      .set({
+        body: safeBody,
+        ...(m.format === "html" ? { bodyText: bodyTextUpdate } : {}),
+        editedAt,
+      })
       .where(eq(messages.id, m.id));
 
     const updated = (await db.select().from(messages).where(eq(messages.id, m.id)).limit(1))[0];
@@ -1307,7 +1365,10 @@ export async function registerMessageRoutes(
       authorCharacterId: m.characterId ?? null,
       displayName: m.displayName,
       kind: m.kind,
-      body: m.body,
+      // Rich-format rows (migration 0352) pin their VISIBLE text: the
+      // pin strip is a plaintext surface, and the snapshot must outlive
+      // the source row, so freeze the mirror rather than raw markup.
+      body: m.format === "html" ? (m.bodyText ?? m.body) : m.body,
       color: m.color,
       cmdCss: m.cmdCss ?? null,
       sceneImageUrl: m.sceneImageUrl ?? null,

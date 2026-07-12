@@ -20,6 +20,7 @@ import { TypingIndicator } from "./components/chat/TypingIndicator.js";
 const HelpModal = lazyModal(() => import("./components/HelpModal.js").then((m) => ({ default: m.HelpModal })));
 import { InfoModal } from "./components/InfoModal.js";
 import { MessageList } from "./components/chat/MessageList.js";
+import { NewcomerStartPanel } from "./components/chat/NewcomerStartPanel.js";
 import { TheaterPanel } from "./components/TheaterPanel.js";
 import { MutualPrompts } from "./components/MutualPrompts.js";
 import { StoryInvitePrompts } from "./components/scriptorium/StoryInvitePrompts.js";
@@ -1543,6 +1544,29 @@ function Chat() {
   // showSiteTour above.
   const siteTourForced = useChat((s) => s.siteTourForced);
   const setSiteTourForced = useChat((s) => s.setSiteTourForced);
+  /**
+   * Newcomer "start here" empty-state panel (retention package). Shown at
+   * the bottom of the message feed while ALL of these hold:
+   *   - the account is younger than 48h (`accountCreatedAt` off /me/profile)
+   *   - this account hasn't dismissed it on this device (tk: localStorage,
+   *     keyed by user id — a veteran's dismissal on a shared browser must
+   *     not swallow the panel for a genuinely new account)
+   *   - they haven't sent a few messages yet (once they're talking, the
+   *     panel's job is done — the send() pipe bumps the counter)
+   * Both flags start in the "hidden" state and are re-read per account once
+   * `me` resolves; the 48h gate keeps the panel off-screen until then.
+   */
+  const [accountCreatedAt, setAccountCreatedAt] = useState<number | null>(null);
+  const [newcomerDismissed, setNewcomerDismissed] = useState<boolean>(true);
+  const [newcomerSentCount, setNewcomerSentCount] = useState<number>(0);
+  useEffect(() => {
+    const uid = me?.id;
+    if (!uid) return;
+    try {
+      setNewcomerDismissed(localStorage.getItem(`tk:newcomerPanel:dismissed:${uid}`) === "1");
+      setNewcomerSentCount(parseInt(localStorage.getItem(`tk:newcomerPanel:sent:${uid}`) ?? "0", 10) || 0);
+    } catch { setNewcomerDismissed(true); }
+  }, [me?.id]);
   const [themeVersion, setThemeVersion] = useState(0);
 
   const socket = useMemo(() => getSocket(), []);
@@ -1648,6 +1672,7 @@ function Chat() {
           publicProfileBgMode?: "cover" | "contain" | "tile" | "stretch";
           welcome?: { html: string; hash: string } | null;
           showSiteTour?: boolean;
+          accountCreatedAt?: number;
           limits?: {
             maxBioLength?: number;
             maxMessageLength?: number;
@@ -1800,6 +1825,8 @@ function Chat() {
           // render below holds the tour back until the welcome modal
           // (if any) is dismissed so they don't stack.
           setShowSiteTour(u.showSiteTour === true);
+          // Account age for the newcomer "start here" panel gate.
+          if (typeof u.accountCreatedAt === "number") setAccountCreatedAt(u.accountCreatedAt);
           useChat.getState().setToursToShow((u as { toursToShow?: TourId[] }).toursToShow ?? []);
         }
       } catch { /* ignore */ }
@@ -3274,12 +3301,34 @@ function Chat() {
 
   function send(
     text: string,
-    opts?: { threadCategoryId?: string | null; threadTitle?: string; replyToId?: string },
+    opts?: { threadCategoryId?: string | null; threadTitle?: string; replyToId?: string; format?: "html" },
   ) {
     if (!currentRoomId) return;
+    // Newcomer-panel auto-hide bookkeeping: a few real (non-command) sends
+    // mean they're talking, so the "start here" panel retires itself. Only
+    // counts while the panel is actually eligible (account <48h, not
+    // dismissed) — established accounts never churn localStorage, and a
+    // veteran's sends on a shared browser can't pre-spend a future
+    // account's counter. Keys are per-account for the same reason.
+    if (
+      !text.trimStart().startsWith("/") &&
+      newcomerSentCount < 3 &&
+      !newcomerDismissed &&
+      me?.id &&
+      accountCreatedAt !== null &&
+      Date.now() - accountCreatedAt < 48 * 60 * 60 * 1000
+    ) {
+      const n = newcomerSentCount + 1;
+      setNewcomerSentCount(n);
+      try { localStorage.setItem(`tk:newcomerPanel:sent:${me.id}`, String(n)); } catch { /* best-effort */ }
+    }
     socket.emit("chat:input", {
       roomId: currentRoomId,
       text,
+      // Rich-HTML body claim (migration 0352): the composer set this
+      // when `text` is its whitelist-HTML serialization. Absent = the
+      // historic markdown pipeline.
+      ...(opts?.format === "html" ? { format: "html" as const } : {}),
       ...(opts?.threadCategoryId ? { threadCategoryId: opts.threadCategoryId } : {}),
       ...(opts?.threadTitle ? { threadTitle: opts.threadTitle } : {}),
       ...(opts?.replyToId ? { replyToId: opts.replyToId } : {}),
@@ -3298,6 +3347,37 @@ function Chat() {
       // on rejection, so a successful send never reaches here.
       if (res && res.ok === false) setNotice({ code: res.code, message: res.message });
     });
+  }
+
+  /**
+   * Newcomer-panel affordance: reveal the people/rooms rail. On phones the
+   * rail is a closed drawer — open it; on desktop it's always visible, so
+   * flash it instead (static .tk-find-flash class; the reduce-motion CSS
+   * already disables that animation, so calm mode stays calm). The two
+   * panel buttons must not read as the same action on desktop, so "people"
+   * scrolls to + flashes the CURRENT room's row (its occupant list lives
+   * under it), while "rooms" flashes the whole tree with its headcounts.
+   */
+  function showRail(target: "people" | "rooms" = "rooms") {
+    if (window.matchMedia("(max-width: 1023px)").matches) {
+      setRailOpen(true);
+      return;
+    }
+    let el: Element | null = null;
+    if (target === "people" && currentRoomId) {
+      el = document.querySelector(
+        `[data-tour="rooms-tree"] [data-room-id="${CSS.escape(currentRoomId)}"]`,
+      );
+    }
+    el ??= document.querySelector('[data-tour="rooms-tree"]');
+    if (el instanceof HTMLElement) {
+      if (target === "people") el.scrollIntoView({ block: "nearest" });
+      el.classList.remove("tk-find-flash");
+      // Force a reflow so re-adding the class restarts the animation.
+      void el.offsetWidth;
+      el.classList.add("tk-find-flash");
+      window.setTimeout(() => el.classList.remove("tk-find-flash"), 1600);
+    }
   }
 
   // Forum bookkeeping: when a new topic message arrives that was
@@ -4563,6 +4643,37 @@ function Chat() {
               padding strip is just empty space at rest. */}
           <TypingIndicator roomId={currentRoomId} />
           </div>
+          {/* Newcomer "start here" panel (retention package): a warm,
+              dismissible strip between the feed and the composer for
+              accounts <48h old, offering one-tap first actions. Auto-hides
+              after a few sends (see send()); hidden on forum rooms whose
+              feed is a topic list. Sits OUTSIDE the relative wrapper above
+              so the TypingIndicator's bottom-pinned overlay can never paint
+              over its action buttons. */}
+          {!emailBlocked &&
+          !isForumRoom &&
+          accountCreatedAt !== null &&
+          Date.now() - accountCreatedAt < 48 * 60 * 60 * 1000 &&
+          !newcomerDismissed &&
+          newcomerSentCount < 3 ? (
+            <NewcomerStartPanel
+              onSayHi={() => {
+                setComposerText((cur) => (cur.trim() ? cur : i18n.t("chat:newcomer.sayHiPrefill")));
+                window.dispatchEvent(new Event("tk:focus-composer"));
+              }}
+              onSeePeople={() => showRail("people")}
+              onFindRoom={() => showRail("rooms")}
+              onExplore={() => {
+                if (emailBlocked) return;
+                setForumsOpen({});
+              }}
+              onDismiss={() => {
+                setNewcomerDismissed(true);
+                if (!me?.id) return;
+                try { localStorage.setItem(`tk:newcomerPanel:dismissed:${me.id}`, "1"); } catch { /* best-effort */ }
+              }}
+            />
+          ) : null}
           <MutualPrompts
             socket={socket}
             onError={(n) => setNotice(n)}
@@ -4603,6 +4714,7 @@ function Chat() {
             canModerate={canModerate}
             postLocked={!!room?.postLocked}
             postMode={room?.postMode ?? "everyone"}
+            richTextDisabled={!!room?.richTextDisabled}
             activeTopic={activeTopic}
             topicCreateMode={topicCreateMode}
             {...(activeForumCategoryId !== undefined
@@ -5259,6 +5371,11 @@ function Chat() {
               flag. onClose clears both so it doesn't immediately reopen. */}
       {(showSiteTour && !welcome) || siteTourForced ? (
         <SiteTour
+          // Mobile drawer staging: steps that spotlight the userlist / room
+          // list / identity / Menu open the right-side drawer so they point
+          // at the real control, then restore this state on close.
+          railOpen={railOpen}
+          setRailOpen={setRailOpen}
           onClose={() => {
             setShowSiteTour(false);
             setSiteTourForced(false);

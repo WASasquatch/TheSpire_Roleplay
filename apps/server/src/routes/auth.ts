@@ -64,8 +64,12 @@ const VERIFY_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 /* eslint-disable no-irregular-whitespace -- NBSP (U+00A0) is deliberately in the allow-list */
 export const MASTER_USERNAME_RX = /^[a-zA-Z0-9_\-'.` ]{2,40}$/;
 /* eslint-enable no-irregular-whitespace */
+// User-facing copy (it surfaces on the register form and the username
+// editor). Plain language only: no regex, no character-code jargon. The
+// technical rules live in the comment above; this just steers people to the
+// fix that almost always applies (spaces → underscores).
 export const MASTER_USERNAME_RULE_MESSAGE =
-  "username must be 2-40 chars: ASCII letters/numbers and _ - ' . ` plus NBSP (Alt+0160); regular spaces and Unicode confusables blocked";
+  "that username won't work - use 2-40 letters, numbers, or _ - ' . ` (no spaces; try an underscore instead, like Oak_Tavern)";
 export function normalizeMasterUsername(input: string): string {
   // NFC, not NFKC. NFKC's compatibility decomposition collapses NBSP
   // (U+00A0) into a regular space (U+0020), which then fails the regex
@@ -250,13 +254,6 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       }
     }
 
-    // Captcha. Validated before the more expensive DB queries so a bad
-    // answer doesn't cost us a username/email lookup.
-    if (!consumeCaptcha(body.captchaId, body.captchaAnswer)) {
-      reply.code(400);
-      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.captchaWrong") };
-    }
-
     // Age floor. `allowMinorSignups` OFF (default) keeps the historical 18+
     // posture; ON lowers it to 13 (under-13 is always rejected — COPPA).
     // Neutral copy, and nothing about the failed attempt is stored.
@@ -292,6 +289,19 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     if (usernameTaken || emailCount >= settings.maxAccountsPerEmail) {
       reply.code(409);
       return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.registrationConflict") };
+    }
+
+    // Captcha — consumed LAST, after every recoverable validation (field
+    // shapes, age, and the username/email conflict check above). Captcha
+    // tokens are single-use, so verifying it earlier burned the challenge on
+    // failures the user then had to fix AND re-answer a fresh captcha for —
+    // needless friction on the exact form where friction loses signups. Only
+    // an attempt that is otherwise going to succeed spends the token. The
+    // `code: "CAPTCHA"` marker lets the client refresh its challenge ONLY
+    // when the captcha itself was the problem.
+    if (!consumeCaptcha(body.captchaId, body.captchaAnswer)) {
+      reply.code(400);
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.captchaWrong"), code: "CAPTCHA" };
     }
 
     // Bootstrap: if there are no human accounts yet (only the `system`

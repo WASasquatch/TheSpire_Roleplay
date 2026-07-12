@@ -1004,6 +1004,7 @@ function RoomGroup({
     <li
       className={`keep-row border-b border-keep-rule/40 ${isCurrent ? "bg-keep-banner/40" : ""}`}
       data-active={isCurrent ? "true" : undefined}
+      data-room-id={room.id}
     >
       {/* The room-switch button spans the FULL row width so its hover/active
           "title bar" reaches the container edge. The per-room mute toggle is a
@@ -1322,6 +1323,19 @@ function RoomGroup({
                             occupant payload. */}
                         {o.badge ? (
                           <RoleBadgeChips roles={[o.badge]} ariaLabel={t("rooms.roleBadgeAria")} compact />
+                        ) : null}
+                        {/* Unverified-email chip (migration 0353). Rides the
+                            occupant payload ONLY while the site's "Denote
+                            unverified users" toggle is on; deliberately muted
+                            so it reads as a hint, not a scarlet letter. */}
+                        {o.unverified ? (
+                          <span
+                            className="shrink-0 rounded border border-keep-rule/60 bg-keep-bg/60 px-1 py-0.5 text-[9px] uppercase leading-none tracking-widest text-keep-muted"
+                            title={t("rooms.unverifiedTitle")}
+                            aria-label={t("rooms.unverifiedTitle")}
+                          >
+                            {t("rooms.unverified")}
+                          </span>
                         ) : null}
                         {/* Moderator action menu (Kick / Mute / Ban). Rendered
                             only when the viewer can act on THIS target — see

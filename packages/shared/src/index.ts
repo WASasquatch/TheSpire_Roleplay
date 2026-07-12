@@ -57,3 +57,4 @@ export * from "./slug.js";
 export * from "./names.js";
 export * from "./cssSanitize.js";
 export * from "./composerDoc.js";
+export * from "./richMessage.js";

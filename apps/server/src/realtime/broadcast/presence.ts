@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer, Socket } from "socket.io";
 import type {
@@ -20,6 +20,7 @@ import {
   characterOwnedNameStyles,
   characters,
   friends,
+  messages,
   roomInvites,
   roomMembers,
   roomMods,
@@ -38,6 +39,7 @@ import type { Db } from "../../db/index.js";
 import { socketsForUsers } from "../presence.js";
 import { markRoomRead } from "../../routes/roomReads.js";
 import {
+  greetNewcomerOnce,
   persistRoomDescriptionOnce,
   persistTargetedSystemMessageToActiveRooms,
 } from "../targetedMessages.js";
@@ -404,6 +406,59 @@ export async function findCanonicalLanding(db: Db): Promise<typeof rooms.$inferS
     .orderBy(asc(rooms.name))
     .limit(1))[0];
   return fallback ?? null;
+}
+
+/**
+ * Liveliest-room landing for a brand-new account's FIRST-EVER socket landing
+ * (migration 0353, retention package). Instead of parking every newcomer in
+ * the fixed canonical lobby — which is empty half the day — prefer the
+ * default-server public room with the most recent HUMAN chat, so their first
+ * screen has a conversation on it.
+ *
+ * Candidate gates compose with every existing scrub, viewer-agnostically:
+ *   - public, live (not archived), on the default server (NULL serverId is
+ *     adopted by the default server everywhere — same predicate as /rooms)
+ *   - flat chat only: no forum boards (forumId) and no standalone
+ *     nested-mode rooms (their feed is a topic list, hostile to a newcomer)
+ *   - SFW only (room flag; the default server is SFW by invariant), so the
+ *     pick is safe for minors without viewer plumbing
+ *   - never an 18+ annex (linkedRoomId)
+ *   - never role-locked (room_role_gates kind='access')
+ * The CALLER additionally re-validates the winner through its own join gates
+ * (ban / private / age), so a race can only degrade to the canonical landing.
+ *
+ * "Human chat" = speech kinds within the last 24h; system/whisper/announce
+ * lines don't make a room feel alive. One grouped query over the recent
+ * window plus one bounded role-gate read; runs only on a first-ever landing.
+ *
+ * Returns null when nothing qualifies (quiet day) — callers fall back to
+ * their existing landing resolution unchanged.
+ */
+export async function findLiveliestLanding(db: Db): Promise<typeof rooms.$inferSelect | null> {
+  const HUMAN_KINDS = ["say", "me", "ooc", "roll", "npc", "scene"] as const;
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const candidates = await db
+    .select({ room: rooms, lastHuman: sql<number>`max(${messages.createdAt})` })
+    .from(messages)
+    .innerJoin(rooms, eq(rooms.id, messages.roomId))
+    .where(and(
+      gt(messages.createdAt, cutoff),
+      inArray(messages.kind, [...HUMAN_KINDS]),
+      eq(rooms.type, "public"),
+      isNull(rooms.archivedAt),
+      isNull(rooms.forumId),
+      isNull(rooms.linkedRoomId),
+      eq(rooms.replyMode, "flat"),
+      eq(rooms.isNsfw, false),
+      or(eq(rooms.serverId, DEFAULT_SERVER_ID), isNull(rooms.serverId)),
+    ))
+    .groupBy(rooms.id)
+    .orderBy(desc(sql`max(${messages.createdAt})`))
+    .limit(5);
+  if (candidates.length === 0) return null;
+  const locked = await roleLockedRoomIdsForServer(db, candidates.map((c) => c.room.id));
+  const hit = candidates.find((c) => !locked.has(c.room.id));
+  return hit?.room ?? null;
 }
 
 /**
@@ -960,6 +1015,23 @@ async function joinRoomBody(
     }
   }
 
+  // One-time personal greeter (migration 0353): a brand-new account's first
+  // flat-room landing gets a targeted, actionable welcome line. Runs AFTER
+  // the backlog + description sends so the live copy lands last (like the
+  // description's isNew emit); the atomic greeted_at claim inside makes this
+  // a no-op for everyone but a genuinely never-greeted account, so the hot
+  // join path pays one indexed UPDATE that matches zero rows. Forum rooms
+  // skip it — their feed is a topic list, not a chat log. Best-effort: a
+  // greeter failure must never break the join.
+  if (room.replyMode !== "nested") {
+    try {
+      await greetNewcomerOnce(db, socket, { id: user.id, username: user.username }, { id: roomId, name: room.name });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[greeter] first-landing greeting failed", { userId: user.id, roomId, err });
+    }
+  }
+
   // Entry/connect chat broadcast. Three mutually-exclusive cases,
   // distinguished by `loginIntent` (fresh login/register handshake)
   // and `priorRooms.length` (was this socket already in another
@@ -1296,6 +1368,10 @@ export async function buildRoomSummary(
     // "Never expire" opt-out (migration 0347); the dossier + expiry strips
     // read it. Not per-viewer.
     retentionExempt: room.retentionExempt,
+    // Per-room rich-text toggle (migration 0354); the composer hides its
+    // rich-only controls on it. Not per-viewer, so it rides the room-wide
+    // fast path safely.
+    richTextDisabled: room.richTextDisabled,
   };
 }
 
@@ -2287,6 +2363,12 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     charFreeformConfigByCharBorder.set(`c::${r.characterId}::${r.borderKey}`, parseFreeformConfig(r.configJson));
   }
 
+  // Denote-unverified chip (migration 0353): admin toggle, resolved once per
+  // occupant rebuild off the in-process settings cache. The flag only rides
+  // the wire while the toggle is ON — no wire noise when off. Per-ACCOUNT
+  // (email verification is account-level), so character rows wear it too.
+  const denoteUnverified = (await getSettings(db)).denoteUnverifiedUsers;
+
   // Render one occupant per resolved identity. Two characters of the
   // same player in the same room (two tabs voicing different chars)
   // come out as two rows; the same character on multiple tabs (or
@@ -2451,6 +2533,8 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
       masterInlineAvatarEnabled,
       useRankAsUserlistIcon: u.useRankAsUserlistIcon,
       badge: badgeByUser.get(u.id) ?? null,
+      // Only stamped while the admin toggle is on (viewer-agnostic).
+      ...(denoteUnverified && !u.emailVerifiedAt ? { unverified: true as const } : {}),
     });
   }
   return out;

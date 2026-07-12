@@ -83,7 +83,9 @@ export const replyCommand: CommandHandler = {
       body,
       replyToId: parent.id,
       replyToDisplayName: parent.displayName,
-      replyToBodySnippet: snippet(parent.body),
+      // Rich-format parents (migration 0352) snapshot their VISIBLE
+      // text, never raw markup.
+      replyToBodySnippet: snippet(parent.format === "html" ? (parent.bodyText ?? "") : parent.body),
     });
   },
 };

@@ -1494,6 +1494,8 @@
     "modeNudge": "Nudge: account works, dismissible reminder banner",
     "modeBlock": "Block: can't chat until verified",
     "verificationNote": "Existing accounts are treated as already verified, so turning this on only affects new sign-ups.",
+    "denoteUnverified": "Denote unverified users",
+    "denoteUnverifiedHint": "Show a small Unverified tag in the room userlist and on profiles for accounts that never confirmed their email, so players can spot possible throwaway accounts. Existing accounts count as verified and are never tagged.",
     "dailyCapLabel": "Broadcast daily cap (emails/day)"
   },
   "overview": {

@@ -5,6 +5,15 @@ import { isMentioned } from "./mentions.js";
 export type NotifyPref = "off" | "mentions" | "all";
 
 /**
+ * Plaintext view of a message body for toast copy + mention matching.
+ * Rich-HTML rows (format 'html', migration 0352) carry markup in
+ * `body`; the server-derived `bodyText` mirror is the readable text.
+ */
+function plainBody(msg: ChatMessage): string {
+  return msg.format === "html" ? (msg.bodyText ?? "") : msg.body;
+}
+
+/**
  * Browser support is hit-and-miss - older browsers and Safari embedded webviews
  * may not have the API. All callers must guard via `isSupported()`.
  */
@@ -55,7 +64,7 @@ export function shouldNotify(
   if (msg.kind === "system") return false;
   if (pref === "mentions") {
     if (msg.kind === "whisper" || msg.kind === "announce") return true;
-    return isMentioned(msg.body, selfNames);
+    return isMentioned(plainBody(msg), selfNames);
   }
   // pref === "all"
   return true;
@@ -71,31 +80,31 @@ export function formatNotification(
   msg: ChatMessage,
   selfNames: ReadonlyArray<string> = [],
 ): { title: string; body: string } {
-  const mentioned = isMentioned(msg.body, selfNames);
+  const mentioned = isMentioned(plainBody(msg), selfNames);
   switch (msg.kind) {
     case "whisper":
       return {
         title: i18n.t("common:notify.whispers", { name: msg.displayName }),
-        body: msg.body,
+        body: plainBody(msg),
       };
     case "announce":
       return {
         title: mentioned
           ? i18n.t("common:notify.announcementMention")
           : i18n.t("common:notify.announcement"),
-        body: msg.body,
+        body: plainBody(msg),
       };
     case "me":
       return {
         title: mentioned
           ? i18n.t("common:notify.nameMention", { name: msg.displayName })
           : i18n.t("common:appName"),
-        body: `${msg.displayName} ${msg.body}`,
+        body: `${msg.displayName} ${plainBody(msg)}`,
       };
     case "roll":
       return {
         title: i18n.t("common:appName"),
-        body: i18n.t("common:notify.rolls", { name: msg.displayName, body: msg.body }),
+        body: i18n.t("common:notify.rolls", { name: msg.displayName, body: plainBody(msg) }),
       };
     case "say":
     case "ooc":
@@ -104,7 +113,7 @@ export function formatNotification(
         title: mentioned
           ? i18n.t("common:notify.mentionsYou", { name: msg.displayName })
           : msg.displayName,
-        body: msg.body,
+        body: plainBody(msg),
       };
   }
 }
@@ -120,7 +129,7 @@ export function formatNotification(
 export function fire(msg: ChatMessage, selfNames: ReadonlyArray<string> = []): void {
   if (!isSupported() || Notification.permission !== "granted") return;
   const { title, body } = formatNotification(msg, selfNames);
-  const mentioned = isMentioned(msg.body, selfNames);
+  const mentioned = isMentioned(plainBody(msg), selfNames);
   try {
     const n = new Notification(title, {
       body,

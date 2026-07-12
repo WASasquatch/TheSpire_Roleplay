@@ -317,9 +317,9 @@ describe("HTML paste mapping", () => {
 
   test("unsupported structure drops to plain text, never raw HTML", () => {
     const html =
-      '<table><tr><td style="color:red">cell A</td><td>cell B</td></tr></table>' +
+      "<table><tr><td>cell A</td><td>cell B</td></tr></table>" +
       '<img src="https://x.com/y.png" alt="pic"><script>alert(1)</script>' +
-      '<h1 style="font-size:80px">Heading</h1>';
+      "<h1>Heading</h1>";
     const d = htmlClipboardToComposerDoc(html);
     const wire = serializeComposerDoc(d);
     assert.ok(!wire.includes("<"), wire);
@@ -333,9 +333,9 @@ describe("HTML paste mapping", () => {
     assert.equal(serializeComposerDoc(d), "click");
   });
 
-  test("colors and font sizes are intentionally dropped", () => {
+  test("colors and font sizes carry through as font marks", () => {
     const d = htmlClipboardToComposerDoc('<span style="color:#ff0000;font-size:30px">red</span>');
-    assert.equal(serializeComposerDoc(d), "red");
+    assert.equal(serializeComposerDoc(d), '<font color="#ff0000" size="4">red</font>');
   });
 
   test("underline and strike via CSS map to marks", () => {

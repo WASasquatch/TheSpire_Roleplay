@@ -15,19 +15,30 @@ import { Extension, Mark, mergeAttributes } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Blockquote from "@tiptap/extension-blockquote";
 import ListItem from "@tiptap/extension-list-item";
+import TextAlign from "@tiptap/extension-text-align";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import { TextSelection } from "@tiptap/pm/state";
 import type { Node as PMNode } from "@tiptap/pm/model";
 import {
+  FONT_SIZE_EM,
+  RICH_SPOILER_CLASS,
+  composerDocNeedsRichFormat,
+  composerDocToRichHtml,
+  cssColorToHex,
   htmlClipboardToComposerDoc,
+  normalizeComposerDoc,
   parseChatMarkdown,
+  resolveMessageColor,
+  richFontSizeEmToBucket,
   serializeComposerDoc,
+  type ComposerBlockFormat,
   type ComposerDoc,
   type ComposerInlineMark,
   type ComposerLine,
   type ComposerSpan,
+  type ComposerTextSize,
 } from "@thekeep/shared";
 import type { ComposerInputAdapter } from "../../lib/composerInput.js";
 
@@ -55,6 +66,15 @@ import type { ComposerInputAdapter } from "../../lib/composerInput.js";
 
 export type ComposerToggleMark = ComposerInlineMark;
 
+/** The four size buckets the toolbar's select offers. */
+export type ComposerSizeChoice = ComposerTextSize | "normal";
+
+/** Block-format dropdown choices (Normal / H1 / H2 / H3). */
+export type ComposerBlockChoice = ComposerBlockFormat | "normal";
+
+/** Alignment button choices. */
+export type ComposerAlignChoice = "left" | "center" | "right";
+
 export interface ComposerEditorHandle extends ComposerInputAdapter {
   toggleMark(mark: ComposerToggleMark): void;
   toggleQuote(): void;
@@ -62,6 +82,9 @@ export interface ComposerEditorHandle extends ComposerInputAdapter {
   /** Wrap the (snapshotted) selection in a color mark, or insert a
    *  colored placeholder when the selection is empty. */
   applyColor(hex: string, sel: { start: number; end: number } | null, placeholder: string): void;
+  /** Set the (snapshotted) selection's size bucket — "normal" clears
+   *  the mark. Empty selection sets the typing style at the caret. */
+  applySize(size: ComposerSizeChoice, sel: { start: number; end: number } | null): void;
   /** Link the current selection, or insert a linked placeholder. */
   applyLink(url: string, placeholder: string): void;
   /** Remove the link mark from the selection (or the link under the caret). */
@@ -72,6 +95,16 @@ export interface ComposerEditorHandle extends ComposerInputAdapter {
   insertText(text: string): void;
   /** Mobile ↵ button: new line (new bullet when inside a list). */
   insertNewline(): void;
+  /** Set the caret's block format: Normal paragraph or heading 1-3. */
+  applyBlock(block: ComposerBlockChoice): void;
+  /** Set the caret block's text alignment. */
+  applyAlign(align: ComposerAlignChoice): void;
+  /**
+   * Rich-HTML wire payload (format 'html'), or null when the document
+   * is fully expressible as chat markdown — the caller then sends the
+   * serialized `value` through the historic md pipeline instead.
+   */
+  getRichPayload(): string | null;
 }
 
 export interface ComposerEditorState {
@@ -79,6 +112,12 @@ export interface ComposerEditorState {
   caretStart: number;
   caretEnd: number;
   active: Record<string, boolean>;
+  /** Size bucket at the caret/selection — drives the toolbar select. */
+  size: ComposerSizeChoice;
+  /** Block format at the caret — drives the block-format select. */
+  block: ComposerBlockChoice;
+  /** Alignment of the caret's block — drives the align buttons. */
+  align: ComposerAlignChoice;
 }
 
 interface Props {
@@ -101,6 +140,15 @@ interface Props {
   onRequestLink: () => void;
   handleRef: MutableRefObject<ComposerEditorHandle | null>;
   disabled?: boolean;
+  /**
+   * Whether the rich-HTML wire format is available for this surface
+   * (flat chat rooms). When off — forum rooms, whose sends always ship
+   * chat markdown — headings and alignment are removed from the SCHEMA
+   * (input rules, shortcuts, paste mapping included), so "# " stays
+   * literal text exactly as the plain textarea kept it; the toolbar
+   * hides the matching controls on the same flag.
+   */
+  richEnabled?: boolean;
   placeholder: string;
   ariaLabel: string;
 }
@@ -200,13 +248,28 @@ function blockToLine(node: PMNode, kind: ComposerLine["kind"]): ComposerLine {
           if (typeof color === "string" && color) span.color = color;
           break;
         }
+        case "textSize": {
+          const size = m.attrs.size;
+          if (size === "small" || size === "large" || size === "huge") span.size = size;
+          break;
+        }
         default: break;
       }
     }
     if (marks.length) span.marks = marks;
     spans.push(span);
   });
-  return { kind, spans };
+  const line: ComposerLine = { kind, spans };
+  // Rich-only block metadata: heading level (plain text lines only —
+  // quote/list context wins) and non-default alignment. Their presence
+  // flips the send path to the rich-HTML wire format.
+  if (kind === "text" && node.type.name === "heading") {
+    const level = node.attrs.level;
+    line.block = level === 1 ? "h1" : level === 2 ? "h2" : "h3";
+  }
+  const ta = node.attrs.textAlign;
+  if (ta === "center" || ta === "right") line.align = ta;
+  return line;
 }
 
 /** Flatten one block node into wire lines. The schema keeps quote/list
@@ -231,7 +294,7 @@ function pushBlockLines(node: PMNode, kind: ComposerLine["kind"], lines: Compose
   }
 }
 
-function pmToComposerDoc(doc: PMNode): ComposerDoc {
+export function pmToComposerDoc(doc: PMNode): ComposerDoc {
   const lines: ComposerLine[] = [];
   doc.forEach((block) => pushBlockLines(block, "text", lines));
   if (!lines.length) lines.push({ kind: "text", spans: [] });
@@ -255,6 +318,7 @@ function spanToTextJson(span: ComposerSpan): JsonNode {
   }
   if (span.link) marks.push({ type: "link", attrs: { href: span.link } });
   if (span.color) marks.push({ type: "textColor", attrs: { color: span.color } });
+  if (span.size) marks.push({ type: "textSize", attrs: { size: span.size } });
   const node: JsonNode = { type: "text", text: span.text };
   if (marks.length) node.marks = marks;
   return node;
@@ -262,7 +326,20 @@ function spanToTextJson(span: ComposerSpan): JsonNode {
 
 function lineToParagraphJson(line: ComposerLine): JsonNode {
   const content = line.spans.filter((s) => s.text.length > 0).map(spanToTextJson);
-  return content.length ? { type: "paragraph", content } : { type: "paragraph" };
+  const align = line.align === "center" || line.align === "right" ? line.align : null;
+  if (line.kind === "text" && line.block) {
+    const level = line.block === "h1" ? 1 : line.block === "h2" ? 2 : 3;
+    return {
+      type: "heading",
+      attrs: { level, ...(align ? { textAlign: align } : {}) },
+      ...(content.length ? { content } : {}),
+    };
+  }
+  return {
+    type: "paragraph",
+    ...(align ? { attrs: { textAlign: align } } : {}),
+    ...(content.length ? { content } : {}),
+  };
 }
 
 function composerDocToPmJson(doc: ComposerDoc): JsonNode[] {
@@ -306,17 +383,23 @@ function plainTextToDoc(text: string): ComposerDoc {
  * Custom marks (spoiler ||…|| and <font color>)
  * ============================================================= */
 
-const Spoiler = Mark.create({
+export const Spoiler = Mark.create({
   name: "spoiler",
   parseHTML() {
-    return [{ tag: "span[data-spoiler]" }];
+    return [
+      { tag: "span[data-spoiler]" },
+      // Stored rich-HTML bodies (format 'html') carry the whitelist's
+      // literal spoiler class — accepted so the inline message editor
+      // hydrates persisted spoilers.
+      { tag: `span.${RICH_SPOILER_CLASS}` },
+    ];
   },
   renderHTML({ HTMLAttributes }) {
     return ["span", mergeAttributes(HTMLAttributes, { "data-spoiler": "", class: "tk-composer-spoiler" }), 0];
   },
 });
 
-const TextColor = Mark.create({
+export const TextColor = Mark.create({
   name: "textColor",
   addAttributes() {
     return {
@@ -333,13 +416,70 @@ const TextColor = Mark.create({
           return color ? { color } : false;
         },
       },
+      // Stored rich-HTML bodies carry `style="color: #hex"` spans.
+      // Style rules are non-consuming, so one span carrying both color
+      // and font-size hydrates both marks.
+      {
+        style: "color",
+        getAttrs: (value) => {
+          const hex = cssColorToHex(String(value));
+          return hex ? { color: hex } : false;
+        },
+      },
     ];
   },
   renderHTML({ HTMLAttributes, mark }) {
     const color = typeof mark.attrs.color === "string" ? mark.attrs.color : "";
+    // The wire keeps the RAW hex; only the preview ink runs through the
+    // same legibility clamp the feed/export apply (resolveMessageColor
+    // against the active theme background, stamped on <body> by
+    // applyTheme) — otherwise a black swatch on a dark theme paints the
+    // draft invisible while the SENT line renders nudged.
+    const themeBg =
+      typeof document !== "undefined" ? document.body.getAttribute("data-theme-bg") : null;
+    const ink = resolveMessageColor(color, themeBg) ?? color;
     // Inline style ATTRIBUTE — allowed by the prod CSP's
     // style-src-attr 'unsafe-inline' (unlike <style> elements).
-    return ["span", mergeAttributes(HTMLAttributes, { style: `color: ${color}` }), 0];
+    return ["span", mergeAttributes(HTMLAttributes, { style: `color: ${ink}` }), 0];
+  },
+});
+
+export const TextSize = Mark.create({
+  name: "textSize",
+  addAttributes() {
+    return {
+      size: { default: null },
+    };
+  },
+  parseHTML() {
+    return [
+      {
+        tag: "span[data-size]",
+        getAttrs: (el) => {
+          if (typeof el === "string") return false;
+          const size = el.getAttribute("data-size");
+          return size === "small" || size === "large" || size === "huge" ? { size } : false;
+        },
+      },
+      // Stored rich-HTML bodies carry the exact bucket em constants as
+      // `style="font-size: …em"` spans; anything else is not a bucket
+      // and stays unmarked.
+      {
+        style: "font-size",
+        getAttrs: (value) => {
+          const bucket = richFontSizeEmToBucket(String(value));
+          return bucket ? { size: bucket } : false;
+        },
+      },
+    ];
+  },
+  renderHTML({ HTMLAttributes, mark }) {
+    const size = mark.attrs.size as ComposerTextSize;
+    const em = FONT_SIZE_EM[size] ?? "1em";
+    // Same em buckets the chat renderer uses, so the editor previews
+    // exactly what the sent line will look like. Style ATTRIBUTE, not
+    // a <style> element, so prod CSP is satisfied.
+    return ["span", mergeAttributes(HTMLAttributes, { "data-size": size, style: `font-size: ${em}` }), 0];
   },
 });
 
@@ -374,6 +514,7 @@ export function ComposerEditor({
   onRequestLink,
   handleRef,
   disabled,
+  richEnabled,
   placeholder,
   ariaLabel,
 }: Props) {
@@ -405,6 +546,14 @@ export function ComposerEditor({
   // The editor instance for callbacks that are wired up at creation
   // time (handlePaste) and therefore can't close over the result.
   const editorRefInternal = useRef<Editor | null>(null);
+  // Rebuild bookkeeping: richEnabled flips destroy and recreate the
+  // Tiptap instance. Autofocus belongs to the FIRST instance only —
+  // a rebuild may fire while the user is typing in some other field,
+  // so it restores focus only when the destroyed instance held it
+  // (destroying a focused view fires no blur, so the flag survives).
+  const hadEditorRef = useRef(false);
+  const editorFocusedRef = useRef(false);
+  const rebuildSyncRef = useRef(false);
 
   const shortcuts = useMemo(
     () =>
@@ -434,10 +583,25 @@ export function ComposerEditor({
 
   const emitState = useCallback((editor: Editor) => {
     const { state } = editor;
+    const sizeAttr = editor.getAttributes("textSize").size as unknown;
+    const headingLevel = editor.isActive("heading")
+      ? (editor.getAttributes("heading").level as unknown)
+      : null;
     onStateChangeRef.current({
       plainText: docPlainText(state.doc),
       caretStart: textOffsetOfPos(state.doc, state.selection.from),
       caretEnd: textOffsetOfPos(state.doc, state.selection.to),
+      size:
+        sizeAttr === "small" || sizeAttr === "large" || sizeAttr === "huge"
+          ? sizeAttr
+          : "normal",
+      block:
+        headingLevel === 1 ? "h1" : headingLevel === 2 ? "h2" : headingLevel === 3 ? "h3" : "normal",
+      align: editor.isActive({ textAlign: "center" })
+        ? "center"
+        : editor.isActive({ textAlign: "right" })
+          ? "right"
+          : "left",
       active: {
         bold: editor.isActive("bold"),
         italic: editor.isActive("italic"),
@@ -456,10 +620,13 @@ export function ComposerEditor({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        // Only what the chat grammar supports: no headings, no ordered
-        // lists, no hr, no code blocks. hardBreak stays off so every
-        // line is its own block (the \n mapping relies on it).
-        heading: false,
+        // The chat grammar's inline set plus rich-only headings
+        // (H1-H3, shipped via the rich-HTML message format — schema'd
+        // only where that format can actually be SENT, so forum-mode
+        // "# " stays literal). No ordered lists, no hr, no code
+        // blocks. hardBreak stays off so every line is its own block
+        // (the \n mapping relies on it).
+        heading: richEnabled ? { levels: [1, 2, 3] } : false,
         codeBlock: false,
         horizontalRule: false,
         orderedList: false,
@@ -480,6 +647,18 @@ export function ComposerEditor({
       // structure the line-based wire format would drop or flatten.
       Blockquote.extend({ content: "paragraph+" }),
       ListItem.extend({ content: "paragraph" }),
+      // Rich-only alignment (center/right ship via the rich-HTML wire
+      // format; left is the default flow — off entirely when the rich
+      // format is, along with its keymap). Applies to paragraphs and
+      // headings — list items / quotes align through their paragraphs.
+      ...(richEnabled
+        ? [
+            TextAlign.configure({
+              types: ["heading", "paragraph"],
+              alignments: ["left", "center", "right"],
+            }),
+          ]
+        : []),
       Underline,
       Link.configure({
         openOnClick: false,
@@ -494,6 +673,7 @@ export function ComposerEditor({
       }),
       Spoiler,
       TextColor,
+      TextSize,
       shortcuts,
     ],
     content: {
@@ -501,11 +681,13 @@ export function ComposerEditor({
       content: composerDocToPmJson(parseChatMarkdown(initialValueRef.current)),
     },
     editable: !disabled,
-    autofocus: "end",
+    autofocus: !hadEditorRef.current || editorFocusedRef.current ? "end" : false,
     // Prod CSP drops un-nonced <style> tags; all editor styling lives
     // in styles.css under .keep-composer-editor instead.
     injectCSS: false,
     onCreate: ({ editor: e }) => {
+      if (hadEditorRef.current) rebuildSyncRef.current = true;
+      hadEditorRef.current = true;
       lastValueRef.current = initialValueRef.current;
       emitState(e);
     },
@@ -517,7 +699,13 @@ export function ComposerEditor({
       emitState(e);
     },
     onSelectionUpdate: ({ editor: e }) => emitState(e),
-    onBlur: () => onBlurRef.current?.(),
+    onFocus: () => {
+      editorFocusedRef.current = true;
+    },
+    onBlur: () => {
+      editorFocusedRef.current = false;
+      onBlurRef.current?.();
+    },
     editorProps: {
       attributes: {
         class:
@@ -567,6 +755,18 @@ export function ComposerEditor({
           // Rich paste: sanitize down to the supported mark set;
           // anything unsupported drops to plain text (never raw HTML).
           doc = htmlClipboardToComposerDoc(html);
+          if (!richEnabled) {
+            // Headings/alignment aren't in this surface's schema (no
+            // rich wire format) — degrade pasted ones to plain lines
+            // instead of feeding the schema unknown node types.
+            doc = {
+              lines: doc.lines.map(({ block: _block, align: _align, ...line }) => {
+                void _block;
+                void _align;
+                return line;
+              }),
+            };
+          }
           if (!doc.lines.some((l) => l.spans.length > 0) && text) doc = plainTextToDoc(text);
         } else if (text) {
           // Plain-text paste stays byte-exact: inserted literally,
@@ -590,13 +790,21 @@ export function ComposerEditor({
         return true;
       },
     },
-  });
+  // Rich-capability flips (flat room ⇄ forum room) change the SCHEMA
+  // (heading node, textAlign attrs), which needs a fresh editor; the
+  // external-value sync effect below restores the current draft into it.
+  }, [richEnabled]);
   editorRefInternal.current = editor;
 
   // External value sync (prefills, history recall, compose-set chips,
-  // send-clears). Mirrors the old textarea: focus + caret to end.
+  // send-clears). Mirrors the old textarea: focus + caret to end —
+  // except on the catch-up pass right after a richEnabled rebuild,
+  // where grabbing focus would steal the keyboard from another field
+  // (the was-focused case is covered by the rebuild's autofocus).
   useEffect(() => {
     if (!editor) return;
+    const rebuildSync = rebuildSyncRef.current;
+    rebuildSyncRef.current = false;
     if (value === lastValueRef.current) return;
     lastValueRef.current = value;
     editor.commands.setContent(
@@ -605,7 +813,7 @@ export function ComposerEditor({
     );
     const end = editor.state.doc.content.size;
     editor.commands.setTextSelection(end);
-    if (!editor.isFocused) editor.commands.focus("end");
+    if (!editor.isFocused && !rebuildSync) editor.commands.focus("end");
     emitState(editor);
   }, [editor, value, emitState]);
 
@@ -851,6 +1059,20 @@ export function ComposerEditor({
             .setTextSelection({ from, to: from + placeholderText.length })
             .run();
         }),
+      applySize: (size, sel) =>
+        withEditor((e) => {
+          const chain = e.chain().focus();
+          if (sel && sel.start !== sel.end) {
+            const doc = e.state.doc;
+            const from = posOfTextOffset(doc, Math.min(sel.start, sel.end));
+            const to = posOfTextOffset(doc, Math.max(sel.start, sel.end));
+            chain.setTextSelection({ from, to });
+          }
+          // With a collapsed selection setMark/unsetMark set the TYPING
+          // style (stored marks), mirroring Gmail's size behavior.
+          if (size === "normal") chain.unsetMark("textSize").run();
+          else chain.setMark("textSize", { size }).run();
+        }),
       applyLink: (url, placeholderText) =>
         withEditor((e) => {
           if (e.state.selection.empty) {
@@ -888,6 +1110,29 @@ export function ComposerEditor({
             ])
             .run();
         }),
+      applyBlock: (block) =>
+        withEditor((e) => {
+          // No heading node in the schema (richEnabled off) → no rich
+          // wire format on this surface; the toolbar hides the control
+          // but the handle stays callable, so fail as a no-op.
+          if (!e.schema.nodes.heading) return;
+          if (block === "normal") {
+            e.chain().focus().setParagraph().run();
+            return;
+          }
+          const level = block === "h1" ? 1 : block === "h2" ? 2 : 3;
+          e.chain().focus().setHeading({ level }).run();
+        }),
+      applyAlign: (align) =>
+        withEditor((e) => {
+          // TextAlign is omitted when richEnabled is off (see above).
+          if (typeof e.commands.setTextAlign !== "function") return;
+          e.chain().focus().setTextAlign(align).run();
+        }),
+      getRichPayload: () => {
+        const doc = normalizeComposerDoc(pmToComposerDoc(editor.state.doc));
+        return composerDocNeedsRichFormat(doc) ? composerDocToRichHtml(doc) : null;
+      },
     };
     handleRef.current = handle;
     // Re-emit once the handle exists: the parent passes it to the

@@ -38,6 +38,23 @@ async function resolveProfileStyleKey(
 }
 
 /**
+ * Unverified-email marker (migration 0353), spread into profile payloads.
+ * Present only while the "Denote unverified users" admin toggle is on AND
+ * the owning account has no email_verified_at — absent otherwise so the
+ * default-off wire stays byte-identical. Legacy accounts were backfilled
+ * verified by migration 0257, so this can only ever mark accounts created
+ * while verification was enabled and still unconfirmed.
+ */
+async function unverifiedMarker(
+  db: import("../../db/index.js").Db,
+  owner: { emailVerifiedAt: Date | null },
+): Promise<{ unverified: true } | Record<string, never>> {
+  if (owner.emailVerifiedAt) return {};
+  const settings = await getSettings(db);
+  return settings.denoteUnverifiedUsers ? { unverified: true } : {};
+}
+
+/**
  * Resolve the identity's equipped name-style key + per-user config so
  * a profile view can paint the username with the user's chosen
  * cosmetic, name styles are show-off cosmetics, not chat-only
@@ -588,6 +605,7 @@ async function buildMasterProfileView(
       profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id, profileServerId),
       publicProfileBgUrl: u.publicProfileBgUrl,
       publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
+      ...(await unverifiedMarker(db, u)),
     },
   };
 }
@@ -651,6 +669,7 @@ async function buildCharacterProfileView(
       profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id, profileServerId),
       publicProfileBgUrl: c.publicProfileBgUrl,
       publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
+      ...(await unverifiedMarker(db, owner)),
       ...(showOwner ? { ownerUsername: owner.username } : {}),
     },
   };
@@ -937,6 +956,7 @@ async function resolveProfileView(
         profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id, profileServerId),
         publicProfileBgUrl: u.publicProfileBgUrl,
         publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
+        ...(await unverifiedMarker(db, u)),
       },
     };
   }
@@ -1008,6 +1028,7 @@ async function resolveProfileView(
       profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id, profileServerId),
       publicProfileBgUrl: c.publicProfileBgUrl,
       publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
+      ...(await unverifiedMarker(db, owner)),
       ...(showOwner ? { ownerUsername: owner.username } : {}),
     },
   };
@@ -1102,12 +1123,13 @@ async function lookupRandomProfile(
         profileBannerUrl: await getEquippedProfileBannerUrl(db, "user", u.id, profileServerId),
         publicProfileBgUrl: u.publicProfileBgUrl,
         publicProfileBgMode: u.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
+        ...(await unverifiedMarker(db, u)),
       },
     };
   }
 
   const row = (await db
-    .select({ char: characters, ownerThemeJson: users.themeJson, ownerStyleKey: users.styleKey, ownerUsername: users.username, ownerLanguages: users.languages })
+    .select({ char: characters, ownerThemeJson: users.themeJson, ownerStyleKey: users.styleKey, ownerUsername: users.username, ownerLanguages: users.languages, ownerEmailVerifiedAt: users.emailVerifiedAt })
     .from(characters)
     .innerJoin(users, eq(users.id, characters.userId))
     .where(and(
@@ -1167,6 +1189,7 @@ async function lookupRandomProfile(
       profileBannerUrl: await getEquippedProfileBannerUrl(db, "character", c.id, profileServerId),
       publicProfileBgUrl: c.publicProfileBgUrl,
       publicProfileBgMode: c.publicProfileBgMode as "cover" | "contain" | "tile" | "stretch",
+      ...(await unverifiedMarker(db, { emailVerifiedAt: row.ownerEmailVerifiedAt })),
       ...(showOwner ? { ownerUsername: row.ownerUsername } : {}),
     },
   };

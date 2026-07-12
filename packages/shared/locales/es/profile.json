@@ -190,6 +190,10 @@
       "storyteller": "Narrador",
       "loremaster": "Maestro del lore"
     },
+    "unverified": {
+      "chip": "Sin verificar",
+      "title": "Esta cuenta aún no confirma su correo; podría ser una cuenta desechable."
+    },
     "mod": {
       "badge": "Mod",
       "visibleToModsOnly": "Visible solo para moderadores.",

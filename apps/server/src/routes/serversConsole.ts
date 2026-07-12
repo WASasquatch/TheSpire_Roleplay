@@ -433,6 +433,9 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
      *  style info room; 'roles' additionally admits the room's designated
      *  usergroups (picked in the editor after creation). */
     postMode: z.enum(["everyone", "staff", "roles"]).optional(),
+    /** Per-room rich-text toggle (migration 0354): true = the composer's
+     *  simple formatting set (no headings/alignment; markdown wire). */
+    richTextDisabled: z.boolean().optional(),
   }).strict();
 
   /** Normalize a console icon field: null/blank clears, otherwise the same
@@ -499,6 +502,7 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         ? body.categoryId
         : await defaultRoomCategoryFor(db, gate.server.id, gate.me.id),
       postMode: body.postMode ?? "everyone",
+      richTextDisabled: body.richTextDisabled ?? false,
     });
     // Optional 18+ channel alongside the fresh room. Failure here is
     // non-fatal for the create itself (the room exists); surface the
@@ -553,6 +557,10 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
      *  both retention passes. The console's lifetime select clears
      *  messageExpiryMinutes alongside so the two knobs never contradict. */
     retentionExempt: z.boolean().optional(),
+    /** Per-room rich-text toggle (migration 0354): true = the composer's
+     *  simple formatting set (no headings/alignment; markdown wire), and
+     *  the ingest/edit chokepoints degrade rich bodies accordingly. */
+    richTextDisabled: z.boolean().optional(),
     /** Who can SEE the room (room_role_gates kind='access', migration 0349).
      *  Full-replace semantics: the sent list becomes the room's access rows;
      *  null/[] clears them (the room turns public again). Ids must be this
@@ -637,6 +645,10 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     if (body.sortOrder !== undefined) update.sortOrder = body.sortOrder;
     if (body.postMode !== undefined) update.postMode = body.postMode;
     if (body.retentionExempt !== undefined) update.retentionExempt = body.retentionExempt;
+    // Rich-text toggle (migration 0354): a plain column write — the
+    // broadcastRoomState below refreshes every open composer's room summary
+    // live, and enforcement reads the row per send, so no per-socket stamp.
+    if (body.richTextDisabled !== undefined) update.richTextDisabled = body.richTextDisabled;
     // One default room PER server (rooms_one_default_per_server). Flag-on first
     // clears whichever room in THIS server currently holds it.
     if (body.isDefault === true && !room.isDefault) {

@@ -134,7 +134,8 @@ export async function registerServerReportRoutes(
           // wiped body; the mod still sees what was reported, but if the
           // author already removed it the queue makes that visible.
           messageBody: msg
-            ? (msg.deletedAt ? "[message removed]" : msg.body)
+            // Rich-format rows report their VISIBLE text, never markup.
+            ? (msg.deletedAt ? "[message removed]" : (msg.format === "html" ? (msg.bodyText ?? msg.body) : msg.body))
             : "[message gone]",
           messageDisplayName: msg?.displayName ?? "(unknown)",
           // The reported author, so a mod can open their profile to verify.

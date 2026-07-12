@@ -48,6 +48,7 @@
       "messagesCapped": "Messages capped at {{max}} chars.",
       "messagesCappedExpanded": "Messages capped at {{max}} chars after inline-command expansion.",
       "forumPostsCapped": "Forum posts capped at {{max}} chars.",
+      "richTooLarge": "That message carries too much formatting. Simplify the styling or shorten it.",
       "rateLimit": "Slow down - try again in {{seconds}}s.",
       "wrongRoom": "You aren't in that room. Try /go <room> to switch.",
       "mutedInRoom": "You're muted in this room for another {{duration}}.",
@@ -535,7 +536,7 @@
       "invalidEmail": "Invalid email",
       "acceptDisclaimer": "you must accept the disclaimer to register",
       "birthdate": "enter your date of birth",
-      "usernameRule": "username must be 2-40 chars: ASCII letters/numbers and _ - ' . ` plus NBSP (Alt+0160); regular spaces and Unicode confusables blocked",
+      "usernameRule": "that username won't work - use 2-40 letters, numbers, or _ - ' . ` (no spaces; try an underscore instead, like Oak_Tavern)",
       "stringTooShort": "String must contain at least {{n}} character(s)",
       "stringTooLong": "String must contain at most {{n}} character(s)"
     }

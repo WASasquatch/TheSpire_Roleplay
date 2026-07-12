@@ -22,9 +22,12 @@ import {
   EXPORT_MANIFEST_VERSION,
   EXPORT_MAX_MESSAGES,
   EXPORT_SIGN_ALGO,
+  escapeHtml,
   isModeratorRole,
+  mapRichHtmlTextNodes,
   mentionsField,
   parseNpcStats,
+  richHtmlToText,
 } from "@thekeep/shared";
 import { escapeLike } from "../lib/nameLookup.js";
 import { getClearedAt } from "../lib/roomClears.js";
@@ -691,7 +694,9 @@ export async function registerRoomsRoutes(
           eq(messages.roomId, room.id),
           isNull(messages.deletedAt),
           sql`${messages.kind} != 'system'`,
-          sql`${messages.body} LIKE ${like} ESCAPE '\\'`,
+          // Rich-format rows (migration 0352) match on their VISIBLE
+          // text mirror; md rows keep matching the raw body.
+          sql`COALESCE(${messages.bodyText}, ${messages.body}) LIKE ${like} ESCAPE '\\'`,
           // SOFT tier (age plan, Phase 2): rows stamped 18+ at write time
           // (a flipped-back room's 18+ era; Phase 3 NSFW topics) are hidden
           // from anyone who can't see NSFW, including adults with the
@@ -743,7 +748,8 @@ export async function registerRoomsRoutes(
       // closest to the search input, see the SearchBar component.
       const needle = q.toLowerCase();
       const hits = visibleRows.map((m): MessageSearchHit & { _ts: number } => {
-        const lc = m.body.toLowerCase();
+        const matchText = m.format === "html" ? (m.bodyText ?? "") : m.body;
+        const lc = matchText.toLowerCase();
         let count = 0;
         let idx = 0;
         while ((idx = lc.indexOf(needle, idx)) !== -1) { count++; idx += needle.length; }
@@ -753,7 +759,7 @@ export async function registerRoomsRoutes(
           userId: m.userId,
           displayName: m.displayName,
           kind: m.kind,
-          snippet: m.body,
+          snippet: matchText,
           createdAt: +m.createdAt,
           relevance: count,
           ...(m.replyToId ? { replyToId: m.replyToId } : {}),
@@ -874,6 +880,9 @@ export async function registerRoomsRoutes(
       displayName: m.displayName,
       kind: m.kind,
       body: m.deletedAt ? "" : m.body,
+      ...(m.format === "html"
+        ? { format: "html" as const, bodyText: m.deletedAt ? "" : m.bodyText }
+        : {}),
       color: m.color,
       createdAt: +m.createdAt,
       ...(m.toUserId ? { toUserId: m.toUserId } : {}),
@@ -904,7 +913,7 @@ export async function registerRoomsRoutes(
       // viewers get the row without it; their renderer paints the bare
       // "[message removed]" placeholder. The flag is resolved once
       // above this map so we don't fire a permission lookup per row.
-      ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
+      ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.format === "html" ? (m.bodyText ?? m.body) : m.body } : {}),
     }));
     // Minor language filter (§J): the jump window masks bodies / titles /
     // quote snippets for an under-18 viewer, same as the live backlog.
@@ -1025,6 +1034,9 @@ export async function registerRoomsRoutes(
       displayName: m.displayName,
       kind: m.kind,
       body: m.deletedAt ? "" : m.body,
+      ...(m.format === "html"
+        ? { format: "html" as const, bodyText: m.deletedAt ? "" : m.bodyText }
+        : {}),
       color: m.color,
       createdAt: +m.createdAt,
       ...(m.toUserId ? { toUserId: m.toUserId } : {}),
@@ -1049,7 +1061,7 @@ export async function registerRoomsRoutes(
       ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
       ...(m.tier != null ? { tier: m.tier } : {}),
-      ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
+      ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.format === "html" ? (m.bodyText ?? m.body) : m.body } : {}),
     }));
     // Minor language filter (§J): older pages mask for an under-18 viewer
     // exactly like the first-50 backlog (sendRoomBacklogTo), so scrolling
@@ -1192,6 +1204,33 @@ export async function registerRoomsRoutes(
     const minorMaskedById = new Map<string, string>();
     if (!me.isAdult) {
       for (const m of capped) {
+        // Rich-format rows mask TEXT NODES only (running the matcher
+        // over markup could split tags); md rows mask the raw body.
+        if (m.format === "html") {
+          let changed = false;
+          const maskedHtml = mapRichHtmlTextNodes(m.body, (text) => {
+            const masked = maskForMinors(text);
+            if (masked !== null) changed = true;
+            return masked ?? text;
+          });
+          // Split-word guard (same rule as maskMessageForMinors): a
+          // filtered word straddling inline marks is invisible per-node,
+          // so re-run the matcher over the CONTIGUOUS visible text of the
+          // per-node result. A residual hit fails safe: the row exports as
+          // escaped masked plaintext (one <p> per line — still valid under
+          // the render re-sanitizer), losing formatting rather than
+          // leaking into the document or the signed manifest.
+          const residual = maskForMinors(richHtmlToText(maskedHtml));
+          if (residual !== null) {
+            minorMaskedById.set(
+              m.id,
+              residual.split("\n").map((line) => `<p>${escapeHtml(line) || "<br />"}</p>`).join(""),
+            );
+          } else if (changed) {
+            minorMaskedById.set(m.id, maskedHtml);
+          }
+          continue;
+        }
         const masked = maskForMinors(m.body);
         if (masked !== null) minorMaskedById.set(m.id, masked);
       }
@@ -1203,6 +1242,7 @@ export async function registerRoomsRoutes(
       kind: m.kind,
       displayName: m.displayName,
       body: exportBody(m),
+      ...(m.format === "html" ? { format: "html" as const } : {}),
       color: m.color,
       createdAt: +m.createdAt,
       toDisplayName: m.toDisplayName,
@@ -1463,6 +1503,7 @@ export async function registerRoomsRoutes(
           displayName: m.displayName,
           kind: m.kind,
           body: m.body,
+          ...(m.format === "html" ? { format: "html" as const, bodyText: m.bodyText } : {}),
           color: m.color,
           createdAt: +m.createdAt,
           ...(m.toUserId ? { toUserId: m.toUserId } : {}),
@@ -1492,7 +1533,7 @@ export async function registerRoomsRoutes(
           // NSFW tag/stamp (age plan, Phase 3) — drives the thread header's
           // NSFW chip. Only adults ever reach this line for a tagged topic.
           ...(m.isNsfw ? { isNsfw: true } : {}),
-          ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
+          ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.format === "html" ? (m.bodyText ?? m.body) : m.body } : {}),
         };
       }
 
@@ -1791,6 +1832,7 @@ export async function registerRoomsRoutes(
           displayName: m.displayName,
           kind: m.kind,
           body: m.body,
+          ...(m.format === "html" ? { format: "html" as const, bodyText: m.bodyText } : {}),
           color: m.color,
           createdAt: +m.createdAt,
           ...(m.toUserId ? { toUserId: m.toUserId } : {}),
@@ -1820,7 +1862,7 @@ export async function registerRoomsRoutes(
           // NSFW tag (age plan, Phase 3) — the built-in chip. Rows carrying
           // it only ever reach viewers who can see NSFW (filter above).
           ...(m.isNsfw ? { isNsfw: true } : {}),
-          ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.body } : {}),
+          ...(canSeeOriginalBody && m.deletedAt ? { originalBody: m.format === "html" ? (m.bodyText ?? m.body) : m.body } : {}),
           ...(flair
             ? {
                 authorRankKey: flair.rankKey,

@@ -34,6 +34,7 @@ const FORMATTING_ROWS: Array<{ syntax: string; example: string; note?: string }>
   { syntax: "@username", example: "thanks @sigrid!", note: "click to open their profile; matches a master account or active character" },
   { syntax: "@world:slug", example: "anyone for a game in @world:ironreach?", note: "click to open the world viewer; slug is the world's URL slug (lowercase + hyphens)" },
   { syntax: `<font color="#hex">text</font>`, example: `<font color="#a83232">red text</font>`, note: "puts a one-off color on a chunk of text. Color must be a 3- or 6-digit hex literal; anything else falls through as plain text. The viewer's theme nudges the value toward legibility if it would disappear against their chat background." },
+  { syntax: `<font size="1-4">text</font>`, example: `<font size="4">huge text</font>`, note: "sizes a chunk of text in four steps: 1 small, 2 normal, 3 large, 4 huge. Numbers outside 1-4 snap to the nearest step, and you can combine color and size on one tag. The toolbar's size menu writes this for you." },
   { syntax: "\\* escape", example: "\\*boinks Kaal on the head\\*", note: "put a backslash before any of * _ ~ | ` [ ] ( ) ! < > @ \\ to keep it literal. Use `\\@name` to type an @username without pinging, or `\\!cmd` to write the command name without firing it." },
 ];
 
@@ -155,10 +156,27 @@ export function FormattingHelp() {
   return (
     <div className="space-y-3 text-xs">
       <p className="text-keep-muted">
-        Chat messages support a small set of formatting shortcuts.
-        Headings, lists, tables, and other big-block stuff stays off
-        in chat. Profile and world pages can use more (see the
-        Profile / world HTML section below).
+        Chat messages support the formatting shortcuts below, and the
+        toolbar above the message box covers most of them with a click.
+        Pasting from Gmail, Docs, or Word keeps its formatting too.
+        Tables stay off in chat. Profile and world pages can use more
+        (see the Profile / world HTML section below).
+      </p>
+      <p className="text-keep-muted">
+        A few toolbar tools have no typed shortcut. The{" "}
+        <b>Heading</b> dropdown turns the current line into a big
+        Heading 1, 2, or 3 (typing <code className="font-mono text-keep-action">#</code>,{" "}
+        <code className="font-mono text-keep-action">##</code>, or{" "}
+        <code className="font-mono text-keep-action">###</code> plus a
+        space at the start of a line does the same). The three{" "}
+        <b>alignment</b> buttons push a line to the left, center, or
+        right. The <b>quote</b> and <b>list</b> buttons turn lines into
+        a quote block or a bulleted list (typing{" "}
+        <code className="font-mono text-keep-action">&gt;</code> or{" "}
+        <code className="font-mono text-keep-action">-</code> plus a
+        space at the start of a line works too). Headings and alignment
+        are for chat rooms only, so those controls stay hidden in
+        forums.
       </p>
       <p className="text-[11px] text-keep-muted">
         Tip: highlight a word in any text box to see synonyms.
@@ -498,7 +516,9 @@ export function FormattingHelp() {
           </li>
           <li>
             <b>Newlines pass through as text.</b> Multi-line messages stack
-            their lines but don't get block-level formatting.
+            their lines. In chat, lines starting with <code>&gt; </code> or{" "}
+            <code>- </code> group into quote blocks and bullet lists; action
+            lines like /me keep them literal.
           </li>
           <li>
             <b>Images stay opt-in.</b> Even when a URL ends in

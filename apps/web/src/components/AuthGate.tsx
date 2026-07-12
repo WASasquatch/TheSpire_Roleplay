@@ -819,6 +819,11 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
         if (!captcha || !captchaAnswer.trim()) {
           throw new Error(t("auth.captchaRequired"));
         }
+        // Backstop for the inline username hints (Enter-key submits can slip
+        // past a disabled button in some browsers). Friendly copy only.
+        if (!usernameLocalValid) {
+          throw new Error(t(usernameHasSpace ? "auth.usernameSpaceWarning" : "auth.usernameInvalid"));
+        }
         // Only under-18 signups carry the isolation opt-in; the checkbox is
         // only shown to them, and the server clamps it to minors anyway.
         const registeringAsMinor = enteredAge !== null && enteredAge < 18;
@@ -828,7 +833,7 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             email,
-            username,
+            username: usernameTrimmed,
             password,
             acceptDisclaimer: true,
             birthdate,
@@ -839,15 +844,17 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
           }),
         });
         if (!res.ok) {
-          // The captcha is single-use server-side, so any failed submit
-          // (wrong answer, dup username, expired token, etc.) leaves the
-          // current id consumed. Drop it so the next render re-fetches.
-          refreshCaptcha();
           // Zod validation failures arrive as `{ error: "validation",
           // issues: [{ path, message }] }`. Surfacing just `error` left
           // the user staring at the word "validation" with no idea
           // which field failed, prefer the first issue's message.
-          const body = await res.json().catch(() => ({} as { error?: string; issues?: Array<{ path?: string; message: string }> }));
+          const body = await res.json().catch(() => ({} as { error?: string; code?: string; issues?: Array<{ path?: string; message: string }> }));
+          // The server now verifies the captcha LAST, so field problems and
+          // the name-in-use conflict no longer consume the token — keep the
+          // current challenge on those failures (fix the field, resubmit).
+          // Only an actual captcha failure (`code: "CAPTCHA"`) burns it, so
+          // only then do we fetch a fresh one.
+          if (body.code === "CAPTCHA") refreshCaptcha();
           const firstIssue = body.issues?.[0];
           const detail = firstIssue
             ? `${firstIssue.path ? `${firstIssue.path}: ` : ""}${firstIssue.message}`
@@ -913,10 +920,27 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
   // Server enforces `accepted` too; this is the UX gate.
   const disclaimerText = branding.registerDisclaimerHtml.trim();
   const needsAcceptance = mode === "register";
+  // Friendly client-side username pre-check (register only). Mirrors the
+  // server's allow-list — letters, numbers, _ - ' . ` and the invisible
+  // non-breaking space — WITHOUT surfacing any of that as copy: the space
+  // warning + one-click underscore fix (same steering CreateCharacterModal
+  // gives character names) covers the case people actually hit. The server
+  // stays authoritative; this just saves a round-trip.
+  // Validated value = SUBMITTED value (the register POST sends
+  // `usernameTrimmed`), so the pre-check can never bless a name the server
+  // then rejects. Only ASCII edge whitespace is stripped — NBSP is part of
+  // the allow-list and must survive wherever the user put it.
+  const usernameTrimmed = username.normalize("NFC").replace(/^[ \t]+|[ \t]+$/g, "");
+  const usernameHasSpace = mode === "register" && /[ \t]/.test(usernameTrimmed);
+  const usernameLocalValid =
+    usernameTrimmed.length >= 2 &&
+    usernameTrimmed.length <= 40 &&
+    // eslint-disable-next-line no-irregular-whitespace -- NBSP (U+00A0) mirrors the server allow-list
+    /^[a-zA-Z0-9_\-'.` ]+$/.test(usernameTrimmed);
   const canSubmit = !submitting && (
     mode === "login"
       ? true
-      : accepted && birthdate !== "" && !!captcha && captchaAnswer.trim() !== ""
+      : accepted && birthdate !== "" && !!captcha && captchaAnswer.trim() !== "" && usernameLocalValid
   );
 
   // "finish" landing: hand off to the dedicated finish-signup screen (it
@@ -1073,6 +1097,27 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
               autoFocus
             />
             <Field label={t("auth.masterUsername")} value={username} onChange={setUsername} autoComplete="username" />
+            {/* Friendly username pre-validation. Same space-steering the
+                character creator has: spaces break name-taking commands, so
+                offer the one-click underscore fix instead of a server
+                round-trip that would also have burned the captcha. Plain
+                language only — the server's rule copy is the backstop. */}
+            {usernameHasSpace ? (
+              <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-[11px] text-keep-accent">
+                {t("auth.usernameSpaceWarning")}
+                <button
+                  type="button"
+                  onClick={() => setUsername((n) => n.trim().replace(/[ \t]+/g, "_"))}
+                  className="ml-1 rounded border border-keep-accent/50 px-1.5 py-0.5 font-semibold uppercase tracking-wide hover:bg-keep-accent/20"
+                >
+                  {t("auth.usernameUseUnderscores")}
+                </button>
+              </div>
+            ) : usernameTrimmed.length >= 2 && !usernameLocalValid ? (
+              <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-[11px] text-keep-accent">
+                {t("auth.usernameInvalid")}
+              </div>
+            ) : null}
           </>
         ) : (
           <Field

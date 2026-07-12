@@ -50,6 +50,8 @@ export const SERVER_CONSOLE_SEARCH_ENTRIES: readonly ServerConsoleSearchEntry[] 
   // mounts per-room, so an unopened editor just tab-switches — harmless by
   // the anchor contract above).
   { key: "console.rooms.postModeLabel", tab: "rooms", also: ["console.rooms.postModeStaff", "console.rooms.postModeRoles", "console.rooms.postModeHint"] },
+  // Text formatting (migration 0354): Full rich text / Simple formatting.
+  { key: "console.rooms.richTextLabel", tab: "rooms", also: ["console.rooms.richTextFull", "console.rooms.richTextSimple", "console.rooms.richTextHint"] },
   { key: "console.rooms.accessLabel", tab: "rooms", also: ["console.rooms.accessRoles", "console.rooms.accessHint"] },
   { key: "console.rooms.lifetimeLabel", tab: "rooms", also: ["console.rooms.lifetimeNever", "console.rooms.lifetimeInherit"] },
   // Roles tab (id `usergroups`): the per-role userlist badge toggle (anchor

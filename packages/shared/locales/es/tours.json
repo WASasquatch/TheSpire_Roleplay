@@ -30,36 +30,36 @@
   },
   "site": {
     "welcome": {
-      "title": "Te damos la bienvenida a The Spire",
-      "body": "Este es un recorrido rápido por la pantalla para que sepas dónde está todo. Toma alrededor de un minuto y puedes repetirlo cuando quieras desde Ayuda."
+      "title": "Vamos a meterte en la historia",
+      "body": "Este recorrido de un minuto te muestra cómo encontrar gente y decir tu primera línea. Puedes repetirlo cuando quieras desde Ayuda."
     },
-    "identity": {
-      "title": "Tú y tus personajes",
-      "body": "Este botón al final de la barra muestra la identidad con la que publicas. Haz clic en él para cambiar a un personaje, crear uno o volver a ser tú. Para abrir tu propio perfil, usa el Menú justo debajo o escribe /profile."
-    },
-    "menu": {
-      "title": "El Menú lo tiene todo",
-      "body": "Abre el Menú para tu perfil, mundos, foros, mensajes, amigos y Ayuda. Cuando no sepas dónde está algo, busca aquí primero."
-    },
-    "composer": {
-      "title": "Di algo",
-      "body": "Escribe aquí y presiona Enter para hablar. Empieza una línea con / para comandos, @ para mencionar a alguien o : para escribir una acción."
+    "people": {
+      "title": "Mira quién está aquí",
+      "body": "Todas las personas de tu sala actual aparecen en esta lista. Un punto verde significa que están conectadas ahora mismo. Haz clic en un nombre para susurrarle, o en su imagen para ver con quién jugarías."
     },
     "rooms": {
-      "title": "Muévete entre salas",
-      "body": "Todas las salas disponibles para ti aparecen aquí con su número de personas. Haz clic en el nombre de una sala para entrar. Las salas privadas piden contraseña."
+      "title": "Encuentra dónde está la gente",
+      "body": "Debajo de los nombres están todas las salas a las que puedes entrar, cada una con su número de personas. Una sala concurrida es la vía más rápida a una escena: haz clic en su nombre y ya estás dentro. Las salas privadas piden contraseña."
     },
-    "communities": {
-      "title": "Explora comunidades",
-      "body": "Estos íconos son las comunidades a las que te has unido. Usa el botón de abajo para descubrir más o para solicitar crear la tuya."
+    "firstLine": {
+      "title": "Di tu primera línea",
+      "body": "Escribe aquí y presiona Enter. Chatear no requiere más. ¿No sabes qué decir? Prueba: «Hola, soy nuevo aquí. ¿Qué están jugando?». Alguien te seguirá la corriente."
     },
-    "forums": {
-      "title": "Foros, y este recorrido otra vez",
-      "body": "Los foros, para la escritura que quieres conservar, viven en el Menú y arriba de la lista de salas. Puedes repetir todo este recorrido cuando quieras desde Ayuda."
+    "character": {
+      "title": "Crea un personaje cuando quieras",
+      "body": "Por ahora puedes chatear como tú. Cuando una historia te atrape, este botón te deja crear un personaje y hablar como él. Sin prisa: mucha gente convive fuera de personaje."
+    },
+    "quiet": {
+      "title": "¿Hora tranquila? Aún hay mucho",
+      "body": "Si nadie está hablando ahora mismo, abre el Menú: los foros, los mundos y las historias son cosas que puedes leer y responder a tu ritmo. Alguien contestará cuando vuelva."
     },
     "channels": {
       "title": "Salas con lado 18+",
       "body": "Algunas salas tienen un canal aparte solo para adultos. Busca el selector SFW / 18+ junto al nombre de la sala aquí y haz clic en un lado para cambiarte. Las mismas reglas aplican en ambos lados: {rules}"
+    },
+    "communities": {
+      "title": "Más comunidades por explorar",
+      "body": "Estos íconos son las comunidades a las que te has unido, cada una con sus propias salas y su gente. Usa el botón de abajo para descubrir más o para solicitar crear la tuya."
     }
   },
   "forumsBrowse": {

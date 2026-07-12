@@ -125,15 +125,35 @@
       "italic": "Cursiva (Ctrl+I)",
       "underline": "Subrayado (Ctrl+U)",
       "strikethrough": "Tachado (Ctrl+Shift+S)",
-      "color": "Colorear el texto seleccionado",
-      "colorRemove": "Quitar el color",
+      "color": "Color del texto",
+      "size": "Tamaño del texto",
       "code": "Código en línea",
       "spoiler": "Spoiler (clic para revelar)",
       "blockquote": "Cita",
       "list": "Lista con viñetas",
       "link": "Enlace (Ctrl+K)",
       "linkRemove": "Quitar el enlace (Ctrl+K)",
-      "image": "Imagen, inserta ![alt](url)"
+      "image": "Imagen, inserta ![alt](url)",
+      "block": "Estilo de texto",
+      "alignLeft": "Alinear a la izquierda",
+      "alignCenter": "Centrar",
+      "alignRight": "Alinear a la derecha"
+    },
+    "size": {
+      "small": "Pequeño",
+      "normal": "Normal",
+      "large": "Grande",
+      "huge": "Enorme"
+    },
+    "color": {
+      "panelAria": "Selector de color del texto",
+      "swatchAria": "Color {{hex}}",
+      "recent": "Recientes",
+      "hexLabel": "Color hex personalizado",
+      "hexPlaceholder": "#a83232",
+      "apply": "Aplicar",
+      "custom": "Más colores…",
+      "clear": "Quitar el color"
     },
     "resizeAria": "Cambiar el tamaño del cuadro de mensaje",
     "resizeTitle": "Arrastra para cambiar el tamaño del cuadro de mensaje · doble clic para restablecer",
@@ -164,7 +184,14 @@
     "insertLineBreak": "Insertar salto de línea",
     "postTopic": "Publicar tema",
     "reply": "Responder",
-    "send": "Enviar"
+    "send": "Enviar",
+    "block": {
+      "normal": "Normal",
+      "h1": "Encabezado 1",
+      "h2": "Encabezado 2",
+      "h3": "Encabezado 3"
+    },
+    "tooRich": "Ese mensaje lleva demasiado formato. Simplifica el estilo o acórtalo."
   },
   "reactions": {
     "add": "Agregar reacción",
@@ -299,6 +326,8 @@
     "empty": "vacía",
     "inCharacter": "En personaje",
     "roleBadgeAria": "Rol de la comunidad",
+    "unverified": "Sin verificar",
+    "unverifiedTitle": "Esta cuenta aún no confirma su correo; podría ser una cuenta desechable.",
     "away": "Ausente",
     "awayWithMessage": "Ausente: {{message}}",
     "idleTitle": "Inactivo, cerró o recargó la pestaña, puede volver",
@@ -317,6 +346,16 @@
     "pairToSfwTitle": "Cambiar al canal para todas las edades de esta sala",
     "pairToNsfwTitle": "Cambiar al canal 18+ de esta sala (solo adultos)",
     "otherSideTitle": "En el otro canal de esta sala"
+  },
+  "newcomer": {
+    "title": "¿Es tu primera vez por aquí? Empieza con algo de esto",
+    "body": "El chat de rol tiene sus ritmos: a veces bulle, a veces está tranquilo. Sea como sea, así puedes lanzarte.",
+    "sayHi": "Saluda",
+    "sayHiPrefill": "¡Hola! Acabo de llegar. ¿Qué están haciendo?",
+    "seePeople": "Mira quién está en línea",
+    "findRoom": "Busca una sala activa",
+    "explore": "Explora los foros",
+    "dismiss": "Ocultar esto"
   },
   "staff": {
     "roomOwner": "Propietario de la sala",

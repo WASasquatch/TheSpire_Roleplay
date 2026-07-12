@@ -84,6 +84,21 @@ export interface ChatMessage {
   kind: MessageKind;
   body: string;
   /**
+   * Body format (migration 0352). Absent or "md" = the historic chat
+   * markdown grammar (parseInline). "html" = `body` is sanitized rich
+   * HTML (strict whitelist, sanitized server-side at ingest and
+   * re-sanitized client-side at render) and `bodyText` carries the
+   * derived plaintext mirror. Old rows/clients never see this field.
+   */
+  format?: import("./richMessage.js").ChatMessageFormat;
+  /**
+   * Server-derived visible plaintext of an "html"-format body (block
+   * breaks as newlines, tags stripped, entities decoded). Present iff
+   * `format === "html"`. Plaintext surfaces (previews, quote-append,
+   * sticker detection) read this instead of parsing the HTML.
+   */
+  bodyText?: string | null;
+  /**
    * Resolved @mentions for this message, snapshotted at send time from any
    * `@id:`/`@cid:` identity tokens the composer inserted. Lets the renderer
    * open the exact mentioned identity on click and highlight self-mentions by

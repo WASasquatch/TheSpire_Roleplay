@@ -471,5 +471,24 @@ export function applyFilters(
   return { hits, action: winner.action, muteMs: winner.muteMs };
 }
 
+/**
+ * Merge two verdicts over the same ruleset — used when a body is matched
+ * in more than one view (raw wire bytes AND the tag-stripped visible
+ * text, so markup can't split a keyword across rendering-invisible
+ * tags). Hits are deduped by rule; the action is re-resolved by the same
+ * severity precedence as `applyFilters`.
+ */
+export function mergeAutomodVerdicts(a: AutomodVerdict, b: AutomodVerdict): AutomodVerdict {
+  if (b.hits.length === 0) return a;
+  if (a.hits.length === 0) return b;
+  const seen = new Set(a.hits.map((h) => h.ruleId));
+  const hits = [...a.hits, ...b.hits.filter((h) => !seen.has(h.ruleId))];
+  let winner = hits[0]!;
+  for (const h of hits) {
+    if (ACTION_SEVERITY[h.action] > ACTION_SEVERITY[winner.action]) winner = h;
+  }
+  return { hits, action: winner.action, muteMs: winner.muteMs };
+}
+
 /** Default mute length when a `mute`-action rule leaves `muteMs` null. */
 export const AUTOMOD_DEFAULT_MUTE_MS = 10 * 60_000;

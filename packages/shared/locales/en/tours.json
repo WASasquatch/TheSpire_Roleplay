@@ -30,36 +30,36 @@
   },
   "site": {
     "welcome": {
-      "title": "Welcome to The Spire",
-      "body": "Here is a quick tour of the screen so you know where everything is. It takes about a minute, and you can replay it any time from Help."
+      "title": "Let's get you into the story",
+      "body": "This one-minute tour shows you how to find people and say your first line. You can replay it any time from Help."
     },
-    "identity": {
-      "title": "You and your characters",
-      "body": "This button at the bottom of the rail shows who you are posting as. Click it to switch into a character, create one, or go back to yourself. To open your own profile, use the Menu just below, or type /profile."
-    },
-    "menu": {
-      "title": "The Menu holds everything",
-      "body": "Open the Menu for your profile, worlds, forums, messages, friends, and Help. When you are not sure where something lives, look here first."
-    },
-    "composer": {
-      "title": "Say something",
-      "body": "Type here and press Enter to talk. Start a line with / for commands, @ to mention someone, or : to write an action."
+    "people": {
+      "title": "See who's here",
+      "body": "Everyone in your current room is listed here. A green dot means they're around right now. Click a name to whisper them, or their picture to see who you'd be playing with."
     },
     "rooms": {
-      "title": "Move between rooms",
-      "body": "Every room you can join is listed here with its headcount. Click a room's name to hop in. Private rooms ask for a password."
+      "title": "Find where people are",
+      "body": "Below the names are all the rooms you can join, each with a headcount. A busy room is the fastest way into a scene, so click a name and you're there. Private rooms ask for a password."
     },
-    "communities": {
-      "title": "Explore communities",
-      "body": "These icons are the communities you have joined. Use the button at the bottom to discover more, or to apply to start your own."
+    "firstLine": {
+      "title": "Say your first line",
+      "body": "Type here and press Enter. That's all chatting takes. Not sure what to say? Try: \"Hi, I'm new here. What's everyone playing?\" Someone will pick it up."
     },
-    "forums": {
-      "title": "Forums, and this tour again",
-      "body": "Forums, for writing you want to keep, live in the Menu and above the room list. You can replay this whole tour any time from Help."
+    "character": {
+      "title": "Make a character when you're ready",
+      "body": "You can chat as yourself for now. When a story grabs you, this button lets you create a character and speak as them. No rush, plenty of people hang out out-of-character."
+    },
+    "quiet": {
+      "title": "Quiet hour? There's still plenty",
+      "body": "If nobody's talking right now, open the Menu: forums, worlds, and stories are all things you can read and reply to at your own pace. Someone will answer when they're back."
     },
     "channels": {
       "title": "Rooms with an 18+ side",
       "body": "Some rooms have a separate adults-only channel. Look for the SFW / 18+ switch beside the room's name here and click a side to hop between them. The same rules apply on both sides: {rules}"
+    },
+    "communities": {
+      "title": "More communities to explore",
+      "body": "These icons are the communities you have joined, each with its own rooms and people. Use the button at the bottom to discover more, or to apply to start your own."
     }
   },
   "forumsBrowse": {

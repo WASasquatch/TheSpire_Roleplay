@@ -440,6 +440,23 @@ export const users = sqliteTable(
      */
     tourSeenVersion: integer("tour_seen_version").notNull().default(0),
     /**
+     * When the one-time personal greeter (a targeted system message on the
+     * account's FIRST room landing) was persisted (migration 0353). NULL =
+     * not yet greeted. Written via an atomic claim (`WHERE greeted_at IS
+     * NULL`) so a multi-tab first connect greets exactly once. Backfilled to
+     * created_at for pre-migration accounts so nobody existing is greeted.
+     */
+    greetedAt: integer("greeted_at", { mode: "timestamp_ms" }),
+    /**
+     * When the account sent its first-ever public chat message (migration
+     * 0353) — speech kinds in public, non-forum, non-role-locked rooms.
+     * Drives the once-per-account welcome-wagon notification. Backfilled to
+     * created_at for pre-migration accounts (message retention makes an
+     * EXISTS-over-messages check unreliable), so only genuinely new accounts
+     * trigger it.
+     */
+    firstSpokeAt: integer("first_spoke_at", { mode: "timestamp_ms" }),
+    /**
      * Last room the user occupied when their previous session disconnected
      * or idled out. Set on disconnect / room switch; consumed on the next
      * connect to drop them back where they were. Null = first connect, or

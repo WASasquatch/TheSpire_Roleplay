@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { canonicalizeNameForLookup, CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, resolveMessageColor, resolveUiRoute, VMARK_SPAN_RE, type CheckResultData, type MentionRef, type UiRoute } from "@thekeep/shared";
+import { canonicalizeNameForLookup, CHK_SPAN_RE, customCmdCssToStyle, decodeCheckMarker, dynamicMarkerFor, FONT_SIZE_EM, matchChatFontOpen, resolveMessageColor, resolveUiRoute, VMARK_SPAN_RE, type CheckResultData, type ComposerTextSize, type MentionRef, type UiRoute } from "@thekeep/shared";
 import { useEmoticons } from "../state/emoticons.js";
 import { EmoticonSprite } from "../components/emoticons/EmoticonSprite.js";
 import { i18n } from "./i18n.js";
@@ -246,13 +246,32 @@ const HTML_TAG_ALIASES: Record<string, (children: ReactNode[]) => ReactNode> = {
 };
 
 const HTML_OPEN_RE = /^<([a-zA-Z]+)>/;
-/** Opener for `<font color="#rrggbb">` / `<font color='#rgb'>`. Single-
- *  attribute only, that's the one attribute users actually reach for in
- *  IRC-era HTML and it keeps the parser tiny. The color value is required
- *  and must be a 3- or 6-digit hex literal; anything else falls through
- *  to the literal-text path. */
-const FONT_OPEN_RE = /^<font\s+color\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))\s*>/i;
-const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
+
+/**
+ * Rendered form of `<font color="#hex" size="1-4">` (either attribute,
+ * both orders; the accepted syntax lives in the shared
+ * `matchChatFontOpen` so the composer and the HTML export parse the
+ * exact same construct). The color is nudged through the same
+ * legibility clamp per-message author colors get — the STORED color
+ * stays the author's, only the rendered value adapts to the viewer's
+ * theme background — and the size renders at a fixed em bucket so a
+ * pasted 96pt line can't break the feed's layout.
+ */
+function ChatFontSpan({
+  color,
+  size,
+  children,
+}: {
+  color: string | null;
+  size: ComposerTextSize | null;
+  children: ReactNode;
+}) {
+  const themeBg = useActiveTheme().bg;
+  const style: CSSProperties = {};
+  if (color) style.color = resolveMessageColor(color, themeBg) ?? color;
+  if (size) style.fontSize = FONT_SIZE_EM[size];
+  return <span style={style}>{children}</span>;
+}
 
 /** Opener for `<span style="...">`, single `style` attribute (quoted). The
  *  declarations are sanitized to a safe whitelist below before they reach a
@@ -349,13 +368,14 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
     }
   }
 
-  // <font color="...">, special-cased first since the generic
-  // HTML_OPEN_RE requires zero attributes and would otherwise miss it.
-  const fontOpen = FONT_OPEN_RE.exec(text.slice(i));
+  // <font color="#hex" size="1-4">, special-cased first since the
+  // generic HTML_OPEN_RE requires zero attributes and would otherwise
+  // miss it. Attribute whitelist + validation live in the shared
+  // matchChatFontOpen; an invalid attribute set falls through to the
+  // literal-text path.
+  const fontOpen = matchChatFontOpen(text.slice(i));
   if (fontOpen) {
-    const raw = (fontOpen[1] ?? fontOpen[2] ?? fontOpen[3] ?? "").trim();
-    if (!HEX_COLOR_RE.test(raw)) return null;
-    const openLen = fontOpen[0].length;
+    const openLen = fontOpen.length;
     const closeRe = /<\/font\s*>/i;
     const rest = text.slice(i + openLen);
     const closeMatch = closeRe.exec(rest);
@@ -365,7 +385,11 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
     const inner = text.slice(i + openLen, closeStart);
     return {
       end: closeEnd,
-      node: <span style={{ color: raw }}>{parseInline(inner, depth + 1)}</span>,
+      node: (
+        <ChatFontSpan color={fontOpen.color} size={fontOpen.size}>
+          {parseInline(inner, depth + 1)}
+        </ChatFontSpan>
+      ),
     };
   }
 
@@ -948,6 +972,86 @@ export function parseInline(text: string, depth: number = 0): ReactNode[] {
 }
 
 /**
+ * TOKEN-ONLY inline renderer for rich-HTML message bodies (format
+ * 'html'). Those bodies carry their structure/marks as real HTML, so
+ * text nodes must NOT re-interpret markdown delimiters (`*x*` typed in
+ * the rich composer is literal prose) — but the app's inline TOKENS
+ * still live in the text: `:slug:idx:` emoticon stickers, unicode-emoji
+ * hover zoom, bare http(s) autolinks, and `{ui-route}` chips. Exactly
+ * those four, nothing else. (Mentions/world-links are split out earlier
+ * by splitMentions, same as the md path.)
+ */
+export function renderInlineTokens(text: string): ReactNode[] {
+  if (!text) return [];
+  const out: ReactNode[] = [];
+  let i = 0;
+  let textStart = 0;
+  let nodeIdx = 0;
+
+  const tryTokenOnly = (at: number): { end: number; node: ReactNode } | null => {
+    // `{ui-route}` chip — same pattern + catalog gate as tryToken;
+    // unknown tokens fall through as literal prose. The author-role
+    // gate already ran server-side over the rich body's visible text.
+    if (text[at] === "{") {
+      const m = /^\{([a-z][a-z0-9-]*(?::[a-z0-9-]+)*)\}/i.exec(text.slice(at));
+      if (m) {
+        const entry = resolveUiRoute(m[1]!.toLowerCase());
+        if (entry) {
+          return { end: at + m[0].length, node: <UiRouteChip entry={entry} /> };
+        }
+      }
+    }
+    // Emoticon token `:slug:idx:` — same pattern as tryToken.
+    if (text[at] === ":") {
+      const m = /^:([a-z][a-z0-9_-]*):(\d+):/.exec(text.slice(at));
+      if (m) {
+        return {
+          end: at + m[0].length,
+          node: <InlineEmoticon slug={m[1]!} cellIndex={parseInt(m[2]!, 10)} />,
+        };
+      }
+    }
+    // Unicode emoji hover-zoom (same cheap-reject as tryToken).
+    const code = text.codePointAt(at);
+    if (code !== undefined && code >= 0x2000) {
+      EMOJI_AT_RE.lastIndex = at;
+      const em = EMOJI_AT_RE.exec(text);
+      if (em && em.index === at && em[0].length > 0) {
+        return { end: at + em[0].length, node: <InlineEmoji glyph={em[0]} /> };
+      }
+    }
+    // Bare http(s) autolink at a word boundary.
+    const ch = text[at];
+    if ((ch === "h" || ch === "H") && (at === 0 || !isWordChar(text[at - 1]))) {
+      const m = URL_RE.exec(text.slice(at));
+      if (m) {
+        const { url } = trimTrailingPunct(m[0]);
+        return { end: at + url.length, node: <UrlOrMedia url={url} /> };
+      }
+    }
+    return null;
+  };
+
+  while (i < text.length) {
+    const m = tryTokenOnly(i);
+    if (m) {
+      if (textStart < i) {
+        out.push(<Fragment key={`t${nodeIdx++}`}>{text.slice(textStart, i)}</Fragment>);
+      }
+      out.push(<Fragment key={`n${nodeIdx++}`}>{m.node}</Fragment>);
+      i = m.end;
+      textStart = i;
+    } else {
+      i++;
+    }
+  }
+  if (textStart < text.length) {
+    out.push(<Fragment key={`t${nodeIdx++}`}>{text.slice(textStart)}</Fragment>);
+  }
+  return out;
+}
+
+/**
  * Wrapper for a server-verified inline command expansion. The text
  * inside `children` came from `expandInlineCommands` on the server (the
  * marker is stripped from user input before expansion, so anything
@@ -1126,7 +1230,7 @@ function CheckBranch({
  * readers and copy/paste still work, but it's visually masked. Once revealed
  * it stays revealed for that render.
  */
-function SpoilerSpan({ children }: { children: ReactNode }) {
+export function SpoilerSpan({ children }: { children: ReactNode }) {
   const { t } = useTranslation("chat");
   const [revealed, setRevealed] = useState(false);
   if (revealed) {

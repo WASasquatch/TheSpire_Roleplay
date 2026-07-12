@@ -30,6 +30,16 @@ export interface ClientToServerEvents {
     payload: {
       roomId: string;
       text: string;
+      /**
+       * Body format claim (migration 0352). "html" = `text` is the
+       * composer's rich-HTML serialization; the server sanitizes it
+       * against the strict whitelist at ingest, derives the plaintext
+       * mirror, and persists format 'html'. Absent = markdown/plain
+       * (the historic pipeline, byte-identical forever). Slash
+       * commands are always sent WITHOUT this field — the command
+       * pipeline never sees HTML.
+       */
+      format?: "html";
       threadCategoryId?: string | null;
       threadTitle?: string;
       replyToId?: string;

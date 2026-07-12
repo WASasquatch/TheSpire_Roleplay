@@ -49,6 +49,8 @@ export type NotificationKind =
   | "emoticon_rejected"
   | "rankup"
   | "royalty"
+  /** Welcome wagon: a newcomer just sent their first-ever public message. */
+  | "first_words"
   | "announcement"
   | "report_resolved"
   | "system";

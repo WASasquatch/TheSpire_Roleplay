@@ -9,6 +9,9 @@ import {
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   Bold,
   Code,
   Eye,
@@ -24,7 +27,7 @@ import {
   Underline,
 } from "lucide-react";
 import type { CommandDoc, RoomOccupant, ThreadCategory } from "@thekeep/shared";
-import { extractMentionTokens } from "@thekeep/shared";
+import { RICH_HTML_MAX_BYTES, extractMentionTokens } from "@thekeep/shared";
 import { CompleterPopup, type CompletionItem } from "../CompleterPopup.js";
 import { EarningStatsStrip } from "../earning/EarningStatsStrip.js";
 import { EmoticonPickerButton } from "../emoticons/EmoticonPickerButton.js";
@@ -44,7 +47,14 @@ import {
 import { getSocket } from "../../lib/socket.js";
 import { formatNumber } from "../../lib/intlFormat.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
-import { ComposerEditor, type ComposerEditorHandle, type ComposerEditorState } from "./ComposerEditor.js";
+import {
+  ComposerEditor,
+  type ComposerAlignChoice,
+  type ComposerBlockChoice,
+  type ComposerEditorHandle,
+  type ComposerEditorState,
+  type ComposerSizeChoice,
+} from "./ComposerEditor.js";
 
 interface Props {
   value: string;
@@ -58,7 +68,18 @@ interface Props {
    */
   onSend: (
     text: string,
-    opts?: { threadCategoryId?: string | null; threadTitle?: string; replyToId?: string },
+    opts?: {
+      threadCategoryId?: string | null;
+      threadTitle?: string;
+      replyToId?: string;
+      /**
+       * Rich-HTML wire format claim (migration 0352): `text` is the
+       * editor's sanitized-whitelist HTML serialization instead of
+       * chat markdown. Only set for flat-chat sends whose document
+       * carries constructs markdown can't express.
+       */
+      format?: "html";
+    },
   ) => void;
   /** Current room occupants - used to populate @-mention autocomplete. */
   occupants?: RoomOccupant[];
@@ -136,6 +157,14 @@ interface Props {
    * line. Absent = 'everyone' (strip never shows anyway).
    */
   postMode?: "everyone" | "staff" | "roles";
+  /**
+   * Per-room rich-text toggle (rooms.rich_text_disabled, migration 0354).
+   * True = this room offers only the simple pre-rich formatting set: the
+   * rich-only controls (heading dropdown, alignment buttons) hide and
+   * every send rides the historic markdown wire. UX mirror only — the
+   * server degrades rich bodies at ingest/edit regardless.
+   */
+  richTextDisabled?: boolean;
   /**
    * Opens the Earning dashboard modal. Click target for the
    * EarningStatsStrip rendered in the composer toolbar area. Set
@@ -428,13 +457,27 @@ export function Composer({
   canModerate,
   postLocked,
   postMode,
+  richTextDisabled,
   preferredCategoryId,
   onOpenEarning,
 }: Props) {
   const { t } = useTranslation("chat");
+  // Rich-HTML availability for THIS surface: forum rooms always ship chat
+  // markdown, and a room flipped to Simple formatting (migration 0354)
+  // does too. Drives the editor schema (headings/alignment removed), the
+  // rich-only toolbar controls, and the format:'html' send path together.
+  const richEnabled = !isForumRoom && !richTextDisabled;
   // The rich editor's imperative surface (plain-text selection reads,
   // ranged replacements, mark toggles). Null until the editor mounts.
   const editorRef = useRef<ComposerEditorHandle | null>(null);
+  // External focus requests (the newcomer "say hi" panel, and any future
+  // "start typing" affordance) arrive as a window event so callers don't
+  // need a ref into this component.
+  useEffect(() => {
+    const onFocusRequest = () => editorRef.current?.focus();
+    window.addEventListener("tk:focus-composer", onFocusRequest);
+    return () => window.removeEventListener("tk:focus-composer", onFocusRequest);
+  }, []);
   // Hidden native color picker + the editor selection captured the moment
   // the color button is clicked. We snapshot the selection because opening
   // the OS picker blurs the editor (losing the live selection), so we
@@ -449,6 +492,15 @@ export function Composer({
   const [plainText, setPlainText] = useState("");
   // Which marks/blocks are active at the caret — lights up the toolbar.
   const [activeFmt, setActiveFmt] = useState<Record<string, boolean>>({});
+  // Size bucket at the caret — mirrored into the toolbar's size select.
+  const [activeSize, setActiveSize] = useState<ComposerSizeChoice>("normal");
+  // Block format at the caret (Normal / H1-H3) — mirrored into the
+  // block-format select.
+  const [activeBlock, setActiveBlock] = useState<ComposerBlockChoice>("normal");
+  // Alignment of the caret's block — lights the align buttons.
+  const [activeAlign, setActiveAlign] = useState<ComposerAlignChoice>("left");
+  // Swatch/hex color panel (the Palette button toggles it).
+  const [colorPanelOpen, setColorPanelOpen] = useState(false);
   // Phase 4 typing indicator, last time this composer fired a
   // `chat:typing` pulse. Throttled to once per 2s so a long
   // sentence costs at most a handful of tiny socket events. The
@@ -1039,6 +1091,25 @@ export function Composer({
       });
       return;
     }
+    // Rich-HTML send (migration 0352): when the document carries
+    // constructs the markdown wire can't express (headings, non-left
+    // alignment), the flat-chat path below ships the editor's
+    // whitelist-HTML serialization with `format: "html"`. Slash
+    // commands never take this path (the command pipeline receives
+    // plain text only), and forum modes + rich-disabled rooms keep the
+    // markdown wire (their editors have no heading/alignment schema, so
+    // the payload is null there anyway — the flag keeps the gate
+    // explicit). The raw-byte ceiling is pre-validated HERE so the
+    // rejection keeps the draft — chat:input is fire-and-forget and the
+    // server's notice would land after the input cleared.
+    const richHtml =
+      richEnabled && !outgoing.startsWith("/")
+        ? editorRef.current?.getRichPayload() ?? null
+        : null;
+    if (richHtml !== null && new TextEncoder().encode(richHtml).length > RICH_HTML_MAX_BYTES) {
+      setNotice({ code: "TOO_LONG", message: t("composer.tooRich") });
+      return;
+    }
     const buf = historyRef.current;
     if (buf[buf.length - 1] !== outgoing) {
       buf.push(outgoing);
@@ -1075,7 +1146,14 @@ export function Composer({
     // Flat-room / non-forum path. threadCategoryId only forwards when
     // the picker is visible (i.e. a categorized nested room before the
     // forum rewrite; defensively kept for installs in flat mode).
-    onSend(outgoing, showCategoryPicker ? { threadCategoryId: effectiveCategoryId } : undefined);
+    if (richHtml !== null) {
+      onSend(richHtml, {
+        format: "html",
+        ...(showCategoryPicker ? { threadCategoryId: effectiveCategoryId } : {}),
+      });
+    } else {
+      onSend(outgoing, showCategoryPicker ? { threadCategoryId: effectiveCategoryId } : undefined);
+    }
     onChange("");
     setCaret(0);
   }
@@ -1299,10 +1377,21 @@ export function Composer({
    * Apply the picked color to the snapshotted selection as a color
    * mark (serialized as `<font color="#hex">…</font>` on the wire).
    * When nothing was selected, a colored placeholder is inserted.
+   * Every applied color lands in the panel's "recent" row.
    */
   function applyColor(hex: string): void {
     editorRef.current?.applyColor(hex, colorSelRef.current, t("composer.ph.text"));
     colorSelRef.current = null;
+    pushRecentColor(hex);
+  }
+
+  /**
+   * Palette button: snapshot the selection (the panel's buttons blur
+   * the editor) and toggle the swatch/recent/custom-hex panel.
+   */
+  function toggleColorPanel(): void {
+    if (!colorPanelOpen) colorSelRef.current = editorRef.current?.getSelection() ?? null;
+    setColorPanelOpen((open) => !open);
   }
 
   /**
@@ -1404,6 +1493,9 @@ export function Composer({
     setPlainText(s.plainText);
     setCaret(s.caretStart);
     setActiveFmt(s.active);
+    setActiveSize(s.size);
+    setActiveBlock(s.block);
+    setActiveAlign(s.align);
   }
 
   // Phase 4 typing pulse, fired by the editor on doc-changing
@@ -1722,7 +1814,11 @@ export function Composer({
         // the hero rank row above (as the MENU button), so the toolbar's
         // first item is the Bold button at every width and the input row
         // below reclaims the width the old drawer column was eating.
-        <div className="flex flex-wrap items-center gap-0.5 text-xs">
+        // `relative` anchors the color panel to the ROW (left-0 = the
+        // composer's left edge) so the 224px panel fits narrow phone
+        // viewports instead of clipping off the right edge when anchored
+        // to the 5th button.
+        <div className="relative flex flex-wrap items-center gap-0.5 text-xs">
           {/* WYSIWYG toggles: each button flips a real editor mark at
               the caret/selection (and lights up while active); the
               serializer emits the same markdown the buttons used to
@@ -1742,22 +1838,44 @@ export function Composer({
           <FmtButton title={t("composer.fmt.strikethrough")} active={!!activeFmt.strike} onClick={() => editorRef.current?.toggleMark("strike")}>
             <Strikethrough className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
-          {/* Color: opens the OS color picker, applies a color mark
-              (<font color="#hex"> on the wire). The input is visually
-              hidden and driven by openColorPicker()'s programmatic
-              click. On an already-colored run the button CLEARS the
-              mark instead — the markup is invisible in the editor, so
-              this is the only un-color affordance. */}
-          <FmtButton
-            title={activeFmt.color ? t("composer.fmt.colorRemove") : t("composer.fmt.color")}
-            active={!!activeFmt.color}
-            onClick={() => {
-              if (activeFmt.color) editorRef.current?.clearColor();
-              else openColorPicker();
-            }}
-          >
-            <Palette className="h-4 w-4" aria-hidden="true" />
-          </FmtButton>
+          {/* Color: toggles a swatch panel (palette + recent + custom
+              hex + the OS picker), applying a color mark
+              (<font color="#hex"> on the wire) to the snapshotted
+              selection. The panel also carries the un-color action —
+              the markup is invisible in the editor, so it needs an
+              explicit affordance. */}
+          <div>
+            <FmtButton
+              title={t("composer.fmt.color")}
+              active={!!activeFmt.color || colorPanelOpen}
+              haspopup="dialog"
+              expanded={colorPanelOpen}
+              onClick={toggleColorPanel}
+            >
+              <Palette className="h-4 w-4" aria-hidden="true" />
+            </FmtButton>
+            {colorPanelOpen ? (
+              <ComposerColorPanel
+                onPick={(hex) => {
+                  setColorPanelOpen(false);
+                  applyColor(hex);
+                }}
+                onCustom={() => {
+                  setColorPanelOpen(false);
+                  openColorPicker();
+                }}
+                onClear={
+                  activeFmt.color
+                    ? () => {
+                        setColorPanelOpen(false);
+                        editorRef.current?.clearColor();
+                      }
+                    : undefined
+                }
+                onClose={() => setColorPanelOpen(false)}
+              />
+            ) : null}
+          </div>
           <input
             ref={colorInputRef}
             type="color"
@@ -1767,6 +1885,43 @@ export function Composer({
             className="pointer-events-none absolute h-0 w-0 opacity-0"
             onChange={(e) => applyColor(e.target.value)}
           />
+          {/* Block format: Normal / Heading 1-3. Headings ship via the
+              rich-HTML message format, which forum surfaces and
+              rich-disabled rooms don't speak — the control only renders
+              where the format can be sent. */}
+          {richEnabled ? (
+            <select
+              value={activeBlock}
+              title={t("composer.fmt.block")}
+              aria-label={t("composer.fmt.block")}
+              onChange={(e) => editorRef.current?.applyBlock(e.target.value as ComposerBlockChoice)}
+              className="h-8 shrink-0 cursor-pointer rounded border border-keep-rule/60 bg-keep-bg/60 px-1 text-base text-keep-muted hover:bg-keep-banner hover:text-keep-text lg:text-xs"
+            >
+              <option value="normal">{t("composer.block.normal")}</option>
+              <option value="h1">{t("composer.block.h1")}</option>
+              <option value="h2">{t("composer.block.h2")}</option>
+              <option value="h3">{t("composer.block.h3")}</option>
+            </select>
+          ) : null}
+          {/* Size: Gmail-style buckets. Applies a size mark rendered at
+              a clamped em scale (<font size="1|3|4"> on the wire);
+              "Normal" clears the mark. The select mirrors the bucket
+              at the caret. */}
+          <select
+            value={activeSize}
+            title={t("composer.fmt.size")}
+            aria-label={t("composer.fmt.size")}
+            onChange={(e) => editorRef.current?.applySize(e.target.value as ComposerSizeChoice, null)}
+            // 16px type below `lg` for the same reason the editor uses
+            // `text-base … lg:text-sm`: iOS Safari auto-zooms the page
+            // when a focused form control's font-size is under 16px.
+            className="h-8 shrink-0 cursor-pointer rounded border border-keep-rule/60 bg-keep-bg/60 px-1 text-base text-keep-muted hover:bg-keep-banner hover:text-keep-text lg:text-xs"
+          >
+            <option value="small">{t("composer.size.small")}</option>
+            <option value="normal">{t("composer.size.normal")}</option>
+            <option value="large">{t("composer.size.large")}</option>
+            <option value="huge">{t("composer.size.huge")}</option>
+          </select>
           <FmtButton title={t("composer.fmt.code")} active={!!activeFmt.code} onClick={() => editorRef.current?.toggleMark("code")}>
             <Code className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
@@ -1779,6 +1934,23 @@ export function Composer({
           <FmtButton title={t("composer.fmt.list")} active={!!activeFmt.bullet} onClick={() => editorRef.current?.toggleBullet()}>
             <List className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
+          {/* Alignment: left is the default flow; center/right ship via
+              the rich-HTML message format, so like the block-format
+              select these hide on forum surfaces and rich-disabled
+              rooms. */}
+          {richEnabled ? (
+            <>
+              <FmtButton title={t("composer.fmt.alignLeft")} active={activeAlign === "left"} onClick={() => editorRef.current?.applyAlign("left")}>
+                <AlignLeft className="h-4 w-4" aria-hidden="true" />
+              </FmtButton>
+              <FmtButton title={t("composer.fmt.alignCenter")} active={activeAlign === "center"} onClick={() => editorRef.current?.applyAlign("center")}>
+                <AlignCenter className="h-4 w-4" aria-hidden="true" />
+              </FmtButton>
+              <FmtButton title={t("composer.fmt.alignRight")} active={activeAlign === "right"} onClick={() => editorRef.current?.applyAlign("right")}>
+                <AlignRight className="h-4 w-4" aria-hidden="true" />
+              </FmtButton>
+            </>
+          ) : null}
           <FmtButton
             title={activeFmt.link ? t("composer.fmt.linkRemove") : t("composer.fmt.link")}
             active={!!activeFmt.link}
@@ -1945,6 +2117,12 @@ export function Composer({
           onRequestLink={linkAction}
           handleRef={editorRef}
           disabled={inputDisabled}
+          // Forum sends and rich-disabled rooms always ship chat
+          // markdown, so headings and alignment come out of the schema
+          // there — same flag that hides the block/align toolbar
+          // controls below. Flipping it recreates the editor; the
+          // external-value sync restores the current draft into it.
+          richEnabled={richEnabled}
           placeholder={effectivePlaceholder}
           ariaLabel={effectivePlaceholder}
         />
@@ -2056,12 +2234,18 @@ function FmtButton({
   title,
   onClick,
   active,
+  haspopup,
+  expanded,
   children,
 }: {
   title: string;
   onClick: () => void;
   /** Lights the button while its mark/block is active at the caret. */
   active?: boolean;
+  /** For buttons that toggle a popup (the color panel): what it opens… */
+  haspopup?: "dialog";
+  /** …and whether it is currently open. */
+  expanded?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -2070,6 +2254,8 @@ function FmtButton({
       title={title}
       aria-label={title}
       aria-pressed={active === undefined ? undefined : active}
+      aria-haspopup={haspopup}
+      aria-expanded={expanded}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       // Square `h-8 w-8` (32px), previously `h-7 min-w-7 px-1.5`,
@@ -2088,5 +2274,201 @@ function FmtButton({
     >
       {children}
     </button>
+  );
+}
+
+/* ============================================================
+ * Text-color panel (swatches + recent + custom hex)
+ * ============================================================ */
+
+/** Fixed swatch palette. Values are what lands on the wire; the
+ *  legibility clamp (applied in the editor preview, the feed, and the
+ *  export alike) keeps the dark end readable on dark themes and the
+ *  light end on light ones. */
+const COLOR_SWATCHES = [
+  "#ffffff", "#c0c0c0", "#808080", "#000000",
+  "#a83232", "#e05252", "#e08b3c", "#e0c341",
+  "#6fbf5e", "#3f8f4f", "#4dbdbd", "#5386e0",
+  "#2c4fa3", "#8a63d9", "#d45bb5", "#8c5a3b",
+];
+
+const RECENT_COLORS_KEY = "tk:composerRecentColors";
+const RECENT_COLORS_MAX = 8;
+const PANEL_HEX_RE = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+function loadRecentColors(): string[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_COLORS_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((v): v is string => typeof v === "string" && PANEL_HEX_RE.test(v))
+      .slice(0, RECENT_COLORS_MAX);
+  } catch {
+    return [];
+  }
+}
+
+function pushRecentColor(hex: string): void {
+  try {
+    const next = [hex, ...loadRecentColors().filter((c) => c !== hex)].slice(0, RECENT_COLORS_MAX);
+    window.localStorage.setItem(RECENT_COLORS_KEY, JSON.stringify(next));
+  } catch {
+    /* storage may be disabled */
+  }
+}
+
+function ColorSwatchRow({ colors, onPick, t }: { colors: string[]; onPick: (hex: string) => void; t: TFunction<"chat"> }) {
+  return (
+    <div className="grid grid-cols-8 gap-1">
+      {colors.map((hex) => (
+        <button
+          key={hex}
+          type="button"
+          title={hex}
+          aria-label={t("composer.color.swatchAria", { hex })}
+          // preventDefault keeps the editor's visual focus state; the
+          // actual selection was snapshotted when the panel opened.
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => onPick(hex)}
+          className="h-5 w-5 rounded border border-keep-rule/60 hover:ring-2 hover:ring-keep-action focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-keep-action"
+          style={{ backgroundColor: hex }}
+        />
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The Palette button's dropdown: a fixed swatch grid, the author's
+ * recently used colors, a custom hex field, and escape hatches to the
+ * OS picker and (when the caret sits on colored text) an un-color
+ * action. Anchored `absolute bottom-full left-0` against the TOOLBAR
+ * ROW's `relative` (not the button's wrapper) so the fixed-width panel
+ * opens from the composer's left edge and fits narrow viewports.
+ * Focus moves to the first swatch on open (the editor selection was
+ * snapshotted by the opener, so stealing focus is safe); closes on
+ * Escape (restoring focus to the Palette button) or any pointer press
+ * outside it.
+ */
+function ComposerColorPanel({
+  onPick,
+  onCustom,
+  onClear,
+  onClose,
+}: {
+  onPick: (hex: string) => void;
+  onCustom: () => void;
+  onClear?: (() => void) | undefined;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation("chat");
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [recent] = useState<string[]>(() => loadRecentColors());
+  const [hexDraft, setHexDraft] = useState("");
+  const hexValid = PANEL_HEX_RE.test(hexDraft.trim());
+
+  // Dialog focus: land on the first swatch when the panel opens so
+  // keyboard and screen-reader users arrive inside it instead of having
+  // to tab-hunt forward. Buttons (not the hex input) so mobile taps
+  // don't summon the on-screen keyboard.
+  useEffect(() => {
+    panelRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+  }, []);
+
+  useEffect(() => {
+    const onDocDown = (e: PointerEvent) => {
+      const panel = panelRef.current;
+      // The Palette button itself toggles; only presses fully outside
+      // the panel AND its anchor wrapper close here.
+      if (panel && !panel.parentElement?.contains(e.target as Node)) onClose();
+    };
+    const onDocKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Focus moved into the panel on open; hand it back to the Palette
+      // button (the wrapper's button) so it doesn't fall to <body>.
+      const anchor =
+        panelRef.current?.parentElement?.querySelector<HTMLButtonElement>(":scope > button");
+      onClose();
+      anchor?.focus();
+    };
+    document.addEventListener("pointerdown", onDocDown);
+    document.addEventListener("keydown", onDocKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDocDown);
+      document.removeEventListener("keydown", onDocKey);
+    };
+  }, [onClose]);
+
+  function applyHexDraft(): void {
+    const trimmed = hexDraft.trim();
+    if (!PANEL_HEX_RE.test(trimmed)) return;
+    onPick(`#${trimmed.replace(/^#/, "").toLowerCase()}`);
+  }
+
+  return (
+    <div
+      ref={panelRef}
+      role="dialog"
+      aria-label={t("composer.color.panelAria")}
+      className="absolute bottom-full left-0 z-30 mb-1 w-56 rounded border border-keep-rule bg-keep-bg p-2 shadow-2xl"
+    >
+      <ColorSwatchRow colors={COLOR_SWATCHES} onPick={onPick} t={t} />
+      {recent.length > 0 ? (
+        <>
+          <div className="mt-2 text-[10px] uppercase tracking-widest text-keep-muted">
+            {t("composer.color.recent")}
+          </div>
+          <div className="mt-1">
+            <ColorSwatchRow colors={recent} onPick={onPick} t={t} />
+          </div>
+        </>
+      ) : null}
+      <div className="mt-2 flex items-center gap-1">
+        <input
+          value={hexDraft}
+          onChange={(e) => setHexDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              applyHexDraft();
+            }
+          }}
+          placeholder={t("composer.color.hexPlaceholder")}
+          aria-label={t("composer.color.hexLabel")}
+          spellCheck={false}
+          className="h-7 w-full min-w-0 rounded border border-keep-rule bg-keep-bg px-2 font-mono text-xs text-keep-text placeholder:text-keep-muted/60 focus:border-keep-action focus:outline-none"
+        />
+        <button
+          type="button"
+          onClick={applyHexDraft}
+          disabled={!hexValid}
+          className="h-7 shrink-0 rounded border border-keep-rule/60 bg-keep-bg/60 px-2 text-xs text-keep-muted enabled:hover:bg-keep-banner enabled:hover:text-keep-text disabled:opacity-40"
+        >
+          {t("composer.color.apply")}
+        </button>
+      </div>
+      <div className="mt-1.5 flex items-center justify-between gap-1">
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={onCustom}
+          className="rounded px-1 py-0.5 text-xs text-keep-muted hover:text-keep-text"
+        >
+          {t("composer.color.custom")}
+        </button>
+        {onClear ? (
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onClear}
+            className="rounded px-1 py-0.5 text-xs text-keep-muted hover:text-keep-text"
+          >
+            {t("composer.color.clear")}
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }

@@ -189,6 +189,10 @@
       "storyteller": "Storyteller",
       "loremaster": "Loremaster"
     },
+    "unverified": {
+      "chip": "Unverified",
+      "title": "This account hasn't confirmed its email yet - it could be a throwaway."
+    },
     "mod": {
       "badge": "Mod",
       "visibleToModsOnly": "Visible to moderators only.",

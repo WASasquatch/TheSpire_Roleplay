@@ -968,6 +968,20 @@ function ProfileBody({
                 <RoleBadgeChips roles={profile.serverRoles} ariaLabel={t("modal.roles.aria")} />
               </div>
             ) : null}
+            {/* Unverified-email chip (migration 0353). Present on the payload
+                only while the site's "Denote unverified users" admin toggle
+                is on and this account never confirmed its email. Muted chip
+                with a friendly tooltip — a hint, not an accusation. */}
+            {profile.profile.unverified ? (
+              <div className="mt-1.5">
+                <span
+                  className="inline-flex items-center rounded border border-keep-rule/60 bg-keep-bg/60 px-1.5 py-0.5 text-[9px] uppercase leading-none tracking-widest text-keep-muted"
+                  title={t("modal.unverified.title")}
+                >
+                  {t("modal.unverified.chip")}
+                </span>
+              </div>
+            ) : null}
             {/* Mod-only attribution + id-copy chips. Two gates:
                   - `ownerUsername` is shipped server-side only to
                     mod+ viewers on character profiles, so its very

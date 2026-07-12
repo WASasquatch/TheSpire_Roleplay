@@ -13,10 +13,13 @@ import {
   extractMentions,
   extractMentionTokens,
   isModeratorRole,
+  mapRichHtmlTextNodes,
   mentionsField,
   parseNpcStats,
   mentionTokenRegex,
   processCheckBlocks,
+  richHtmlLinkHrefs,
+  richHtmlToText,
   stripCheckMarkers,
   validateAuthorUiRouteTokens,
 } from "@thekeep/shared";
@@ -55,6 +58,7 @@ import { readPoolRank } from "../../earning/resolver.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
 import { routeMessage } from "../../earning/routing.js";
 import { tFor } from "../../i18n.js";
+import { maybeFireFirstWords } from "../welcomeWagon.js";
 import { emitTreeChanged, userIsOnline } from "./presence.js";
 import { isHiddenIncognitoIdentity } from "./incognito.js";
 
@@ -89,8 +93,18 @@ const MENTION_NBSP = String.fromCharCode(0xa0);
 async function resolveMentionTokens(
   db: Db,
   body: string,
+  /**
+   * True when `body` is a sanitized rich-HTML body (format 'html').
+   * Tokens are extracted from — and rewritten in — TEXT NODES ONLY, so
+   * an `@cid:`-looking run inside an href can neither ping anyone nor
+   * get rewritten into a corrupted URL.
+   */
+  html = false,
 ): Promise<{ body: string; mentions: MentionRef[] | null }> {
-  const hits = extractMentionTokens(body);
+  const extractionSource = html
+    ? body.split(/(<[^>]*>)/).filter((p) => p && !p.startsWith("<")).join("\n")
+    : body;
+  const hits = extractMentionTokens(extractionSource);
   if (hits.length === 0) return { body, mentions: null };
 
   // Resolve each unique token: `id` -> master account; `cid` -> character
@@ -109,7 +123,7 @@ async function resolveMentionTokens(
   }
   if (resolved.size === 0) return { body, mentions: null };
 
-  const newBody = body.replace(mentionTokenRegex(), (full: string, ...args: unknown[]) => {
+  const rewrite = (s: string) => s.replace(mentionTokenRegex(), (full: string, ...args: unknown[]) => {
     const groups = args[args.length - 1] as { prefix?: string; tokenKind?: string; tokenId?: string };
     const prefix = groups.prefix ?? "";
     if (prefix === "\\") return full.slice(1); // escaped: drop the backslash, keep literal
@@ -117,6 +131,7 @@ async function resolveMentionTokens(
     if (!ref) return full; // unresolved: leave the token as typed
     return `${prefix}@${ref.displayName.replace(/ /g, MENTION_NBSP)}`;
   });
+  const newBody = html ? mapRichHtmlTextNodes(body, rewrite) : rewrite(body);
 
   const mentions: MentionRef[] = [...resolved.values()].map((ref) => ({
     name: ref.displayName.replace(/ /g, MENTION_NBSP).toLowerCase(),
@@ -131,6 +146,17 @@ export async function addMessage(
   payload: {
     kind: MessageKind;
     body: string;
+    /**
+     * Body format (migration 0352). "html" = `body` is ALREADY-
+     * SANITIZED rich HTML (the dispatch ingest chokepoint ran
+     * sanitizeRichMessageHtml before this call). addMessage derives
+     * the plaintext mirror AFTER mention-token rewriting and persists
+     * both. Markdown-format machinery (inline `!cmd` expansion,
+     * `<check>` blocks) is skipped for html bodies — those constructs
+     * belong to the md grammar. Absent = 'md', byte-identical to the
+     * historic pipeline.
+     */
+    format?: "html";
     toUserId?: string;
     /**
      * Per-call color override. Custom commands pass this when the admin set
@@ -217,7 +243,13 @@ export async function addMessage(
   // here drops the send and notifies the user via the same
   // TOO_LONG channel the dispatcher uses for raw-input rejections.
   let body = payload.body;
-  const expanded = expandInlineCommands(body, ctx.registry, ctx.user, ctx.roomId, (ctx.socket.data as { serverId?: string }).serverId);
+  const isRichBody = payload.format === "html";
+  // Inline `!cmd` expansion is an MD-grammar feature: a rich body keeps
+  // its bytes (an exclamation token inside HTML is prose, and splicing
+  // expander output into markup would corrupt the tree).
+  const expanded = isRichBody
+    ? body
+    : expandInlineCommands(body, ctx.registry, ctx.user, ctx.roomId, (ctx.socket.data as { serverId?: string }).serverId);
   if (expanded !== body) {
     const { maxMessageLength } = await getSettings(ctx.db);
     if (expanded.length > maxMessageLength) {
@@ -237,7 +269,9 @@ export async function addMessage(
   // line like `{nervously}` stays unaffected. Runs after inline-cmd
   // expansion in case a custom command's template embeds a token,
   // the post-expansion body is what actually broadcasts.
-  const uiTokenCheck = validateAuthorUiRouteTokens(body, ctx.user.role);
+  // For rich bodies the tokens live in text nodes; validate against the
+  // visible text so markup can't hide a role-gated token from the gate.
+  const uiTokenCheck = validateAuthorUiRouteTokens(isRichBody ? richHtmlToText(body) : body, ctx.user.role);
   if (!uiTokenCheck.ok) {
     ctx.socket.emit("error:notice", {
       code: "UI_ROUTE_FORBIDDEN",
@@ -251,7 +285,7 @@ export async function addMessage(
   // render path shows the right chip with zero render changes) and snapshot the
   // resolved ids on the message, so a click opens the exact identity and a
   // self-mention highlights by id rather than by an ambiguous shared name.
-  const resolvedMentions = await resolveMentionTokens(ctx.db, body);
+  const resolvedMentions = await resolveMentionTokens(ctx.db, body, isRichBody);
   body = resolvedMentions.body;
   const mentionsSnapshot = resolvedMentions.mentions;
 
@@ -265,7 +299,11 @@ export async function addMessage(
   // branch prose carries resolved names, and after the inline-expansion
   // length gate so the marker's encoding overhead (URI-encoded JSON) is
   // never charged against the author's typed length.
-  body = processCheckBlocks(stripCheckMarkers(body), randomInt);
+  if (!isRichBody) body = processCheckBlocks(stripCheckMarkers(body), randomInt);
+
+  // Plaintext mirror of a rich body, derived AFTER every body transform
+  // (mention rewrite) so it matches what readers see. Null on md rows.
+  const bodyTextSnapshot = isRichBody ? richHtmlToText(body) : null;
 
   // Forum-thread auto-binding. When the dispatcher hydrated a reply
   // context (composer was scoped to an active topic in a nested-mode
@@ -511,6 +549,8 @@ export async function addMessage(
     displayName,
     kind: payload.kind,
     body,
+    format: payload.format ?? "md",
+    bodyText: bodyTextSnapshot,
     color: colorSnapshot,
     toUserId: payload.toUserId ?? null,
     replyToId: payload.replyToId ?? null,
@@ -582,6 +622,7 @@ export async function addMessage(
     displayName,
     kind: payload.kind,
     body,
+    ...(isRichBody ? { format: "html" as const, bodyText: bodyTextSnapshot } : {}),
     color: colorSnapshot,
     createdAt: +now,
     ...(payload.toUserId ? { toUserId: payload.toUserId } : {}),
@@ -658,6 +699,13 @@ export async function addMessage(
   // the chat to read what was said.
   void pushTriggers(ctx.io, ctx.db, out, ctx.user, payload.kind, messageIsNsfw);
 
+  // Welcome wagon (migration 0353): if this is the author's first-ever
+  // spoken message, ping online members of this server so someone says hi.
+  // `payload.kind` here is the POST-incognito-rewrite kind, so a hidden
+  // moderator's system-line rewrite can never announce. Fire-and-forget —
+  // the helper is best-effort by contract.
+  void maybeFireFirstWords(ctx.io, ctx.db, ctx.user, ctx.roomId, payload.kind, displayName);
+
   // Fire-and-forget link unfurl (OpenGraph preview). Off the hot path:
   // the card arrives via a message:update once the target site answers.
   // Failures (timeouts, unsafe hosts, no metadata) are silent.
@@ -666,7 +714,12 @@ export async function addMessage(
       messageId: id,
       roomId: ctx.roomId,
       kind: payload.kind,
-      body: out.body,
+      // Rich bodies keep their links in <a href> attributes, invisible
+      // to a text scan — feed the extracted hrefs (plus the visible
+      // text for bare pasted URLs) instead of the markup.
+      body: isRichBody
+        ? [...richHtmlLinkHrefs(out.body), bodyTextSnapshot ?? ""].join("\n")
+        : out.body,
     }))
     .catch(() => { /* cosmetic */ });
 
@@ -745,7 +798,9 @@ export async function addMessage(
         characterId: ctx.user.activeCharacterId,
         defaultActiveCharacterId: ctx.user.activeCharacterId,
         kind: payload.kind,
-        body,
+        // Award quality/length reads the VISIBLE text of a rich body —
+        // markup bytes must not count toward the body floor or length.
+        body: bodyTextSnapshot ?? body,
         roomId: ctx.roomId,
         messageId: id,
       });
@@ -826,7 +881,10 @@ export async function pushTriggers(
     if (kind !== "say" && kind !== "me" && kind !== "ooc" && kind !== "announce") return;
 
     const tokenRefs = msg.mentions ?? [];
-    const names = extractMentions(msg.body);
+    // Rich rows scan their VISIBLE text: `@` runs inside markup
+    // (hrefs, entities) are not mentions.
+    const mentionSource = msg.format === "html" ? (msg.bodyText ?? "") : msg.body;
+    const names = extractMentions(mentionSource);
     if (names.length === 0 && tokenRefs.length === 0) return;
 
     // The room's server, so the mention notification is grouped under it (rail
@@ -871,9 +929,12 @@ export async function pushTriggers(
       seen.add(targetUserId);
       const recipientIsMinor = !isAdultUser({ birthdate });
       if (recipientIsMinor && minorMaskedBody === undefined) {
-        minorMaskedBody = maskForMinors(msg.body);
+        minorMaskedBody = maskForMinors(msg.format === "html" ? (msg.bodyText ?? "") : msg.body);
       }
-      const snippetSource = recipientIsMinor ? (minorMaskedBody ?? msg.body) : msg.body;
+      // Inbox rows persist a plaintext snippet — rich rows contribute
+      // their derived text, never markup.
+      const plainBody = msg.format === "html" ? (msg.bodyText ?? "") : msg.body;
+      const snippetSource = recipientIsMinor ? (minorMaskedBody ?? plainBody) : plainBody;
       // Persist a Notification Center row + live bell pulse for everyone
       // mentioned (online or not). The engine's own push is suppressed
       // (push:false) because the offline web-push just below is this surface's
@@ -993,6 +1054,24 @@ export async function pushTriggers(
  * fails closed (treated as a minor → masked), matching the NSFW gate's
  * posture one paragraph up.
  */
+/**
+ * Deploy-window compatibility shim (migration 0352): a stale bundle
+ * receiving `format: "html"` would run the body through parseInline and
+ * paint literal tag soup. Sockets whose handshake lacked the
+ * `rich-html` capability get the row downgraded to its plaintext
+ * mirror (an ordinary md body). Rich-capable sockets — every bundle
+ * shipped with this feature — receive the shared original object.
+ */
+export function messageForSocket(
+  msg: ChatMessage,
+  socketData: { richHtml?: boolean },
+): ChatMessage {
+  if (msg.format !== "html" || socketData.richHtml) return msg;
+  const { format: _format, bodyText: _bodyText, ...rest } = msg;
+  void _format;
+  return { ...rest, body: _bodyText ?? msg.body };
+}
+
 export async function emitFiltered(
   io: Io,
   db: Db,
@@ -1031,12 +1110,26 @@ export async function emitFiltered(
   // (participant-scoped privacy); the sender's hide-set carries over so an
   // ignore/block filters identically on both sides. The mirrored payload
   // keeps its true roomId — the client buckets it under the sibling and
-  // tints it in the merged render.
+  // tints it in the merged render. Same per-socket rich-HTML capability
+  // downgrade as the room fan-out below: a staff socket on a pre-rich
+  // bundle must not receive raw markup through the mirror either.
   const mirror = msg.kind !== "whisper" && !msg.toUserId
-    ? emitToPairStaff(io, db, roomId, (s) => s.emit("message:new", msg), hide, sender)
+    ? emitToPairStaff(
+        io,
+        db,
+        roomId,
+        (s) => s.emit("message:new", messageForSocket(msg, s.data as { richHtml?: boolean })),
+        hide,
+        sender,
+      )
     : Promise.resolve();
+  // Rich rows force the per-socket path only while some connected
+  // recipient runs a pre-rich bundle (deploy window); afterwards every
+  // socket carries the capability and the fast path is restored.
+  const anyLegacySocket = msg.format === "html"
+    && sockets.some((s) => !(s.data as { richHtml?: boolean }).richHtml);
   if (!roomIsNsfw && !senderMayIsolate && ignorerRows.length === 0
-    && blockedWithSender.size === 0 && !minorVariant) {
+    && blockedWithSender.size === 0 && !minorVariant && !anyLegacySocket) {
     io.to(`room:${roomId}`).emit("message:new", msg);
     await mirror;
     return;
@@ -1050,7 +1143,8 @@ export async function emitFiltered(
     // check, mirroring how the block set relies on socket.data alone.
     const recipient = (s.data as { user?: SessionUser }).user;
     if (senderMayIsolate && recipient && uid !== senderUserId && isIsolatedBetween(sender, recipient)) continue;
-    s.emit("message:new", minorVariant && !recipient?.isAdult ? minorVariant : msg);
+    const base = minorVariant && !recipient?.isAdult ? minorVariant : msg;
+    s.emit("message:new", messageForSocket(base, s.data as { richHtml?: boolean }));
   }
   await mirror;
 }
@@ -1133,7 +1227,7 @@ async function fanRoomUnreadBump(
              COUNT(m.id) AS unread,
              SUM(
                CASE WHEN m.id IS NOT NULL
-                          AND (lower(m.body) LIKE '%@' || lower(u.username) || '%'
+                          AND (lower(COALESCE(m.body_text, m.body)) LIKE '%@' || lower(u.username) || '%'
                                OR m.mentions_json LIKE '%"userId":"' || rm.user_id || '"%')
                     THEN 1 ELSE 0 END
              ) AS mentions,
@@ -1314,6 +1408,9 @@ export async function sendRoomBacklogTo(
   socket: {
     emit(event: "message:bulk", payload: ChatMessage[]): unknown;
     emit(event: "room:history_meta", payload: { roomId: string; hasMore: boolean }): unknown;
+    /** socket.data (optional so test stubs stay minimal); read for the
+     *  rich-html capability downgrade. */
+    data?: { richHtml?: boolean };
   },
   db: Db,
   roomId: string,
@@ -1416,6 +1513,9 @@ export async function sendRoomBacklogTo(
       displayName: m.displayName,
       kind: m.kind,
       body: m.deletedAt ? "" : m.body,
+      ...(m.format === "html"
+        ? { format: "html" as const, bodyText: m.deletedAt ? "" : m.bodyText }
+        : {}),
       color: m.color,
       createdAt: +m.createdAt,
       ...(m.toUserId ? { toUserId: m.toUserId } : {}),
@@ -1448,7 +1548,7 @@ export async function sendRoomBacklogTo(
       // delete route + the history endpoints: site admins receive the
       // original body of a deleted message; everyone else gets the
       // bare placeholder.
-      ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.body } : {}),
+      ...(viewerIsAdmin && m.deletedAt ? { originalBody: m.format === "html" ? (m.bodyText ?? m.body) : m.body } : {}),
       // Admin-only snapshot of who performed the delete. See toWire in
       // routes/messages.ts for the same shape, both paths must stay
       // in sync or admins see audit info live but not in backlog.
@@ -1504,7 +1604,13 @@ export async function sendRoomBacklogTo(
     const state = await loadRoleSelectState(db, backlogServerId, viewerUserId, m.body);
     if (state) m.roleSelect = state;
   }
-  socket.emit("message:bulk", backlog);
+  // Deploy-window shim (migration 0352): a pre-rich bundle joining a
+  // room mid-deploy gets rich rows downgraded to their plaintext mirror.
+  const socketCaps = socket.data ?? {};
+  const backlogOut = socketCaps.richHtml
+    ? backlog
+    : backlog.map((m) => messageForSocket(m, socketCaps));
+  socket.emit("message:bulk", backlogOut);
   // Authoritative "older messages exist" signal for the scroll-up
   // paginator. Computed from the DB-level query length (51) so it
   // ignores per-viewer filtering, the load-older endpoint will

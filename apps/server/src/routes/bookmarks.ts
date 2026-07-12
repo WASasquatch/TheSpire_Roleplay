@@ -68,7 +68,10 @@ type MessageRow = typeof messages.$inferSelect;
 function buildSnapshot(m: MessageRow, roomName: string): Partial<typeof bookmarks.$inferInsert> {
   return {
     snapshotDisplayName: m.displayName,
-    snapshotBody: m.body,
+    // Rich-format rows (migration 0352) freeze their VISIBLE text: the
+    // bookmarks viewer is a plaintext surface, so the plaintext mirror
+    // is the faithful snapshot (raw markup would render as tag soup).
+    snapshotBody: m.format === "html" ? (m.bodyText ?? m.body) : m.body,
     snapshotBodyHtml: m.bodyHtml ?? null,
     snapshotColor: m.color ?? null,
     snapshotCmdCss: m.cmdCss ?? null,
@@ -218,7 +221,9 @@ export async function registerBookmarkRoutes(app: FastifyInstance, db: Db): Prom
             roomName: room?.name ?? "(deleted room)",
             displayName: m.displayName,
             kind: m.kind,
-            body: maskBody(m.body),
+            // Rich rows serve their plaintext mirror — the viewer renders
+            // bookmark bodies through the md pipeline.
+            body: maskBody(m.format === "html" ? (m.bodyText ?? m.body) : m.body),
             createdAt: +m.createdAt,
             replyToId: m.replyToId ?? null,
             // Snapshot color + cmd-css so the bookmark preview paints the

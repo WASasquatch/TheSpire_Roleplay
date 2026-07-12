@@ -298,7 +298,8 @@ export async function registerReportRoutes(app: FastifyInstance, db: Db): Promis
         messageBody: isProfileReport || isDmReport
           ? (r.bodySnapshot ?? "[snapshot gone]")
           : (msg
-              ? (msg.deletedAt ? "[message removed]" : msg.body)
+              // Rich-format rows report their VISIBLE text, never markup.
+              ? (msg.deletedAt ? "[message removed]" : (msg.format === "html" ? (msg.bodyText ?? msg.body) : msg.body))
               : "[message gone]"),
         messageDisplayName: isProfileReport || isDmReport
           ? (reportedUser?.username ?? "(unknown)")

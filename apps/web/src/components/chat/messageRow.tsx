@@ -2,12 +2,13 @@ import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, typ
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Bookmark, BookmarkCheck, Flag, Pencil, Pin, PinOff, Reply, SmilePlus, Trash2 } from "lucide-react";
-import { canonicalizeNameForLookup, customCmdCssToStyle, extractMentions, renderUiRouteChipsInHtml, resolveMessageColor, type AvatarCrop, type ChatMessage, type MentionRef } from "@thekeep/shared";
+import { canonicalizeNameForLookup, customCmdCssToStyle, extractMentions, renderUiRouteChipsInHtml, resolveMessageColor, richHtmlToText, type AvatarCrop, type ChatMessage, type MentionRef } from "@thekeep/shared";
 import { useActiveTheme } from "../../lib/theme.js";
 import { BorderedAvatar } from "../cosmetics/BorderedAvatar.js";
 import { UserNameTag } from "../UserNameTag.js";
 import type { Gender } from "../../lib/gender.js";
-import { groupBodyBlocks, parseInline, solitaryEmoticonToken, type BodyBlockGroup } from "../../lib/markdown.js";
+import { groupBodyBlocks, parseInline, renderInlineTokens, solitaryEmoticonToken, type BodyBlockGroup } from "../../lib/markdown.js";
+import { richBodyToReact } from "../../lib/richBody.js";
 import { sanitizeUserHtml } from "../../lib/userHtml.js";
 import { handleUiRouteClickInHtml } from "../../lib/uiRouteOpen.js";
 import { hydrateDynamicUiRouteChips } from "../../lib/hydrateDynamicUiRouteChips.js";
@@ -22,6 +23,7 @@ import { formatTime } from "../../lib/intlFormat.js";
 import { fmtTime } from "../messageTime.js";
 import { ReactionAddButton, ReactionBar } from "./ReactionBar.js";
 import { PollCard } from "./PollCard.js";
+import { RichMessageEditArea } from "./RichMessageEditArea.js";
 import { RoleSelectCard } from "./RoleSelectCard.js";
 
 /** Kinds eligible for /reports - mirrors the server's privacy gate. */
@@ -176,6 +178,14 @@ function renderParts(
    * always treated as a known/clickable mention.
    */
   mentions: ReadonlyArray<MentionRef> = [],
+  /**
+   * Inline renderer for plain-text segments. Defaults to the full chat
+   * markdown grammar; rich-HTML bodies (format 'html') pass the
+   * token-only renderer instead so their text nodes keep @mention chips
+   * / emoticon stickers / autolinks WITHOUT re-interpreting markdown
+   * delimiters (the structure is already real HTML).
+   */
+  inlineRenderer: (text: string) => ReactNode[] = parseInline,
 ): ReactNode[] {
   // Normalize NBSP to a regular space so a mention rendered with the "fake
   // space" matches a viewer/self name (or a snapshot ref) typed with a real
@@ -191,7 +201,7 @@ function renderParts(
   const out: ReactNode[] = [];
   parts.forEach((p, i) => {
     if (p.kind === "text") {
-      out.push(<Fragment key={i}>{parseInline(p.text)}</Fragment>);
+      out.push(<Fragment key={i}>{inlineRenderer(p.text)}</Fragment>);
     } else if (p.kind === "world-mention") {
       // World mention chip - styled distinctly from @user mentions so the
       // two are visually separable mid-sentence. Opens the world viewer.
@@ -519,15 +529,33 @@ export function Line({
       hideIcon
     />
   );
+  // Rich-HTML body (format 'html', migration 0352): the body is
+  // server-sanitized markup, re-sanitized + rendered structurally by
+  // richBodyToReact below. `plainBody` is the server-derived visible
+  // text — the row's plaintext view for mention resolution and sticker
+  // promotion (identical to the body on md rows).
+  const isRichBody = msg.format === "html";
+  const plainBody = isRichBody ? (msg.bodyText ?? "") : msg.body;
   // Memoize the parsed parts on body so the splitMentions regex doesn't
   // re-run on every parent render (only when the body changes).
   // `bodyBlocks` is non-null ONLY when the body carries `> `/`- ` block
   // lines; every other message keeps the plain single-pass render.
+  //
+  // Block inference applies ONLY to plain 'say' rows — the kind the
+  // composer's markdown serializer emits quote/bullet prefixes for.
+  // Inline action kinds (/me, rolls, whispers, ooc, npc, system…)
+  // render strictly inline, so the RP dash convention ("/me - lightning
+  // crashes as WAS stands ominously") keeps its literal leading "- "
+  // instead of collapsing into a nameless one-item bullet list.
   const bodyBlocks = useMemo(() => {
+    if (isRichBody || msg.kind !== "say") return null;
     const groups = groupBodyBlocks(msg.body);
     return groups.some((g) => g.kind === "quote" || g.kind === "bullet") ? groups : null;
-  }, [msg.body]);
-  const bodyParts = useMemo(() => (bodyBlocks ? null : splitMentions(msg.body)), [bodyBlocks, msg.body]);
+  }, [isRichBody, msg.kind, msg.body]);
+  const bodyParts = useMemo(
+    () => (bodyBlocks || isRichBody ? null : splitMentions(msg.body)),
+    [bodyBlocks, isRichBody, msg.body],
+  );
   // Subscribe to the mentions cache version + known set so the render
   // re-fires after a batch resolve lands (the resolver mutates Sets
   // in place; the version bump is what triggers React to re-evaluate).
@@ -537,14 +565,41 @@ export function Line({
   });
   // Kick off resolution for any mention names in this body that the
   // cache hasn't seen yet. Debounced + deduped inside the cache, so
-  // calling this on every Line render is cheap.
+  // calling this on every Line render is cheap. Rich rows scan their
+  // visible text, so markup bytes can't fabricate a mention.
   useEffect(() => {
-    const names = extractMentions(msg.body);
+    const names = extractMentions(plainBody);
     if (names.length > 0) requestMentionResolve(names);
-  }, [msg.body]);
-  const renderedBody = bodyBlocks
-    ? renderBodyBlocks(t, bodyBlocks, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? [])
-    : renderParts(t, bodyParts!, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? []);
+  }, [plainBody]);
+  // Rich bodies keep full inline-token parity: every TEXT node runs
+  // through the mention splitter + the token-only inline renderer
+  // (emoticon stickers, emoji zoom, autolinks) — but never through the
+  // markdown grammar, whose delimiters are literal prose inside a
+  // structured body. Memoized: richBodyToReact parses via a detached
+  // <template> per call.
+  const richRendered = useMemo(() => {
+    if (!isRichBody) return null;
+    return richBodyToReact(msg.body, (text, key) => (
+      <Fragment key={key}>
+        {renderParts(
+          t,
+          splitMentions(text),
+          onMentionClick,
+          onWorldClick,
+          selfNames,
+          knownMentions,
+          msg.mentions ?? [],
+          renderInlineTokens,
+        )}
+      </Fragment>
+    ));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isRichBody, msg.body, msg.mentions, t, onMentionClick, onWorldClick, selfNames, knownMentions]);
+  const renderedBody = isRichBody
+    ? richRendered
+    : bodyBlocks
+      ? renderBodyBlocks(t, bodyBlocks, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? [])
+      : renderParts(t, bodyParts!, onMentionClick, onWorldClick, selfNames, knownMentions, msg.mentions ?? []);
   // Resolve the user's stored color once and feed both kind-shaped
   // body styles below. `themeBg` lets resolveMessageColor swap in a
   // legible variant of literal hex colors when the chosen shade would
@@ -558,7 +613,7 @@ export function Line({
   // Resolved here once for ALL kinds so the lookup obeys hook order
   // even when this message renders as `me`/`ooc`/`whisper` etc. and
   // doesn't end up taking the sticker path.
-  const sticker = solitaryEmoticonToken(msg.body);
+  const sticker = solitaryEmoticonToken(plainBody);
   const stickerSheet = useEmoticons((s) =>
     sticker ? s.sheets.find((sh) => sh.slug === sticker.slug) : undefined,
   );
@@ -978,6 +1033,23 @@ export function Line({
         );
         break;
       }
+      // Rich-HTML rows carry real block structure (headings, aligned
+      // paragraphs, lists) — the body renders as a full-width block
+      // BELOW the name line (same shape as the poll / role-select
+      // cards) so centered/right-aligned lines have a real line box to
+      // align inside. Sticker promotion still wins for a body whose
+      // visible text is a single emoticon token.
+      if (isRichBody && !(stickerOk && sticker)) {
+        lineEl = (
+          <div>
+            <div>{time}{inlineAvatar}[{tag}]{editedBadge}</div>
+            <div className="chat-rich-body" style={bodyColor ? { color: bodyColor } : undefined}>
+              {renderedBody}
+            </div>
+          </div>
+        );
+        break;
+      }
       lineEl = (
         <div>
           {time}{inlineAvatar}[{tag}]{" "}
@@ -1383,11 +1455,23 @@ function InlineEditForm({
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState(msg.body);
   const [error, setError] = useState<string | null>(null);
+  // Rich-editor variant: the editor lives outside the form's native
+  // submit flow, so Enter routes through requestSubmit on this ref.
+  const formRef = useRef<HTMLFormElement | null>(null);
+  // Per-room rich-text toggle (migration 0354): editing a stored rich
+  // message in a Simple-formatting room still opens the rich editor, but
+  // with headings/alignment out of its schema — the save re-serializes
+  // without them (the PATCH route degrades server-side regardless).
+  const roomRichDisabled = useChat((s) => !!s.rooms[msg.roomId]?.richTextDisabled);
 
   async function submitEdit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = draft.trim();
     if (!trimmed) return;
+    // Rich rows: an emptied editor still serializes markup
+    // ("<p><br /></p>"), so gate on the VISIBLE text — the same
+    // silent no-op the plain textarea's !trimmed guard gives md rows.
+    if (msg.format === "html" && !richHtmlToText(trimmed).trim()) return;
     if (trimmed === msg.body) { onClose(); return; }
     setBusy(true);
     setError(null);
@@ -1426,6 +1510,7 @@ function InlineEditForm({
 
   return (
     <form
+      ref={formRef}
       onSubmit={submitEdit}
       // Full row width, that's the entire reason this form lives at
       // the Line level instead of inside the absolute-positioned
@@ -1437,27 +1522,43 @@ function InlineEditForm({
         if (e.key === "Escape") onClose();
       }}
     >
-      <textarea
-        // eslint-disable-next-line jsx-a11y/no-autofocus
-        autoFocus
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        // Auto-grow with the draft: floor at 1 row so single-line
-        // edits keep the original inline feel, cap at 10 so a long
-        // body doesn't blow the row's vertical budget.
-        rows={Math.min(10, Math.max(1, draft.split("\n").length))}
-        // Enter saves (mirrors the composer's send-on-Enter convention);
-        // Shift+Enter inserts a newline. Without this override the form's
-        // onSubmit would never fire because <textarea> swallows Enter.
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
-            e.preventDefault();
-            e.currentTarget.form?.requestSubmit();
-          }
-        }}
-        className={textareaClass}
-        {...(isAdmin ? { "aria-label": t("row.adminEditAria", { name: msg.displayName }) } : {})}
-      />
+      {msg.format === "html" ? (
+        // Rich-HTML rows (migration 0352) edit in the rich editor —
+        // dropping their markup into a plain textarea would force the
+        // author to hand-edit HTML. Same key contract as the textarea:
+        // Enter saves, Shift+Enter breaks a line, Escape closes.
+        <RichMessageEditArea
+          initialHtml={msg.body}
+          richEnabled={!roomRichDisabled}
+          onChange={setDraft}
+          onSubmit={() => formRef.current?.requestSubmit()}
+          onCancel={onClose}
+          className={`min-w-0 flex-1 cursor-text overflow-y-auto rounded border bg-keep-bg ${isAdmin ? "border-keep-accent" : "border-keep-action"} max-h-64`}
+          {...(isAdmin ? { ariaLabel: t("row.adminEditAria", { name: msg.displayName }) } : {})}
+        />
+      ) : (
+        <textarea
+          // eslint-disable-next-line jsx-a11y/no-autofocus
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          // Auto-grow with the draft: floor at 1 row so single-line
+          // edits keep the original inline feel, cap at 10 so a long
+          // body doesn't blow the row's vertical budget.
+          rows={Math.min(10, Math.max(1, draft.split("\n").length))}
+          // Enter saves (mirrors the composer's send-on-Enter convention);
+          // Shift+Enter inserts a newline. Without this override the form's
+          // onSubmit would never fire because <textarea> swallows Enter.
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+          className={textareaClass}
+          {...(isAdmin ? { "aria-label": t("row.adminEditAria", { name: msg.displayName }) } : {})}
+        />
+      )}
       <div className="flex items-center justify-end gap-1">
         {error ? <span className="mr-auto text-[10px] text-keep-accent">{error}</span> : null}
         <button

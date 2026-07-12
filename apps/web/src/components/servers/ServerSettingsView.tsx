@@ -279,6 +279,8 @@ interface RoomListRow {
   postMode?: "everyone" | "staff" | "roles";
   /** "Never expire" opt-out (migration 0347); absent = false. */
   retentionExempt?: boolean;
+  /** Per-room rich-text toggle (migration 0354); absent = full rich text. */
+  richTextDisabled?: boolean;
   occupants?: unknown[];
 }
 
@@ -1833,6 +1835,9 @@ function RoomCreateForm({ detail, categories, busy, run, onCreated }: { detail: 
   // Who can post (migration 0345): "staff" creates an announcements-style
   // info room where only staff post and everyone else reads + reacts.
   const [postMode, setPostMode] = useState<"everyone" | "staff">("everyone");
+  // Text formatting (migration 0354): "simple" hides the composer's
+  // rich-only controls (headings, alignment) in this room.
+  const [richText, setRichText] = useState<"full" | "simple">("full");
   // 18+ room checkbox (age-restriction plan, Phase 2): hidden from under-18
   // viewers entirely (the route rejects the write regardless), and moot
   // inside an 18+ community, where every room is 18+ by the server flag.
@@ -1885,6 +1890,15 @@ function RoomCreateForm({ detail, categories, busy, run, onCreated }: { detail: 
             of the same setting. */}
         <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.postModeHint")}</span>
       </label>
+      <label className="block text-xs">
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.richTextLabel")}</span>
+        <select value={richText} onChange={(e) => setRichText(e.target.value as "full" | "simple")}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm">
+          <option value="full">{t("console.rooms.richTextFull")}</option>
+          <option value="simple">{t("console.rooms.richTextSimple")}</option>
+        </select>
+        <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.richTextHint")}</span>
+      </label>
       <label className="flex items-start gap-2 text-xs text-keep-text">
         <input type="checkbox" className="mt-0.5" checked={persistent} onChange={(e) => setPersistent(e.target.checked)} />
         <span>
@@ -1917,7 +1931,7 @@ function RoomCreateForm({ detail, categories, busy, run, onCreated }: { detail: 
       <div className="flex justify-end">
         <button type="button" disabled={busy || !canSave}
           onClick={() => void run(async () => {
-            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(postMode === "staff" ? { postMode } : {}), ...(nsfw ? { isNsfw: true } : {}), ...(adultChannel && !nsfw && type === "public" ? { adultChannel: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}), ...(icon.trim() ? { icon: icon.trim() } : {}), ...(categoryId === "none" ? { categoryId: null } : categoryId ? { categoryId } : {}) });
+            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(postMode === "staff" ? { postMode } : {}), ...(richText === "simple" ? { richTextDisabled: true } : {}), ...(nsfw ? { isNsfw: true } : {}), ...(adultChannel && !nsfw && type === "public" ? { adultChannel: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}), ...(icon.trim() ? { icon: icon.trim() } : {}), ...(categoryId === "none" ? { categoryId: null } : categoryId ? { categoryId } : {}) });
             onCreated();
           })}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.rooms.createRoom")}</button>
@@ -1991,6 +2005,9 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
   );
   // Who can post (migrations 0345/0349).
   const [postMode, setPostMode] = useState<"everyone" | "staff" | "roles">(room.postMode ?? "everyone");
+  // Text formatting (migration 0354): "simple" hides the composer's
+  // rich-only controls (headings, alignment) in this room.
+  const [richText, setRichText] = useState<"full" | "simple">(room.richTextDisabled ? "simple" : "full");
   // Per-role room gates (room_role_gates, migration 0349), lazily fetched
   // with the editor: the server's named usergroups + this room's current
   // access/post rows. `gates` null = still loading (role controls hidden).
@@ -2049,11 +2066,12 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
   const iconDirty = (icon.trim() || null) !== (room.icon ?? null);
   const categoryDirty = (categoryId || null) !== (room.categoryId ?? null);
   const postModeDirty = postMode !== (room.postMode ?? "everyone");
+  const richTextDirty = (richText === "simple") !== (room.richTextDisabled ?? false);
   const lifetimeDirty = lifetime !== initialLifetime
     || (lifetime === "custom" && expiry !== String(room.messageExpiryMinutes ?? ""));
   // Custom mode needs an actual minutes value before Save makes sense.
   const lifetimeInvalid = lifetime === "custom" && !(Number(expiry) >= 1);
-  const dirty = name !== room.name || topic !== (room.topic ?? "") || lifetimeDirty || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty || iconDirty || categoryDirty || postModeDirty || accessDirty || postRolesDirty;
+  const dirty = name !== room.name || topic !== (room.topic ?? "") || lifetimeDirty || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty || iconDirty || categoryDirty || postModeDirty || richTextDirty || accessDirty || postRolesDirty;
   return (
     <div className="mt-2 space-y-2 border-t border-keep-rule/60 pt-2">
       <label className="block text-xs">
@@ -2142,6 +2160,15 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
           </>
         ) : null}
       </label>
+      <label className="block text-xs" data-admin-anchor="console.rooms.richTextLabel">
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.richTextLabel")}</span>
+        <select value={richText} onChange={(e) => setRichText(e.target.value as "full" | "simple")}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
+          <option value="full">{t("console.rooms.richTextFull")}</option>
+          <option value="simple">{t("console.rooms.richTextSimple")}</option>
+        </select>
+        <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.richTextHint")}</span>
+      </label>
       <label className="block text-xs" data-admin-anchor="console.rooms.lifetimeLabel">
         <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.lifetimeLabel")}</span>
         <select value={lifetime} onChange={(e) => setLifetime(e.target.value as "inherit" | "custom" | "never")}
@@ -2212,6 +2239,7 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
               retentionExempt: lifetime === "never",
               persistent,
               ...(postModeDirty ? { postMode } : {}),
+              ...(richTextDirty ? { richTextDisabled: richText === "simple" } : {}),
               // Role gates: full-replace lists, sent only when touched
               // ("Everyone" saves as an empty list = clear the lock).
               ...(accessDirty ? { accessRoleIds: [...effectiveAccessIds] } : {}),

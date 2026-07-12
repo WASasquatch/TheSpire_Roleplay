@@ -162,6 +162,13 @@ export interface RoomSummary {
    * history is kept forever. Absent (older bundle) = false.
    */
   retentionExempt?: boolean;
+  /**
+   * Per-room rich-text toggle (migration 0354). True = the composer offers
+   * only the simple pre-rich formatting set (heading / alignment controls
+   * hidden; sends ride the markdown wire). Viewer-agnostic — the server
+   * enforces it at ingest/edit regardless. Absent (older bundle) = false.
+   */
+  richTextDisabled?: boolean;
 }
 
 /**
@@ -377,4 +384,12 @@ export interface RoomOccupant {
    * the profile "Roles" row). Optional for old payloads.
    */
   badge?: { name: string; color: string | null } | null;
+  /**
+   * Unverified-email marker (migration 0353). Present (true) ONLY while the
+   * site's "Denote unverified users" admin toggle is on AND this account has
+   * not confirmed its email — absent otherwise, so the default-off wire is
+   * byte-identical to before. Per-account: character rows carry it too.
+   * Renders as a subtle "Unverified" chip in the userlist.
+   */
+  unverified?: boolean;
 }

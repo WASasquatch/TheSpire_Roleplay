@@ -1501,6 +1501,8 @@
     "modeNudge": "Recordatorio: la cuenta funciona, con un aviso descartable",
     "modeBlock": "Bloqueo: no puede chatear hasta verificar",
     "verificationNote": "Las cuentas existentes se tratan como ya verificadas, así que activarlo solo afecta a los registros nuevos.",
+    "denoteUnverified": "Señalar usuarios sin verificar",
+    "denoteUnverifiedHint": "Muestra una pequeña etiqueta Sin verificar en la lista de personas de la sala y en los perfiles de las cuentas que nunca confirmaron su correo, para detectar posibles cuentas desechables. Las cuentas existentes cuentan como verificadas y nunca se etiquetan.",
     "dailyCapLabel": "Tope diario de envío masivo (correos/día)"
   },
   "overview": {

@@ -2278,6 +2278,103 @@ aside.margin-note {
   height: 0;
   pointer-events: none;
 }
+/* Rich-only headings (shipped via the rich-HTML message format):
+ * previewed at the same chat-scale em sizes the feed renders. */
+.keep-composer-editor h1,
+.keep-composer-editor h2,
+.keep-composer-editor h3 {
+  margin: 0;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.keep-composer-editor h1 {
+  font-size: 1.5em;
+}
+.keep-composer-editor h2 {
+  font-size: 1.3em;
+}
+.keep-composer-editor h3 {
+  font-size: 1.15em;
+}
+
+/* ============================================================
+ * Rich-HTML message bodies (format 'html', migration 0352)
+ * ============================================================
+ *
+ * Scoped container for the chat feed's structured bodies. The markup
+ * supplies its own block structure, so pre-wrap comes OFF (block
+ * boundaries are the line breaks) and the block set gets chat-scale
+ * styling: headings must not dwarf the log, quotes/lists/code mirror
+ * the md block renderer's look. Alignment arrives as validated inline
+ * style on p/h1-h3.
+ */
+.chat-rich-body {
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.chat-rich-body p {
+  margin: 0 0 0.15em;
+}
+.chat-rich-body p:last-child {
+  margin-bottom: 0;
+}
+.chat-rich-body h1,
+.chat-rich-body h2,
+.chat-rich-body h3 {
+  margin: 0.15em 0 0.1em;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.chat-rich-body h1 {
+  font-size: 1.5em;
+}
+.chat-rich-body h2 {
+  font-size: 1.3em;
+}
+.chat-rich-body h3 {
+  font-size: 1.15em;
+}
+.chat-rich-body ul,
+.chat-rich-body ol {
+  list-style: disc;
+  margin: 0.15em 0;
+  padding-left: 1.4em;
+}
+.chat-rich-body ol {
+  list-style: decimal;
+}
+.chat-rich-body blockquote {
+  border-left: 2px solid rgb(var(--keep-action) / 0.5);
+  background: rgb(var(--keep-banner) / 0.4);
+  color: rgb(var(--keep-muted) / 1);
+  font-style: italic;
+  margin: 0.15em 0;
+  padding: 0.1em 0.5em;
+}
+.chat-rich-body blockquote p {
+  margin: 0;
+}
+.chat-rich-body pre {
+  background: rgb(var(--keep-panel) / 0.6);
+  border: 1px solid rgb(var(--keep-rule) / 0.6);
+  border-radius: 4px;
+  margin: 0.15em 0;
+  padding: 0.3em 0.5em;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+.chat-rich-body code {
+  background: rgb(var(--keep-panel) / 0.6);
+  border-radius: 3px;
+  padding: 0 0.25em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.95em;
+}
+.chat-rich-body pre code {
+  background: transparent;
+  padding: 0;
+}
 
 /* ============================================================
  * Reader scheme isolation (Scriptorium reader)

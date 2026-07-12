@@ -193,7 +193,10 @@ export async function registerForumBoardRoutes(app: FastifyInstance, db: Db, io:
         // keep byte-identical cards; the stored row is never touched.
         const title = m.title ?? "";
         const cardTitle = me.isAdult ? title : (maskForMinors(title) ?? title);
-        const cardBody = me.isAdult ? m.body : (maskForMinors(m.body) ?? m.body);
+        // Rich-format rows (migration 0352) snippet their VISIBLE text —
+        // the card snippet is a plaintext surface.
+        const plainBody = m.format === "html" ? (m.bodyText ?? "") : m.body;
+        const cardBody = me.isAdult ? plainBody : (maskForMinors(plainBody) ?? plainBody);
         return {
           id: m.id,
           title: cardTitle,

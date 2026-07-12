@@ -349,6 +349,13 @@ export interface CharacterProfile {
   languages: string[];
   /** Public-visibility journal entries in chronological order (oldest first). Private entries are NEVER included in this array - they only surface in the owner's editor. */
   journalEntries: CharacterJournalEntry[];
+  /**
+   * The OWNING ACCOUNT's unverified-email marker (migration 0353) — same
+   * semantics as `MasterProfile.unverified` (present only while the admin
+   * toggle is on and the owner is unverified). Account-level: a throwaway
+   * account's characters wear the chip too.
+   */
+  unverified?: boolean;
   /** Owner's chosen UI theme - applied to the profile modal when others view it. */
   theme: Theme;
   /**
@@ -624,6 +631,13 @@ export interface MasterProfile {
   isPublic: boolean;
   isNsfw: boolean;
   createdAt: number;
+  /**
+   * Unverified-email marker (migration 0353). True ONLY while the site's
+   * "Denote unverified users" admin toggle is on AND the account hasn't
+   * confirmed its email; absent otherwise (no wire noise when off).
+   * Renders as a subtle "Unverified" chip on the profile modal.
+   */
+  unverified?: boolean;
   /** Lifetime activity counters scoped to this master account (every character). */
   metrics: ProfileMetrics;
   /**

@@ -243,7 +243,10 @@ export async function registerSearchRoutes(app: FastifyInstance, db: Db): Promis
           inArray(messages.roomId, roomIds),
           isNull(messages.deletedAt),
           sql`${messages.kind} != 'system'`,
-          sql`${messages.body} LIKE ${like} ESCAPE '\\'`,
+          // Rich-format rows (migration 0352) match on their VISIBLE
+          // text mirror so markup bytes can neither hide a hit nor
+          // fabricate one; md rows keep matching the raw body.
+          sql`COALESCE(${messages.bodyText}, ${messages.body}) LIKE ${like} ESCAPE '\\'`,
           // SOFT tier (age plan, Phase 2): rows stamped 18+ at write time —
           // a flipped-back room's 18+ era, and Phase 3's NSFW topic titles/
           // bodies — are dropped for minors, anonymous never reaches this
@@ -299,7 +302,8 @@ export async function registerSearchRoutes(app: FastifyInstance, db: Db): Promis
       const hits = rows
         .filter((m) => !blocked.has(m.userId) && !inLockedCategory(m))
         .map((m): MessageSearchHit & { _ts: number } => {
-          const lc = m.body.toLowerCase();
+          const matchText = m.format === "html" ? (m.bodyText ?? "") : m.body;
+          const lc = matchText.toLowerCase();
           let count = 0;
           let idx = 0;
           while ((idx = lc.indexOf(needle, idx)) !== -1) { count++; idx += needle.length; }
@@ -313,7 +317,7 @@ export async function registerSearchRoutes(app: FastifyInstance, db: Db): Promis
             userId: m.userId,
             displayName: m.displayName,
             kind: m.kind,
-            snippet: m.body,
+            snippet: matchText,
             createdAt: +m.createdAt,
             relevance: count,
             ...(m.replyToId ? { replyToId: m.replyToId } : {}),

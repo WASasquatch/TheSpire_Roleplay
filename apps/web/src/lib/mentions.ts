@@ -1,4 +1,4 @@
-import { extractMentions as sharedExtractMentions, mentionRegex, splitOnCode } from "@thekeep/shared";
+import { CHAT_FONT_OPEN_SOURCE, extractMentions as sharedExtractMentions, mentionRegex, splitOnCode } from "@thekeep/shared";
 
 /**
  * Render-time mention parsing. The regex + extractMentions live in
@@ -53,9 +53,15 @@ export type BodyPart = TextPart | MentionPart | WorldMentionPart;
  * A mention inside such a span therefore renders as plain (colored) text,
  * not a clickable chip — the @notification path is unaffected (it uses the
  * shared extractor over the raw body, not this render-time split).
+ *
+ * The <font> branch is built from the shared grammar's opener source
+ * (CHAT_FONT_OPEN_SOURCE: color and/or size attributes, any order) so
+ * this protector can never drift from what the renderer consumes.
  */
-const STYLED_SPAN_RE =
-  /<font\s+color\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)\s*>[\s\S]*?<\/font\s*>|<span\s+style\s*=\s*(?:"[^"]*"|'[^']*')\s*>[\s\S]*?<\/span\s*>/gi;
+const STYLED_SPAN_RE = new RegExp(
+  `${CHAT_FONT_OPEN_SOURCE}[\\s\\S]*?</font\\s*>|<span\\s+style\\s*=\\s*(?:"[^"]*"|'[^']*')\\s*>[\\s\\S]*?</span\\s*>`,
+  "gi",
+);
 
 export function splitMentions(body: string): BodyPart[] {
   const out: BodyPart[] = [];

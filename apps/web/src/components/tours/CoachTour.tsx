@@ -37,6 +37,15 @@ export interface CoachStep {
   body: ReactNode;
   /** Candidate selectors, first match wins. Omit for a centered step. */
   targets?: string[];
+  /**
+   * Runs when this step becomes current — BEFORE the target is measured —
+   * so a step can stage the UI its target lives in (the site tour opens the
+   * mobile navigation drawer for userlist/room-list steps). May return a
+   * cleanup, invoked when the step is left (advance, back, or close), for
+   * restoring whatever the prepare changed. Prepares should be idempotent:
+   * two consecutive drawer steps each "open" it without flicker.
+   */
+  prepare?: () => void | (() => void);
 }
 
 const PAD = 8;
@@ -81,6 +90,41 @@ export function CoachTour({
   useEffect(() => {
     if (steps.length === 0) onClose();
   }, [steps.length, onClose]);
+
+  // Per-step prepare/cleanup. Runs the incoming step's `prepare` (e.g. "open
+  // the mobile drawer this target lives in") and invokes its returned cleanup
+  // when the step is left — including on unmount, so a skipped tour restores
+  // whatever the current step staged. Steps are read through a ref so a
+  // re-memoized (but logically identical) steps array — a language switch —
+  // doesn't re-run the prepare mid-step.
+  const stepsRef = useRef(steps);
+  stepsRef.current = steps;
+  useEffect(() => {
+    const prep = stepsRef.current[safeStep]?.prepare;
+    let cleanup: (() => void) | undefined;
+    if (prep) {
+      const r = prep();
+      if (typeof r === "function") cleanup = r;
+    }
+    return () => { cleanup?.(); };
+  }, [safeStep]);
+
+  // Backdrop-click nudge. An outside click must NOT dismiss the tour (that
+  // used to permanently kill the first-run walkthrough via the POSTed
+  // dismissal); instead the card pulses so the eye lands on the real
+  // controls. Dismissal stays explicit: the ✕ / Skip buttons, Esc, or
+  // finishing. The pulse is a color ring (calm-safe) plus a small scale pop
+  // that is dropped under reduced motion.
+  const [nudge, setNudge] = useState(false);
+  const nudgeTimer = useRef<number | null>(null);
+  const pulseCard = useCallback(() => {
+    setNudge(true);
+    if (nudgeTimer.current) window.clearTimeout(nudgeTimer.current);
+    nudgeTimer.current = window.setTimeout(() => setNudge(false), 400);
+  }, []);
+  useEffect(() => () => {
+    if (nudgeTimer.current) window.clearTimeout(nudgeTimer.current);
+  }, []);
 
   // Resolve + track the current step's target rect. Polls briefly for late-
   // mounting panels, then follows it on scroll/resize.
@@ -222,13 +266,55 @@ export function CoachTour({
 
   return createPortal(
     <div className="fixed inset-0 z-[200]" aria-modal role="dialog">
-      {/* Click-catcher: dims the page and blocks stray interaction. When there's
-          no spotlight target it provides the dim itself. */}
-      <div
-        className="absolute inset-0"
-        style={{ background: rect ? "transparent" : "rgba(8,10,18,0.62)" }}
-        onClick={onClose}
-      />
+      {/* Click-catcher: blocks stray interaction outside the spotlight. When
+          there's no spotlight target it covers everything and provides the dim
+          itself. Clicking it advances NOTHING and never dismisses — it just
+          pulses the card (dismissing here permanently killed the tour for
+          anyone who tapped the page). With a target, the catcher is FOUR
+          strips around the spotlight hole so the spotlighted control itself
+          stays clickable: several steps coach clicking the real UI (open the
+          drawer, press New Topic) and later steps' targets only mount after
+          that click. */}
+      {rect ? (
+        <>
+          <div
+            className="absolute"
+            style={{ top: 0, left: 0, right: 0, height: Math.max(0, rect.top - PAD) }}
+            onClick={pulseCard}
+          />
+          <div
+            className="absolute"
+            style={{ top: rect.bottom + PAD, left: 0, right: 0, bottom: 0 }}
+            onClick={pulseCard}
+          />
+          <div
+            className="absolute"
+            style={{
+              top: Math.max(0, rect.top - PAD),
+              left: 0,
+              width: Math.max(0, rect.left - PAD),
+              height: rect.height + PAD * 2,
+            }}
+            onClick={pulseCard}
+          />
+          <div
+            className="absolute"
+            style={{
+              top: Math.max(0, rect.top - PAD),
+              left: rect.right + PAD,
+              right: 0,
+              height: rect.height + PAD * 2,
+            }}
+            onClick={pulseCard}
+          />
+        </>
+      ) : (
+        <div
+          className="absolute inset-0"
+          style={{ background: "rgba(8,10,18,0.62)" }}
+          onClick={pulseCard}
+        />
+      )}
 
       {/* Spotlight. Dim (a giant box-shadow) lives on this div; the accent ring
           is a separate outline so a theme-var hiccup can't drop the dim too.
@@ -251,11 +337,19 @@ export function CoachTour({
         />
       ) : null}
 
-      {/* Tooltip card. */}
+      {/* Tooltip card. The nudge ring/pop fires on backdrop clicks; the
+          scale transform is skipped under reduced motion (the ring alone is
+          the calm-mode emphasis). */}
       <div
         ref={cardRef}
-        style={cardStyle}
-        className="max-h-[92vh] max-w-[92vw] overflow-y-auto rounded-xl border border-keep-rule bg-keep-panel p-4 text-keep-text shadow-2xl"
+        style={{
+          ...cardStyle,
+          ...(reduceMotion ? {} : {
+            transition: "transform .15s ease",
+            transform: nudge ? "scale(1.03)" : "scale(1)",
+          }),
+        }}
+        className={`max-h-[92vh] max-w-[92vw] overflow-y-auto rounded-xl border bg-keep-panel p-4 text-keep-text shadow-2xl ${nudge ? "border-keep-accent ring-2 ring-keep-accent" : "border-keep-rule"}`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-2 flex items-center gap-2">

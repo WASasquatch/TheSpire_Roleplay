@@ -201,6 +201,15 @@ export const rooms = sqliteTable(
       .notNull()
       .default("everyone"),
     /**
+     * Per-room rich-text toggle (migration 0354). When true the composer
+     * reduces to the simple pre-rich formatting set (rich-only heading /
+     * alignment controls hidden; sends ride the markdown wire), and the
+     * chat ingest + edit chokepoints degrade any incoming rich-HTML body
+     * (h1-h3 unwrap to paragraphs, text-align strips) so headings and
+     * alignment can never persist here. Console-set (manage_rooms).
+     */
+    richTextDisabled: integer("rich_text_disabled", { mode: "boolean" }).notNull().default(false),
+    /**
      * Difficulty Class for dice mechanics (migration 0246). When set,
      * `/roll` and `/initiative` report pass/fail against this threshold
      * (a roll must MEET OR BEAT it). Owners/mods/admins set it via
@@ -538,6 +547,22 @@ export const messages = sqliteTable(
       .notNull()
       .default("say"),
     body: text("body").notNull(),
+    /**
+     * Body format (migration 0352). 'md' = the historic chat markdown
+     * grammar (every pre-migration row, byte-identical forever).
+     * 'html' = `body` holds sanitized rich HTML (strict whitelist,
+     * sanitized at the dispatch ingest chokepoint) and `bodyText`
+     * carries the derived plaintext mirror.
+     */
+    format: text("format", { enum: ["md", "html"] }).notNull().default("md"),
+    /**
+     * Visible plaintext of an 'html'-format body, derived server-side
+     * at write time (block breaks as newlines, tags stripped, entities
+     * decoded). NULL on 'md' rows. Search / automod / notification
+     * snippets / caps read COALESCE(body_text, body) so markup never
+     * hides content from plaintext consumers.
+     */
+    bodyText: text("body_text"),
     /** Snapshot of the author's chat color at send time (e.g. "#990000"). Null = default. */
     color: text("color"),
     /** populated only for whispers */

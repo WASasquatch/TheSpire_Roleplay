@@ -164,6 +164,7 @@ export const ADMIN_SEARCH_ENTRIES: readonly AdminSearchEntry[] = [
   { key: "email.sendTitle", tab: "email", also: ["email.specificUser", "email.allUsers"] },
   { key: "email.newNewsletter", tab: "email", also: ["email.deliverAt"] },
   { key: "email.verificationLegend", tab: "email", also: ["email.requireVerification", "email.verificationNote"] },
+  { key: "email.denoteUnverified", tab: "email", also: ["email.denoteUnverifiedHint"] },
   { key: "email.dailyCapLabel", tab: "email" },
 
   // ----- System panels + maintenance tools -----

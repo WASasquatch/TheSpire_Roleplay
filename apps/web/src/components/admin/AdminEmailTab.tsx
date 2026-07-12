@@ -55,6 +55,7 @@ export function AdminEmailTab() {
   // Verification settings
   const [verifyEnabled, setVerifyEnabled] = useState(false);
   const [verifyMode, setVerifyMode] = useState<"nudge" | "block">("nudge");
+  const [denoteUnverified, setDenoteUnverified] = useState(false);
   const [dailyCap, setDailyCap] = useState("300");
   const [savingSettings, setSavingSettings] = useState(false);
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
@@ -92,6 +93,7 @@ export function AdminEmailTab() {
         const s = await fetch("/admin/settings", { credentials: "include" }).then((r) => r.json());
         setVerifyEnabled(!!s.emailVerificationEnabled);
         setVerifyMode(s.emailVerificationMode === "block" ? "block" : "nudge");
+        setDenoteUnverified(!!s.denoteUnverifiedUsers);
         setDailyCap(String(s.emailDailyCap ?? 300));
       } catch { /* ignore */ }
       await refreshStatus();
@@ -125,7 +127,7 @@ export function AdminEmailTab() {
       const cap = Math.max(1, Math.min(100000, parseInt(dailyCap, 10) || 300));
       const r = await fetch("/admin/settings", {
         method: "PUT", credentials: "include", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emailVerificationEnabled: verifyEnabled, emailVerificationMode: verifyMode, emailDailyCap: cap }),
+        body: JSON.stringify({ emailVerificationEnabled: verifyEnabled, emailVerificationMode: verifyMode, denoteUnverifiedUsers: denoteUnverified, emailDailyCap: cap }),
       });
       if (!r.ok) throw new Error("save failed");
       setDailyCap(String(cap));
@@ -357,6 +359,14 @@ export function AdminEmailTab() {
             </label>
           </div>
           <p className="text-[11px] text-keep-muted">{t("email.verificationNote")}</p>
+          {/* Denote unverified users (migration 0353). Independent of the
+              require-verification toggle: it reads meaningfully either way
+              (legacy accounts are backfilled verified), so it stays enabled. */}
+          <label data-admin-anchor="email.denoteUnverified" className="flex items-center gap-2">
+            <input type="checkbox" checked={denoteUnverified} onChange={(e) => setDenoteUnverified(e.target.checked)} />
+            <span>{t("email.denoteUnverified")}</span>
+          </label>
+          <p className="text-[11px] text-keep-muted">{t("email.denoteUnverifiedHint")}</p>
           <label data-admin-anchor="email.dailyCapLabel" className="block">
             <span className="mb-1 block text-xs text-keep-muted">{t("email.dailyCapLabel")}</span>
             <input className={input + " w-32"} value={dailyCap} onChange={(e) => setDailyCap(e.target.value)} placeholder="300" />

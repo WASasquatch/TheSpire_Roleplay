@@ -126,6 +126,8 @@ export interface SiteSettings {
   emailVerificationMode: "nudge" | "block";
   /** Max broadcast emails the throttled queue sends per calendar day (Brevo free = 300). */
   emailDailyCap: number;
+  /** When true, unverified accounts wear a subtle "Unverified" chip in the userlist and on profiles. */
+  denoteUnverifiedUsers: boolean;
   /** When false, /auth/register returns 503. */
   registrationOpen: boolean;
   /** Sanitized HTML rendered above the splash login/register form. */
@@ -355,6 +357,8 @@ export interface SettingsPatch {
   emailVerificationMode?: "nudge" | "block";
   /** Broadcast queue daily send cap. Route handler bounds it (1..100000). */
   emailDailyCap?: number;
+  /** Denote unverified users with a subtle chip (migration 0353). */
+  denoteUnverifiedUsers?: boolean;
   registrationOpen?: boolean;
   /** Pre-sanitized HTML; settings layer doesn't re-sanitize so the route handler must. */
   welcomeHtml?: string;
@@ -483,6 +487,7 @@ export async function updateSettings(
   if (patch.emailVerificationEnabled !== undefined) update.emailVerificationEnabled = patch.emailVerificationEnabled;
   if (patch.emailVerificationMode !== undefined) update.emailVerificationMode = patch.emailVerificationMode;
   if (patch.emailDailyCap !== undefined) update.emailDailyCap = patch.emailDailyCap;
+  if (patch.denoteUnverifiedUsers !== undefined) update.denoteUnverifiedUsers = patch.denoteUnverifiedUsers;
   if (patch.registrationOpen !== undefined) update.registrationOpen = patch.registrationOpen;
   if (patch.welcomeHtml !== undefined) update.welcomeHtml = patch.welcomeHtml;
   if (patch.rulesHtml !== undefined) update.rulesHtml = patch.rulesHtml;
@@ -595,6 +600,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     emailVerificationEnabled: row.emailVerificationEnabled,
     emailVerificationMode: row.emailVerificationMode,
     emailDailyCap: row.emailDailyCap,
+    denoteUnverifiedUsers: !!row.denoteUnverifiedUsers,
     registrationOpen: row.registrationOpen,
     welcomeHtml: row.welcomeHtml,
     rulesHtml: row.rulesHtml,

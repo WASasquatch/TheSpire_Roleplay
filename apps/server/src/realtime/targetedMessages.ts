@@ -23,7 +23,7 @@
 import { and, eq, inArray, isNotNull, isNull, like, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
-import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
+import type { ChatMessage, ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { messages, rooms, users } from "../db/schema.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
@@ -223,6 +223,53 @@ export async function persistTargetedSystemMessageToActiveRooms(
       }
     }
   }
+}
+
+/**
+ * One-time personal greeter (migration 0353). On a brand-new account's FIRST
+ * flat-room landing, persist a targeted system line with actionable copy —
+ * how to speak, where the people/rooms live, what to do when it's quiet —
+ * and emit the live copy to the landing socket (the same persist-then-emit
+ * shape the room-description line uses: the backlog was already sent, so the
+ * live emit is the only delivery until the next refetch slots the stored row
+ * into its place).
+ *
+ * Idempotent via an atomic claim on `users.greeted_at` (UPDATE ... WHERE
+ * greeted_at IS NULL): a multi-tab first connect races into one winner, so
+ * exactly one greeting is ever written per account. Pre-migration accounts
+ * were backfilled non-NULL and can never be greeted retroactively.
+ *
+ * The body is persisted English on purpose — stored chat rows are never
+ * localized (they're shared history, not transient notices).
+ */
+export async function greetNewcomerOnce(
+  db: Db,
+  socket: { emit: (ev: "message:new", msg: ChatMessage) => void },
+  user: { id: string; username: string },
+  room: { id: string; name: string },
+): Promise<void> {
+  const claimed = await db
+    .update(users)
+    .set({ greetedAt: new Date() })
+    .where(and(eq(users.id, user.id), isNull(users.greetedAt)));
+  if (Number(claimed.changes ?? 0) === 0) return;
+  const body =
+    `Welcome, ${user.username}! You're standing in ${room.name}. ` +
+    `To talk, just type in the box below and press Enter - someone may well say hi back. ` +
+    `The people and rooms list (the panel on the right, or the button at the top on a phone) shows everyone in this room and every room you can join; the counts show where people are hanging out. ` +
+    `If it's quiet right now, open the Menu for forums, worlds, and stories you can read and reply to any time.`;
+  await persistTargetedSystemMessage(db, user.id, room.id, body);
+  socket.emit("message:new", {
+    id: `greet-${nanoid()}`,
+    roomId: room.id,
+    userId: "system",
+    characterId: null,
+    displayName: SYSTEM_USERNAME,
+    kind: "system",
+    body,
+    color: null,
+    createdAt: Date.now(),
+  });
 }
 
 /**

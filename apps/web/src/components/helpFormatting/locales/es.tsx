@@ -28,6 +28,7 @@ const FORMATTING_ROWS: Array<{ syntax: string; example: string; note?: string }>
   { syntax: "@usuario", example: "¡gracias @sigrid!", note: "haz clic para abrir su perfil; coincide con una cuenta principal o un personaje activo" },
   { syntax: "@world:slug", example: "¿alguien para una partida en @world:ironreach?", note: "haz clic para abrir el visor del mundo; el slug es el de la URL del mundo (minúsculas + guiones)" },
   { syntax: `<font color="#hex">texto</font>`, example: `<font color="#a83232">texto rojo</font>`, note: "aplica un color puntual a un fragmento de texto. El color debe ser un hex literal de 3 o 6 dígitos; cualquier otra cosa queda como texto plano. El tema de quien lo ve ajusta el valor hacia la legibilidad si desaparecería contra su fondo de chat." },
+  { syntax: `<font size="1-4">texto</font>`, example: `<font size="4">texto enorme</font>`, note: "cambia el tamaño de un fragmento de texto en cuatro pasos: 1 pequeño, 2 normal, 3 grande, 4 enorme. Los números fuera de 1-4 se ajustan al paso más cercano, y puedes combinar color y tamaño en una sola etiqueta. El menú de tamaño de la barra lo escribe por ti." },
   { syntax: "\\* escape", example: "\\*le da un coscorrón a Kaal\\*", note: "pon una barra invertida antes de cualquiera de * _ ~ | ` [ ] ( ) ! < > @ \\ para mantenerlo literal. Usa `\\@nombre` para escribir un @usuario sin mencionarlo, o `\\!cmd` para escribir el nombre del comando sin ejecutarlo." },
 ];
 
@@ -129,10 +130,29 @@ export function FormattingHelp() {
   return (
     <div className="space-y-3 text-xs">
       <p className="text-keep-muted">
-        Los mensajes de chat admiten un pequeño conjunto de atajos de
-        formato. Los encabezados, listas, tablas y demás bloques grandes
-        quedan fuera del chat. Las páginas de perfil y de mundo pueden usar
-        más (mira la sección HTML de perfiles / mundos, abajo).
+        Los mensajes de chat admiten los atajos de formato de abajo, y la
+        barra de herramientas sobre el cuadro de mensaje cubre casi todos
+        con un clic. Pegar desde Gmail, Docs o Word también conserva el
+        formato. Las tablas quedan fuera del chat. Las páginas de perfil y
+        de mundo pueden usar más (mira la sección HTML de perfiles /
+        mundos, abajo).
+      </p>
+      <p className="text-keep-muted">
+        Algunas herramientas de la barra no tienen atajo escrito. El menú
+        de <b>Encabezado</b> convierte la línea actual en un encabezado
+        grande 1, 2 o 3 (escribir{" "}
+        <code className="font-mono text-keep-action">#</code>,{" "}
+        <code className="font-mono text-keep-action">##</code> o{" "}
+        <code className="font-mono text-keep-action">###</code> más un
+        espacio al inicio de la línea hace lo mismo). Los tres botones de{" "}
+        <b>alineación</b> llevan la línea a la izquierda, al centro o a la
+        derecha. Los botones de <b>cita</b> y <b>lista</b> convierten las
+        líneas en un bloque de cita o en una lista con viñetas (escribir{" "}
+        <code className="font-mono text-keep-action">&gt;</code> o{" "}
+        <code className="font-mono text-keep-action">-</code> más un
+        espacio al inicio de la línea también funciona). Los encabezados y
+        la alineación son solo para las salas de chat, así que esos
+        controles quedan ocultos en los foros.
       </p>
       <p className="text-[11px] text-keep-muted">
         Consejo: resalta una palabra en cualquier cuadro de texto para ver
@@ -477,7 +497,10 @@ export function FormattingHelp() {
           </li>
           <li>
             <b>Los saltos de línea pasan como texto.</b> Los mensajes de
-            varias líneas apilan sus líneas pero no reciben formato de bloque.
+            varias líneas apilan sus líneas. En el chat, las líneas que
+            empiezan con <code>&gt; </code> o <code>- </code> se agrupan en
+            bloques de cita y listas con viñetas; las líneas de acción como
+            /me las mantienen literales.
           </li>
           <li>
             <b>Las imágenes son opcionales.</b> Aunque una URL termine en

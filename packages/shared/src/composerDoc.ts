@@ -30,6 +30,10 @@ export type ComposerInlineMark =
   | "spoiler"
   | "code";
 
+/** Bucketed text size (<font size>). Absence = normal. Sizes are
+ *  buckets, never raw px, so pasted 96pt text can't break layout. */
+export type ComposerTextSize = "small" | "large" | "huge";
+
 export interface ComposerSpan {
   text: string;
   marks?: ComposerInlineMark[];
@@ -37,13 +41,133 @@ export interface ComposerSpan {
   link?: string;
   /** #rgb / #rrggbb text color (<font color>). */
   color?: string;
+  /** Bucketed size (<font size="1|3|4">). */
+  size?: ComposerTextSize;
+}
+
+/* =============================================================
+ * <font> wire construct: color and/or size on one tag
+ *
+ * `<font color="#rrggbb">` is the pre-existing color construct; size
+ * extends the SAME tag additively (`<font size="1|3|4">`, buckets
+ * small/large/huge; 2 = normal is never emitted). Both attributes may
+ * appear on one tag. A client that doesn't know the size attribute
+ * renders the tag as visible literal text — degraded, never broken.
+ * ============================================================= */
+
+/** Wire value per bucket (1 = small, 2 = normal/unmarked, 3 = large,
+ *  4 = huge). */
+export const FONT_SIZE_TO_WIRE: Record<ComposerTextSize, number> = {
+  small: 1,
+  large: 3,
+  huge: 4,
+};
+
+/** Rendered scale per bucket. Em-relative so the buckets track each
+ *  surface's base size, and clamped by construction. */
+export const FONT_SIZE_EM: Record<ComposerTextSize, string> = {
+  small: "0.8em",
+  large: "1.35em",
+  huge: "1.75em",
+};
+
+/** Wire size value → bucket. Non-integer garbage is the CALLER's
+ *  reject; integers outside 1..4 clamp to the nearest bucket; 2 (and
+ *  anything clamping to it) means normal → null. */
+export function fontSizeFromWire(n: number): ComposerTextSize | null {
+  const clamped = Math.min(4, Math.max(1, Math.round(n)));
+  if (clamped === 1) return "small";
+  if (clamped === 3) return "large";
+  if (clamped === 4) return "huge";
+  return null;
+}
+
+/** Opener for `<font …>` carrying ONLY color/size attributes (any
+ *  order, quoted or bare values). Tags with any other attribute do not
+ *  match and stay literal text.
+ *
+ *  The un-anchored SOURCE is exported so render-side protectors (e.g.
+ *  the mention splitter, which must treat a whole `<font>…</font>`
+ *  region as one unsplittable unit) build from the same pattern and
+ *  can't drift from the grammar. Group 1 captures the attribute run. */
+export const CHAT_FONT_OPEN_SOURCE =
+  "<font((?:\\s+(?:color|size)\\s*=\\s*(?:\"[^\"]*\"|'[^']*'|[^\\s>]+))+)\\s*>";
+const CHAT_FONT_OPEN_RE = new RegExp(`^${CHAT_FONT_OPEN_SOURCE}`, "i");
+const CHAT_FONT_ATTR_RE =
+  /(color|size)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/gi;
+
+export interface ChatFontOpenMatch {
+  /** Consumed length of the opening tag. */
+  length: number;
+  color: string | null;
+  size: ComposerTextSize | null;
+}
+
+/**
+ * Match a `<font color=… size=…>` opener at the START of `text`.
+ * Returns null (→ the tag stays literal) unless every present
+ * attribute validates: color must be a 3/6-digit hex literal; size
+ * must be an integer (then clamped into 1..4). This is the single
+ * accepted syntax shared by the chat renderer, the composer's
+ * serializer/parser and the HTML export.
+ */
+export function matchChatFontOpen(text: string): ChatFontOpenMatch | null {
+  const m = CHAT_FONT_OPEN_RE.exec(text);
+  if (!m) return null;
+  let color: string | null = null;
+  let size: ComposerTextSize | null = null;
+  let sawColor = false;
+  let sawSize = false;
+  CHAT_FONT_ATTR_RE.lastIndex = 0;
+  let attr: RegExpExecArray | null;
+  while ((attr = CHAT_FONT_ATTR_RE.exec(m[1]!)) !== null) {
+    const name = attr[1]!.toLowerCase();
+    const value = (attr[2] ?? attr[3] ?? attr[4] ?? "").trim();
+    // A repeated attribute rejects the whole tag: the legacy
+    // single-attribute grammar never consumed duplicated-attribute tags,
+    // so they must keep rendering as literal text.
+    if (name === "color") {
+      if (sawColor) return null;
+      sawColor = true;
+      if (!HEX_COLOR_RE.test(value)) return null;
+      color = value;
+    } else {
+      if (sawSize) return null;
+      sawSize = true;
+      // Integer sizes clamp into the bucket range; `size="2"` (and
+      // whatever clamps to 2) is explicit-normal — a valid, consumed
+      // tag that applies no styling. Non-integer values reject the
+      // whole tag to literal text.
+      if (!/^\d{1,4}$/.test(value)) return null;
+      size = fontSizeFromWire(parseInt(value, 10));
+    }
+  }
+  return { length: m[0].length, color, size };
 }
 
 export type ComposerLineKind = "text" | "quote" | "bullet";
 
+/** Rich-only heading level for a "text" line. */
+export type ComposerBlockFormat = "h1" | "h2" | "h3";
+
+/** Rich-only block alignment. `left` is the default flow and is never
+ *  stored — absence means left. */
+export type ComposerTextAlign = "center" | "right";
+
 export interface ComposerLine {
   kind: ComposerLineKind;
   spans: ComposerSpan[];
+  /**
+   * RICH-ONLY heading level. The chat-markdown wire cannot express
+   * headings: `serializeComposerDoc` ignores this field (the md
+   * projection degrades the line to plain text) and `parseChatMarkdown`
+   * never produces it. Only the editor's document capture and the
+   * HTML-clipboard mapper set it; a doc carrying it ships as the
+   * rich-HTML message format instead of markdown.
+   */
+  block?: ComposerBlockFormat;
+  /** RICH-ONLY block alignment. Same wire rules as `block`. */
+  align?: ComposerTextAlign;
 }
 
 export interface ComposerDoc {
@@ -74,6 +198,7 @@ function sortedMarks(marks: ComposerInlineMark[] | undefined): ComposerInlineMar
 function sameAttrs(a: ComposerSpan, b: ComposerSpan): boolean {
   if ((a.link ?? null) !== (b.link ?? null)) return false;
   if ((a.color ?? null) !== (b.color ?? null)) return false;
+  if ((a.size ?? null) !== (b.size ?? null)) return false;
   const am = sortedMarks(a.marks);
   const bm = sortedMarks(b.marks);
   if (am.length !== bm.length) return false;
@@ -94,11 +219,17 @@ export function normalizeComposerDoc(doc: ComposerDoc): ComposerDoc {
       if (marks.length) span.marks = marks;
       if (raw.link) span.link = raw.link;
       if (raw.color) span.color = raw.color;
+      if (raw.size) span.size = raw.size;
       const prev = spans[spans.length - 1];
       if (prev && sameAttrs(prev, span)) prev.text += span.text;
       else spans.push(span);
     }
-    return { kind: line.kind, spans };
+    const out: ComposerLine = { kind: line.kind, spans };
+    // Rich-only block metadata rides through normalization untouched;
+    // headings only apply to plain "text" lines (quote/bullet win).
+    if (line.block && line.kind === "text") out.block = line.block;
+    if (line.align) out.align = line.align;
+    return out;
   });
   return { lines: lines.length ? lines : [{ kind: "text", spans: [] }] };
 }
@@ -117,17 +248,20 @@ export function composerDocPlainText(doc: ComposerDoc): string {
 const HEX_COLOR_RE = /^#(?:[0-9a-fA-F]{3}){1,2}$/;
 
 interface MarkInstance {
-  /** Identity key, marks with payloads carry it (link URL / color). */
+  /** Identity key, marks with payloads carry it (link URL / color+size). */
   key: string;
-  kind: ComposerInlineMark | "link" | "color";
+  kind: ComposerInlineMark | "link" | "font";
   payload?: string;
+  /** font composite payload. */
+  color?: string;
+  size?: ComposerTextSize;
 }
 
 /** Priority: outermost first. Code is innermost because its content is
  *  literal; link outermost so its label carries the styling. */
 const WRAP_PRIORITY: Record<string, number> = {
   link: 0,
-  color: 1,
+  font: 1,
   spoiler: 2,
   bold: 3,
   italic: 4,
@@ -139,7 +273,18 @@ const WRAP_PRIORITY: Record<string, number> = {
 function markInstancesOf(span: ComposerSpan): MarkInstance[] {
   const out: MarkInstance[] = [];
   if (span.link) out.push({ key: `link:${span.link}`, kind: "link", payload: span.link });
-  if (span.color) out.push({ key: `color:${span.color}`, kind: "color", payload: span.color });
+  if (span.color || span.size) {
+    // Color and size share ONE <font> tag: nested font-in-font would
+    // mis-close (the grammar's close-search is first-match, not
+    // nesting-aware), so a color+size run is a single composite mark.
+    const inst: MarkInstance = {
+      key: `font:${span.color ?? ""}:${span.size ?? ""}`,
+      kind: "font",
+    };
+    if (span.color) inst.color = span.color;
+    if (span.size) inst.size = span.size;
+    out.push(inst);
+  }
   for (const m of sortedMarks(span.marks)) out.push({ key: m, kind: m });
   out.sort((a, b) => (WRAP_PRIORITY[a.kind] ?? 99) - (WRAP_PRIORITY[b.kind] ?? 99));
   return out;
@@ -207,10 +352,12 @@ function wrapMark(m: MarkInstance, inner: string): string {
         !inner.includes("\n");
       return ok ? `[${inner}](${url})` : inner;
     }
-    case "color": {
-      const color = m.payload ?? "";
-      if (HEX_COLOR_RE.test(color) && !/<\/font>/i.test(inner)) {
-        return `<font color="${color}">${inner}</font>`;
+    case "font": {
+      const attrs: string[] = [];
+      if (m.color && HEX_COLOR_RE.test(m.color)) attrs.push(`color="${m.color}"`);
+      if (m.size) attrs.push(`size="${FONT_SIZE_TO_WIRE[m.size]}"`);
+      if (attrs.length && !/<\/font>/i.test(inner)) {
+        return `<font ${attrs.join(" ")}>${inner}</font>`;
       }
       return inner;
     }
@@ -372,14 +519,21 @@ interface ParseCtx {
   marks: ComposerInlineMark[];
   link?: string;
   color?: string;
+  size?: ComposerTextSize;
 }
 
-function ctxWith(ctx: ParseCtx, mark?: ComposerInlineMark, extra?: { link?: string; color?: string }): ParseCtx {
+function ctxWith(
+  ctx: ParseCtx,
+  mark?: ComposerInlineMark,
+  extra?: { link?: string; color?: string; size?: ComposerTextSize },
+): ParseCtx {
   const next: ParseCtx = { marks: mark ? [...ctx.marks, mark] : [...ctx.marks] };
   const link = extra?.link ?? ctx.link;
   const color = extra?.color ?? ctx.color;
+  const size = extra?.size ?? ctx.size;
   if (link) next.link = link;
   if (color) next.color = color;
+  if (size) next.size = size;
   return next;
 }
 
@@ -388,6 +542,7 @@ function literalSpan(text: string, ctx: ParseCtx): ComposerSpan {
   if (ctx.marks.length) span.marks = [...ctx.marks];
   if (ctx.link) span.link = ctx.link;
   if (ctx.color) span.color = ctx.color;
+  if (ctx.size) span.size = ctx.size;
   return span;
 }
 
@@ -404,7 +559,6 @@ const ALIAS_TO_MARK: Record<string, ComposerInlineMark> = {
 };
 
 const HTML_OPEN_RE = /^<([a-zA-Z]+)>/;
-const FONT_OPEN_RE = /^<font\s+color\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))\s*>/i;
 
 interface SpanMatch {
   end: number;
@@ -413,18 +567,19 @@ interface SpanMatch {
 
 function tryHtmlToken(text: string, i: number, depth: number, ctx: ParseCtx): SpanMatch | null {
   if (text[i] !== "<") return null;
-  const fontOpen = FONT_OPEN_RE.exec(text.slice(i));
+  const fontOpen = matchChatFontOpen(text.slice(i));
   if (fontOpen) {
-    const raw = (fontOpen[1] ?? fontOpen[2] ?? fontOpen[3] ?? "").trim();
-    if (!HEX_COLOR_RE.test(raw)) return null;
-    const openLen = fontOpen[0].length;
+    const openLen = fontOpen.length;
     const closeMatch = /<\/font\s*>/i.exec(text.slice(i + openLen));
     if (!closeMatch) return null;
     const closeStart = i + openLen + closeMatch.index;
     const inner = text.slice(i + openLen, closeStart);
+    const extra: { color?: string; size?: ComposerTextSize } = {};
+    if (fontOpen.color) extra.color = fontOpen.color;
+    if (fontOpen.size) extra.size = fontOpen.size;
     return {
       end: closeStart + closeMatch[0].length,
-      spans: parseSpans(inner, depth + 1, ctxWith(ctx, undefined, { color: raw })),
+      spans: parseSpans(inner, depth + 1, ctxWith(ctx, undefined, extra)),
     };
   }
   const open = HTML_OPEN_RE.exec(text.slice(i));
@@ -654,11 +809,15 @@ export function parseChatMarkdown(text: string): ComposerDoc {
  *
  * Regex-walk sanitizer (no DOM, testable server-side): the HTML string
  * is reduced to the supported mark set — bold / italic / underline /
- * strike / inline code / http(s) links / bullet lines / quote lines —
- * everything else (colors, fonts, sizes, images, tables, scripts)
- * drops to plain text. Word's mso-list bullet glyph runs and Google
- * Docs' font-weight:normal <b> wrapper are special-cased so pastes
- * from both land structurally intact.
+ * strike / inline code / http(s) links / bullet lines / quote lines /
+ * text color / bucketed text size — everything else (backgrounds,
+ * font families, alignment, images, tables, scripts) drops to plain
+ * text. Colors accept hex / rgb() / a named-color table and carry as
+ * the color mark; font sizes (px/pt/em/%/keywords and legacy <font
+ * size>) map to the NEAREST bucket, so no raw pixel value ever reaches
+ * the document. Word's mso-list bullet glyph runs and Google Docs'
+ * font-weight:normal <b> wrapper are special-cased so pastes from both
+ * land structurally intact.
  * ============================================================= */
 
 const NAMED_ENTITIES: Record<string, string> = {
@@ -695,6 +854,104 @@ function decodeEntities(text: string): string {
   });
 }
 
+/** Named CSS colors the paste mapper recognizes (the 16 basic colors
+ *  plus common extended names word processors emit). Values are the
+ *  hex the color mark stores. Anything not listed — including hostile
+ *  strings like `javascript:` or `expression(...)` — never validates
+ *  and is dropped. */
+const NAMED_COLORS: Record<string, string> = {
+  black: "#000000", silver: "#c0c0c0", gray: "#808080", grey: "#808080",
+  white: "#ffffff", maroon: "#800000", red: "#ff0000", purple: "#800080",
+  fuchsia: "#ff00ff", magenta: "#ff00ff", green: "#008000", lime: "#00ff00",
+  olive: "#808000", yellow: "#ffff00", navy: "#000080", blue: "#0000ff",
+  teal: "#008080", aqua: "#00ffff", cyan: "#00ffff", orange: "#ffa500",
+  brown: "#a52a2a", pink: "#ffc0cb", gold: "#ffd700", violet: "#ee82ee",
+  indigo: "#4b0082", crimson: "#dc143c", coral: "#ff7f50", salmon: "#fa8072",
+  tomato: "#ff6347", chocolate: "#d2691e", firebrick: "#b22222",
+  darkred: "#8b0000", darkblue: "#00008b", darkgreen: "#006400",
+  darkorange: "#ff8c00", darkviolet: "#9400d3", darkcyan: "#008b8b",
+  darkmagenta: "#8b008b", darkgray: "#a9a9a9", darkgrey: "#a9a9a9",
+  dimgray: "#696969", dimgrey: "#696969", lightgray: "#d3d3d3",
+  lightgrey: "#d3d3d3", lightblue: "#add8e6", lightgreen: "#90ee90",
+  lightpink: "#ffb6c1", hotpink: "#ff69b4", deeppink: "#ff1493",
+  skyblue: "#87ceeb", steelblue: "#4682b4", royalblue: "#4169e1",
+  midnightblue: "#191970", slategray: "#708090", slategrey: "#708090",
+  forestgreen: "#228b22", seagreen: "#2e8b57", turquoise: "#40e0d0",
+  lavender: "#e6e6fa", plum: "#dda0dd", orchid: "#da70d6", tan: "#d2b48c",
+  beige: "#f5f5dc", khaki: "#f0e68c", wheat: "#f5deb3",
+};
+
+const RGB_FN_RE =
+  /^rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([0-9.]+)\s*)?\)$/;
+
+/** Validate/normalize a pasted CSS color value to the hex the color
+ *  mark stores, or null when it isn't a plain opaque color (keywords
+ *  like `inherit`/`windowtext`, gradients, hostile payloads). */
+export function cssColorToHex(rawValue: string): string | null {
+  const value = rawValue.trim().toLowerCase();
+  if (HEX_COLOR_RE.test(value)) return value;
+  const named = NAMED_COLORS[value];
+  if (named) return named;
+  const rgb = RGB_FN_RE.exec(value);
+  if (rgb) {
+    const a = rgb[4] === undefined ? 1 : Number(rgb[4]);
+    // Mostly-transparent text is formatting noise, not a color choice.
+    if (!Number.isFinite(a) || a < 0.25) return null;
+    const chan = (s: string) => Math.min(255, parseInt(s, 10)).toString(16).padStart(2, "0");
+    return `#${chan(rgb[1]!)}${chan(rgb[2]!)}${chan(rgb[3]!)}`;
+  }
+  return null;
+}
+
+/** Bucket px thresholds: midpoints between the rendered bucket sizes
+ *  at a 16px base (12.8 / 16 / 21.6 / 28px) — "nearest bucket". */
+function pxToBucket(px: number): ComposerTextSize | null {
+  if (!Number.isFinite(px) || px <= 0) return null;
+  if (px < 14.4) return "small";
+  if (px < 18.8) return null;
+  if (px < 24.8) return "large";
+  return "huge";
+}
+
+const FONT_SIZE_KEYWORDS: Record<string, ComposerTextSize | null> = {
+  "xx-small": "small", "x-small": "small", small: "small", smaller: "small",
+  medium: null,
+  large: "large", larger: "large", "x-large": "large",
+  "xx-large": "huge", "xxx-large": "huge",
+};
+
+/**
+ * Map a pasted CSS font-size value to a bucket. Returns a bucket,
+ * null for explicit-normal, or undefined when the value is
+ * unrecognizable (→ ignored, size inherits).
+ */
+export function cssFontSizeToBucket(rawValue: string): ComposerTextSize | null | undefined {
+  const value = rawValue.trim().toLowerCase();
+  if (value in FONT_SIZE_KEYWORDS) return FONT_SIZE_KEYWORDS[value];
+  const m = /^([0-9.]+)(px|pt|em|rem|%)?$/.exec(value);
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) return undefined;
+  switch (m[2] ?? "px") {
+    case "pt": return pxToBucket(n * (4 / 3));
+    case "em":
+    case "rem": return pxToBucket(n * 16);
+    case "%": return pxToBucket((n / 100) * 16);
+    default: return pxToBucket(n);
+  }
+}
+
+/** Legacy HTML `<font size="1..7">` (3 = default) → bucket. */
+function legacyFontSizeToBucket(rawValue: string): ComposerTextSize | null | undefined {
+  const m = /^([1-7])$/.exec(rawValue.trim());
+  if (!m) return undefined;
+  const n = Number(m[1]);
+  if (n <= 2) return "small";
+  if (n === 3) return null;
+  if (n <= 5) return "large";
+  return "huge";
+}
+
 interface PasteState {
   bold: number;
   italic: number;
@@ -702,6 +959,18 @@ interface PasteState {
   strike: number;
   code: number;
   links: string[];
+  /** Inline color/size context stacks; entries are pushed only by tags
+   *  that set the property (null = explicitly back to default). */
+  colors: Array<string | null>;
+  sizes: Array<ComposerTextSize | null>;
+  /** Block-context stacks (rich-only line metadata). Every BLOCK tag
+   *  pushes one entry: headings push their level, other blocks push
+   *  null (a paragraph inside a heading-adjacent div is not a
+   *  heading). Alignment INHERITS: a block without its own
+   *  text-align keeps the enclosing block's (Gmail centers via a
+   *  wrapping <div style="text-align:center">). */
+  blocks: Array<ComposerBlockFormat | null>;
+  aligns: Array<ComposerTextAlign | null>;
   quoteDepth: number;
   listDepth: number;
   /** Depth counters for content we discard entirely. */
@@ -733,11 +1002,26 @@ function hrefOf(attrs: string): string | null {
   return /^https?:\/\//i.test(url) ? url : null;
 }
 
+function attrOf(attrs: string, name: string): string | null {
+  const m = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i").exec(attrs);
+  const raw = (m?.[1] ?? m?.[2] ?? m?.[3] ?? "").trim();
+  return raw ? decodeEntities(raw) : null;
+}
+
+/** One declaration's value out of an (already lowercased) style string.
+ *  `color` needs the boundary guard so `background-color` can't match. */
+function styleDeclOf(style: string, prop: string): string | null {
+  const m = new RegExp(`(?:^|;)\\s*${prop}\\s*:\\s*([^;]+)`).exec(style);
+  if (!m) return null;
+  return m[1]!.replace(/\s*!important\s*$/, "").trim() || null;
+}
+
 export function htmlClipboardToComposerDoc(html: string): ComposerDoc {
   const tokens = html.match(/<!--[\s\S]*?-->|<!\[[^\]]*\]>|<[^>]*>|[^<]+/g) ?? [];
   const st: PasteState = {
     bold: 0, italic: 0, underline: 0, strike: 0, code: 0,
-    links: [], quoteDepth: 0, listDepth: 0, skipDepth: 0, msoIgnoreDepth: 0,
+    links: [], colors: [], sizes: [], blocks: [], aligns: [],
+    quoteDepth: 0, listDepth: 0, skipDepth: 0, msoIgnoreDepth: 0,
   };
   const lines: ComposerLine[] = [];
   let spans: ComposerSpan[] = [];
@@ -755,7 +1039,15 @@ export function htmlClipboardToComposerDoc(html: string): ComposerDoc {
 
   const flushLine = () => {
     if (!lineOpen && spans.length === 0) return;
-    lines.push({ kind: lineKind, spans });
+    const line: ComposerLine = { kind: lineKind, spans };
+    // Rich-only line metadata from the current block context. Heading
+    // levels only apply to plain text lines (a heading inside a list
+    // or quote stays a list/quote line).
+    const block = st.blocks[st.blocks.length - 1];
+    if (block && lineKind === "text") line.block = block;
+    const align = st.aligns[st.aligns.length - 1];
+    if (align) line.align = align;
+    lines.push(line);
     spans = [];
     lineOpen = false;
   };
@@ -784,6 +1076,10 @@ export function htmlClipboardToComposerDoc(html: string): ComposerDoc {
     if (marks.length) span.marks = marks;
     const link = st.links[st.links.length - 1];
     if (link) span.link = link;
+    const color = st.colors[st.colors.length - 1];
+    if (color) span.color = color;
+    const size = st.sizes[st.sizes.length - 1];
+    if (size) span.size = size;
     spans.push(span);
   };
 
@@ -829,12 +1125,71 @@ export function htmlClipboardToComposerDoc(html: string): ComposerDoc {
       st.code++;
       undos.push(() => { st.code = Math.max(0, st.code - 1); });
     }
+    // Text color: style `color: …` (Gmail/Docs/Word all emit it) or the
+    // legacy <font color> attribute. Only plain opaque colors validate
+    // (hex / rgb() / named table); anything else — including hostile
+    // values — is ignored and the surrounding color inherits. EXACT
+    // pure black is every word processor's stamped-on-everything
+    // default, not an author choice — it maps to "no color" (an explicit
+    // null on the stack, so a black run INSIDE a colored parent resets
+    // to default instead of inheriting the parent color) and a plain
+    // Docs/Word paste isn't wrapped in font tags end to end. Near-black
+    // picks (#111 etc.) still carry, and render legibility-clamped.
+    {
+      const styleColor = styleDeclOf(style, "color");
+      const attrColor = tag === "font" ? attrOf(attrs, "color") : null;
+      const hex = cssColorToHex(styleColor ?? attrColor ?? "");
+      if (hex) {
+        st.colors.push(hex === "#000000" || hex === "#000" ? null : hex);
+        undos.push(() => { st.colors.pop(); });
+      }
+    }
+    // Bucketed text size: style `font-size` (any unit → nearest bucket),
+    // legacy <font size="1..7">, or <big>/<small>. Explicit-normal
+    // values push null so e.g. a medium run inside a huge paragraph
+    // resets instead of inheriting huge.
+    {
+      let bucket: ComposerTextSize | null | undefined;
+      const styleSize = styleDeclOf(style, "font-size");
+      if (styleSize != null) bucket = cssFontSizeToBucket(styleSize);
+      if (bucket === undefined && tag === "font") {
+        const attrSize = attrOf(attrs, "size");
+        if (attrSize != null) bucket = legacyFontSizeToBucket(attrSize);
+      }
+      if (bucket === undefined && tag === "big") bucket = "large";
+      if (bucket === undefined && tag === "small") bucket = "small";
+      if (bucket !== undefined) {
+        st.sizes.push(bucket);
+        undos.push(() => { st.sizes.pop(); });
+      }
+    }
     if (tag === "a") {
       const href = hrefOf(attrs);
       if (href) {
         st.links.push(href);
         undos.push(() => { st.links.pop(); });
       }
+    }
+    // Rich-only block metadata. Headings map h1/h2 exactly, h3-h6
+    // flatten to the smallest supported level; other block tags push
+    // null so heading context never leaks into a sibling paragraph.
+    // Alignment INHERITS through blocks that don't set their own
+    // (Gmail centers via a wrapping <div style="text-align:center">);
+    // an explicit left/justify resets to default.
+    if (BLOCK_TAGS.has(tag)) {
+      const h = /^h([1-6])$/.exec(tag);
+      const level = h ? Number(h[1]) : 0;
+      st.blocks.push(level === 1 ? "h1" : level === 2 ? "h2" : level >= 3 ? "h3" : null);
+      undos.push(() => { st.blocks.pop(); });
+      const rawAlign =
+        styleDeclOf(style, "text-align") ?? attrOf(attrs, "align")?.toLowerCase() ?? null;
+      let align: ComposerTextAlign | null;
+      if (rawAlign === "center") align = "center";
+      else if (rawAlign === "right" || rawAlign === "end") align = "right";
+      else if (rawAlign) align = null;
+      else align = st.aligns[st.aligns.length - 1] ?? null;
+      st.aligns.push(align);
+      undos.push(() => { st.aligns.pop(); });
     }
     if (tag === "blockquote") {
       st.quoteDepth++;

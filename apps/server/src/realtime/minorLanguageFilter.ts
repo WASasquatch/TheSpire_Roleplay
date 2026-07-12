@@ -93,6 +93,7 @@ import {
   skipNonAlphabeticTransformer,
 } from "obscenity";
 import type { ChatMessage } from "@thekeep/shared";
+import { mapRichHtmlTextNodes, richHtmlToText } from "@thekeep/shared";
 
 /**
  * The slice of SiteSettings this module reads. Declared structurally (and
@@ -377,13 +378,56 @@ export function maskForMinors(body: string): string | null {
  * names are the queued follow-up pass).
  */
 export function maskMessageForMinors(msg: ChatMessage): ChatMessage | null {
-  const body = maskForMinors(msg.body);
+  // Rich-format bodies (migration 0352) mask TEXT NODES only — running
+  // the matcher over raw markup could hit tag/attribute bytes and split
+  // the tree. The plaintext mirror is masked in lockstep so plaintext
+  // consumers of the same clone stay consistent.
+  let body: string | null;
+  let bodyText: string | null = null;
+  let dropRich = false;
+  if (msg.format === "html") {
+    let changed = false;
+    const maskedHtml = mapRichHtmlTextNodes(msg.body, (text) => {
+      const masked = maskForMinors(text);
+      if (masked !== null) changed = true;
+      return masked ?? text;
+    });
+    // Split-word guard: a filtered word straddling inline marks
+    // (<p>f<strong>uck</strong></p>) is invisible per-node — each node
+    // holds only a fragment. Re-run the matcher over the CONTIGUOUS
+    // visible text of the per-node result; any residual hit fails safe
+    // by downgrading the clone to the masked plaintext (format/bodyText
+    // dropped, the same downgrade shape messageForSocket ships to
+    // pre-rich sockets), losing formatting rather than leaking.
+    const residual = maskForMinors(richHtmlToText(maskedHtml));
+    if (residual !== null) {
+      body = residual;
+      dropRich = true;
+    } else {
+      body = changed ? maskedHtml : null;
+      bodyText = msg.bodyText ? maskForMinors(msg.bodyText) : null;
+    }
+  } else {
+    body = maskForMinors(msg.body);
+  }
   const title = msg.title ? maskForMinors(msg.title) : null;
   const snippet = msg.replyToBodySnippet ? maskForMinors(msg.replyToBodySnippet) : null;
-  if (body === null && title === null && snippet === null) return null;
+  if (body === null && bodyText === null && title === null && snippet === null) return null;
+  if (dropRich) {
+    const { format: _format, bodyText: _bodyText, ...rest } = msg;
+    void _format;
+    void _bodyText;
+    return {
+      ...rest,
+      body: body!,
+      ...(title !== null ? { title } : {}),
+      ...(snippet !== null ? { replyToBodySnippet: snippet } : {}),
+    };
+  }
   return {
     ...msg,
     ...(body !== null ? { body } : {}),
+    ...(bodyText !== null ? { bodyText } : {}),
     ...(title !== null ? { title } : {}),
     ...(snippet !== null ? { replyToBodySnippet: snippet } : {}),
   };

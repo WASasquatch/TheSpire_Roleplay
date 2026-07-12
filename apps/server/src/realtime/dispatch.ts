@@ -1,6 +1,13 @@
 import { and, eq } from "drizzle-orm";
 import type { Server as IoServer, Socket } from "socket.io";
-import { isAdminRole } from "@thekeep/shared";
+import {
+  RICH_HTML_MAX_BYTES,
+  composerDocPlainText,
+  isAdminRole,
+  parseChatMarkdown,
+  richHtmlLinkHrefs,
+  richHtmlToText,
+} from "@thekeep/shared";
 import type {
   ClientToServerEvents,
   Role,
@@ -15,11 +22,12 @@ import { formatDuration } from "../commands/duration.js";
 import { areServersEnabled, getServerSettings, getSettings } from "../settings.js";
 import { resolveRoomServerId } from "../earning/pool.js";
 import { hasPermission } from "../auth/permissions.js";
+import { sanitizeRichMessageHtml } from "../lib/richHtml.js";
 import { recordAudit } from "../audit.js";
 import { tFor } from "../i18n.js";
 import { addMessage, addMessageDirect, exitIncognitoOnCharSwitch } from "./broadcast.js";
 import { evaluateAntiSpam } from "./antiSpam.js";
-import { applyFilters, AUTOMOD_DEFAULT_MUTE_MS, getCompiledRuleset } from "./automod.js";
+import { applyFilters, AUTOMOD_DEFAULT_MUTE_MS, getCompiledRuleset, mergeAutomodVerdicts } from "./automod.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 type Sock = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -150,8 +158,19 @@ export async function dispatchChatInput(args: {
    * require encoding the parent id inside the body text.
    */
   replyToId?: string;
+  /**
+   * Body format claim (migration 0352). "html" = `text` is the
+   * composer's rich-HTML serialization: it is sanitized against the
+   * strict whitelist RIGHT HERE (the ingest chokepoint), its visible
+   * plaintext is derived for every text-shaped gate (caps, automod),
+   * and it persists as a plain say — command parsing is skipped
+   * entirely (a leading `/` inside HTML is content, and the client
+   * always sends commands without this field). Absent = the historic
+   * markdown pipeline, byte-identical.
+   */
+  format?: "html";
 }): Promise<void> {
-  const { io, socket, db, registry, user, roomId, text, threadCategoryId, threadTitle, replyToId } = args;
+  const { io, socket, db, registry, user, roomId, text, threadCategoryId, threadTitle, replyToId, format } = args;
 
   const trimmed = text.trim();
   if (!trimmed) return;
@@ -176,8 +195,47 @@ export async function dispatchChatInput(args: {
   // exact `maxForumPostLength` cap; chat-bound input is gated below
   // by the standard `maxMessageLength` check after the room is
   // resolved.
+  // Rich-HTML ingest (migration 0352). This is THE chokepoint: the raw
+  // payload is sanitized against the strict whitelist before any other
+  // gate reads it, and every text-shaped check below (caps, automod)
+  // runs on the derived VISIBLE plaintext, never the markup. A raw-byte
+  // ceiling runs first so a 4000-visible-char body wrapped in
+  // per-character spans can't bloat storage/broadcast.
+  let richBody: string | null = null;
+  let richText: string | null = null;
+  if (format === "html") {
+    if (Buffer.byteLength(text, "utf8") > RICH_HTML_MAX_BYTES) {
+      socket.emit("error:notice", {
+        code: "TOO_LONG",
+        message: tFor(user.locale, "errors:server.realtime.richTooLarge"),
+      });
+      return;
+    }
+    // Per-room rich-text toggle (migration 0354): a rich-disabled room must
+    // never PERSIST headings or alignment, no matter what a client sends —
+    // honest clients never ship format 'html' there (the composer's rich
+    // controls are hidden), so this read only defends against stale/hostile
+    // ones. Degrade gracefully rather than reject: the reduced sanitizer
+    // profile unwraps h1-h3 to paragraphs and strips text-align while every
+    // inline construct (marks, color, size, spoiler, links, lists, quotes)
+    // survives untouched.
+    const richRoom = (await db
+      .select({ richTextDisabled: rooms.richTextDisabled })
+      .from(rooms)
+      .where(eq(rooms.id, roomId))
+      .limit(1))[0];
+    richBody = sanitizeRichMessageHtml(
+      text,
+      richRoom?.richTextDisabled ? { blocksDisabled: true } : undefined,
+    );
+    richText = richHtmlToText(richBody).trim();
+    // Markup with no visible text (or markup that sanitized away
+    // entirely) is a no-op send, same as an all-whitespace input.
+    if (!richText) return;
+  }
+
   const earlyCap = Math.max(maxMessageLength, maxForumPostLength);
-  if (trimmed.length > earlyCap) {
+  if ((richText ?? trimmed).length > earlyCap) {
     socket.emit("error:notice", { code: "TOO_LONG", message: tFor(user.locale, "errors:server.realtime.messagesCapped", { max: earlyCap }) });
     return;
   }
@@ -185,7 +243,11 @@ export async function dispatchChatInput(args: {
   // Parsed early (parseInput is pure and side-effect free) so the read-only
   // gate below can tell a room post from a whisper / non-posting command.
   // The mute / anti-spam / automod blocks farther down reuse this result.
-  const parsed = parseInput(text);
+  // Rich bodies are ALWAYS plain says: the sanitized HTML rides through
+  // as argsText and the command registry is never consulted.
+  const parsed = richBody !== null
+    ? { command: null, argsText: richBody, args: [] as string[] }
+    : parseInput(text);
 
   // Read-only posting mode (post_mode = 'staff', migration 0345). Runs
   // BEFORE the rate limit on purpose: a locked member's attempts must not
@@ -415,10 +477,29 @@ export async function dispatchChatInput(args: {
     const amRoom = (await db.select({ replyMode: rooms.replyMode }).from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
     const surface: "chat" | "forum" = amRoom?.replyMode === "nested" ? "forum" : "chat";
     // Match against the actual message body (the argsText for a slash-speech
-    // command like /me, or the full input for a plain say).
-    const filterBody = parsed.command === null ? trimmed : parsed.argsText.trim();
+    // command like /me, or the full input for a plain say). Rich bodies
+    // filter on their VISIBLE text plus every carried href — matching
+    // editor-generated markup bytes (style declarations, rel attributes)
+    // would let an innocent rule like "center" block every aligned line,
+    // while hrefs must stay matchable exactly as md bodies' inline URLs
+    // are.
+    const filterBody = parsed.command === null
+      ? (richBody !== null
+          ? [richText ?? "", ...richHtmlLinkHrefs(richBody)].join("\n")
+          : trimmed)
+      : parsed.argsText.trim();
+    // Also match against the tag-stripped VISIBLE text: a validated markup
+    // construct can be rendering-invisible (`bad<font size="2">word</font>`
+    // paints exactly "badword" in every client), so raw-byte matching alone
+    // is split-evadable. Both views run; the severest verdict applies.
+    // Rich bodies use their server-derived plaintext (`bad<em>word</em>`
+    // is visibly "badword"); md bodies derive through the chat grammar.
+    const visibleBody = richText ?? composerDocPlainText(parseChatMarkdown(filterBody));
     const ruleset = await getCompiledRuleset(db);
-    const verdict = applyFilters(filterBody, ruleset, surface);
+    let verdict = applyFilters(filterBody, ruleset, surface);
+    if (visibleBody !== filterBody) {
+      verdict = mergeAutomodVerdicts(verdict, applyFilters(visibleBody, ruleset, surface));
+    }
     if (verdict.action) {
       // Log EVERY hit (not just the winning action) so an admin tuning rules
       // can see exactly which fired. Best-effort; never blocks the action.
@@ -492,7 +573,9 @@ export async function dispatchChatInput(args: {
     // gate above used the larger of the two so this branch can apply
     // the right one with a clean error message.
     const effectiveCap = isForum ? maxForumPostLength : maxMessageLength;
-    if (trimmed.length > effectiveCap) {
+    // Rich bodies are capped on what readers SEE (the derived
+    // plaintext), mirroring the raw-length cap md bodies get.
+    if ((richText ?? trimmed).length > effectiveCap) {
       socket.emit("error:notice", {
         code: "TOO_LONG",
         message: isForum
@@ -523,6 +606,7 @@ export async function dispatchChatInput(args: {
         await addMessage(ctx, {
           kind: "say",
           body: parsed.argsText.trimEnd(),
+          ...(richBody !== null ? { format: "html" as const } : {}),
           title: cappedTitle,
           ...(threadCategoryId ? { threadCategoryId } : {}),
         });
@@ -572,10 +656,14 @@ export async function dispatchChatInput(args: {
           });
           return;
         }
-        const snippet = parent.body.length > 120 ? `${parent.body.slice(0, 120)}…` : parent.body;
+        // Snippet from the parent's VISIBLE text: an html-format parent
+        // snapshots its derived plaintext, never raw markup.
+        const parentText = parent.format === "html" ? (parent.bodyText ?? "") : parent.body;
+        const snippet = parentText.length > 120 ? `${parentText.slice(0, 120)}…` : parentText;
         await addMessage(ctx, {
           kind: "say",
           body: parsed.argsText.trimEnd(),
+          ...(richBody !== null ? { format: "html" as const } : {}),
           replyToId: parent.id,
           replyToDisplayName: parent.displayName,
           replyToBodySnippet: snippet,
@@ -597,6 +685,7 @@ export async function dispatchChatInput(args: {
     await addMessage(ctx, {
       kind: "say",
       body: parsed.argsText.trim(),
+      ...(richBody !== null ? { format: "html" as const } : {}),
       ...(threadCategoryId ? { threadCategoryId } : {}),
     });
     return;
@@ -671,9 +760,10 @@ export async function dispatchChatInput(args: {
         !parent.deletedAt &&
         (!parent.lockedAt || canBypassLock)
       ) {
-        const snippet = parent.body.length > 120
-          ? `${parent.body.slice(0, 120)}…`
-          : parent.body;
+        const parentText = parent.format === "html" ? (parent.bodyText ?? "") : parent.body;
+        const snippet = parentText.length > 120
+          ? `${parentText.slice(0, 120)}…`
+          : parentText;
         replyContext = {
           replyToId: parent.id,
           replyToDisplayName: parent.displayName,

@@ -48,6 +48,7 @@
       "messagesCapped": "Los mensajes tienen un límite de {{max}} caracteres.",
       "messagesCappedExpanded": "Los mensajes tienen un límite de {{max}} caracteres después de expandir los comandos en línea.",
       "forumPostsCapped": "Las publicaciones del foro tienen un límite de {{max}} caracteres.",
+      "richTooLarge": "Ese mensaje lleva demasiado formato. Simplifica el estilo o acórtalo.",
       "rateLimit": "Más despacio - intenta de nuevo en {{seconds}}s.",
       "wrongRoom": "No estás en esa sala. Prueba /go <room> para cambiarte.",
       "mutedInRoom": "Tu silencio en esta sala dura {{duration}} más.",
@@ -538,7 +539,7 @@
       "invalidEmail": "Correo no válido",
       "acceptDisclaimer": "debes aceptar el aviso para registrarte",
       "birthdate": "ingresa tu fecha de nacimiento",
-      "usernameRule": "el nombre de usuario debe tener de 2 a 40 caracteres: letras/números ASCII y _ - ' . ` más NBSP (Alt+0160); se bloquean los espacios normales y los caracteres Unicode confundibles",
+      "usernameRule": "ese nombre de usuario no sirve: usa de 2 a 40 letras, números o _ - ' . ` (sin espacios; prueba con un guion bajo, como Taberna_Roble)",
       "stringTooShort": "Debe contener al menos {{n}} caracteres",
       "stringTooLong": "Debe contener como máximo {{n}} caracteres"
     }

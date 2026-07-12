@@ -124,15 +124,35 @@
       "italic": "Italic (Ctrl+I)",
       "underline": "Underline (Ctrl+U)",
       "strikethrough": "Strikethrough (Ctrl+Shift+S)",
-      "color": "Color selected text",
-      "colorRemove": "Remove color",
+      "color": "Text color",
+      "size": "Text size",
       "code": "Inline code",
       "spoiler": "Spoiler (click to reveal)",
       "blockquote": "Quote",
       "list": "Bulleted list",
       "link": "Link (Ctrl+K)",
       "linkRemove": "Remove link (Ctrl+K)",
-      "image": "Image, inserts ![alt](url)"
+      "image": "Image, inserts ![alt](url)",
+      "block": "Text style",
+      "alignLeft": "Align left",
+      "alignCenter": "Align center",
+      "alignRight": "Align right"
+    },
+    "size": {
+      "small": "Small",
+      "normal": "Normal",
+      "large": "Large",
+      "huge": "Huge"
+    },
+    "color": {
+      "panelAria": "Text color picker",
+      "swatchAria": "Color {{hex}}",
+      "recent": "Recent",
+      "hexLabel": "Custom hex color",
+      "hexPlaceholder": "#a83232",
+      "apply": "Apply",
+      "custom": "More colors…",
+      "clear": "Remove color"
     },
     "resizeAria": "Resize the message box",
     "resizeTitle": "Drag to resize the message box · double-click to reset",
@@ -163,7 +183,14 @@
     "insertLineBreak": "Insert line break",
     "postTopic": "Post topic",
     "reply": "Reply",
-    "send": "Send"
+    "send": "Send",
+    "block": {
+      "normal": "Normal",
+      "h1": "Heading 1",
+      "h2": "Heading 2",
+      "h3": "Heading 3"
+    },
+    "tooRich": "That message carries too much formatting. Simplify the styling or shorten it."
   },
   "reactions": {
     "add": "Add reaction",
@@ -295,6 +322,8 @@
     "empty": "empty",
     "inCharacter": "In character",
     "roleBadgeAria": "Community role",
+    "unverified": "Unverified",
+    "unverifiedTitle": "This account hasn't confirmed its email yet - it could be a throwaway.",
     "away": "Away",
     "awayWithMessage": "Away: {{message}}",
     "idleTitle": "Idle, tab closed or refreshed, may return",
@@ -313,6 +342,16 @@
     "pairToSfwTitle": "Switch to this room's all-ages channel",
     "pairToNsfwTitle": "Switch to this room's 18+ channel (adults only)",
     "otherSideTitle": "In this room's other channel"
+  },
+  "newcomer": {
+    "title": "New here? Start with one of these",
+    "body": "Roleplay chat has its rhythms - sometimes buzzing, sometimes quiet. Either way, here's how to dive in.",
+    "sayHi": "Say hi",
+    "sayHiPrefill": "Hi, I'm new here! What's everyone up to?",
+    "seePeople": "See who's online",
+    "findRoom": "Find an active room",
+    "explore": "Browse the forums",
+    "dismiss": "Hide this"
   },
   "staff": {
     "roomOwner": "Room owner",

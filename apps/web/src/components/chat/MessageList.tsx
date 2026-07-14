@@ -403,14 +403,25 @@ const STICK_BOTTOM_PX = 24;
  * stay on the server and re-hydrate through the normal scroll-up
  * load-older fetch, so windowing is lossless to the reader.
  *
- * This complements MessageVisibilityGate (which unmounts off-screen
- * DOM but keeps a placeholder + observer per message): the gate bounds
- * paint/decode cost, this bounds the row COUNT so a long live session
+ * This complements MessageVisibilityGate (which skips paint/layout for
+ * off-screen rows via content-visibility, reserving their height): the gate
+ * bounds paint/decode cost, this bounds the row COUNT so a long live session
  * or repeated load-older doesn't accumulate thousands of placeholders.
  * SOFT_CAP keeps several scroll-up pages of context resident.
  */
 const FLAT_BUFFER_SOFT_CAP = 200;
 const FLAT_BUFFER_HARD_CAP = 300;
+
+/**
+ * Window (ms) after a framework-initiated scrollTop write during which the
+ * resulting scroll event is treated as that write's own echo rather than user
+ * intent. A programmatic scroll's echo dispatches within a frame or two; 100ms
+ * absorbs main-thread jank while staying short enough that a genuine user
+ * scroll afterwards is still classified correctly. Misreading a framework
+ * write as a user scroll is what deferred the async-growth re-pin ~250ms and
+ * left the newest line stranded off-bottom (the "occasional bounce").
+ */
+const PROGRAMMATIC_ECHO_MS = 100;
 
 export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canPinMessage = false, pinnedMessageIds, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, forumTourAnchors = false, postPermalink, nsfwTintRoomId = null, pairSiblingRoomId = null }: Props) {
   const { t } = useTranslation("chat");
@@ -455,11 +466,17 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   const scrollState = useRef<{ height: number; top: number; firstId: string | null; lastId: string | null } | null>(null);
   // Bottom re-pin bookkeeping (see the ResizeObserver further below). The
   // pin is coalesced into a single pending handle (rAF or timeout id), and
-  // it cooperates with the scroll listener: a programmatic pin emits a
-  // scroll event we must NOT read as user intent, and a recent USER scroll
-  // defers the pin so it never fights an in-progress drag.
+  // it cooperates with the scroll listener: any programmatic scroll (the
+  // re-pin AND every framework end-pin / prepend adjust) emits a scroll event
+  // we must NOT read as user intent, and a recent USER scroll defers the pin
+  // so it never fights an in-progress drag.
   const pinHandleRef = useRef<number | null>(null);
-  const programmaticScrollRef = useRef(false);
+  // performance.now() of our last framework-initiated scrollTop write. A
+  // scroll event within PROGRAMMATIC_ECHO_MS of it is that write's echo, not
+  // user intent. A timestamp (vs a one-shot boolean) can't wedge true when a
+  // write lands as a no-op — no echo fires to clear the flag — and then
+  // swallow a later real user scroll; it simply expires.
+  const programmaticScrollAtRef = useRef(0);
   const lastUserScrollTsRef = useRef(0);
   // Scroll DIRECTION bookkeeping. A forced re-pin (container resize) uses these
   // to tell a mobile address-bar reveal DURING a scroll-up (don't yank the
@@ -530,20 +547,23 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       //   - at the bottom (stick) → OFF: the manual re-pin owns the position
       //     there, and browser anchoring would fight it into a wobble.
       //   - reading history (not stick) → ON: let the browser hold the visible
-      //     line steady as gates mount/unmount and late media load ABOVE the
-      //     viewport. Without this, every such height change shifts the content
+      //     line steady as gates toggle visibility and late media load ABOVE
+      //     the viewport. Without this, every such height change shifts content
       //     with nothing to compensate — the jerky scroll-up. The manual
       //     prepend anchor targets the same position anchoring would, so they
       //     agree rather than fight. (Safari lacks overflow-anchor and simply
       //     ignores this, keeping its current behaviour.)
       el.style.overflowAnchor =
         replyModeRef.current !== "nested" && !stickRef.current ? "auto" : "none";
-      // A programmatic pin (the ResizeObserver below) also emits a scroll
-      // event; swallow that echo so it isn't mistaken for user intent.
-      // Every OTHER scroll is the reader's, and stamps their last
-      // interaction so the re-pin can hold off and never yank a live drag.
-      if (programmaticScrollRef.current) programmaticScrollRef.current = false;
-      else lastUserScrollTsRef.current = performance.now();
+      // Our own programmatic scrolls — the ResizeObserver re-pin AND the
+      // layout effect's end-pin / prepend adjust below — also emit a scroll
+      // event; swallow that echo (any scroll within PROGRAMMATIC_ECHO_MS of
+      // the write) so it isn't mistaken for user intent. Every OTHER scroll is
+      // the reader's, and stamps their last interaction so the re-pin can hold
+      // off and never yank a live drag.
+      if (performance.now() - programmaticScrollAtRef.current >= PROGRAMMATIC_ECHO_MS) {
+        lastUserScrollTsRef.current = performance.now();
+      }
       // Track scroll DIRECTION (down-clamped for a couple px of noise) so the
       // forced re-pin can stand down during an active scroll-up (a mobile
       // address-bar reveal) instead of grabbing the reader back to the bottom.
@@ -574,6 +594,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     const newLastId = messages[messages.length - 1]?.id ?? null;
     if (!prev || !prev.firstId || !prev.lastId) {
       // Initial mount or empty → end-pin.
+      programmaticScrollAtRef.current = performance.now(); // our write; swallow its echo
       el.scrollTop = el.scrollHeight;
       stickRef.current = true;
       el.style.overflowAnchor = "none"; // parked at bottom → manual pin owns it
@@ -586,6 +607,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       // history → let native anchoring stay on to absorb the prepended (and
       // still-settling) rows' height churn; it targets the same position.
       const delta = el.scrollHeight - prev.height;
+      programmaticScrollAtRef.current = performance.now(); // our write; swallow its echo
       el.scrollTop = prev.top + delta;
       el.style.overflowAnchor = stickRef.current ? "none" : "auto";
       return;
@@ -603,10 +625,16 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       // swap). End-pin so the user lands at the newest.
       const replaced = firstChanged && lastChanged;
       if (replaced || dist <= STICK_BOTTOM_PX || (newestIsMine && dist < NEAR_BOTTOM_PX)) {
+        // Mark our write so its (async) scroll echo isn't read as a user
+        // scroll: unmarked, the echo stamped lastUserScrollTsRef and tripped
+        // the re-pin's "user just scrolled" deferral, delaying the follow-up
+        // late-media re-pin ~250ms and stranding the newest line off-bottom
+        // until the timer snapped it back.
+        programmaticScrollAtRef.current = performance.now();
         el.scrollTop = el.scrollHeight;
-        // Re-arm the stick so the async-growth re-pin keeps following
-        // this append's late-loading media (a programmatic scrollTop set
-        // doesn't fire a scroll event, so capture() won't re-arm it).
+        // Re-arm the stick so the async-growth re-pin keeps following this
+        // append's late-loading media (capture() swallows this write's echo,
+        // so it won't re-arm stick on its own).
         stickRef.current = true;
         el.style.overflowAnchor = "none"; // back at bottom → manual pin owns it
       }
@@ -614,6 +642,23 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     // first AND last unchanged → no buffer changes that affect layout
     // (an in-place message edit, for example). Leave scroll alone.
   }, [messages, highlightMessageId, replyMode, myUserId]);
+
+  // A font-size step (the Tools "Size" cycle changes FONT_EM on the scroll
+  // container) re-wraps every visible row taller/shorter at once. That growth
+  // changes neither the first nor last message id, so the buffer-diff layout
+  // effect above leaves scroll alone; the async re-pin below would then paint
+  // one bounced frame (newest line shoved off-screen) before catching up.
+  // Re-pin synchronously here — a layout effect runs before paint — while
+  // parked at the bottom, so the resize is seamless. Forums (nested) opt out.
+  useLayoutEffect(() => {
+    if (replyMode === "nested") return;
+    if (highlightMessageId) return; // jump-to-message owns scroll
+    if (!stickRef.current) return; // reading history → don't yank to bottom
+    const el = ref.current;
+    if (!el) return;
+    programmaticScrollAtRef.current = performance.now(); // our write; swallow its echo
+    el.scrollTop = el.scrollHeight;
+  }, [fontStep, replyMode, highlightMessageId]);
 
   // Keep the flat feed pinned to the newest line after LATE height
   // growth the buffer-diff effect above can't see: avatars / inline
@@ -628,15 +673,19 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   // while the user is parked at the bottom (stickRef), and no-ops the
   // instant they scroll away. Forums (nested) read top-down and opt out.
   //
-  // CRUCIAL: setting scrollTop DOES indirectly resize the content here —
-  // moving the viewport flips MessageVisibilityGate intersection states,
-  // which mount/unmount message bodies and change the feed height, which
-  // re-fires this observer. Writing scrollTop unconditionally turned that
-  // into a runaway observe→pin→gate-flip→observe loop (the "seizure" shake)
-  // that also stole manual scrolling. So the pin is hardened three ways:
+  // HISTORY: setting scrollTop moves the viewport, which flips
+  // MessageVisibilityGate intersection states. The gate USED to mount/unmount
+  // message bodies, so a flip changed the feed height and re-fired this
+  // observer; writing scrollTop unconditionally turned that into a runaway
+  // observe→pin→gate-flip→observe loop (the "seizure" shake) that also stole
+  // manual scrolling. The gate now toggles content-visibility with a reserved
+  // intrinsic-size instead, so a flip is height-neutral and that loop is
+  // broken at the source. The three hardenings below are kept as
+  // defense-in-depth and to tame the OTHER height-change sources (late media,
+  // container resize):
   //   (a) coalesced to ONE write per frame (rAF), never re-entrant;
   //   (b) skipped once we're already within a pixel of the bottom, so a
-  //       settled feed stops writing and the gates stop thrashing;
+  //       settled feed stops writing;
   //   (c) deferred for a beat after any USER scroll, so it never hijacks
   //       an in-progress drag (mobile momentum especially) — then fires
   //       once when the reader settles so late media still lands at bottom.
@@ -682,34 +731,44 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
         return;
       }
       forceNextPin = false;
-      programmaticScrollRef.current = true; // mark the scroll-echo as ours
+      programmaticScrollAtRef.current = performance.now(); // mark the scroll-echo as ours
       el.scrollTop = el.scrollHeight;
     };
-    // Track the container's last height so we can ignore sub-line wobble.
+    // Track the container's last height (to ignore sub-line wobble) and width.
+    // A pure WIDTH change re-wraps rows taller without touching clientHeight —
+    // desktop horizontal resize, browser zoom, device rotation, or the
+    // vertical scrollbar first appearing — so height alone can't detect it.
     let lastContainerH = el.clientHeight;
+    let lastContainerW = el.clientWidth;
     // Pixels the CONTAINER must change by before we re-pin. The composer
     // auto-grow re-measures on every keystroke and can jitter by a few px
     // (min-height vs scrollHeight rounding, the overflowY scrollbar
     // toggling near max-lines); re-pinning on that micro-wobble made the
     // feed "bounce" while typing. A real line grow/shrink is ~a line tall,
-    // well over this, so it still pins; content-box growth (late media,
-    // gate mounts) is never gated this way.
+    // well over this, so it still pins; content-box growth (late media) is
+    // never gated this way.
     const CONTAINER_REPIN_MIN_DELTA = 10;
     const ro = new ResizeObserver((entries) => {
       if (pinHandleRef.current != null) return; // (a) one pending pin at a time
       let shouldPin = false;
       for (const e of entries) {
         if (e.target === el) {
-          // Container (scroll viewport): only react to a meaningful resize,
+          // Container (scroll viewport): react to a meaningful HEIGHT resize
+          // OR any WIDTH change (width re-wraps rows → grows content height),
           // and force an IMMEDIATE re-stick (a resize is a layout change, not
           // a user drag — don't let the user-scroll deferral hold it off).
           const h = el.clientHeight;
-          if (Math.abs(h - lastContainerH) >= CONTAINER_REPIN_MIN_DELTA) { shouldPin = true; forceNextPin = true; }
+          const w = el.clientWidth;
+          if (Math.abs(h - lastContainerH) >= CONTAINER_REPIN_MIN_DELTA || w !== lastContainerW) {
+            shouldPin = true;
+            forceNextPin = true;
+          }
           lastContainerH = h;
+          lastContainerW = w;
         } else {
           // Content box: late media / gate mounts. Only schedule a pin while
           // parked at the BOTTOM (stickRef) — while reading history the pin
-          // would no-op anyway, so scheduling it on every gate mount/unmount
+          // would no-op anyway, so scheduling it on every gate visibility flip
           // during a scroll-up just thrashes rAF + layout reads and stutters
           // the scroll (the "resistive scroll-up", desktop especially, where
           // there's no address bar in play). Container resizes above still
@@ -720,7 +779,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       if (!shouldPin) return;
       pinHandleRef.current = requestAnimationFrame(pin);
     });
-    // Observe the CONTENT box (late media / gate mounts grow the stream)
+    // Observe the CONTENT box (late media grows the stream)
     // AND the scroll CONTAINER itself (composer auto-grow / window resize
     // shrink it; with `overflow-anchor: none` the browser won't re-pin for
     // us). Setting scrollTop never resizes the container, so no loop.
@@ -1144,7 +1203,7 @@ function FlatMessageView({
       // re-renders don't clobber the live value: it's toggled OFF while parked
       // at the bottom (the manual re-pin owns the position, and anchoring would
       // fight it into a wobble) and ON while reading history (so the browser
-      // keeps the visible line steady as gates mount/unmount and late media
+      // keeps the visible line steady as gates toggle visibility and late media
       // load above the viewport, instead of jerking the reader). See the scroll
       // capture + layout effect in MessageList. Default is the browser's `auto`
       // until the first pin flips it to `none`.
@@ -1189,11 +1248,10 @@ function FlatMessageView({
       ) : null}
       {messages.map((m) => (
         // Each message rides through a viewport-aware gate that
-        // unmounts the line's heavy DOM (embeds, sprite images,
-        // bordered avatars, name-style decorations) when scrolled
-        // far away, Discord-style. The gate's outer div holds a
-        // measured-height placeholder while unmounted so scroll
-        // position never jumps.
+        // skips paint/layout for the line's heavy DOM (embeds, sprite
+        // images, bordered avatars, name-style decorations) when
+        // scrolled far away, Discord-style. The gate reserves the row's
+        // measured height while skipped so scroll position never jumps.
         <MessageVisibilityGate key={m.id}>{lineFor(m)}</MessageVisibilityGate>
       ))}
       </div>

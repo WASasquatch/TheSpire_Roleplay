@@ -63,11 +63,21 @@ function NavigationTagsGuideEs() {
           <K>{"{scriptorium:latest:story}"}</K> siempre apunta a la historia publicada más
           reciente.
         </li>
+        <li>
+          <K>{"{forum:the-handle}"}</K> abre ese foro. El identificador es el slug del foro (el
+          nombre corto de su dirección <K>/f/</K>, como <K>feedback</K>). El <K>{"{forums}"}</K> a
+          secas abre todo el catálogo de Foros.
+        </li>
+        <li>
+          <K>{"{post:the-id}"}</K> salta directo a una publicación del foro y abre su hilo. Copia el
+          id con el botón <b>Copiar enlace</b> de la publicación. La etiqueta muestra el título del
+          tema.
+        </li>
       </Bullets>
       <P>
-        La etiqueta muestra el nombre real del mundo, la sala o la historia, y respeta la
-        privacidad: si alguien no puede ver ese lugar, la etiqueta se queda como texto normal para
-        esa persona, sin hacer ruido.
+        La etiqueta muestra el nombre real del mundo, la sala, la historia o el foro (y una etiqueta
+        de publicación muestra el título de su tema), y respeta la privacidad: si alguien no puede
+        ver ese lugar, la etiqueta se queda como texto normal para esa persona, sin hacer ruido.
       </P>
 
       <Heading>Todas las etiquetas que puedes usar</Heading>

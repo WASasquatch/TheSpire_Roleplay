@@ -60,7 +60,7 @@ import { reduceMotionEnabled } from "./lib/reducedMotion.js";
 // Side-effect: stamps the unified `calm-cosmetics` class on <html> at boot so
 // expensive equipped cosmetics are gated even before Settings is opened.
 import "./lib/calmCosmetics.js";
-import { fetchSpotlightMember, fetchRoomBrief, fetchStoryBrief } from "./lib/uiRouteDynamicLabel.js";
+import { fetchSpotlightMember, fetchRoomBrief, fetchStoryBrief, fetchForumPostBrief } from "./lib/uiRouteDynamicLabel.js";
 import { loadForumDraft, pruneStaleForumDrafts, saveForumDraft } from "./lib/forumDrafts.js";
 import { ItemZoomView, type ItemZoomEntry } from "./components/cosmetics/ItemZoomView.js";
 const ThreadModal = lazyModal(() => import("./components/forums/ThreadModal.js").then((m) => ({ default: m.ThreadModal })));
@@ -1333,6 +1333,34 @@ function Chat() {
             return;
           }
           onRoomClick(brief.id);
+        });
+        return;
+      }
+      case "nav-forums":
+        // Bare `{forums}` chip → open the Forums catalog landing.
+        setForumsOpen({});
+        return;
+      case "nav-forum":
+        // Parametric `{forum:<slug>}` chip. `key` accepts a slug or id (same
+        // as the /f/<slug> deep-link and the open-forums ui:hint); the catalog
+        // does its own visibility-gated fetch, so hand the slug straight through.
+        setForumsOpen({ key: t.ref });
+        return;
+      case "open-forum-post": {
+        // Parametric `{post:<id>}` chip. Resolve the post's forum/topic
+        // (visibility-gated, cached from the label render) and open the Forums
+        // catalog flashing the post — the same path a /f/<slug>/t/<id>
+        // permalink and a bookmark jump take. A null brief means the post is
+        // gone or not visible to this viewer, so surface a gentle notice.
+        void fetchForumPostBrief(t.ref).then((brief) => {
+          if (!brief) {
+            setNotice({ code: "JUMP_FAILED", message: i18n.t("notifications:toast.topicGone") });
+            return;
+          }
+          setForumsOpen({
+            key: brief.forumId,
+            topic: { boardId: brief.boardRoomId, topicId: brief.topicId, postId: t.ref },
+          });
         });
         return;
       }

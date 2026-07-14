@@ -143,7 +143,26 @@ export type UiRouteTarget =
    * `{scriptorium:latest:story}` rows resolve from the catalog first,
    * so only an actual story slug reaches this parametric fallback.
    */
-  | { kind: "open-story"; ref: string };
+  | { kind: "open-story"; ref: string }
+  /** Open the Forums catalog landing (no specific forum). Token `{forums}`. */
+  | { kind: "nav-forums" }
+  /**
+   * PARAMETRIC: open a SPECIFIC forum by slug. Token `{forum:<slug>}`.
+   * Synthesized (not a static row), name-hydrated at render time, and
+   * visibility-gated at resolve time (a forum the viewer can't see resolves
+   * to no label, so the chip degrades to literal text). Dispatcher opens the
+   * Forums catalog to it.
+   */
+  | { kind: "nav-forum"; ref: string }
+  /**
+   * PARAMETRIC: jump to a SPECIFIC forum post by its message id. Token
+   * `{post:<postId>}`. Unlike the slug refs above, the id is a CASE-SENSITIVE
+   * nanoid (and may contain `_`), so the token pipeline preserves this ref's
+   * original case verbatim. The dispatcher resolves the owning forum/topic
+   * via `locateForumTopic` and opens the catalog flashing the post; an
+   * inaccessible or missing post surfaces a gentle notice.
+   */
+  | { kind: "open-forum-post"; ref: string };
 
 export interface UiRoute {
   /** Canonical token (lowercase, colon-delimited). Matches what the
@@ -171,9 +190,10 @@ export interface UiRoute {
 /**
  * The catalog itself. Add new routes here, every other surface
  * (parser, validator, renderer, dispatcher) picks them up
- * automatically. Token strings MUST be lowercase + use the
- * `[a-z][a-z0-9-]*(?::[a-z0-9-]+)*` shape; the parser regex won't
- * recognize anything else.
+ * automatically. Static token strings MUST be lowercase + use the
+ * `[a-z][a-z0-9_-]*(?::[a-z0-9_-]+)*` shape; the parser regex won't
+ * recognize anything else. (Parametric refs like a `{post:<id>}` nanoid
+ * may carry mixed case — see `resolveUiRoute`.)
  */
 /**
  * Catalog of every recognized `{token}`. Naming convention:
@@ -199,6 +219,7 @@ export const UI_ROUTES: ReadonlyArray<UiRoute> = [
   { token: "messages", label: "Messages", icon: "MessageSquare", description: "Open your Direct Messenger.", target: { kind: "modal-messages" } },
   { token: "dms", label: "DMs", icon: "MessageSquare", description: "Open your Direct Messenger.", target: { kind: "modal-messages" } },
   { token: "worlds", label: "Worlds", icon: "Globe", description: "Open the worlds catalog.", target: { kind: "modal-worlds" } },
+  { token: "forums", label: "Forums", icon: "MessagesSquare", description: "Open the Forums catalog.", target: { kind: "nav-forums" } },
   { token: "profile", label: "My profile", icon: "UserCircle", description: "Open your own profile editor.", target: { kind: "modal-profile-own" } },
 
   // ----- Earning dashboard + tabs (bare + common-plural alias) -----
@@ -296,33 +317,56 @@ const UI_ROUTES_BY_TOKEN = new Map<string, UiRoute>(
  * slug ref is everything after the first colon (slugs never contain
  * colons, so multi-segment refs just defensively re-join).
  */
-function synthesizeParametricRoute(prefix: string, ref: string): UiRoute | null {
-  if (!ref) return null;
+function synthesizeParametricRoute(prefix: string, rawRef: string): UiRoute | null {
+  if (!rawRef) return null;
+  // Slug-based refs are case-insensitive (slugs are stored lowercase), so
+  // fold them here — an author's `{room:MyRoom}` still resolves. The `post`
+  // ref below is a case-sensitive message id and is kept verbatim instead.
+  const slug = rawRef.toLowerCase();
   if (prefix === "world") {
     return {
-      token: `world:${ref}`,
+      token: `world:${slug}`,
       label: "World",
       icon: "Globe",
-      description: `Open the world "${ref}".`,
-      target: { kind: "open-world", ref },
+      description: `Open the world "${slug}".`,
+      target: { kind: "open-world", ref: slug },
     };
   }
   if (prefix === "room") {
     return {
-      token: `room:${ref}`,
+      token: `room:${slug}`,
       label: "Room",
       icon: "DoorOpen",
-      description: `Go to the room "${ref}".`,
-      target: { kind: "nav-room", ref },
+      description: `Go to the room "${slug}".`,
+      target: { kind: "nav-room", ref: slug },
     };
   }
   if (prefix === "scriptorium") {
     return {
-      token: `scriptorium:${ref}`,
+      token: `scriptorium:${slug}`,
       label: "Story",
       icon: "BookOpen",
-      description: `Open the story "${ref}" in the Scriptorium.`,
-      target: { kind: "open-story", ref },
+      description: `Open the story "${slug}" in the Scriptorium.`,
+      target: { kind: "open-story", ref: slug },
+    };
+  }
+  if (prefix === "forum") {
+    return {
+      token: `forum:${slug}`,
+      label: "Forum",
+      icon: "MessagesSquare",
+      description: `Open the "${slug}" forum.`,
+      target: { kind: "nav-forum", ref: slug },
+    };
+  }
+  if (prefix === "post") {
+    // Forum post id — a case-sensitive nanoid, kept verbatim (never folded).
+    return {
+      token: `post:${rawRef}`,
+      label: "Forum post",
+      icon: "MessageSquareText",
+      description: "Jump to a forum post.",
+      target: { kind: "open-forum-post", ref: rawRef },
     };
   }
   return null;
@@ -339,9 +383,12 @@ export function resolveUiRoute(token: string): UiRoute | null {
   const lc = token.toLowerCase();
   const exact = UI_ROUTES_BY_TOKEN.get(lc);
   if (exact) return exact;
-  const colon = lc.indexOf(":");
+  // Parametric fallback. Match the PREFIX case-insensitively, but hand the
+  // REF through with its ORIGINAL case — `{post:<id>}` ids are case-sensitive
+  // nanoids. synthesizeParametricRoute folds slug-based refs itself.
+  const colon = token.indexOf(":");
   if (colon > 0) {
-    return synthesizeParametricRoute(lc.slice(0, colon), lc.slice(colon + 1));
+    return synthesizeParametricRoute(token.slice(0, colon).toLowerCase(), token.slice(colon + 1));
   }
   return null;
 }
@@ -350,10 +397,13 @@ export function resolveUiRoute(token: string): UiRoute | null {
  * Pattern that matches a UI-route token in a body. Public so the
  * renderer can use the same regex to tokenize. The capture is the
  * inside-of-braces text. The token shape mirrors the catalog
- * registration: start with a letter, then letters/digits/hyphens,
- * with optional `:segment` parts of the same alphabet.
+ * registration: start with a letter, then letters/digits/hyphens/
+ * underscores, with optional `:segment` parts of the same alphabet.
+ * Underscores are permitted because forum slugs (`{forum:shadows_of_x}`)
+ * and forum-post nanoid ids (`{post:V1StGXR8_Z5}`) can contain them; the
+ * match is case-insensitive so a nanoid's uppercase letters match too.
  */
-export const UI_ROUTE_TOKEN_RE = /\{([a-z][a-z0-9-]*(?::[a-z0-9-]+)*)\}/gi;
+export const UI_ROUTE_TOKEN_RE = /\{([a-z][a-z0-9_-]*(?::[a-z0-9_-]+)*)\}/gi;
 
 /**
  * Extract every UI-route token from a body. Used by the save-time
@@ -465,7 +515,9 @@ export function splitOnUiRouteTokens(body: string): UiRouteSegment[] {
   for (const m of body.matchAll(re)) {
     const idx = m.index ?? 0;
     if (idx > lastIdx) out.push({ kind: "text", raw: body.slice(lastIdx, idx) });
-    out.push({ kind: "token", token: m[1]!.toLowerCase(), raw: m[0]! });
+    // Preserve the token's ORIGINAL case; resolveUiRoute folds the prefix
+    // for lookup but keeps a parametric ref's case (post-id nanoids).
+    out.push({ kind: "token", token: m[1]!, raw: m[0]! });
     lastIdx = idx + m[0]!.length;
   }
   if (lastIdx < body.length) out.push({ kind: "text", raw: body.slice(lastIdx) });
@@ -519,6 +571,13 @@ export function dynamicMarkerFor(entry: UiRoute): string | null {
       return "room";
     case "open-story":
       return "story";
+    // Parametric forum chips: {forum:<slug>} hydrates to the forum's name,
+    // {post:<id>} to the linked topic's title (both visibility-gated). The
+    // bare {forums} is static (nav-forums → default null).
+    case "nav-forum":
+      return "forum";
+    case "open-forum-post":
+      return "post";
     default:
       return null;
   }
@@ -527,7 +586,10 @@ export function dynamicMarkerFor(entry: UiRoute): string | null {
 export function renderUiRouteChipsInHtml(html: string): string {
   if (!html.includes("{")) return html;
   return html.replace(UI_ROUTE_TOKEN_RE, (raw, capturedToken: string) => {
-    const token = capturedToken.toLowerCase();
+    // Keep the ORIGINAL case: resolveUiRoute folds the prefix but a
+    // parametric ref (a `{post:<id>}` nanoid) is case-sensitive, and the
+    // `data-tk-ui-route` attr below must round-trip it back to openUiRoute.
+    const token = capturedToken;
     const entry = resolveUiRoute(token);
     if (!entry) return raw;
     const safeToken = escapeHtmlAttr(token);
@@ -594,7 +656,7 @@ export function renderUiRouteChipsInHtml(html: string): string {
  * with hand-written examples.
  */
 export const UI_ROUTE_HELP_GROUPS: ReadonlyArray<{ label: string; tokens: ReadonlyArray<string> }> = [
-  { label: "Pages & menus", tokens: ["rules", "help", "messages", "worlds", "profile"] },
+  { label: "Pages & menus", tokens: ["rules", "help", "messages", "worlds", "forums", "profile"] },
   { label: "Earning", tokens: ["earning", "earning:ledger", "earning:styles", "earning:borders", "earning:cosmetics", "earning:settings"] },
   { label: "Items", tokens: ["items", "shop", "inventory", "collection", "pets"] },
   { label: "Scriptorium", tokens: ["scriptorium", "scriptorium:latest", "scriptorium:latest:story"] },

@@ -547,9 +547,11 @@ function tryToken(text: string, i: number, depth: number): TokenMatch | null {
   // ran server-side, so by the time we're rendering we trust the
   // viewer can see whatever made it onto the wire.
   if (text[i] === "{") {
-    const m = /^\{([a-z][a-z0-9-]*(?::[a-z0-9-]+)*)\}/i.exec(text.slice(i));
+    const m = /^\{([a-z][a-z0-9_-]*(?::[a-z0-9_-]+)*)\}/i.exec(text.slice(i));
     if (m) {
-      const token = m[1]!.toLowerCase();
+      // Original case: a parametric ref (a `{post:<id>}` nanoid) is
+      // case-sensitive; resolveUiRoute folds only the prefix.
+      const token = m[1]!;
       const entry = resolveUiRoute(token);
       if (entry) {
         return {
@@ -993,9 +995,11 @@ export function renderInlineTokens(text: string): ReactNode[] {
     // unknown tokens fall through as literal prose. The author-role
     // gate already ran server-side over the rich body's visible text.
     if (text[at] === "{") {
-      const m = /^\{([a-z][a-z0-9-]*(?::[a-z0-9-]+)*)\}/i.exec(text.slice(at));
+      const m = /^\{([a-z][a-z0-9_-]*(?::[a-z0-9_-]+)*)\}/i.exec(text.slice(at));
       if (m) {
-        const entry = resolveUiRoute(m[1]!.toLowerCase());
+        // Original case (see tryToken above): parametric post-id refs are
+        // case-sensitive; resolveUiRoute folds only the prefix.
+        const entry = resolveUiRoute(m[1]!);
         if (entry) {
           return { end: at + m[0].length, node: <UiRouteChip entry={entry} /> };
         }

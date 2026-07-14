@@ -19,6 +19,7 @@
 import type { UiRoute, UiRouteRankingBoard } from "@thekeep/shared";
 import { fetchLatestPublishedStory } from "./latestStory.js";
 import { fetchRankings, type RankingsResponse } from "./earning.js";
+import { fetchForumDetail, fetchTopicThread, locateForumTopic } from "./forums.js";
 
 const TTL_MS = 30_000;
 
@@ -275,6 +276,91 @@ export async function fetchStoryName(ref: string): Promise<string | null> {
   return brief?.title ?? null;
 }
 
+/* ---------- forum name (for {forum:<slug>} labels) ---------- */
+
+const forumNameCache = new Map<string, NameCell>();
+
+/**
+ * Resolve a forum's display name from its slug (or id) via the
+ * visibility-gated `GET /forums/:idOrSlug`. A forum the viewer can't see
+ * throws (404 / 403) → null, so the `{forum:<slug>}` chip degrades to its
+ * literal text. Cached + coalesced like the world / room / story lookups.
+ */
+export async function fetchForumName(ref: string): Promise<string | null> {
+  return cachedName(forumNameCache, ref, async () => {
+    try {
+      const d = await fetchForumDetail(ref);
+      return d?.name ?? null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+/* ---------- forum post coords + title (for {post:<id>} labels + jump) ---------- */
+
+export interface ForumPostBrief {
+  forumId: string;
+  forumSlug: string;
+  boardRoomId: string;
+  topicId: string;
+  /** The owning topic's title (chip label). Null when the topic has none. */
+  title: string | null;
+}
+
+interface ForumPostBriefCell {
+  brief: ForumPostBrief | null;
+  expiresAt: number;
+  inFlight: Promise<ForumPostBrief | null> | null;
+}
+// Keyed by the RAW post id — nanoids are case-sensitive, so (unlike the
+// slug caches above) this key is NOT lowercased.
+const forumPostBriefCache = new Map<string, ForumPostBriefCell>();
+
+/**
+ * Resolve a forum post id to its forum coordinates + owning topic title.
+ * `locateForumTopic` is visibility-gated (throws for a post the viewer
+ * can't reach) and resolves a topic id OR a reply id to the owning topic;
+ * the thread fetch then supplies that topic's title for the chip label.
+ * Both the chip's label render and its click-time jump share this one
+ * cached lookup, so a `{post:<id>}` click reuses the render's fetch.
+ */
+export async function fetchForumPostBrief(ref: string): Promise<ForumPostBrief | null> {
+  const now = Date.now();
+  const cell = forumPostBriefCache.get(ref);
+  if (cell) {
+    if (cell.brief !== null && now < cell.expiresAt) return cell.brief;
+    if (cell.inFlight) return cell.inFlight;
+  }
+  const inFlight = (async () => {
+    let brief: ForumPostBrief | null = null;
+    try {
+      const coords = await locateForumTopic(ref);
+      let title: string | null = null;
+      try {
+        const thread = await fetchTopicThread(coords.boardRoomId, coords.topicId);
+        title = thread.topic.title ?? null;
+      } catch {
+        title = null; // located but the thread/title is unavailable — label falls back
+      }
+      brief = { ...coords, title };
+    } catch {
+      brief = null;
+    }
+    forumPostBriefCache.set(ref, { brief, expiresAt: Date.now() + TTL_MS, inFlight: null });
+    return brief;
+  })();
+  forumPostBriefCache.set(ref, { brief: cell?.brief ?? null, expiresAt: cell?.expiresAt ?? 0, inFlight });
+  return inFlight;
+}
+
+/** Owning-topic title for a `{post:<id>}` chip label, or null when the post
+ *  is missing / not visible to the viewer. */
+export async function fetchForumPostTitle(ref: string): Promise<string | null> {
+  const brief = await fetchForumPostBrief(ref);
+  return brief?.title ?? null;
+}
+
 /* ---------- unified resolver ---------- */
 
 /**
@@ -307,6 +393,10 @@ export async function resolveDynamicChipLabel(entry: UiRoute): Promise<string | 
       return fetchRoomName(t.ref);
     case "open-story":
       return fetchStoryName(t.ref);
+    case "nav-forum":
+      return fetchForumName(t.ref);
+    case "open-forum-post":
+      return fetchForumPostTitle(t.ref);
     default:
       return null;
   }

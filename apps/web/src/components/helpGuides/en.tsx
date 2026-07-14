@@ -63,10 +63,20 @@ function NavigationTagsGuide() {
           story's slug (the short name in its web address). <K>{"{scriptorium:latest:story}"}</K>{" "}
           always points at the newest published story.
         </li>
+        <li>
+          <K>{"{forum:the-handle}"}</K> opens that forum. The handle is the forum's slug (the short
+          name in its <K>/f/</K> web address, like <K>feedback</K>). The bare <K>{"{forums}"}</K>{" "}
+          opens the whole Forums catalog.
+        </li>
+        <li>
+          <K>{"{post:the-id}"}</K> jumps straight to one forum post, opening its thread. Grab the id
+          from the post's <b>Copy link</b> button. The chip reads as the topic's title.
+        </li>
       </Bullets>
       <P>
-        The chip shows the world, room, or story's real name, and it respects privacy: if a reader
-        can't see that place, the chip quietly stays as plain text for them.
+        The chip shows the world, room, story, or forum's real name (and a post chip shows its
+        topic title), and it respects privacy: if a reader can't see that place, the chip quietly
+        stays as plain text for them.
       </P>
 
       <Heading>Every tag you can use</Heading>

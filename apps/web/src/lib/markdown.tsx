@@ -52,7 +52,11 @@ import { LazyMediaEmbed } from "./LazyMediaEmbed.js";
  *   `f**oo**bar`       → "oo" bolded
  */
 
-const MAX_DEPTH = 8;
+// Recursion guard for nested inline parsing. Generous so real formatting
+// nesting (bold › color › italic › span › …) never gets truncated to literal
+// text; still bounded so a hostile `*****x*****` or deeply mismatched tags
+// can't blow the stack.
+const MAX_DEPTH = 32;
 
 /**
  * Try every token pattern at position `i`. Returns the matched length and
@@ -240,6 +244,11 @@ const HTML_TAG_ALIASES: Record<string, (children: ReactNode[]) => ReactNode> = {
   s: (c) => <s>{c}</s>,
   strike: (c) => <s>{c}</s>,
   del: (c) => <s>{c}</s>,
+  ins: (c) => <u>{c}</u>,
+  mark: (c) => <mark className="rounded bg-keep-accent/30 px-0.5">{c}</mark>,
+  sub: (c) => <sub>{c}</sub>,
+  sup: (c) => <sup>{c}</sup>,
+  small: (c) => <small>{c}</small>,
   code: (c) => (
     <code className="rounded bg-keep-panel/60 px-1 font-mono text-[0.95em]">{c}</code>
   ),
@@ -272,11 +281,6 @@ function ChatFontSpan({
   if (size) style.fontSize = FONT_SIZE_EM[size];
   return <span style={style}>{children}</span>;
 }
-
-/** Opener for `<span style="...">`, single `style` attribute (quoted). The
- *  declarations are sanitized to a safe whitelist below before they reach a
- *  real `style` object — see `sanitizeChatStyle`. */
-const SPAN_STYLE_OPEN_RE = /^<span\s+style\s*=\s*(?:"([^"]*)"|'([^']*)')\s*>/i;
 
 /**
  * CSS properties a user's `<span style>` in CHAT is allowed to set. This is
@@ -335,6 +339,30 @@ function sanitizeChatStyle(raw: string): CSSProperties | null {
 const ICON_OPEN_RE = /^<icon\s+src\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>/]+))\s*\/?\s*>/i;
 const ICON_URL_RE = /^(?:\/assets\/[^\s"'<>]+|https?:\/\/[^\s"'<>]+)$/i;
 
+/**
+ * Find the `</tag>` that BALANCES an already-consumed opening `<tag>` so
+ * same-name nesting doesn't close early: in `<b>a <b>b</b> c</b>` the outer
+ * <b> closes on the LAST </b>, not the inner one — supporting arbitrarily
+ * deep nesting. Different nested tags never affect the balance (the scan only
+ * tracks `tag`). `rest` is the text AFTER the opening tag; the returned
+ * offsets are relative to `rest`. Null when unbalanced (an unmatched open
+ * then falls through to literal text, so a stray `<b>` renders as typed).
+ */
+function findBalancedTagClose(rest: string, tag: string): { closeStart: number; closeEnd: number } | null {
+  const re = new RegExp(`<${tag}(?:\\s[^>]*)?>|</${tag}\\s*>`, "gi");
+  let depth = 1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(rest)) !== null) {
+    if (m[0]!.startsWith("</")) {
+      depth--;
+      if (depth === 0) return { closeStart: m.index, closeEnd: m.index + m[0]!.length };
+    } else {
+      depth++;
+    }
+  }
+  return null;
+}
+
 function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
   if (text[i] !== "<") return null;
 
@@ -376,15 +404,13 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
   const fontOpen = matchChatFontOpen(text.slice(i));
   if (fontOpen) {
     const openLen = fontOpen.length;
-    const closeRe = /<\/font\s*>/i;
     const rest = text.slice(i + openLen);
-    const closeMatch = closeRe.exec(rest);
-    if (!closeMatch) return null;
-    const closeStart = i + openLen + closeMatch.index;
-    const closeEnd = closeStart + closeMatch[0].length;
-    const inner = text.slice(i + openLen, closeStart);
+    // Balanced close so nested <font>…<font>…</font>…</font> works.
+    const close = findBalancedTagClose(rest, "font");
+    if (!close) return null;
+    const inner = text.slice(i + openLen, i + openLen + close.closeStart);
     return {
-      end: closeEnd,
+      end: i + openLen + close.closeEnd,
       node: (
         <ChatFontSpan color={fontOpen.color} size={fontOpen.size}>
           {parseInline(inner, depth + 1)}
@@ -393,23 +419,20 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
     };
   }
 
-  // <span style="..."> — honored with the SAFE whitelist only (see
-  // sanitizeChatStyle). Arbitrary CSS is intentionally NOT applied. When no
-  // safe declarations survive we still render the inner content (unstyled)
-  // so the text isn't dropped.
-  const spanStyle = SPAN_STYLE_OPEN_RE.exec(text.slice(i));
-  if (spanStyle) {
-    const openLen = spanStyle[0].length;
-    const closeRe = /<\/span\s*>/i;
+  // <span> — bare, with a `style` attribute (safe whitelist via
+  // sanitizeChatStyle), or with any other attributes (ignored). Formatting-
+  // only: arbitrary CSS is NOT applied. Balanced close supports nesting.
+  const spanOpen = /^<span((?:\s[^>]*)?)>/i.exec(text.slice(i));
+  if (spanOpen) {
+    const openLen = spanOpen[0].length;
     const rest = text.slice(i + openLen);
-    const closeMatch = closeRe.exec(rest);
-    if (!closeMatch) return null;
-    const closeStart = i + openLen + closeMatch.index;
-    const closeEnd = closeStart + closeMatch[0].length;
-    const inner = text.slice(i + openLen, closeStart);
-    const style = sanitizeChatStyle(spanStyle[1] ?? spanStyle[2] ?? "");
+    const close = findBalancedTagClose(rest, "span");
+    if (!close) return null;
+    const inner = text.slice(i + openLen, i + openLen + close.closeStart);
+    const styleAttr = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(spanOpen[1] ?? "");
+    const style = styleAttr ? sanitizeChatStyle(styleAttr[1] ?? styleAttr[2] ?? "") : null;
     return {
-      end: closeEnd,
+      end: i + openLen + close.closeEnd,
       node: style
         ? <span style={style}>{parseInline(inner, depth + 1)}</span>
         : <span>{parseInline(inner, depth + 1)}</span>,
@@ -422,18 +445,15 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
   const render = HTML_TAG_ALIASES[tag];
   if (!render) return null;
   const openLen = open[0].length;
-  // Case-insensitive close-tag search. Without the `i` flag a user who
-  // typed `<B>...</b>` (mixed case) would land on a parse miss and
-  // their formatting would render as raw text.
-  const closeRe = new RegExp(`</${tag}>`, "i");
   const rest = text.slice(i + openLen);
-  const closeMatch = closeRe.exec(rest);
-  if (!closeMatch) return null;
-  const closeStart = i + openLen + closeMatch.index;
-  const closeEnd = closeStart + closeMatch[0].length;
-  const inner = text.slice(i + openLen, closeStart);
+  // Balanced, case-insensitive close so `<b>…<b>…</b>…</b>` (and mixed case
+  // `<B>…</b>`) nest correctly to any depth instead of closing on the first
+  // inner `</b>`.
+  const close = findBalancedTagClose(rest, tag);
+  if (!close) return null;
+  const inner = text.slice(i + openLen, i + openLen + close.closeStart);
   return {
-    end: closeEnd,
+    end: i + openLen + close.closeEnd,
     node: render(parseInline(inner, depth + 1)),
   };
 }

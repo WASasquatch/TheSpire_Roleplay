@@ -169,6 +169,13 @@ export interface RoomSummary {
    */
   staffOnly?: boolean;
   /**
+   * The server's default LANDING room (rooms.is_default): where members land
+   * on a fresh login / when they enter this server. At most one per server.
+   * Surfaced so the console's room editor can show + reassign it (the flag was
+   * otherwise unreadable client-side). Absent = not the default.
+   */
+  isDefault?: boolean;
+  /**
    * "Never expire" opt-out (migration 0347). True = the janitor skips this
    * room in both the server-retention and per-room-expiry sweeps, so its
    * history is kept forever. Absent (older bundle) = false.

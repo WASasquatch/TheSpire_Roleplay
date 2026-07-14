@@ -400,6 +400,8 @@
       "topicPlaceholder": "Tema (opcional)",
       "keepWhenEmpty": "Conservar esta sala aunque esté vacía",
       "keepWhenEmptyCreateHint": "Activado (recomendado): el canal se queda. Desactivado: se elimina automáticamente cuando todos se van.",
+      "defaultRoom": "Sala de aterrizaje predeterminada",
+      "defaultRoomHint": "Donde llegan los miembros al iniciar sesión o al entrar a este servidor. Solo una sala puede ser la de aterrizaje; activarlo la mueve aquí.",
       "staffOnlyRoom": "Solo para el equipo",
       "staffOnlyHint": "Oculta esta sala para todos menos el equipo: tú, los mods de esta sala, el equipo de este servidor y el equipo del sitio. Sigue siendo una sala normal para ellos, con una lista de miembros normal.",
       "nsfwRoom": "Sala 18+",

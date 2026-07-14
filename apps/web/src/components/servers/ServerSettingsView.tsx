@@ -291,6 +291,9 @@ interface RoomListRow {
    *  ever present as true on a row the viewer is staff of (the server drops
    *  staff rooms for everyone else). */
   staffOnly?: boolean;
+  /** The server's default landing room (rooms.is_default); absent = false.
+   *  Where members land on a fresh login / entering the server. */
+  isDefault?: boolean;
   occupants?: unknown[];
 }
 
@@ -2105,6 +2108,10 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
   const [password, setPassword] = useState("");
   // Staff-only access (migration 0363): hide the room from everyone but staff.
   const [staffOnly, setStaffOnly] = useState(room.staffOnly ?? false);
+  // Default landing room: where members land on fresh login / entering this
+  // server. Single-winner per server (the server clears the previous holder
+  // when this is turned on). Editable here so it's assignable post-creation.
+  const [isDefault, setIsDefault] = useState(room.isDefault ?? false);
   const [nsfw, setNsfw] = useState(room.isNsfw ?? false);
   // 18+ CHANNEL: an adults-only side feed behind a SFW/18+ toggle on the
   // room's rail row. One checkbox — enabling creates (or revives, history
@@ -2121,6 +2128,7 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
   const postModeDirty = postMode !== (room.postMode ?? "everyone");
   const richTextDirty = (richText === "simple") !== (room.richTextDisabled ?? false);
   const staffOnlyDirty = staffOnly !== (room.staffOnly ?? false);
+  const isDefaultDirty = isDefault !== (room.isDefault ?? false);
   const visibilityDirty = visibility !== (wasPrivate ? "private" : "public");
   // A NEW password only matters while private; sending it clears/sets the hash.
   const passwordDirty = visibility === "private" && password.length > 0;
@@ -2131,7 +2139,7 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
     || (lifetime === "custom" && expiry !== String(room.messageExpiryMinutes ?? ""));
   // Custom mode needs an actual minutes value before Save makes sense.
   const lifetimeInvalid = lifetime === "custom" && !(Number(expiry) >= 1);
-  const dirty = name !== room.name || topic !== (room.topic ?? "") || lifetimeDirty || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty || iconDirty || categoryDirty || postModeDirty || richTextDirty || staffOnlyDirty || visibilityDirty || passwordDirty || accessDirty || postRolesDirty;
+  const dirty = name !== room.name || topic !== (room.topic ?? "") || lifetimeDirty || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty || iconDirty || categoryDirty || postModeDirty || richTextDirty || staffOnlyDirty || isDefaultDirty || visibilityDirty || passwordDirty || accessDirty || postRolesDirty;
   return (
     <div className="mt-2 space-y-2 border-t border-keep-rule/60 pt-2">
       <label className="block text-xs">
@@ -2286,6 +2294,13 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
         </span>
       </label>
       <label className="flex items-start gap-2 text-xs text-keep-text">
+        <input type="checkbox" className="mt-0.5" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
+        <span>
+          <span className="block">{t("console.rooms.defaultRoom")}</span>
+          <span className="block text-[10px] text-keep-muted">{t("console.rooms.defaultRoomHint")}</span>
+        </span>
+      </label>
+      <label className="flex items-start gap-2 text-xs text-keep-text">
         <input type="checkbox" className="mt-0.5" checked={staffOnly} onChange={(e) => setStaffOnly(e.target.checked)} />
         <span>
           <span className="block">{t("console.rooms.staffOnlyRoom")}</span>
@@ -2329,6 +2344,9 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
               ...(postModeDirty ? { postMode } : {}),
               ...(richTextDirty ? { richTextDisabled: richText === "simple" } : {}),
               ...(staffOnlyDirty ? { staffOnly } : {}),
+              // Default landing room (single-winner; the server clears the
+              // previous holder when this turns on).
+              ...(isDefaultDirty ? { isDefault } : {}),
               // Visibility (type) + password. Switching to public clears the
               // password server-side; a blank password on an already-private
               // room keeps the current one.

@@ -394,6 +394,8 @@
       "topicPlaceholder": "Topic (optional)",
       "keepWhenEmpty": "Keep this room even when empty",
       "keepWhenEmptyCreateHint": "On (recommended): the channel stays put. Off: it's removed automatically once everyone leaves.",
+      "defaultRoom": "Default landing room",
+      "defaultRoomHint": "Where members land on a fresh login or when they enter this server. Only one room can be the landing; turning this on moves it here.",
       "staffOnlyRoom": "Staff only",
       "staffOnlyHint": "Hide this room from everyone but staff: you, this room's mods, this server's staff, and site staff. It stays a normal room for them, with a normal member list.",
       "nsfwRoom": "18+ room",

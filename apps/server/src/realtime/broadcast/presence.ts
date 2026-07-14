@@ -1489,6 +1489,9 @@ export async function buildRoomSummary(
     // refuses it, the slug 404s — so a recipient seeing this flag is already
     // allowed to. Kept only when true so the default-off wire is unchanged.
     ...(room.staffOnly ? { staffOnly: true } : {}),
+    // Default landing room (rooms.is_default): surfaced so the console's room
+    // editor can show + reassign it. Not sensitive; kept only when true.
+    ...(room.isDefault ? { isDefault: true } : {}),
   };
 }
 

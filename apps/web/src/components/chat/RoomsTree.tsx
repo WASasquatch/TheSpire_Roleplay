@@ -12,7 +12,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { legibleAgainstBg, roleRank, type PermissionKey, type RoomCategorySummary, type RoomOccupant, type RoomSummary, type ServerModPermission, type Theme } from "@thekeep/shared";
-import { Ban, Bell, BellOff, Clapperboard, Landmark, Megaphone, MessagesSquare, Plus, ScrollText, ShieldAlert, UserRoundPlus, UserX, VolumeX } from "lucide-react";
+import { Ban, Bell, BellOff, Clapperboard, Landmark, Megaphone, MessagesSquare, Plus, ScrollText, Shield, ShieldAlert, UserRoundPlus, UserX, VolumeX } from "lucide-react";
 import { useChat } from "../../state/store.js";
 import { useActiveTheme } from "../../lib/theme.js";
 import { AdminIcon, CharacterMaskIcon, MasterAdminIcon, ModIcon } from "../moderation/StaffIcons.js";
@@ -1122,6 +1122,19 @@ function RoomGroup({
                   className="mr-1 inline-flex shrink-0 align-middle text-keep-muted"
                 >
                   <Megaphone aria-hidden style={{ width: "1.4em", height: "1.4em" }} />
+                </span>
+              ) : null}
+              {/* Staff-only ACCESS glyph (staff_only, migration 0363): the
+                  server only sends a staff room to viewers who may see it, so
+                  this row is staff-visible. Distinct from the megaphone
+                  (who-can-POST) — this is who-can-SEE. Keeps the normal
+                  occupant strip; NOT routed through the info-room path. */}
+              {room.staffOnly ? (
+                <span
+                  title={t("rooms.staffRoomTitle")}
+                  className="mr-1 inline-flex shrink-0 align-middle text-keep-muted"
+                >
+                  <Shield aria-hidden style={{ width: "1.4em", height: "1.4em" }} />
                 </span>
               ) : null}
               {isPrivate ? <span title={t("rooms.privateTitle")} className="mr-1">🔒</span> : null}

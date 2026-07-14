@@ -1,0 +1,15 @@
+-- Staff-only room access.
+--
+-- A NEW access axis, orthogonal to who-can-POST (post_mode) and to the
+-- password/role-gate lanes: `staff_only` decides who can SEE and JOIN the
+-- room. When set, the room is hidden from everyone outside the staff set
+-- (site staff, this server's owner/admin/mod, the room owner, and room
+-- mods) — dropped from GET /rooms, refused on join with the same NO_ROOM
+-- shape a nonexistent room gives, and 404'd by slug, so its existence never
+-- leaks. It keeps a NORMAL userlist and normal posting among the staff who
+-- can see it, which is what distinguishes it from an info room
+-- (post_mode='staff', public-read). The two are independent: a room may be
+-- staff-only, an info room, both, or neither.
+--
+-- No backfill: existing rooms stay staff_only=0 (visible to everyone).
+ALTER TABLE rooms ADD COLUMN staff_only integer NOT NULL DEFAULT 0;

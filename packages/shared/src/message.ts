@@ -12,6 +12,7 @@ export type MessageKind =
   | "scene"    // owner/mod scene-marker banner ("Scene begins: ...")
   | "npc"      // NPC voiced by a user; rendered with a "voiced by" tag
   | "ooc"      // out-of-character aside
+  | "container" // themed embed block ("/container <style> [color]"); owner/mod; "Posted by X" header, no edited badge
   | "poll";    // poll post: options to vote on, body/title is the question
 
 /**
@@ -148,6 +149,17 @@ export interface ChatMessage {
    * predate migration 0190.
    */
   sceneImageUrl?: string | null;
+  /**
+   * For `kind === "container"` only (migration 0362). The embed STYLE
+   * (solid|glass|parchment|bokeh|gradient) and an optional accent COLOR
+   * keyword (alert|green|purple|red|blue|teal|pink). Set by
+   * `/container <style> [color]` and frozen at send time. The renderer paints
+   * a themed full-width block whose base colors track the VIEWER's active
+   * theme; the accent is derived from the KEYWORD at render (never a snapshot
+   * hex) so it re-themes per viewer. Absent on every non-container row.
+   */
+  containerStyle?: string | null;
+  containerColor?: string | null;
   /**
    * Trusted-HTML body for scheduled `/announce` lines (migration
    * 0191). When set, the announce renderer paints it via

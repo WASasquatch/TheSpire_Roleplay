@@ -15,6 +15,7 @@ import {
   isModeratorRole,
   mapRichHtmlTextNodes,
   mentionsField,
+  containerFields,
   parseNpcStats,
   mentionTokenRegex,
   processCheckBlocks,
@@ -203,6 +204,15 @@ export async function addMessage(
      * caller can't paint an image onto a /me line.
      */
     sceneImageUrl?: string | null;
+    /**
+     * For `kind: "container"` embeds: the style
+     * (solid|glass|parchment|bokeh|gradient) and an optional accent color
+     * keyword, both validated by the /container handler before this call.
+     * Persisted verbatim; ignored on every other kind so a stray caller can't
+     * paint an embed onto a /me line.
+     */
+    containerStyle?: string | null;
+    containerColor?: string | null;
     /**
      * Serialized {@link PollData} for `kind: "poll"` rows (the /poll command
      * and the forum poll composer build it). Persisted verbatim and echoed
@@ -588,6 +598,11 @@ export async function addMessage(
     // upstream (scene.ts validateSceneImageUrl) before this column
     // receives a non-null value.
     sceneImageUrl: payload.kind === "scene" ? (payload.sceneImageUrl ?? null) : null,
+    // Container style/color, gated to `kind: "container"` for the same reason
+    // sceneImageUrl is gated to "scene": a stray caller on a /me line can't
+    // embed-style it. Validation ran upstream (container.ts).
+    containerStyle: payload.kind === "container" ? (payload.containerStyle ?? null) : null,
+    containerColor: payload.kind === "container" ? (payload.containerColor ?? null) : null,
     // Poll definition, gated to `kind: "poll"` for the same reason cmdCss /
     // sceneImageUrl are gated to their kinds.
     pollDataJson: payload.kind === "poll" ? (payload.pollDataJson ?? null) : null,
@@ -662,6 +677,13 @@ export async function addMessage(
     // Same posture for sceneImageUrl, only attached when this is a
     // scene row that actually carried an image.
     ...(payload.kind === "scene" && payload.sceneImageUrl ? { sceneImageUrl: payload.sceneImageUrl } : {}),
+    // Container presentation, only on container rows that carry a style.
+    ...(payload.kind === "container" && payload.containerStyle
+      ? {
+          containerStyle: payload.containerStyle,
+          ...(payload.containerColor ? { containerColor: payload.containerColor } : {}),
+        }
+      : {}),
     // Rank snapshot, only attach when present so the wire stays
     // light for unranked authors.
     ...(rankKeySnapshot ? { rankKey: rankKeySnapshot } : {}),
@@ -1554,6 +1576,7 @@ export async function sendRoomBacklogTo(
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
       ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
       ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+      ...containerFields(m),
       ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
       ...(m.tier != null ? { tier: m.tier } : {}),

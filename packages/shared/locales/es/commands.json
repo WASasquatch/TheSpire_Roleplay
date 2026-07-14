@@ -251,6 +251,29 @@
     "alreadyStaff": "Publicar ya está limitado al equipo.",
     "alreadyEveryone": "Publicar ya está abierto para todos."
   },
+  "public": {
+    "forumBoard": "Esta sala es un tablón del foro; su visibilidad se gestiona desde los ajustes del foro.",
+    "permission": "Solo el propietario, un mod o un admin de la sala puede cambiar quién encuentra esta sala.",
+    "already": "Esta sala ya es pública.",
+    "systemLine": "Esta sala ahora es pública: cualquiera puede encontrarla y unirse."
+  },
+  "staffRoom": {
+    "currentOn": "Esta sala es solo para el equipo: solo el equipo puede verla.",
+    "currentOff": "Esta sala es visible para todos.",
+    "usage": "Usa /staffroom on o /staffroom off. /staffroom sin argumentos muestra la configuración actual.",
+    "forumBoard": "Esta sala es un tablón del foro; quién puede verla se gestiona desde los ajustes del foro.",
+    "permission": "Solo el propietario, un mod o un admin de la sala puede cambiar quién puede ver esta sala.",
+    "alreadyOn": "Esta sala ya es solo para el equipo.",
+    "alreadyOff": "Esta sala ya es visible para todos.",
+    "systemLineOn": "Esta sala ahora es solo para el equipo: solo el equipo puede verla.",
+    "systemLineOff": "Esta sala ahora es visible para todos."
+  },
+  "container": {
+    "permission": "Solo el propietario o un mod de la sala puede publicar un contenedor.",
+    "badStyle": "Elige un estilo de contenedor: {{styles}}. Por ejemplo: /container glass",
+    "badColor": "Color de acento desconocido. Prueba uno de estos: {{colors}}, o déjalo en blanco para usar el acento de tu tema.",
+    "empty": "Añade el texto del contenedor en las líneas después de /container <style>."
+  },
   "replyMode": {
     "current": "Modo de respuestas de esta sala: {{mode}}.",
     "invalid": "El modo de respuestas debe ser 'flat' o 'nested'.",

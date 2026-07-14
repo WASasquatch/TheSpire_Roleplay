@@ -93,6 +93,9 @@ export async function maybeFireFirstWords(
       // there, and the "say hi" deep link would drop responders into a
       // room they can't reply in (and that displays nobody).
       room.postMode !== "staff" &&
+      // Staff-only rooms (staff_only, migration 0363) never announce: the ping
+      // reaches every online member, but only staff can see or enter one.
+      !room.staffOnly &&
       !(await effectiveRoomNsfw(db, room)) &&
       !(await roleLockedRoomIdsForServer(db, [room.id])).has(room.id);
 

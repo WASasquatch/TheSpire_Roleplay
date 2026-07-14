@@ -2,8 +2,9 @@ import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, typ
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { Bookmark, BookmarkCheck, Check, Flag, Link2, Pencil, Pin, PinOff, Reply, SmilePlus, Trash2 } from "lucide-react";
-import { buildMessageLinkUrl, canonicalizeNameForLookup, customCmdCssToStyle, extractMentions, renderUiRouteChipsInHtml, resolveMessageColor, richHtmlToText, type AvatarCrop, type ChatMessage, type MentionRef } from "@thekeep/shared";
+import { buildMessageLinkUrl, canonicalizeNameForLookup, CONTAINER_COLOR_RGB, customCmdCssToStyle, extractMentions, isContainerColor, isContainerStyle, renderUiRouteChipsInHtml, resolveMessageColor, richHtmlToText, type AvatarCrop, type ChatMessage, type MentionRef } from "@thekeep/shared";
 import { useActiveTheme } from "../../lib/theme.js";
+import { ensureInjectedStyle } from "../../lib/injectStyle.js";
 import { BorderedAvatar } from "../cosmetics/BorderedAvatar.js";
 import { UserNameTag } from "../UserNameTag.js";
 import type { Gender } from "../../lib/gender.js";
@@ -108,6 +109,97 @@ function SceneBanner({
           onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
         />
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Themed "container" embed CSS (kind === "container"). Injected ONCE via the
+ * CSP-nonce-stamped injector — a plain React <style> would be dropped by the
+ * prod `style-src 'self' 'nonce-…'` policy (see injectStyle.ts). The base
+ * surface + accent track the VIEWER's theme through the `--theme-*` vars; the
+ * per-message accent rides an inline `--container-accent` custom property
+ * (allowed by `style-src-attr 'unsafe-inline'`), falling back to the theme
+ * accent when the message carried no color keyword.
+ */
+const CONTAINER_EMBED_CSS = `
+.container-embed {
+  --cx-accent: var(--container-accent, var(--theme-accent-rgb));
+  position: relative;
+  border: 1px solid rgb(var(--cx-accent) / 0.45);
+  border-radius: 0.85rem;
+  padding: 0.7rem 1rem 0.8rem;
+  color: var(--theme-text);
+  overflow: hidden;
+}
+.container-embed__header {
+  display: flex; align-items: center; gap: 0.35rem;
+  font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--theme-muted); margin-bottom: 0.4rem;
+}
+.container-embed__dot {
+  width: 0.5rem; height: 0.5rem; border-radius: 9999px; flex: none;
+  background: rgb(var(--cx-accent) / 0.9);
+}
+.container-embed__body { white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+.container-embed--solid { background: var(--theme-panel); }
+.container-embed--glass {
+  background: rgb(var(--theme-panel-rgb) / 0.5);
+  backdrop-filter: blur(9px) saturate(1.25);
+  -webkit-backdrop-filter: blur(9px) saturate(1.25);
+  border-color: rgb(var(--cx-accent) / 0.35);
+}
+.container-embed--parchment {
+  background:
+    repeating-linear-gradient(0deg, rgb(var(--theme-text-rgb) / 0.02) 0 2px, transparent 2px 5px),
+    var(--theme-panel);
+  box-shadow: inset 0 0 42px rgb(var(--theme-text-rgb) / 0.07);
+  border-style: double; border-width: 3px;
+}
+.container-embed--bokeh {
+  background:
+    radial-gradient(circle at 12% 18%, rgb(var(--cx-accent) / 0.28) 0, transparent 22%),
+    radial-gradient(circle at 82% 12%, rgb(var(--cx-accent) / 0.18) 0, transparent 24%),
+    radial-gradient(circle at 72% 88%, rgb(var(--cx-accent) / 0.22) 0, transparent 20%),
+    var(--theme-panel);
+}
+.container-embed--gradient {
+  background: linear-gradient(135deg, rgb(var(--cx-accent) / 0.4), rgb(var(--theme-panel-rgb) / 0.9));
+}
+`;
+
+/**
+ * Themed embed block for `/container <style> [color]` (kind === "container").
+ * Full-width card with side margins (tighter on mobile), a muted "Posted by
+ * <name>" header, and the multi-line body rendered with preserved newlines +
+ * chat markdown. Deliberately renders NO edited badge (informational; admins
+ * can still edit/delete). Mirrors SceneBanner's shape.
+ */
+function ContainerEmbed({
+  renderedBody,
+  style,
+  color,
+  author,
+}: {
+  renderedBody: ReactNode;
+  style: string | null | undefined;
+  color: string | null | undefined;
+  author: string;
+}) {
+  const { t } = useTranslation("chat");
+  // Idempotent (getElementById-guarded); calling in render avoids an unstyled
+  // first frame that a useEffect injection would show.
+  ensureInjectedStyle("container-embed-styles", CONTAINER_EMBED_CSS);
+  const variant = style && isContainerStyle(style) ? style : "solid";
+  const accent = color && isContainerColor(color) ? CONTAINER_COLOR_RGB[color] : null;
+  const styleVar = accent ? ({ "--container-accent": accent } as CSSProperties) : undefined;
+  return (
+    <div className={`container-embed container-embed--${variant} mx-1 my-2 sm:mx-8`} style={styleVar}>
+      <div className="container-embed__header">
+        <span className="container-embed__dot" aria-hidden />
+        {t("row.postedBy", { name: author })}
+      </div>
+      <div className="container-embed__body">{renderedBody}</div>
     </div>
   );
 }
@@ -541,14 +633,15 @@ export function Line({
   // `bodyBlocks` is non-null ONLY when the body carries `> `/`- ` block
   // lines; every other message keeps the plain single-pass render.
   //
-  // Block inference applies ONLY to plain 'say' rows — the kind the
-  // composer's markdown serializer emits quote/bullet prefixes for.
-  // Inline action kinds (/me, rolls, whispers, ooc, npc, system…)
-  // render strictly inline, so the RP dash convention ("/me - lightning
-  // crashes as WAS stands ominously") keeps its literal leading "- "
-  // instead of collapsing into a nameless one-item bullet list.
+  // Block inference applies to plain 'say' rows — the kind the composer's
+  // markdown serializer emits quote/bullet prefixes for — AND to 'container'
+  // embeds, which are authored announcement blocks meant to render bullets /
+  // quotes / fenced code. Inline action kinds (/me, rolls, whispers, ooc,
+  // npc, system…) render strictly inline, so the RP dash convention ("/me -
+  // lightning crashes as WAS stands ominously") keeps its literal leading
+  // "- " instead of collapsing into a nameless one-item bullet list.
   const bodyBlocks = useMemo(() => {
-    if (isRichBody || msg.kind !== "say") return null;
+    if (isRichBody || (msg.kind !== "say" && msg.kind !== "container")) return null;
     const groups = groupBodyBlocks(msg.body);
     return groups.some((g) => g.kind === "quote" || g.kind === "bullet") ? groups : null;
   }, [isRichBody, msg.kind, msg.body]);
@@ -647,8 +740,12 @@ export function Line({
   // gate is just "not currently showing OwnControls", within-grace
   // own posts keep the standard OwnControls path so the UI doesn't
   // render both row variants on top of each other.
-  const showModDelete = canModerate && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind) && !showOwnControls;
-  const showAdminEdit = canAdminEdit && !msg.deletedAt && REPLYABLE_KINDS.has(msg.kind) && !showOwnControls;
+  // Containers aren't reactable/replyable (not in REPLYABLE_KINDS), but staff
+  // must still be able to edit/delete them — so admit "container" to the
+  // moderation gates explicitly.
+  const canModerateKind = REPLYABLE_KINDS.has(msg.kind) || msg.kind === "container";
+  const showModDelete = canModerate && !msg.deletedAt && canModerateKind && !showOwnControls;
+  const showAdminEdit = canAdminEdit && !msg.deletedAt && canModerateKind && !showOwnControls;
   const showModControls = showModDelete || showAdminEdit;
   // Inline edit lives at the ROW level, not inside the controls dock.
   // The dock is `md:absolute md:right-3` on desktop so its children
@@ -922,6 +1019,16 @@ export function Line({
         // SceneBanner handles the optional hero image + collapse toggle
         // so this case stays declarative.
         <SceneBanner renderedBody={renderedBody} imageUrl={msg.sceneImageUrl ?? null} />
+      );
+      break;
+    case "container":
+      lineEl = (
+        <ContainerEmbed
+          renderedBody={renderedBody}
+          style={msg.containerStyle}
+          color={msg.containerColor}
+          author={msg.displayName}
+        />
       );
       break;
     case "npc":

@@ -396,25 +396,27 @@ export function setGhostSweepIo(io: Io): void {
  *
  * Info rooms (post_mode = 'staff') are skipped at every tier: they are
  * read-only channels that DISPLAY no occupants, so a landing there would
- * park arrivals in a room where nobody can see (or talk to) them.
+ * park arrivals in a room where nobody can see (or talk to) them. Staff-only
+ * rooms (staff_only, migration 0363) are skipped for the same reason — most
+ * arrivals aren't staff and can't even see one.
  */
 export async function findCanonicalLanding(db: Db): Promise<typeof rooms.$inferSelect | null> {
   const defaulted = (await db
     .select()
     .from(rooms)
-    .where(and(eq(rooms.isDefault, true), ne(rooms.postMode, "staff")))
+    .where(and(eq(rooms.isDefault, true), ne(rooms.postMode, "staff"), eq(rooms.staffOnly, false)))
     .limit(1))[0];
   if (defaulted) return defaulted;
   const named = (await db
     .select()
     .from(rooms)
-    .where(and(eq(rooms.name, "The_Spire"), ne(rooms.postMode, "staff")))
+    .where(and(eq(rooms.name, "The_Spire"), ne(rooms.postMode, "staff"), eq(rooms.staffOnly, false)))
     .limit(1))[0];
   if (named) return named;
   const fallback = (await db
     .select()
     .from(rooms)
-    .where(and(eq(rooms.isSystem, true), ne(rooms.postMode, "staff")))
+    .where(and(eq(rooms.isSystem, true), ne(rooms.postMode, "staff"), eq(rooms.staffOnly, false)))
     .orderBy(asc(rooms.name))
     .limit(1))[0];
   return fallback ?? null;
@@ -465,6 +467,9 @@ export async function findLiveliestLanding(db: Db): Promise<typeof rooms.$inferS
       // Never an info room (post_mode 'staff'): read-only, displays nobody —
       // hostile as a first screen even when its announcements are recent.
       ne(rooms.postMode, "staff"),
+      // Never a staff-only room (migration 0363): a brand-new account isn't
+      // staff and can't even see one, so it must never be their first screen.
+      eq(rooms.staffOnly, false),
       or(eq(rooms.serverId, DEFAULT_SERVER_ID), isNull(rooms.serverId)),
     ))
     .groupBy(rooms.id)
@@ -511,7 +516,10 @@ export async function findServerLanding(
   // placed, so a room most of the server can't even see must never be it.
   // Info rooms (post_mode 'staff') are skipped at every tier for the same
   // reason as findCanonicalLanding: read-only channels display no
-  // occupants, so a landing there strands arrivals invisibly.
+  // occupants, so a landing there strands arrivals invisibly. Staff-only
+  // rooms (staff_only, migration 0363) are skipped too — most arrivals
+  // aren't staff and can't even see one (roleLockedRoomIdsForServer folds
+  // them in, and each tier's query also filters them out directly).
   // Tiers resolve LAZILY — the overwhelmingly common case (default room
   // exists, no access gate) costs one indexed rooms read plus one gate
   // read, and the wider fallback scans only run when an earlier tier is
@@ -524,6 +532,7 @@ export async function findServerLanding(
   if (
     defaulted
     && !isInfoRoom(defaulted)
+    && !defaulted.staffOnly
     && !(opts.skipArchivedDefault && defaulted.archivedAt)
     && !(await roleLockedRoomIdsForServer(db, [defaulted.id])).has(defaulted.id)
   ) {
@@ -540,6 +549,7 @@ export async function findServerLanding(
       eq(rooms.serverId, serverId),
       isNull(rooms.archivedAt),
       ne(rooms.postMode, "staff"),
+      eq(rooms.staffOnly, false),
     ))
     .orderBy(asc(rooms.name));
   if (fallbacks.length > 0) {
@@ -559,6 +569,7 @@ export async function findServerLanding(
       isNull(rooms.forumId),
       isNull(rooms.linkedRoomId),
       ne(rooms.postMode, "staff"),
+      eq(rooms.staffOnly, false),
     ))
     .orderBy(asc(rooms.name));
   if (anyLive.length > 0) {
@@ -1472,6 +1483,12 @@ export async function buildRoomSummary(
     // rich-only controls on it. Not per-viewer, so it rides the room-wide
     // fast path safely.
     richTextDisabled: room.richTextDisabled,
+    // Staff-only ACCESS (migration 0363): drives the rail's shield glyph.
+    // Safe on the room-wide fast path precisely BECAUSE the server only ever
+    // delivers a staff room to a staff viewer — GET /rooms drops it, join
+    // refuses it, the slug 404s — so a recipient seeing this flag is already
+    // allowed to. Kept only when true so the default-off wire is unchanged.
+    ...(room.staffOnly ? { staffOnly: true } : {}),
   };
 }
 
@@ -1999,6 +2016,18 @@ export async function expireIfEmpty(io: Io, db: Db, roomId: string): Promise<boo
   // board 60s after start, stranding its topics in an archived room. Board
   // lifecycle is owner-driven (the forums boards DELETE route archives).
   if (room.forumId) return false;
+  // Info rooms (postMode='staff', no forumId) are announcement channels with
+  // PHANTOM presence — currentOccupants() returns [] and readers are attributed
+  // to an anchor room, so an empty socket band is their steady state, not
+  // abandonment (same rationale as forum boards). Without this a non-persistent
+  // room flipped to an info channel auto-parked the instant its sole reader
+  // navigated away (the "staff-only room archives immediately" report). Flip
+  // postMode back to 'everyone' to make it parkable again.
+  if (isInfoRoom(room)) return false;
+  // A staff-only room (migration 0363) is an intentional staff channel; don't
+  // auto-park it the instant its staff step away (it sits empty by design
+  // most of the day, like an info room or a board).
+  if (room.staffOnly) return false;
   // A linked 18+ annex sits empty most of the time BY DESIGN — it's reached
   // through the base row's SFW/18+ toggle, not the rail, so empty is its
   // steady state, not abandonment. Keep it alive while its base room is

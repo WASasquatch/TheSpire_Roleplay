@@ -534,6 +534,10 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     /** Per-room rich-text toggle (migration 0354): true = the composer's
      *  simple formatting set (no headings/alignment; markdown wire). */
     richTextDisabled: z.boolean().optional(),
+    /** Staff-only ACCESS (room.staff_only, migration 0363): hide the room from
+     *  everyone but staff. A separate axis from postMode + the access role
+     *  gate — the room keeps a normal userlist and normal posting. */
+    staffOnly: z.boolean().optional(),
   }).strict();
 
   /** Normalize a console icon field: null/blank clears, otherwise the same
@@ -601,6 +605,7 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         : await defaultRoomCategoryFor(db, gate.server.id, gate.me.id),
       postMode: body.postMode ?? "everyone",
       richTextDisabled: body.richTextDisabled ?? false,
+      staffOnly: body.staffOnly ?? false,
     });
     // Creating a room AS an info room can be the install's first: the
     // presence-attribution short-circuit caches "no info rooms exist" and
@@ -674,6 +679,11 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     /** The usergroups who may post when postMode='roles' (kind='post' rows).
      *  Same full-replace semantics as accessRoleIds. */
     postRoleIds: z.array(z.string().min(1).max(64)).max(SERVER_MAX_USERGROUPS).nullable().optional(),
+    /** Staff-only ACCESS (room.staff_only, migration 0363). Hides the room
+     *  from everyone but staff (a separate axis from accessRoleIds — no
+     *  usergroup involved). A flip to true evicts current non-staff occupants,
+     *  like an access-gate narrowing. */
+    staffOnly: z.boolean().optional(),
   }).strict();
 
   /** Resolve gate-role ids against THIS server's named (non-default)
@@ -754,6 +764,11 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     // broadcastRoomState below refreshes every open composer's room summary
     // live, and enforcement reads the row per send, so no per-socket stamp.
     if (body.richTextDisabled !== undefined) update.richTextDisabled = body.richTextDisabled;
+    // Staff-only access (migration 0363): a plain column write — the eviction
+    // pass below boots current non-staff occupants when it flips ON, and
+    // broadcastRoomState + the tree pulse repaint the rail (shield glyph /
+    // drop-for-non-staff).
+    if (body.staffOnly !== undefined) update.staffOnly = body.staffOnly;
     // One default room PER server (rooms_one_default_per_server). Flag-on first
     // clears whichever room in THIS server currently holds it.
     if (body.isDefault === true && !room.isDefault) {
@@ -837,13 +852,16 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       const { restampPostLockedForRoom } = await import("../lib/postMode.js");
       await restampPostLockedForRoom(io, db, { ...room, postMode: body.postMode ?? room.postMode });
     }
-    // An access-gate write can lock the room against CURRENT occupants: the
-    // socket path has no per-message role check, so they must be booted the
-    // way an 18+ flip boots minors (their HTTP reads already 404). One-read
-    // no-op when the write cleared the gates.
-    if (accessNames !== null) {
+    // An access-gate write OR a staff-only flip-ON can lock the room against
+    // CURRENT occupants: the socket path has no per-message read check, so
+    // they must be booted the way an 18+ flip boots minors (their HTTP reads
+    // already 404). Pass the EFFECTIVE post-patch staffOnly so an access
+    // change to an already-staff-only room still evicts non-staff. One-read
+    // no-op when nothing narrowed access.
+    const staffOnlyFlippedOn = body.staffOnly === true && !room.staffOnly;
+    if (accessNames !== null || staffOnlyFlippedOn) {
       const { evictRoleDeniedFromRoom } = await import("../lib/roleGates.js");
-      await evictRoleDeniedFromRoom(io, db, room);
+      await evictRoleDeniedFromRoom(io, db, { ...room, staffOnly: body.staffOnly ?? !!room.staffOnly });
     }
     await broadcastRoomState(io, db, room.id);
     emitTreeChanged(io, gate.server.id);

@@ -3,7 +3,7 @@ import { isModeratorRole } from "@thekeep/shared";
 import { messages, roomMembers, rooms } from "../../db/schema.js";
 import { listArchivedOwnedRooms } from "../../lib/archivedRooms.js";
 import { effectiveRoomNsfwWith, nsfwServerIds } from "../../lib/nsfwRooms.js";
-import { loadRoleGates, roleAccessDeniedWith, staffServerIdsFor, usergroupIdsFor } from "../../lib/roleGates.js";
+import { loadRoleGates, roleAccessDeniedWith, roomModRoomIdsFor, staffServerIdsFor, usergroupIdsFor } from "../../lib/roleGates.js";
 import { nsfwForumIds } from "../../forums/nsfw.js";
 import { setRoomCleared } from "../../lib/roomClears.js";
 import { formatDuration, parseDuration } from "../duration.js";
@@ -15,25 +15,31 @@ import type { CommandContext, CommandHandler } from "../types.js";
 const CLEAR_CHUNK = 400; // keep each UPDATE under SQLite's bound-variable cap
 
 /**
- * Drop rooms the caller's roles deny (room_role_gates kind='access') from a
- * command listing — role-locked rooms' existence must not leak through /list
- * or /find when every other surface (rail, join, by-slug) hides them. Same
- * batched shape as GET /rooms: one gate read, then at most one membership
- * read and one staff read for the caller.
+ * Drop rooms the caller can't see from a command listing — role-locked rooms
+ * (room_role_gates kind='access') AND staff-only rooms (rooms.staff_only,
+ * migration 0363). Their existence must not leak through /list or /find when
+ * every other surface (rail, join, by-slug) hides them. Same batched shape as
+ * GET /rooms: one gate read, then at most one membership, one staff, and one
+ * room-mod read for the caller. Callers MUST select `staffOnly` onto the rows
+ * (else a staff room reads as visible and leaks here).
  */
 async function dropRoleLockedRooms<
-  T extends { id: string; ownerId: string | null; serverId: string | null },
+  T extends { id: string; ownerId: string | null; serverId: string | null; staffOnly?: boolean },
 >(ctx: CommandContext, rows: T[]): Promise<T[]> {
   if (rows.length === 0) return rows;
   const gates = await loadRoleGates(ctx.db, rows.map((r) => r.id));
   const hasAccess = [...gates.values()].some((g) => g.access.size > 0);
-  if (!hasAccess) return rows;
-  const groupIds = await usergroupIdsFor(ctx.db, ctx.user.id);
-  const staffIds = isModeratorRole(ctx.user.role)
-    ? new Set<string>()
-    : await staffServerIdsFor(ctx.db, ctx.user.id);
+  const hasStaffOnly = rows.some((r) => r.staffOnly);
+  if (!hasAccess && !hasStaffOnly) return rows;
+  const isSite = isModeratorRole(ctx.user.role);
+  const groupIds = hasAccess ? await usergroupIdsFor(ctx.db, ctx.user.id) : new Set<string>();
+  const staffIds = isSite ? new Set<string>() : await staffServerIdsFor(ctx.db, ctx.user.id);
+  // Staff-only rooms additionally admit the room's own mods.
+  const roomModIds = hasStaffOnly && !isSite
+    ? await roomModRoomIdsFor(ctx.db, ctx.user.id, rows.filter((r) => r.staffOnly).map((r) => r.id))
+    : new Set<string>();
   return rows.filter(
-    (r) => !roleAccessDeniedWith(ctx.user, r, gates.get(r.id)?.access, groupIds, staffIds),
+    (r) => !roleAccessDeniedWith(ctx.user, r, gates.get(r.id)?.access, groupIds, staffIds, roomModIds),
   );
 }
 
@@ -82,6 +88,9 @@ export const listCommand: CommandHandler = {
         serverId: rooms.serverId,
         ownerId: rooms.ownerId,
         forumId: rooms.forumId,
+        // Needed by dropRoleLockedRooms below — without it a staff-only room
+        // reads as visible and would leak into /list for non-staff.
+        staffOnly: rooms.staffOnly,
       })
       .from(rooms)
       // Archived rows hold a name reservation but no users; hide them
@@ -316,6 +325,9 @@ export const findCommand: CommandHandler = {
         serverId: rooms.serverId,
         ownerId: rooms.ownerId,
         forumId: rooms.forumId,
+        // Needed by dropRoleLockedRooms below (staff-only rooms don't surface
+        // by name for non-staff, same as role-locked rooms).
+        staffOnly: rooms.staffOnly,
       })
       .from(rooms)
       .where(sql`lower(${rooms.name}) LIKE ${"%" + needle.toLowerCase() + "%"}`)

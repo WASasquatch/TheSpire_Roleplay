@@ -155,6 +155,24 @@ export const rooms = sqliteTable(
      */
     isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
     /**
+     * Staff-only ACCESS (migration 0363) — a NEW axis orthogonal to
+     * `post_mode` (who-can-POST) and to the password/role-gate lanes
+     * (who-can-see via a usergroup). When true the room is hidden from
+     * everyone outside the staff set — site staff, this server's
+     * owner/admin/mod, the room owner (`owner_id`), and room mods
+     * (`room_members.role` owner/mod; a NULL `server_id` homes to the
+     * default server) — dropped from GET /rooms, refused on join with the
+     * same NO_ROOM shape a nonexistent room gives, and 404'd by slug, so its
+     * existence never leaks (the role-locked-room posture, but keyed on this
+     * column instead of a `room_role_gates` row). It KEEPS a normal userlist
+     * and normal posting among the staff who see it — that is what separates
+     * it from an info room (`post_mode='staff'`, public-read). The two axes
+     * are independent: a room may be staff-only, an info room, both, or
+     * neither. Toggled via `/staffroom` (callerCanEditRoom) and the servers
+     * console. Absent/0 = visible to everyone.
+     */
+    staffOnly: integer("staff_only", { mode: "boolean" }).notNull().default(false),
+    /**
      * Admin-flagged default landing room. Exactly one row in the table is
      * expected to carry isDefault=true (enforced by partial unique index in
      * the migration). All "where should we put this user?" flows resolve
@@ -542,7 +560,7 @@ export const messages = sqliteTable(
     /** snapshot - display name at send time (so renames don't rewrite history) */
     displayName: text("display_name").notNull(),
     kind: text("kind", {
-      enum: ["say", "me", "cmd", "system", "whisper", "roll", "announce", "scene", "npc", "ooc", "poll"],
+      enum: ["say", "me", "cmd", "system", "whisper", "roll", "announce", "scene", "npc", "ooc", "container", "poll"],
     })
       .notNull()
       .default("say"),
@@ -623,6 +641,16 @@ export const messages = sqliteTable(
      * rows that predate migration 0190.
      */
     sceneImageUrl: text("scene_image_url"),
+    /**
+     * For `container`-kind rows (migration 0362): the embed style
+     * (solid|glass|parchment|bokeh|gradient) and an optional accent color
+     * KEYWORD (alert|green|purple|red|blue|teal|pink), set by
+     * `/container <style> [color]`. NULL on every non-container row. The color
+     * is stored as a keyword (theme-independent) and resolved per viewer at
+     * render, so the block re-themes when a viewer switches palette.
+     */
+    containerStyle: text("container_style"),
+    containerColor: text("container_color"),
     /**
      * Trusted-HTML body for scheduled-/announce lines (migration 0191).
      * The chat markdown pipeline still owns regular chat, when this

@@ -157,6 +157,18 @@ export interface RoomSummary {
    */
   postLocked?: boolean;
   /**
+   * Staff-only ACCESS flag (migration 0363). True = this room is hidden from
+   * everyone outside the staff set (site staff, the server's owner/admin/mod,
+   * the room owner, and room mods); the rail draws a shield glyph on the row.
+   * The server ONLY ever sends a staff room to a viewer allowed to see it —
+   * it is DROPPED from GET /rooms for everyone else, exactly like a
+   * role-locked room (same no-leak scrub), so a present `staffOnly: true` row
+   * always means the viewer is staff. Never send-but-lock. A staff room keeps
+   * a NORMAL userlist (unlike an info room), so it is NOT routed through the
+   * no-userlist info-room path. Absent (older bundle) = not staff-only.
+   */
+  staffOnly?: boolean;
+  /**
    * "Never expire" opt-out (migration 0347). True = the janitor skips this
    * room in both the server-retention and per-room-expiry sweeps, so its
    * history is kept forever. Absent (older bundle) = false.

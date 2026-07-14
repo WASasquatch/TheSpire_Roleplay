@@ -251,6 +251,29 @@
     "alreadyStaff": "Posting is already limited to staff.",
     "alreadyEveryone": "Posting is already open to everyone."
   },
+  "public": {
+    "forumBoard": "This room is a forum board - its visibility is managed by the forum's own settings.",
+    "permission": "Only the room owner / mod / admin can change who can find this room.",
+    "already": "This room is already public.",
+    "systemLine": "This room is now public - anyone can find and join it."
+  },
+  "staffRoom": {
+    "currentOn": "This room is staff only - only staff can see it.",
+    "currentOff": "This room is visible to everyone.",
+    "usage": "Use /staffroom on or /staffroom off. Bare /staffroom shows the current setting.",
+    "forumBoard": "This room is a forum board - who can see it is managed by the forum's own settings.",
+    "permission": "Only the room owner / mod / admin can change who can see this room.",
+    "alreadyOn": "This room is already staff only.",
+    "alreadyOff": "This room is already visible to everyone.",
+    "systemLineOn": "This room is now staff only - only staff can see it.",
+    "systemLineOff": "This room is now visible to everyone."
+  },
+  "container": {
+    "permission": "Only the room owner or a mod can post a container.",
+    "badStyle": "Pick a container style: {{styles}}. For example: /container glass",
+    "badColor": "Unknown accent color. Try one of: {{colors}} - or leave it out to use your theme's accent.",
+    "empty": "Add the container's text on the lines after /container <style>."
+  },
   "replyMode": {
     "current": "This room's reply mode: {{mode}}.",
     "invalid": "Reply mode must be 'flat' or 'nested'.",

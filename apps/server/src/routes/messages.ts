@@ -14,7 +14,7 @@ import { and, asc, eq, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
-import { RICH_HTML_MAX_BYTES, mentionsField, parseNpcStats, richHtmlToText } from "@thekeep/shared";
+import { RICH_HTML_MAX_BYTES, containerFields, mentionsField, parseNpcStats, richHtmlToText } from "@thekeep/shared";
 import { recordAudit } from "../audit.js";
 import { messages, rooms, roomThreadCategories, roomMembers, pinnedMessages, users } from "../db/schema.js";
 import { callerCanEditRoom } from "../auth/roomPermissions.js";
@@ -422,6 +422,7 @@ export function toWire(m: typeof messages.$inferSelect, viewerIsAdmin = false): 
     ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
     ...(() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })(),
     ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+    ...containerFields(m),
     ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
     ...mentionsField(m.mentionsJson),
     ...(m.rankKey ? { rankKey: m.rankKey } : {}),
@@ -585,6 +586,10 @@ export async function registerMessageRoutes(
     // cap.
     const trimmed = body.body.trim();
     if (!trimmed) { reply.code(400); return { error: "empty" }; }
+    // Persisted plain body keeps a leading blank line (trimEnd), so an edit
+    // can start content below the author name — same contract as a fresh send
+    // (dispatch.ts). `trimmed` stays full-trim for the empty check + caps.
+    const kept = body.body.trimEnd();
     const effectiveCap = forum ? maxForumPostLength : maxMessageLength;
 
     // Rich-format rows (migration 0352) keep their format on edit: the
@@ -636,8 +641,8 @@ export async function registerMessageRoutes(
       // don't currently render body via dangerouslySetInnerHTML on the chat
       // line, but be defensive, sanitiseBio is the same routine used for bio
       // HTML and is safe to apply to plain text (it's a no-op for text-only).
-      safeBody = m.kind === "say" || m.kind === "me" || m.kind === "ooc" || m.kind === "scene"
-        ? trimmed
+      safeBody = m.kind === "say" || m.kind === "me" || m.kind === "ooc" || m.kind === "scene" || m.kind === "container"
+        ? kept
         : sanitizeBio(trimmed);
     }
 

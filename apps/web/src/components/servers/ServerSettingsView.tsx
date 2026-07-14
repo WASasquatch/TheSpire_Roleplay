@@ -287,6 +287,10 @@ interface RoomListRow {
   retentionExempt?: boolean;
   /** Per-room rich-text toggle (migration 0354); absent = full rich text. */
   richTextDisabled?: boolean;
+  /** Staff-only access (migration 0363); absent = visible to everyone. Only
+   *  ever present as true on a row the viewer is staff of (the server drops
+   *  staff rooms for everyone else). */
+  staffOnly?: boolean;
   occupants?: unknown[];
 }
 
@@ -1869,6 +1873,8 @@ function RoomCreateForm({ detail, categories, busy, run, onCreated }: { detail: 
   // Text formatting (migration 0354): "simple" hides the composer's
   // rich-only controls (headings, alignment) in this room.
   const [richText, setRichText] = useState<"full" | "simple">("full");
+  // Staff-only access (migration 0363): hide the room from everyone but staff.
+  const [staffOnly, setStaffOnly] = useState(false);
   // 18+ room checkbox (age-restriction plan, Phase 2): hidden from under-18
   // viewers entirely (the route rejects the write regardless), and moot
   // inside an 18+ community, where every room is 18+ by the server flag.
@@ -1937,6 +1943,13 @@ function RoomCreateForm({ detail, categories, busy, run, onCreated }: { detail: 
           <span className="block text-[10px] text-keep-muted">{t("console.rooms.keepWhenEmptyCreateHint")}</span>
         </span>
       </label>
+      <label className="flex items-start gap-2 text-xs text-keep-text">
+        <input type="checkbox" className="mt-0.5" checked={staffOnly} onChange={(e) => setStaffOnly(e.target.checked)} />
+        <span>
+          <span className="block">{t("console.rooms.staffOnlyRoom")}</span>
+          <span className="block text-[10px] text-keep-muted">{t("console.rooms.staffOnlyHint")}</span>
+        </span>
+      </label>
       {isAdultViewer && !serverIsNsfw ? (
         <label className="flex items-start gap-2 text-xs text-keep-text">
           <input type="checkbox" className="mt-0.5" checked={nsfw} onChange={(e) => setNsfw(e.target.checked)} />
@@ -1962,7 +1975,7 @@ function RoomCreateForm({ detail, categories, busy, run, onCreated }: { detail: 
       <div className="flex justify-end">
         <button type="button" disabled={busy || !canSave}
           onClick={() => void run(async () => {
-            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(postMode === "staff" ? { postMode } : {}), ...(richText === "simple" ? { richTextDisabled: true } : {}), ...(nsfw ? { isNsfw: true } : {}), ...(adultChannel && !nsfw && type === "public" ? { adultChannel: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}), ...(icon.trim() ? { icon: icon.trim() } : {}), ...(categoryId === "none" ? { categoryId: null } : categoryId ? { categoryId } : {}) });
+            await apiCreateServerRoom(detail.id, { name: name.trim(), type, persistent, ...(postMode === "staff" ? { postMode } : {}), ...(richText === "simple" ? { richTextDisabled: true } : {}), ...(staffOnly ? { staffOnly: true } : {}), ...(nsfw ? { isNsfw: true } : {}), ...(adultChannel && !nsfw && type === "public" ? { adultChannel: true } : {}), ...(type === "private" ? { password } : {}), ...(topic.trim() ? { topic: topic.trim() } : {}), ...(icon.trim() ? { icon: icon.trim() } : {}), ...(categoryId === "none" ? { categoryId: null } : categoryId ? { categoryId } : {}) });
             onCreated();
           })}
           className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">{t("console.rooms.createRoom")}</button>
@@ -2083,6 +2096,8 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
   // an already-roles room.
   const postRolesInvalid = !!gates && postMode === "roles" && postIds.size === 0;
   const [persistent, setPersistent] = useState(room.persistent ?? true);
+  // Staff-only access (migration 0363): hide the room from everyone but staff.
+  const [staffOnly, setStaffOnly] = useState(room.staffOnly ?? false);
   const [nsfw, setNsfw] = useState(room.isNsfw ?? false);
   // 18+ CHANNEL: an adults-only side feed behind a SFW/18+ toggle on the
   // room's rail row. One checkbox — enabling creates (or revives, history
@@ -2098,11 +2113,12 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
   const categoryDirty = (categoryId || null) !== (room.categoryId ?? null);
   const postModeDirty = postMode !== (room.postMode ?? "everyone");
   const richTextDirty = (richText === "simple") !== (room.richTextDisabled ?? false);
+  const staffOnlyDirty = staffOnly !== (room.staffOnly ?? false);
   const lifetimeDirty = lifetime !== initialLifetime
     || (lifetime === "custom" && expiry !== String(room.messageExpiryMinutes ?? ""));
   // Custom mode needs an actual minutes value before Save makes sense.
   const lifetimeInvalid = lifetime === "custom" && !(Number(expiry) >= 1);
-  const dirty = name !== room.name || topic !== (room.topic ?? "") || lifetimeDirty || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty || iconDirty || categoryDirty || postModeDirty || richTextDirty || accessDirty || postRolesDirty;
+  const dirty = name !== room.name || topic !== (room.topic ?? "") || lifetimeDirty || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty || iconDirty || categoryDirty || postModeDirty || richTextDirty || staffOnlyDirty || accessDirty || postRolesDirty;
   return (
     <div className="mt-2 space-y-2 border-t border-keep-rule/60 pt-2">
       <label className="block text-xs">
@@ -2235,6 +2251,13 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
           <span className="block text-[10px] text-keep-muted">{t("console.rooms.keepWhenEmptyEditHint")}</span>
         </span>
       </label>
+      <label className="flex items-start gap-2 text-xs text-keep-text">
+        <input type="checkbox" className="mt-0.5" checked={staffOnly} onChange={(e) => setStaffOnly(e.target.checked)} />
+        <span>
+          <span className="block">{t("console.rooms.staffOnlyRoom")}</span>
+          <span className="block text-[10px] text-keep-muted">{t("console.rooms.staffOnlyHint")}</span>
+        </span>
+      </label>
       {isAdultViewer && !serverIsNsfw ? (
         <label className="flex items-start gap-2 text-xs text-keep-text">
           <input type="checkbox" className="mt-0.5" checked={nsfw} onChange={(e) => setNsfw(e.target.checked)} />
@@ -2271,6 +2294,7 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
               persistent,
               ...(postModeDirty ? { postMode } : {}),
               ...(richTextDirty ? { richTextDisabled: richText === "simple" } : {}),
+              ...(staffOnlyDirty ? { staffOnly } : {}),
               // Role gates: full-replace lists, sent only when touched
               // ("Everyone" saves as an empty list = clear the lock).
               ...(accessDirty ? { accessRoleIds: [...effectiveAccessIds] } : {}),

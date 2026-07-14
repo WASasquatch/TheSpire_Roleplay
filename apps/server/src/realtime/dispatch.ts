@@ -82,7 +82,7 @@ function isSpeechCommand(cmd: string | null): boolean {
     "reply", "re",
     "roll", "dice",
     "topic",
-    "scene", "npc",
+    "scene", "npc", "container", "embed", "card",
   ].includes(cmd);
 }
 
@@ -684,7 +684,11 @@ export async function dispatchChatInput(args: {
     // is harmless if present, ignored by the flat renderer.
     await addMessage(ctx, {
       kind: "say",
-      body: parsed.argsText.trim(),
+      // trimEnd (not trim) so a leading blank line survives — lets a message
+      // start below the author name (matches the forum siblings above and the
+      // parser's documented contract; the empty-guard at the top still full-
+      // trims, so all-whitespace sends are still rejected).
+      body: parsed.argsText.trimEnd(),
       ...(richBody !== null ? { format: "html" as const } : {}),
       ...(threadCategoryId ? { threadCategoryId } : {}),
     });

@@ -48,6 +48,7 @@ import { effectiveRoomNsfwWith, nsfwServerIds } from "../lib/nsfwRooms.js";
 import {
   loadRoleGates,
   roleAccessDeniedWith,
+  roomModRoomIdsFor,
   staffServerIdsFor,
   usergroupIdsFor,
 } from "../lib/roleGates.js";
@@ -124,6 +125,9 @@ async function visibleRoomsForServer(
       serverId: rooms.serverId,
       ownerId: rooms.ownerId,
       isNsfw: rooms.isNsfw,
+      // Staff-only rooms (migration 0363) must drop out of the searchable
+      // universe for non-staff too, or a cross-room search leaks their bodies.
+      staffOnly: rooms.staffOnly,
     })
     .from(rooms)
     .where(and(isNull(rooms.archivedAt), serverScope));
@@ -156,11 +160,21 @@ async function visibleRoomsForServer(
   // cross-room search becomes the one read that leaks its bodies. Same
   // batched shape as GET /rooms: one gate read for the whole candidate set,
   // then at most one membership + one staff read for the viewer.
+  // Staff-only rooms (rooms.staff_only, migration 0363) drop from the search
+  // universe the same way — a whole SEPARATE axis (no gate row), so detect it
+  // off the room column and fold it into the same deny filter below.
   const roleGates = await loadRoleGates(db, candidateRows.map((r) => r.id));
   const hasAccessGates = [...roleGates.values()].some((g) => g.access.size > 0);
+  const hasStaffOnly = candidateRows.some((r) => r.staffOnly);
+  const gatesActive = hasAccessGates || hasStaffOnly;
+  const isSiteStaff = isModeratorRole(me.role);
   const viewerGroupIds = hasAccessGates ? await usergroupIdsFor(db, me.id) : new Set<string>();
-  const roleStaffServerIds = hasAccessGates && !isModeratorRole(me.role)
+  const roleStaffServerIds = gatesActive && !isSiteStaff
     ? await staffServerIdsFor(db, me.id)
+    : new Set<string>();
+  // Staff-only rooms additionally admit the room's own mods.
+  const staffRoomModIds = hasStaffOnly && !isSiteStaff
+    ? await roomModRoomIdsFor(db, me.id, candidateRows.filter((r) => r.staffOnly).map((r) => r.id))
     : new Set<string>();
 
   const visible = new Map<string, RoomForSearch>();
@@ -171,8 +185,8 @@ async function visibleRoomsForServer(
     if (nsfwForums && r.forumId && nsfwForums.has(r.forumId)) continue;
     if (r.type === "private" && !myRoomIds.has(r.id)) continue;
     if (
-      hasAccessGates
-      && roleAccessDeniedWith(me, r, roleGates.get(r.id)?.access, viewerGroupIds, roleStaffServerIds)
+      gatesActive
+      && roleAccessDeniedWith(me, r, roleGates.get(r.id)?.access, viewerGroupIds, roleStaffServerIds, staffRoomModIds)
     ) continue;
 
     if (r.forumId) {

@@ -30,6 +30,7 @@ import { whisperCommand } from "./whisper.js";
 import { replyCommand } from "./reply.js";
 import { moodCommand } from "./mood.js";
 import { sceneCommand } from "./scene.js";
+import { containerCommand } from "./container.js";
 import { npcCommand, npcModeCommand } from "./npc.js";
 import {
   acceptFriendCommand,
@@ -41,7 +42,7 @@ import {
 import { worldCommand, worldsCommand } from "./world.js";
 import { forumsCommand } from "./forums.js";
 import { scriptoriumCommand, storyCommand, writeCommand } from "./scriptorium.js";
-import { expiryCommand, nsfwCommand, postModeCommand, replyModeCommand } from "./room_modes.js";
+import { expiryCommand, nsfwCommand, postModeCommand, publicRoomCommand, replyModeCommand, staffRoomCommand } from "./room_modes.js";
 import { goPairCommand } from "./room_link.js";
 import { iconCommand } from "./icon.js";
 import { theaterCommand } from "./theater.js";
@@ -118,6 +119,7 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(replyCommand);
   reg.registerBuiltin(moodCommand);
   reg.registerBuiltin(sceneCommand);
+  reg.registerBuiltin(containerCommand);
   reg.registerBuiltin(npcCommand);
   reg.registerBuiltin(npcModeCommand);
   reg.registerBuiltin(friendCommand);
@@ -135,6 +137,8 @@ export function registerBuiltins(reg: CommandRegistry): void {
   reg.registerBuiltin(expiryCommand);
   reg.registerBuiltin(replyModeCommand);
   reg.registerBuiltin(postModeCommand);
+  reg.registerBuiltin(publicRoomCommand);
+  reg.registerBuiltin(staffRoomCommand);
   reg.registerBuiltin(nsfwCommand);
   reg.registerBuiltin(goPairCommand);
   reg.registerBuiltin(theaterCommand);

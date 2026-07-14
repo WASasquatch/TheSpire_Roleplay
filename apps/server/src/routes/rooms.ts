@@ -26,6 +26,7 @@ import {
   isModeratorRole,
   mapRichHtmlTextNodes,
   mentionsField,
+  containerFields,
   parseNpcStats,
   richHtmlToText,
 } from "@thekeep/shared";
@@ -58,6 +59,7 @@ import {
   loadRoleGates,
   roleAccessDeniedFor,
   roleAccessDeniedWith,
+  roomModRoomIdsFor,
   staffServerIdsFor,
   usergroupIdsFor,
 } from "../lib/roleGates.js";
@@ -210,6 +212,11 @@ export async function registerRoomsRoutes(
     // the postLocked computation farther down.
     const roleGates = await loadRoleGates(db, allRooms.map((r) => r.id));
     const hasAccessGates = [...roleGates.values()].some((g) => g.access.size > 0);
+    // Staff-only rooms (rooms.staff_only, migration 0363): dropped for every
+    // non-staff viewer in the SAME pass as role-locked rooms below. This is a
+    // whole SEPARATE access axis from role gates — no room_role_gates row is
+    // involved — so it's detected off the room column, not the gate map.
+    const hasStaffOnly = allRooms.some((r) => r.staffOnly);
     const hasRolePostRooms = allRooms.some((r) => r.postMode === "roles" && !r.forumId);
     const viewerGroupIds = me && (hasAccessGates || hasRolePostRooms)
       ? await usergroupIdsFor(db, me.id)
@@ -223,11 +230,22 @@ export async function registerRoomsRoutes(
       if (!staffServerIdsMemo) staffServerIdsMemo = await staffServerIdsFor(db, me.id);
       return staffServerIdsMemo;
     };
-    const roleStaffServerIds = me && hasAccessGates && !isModeratorRole(me.role)
+    const roleStaffServerIds = me && (hasAccessGates || hasStaffOnly) && !isModeratorRole(me.role)
       ? await getStaffServerIds()
       : new Set<string>();
+    // Staff-only rooms additionally admit the room's own mods; resolve the
+    // viewer's room-mod set across just those rooms once (empty for site
+    // staff — they bypass without it).
+    const staffRoomModIds = me && hasStaffOnly && !isModeratorRole(me.role)
+      ? await roomModRoomIdsFor(db, me.id, allRooms.filter((r) => r.staffOnly).map((r) => r.id))
+      : new Set<string>();
     const roleDropped = new Set<string>();
-    if (hasAccessGates) {
+    if (hasAccessGates || hasStaffOnly) {
+      // ONE pass drops both role-locked rooms the viewer holds no access role
+      // for AND staff-only rooms the viewer isn't staff of — either way the
+      // room is simply ABSENT per viewer (no scrub flag), the same no-leak
+      // posture as private rooms. roleAccessDeniedWith short-circuits any room
+      // carrying neither gate, so mixing them in one filter is free.
       allRooms = allRooms.filter((r) => {
         const denied = roleAccessDeniedWith(
           me,
@@ -235,6 +253,7 @@ export async function registerRoomsRoutes(
           roleGates.get(r.id)?.access,
           viewerGroupIds,
           roleStaffServerIds,
+          staffRoomModIds,
         );
         if (denied) roleDropped.add(r.id);
         return !denied;
@@ -914,6 +933,7 @@ export async function registerRoomsRoutes(
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
       ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
       ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+      ...containerFields(m),
       ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
       ...(m.tier != null ? { tier: m.tier } : {}),
@@ -1068,6 +1088,7 @@ export async function registerRoomsRoutes(
       ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
       ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
       ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+      ...containerFields(m),
       ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
       ...(m.rankKey ? { rankKey: m.rankKey } : {}),
       ...(m.tier != null ? { tier: m.tier } : {}),
@@ -1536,6 +1557,8 @@ export async function registerRoomsRoutes(
           ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
         ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
           ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+          ...containerFields(m),
+      ...containerFields(m),
           ...mentionsField(m.mentionsJson),
           ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
           ...(m.rankKey ? { rankKey: m.rankKey } : {}),
@@ -1865,6 +1888,8 @@ export async function registerRoomsRoutes(
           ...(m.cmdCss ? { cmdCss: m.cmdCss } : {}),
           ...((() => { const lp = linkPreviewFromRow(m.linkPreviewJson); return lp ? { linkPreview: lp } : {}; })()),
           ...(m.sceneImageUrl ? { sceneImageUrl: m.sceneImageUrl } : {}),
+          ...containerFields(m),
+      ...containerFields(m),
           ...(m.bodyHtml ? { bodyHtml: m.bodyHtml } : {}),
           ...mentionsField(m.mentionsJson),
           ...(m.rankKey ? { rankKey: m.rankKey } : {}),

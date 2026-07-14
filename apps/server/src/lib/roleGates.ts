@@ -14,6 +14,14 @@
  * plus holders of any kind='post' row may post; everyone else gets the
  * read-only composer. post_mode='staff' ignores role rows entirely.
  *
+ * STAFF-ONLY (rooms.staff_only, migration 0363): an adjacent access axis that
+ * needs NO gate row — the column alone hides the room from everyone outside
+ * the staff set (site staff, server owner/admin/mod, room owner, room mods),
+ * INDEPENDENT of usergroups. It rides the SAME deny helpers as a role-locked
+ * room (roleAccessDeniedFor/With), lands in roleLockedRoomIdsForServer, and
+ * is evicted on flip-ON by evictRoleDeniedFromRoom — so callers get one
+ * uniform no-leak "denied" result whichever gate tripped.
+ *
  * This module is the single audit point for both reads:
  *   - loadRoleGates      — ONE batched inArray read for a whole room list
  *                          (GET /rooms must never issue per-room queries);
@@ -24,7 +32,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import { isModeratorRole, type ClientToServerEvents, type Role, type ServerToClientEvents } from "@thekeep/shared";
-import { rooms, roomRoleGates, serverMembers, serverUsergroupMembers } from "../db/schema.js";
+import { roomMembers, rooms, roomRoleGates, serverMembers, serverUsergroupMembers } from "../db/schema.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { tFor } from "../i18n.js";
 import type { Db } from "../db/index.js";
@@ -36,6 +44,14 @@ export interface RoleGateRoom {
   id: string;
   ownerId: string | null;
   serverId: string | null;
+  /**
+   * Staff-only ACCESS (migration 0363). True ⇒ the room is denied to
+   * everyone outside the staff set (site staff, server owner/admin/mod, the
+   * room owner, room mods), INDEPENDENT of any `room_role_gates` row — a
+   * usergroup can't rescue a non-staff viewer. Optional so a caller passing a
+   * partial shape (or an older row) reads as "not staff-only".
+   */
+  staffOnly?: boolean;
 }
 
 export interface RoomRoleGateSets {
@@ -91,8 +107,35 @@ export async function staffServerIdsFor(db: Db, userId: string): Promise<Set<str
 }
 
 /**
+ * The room ids from `roomIds` where `userId` is a room owner/mod
+ * (room_members.role) — one batched read. The room-mod tier of the staff-only
+ * bypass (migration 0363), consumed by GET /rooms' batched filter and the
+ * eviction pass so a room's own mods keep seeing/holding a staff-only room.
+ */
+export async function roomModRoomIdsFor(db: Db, userId: string, roomIds: readonly string[]): Promise<Set<string>> {
+  if (roomIds.length === 0) return new Set();
+  const rows = await db
+    .select({ roomId: roomMembers.roomId })
+    .from(roomMembers)
+    .where(and(
+      eq(roomMembers.userId, userId),
+      inArray(roomMembers.roomId, [...roomIds]),
+      inArray(roomMembers.role, ["owner", "mod"]),
+    ));
+  return new Set(rows.map((r) => r.roomId));
+}
+
+/**
  * Pure form of the access decision, for callers that already batched the
  * reads (GET /rooms). True = the viewer must NOT receive this room.
+ *
+ * Two gates share one staff/owner bypass:
+ *   - `room.staffOnly` (migration 0363): denies everyone outside the staff
+ *     set, INDEPENDENT of usergroup rows — room mods pass (via
+ *     `viewerRoomModRoomIds`), no access usergroup rescues anyone else.
+ *   - `accessGroupIds` (role-locked room): a held access usergroup admits.
+ * A room carrying BOTH is staff-only-dominant — the flag denies a non-staff
+ * usergroup holder just the same.
  */
 export function roleAccessDeniedWith(
   viewer: { id: string; role: Role } | null | undefined,
@@ -100,13 +143,21 @@ export function roleAccessDeniedWith(
   accessGroupIds: ReadonlySet<string> | undefined,
   viewerGroupIds: ReadonlySet<string>,
   viewerStaffServerIds: ReadonlySet<string>,
+  viewerRoomModRoomIds?: ReadonlySet<string>,
 ): boolean {
-  if (!accessGroupIds || accessGroupIds.size === 0) return false;
+  const staffOnly = !!room.staffOnly;
+  const hasAccessGate = !!accessGroupIds && accessGroupIds.size > 0;
+  // Neither gate → visible to everyone (the overwhelmingly common room).
+  if (!staffOnly && !hasAccessGate) return false;
   if (!viewer) return true;
+  // Staff / owner bypass — shared by both gates.
   if (isModeratorRole(viewer.role)) return false;
   if (room.ownerId === viewer.id) return false;
   if (viewerStaffServerIds.has(room.serverId ?? DEFAULT_SERVER_ID)) return false;
-  for (const gid of accessGroupIds) if (viewerGroupIds.has(gid)) return false;
+  // Staff-only wins first: room mods also pass; nothing else does.
+  if (staffOnly) return !viewerRoomModRoomIds?.has(room.id);
+  // Role-locked: a held access usergroup admits.
+  for (const gid of accessGroupIds!) if (viewerGroupIds.has(gid)) return false;
   return true;
 }
 
@@ -121,12 +172,17 @@ export async function roleAccessDeniedFor(
   viewer: { id: string; role: Role } | null | undefined,
   room: RoleGateRoom,
 ): Promise<boolean> {
+  const staffOnly = !!room.staffOnly;
+  // Role-locked rooms carry kind='access' rows; a staff-only room is gated by
+  // the column alone. One indexed read serves both — a pure staff-only room
+  // just comes back empty.
   const rows = await db
     .select({ usergroupId: roomRoleGates.usergroupId })
     .from(roomRoleGates)
     .where(and(eq(roomRoleGates.roomId, room.id), eq(roomRoleGates.kind, "access")));
-  if (rows.length === 0) return false;
+  if (!staffOnly && rows.length === 0) return false;
   if (!viewer) return true;
+  // Staff / owner bypass — shared by both gates.
   if (isModeratorRole(viewer.role)) return false;
   if (room.ownerId === viewer.id) return false;
   const staff = (await db
@@ -139,6 +195,17 @@ export async function roleAccessDeniedFor(
     ))
     .limit(1))[0];
   if (staff) return false;
+  // Staff-only (migration 0363): room mods (room_members owner/mod) also pass;
+  // no usergroup membership can rescue anyone else, so the access rows above
+  // are irrelevant here — the flag denies independently.
+  if (staffOnly) {
+    const member = (await db
+      .select({ role: roomMembers.role })
+      .from(roomMembers)
+      .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, viewer.id)))
+      .limit(1))[0];
+    return !(member?.role === "owner" || member?.role === "mod");
+  }
   const held = (await db
     .select({ groupId: serverUsergroupMembers.groupId })
     .from(serverUsergroupMembers)
@@ -161,7 +228,15 @@ export async function roleLockedRoomIdsForServer(db: Db, roomIds: readonly strin
     .select({ roomId: roomRoleGates.roomId })
     .from(roomRoleGates)
     .where(and(inArray(roomRoleGates.roomId, [...roomIds]), eq(roomRoleGates.kind, "access")));
-  return new Set(rows.map((r) => r.roomId));
+  const out = new Set(rows.map((r) => r.roomId));
+  // Staff-only rooms (migration 0363) are viewer-agnostically hidden too — a
+  // landing must never drop arbitrary members into one either.
+  const staffRows = await db
+    .select({ id: rooms.id })
+    .from(rooms)
+    .where(and(inArray(rooms.id, [...roomIds]), eq(rooms.staffOnly, true)));
+  for (const r of staffRows) out.add(r.id);
+  return out;
 }
 
 /**
@@ -208,17 +283,24 @@ export async function stampAnnexRoleDenied(
  * group deletion. Rooms with no access rows are a one-read no-op.
  * Relocation + notice follow the minor-eviction posture; membership rows
  * are KEPT (keep-but-hide) so regaining the role restores everything.
+ *
+ * Also the enforcement point for a staff-only flip-ON (migration 0363): the
+ * socket path has no per-message access check, so a room turning staff-only
+ * must boot its current non-staff occupants the same way. Room mods pass (the
+ * room-mod tier is folded into the per-user decision below).
  */
 export async function evictRoleDeniedFromRoom(
   io: Io,
   db: Db,
   room: RoleGateRoom & { serverId: string | null },
 ): Promise<number> {
+  const staffOnly = !!room.staffOnly;
   const gateRows = await db
     .select({ usergroupId: roomRoleGates.usergroupId })
     .from(roomRoleGates)
     .where(and(eq(roomRoleGates.roomId, room.id), eq(roomRoleGates.kind, "access")));
-  if (gateRows.length === 0) return 0;
+  // Nothing to enforce: no access gate AND not staff-only.
+  if (gateRows.length === 0 && !staffOnly) return 0;
   const access = new Set(gateRows.map((r) => r.usergroupId));
   const socks = await io.in(`room:${room.id}`).fetchSockets();
   if (socks.length === 0) return 0;
@@ -238,12 +320,16 @@ export async function evictRoleDeniedFromRoom(
     if (!su) continue;
     let denied = denialByUser.get(su.id);
     if (denied === undefined) {
+      const isSite = isModeratorRole(su.role);
       denied = roleAccessDeniedWith(
         su,
         room,
         access,
-        await usergroupIdsFor(db, su.id),
-        isModeratorRole(su.role) ? new Set<string>() : await staffServerIdsFor(db, su.id),
+        access.size > 0 ? await usergroupIdsFor(db, su.id) : new Set<string>(),
+        isSite ? new Set<string>() : await staffServerIdsFor(db, su.id),
+        // The room-mod tier only matters for a staff-only room; skip the read
+        // otherwise (a role-locked room never bypasses on room-mod).
+        staffOnly && !isSite ? await roomModRoomIdsFor(db, su.id, [room.id]) : new Set<string>(),
       );
       denialByUser.set(su.id, denied);
     }

@@ -60,3 +60,4 @@ export * from "./names.js";
 export * from "./cssSanitize.js";
 export * from "./composerDoc.js";
 export * from "./richMessage.js";
+export * from "./container.js";

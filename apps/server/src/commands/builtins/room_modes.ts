@@ -222,6 +222,129 @@ export const postModeCommand: CommandHandler = {
 };
 
 /**
+ * /public
+ *
+ * Convert this room from PRIVATE to PUBLIC in place. A room's visibility
+ * (rooms.type) is otherwise only ever set at creation (/private <name> <pw>
+ * vs /go), and there was no way to open a private room up afterward — the
+ * "can't change private → public once you're done setting up a room" report.
+ * Clears the room password (a public room needs none) and re-lists the room
+ * in the public rail. Boards (forumId) carry their own visibility model and
+ * are refused. Same gate as the other room-mode commands (callerCanEditRoom:
+ * owner / room mod / edit_any_room_metadata). Distinct verb from the CREATING
+ * /private command so it never shadows room creation.
+ *
+ * Note: visibility (type) is orthogonal to a room's access role-gate — a
+ * public room that also has an access gate still stays hidden from members
+ * who lack the gating role. This only flips the public/private axis.
+ */
+export const publicRoomCommand: CommandHandler = {
+  name: "public",
+  aliases: ["unlock"],
+  usage: "/public",
+  description: "Make this private room public so anyone can find and join it (owner/mod only).",
+  subcommands: [
+    { verb: "(no args)", usage: "/public", description: "Convert this private room to public and clear its password." },
+  ],
+  async run(ctx) {
+    const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
+    if (!room) return notice(ctx, "NO_ROOM", tFor(ctx.user.locale, "commands:shared.roomNotFound"));
+    // Boards live in the Forums Catalog with their own visibility model.
+    if (room.forumId) {
+      return notice(ctx, "FORUM_BOARD", tFor(ctx.user.locale, "commands:public.forumBoard"));
+    }
+    if (!(await callerCanEditRoom(ctx.db, ctx.user, ctx.roomId))) {
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:public.permission"));
+    }
+    if (room.type === "public") {
+      return notice(ctx, "PUBLIC", tFor(ctx.user.locale, "commands:public.already"));
+    }
+    // Clear the password: joinRoom gates the prompt on type==='private', so a
+    // leftover hash is inert, but a public room should carry no secret.
+    await ctx.db.update(rooms).set({ type: "public", passwordHash: null }).where(eq(rooms.id, ctx.roomId));
+
+    const { addMessage, broadcastRoomState, emitTreeChanged } = await import("../../realtime/broadcast.js");
+    await addMessage(ctx, { kind: "system", body: tFor(ctx.user.locale, "commands:public.systemLine") });
+    await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
+    // broadcastRoomState only reaches occupants; non-occupant rails need a
+    // /rooms refetch to surface the now-public room in the listing.
+    emitTreeChanged(ctx.io, room.serverId ?? null);
+  },
+};
+
+/**
+ * /staffroom [on|off]
+ *
+ * Show or set whether this room is STAFF-ONLY (migration 0363) — a NEW access
+ * axis, orthogonal to /postmode (who can POST) and to visibility/role gates.
+ * When on, the room is hidden from everyone outside the staff set (the room
+ * owner, room mods, this server's staff, and site staff): it drops out of the
+ * rail, its join refuses with the same "no such room" as a nonexistent room,
+ * and its slug link 404s — so its existence never leaks. It KEEPS a normal
+ * userlist and normal posting among the staff who can see it, which is what
+ * separates it from an info room (/postmode staff, public-read). Boards
+ * (forumId) carry their own model and are refused. Same gate as the other
+ * room-mode commands (callerCanEditRoom: owner / room mod /
+ * edit_any_room_metadata). Flipping it ON evicts current non-staff occupants
+ * (the socket path has no per-message read check).
+ */
+export const staffRoomCommand: CommandHandler = {
+  name: "staffroom",
+  aliases: ["staffonly"],
+  usage: "/staffroom [on|off]",
+  description: "Show or set whether only staff can see this room (owner/mod only to set).",
+  subcommands: [
+    { verb: "(no args)", usage: "/staffroom", description: "Show whether this room is staff only." },
+    { verb: "on", usage: "/staffroom on", description: "Hide this room from everyone but staff: the room owner, room mods, this server's staff, and site staff. It keeps a normal userlist and normal posting.", aliases: ["true", "1"] },
+    { verb: "off", usage: "/staffroom off", description: "Make this room visible to everyone again.", aliases: ["false", "0"] },
+  ],
+  async run(ctx) {
+    const arg = ctx.argsText.trim().toLowerCase();
+    const room = (await ctx.db.select().from(rooms).where(eq(rooms.id, ctx.roomId)).limit(1))[0];
+    if (!room) return notice(ctx, "NO_ROOM", tFor(ctx.user.locale, "commands:shared.roomNotFound"));
+
+    if (!arg) {
+      return notice(ctx, "STAFFROOM", tFor(ctx.user.locale,
+        room.staffOnly ? "commands:staffRoom.currentOn" : "commands:staffRoom.currentOff"));
+    }
+    let value: boolean;
+    if (/^(on|true|1)$/.test(arg)) value = true;
+    else if (/^(off|false|0)$/.test(arg)) value = false;
+    else return notice(ctx, "BAD_STAFFROOM", tFor(ctx.user.locale, "commands:staffRoom.usage"));
+
+    // Boards live in the Forums Catalog with their own access model.
+    if (room.forumId) {
+      return notice(ctx, "FORUM_BOARD", tFor(ctx.user.locale, "commands:staffRoom.forumBoard"));
+    }
+    if (!(await callerCanEditRoom(ctx.db, ctx.user, ctx.roomId))) {
+      return notice(ctx, "PERM", tFor(ctx.user.locale, "commands:staffRoom.permission"));
+    }
+    if (!!room.staffOnly === value) {
+      return notice(ctx, "STAFFROOM", tFor(ctx.user.locale,
+        value ? "commands:staffRoom.alreadyOn" : "commands:staffRoom.alreadyOff"));
+    }
+    await ctx.db.update(rooms).set({ staffOnly: value }).where(eq(rooms.id, ctx.roomId));
+
+    const { addMessage, broadcastRoomState, emitTreeChanged } = await import("../../realtime/broadcast.js");
+    await addMessage(ctx, {
+      kind: "system",
+      body: tFor(ctx.user.locale, value ? "commands:staffRoom.systemLineOn" : "commands:staffRoom.systemLineOff"),
+    });
+    // Flip ON: boot current non-staff occupants — the socket path has no
+    // per-message read check, so a live flip must evict them the way an
+    // access-gate PATCH does. Room mods pass (folded into the eviction gate).
+    if (value) {
+      const { evictRoleDeniedFromRoom } = await import("../../lib/roleGates.js");
+      await evictRoleDeniedFromRoom(ctx.io, ctx.db, { ...room, staffOnly: true });
+    }
+    await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
+    // broadcastRoomState only reaches occupants; non-occupant rails need a
+    // /rooms refetch to drop (or restore) the now-hidden room + shield glyph.
+    emitTreeChanged(ctx.io, room.serverId ?? null);
+  },
+};
+
+/**
  * /nsfw [on|off]
  *
  * Show or set this room's 18+ flag (age-restriction plan, Phase 2). While a

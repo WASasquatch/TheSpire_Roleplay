@@ -86,10 +86,15 @@ export function WorldMapsTab({
   }, [worldId, serversEnabled]);
 
   const kindDefs: WorldEntityKindDef[] = useMemo(() => {
-    const custom: WorldEntityKindDef[] = detail.entityKinds.map((k) => ({
-      key: k.key, label: k.label, description: k.description,
-      icon: k.icon ?? "✦", color: k.color ?? "#8a8a8a", sortOrder: k.sortOrder, builtIn: false,
-    }));
+    // A custom kind registered before its key became a builtin (poi/town)
+    // would duplicate the builtin's entry and React key; the builtin wins.
+    const builtinKeys = new Set<string>(BUILTIN_WORLD_ENTITY_KINDS.map((k) => k.key));
+    const custom: WorldEntityKindDef[] = detail.entityKinds
+      .filter((k) => !builtinKeys.has(k.key.toLowerCase()))
+      .map((k) => ({
+        key: k.key, label: k.label, description: k.description,
+        icon: k.icon ?? "✦", color: k.color ?? "#8a8a8a", sortOrder: k.sortOrder, builtIn: false,
+      }));
     const builtIn: WorldEntityKindDef[] = BUILTIN_WORLD_ENTITY_KINDS.map((k) => ({
       ...k,
       label: t(`kinds.${k.key}.label`),
@@ -588,6 +593,11 @@ function MarkerForm({
   }
 
   const IconPreview = icon ? EVENT_ICONS[icon] : undefined;
+  // Label-kind annotations never read labelMode or the icon, and text-only
+  // markers draw fixed outlined white text (no pin, icon, or color), so the
+  // inert controls hide or dim instead of silently doing nothing.
+  const isLabelKind = kind === "label";
+  const textOnly = !isLabelKind && labelMode === "text";
 
   return (
     <div className="space-y-2 rounded border border-keep-rule/60 bg-keep-bg/30 p-3 text-sm">
@@ -608,7 +618,7 @@ function MarkerForm({
         </label>
       </div>
 
-      <div className="block">
+      <div className={textOnly ? "block opacity-60" : "block"} title={textOnly ? t("maps.textOnlyHint") : undefined}>
         <span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("fields.color")}</span>
         <div className="mt-0.5 flex flex-wrap items-center gap-1">
           {COLOR_SWATCHES.map((c) => (
@@ -631,7 +641,8 @@ function MarkerForm({
         </div>
       </div>
 
-      <div className="block">
+      {isLabelKind ? null : (
+      <div className={textOnly ? "block opacity-60" : "block"} title={textOnly ? t("maps.textOnlyHint") : undefined}>
         <div className="flex items-center gap-2">
           <span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("maps.markerIcon")}</span>
           <button type="button" onClick={() => setShowIcons((v) => !v)} className="rounded border border-keep-rule px-2 py-0.5 text-[11px] text-keep-muted hover:bg-keep-banner">
@@ -676,8 +687,11 @@ function MarkerForm({
           </div>
         ) : null}
       </div>
+      )}
+      {textOnly ? <p className="text-[11px] text-keep-muted">{t("maps.textOnlyHint")}</p> : null}
 
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {isLabelKind ? null : (
         <label className="block">
           <span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("maps.labelMode")}</span>
           <select value={labelMode} onChange={(e) => setLabelMode(e.target.value as WorldMapMarkerLabelMode)} className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs" title={t("maps.labelModeTitle")}>
@@ -686,6 +700,7 @@ function MarkerForm({
             <option value="both">{t("maps.labelModeBoth")}</option>
           </select>
         </label>
+        )}
         <label className="block">
           <span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("maps.markerSize")}</span>
           <select value={size} onChange={(e) => setSize(e.target.value as WorldMapMarkerSize)} className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs">

@@ -60,10 +60,15 @@ export function WorldKnowledgeBase({ worldId, detail, membership }: { worldId: s
   });
 
   const kindDefs: WorldEntityKindDef[] = useMemo(() => {
-    const custom = detail.entityKinds.map((k) => ({
-      key: k.key, label: k.label, description: k.description,
-      icon: k.icon ?? "✦", color: k.color ?? "#8a8a8a", sortOrder: k.sortOrder, builtIn: false,
-    }));
+    // A custom kind registered before its key became a builtin (poi/town)
+    // would duplicate the builtin's card and React key; the builtin wins.
+    const builtinKeys = new Set<string>(BUILTIN_WORLD_ENTITY_KINDS.map((k) => k.key));
+    const custom = detail.entityKinds
+      .filter((k) => !builtinKeys.has(k.key.toLowerCase()))
+      .map((k) => ({
+        key: k.key, label: k.label, description: k.description,
+        icon: k.icon ?? "✦", color: k.color ?? "#8a8a8a", sortOrder: k.sortOrder, builtIn: false,
+      }));
     // Built-in kind labels/descriptions localize; custom kinds are the
     // author's own text and render as written.
     const builtIn: WorldEntityKindDef[] = BUILTIN_WORLD_ENTITY_KINDS.map((k) => ({
@@ -826,6 +831,7 @@ function MapPanel({ worldId, detail, kindDefs, onOpenEntry, focus = null }: {
                 key={kind}
                 type="button"
                 onClick={() => toggleKind(kind)}
+                aria-pressed={on}
                 title={on ? t("maps.hideLayerTitle", { label: meta.label }) : t("maps.showLayerTitle", { label: meta.label })}
                 className={`flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] ${on ? "border-keep-rule/60" : "border-dashed border-keep-rule/40 text-keep-muted opacity-60"}`}
               >
@@ -838,6 +844,7 @@ function MapPanel({ worldId, detail, kindDefs, onOpenEntry, focus = null }: {
             <button
               type="button"
               onClick={toggleSecret}
+              aria-pressed={showSecret}
               title={t("maps.dmOnlyTitle")}
               className={`rounded border px-2 py-0.5 text-[11px] ${showSecret ? "border-keep-accent/60 text-keep-accent" : "border-dashed border-keep-rule/40 text-keep-muted opacity-60"}`}
             >

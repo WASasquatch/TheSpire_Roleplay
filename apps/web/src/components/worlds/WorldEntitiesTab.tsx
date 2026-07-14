@@ -218,6 +218,7 @@ function EntityEditor({
   const [bodyHtml, setBodyHtml] = useState("");
   const [tagsText, setTagsText] = useState("");
   const [imageUrl, setImageUrl] = useState("");
+  const [storedImageUrl, setStoredImageUrl] = useState("");
   const [isPublic, setIsPublic] = useState(false);
   const [stats, setStats] = useState<Array<[string, string]>>([]);
   const [loading, setLoading] = useState(!!entityId);
@@ -232,6 +233,7 @@ function EntityEditor({
         if (!alive) return;
         setName(e.name); setSlug(e.slug); setSlugDirty(true); setSummary(e.summary);
         setBodyHtml(e.bodyHtml); setTagsText(e.tags.join(", ")); setImageUrl(e.imageUrl ?? "");
+        setStoredImageUrl(e.imageUrl ?? "");
         setIsPublic(e.isPublic); setStats(Object.entries(e.stats));
       })
       .catch((x) => onError(x instanceof Error ? x.message : t("errors.loadFailed")))
@@ -243,6 +245,16 @@ function EntityEditor({
   }, [worldId, entityId, onError]);
 
   const effectiveSlug = slugDirty ? slug : deriveSlug(name);
+  // Mirror the server's https-only rule so a bad paste surfaces as a
+  // localized inline hint instead of the route's generic 400. A stored URL
+  // echoed back unchanged stays saveable (it is omitted from the PATCH
+  // body), even if it predates the https-only rule.
+  const trimmedImage = imageUrl.trim();
+  const imageHttps = (() => {
+    try { return new URL(trimmedImage).protocol === "https:"; } catch { return false; }
+  })();
+  const imageUnchanged = !!entityId && trimmedImage === storedImageUrl.trim();
+  const imageOk = trimmedImage === "" || imageHttps || imageUnchanged;
 
   async function save() {
     if (busy) return;
@@ -252,8 +264,9 @@ function EntityEditor({
       const statsObj = Object.fromEntries(stats.filter(([k]) => k.trim()).map(([k, v]) => [k.trim(), v]));
       const input = {
         name: name.trim(), slug: effectiveSlug, summary, bodyHtml,
-        tags: parseTagList(tagsText), imageUrl: imageUrl.trim() || null, isPublic,
+        tags: parseTagList(tagsText), isPublic,
         stats: statsObj,
+        ...(imageUnchanged ? {} : { imageUrl: trimmedImage || null }),
       };
       const e = entityId
         ? await updateWorldEntity(worldId, entityId, input)
@@ -321,13 +334,18 @@ function EntityEditor({
       <label className="block">
         <span className="text-[11px] uppercase tracking-widest text-keep-muted">{t("entities.imageUrl")}</span>
         <input value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} className="mt-0.5 w-full rounded border border-keep-rule bg-keep-bg px-2 py-1" placeholder={t("entities.imagePlaceholder")} />
+        {!imageOk ? (
+          <span className="mt-0.5 block text-[11px] text-keep-accent">{t("entities.imageUrlInvalid")}</span>
+        ) : (
+          <span className="mt-0.5 block text-[11px] text-keep-muted">{t("entities.imageUrlHint")}</span>
+        )}
       </label>
       <label className="flex items-center gap-2">
         <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} />
         <span className="text-xs">{t("entities.publicLabel")}</span>
       </label>
       <div className="flex items-center gap-2 pt-1">
-        <button type="button" disabled={busy || !name.trim()} onClick={() => void save()} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action disabled:opacity-50">{t("common:save")}</button>
+        <button type="button" disabled={busy || !name.trim() || !imageOk} onClick={() => void save()} className="rounded border border-keep-action bg-keep-action/15 px-3 py-1 text-xs text-keep-action disabled:opacity-50">{t("common:save")}</button>
         <button type="button" onClick={onCancel} className="rounded border border-keep-rule px-3 py-1 text-xs hover:bg-keep-banner">{t("common:cancel")}</button>
         {entityId ? <button type="button" disabled={busy} onClick={() => void remove()} className="ml-auto rounded border border-keep-accent/50 px-3 py-1 text-xs text-keep-accent hover:bg-keep-accent/10">{t("common:delete")}</button> : null}
       </div>

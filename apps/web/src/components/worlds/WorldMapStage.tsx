@@ -495,14 +495,16 @@ export const WorldMapStage = forwardRef<MapStageHandle, {
               title={ariaLabel}
               aria-label={ariaLabel}
               onClick={(e) => { if (e.detail === 0) onMarkerClick?.(m); }}
-              className={`absolute whitespace-nowrap rounded px-1 font-action tracking-wide ${m.isSecret ? "opacity-60" : ""} ${selected ? "ring-2 ring-keep-action" : ""}`}
+              className={`absolute max-w-[24ch] overflow-hidden text-ellipsis whitespace-nowrap rounded px-1 font-action tracking-wide ${m.isSecret ? "opacity-60" : ""} ${selected ? "ring-2 ring-keep-action" : ""}`}
               style={{
                 left: sx,
                 top: sy,
                 transform: `translate(-50%, -50%)${mapScaled ? ` scale(${zoomFactor})` : ""}`,
                 color,
                 fontSize: LABEL_FONT_PX[m.size],
-                textShadow: "0 1px 3px rgba(0,0,0,.7)",
+                // Same layered outline as .map-marker-label, keeping the
+                // author-picked ink color legible over busy map art.
+                textShadow: "0 1px 2px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.9), 0 0 10px rgba(0,0,0,.5)",
                 cursor: "pointer",
               }}
             >

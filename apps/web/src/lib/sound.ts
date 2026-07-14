@@ -98,12 +98,21 @@ function isUserAway(): boolean {
   if (!myId) return false;
   const roomId = s.currentRoomId;
   if (!roomId) return false;
-  const occ = s.occupants[roomId];
-  if (!occ) return false;
   const myCharId = s.activeCharacterId;
-  return occ.some(
-    (o) => identityEquals(o.userId, o.characterId, myId, myCharId) && o.away,
-  );
+  const isMineAway = (list: ReadonlyArray<{ userId: string; characterId: string | null; away?: boolean }> | undefined): boolean =>
+    !!list?.some((o) => identityEquals(o.userId, o.characterId, myId, myCharId) && o.away);
+  if (isMineAway(s.occupants[roomId])) return true;
+  // Info rooms display no occupants (phantom presence), so while reading
+  // one this tab's own row — the /away flag included — lives in the ANCHOR
+  // room's list instead of the current room's. Away is per-identity, so a
+  // matching away row in any room means this identity is away; without
+  // this fallback the /away hard-mute would silently disengage the moment
+  // the user opened an info room.
+  for (const [rid, list] of Object.entries(s.occupants)) {
+    if (rid === roomId) continue;
+    if (isMineAway(list)) return true;
+  }
+  return false;
 }
 
 function isEnabled(event: SoundEvent): boolean {

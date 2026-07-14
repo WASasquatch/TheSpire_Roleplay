@@ -2,38 +2,64 @@
  * Per-server Events (community calendar) — Multi-Server Lift.
  *
  * The server-scoped calendar: a server owner/mod holding `manage_events`
- * schedules one-off events (a session, a tournament, a lore night); any
- * participant RSVPs going/maybe/declined as an identity of their choosing, and
- * an opt-in reminder pings the going/maybe crowd once, a lead-time before the
- * event starts. Structurally this clones `servers/announcements.ts`:
+ * schedules events (a session, a tournament, a lore night) — one-off or
+ * repeating on a preset rule (shared EventRecurrence, stored in
+ * `recurrence_json`); any participant RSVPs going/maybe/declined as an
+ * identity of their choosing (per SERIES, not per occurrence), and an opt-in
+ * reminder pings the going/maybe crowd, a lead-time before each occurrence
+ * starts. Structurally this clones `servers/announcements.ts`:
  *
  *   GET    /servers/:id/events?from&to   list (viewer RSVP + aggregate counts),
- *                                        readable by any participant.
+ *                                        readable by any participant. With a
+ *                                        window, recurring events expand into
+ *                                        occurrence instances; without one the
+ *                                        console gets one row per series.
  *   POST   /servers/:id/events           create (manage_events)
- *   PATCH  /servers/:id/events/:eventId  edit / cancel (manage_events)
+ *   PATCH  /servers/:id/events/:eventId  edit / cancel (manage_events; affects
+ *                                        the whole series)
  *   DELETE /servers/:id/events/:eventId  delete (manage_events)
  *   PUT    /servers/:id/events/:eventId/rsvp  upsert the caller's RSVP.
+ *   GET    /servers/:id/events/forums    forum picker (manage_events)
+ *   GET    /forums/:idOrSlug/events      the forum's public upcoming strip
+ *                                        (anon-safe, NSFW-teaser composed)
+ *
+ * An event carries at most ONE primary destination link — room, chat message
+ * (`<roomId>:<messageId>`, no FK), forum, or external URL — enforced at write.
+ * Message links deliberately skip any server-membership pre-check: the
+ * jump-to-message routes' own gates are the authorization boundary at click.
  *
  * The reminder sweep ({@link sweepEventRemindersOnce}) mirrors
- * admin/announcements.ts' `runDueAnnouncements`: it finds scheduled events whose
- * reminder window has opened and not yet fired, notifies every going/maybe
- * RSVP (deduped by account), and stamps `reminderFiredAt` so it fires at most
- * once. index.ts starts it beside the announcement scheduler.
+ * admin/announcements.ts' `runDueAnnouncements`: one-off events fire once and
+ * stamp `reminderFiredAt`; recurring events stamp `reminderFiredFor` with the
+ * occurrence start so each occurrence reminds at most once. The status sweep
+ * ({@link sweepEventStatusTransitionsOnce}) auto-flips scheduled→live at an
+ * occurrence start and live→ended at its end (recurring series cycle back to
+ * scheduled while occurrences remain); `cancelled` stays manual and open-ended
+ * events (no end time) never auto-end. index.ts starts both on one timer
+ * beside the announcement scheduler.
  *
  * Flag-gated + cross-server safe: every route 404s when `!serversEnabled` and
  * scopes every row on `server_id = :id`; a client-supplied event id from
  * another server is invisible (404), never editable.
  */
 import type { FastifyInstance, FastifyRequest, FastifyReply } from "fastify";
-import { and, asc, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
 import type {
   ClientToServerEvents,
+  EventOccurrence,
   ServerEvent,
   ServerEventRsvp,
   ServerToClientEvents,
+} from "@thekeep/shared";
+import {
+  MAX_RECURRENCE_COUNT,
+  buildMessageLinkToken,
+  expandOccurrences,
+  parseEventRecurrence,
+  parseMessageLink,
 } from "@thekeep/shared";
 import {
   auditLog,
@@ -68,6 +94,30 @@ const REMINDER_LEADS_MS = new Set<number>([
   24 * 60 * 60_000,
 ]);
 
+// Restrict externalUrl to https — z.string().url() alone also allows
+// javascript:, data:, file:, etc., and event links open in members'
+// browsers, so unencrypted http destinations are rejected at write too.
+const httpsUrl = z.string().url().max(500).refine(
+  (s) => /^https:\/\//i.test(s),
+  { message: "externalUrl must use https" },
+);
+
+/** Preset repeat rule accepted on the wire (mirrors shared EventRecurrence).
+ *  Canonicalized through parseEventRecurrence before storage so the stored
+ *  JSON is exactly what the shared expander reads back. */
+const recurrenceSchema = z.object({
+  freq: z.enum(["daily", "weekly", "biweekly", "monthly"]),
+  byWeekday: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
+  until: z.number().int().positive().optional(),
+  count: z.number().int().min(1).max(MAX_RECURRENCE_COUNT).optional(),
+}).strict()
+  .refine((r) => r.byWeekday === undefined || r.freq === "weekly", {
+    message: "byWeekday is weekly-only",
+  })
+  .refine((r) => r.until === undefined || r.count === undefined, {
+    message: "until and count are mutually exclusive",
+  });
+
 const createSchema = z.object({
   title: z.string().trim().min(1).max(TITLE_MAX),
   icon: z.string().trim().max(40).regex(/^[a-z0-9-]+$/).nullable().optional(),
@@ -77,6 +127,9 @@ const createSchema = z.object({
   hostCharacterId: z.string().nullable().optional(),
   linkedRoomId: z.string().nullable().optional(),
   linkedForumId: z.string().nullable().optional(),
+  linkedMessageId: z.string().trim().max(600).nullable().optional(),
+  externalUrl: httpsUrl.nullable().optional(),
+  recurrence: recurrenceSchema.nullable().optional(),
   reminderLeadMs: z.number().int().positive().nullable().optional(),
 }).strict();
 
@@ -89,10 +142,29 @@ const updateSchema = z.object({
   hostCharacterId: z.string().nullable().optional(),
   linkedRoomId: z.string().nullable().optional(),
   linkedForumId: z.string().nullable().optional(),
+  linkedMessageId: z.string().trim().max(600).nullable().optional(),
+  externalUrl: httpsUrl.nullable().optional(),
+  recurrence: recurrenceSchema.nullable().optional(),
   reminderLeadMs: z.number().int().positive().nullable().optional(),
   // Lifecycle change (cancel / re-schedule). Only these are settable here.
   status: z.enum(["scheduled", "live", "ended", "cancelled"]).optional(),
 }).strict();
+
+/** Canonical stored JSON for a validated wire recurrence (null = one-off).
+ *  Round-trips through the shared parser so storage and expansion can never
+ *  disagree on what a rule means. */
+function recurrenceToJson(r: z.infer<typeof recurrenceSchema> | null | undefined): string | null {
+  if (!r) return null;
+  const json = JSON.stringify(r);
+  // The Zod shape is a superset-free mirror of the parser's presets; a null
+  // here means the two drifted — reject rather than store an inert rule.
+  return parseEventRecurrence(json) ? json : null;
+}
+
+/** How far past the requested window's open end recurring events expand
+ *  (a member fetch sends only `from`); occurrences beyond it surface on a
+ *  later fetch as time advances. */
+const EXPANSION_HORIZON_MS = 90 * 24 * 60 * 60_000;
 
 const rsvpSchema = z.object({
   status: z.enum(RSVP_STATUSES),
@@ -140,6 +212,8 @@ function wireEvent(r: typeof serverEvents.$inferSelect): ServerEvent {
     endsAt: r.endsAt != null ? +r.endsAt : null,
     linkedRoomId: r.linkedRoomId ?? null,
     linkedForumId: r.linkedForumId ?? null,
+    linkedMessageId: r.linkedMessageId ?? null,
+    externalUrl: r.externalUrl ?? null,
     status: r.status as ServerEvent["status"],
     reminderLeadMs: r.reminderLeadMs != null ? +r.reminderLeadMs : null,
     reminderFiredAt: r.reminderFiredAt != null ? +r.reminderFiredAt : null,
@@ -234,6 +308,60 @@ async function forumInServer(db: Db, serverId: string, forumId: string): Promise
   return !!row;
 }
 
+/** An event points at at most ONE primary destination. */
+function linkCount(l: {
+  linkedRoomId: string | null;
+  linkedForumId: string | null;
+  linkedMessageId: string | null;
+  externalUrl: string | null;
+}): number {
+  return [l.linkedRoomId, l.linkedForumId, l.linkedMessageId, l.externalUrl]
+    .filter((v) => v != null).length;
+}
+
+/** One expanded list item: an event (series) at a concrete occurrence. For
+ *  one-off events the occurrence just mirrors startsAt/endsAt. */
+interface OccurrenceItem {
+  row: typeof serverEvents.$inferSelect;
+  occ: EventOccurrence;
+}
+
+/**
+ * Expand event rows into occurrence instances for a `[from, to]` list window.
+ * One-off rows keep the exact SQL window semantics they had before recurrence
+ * existed (an open `to` really is open-ended); recurring rows expand against
+ * a horizon-clamped window so an endless series can't return unbounded rows.
+ */
+function expandForWindow(
+  rows: (typeof serverEvents.$inferSelect)[],
+  from: number | null,
+  to: number | null,
+  nowMs: number,
+): OccurrenceItem[] {
+  const fromB = from ?? nowMs;
+  const toB = to ?? fromB + EXPANSION_HORIZON_MS;
+  const out: OccurrenceItem[] = [];
+  for (const row of rows) {
+    if (parseEventRecurrence(row.recurrenceJson)) {
+      for (const occ of expandOccurrences(
+        { startsAt: +row.startsAt, endsAt: row.endsAt != null ? +row.endsAt : null, recurrenceJson: row.recurrenceJson },
+        fromB,
+        toB,
+      )) {
+        out.push({ row, occ });
+      }
+    } else {
+      // One-off: the SQL window already filtered it; occurrence = itself.
+      out.push({
+        row,
+        occ: { startsAt: +row.startsAt, endsAt: row.endsAt != null ? +row.endsAt : null },
+      });
+    }
+  }
+  out.sort((a, b) => a.occ.startsAt - b.occ.startsAt);
+  return out;
+}
+
 /**
  * Register the per-server events CRUD + RSVP under `/servers/:id/events`.
  * Mounted once by `registerServerRoutes`.
@@ -253,19 +381,40 @@ export async function registerServerEventRoutes(
 
       // Optional [from,to] window over startsAt (ms epoch). Absent bounds are
       // open-ended; the server_events_server_time_idx covers (serverId,startsAt).
-      const from = req.query.from ? Number(req.query.from) : null;
-      const to = req.query.to ? Number(req.query.to) : null;
-      const conds = [eq(serverEvents.serverId, g.serverId)];
-      if (from != null && Number.isFinite(from)) conds.push(gte(serverEvents.startsAt, from));
-      if (to != null && Number.isFinite(to)) conds.push(lte(serverEvents.startsAt, to));
+      // With a window, recurring events expand into occurrence instances (a
+      // series whose anchor start predates `from` still surfaces when an
+      // occurrence lands inside). Without one — the console's series list —
+      // rows come back exactly as stored, one per event.
+      const from = req.query.from && Number.isFinite(Number(req.query.from)) ? Number(req.query.from) : null;
+      const to = req.query.to && Number.isFinite(Number(req.query.to)) ? Number(req.query.to) : null;
+      const windowed = from != null || to != null;
+
+      const windowConds = [];
+      if (from != null) windowConds.push(gte(serverEvents.startsAt, from));
+      if (to != null) windowConds.push(lte(serverEvents.startsAt, to));
+      const where = windowed
+        ? and(
+            eq(serverEvents.serverId, g.serverId),
+            // Recurring rows bypass the startsAt window in SQL — occurrence
+            // membership is decided by the expansion below.
+            or(isNotNull(serverEvents.recurrenceJson), and(...windowConds)),
+          )
+        : eq(serverEvents.serverId, g.serverId);
 
       const rows = await db
         .select()
         .from(serverEvents)
-        .where(and(...conds))
+        .where(where)
         .orderBy(asc(serverEvents.startsAt));
 
-      const eventIds = rows.map((r) => r.id);
+      const items: OccurrenceItem[] = windowed
+        ? expandForWindow(rows, from, to, Date.now())
+        : rows.map((row) => ({
+            row,
+            occ: { startsAt: +row.startsAt, endsAt: row.endsAt != null ? +row.endsAt : null },
+          }));
+
+      const eventIds = [...new Set(items.map((i) => i.row.id))];
 
       // Aggregate RSVP counts per event/status (one grouped read), plus the
       // viewer's own RSVP rows across their identities.
@@ -303,12 +452,35 @@ export async function registerServerEventRoutes(
       }
 
       return {
-        events: rows.map((r) => ({
-          event: wireEvent(r),
-          counts: countsBy.get(r.id) ?? { going: 0, maybe: 0, declined: 0 },
-          myRsvps: myRsvpsBy.get(r.id) ?? [],
+        events: items.map(({ row, occ }) => ({
+          event: wireEvent(row),
+          // Concrete occurrence this list entry stands for. Equal to the
+          // event's own startsAt/endsAt for one-off rows, so pre-recurrence
+          // consumers reading event.startsAt see identical times.
+          occurrenceStartsAt: occ.startsAt,
+          occurrenceEndsAt: occ.endsAt,
+          counts: countsBy.get(row.id) ?? { going: 0, maybe: 0, declined: 0 },
+          myRsvps: myRsvpsBy.get(row.id) ?? [],
         })),
       };
+    },
+  );
+
+  /* ---------- forum picker (console form) ---------- */
+
+  app.get<{ Params: { id: string } }>(
+    "/servers/:id/events/forums",
+    async (req, reply) => {
+      const g = await gate(req, reply, db, req.params.id, { manage: true });
+      if (!g) return { error: "forbidden" };
+      // Only THIS server's affiliated forums are linkable (forumInServer is
+      // the matching write-side guard).
+      const all = await db
+        .select({ id: forums.id, name: forums.name })
+        .from(forums)
+        .where(eq(forums.serverId, g.serverId))
+        .orderBy(asc(forums.name));
+      return { forums: all };
     },
   );
 
@@ -324,6 +496,13 @@ export async function registerServerEventRoutes(
       if (body.endsAt != null && body.endsAt <= body.startsAt) {
         reply.code(400);
         return { error: tFor(g.locale, "errors:server.events.endAfterStart") };
+      }
+      // A repeat-until before the anchor start expands to ZERO occurrences —
+      // invisible on every windowed surface and insta-'ended' by the status
+      // sweep. The recurrenceSchema alone can't see startsAt, so check here.
+      if (body.recurrence?.until != null && body.recurrence.until < body.startsAt) {
+        reply.code(400);
+        return { error: tFor(g.locale, "errors:server.events.repeatEndsBeforeStart") };
       }
       if (body.reminderLeadMs != null && !REMINDER_LEADS_MS.has(body.reminderLeadMs)) {
         reply.code(400);
@@ -341,6 +520,29 @@ export async function registerServerEventRoutes(
         reply.code(400);
         return { error: tFor(g.locale, "errors:server.events.forumNotInServer") };
       }
+      // A message link is accepted as the bare `<roomId>:<messageId>` token or
+      // a full `?m=` URL; stored canonically as the token. Deliberately no
+      // room/server ownership check: the jump-to-message routes gate access at
+      // click time (messages prune, rooms gate, servers differ).
+      let linkedMessageId: string | null = null;
+      if (body.linkedMessageId) {
+        const parsed = parseMessageLink(body.linkedMessageId);
+        if (!parsed) {
+          reply.code(400);
+          return { error: tFor(g.locale, "errors:server.events.badMessageLink") };
+        }
+        linkedMessageId = buildMessageLinkToken(parsed.roomId, parsed.messageId);
+      }
+      const links = {
+        linkedRoomId: body.linkedRoomId ?? null,
+        linkedForumId: body.linkedForumId ?? null,
+        linkedMessageId,
+        externalUrl: body.externalUrl ?? null,
+      };
+      if (linkCount(links) > 1) {
+        reply.code(400);
+        return { error: tFor(g.locale, "errors:server.events.oneLink") };
+      }
 
       const id = nanoid();
       await db.insert(serverEvents).values({
@@ -353,8 +555,8 @@ export async function registerServerEventRoutes(
         descriptionHtml: body.descriptionHtml ? sanitizeBio(body.descriptionHtml) : null,
         startsAt: body.startsAt,
         endsAt: body.endsAt ?? null,
-        linkedRoomId: body.linkedRoomId ?? null,
-        linkedForumId: body.linkedForumId ?? null,
+        ...links,
+        recurrenceJson: recurrenceToJson(body.recurrence),
         reminderLeadMs: body.reminderLeadMs ?? null,
       });
       await auditServerEvent(db, {
@@ -395,6 +597,19 @@ export async function registerServerEventRoutes(
         reply.code(400);
         return { error: tFor(g.locale, "errors:server.events.endAfterStart") };
       }
+      // The EFFECTIVE rule's until must not precede the EFFECTIVE start, or
+      // the series expands to zero occurrences (checked only when the
+      // schedule actually moves, so an unrelated patch to a legacy bad row
+      // still saves).
+      if (body.startsAt !== undefined || body.recurrence !== undefined) {
+        const nextRule = body.recurrence !== undefined
+          ? body.recurrence
+          : parseEventRecurrence(existing.recurrenceJson);
+        if (nextRule?.until != null && nextRule.until < nextStart) {
+          reply.code(400);
+          return { error: tFor(g.locale, "errors:server.events.repeatEndsBeforeStart") };
+        }
+      }
       if (body.reminderLeadMs != null && !REMINDER_LEADS_MS.has(body.reminderLeadMs)) {
         reply.code(400);
         return { error: tFor(g.locale, "errors:server.events.badReminderLead") };
@@ -411,6 +626,33 @@ export async function registerServerEventRoutes(
         reply.code(400);
         return { error: tFor(g.locale, "errors:server.events.forumNotInServer") };
       }
+      // Canonicalize an incoming message link (token or ?m= URL → token). No
+      // ownership pre-check by design — jump-to-message gates at click.
+      let linkedMessageId: string | null | undefined = undefined;
+      if (body.linkedMessageId !== undefined) {
+        if (body.linkedMessageId === null) linkedMessageId = null;
+        else {
+          const parsed = parseMessageLink(body.linkedMessageId);
+          if (!parsed) {
+            reply.code(400);
+            return { error: tFor(g.locale, "errors:server.events.badMessageLink") };
+          }
+          linkedMessageId = buildMessageLinkToken(parsed.roomId, parsed.messageId);
+        }
+      }
+      // One-link rule holds across the EFFECTIVE next state (patched keys
+      // where present, stored values otherwise) so a partial patch can't
+      // sneak a second destination beside an existing one.
+      const nextLinks = {
+        linkedRoomId: body.linkedRoomId !== undefined ? body.linkedRoomId : (existing.linkedRoomId ?? null),
+        linkedForumId: body.linkedForumId !== undefined ? body.linkedForumId : (existing.linkedForumId ?? null),
+        linkedMessageId: linkedMessageId !== undefined ? linkedMessageId : (existing.linkedMessageId ?? null),
+        externalUrl: body.externalUrl !== undefined ? body.externalUrl : (existing.externalUrl ?? null),
+      };
+      if (linkCount(nextLinks) > 1) {
+        reply.code(400);
+        return { error: tFor(g.locale, "errors:server.events.oneLink") };
+      }
 
       const patch: Record<string, unknown> = { updatedAt: new Date() };
       if (body.title !== undefined) patch.title = body.title;
@@ -423,6 +665,9 @@ export async function registerServerEventRoutes(
       if (body.hostCharacterId !== undefined) patch.hostCharacterId = body.hostCharacterId;
       if (body.linkedRoomId !== undefined) patch.linkedRoomId = body.linkedRoomId;
       if (body.linkedForumId !== undefined) patch.linkedForumId = body.linkedForumId;
+      if (linkedMessageId !== undefined) patch.linkedMessageId = linkedMessageId;
+      if (body.externalUrl !== undefined) patch.externalUrl = body.externalUrl;
+      if (body.recurrence !== undefined) patch.recurrenceJson = recurrenceToJson(body.recurrence);
       if (body.status !== undefined) patch.status = body.status;
       if (body.reminderLeadMs !== undefined) {
         patch.reminderLeadMs = body.reminderLeadMs;
@@ -430,10 +675,24 @@ export async function registerServerEventRoutes(
         // guard so an edited event can still remind. A cancelled event never
         // reminds regardless (the sweep skips non-scheduled rows).
         patch.reminderFiredAt = null;
+        patch.reminderFiredFor = null;
       }
-      // Moving the start time re-arms the reminder too (the window shifted).
-      if (body.startsAt !== undefined && body.reminderLeadMs === undefined) {
+      // Moving the start time — or changing the repeat rule, which moves every
+      // occurrence — re-arms the reminder too (the window shifted).
+      if ((body.startsAt !== undefined || body.recurrence !== undefined) && body.reminderLeadMs === undefined) {
         patch.reminderFiredAt = null;
+        patch.reminderFiredFor = null;
+      }
+      // A schedule move also re-opens an auto-'ended' event: the status sweep
+      // only scans scheduled/live rows, so without this a rescheduled event
+      // would stay 'ended' forever (RSVPs 409, reminders skipped). An explicit
+      // status in the same PATCH wins; 'cancelled' stays manual-only.
+      if (
+        body.status === undefined &&
+        existing.status === "ended" &&
+        (body.startsAt !== undefined || body.recurrence !== undefined)
+      ) {
+        patch.status = "scheduled";
       }
 
       await db
@@ -553,6 +812,94 @@ export async function registerServerEventRoutes(
       return { counts, myRsvps };
     },
   );
+
+  /* ---------- forum upcoming-events strip (public /f/<slug> landing) ---------- */
+
+  app.get<{ Params: { idOrSlug: string } }>(
+    "/forums/:idOrSlug/events",
+    // Anonymous traffic on a public landing: same browse rate-limit posture
+    // as the forum catalog routes.
+    { config: { rateLimit: { max: 60, timeWindow: "1 minute" } } },
+    async (req, reply) => {
+      // Anon-safe by design: no session required. An empty list (rather than
+      // a 404) when servers are dark keeps the public landing render simple.
+      if (!areServersEnabled(await getSettings(db))) return { events: [] };
+      const me = await getSessionUser(req, db).catch(() => null);
+      const key = req.params.idOrSlug;
+      let forum = (await db.select().from(forums).where(eq(forums.id, key)).limit(1))[0];
+      if (!forum) {
+        forum = (await db.select().from(forums)
+          .where(sql`lower(${forums.slug}) = lower(${key})`).limit(1))[0];
+      }
+      if (!forum) {
+        reply.code(404);
+        return { error: "no forum" };
+      }
+      // Whole-forum 18+ gate composes exactly like the forum detail teaser
+      // (routes/forums/catalog.ts): minors and anonymous viewers get nothing
+      // owner-authored, so the strip is empty for them.
+      if (forum.isNsfw && !me?.isAdult) return { events: [] };
+
+      const nowMs = Date.now();
+      const rows = await db
+        .select()
+        .from(serverEvents)
+        .where(and(
+          eq(serverEvents.linkedForumId, forum.id),
+          // Public teaser: only what's coming or on now — cancelled/ended
+          // series are console housekeeping, not landing-page material.
+          inArray(serverEvents.status, ["scheduled", "live"]),
+          // One-off rows get the strip's window in SQL (expandForWindow
+          // passes them through untouched); recurring rows bypass it and are
+          // window-clamped by the expansion, same split as the list route.
+          or(
+            isNotNull(serverEvents.recurrenceJson),
+            and(
+              gte(serverEvents.startsAt, nowMs - 60 * 60_000),
+              lte(serverEvents.startsAt, nowMs + EXPANSION_HORIZON_MS),
+            ),
+          ),
+        ))
+        .orderBy(asc(serverEvents.startsAt));
+      // Include occurrences that started within the last hour (matches the
+      // member panel's "just started" grace) out to the standard horizon.
+      const items = expandForWindow(rows, nowMs - 60 * 60_000, null, nowMs).slice(0, 8);
+
+      const eventIds = [...new Set(items.map((i) => i.row.id))];
+      const goingBy = new Map<string, number>();
+      if (eventIds.length) {
+        const counts = await db
+          .select({ eventId: serverEventRsvps.eventId, n: sql<number>`count(*)` })
+          .from(serverEventRsvps)
+          .where(and(
+            inArray(serverEventRsvps.eventId, eventIds),
+            eq(serverEventRsvps.status, "going"),
+          ))
+          .groupBy(serverEventRsvps.eventId);
+        for (const c of counts) goingBy.set(c.eventId, Number(c.n));
+      }
+
+      return {
+        events: items.map(({ row, occ }) => ({
+          // Read-only public card: title/icon/when/status/repeat — no
+          // description (it can quote member content), no RSVP surface
+          // (RSVPs stay in the member panel).
+          event: {
+            id: row.id,
+            title: row.title,
+            icon: row.icon ?? null,
+            startsAt: +row.startsAt,
+            endsAt: row.endsAt != null ? +row.endsAt : null,
+            status: row.status,
+            recurrenceJson: row.recurrenceJson ?? null,
+          },
+          occurrenceStartsAt: occ.startsAt,
+          occurrenceEndsAt: occ.endsAt,
+          counts: { going: goingBy.get(row.id) ?? 0 },
+        })),
+      };
+    },
+  );
 }
 
 /* ============================================================
@@ -561,27 +908,42 @@ export async function registerServerEventRoutes(
  * ============================================================ */
 
 /**
- * One pass of the event-reminder sweep. Finds scheduled events with a reminder
- * lead set, whose `starts_at - reminder_lead_ms <= now < starts_at` and which
- * haven't reminded yet (`reminder_fired_at` NULL), then notifies every going/
- * maybe RSVP (deduped by account), and stamps `reminder_fired_at` so it fires
- * at most once. Per-row try/catch so one bad row never stalls the rest; the
- * whole sweep is best-effort and never throws back into the caller.
+ * One pass of the event-reminder sweep. One-off events: a scheduled row with
+ * a reminder lead whose `starts_at - reminder_lead_ms <= now < starts_at` and
+ * `reminder_fired_at` still NULL fires once and stamps it. Recurring events:
+ * the next occurrence starting within the lead window fires once PER
+ * OCCURRENCE, guarded by `reminder_fired_for` (the occurrence start last
+ * reminded). Both notify every going/maybe RSVP (deduped by account — RSVPs
+ * are per SERIES). Per-row try/catch so one bad row never stalls the rest;
+ * the whole sweep is best-effort and never throws back into the caller.
+ * `nowMs` is injectable so tests can advance a clock.
  */
-export async function sweepEventRemindersOnce(db: Db, io: Io): Promise<void> {
-  const now = Date.now();
+export async function sweepEventRemindersOnce(db: Db, io: Io, nowMs: number = Date.now()): Promise<void> {
+  const now = nowMs;
   let dueRows: (typeof serverEvents.$inferSelect)[];
   try {
     dueRows = await db
       .select()
       .from(serverEvents)
       .where(and(
-        eq(serverEvents.status, "scheduled"),
-        isNull(serverEvents.reminderFiredAt),
         sql`${serverEvents.reminderLeadMs} is not null`,
-        // Reminder window has opened but the event hasn't started yet.
-        sql`(${serverEvents.startsAt} - ${serverEvents.reminderLeadMs}) <= ${now}`,
-        sql`${serverEvents.startsAt} > ${now}`,
+        or(
+          // One-off: the original due predicate, untouched.
+          and(
+            isNull(serverEvents.recurrenceJson),
+            eq(serverEvents.status, "scheduled"),
+            isNull(serverEvents.reminderFiredAt),
+            // Reminder window has opened but the event hasn't started yet.
+            sql`(${serverEvents.startsAt} - ${serverEvents.reminderLeadMs}) <= ${now}`,
+            sql`${serverEvents.startsAt} > ${now}`,
+          ),
+          // Recurring: the due occurrence is computed in JS (a series can be
+          // mid-occurrence and thus 'live' while its NEXT start approaches).
+          and(
+            isNotNull(serverEvents.recurrenceJson),
+            inArray(serverEvents.status, ["scheduled", "live"]),
+          ),
+        ),
       ));
   } catch (err) {
     // eslint-disable-next-line no-console
@@ -606,17 +968,43 @@ async function fireEventReminder(
   row: typeof serverEvents.$inferSelect,
   now: number,
 ): Promise<void> {
+  const rule = parseEventRecurrence(row.recurrenceJson);
+  // The occurrence this reminder is about. One-off events (or a recurring row
+  // whose stored rule no longer parses) keep the original startsAt semantics.
+  let occStart = +row.startsAt;
+  if (rule) {
+    const lead = row.reminderLeadMs != null ? +row.reminderLeadMs : 0;
+    if (lead <= 0) return;
+    // Next occurrence starting strictly after now, within the lead window.
+    const next = expandOccurrences(
+      { startsAt: +row.startsAt, endsAt: row.endsAt != null ? +row.endsAt : null, recurrenceJson: row.recurrenceJson },
+      now + 1,
+      now + lead,
+      1,
+    )[0];
+    if (!next) return;
+    if (row.reminderFiredFor != null && +row.reminderFiredFor === next.startsAt) return;
+    occStart = next.startsAt;
+  }
+
   // Stamp FIRST (idempotent guard): the conditional update only "wins" while
-  // reminder_fired_at is still NULL, so two overlapping sweeps can't both
-  // notify. The atomic claim runs in a synchronous transaction (mirrors the
-  // server-join invite-claim in routes/servers.ts). If we didn't win the row,
-  // another sweep already sent it.
+  // the guard column still shows an earlier state — reminder_fired_at NULL
+  // for one-off events, reminder_fired_for ≠ this occurrence for recurring —
+  // so two overlapping sweeps can't both notify. The atomic claim runs in a
+  // synchronous transaction (mirrors the server-join invite-claim in
+  // routes/servers.ts). If we didn't win the row, another sweep already sent
+  // it.
   let claimed = false;
   db.transaction((tx) => {
     const claim = tx
       .update(serverEvents)
-      .set({ reminderFiredAt: now })
-      .where(and(eq(serverEvents.id, row.id), isNull(serverEvents.reminderFiredAt)))
+      .set(rule ? { reminderFiredAt: now, reminderFiredFor: occStart } : { reminderFiredAt: now })
+      .where(and(
+        eq(serverEvents.id, row.id),
+        rule
+          ? sql`(${serverEvents.reminderFiredFor} is null or ${serverEvents.reminderFiredFor} != ${occStart})`
+          : isNull(serverEvents.reminderFiredAt),
+      ))
       .run();
     if (claim.changes > 0) claimed = true;
   });
@@ -634,7 +1022,7 @@ async function fireEventReminder(
   const userIds = [...new Set(rsvps.map((r) => r.userId))];
   if (userIds.length === 0) return;
 
-  const startsIn = Math.max(0, +row.startsAt - now);
+  const startsIn = Math.max(0, occStart - now);
   const mins = Math.round(startsIn / 60_000);
   const whenText = mins >= 120
     ? `in about ${Math.round(mins / 60)} hours`
@@ -652,10 +1040,96 @@ async function fireEventReminder(
     title: `Starting ${whenText}: ${row.title}`,
     snippet: "An event you're attending is about to begin.",
     target: { kind: "event", id: row.id },
-    // Collapse a duplicate ping for the same event within the window.
-    dedupeKey: `event-reminder:${row.id}`,
+    // Collapse a duplicate ping for the same occurrence within the window
+    // (one-off events keep their original event-scoped key).
+    dedupeKey: rule ? `event-reminder:${row.id}:${occStart}` : `event-reminder:${row.id}`,
   }));
   await notifyMany(db, io, inputs);
+}
+
+/**
+ * One pass of the status-transition sweep: scheduled→live when an occurrence
+ * is underway, live→ended when it's over — and, for a recurring series with
+ * occurrences still ahead, live→scheduled between occurrences so the series
+ * RSVP stays open. `cancelled` is manual-only and never touched; so is a
+ * manual `ended`. Events without an end time never auto-end (we can't know
+ * when they finish), and open-ended RECURRING events get no auto transitions
+ * at all — 'live' would stick forever with no end to flip on. Every write is
+ * a conditional `status = <from>` UPDATE, so a concurrent sweep or a manual
+ * PATCH racing it can't double-apply. `nowMs` is injectable for tests.
+ */
+export async function sweepEventStatusTransitionsOnce(db: Db, nowMs: number = Date.now()): Promise<void> {
+  const now = nowMs;
+  let rows: (typeof serverEvents.$inferSelect)[];
+  try {
+    rows = await db
+      .select()
+      .from(serverEvents)
+      .where(and(
+        inArray(serverEvents.status, ["scheduled", "live"]),
+        // Nothing to do before the series anchor start.
+        lte(serverEvents.startsAt, now),
+      ));
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("[server-events] status sweep failed to read rows", err);
+    return;
+  }
+
+  for (const row of rows) {
+    try {
+      const desired = desiredStatusAt(row, now);
+      if (!desired || desired === row.status) continue;
+      await db
+        .update(serverEvents)
+        .set({ status: desired, updatedAt: new Date(now) })
+        .where(and(eq(serverEvents.id, row.id), eq(serverEvents.status, row.status)));
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[server-events] failed to transition status", { id: row.id, err });
+    }
+  }
+}
+
+/** Where the sweep thinks a scheduled/live event should be at `now`; null =
+ *  leave it alone (open-ended shapes the sweep deliberately doesn't manage). */
+function desiredStatusAt(row: typeof serverEvents.$inferSelect, now: number): "scheduled" | "live" | "ended" | null {
+  const startsAt = +row.startsAt;
+  const endsAt = row.endsAt != null ? +row.endsAt : null;
+  const rule = parseEventRecurrence(row.recurrenceJson);
+
+  if (!rule) {
+    if (endsAt == null) {
+      // Open-ended one-off: flips live at start; ending stays manual.
+      return now >= startsAt ? "live" : null;
+    }
+    if (now >= endsAt) return "ended";
+    return now >= startsAt ? "live" : null;
+  }
+
+  // Recurring: transitions only make sense with a known duration.
+  const durationMs = endsAt != null && endsAt > startsAt ? endsAt - startsAt : null;
+  if (durationMs == null) return null;
+  // Underway right now? The latest occurrence starting within one duration
+  // back of `now` is the only candidate that can still contain it.
+  const recent = expandOccurrences(
+    { startsAt, endsAt, recurrenceJson: row.recurrenceJson },
+    now - durationMs,
+    now,
+  );
+  const current = recent[recent.length - 1];
+  if (current && current.endsAt != null && now < current.endsAt) return "live";
+  // Between (or before) occurrences: back to scheduled while any remain,
+  // ended once the series is exhausted. Consecutive occurrences are at most
+  // ~31 days apart across every preset (monthly is the widest), so a 40-day
+  // lookahead conclusively answers "is there a next one".
+  const hasFuture = expandOccurrences(
+    { startsAt, endsAt, recurrenceJson: row.recurrenceJson },
+    now + 1,
+    now + 40 * 24 * 60 * 60_000,
+    1,
+  ).length > 0;
+  return hasFuture ? "scheduled" : "ended";
 }
 
 /* ============================================================
@@ -665,17 +1139,23 @@ async function fireEventReminder(
 const SWEEP_TICK_MS = 60_000;
 let sweepTimer: NodeJS.Timeout | null = null;
 
-/** Start the event-reminder sweep beside startAnnouncementScheduler. Idempotent
- *  (dev hot-reload / double boot won't stack timers). Returns a stopper. */
+/** Start the event-reminder + status-transition sweeps (one shared timer)
+ *  beside startAnnouncementScheduler. Idempotent (dev hot-reload / double
+ *  boot won't stack timers). Returns a stopper. */
 export function startEventReminderSweep(deps: { db: Db; io: Io }): () => void {
   const { db, io } = deps;
   if (sweepTimer) return () => stopEventReminderSweep();
   // eslint-disable-next-line no-console
   console.info("[server-events] reminder sweep started", { tickMs: SWEEP_TICK_MS });
-  sweepTimer = setInterval(() => { void sweepEventRemindersOnce(db, io); }, SWEEP_TICK_MS);
+  const tick = async () => {
+    // Transitions first so a reminder pass sees fresh statuses.
+    await sweepEventStatusTransitionsOnce(db);
+    await sweepEventRemindersOnce(db, io);
+  };
+  sweepTimer = setInterval(() => { void tick(); }, SWEEP_TICK_MS);
   // Don't hold the process open on this timer alone.
   sweepTimer.unref?.();
-  setImmediate(() => { void sweepEventRemindersOnce(db, io); });
+  setImmediate(() => { void tick(); });
   return () => stopEventReminderSweep();
 }
 

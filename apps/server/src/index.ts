@@ -31,6 +31,7 @@ import { installHandshake } from "./handshake.js";
 import { wireSocketHandlers } from "./socketHandlers.js";
 import { registerAllRoutes } from "./registerRoutes.js";
 import { rooms, serverSettings, servers, users } from "./db/schema.js";
+import { betaBadgeActive } from "./lib/betaBadge.js";
 import { DEFAULT_SERVER_ID } from "./earning/pool.js";
 import { CommandRegistry } from "./commands/registry.js";
 import { registerBuiltins } from "./commands/builtins/index.js";
@@ -380,6 +381,11 @@ async function main() {
       // can be on alone, and the splash renders only the sections
       // whose toggle is on. When both are on they share one row.
       splashMessages24hEnabled: s.splashMessages24hEnabled,
+      // Splash "Beta" chip + hero line. Admin toggle ANDed with the
+      // app-version gate (VERSION < 1.0.0) server-side, so the anonymous
+      // splash only ever sees a single boolean and the badge self-retires
+      // the moment a 1.0.0 build ships.
+      betaBadgeEnabled: betaBadgeActive(s),
       // Visual bio Designer (GrapesJS) availability. When on, the profile
       // editor's bio tab offers a Designer/Source toggle (desktop only).
       profileDesignerEnabled: s.profileDesignerEnabled,
@@ -400,6 +406,12 @@ async function main() {
       // single-server experience. Without this field the client always
       // defaults to false, so the feature can never light up — wire it here.
       serversEnabled: areServersEnabled(s),
+      // World map uploads flag (migration 0360). The world editor reads it
+      // off the branding store to decide whether to offer the map-image
+      // upload picker beside the external-URL field; the map routes enforce
+      // it server-side regardless. Boolean only — same public posture as
+      // profileDesignerEnabled.
+      worldMapUploadsEnabled: s.worldMapUploadsEnabled,
       // Env-gated: whether the operator configured Google OAuth credentials, so
       // the client hides the sign-in-with-Google button when it can't work. Pure
       // env boolean (no admin toggle). (YouTube for /theater needs no client
@@ -798,6 +810,10 @@ async function main() {
       // it may open and enters its rooms (see App.tsx). Without this the link
       // would fall to the 404 page below — which is what it did before.
       app.get("/s/:slug", publicLimit, serveSplash);
+      // Server invite links: the shareable `/i/<code>` landing. Boots the SPA
+      // shell; the client resolves the code via GET /servers/invite/:code and
+      // renders the branded join/register page (see ServerInviteLanding).
+      app.get("/i/:code", publicLimit, serveSplash);
       app.get("/login", publicLimit, serveSplash);
       app.get("/register", publicLimit, serveSplash);
       // Scriptorium, public catalog of SFW stories + canonical story

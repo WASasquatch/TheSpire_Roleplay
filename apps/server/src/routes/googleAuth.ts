@@ -259,6 +259,12 @@ const finishBody = z.object({
    * only when the account derives minor, mirroring /auth/register.
    */
   isolateFromAdults: z.boolean().optional(),
+  /**
+   * Server invite carry-through (migration 0356), mirroring /auth/register:
+   * the /i/<code> landing's code survives the OAuth round-trip client-side
+   * and rides the finish POST. Best-effort — never fails the signup.
+   */
+  inviteCode: z.string().trim().min(1).max(64).optional(),
 });
 
 export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Promise<void> {
@@ -563,6 +569,24 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
 
     // Link the Google identity to the fresh account.
     await upsertLink(db, id, entry.sub, entry.email);
+
+    // Invite carry-through (server invite links) — the same additive,
+    // never-fatal join /auth/register performs for its inviteCode.
+    if (body.inviteCode) {
+      try {
+        const { areServersEnabled } = await import("../settings.js");
+        if (areServersEnabled(settings)) {
+          const { redeemInviteForSignup } = await import("../servers/inviteLinks.js");
+          await redeemInviteForSignup(
+            db,
+            { id, role, isAdult: isAdultUser({ birthdate: body.birthdate }) },
+            body.inviteCode,
+          );
+        }
+      } catch (err) {
+        req.log.error({ err }, "invite carry-through failed (non-fatal)");
+      }
+    }
 
     // Fire-and-forget verification mail when the policy requires it (a mail
     // hiccup must never fail signup — the user can re-request from the banner).

@@ -18,6 +18,12 @@ import type {
   WorldEntityKind,
   WorldArc,
   WorldArcStatus,
+  WorldMap,
+  WorldMapLight,
+  WorldMapMarker,
+  WorldMapMarkerLabelMode,
+  WorldMapMarkerScaleMode,
+  WorldMapMarkerSize,
   WorldSession,
   WorldSessionLight,
   WorldVibeStats,
@@ -43,6 +49,8 @@ import type {
   worldArcs,
   worldEntities,
   worldEntityKinds,
+  worldMapMarkers,
+  worldMaps,
   worldSessions} from "../../db/schema.js";
 import {
   characters,
@@ -637,6 +645,52 @@ export function entityLightToWire(e: typeof worldEntities.$inferSelect): WorldEn
 }
 export function entityRowToWire(e: typeof worldEntities.$inferSelect): WorldEntity {
   return { ...entityLightToWire(e), bodyHtml: e.bodyHtml };
+}
+export function mapLightToWire(m: typeof worldMaps.$inferSelect): WorldMapLight {
+  return {
+    id: m.id,
+    worldId: m.worldId,
+    slug: m.slug,
+    name: m.name,
+    sortOrder: m.sortOrder,
+  };
+}
+export function mapRowToWire(m: typeof worldMaps.$inferSelect): WorldMap {
+  return {
+    ...mapLightToWire(m),
+    description: m.description,
+    imageUrl: m.imageUrl,
+    imageKind: (m.imageKind ?? "external") as "external" | "upload",
+    width: m.width ?? null,
+    height: m.height ?? null,
+    createdAt: +m.createdAt,
+    updatedAt: +m.updatedAt,
+  };
+}
+export function markerRowToWire(k: typeof worldMapMarkers.$inferSelect): WorldMapMarker {
+  return {
+    id: k.id,
+    mapId: k.mapId,
+    kind: k.kind,
+    label: k.label,
+    x: k.x,
+    y: k.y,
+    color: k.color ?? null,
+    icon: k.icon ?? null,
+    size: (k.size ?? "md") as WorldMapMarkerSize,
+    scaleMode: (k.scaleMode ?? "fixed") as WorldMapMarkerScaleMode,
+    labelMode: (k.labelMode ?? "icon") as WorldMapMarkerLabelMode,
+    minZoom: k.minZoom ?? null,
+    maxZoom: k.maxZoom ?? null,
+    entryKind: k.entryKind ?? null,
+    entrySlug: k.entrySlug ?? null,
+    eventId: k.eventId ?? null,
+    body: k.body,
+    isSecret: !!k.isSecret,
+    sortOrder: k.sortOrder,
+    createdAt: +k.createdAt,
+    updatedAt: +k.updatedAt,
+  };
 }
 export function entityKindRowToWire(k: typeof worldEntityKinds.$inferSelect): WorldEntityKind {
   return {

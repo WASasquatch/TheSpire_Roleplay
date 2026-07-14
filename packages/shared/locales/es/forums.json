@@ -106,7 +106,14 @@
     "topicCount_other": "{{count}} temas",
     "topicCount_many": "{{count}} temas",
     "teaserApplication": "Inicia sesión para leer los tableros - publicar requiere la aprobación del guardián.",
-    "teaserOpen": "Inicia sesión para leer los tableros y unirte a la conversación."
+    "teaserOpen": "Inicia sesión para leer los tableros y unirte a la conversación.",
+    "upcomingEvents": "Próximos eventos",
+    "eventLive": "En vivo",
+    "eventRepeats": "Se repite",
+    "eventGoing_one": "{{count}} va",
+    "eventGoing_many": "{{count}} van",
+    "eventGoing_other": "{{count}} van",
+    "eventsRsvpHint": "Inicia sesión y únete a la comunidad para confirmar asistencia."
   },
   "footer": {
     "whosOnline": "Quién está en línea",

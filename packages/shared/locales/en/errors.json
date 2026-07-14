@@ -71,6 +71,8 @@
       "forumBoardRefusal": "That's a forum board - it lives in the Forums Catalog. Type /forums to open it.",
       "roomReadOnly": "Only staff can post in this room.",
       "roomReadOnlyRoles": "Only members with certain roles can post in this room.",
+      "commandDisabled": "This command is turned off on this server.",
+      "commandNeedsRole": "This command is limited to certain roles on this server.",
       "adultsOnlyRoom": "This room is for adults only.",
       "banishedFromRoom": "You are banished from this room.",
       "joinServerFirst": "You need to join this server before entering its rooms.",
@@ -246,7 +248,10 @@
       "characterLimit": "Limit of {{max}} characters per account.",
       "portraitLimitCharacter": "Limit of {{max}} extra portraits per character.",
       "portraitLimitProfile": "Limit of {{max}} extra portraits per profile.",
-      "minorOnlySetting": "This setting is only available to accounts under 18."
+      "minorOnlySetting": "This setting is only available to accounts under 18.",
+      "birthdateAlreadySet": "Your date of birth is already on file and can't be changed. Contact staff if it needs to be corrected.",
+      "birthdateUnderFloor": "That date can't be saved: members must be at least 13 years old. If it really is your date of birth, contact staff.",
+      "birthdateMinorSignedOut": "Your date of birth was saved. Because you're under 18, areas marked 18+ are no longer available. Please sign in again."
     },
     "forums": {
       "applicationsNotAvailable": "Forum creation applications aren't available to you.",
@@ -294,6 +299,12 @@
       "bannedFromNamedUntil": "You are banned from the \"{{name}}\" forum until {{date}}.",
       "approvedMembersOnly": "\"{{name}}\" accepts posts from approved members. Apply from the forum's page."
     },
+    "invites": {
+      "createNotAllowed": "You can't create invite links for this community.",
+      "capReached": "You already have {{cap}} active invite links here. Revoke one to make room.",
+      "revokeNotYours": "You can only revoke your own invite links.",
+      "invalidOrExpired": "That invite link isn't valid or has expired."
+    },
     "servers": {
       "applicationsNotAvailable": "Server creation applications aren't available to you.",
       "agreeRules": "Please read and agree to the server registration rules before applying.",
@@ -335,6 +346,8 @@
       "privateSwitchNeedsPassword": "switching to private requires a password",
       "systemRoomOwnerOnly": "only the server owner can remove a system room",
       "lastSystemRoom": "can't remove the server's only system room; make another room first",
+      "commandRuleUnknown": "That command doesn't exist in this server.",
+      "commandRuleExempt": "That command is always available and can't be restricted.",
       "roomRemoved": "Room \"{{name}}\" was removed.",
       "ownerHoldsAllPowers": "The owner already holds every power.",
       "onlyOwnerRemovesAdmin": "Only the owner can remove an admin.",
@@ -410,7 +423,13 @@
       "tooManyKinds": "too many custom kinds",
       "tooManyArcs": "too many arcs",
       "tooManySessions": "too many sessions",
-      "kindHasEntries": "kind still has entries; delete or reassign them first"
+      "kindHasEntries": "kind still has entries; delete or reassign them first",
+      "mapSlugExists": "a map with that slug already exists",
+      "tooManyMaps": "too many maps",
+      "tooManyMarkers": "too many markers on this map",
+      "tooManyMapUploads": "this world already stores {{max}} uploaded map images; delete one or use an external link",
+      "mapUploadsDisabled": "map image uploads are turned off on this site; use an external https link instead",
+      "eventNotLinkable": "that event can't be linked; it must belong to a community that features this world"
     },
     "arcade": {
       "eidolonUnavailable": "The Eidolon Tamer isn't available to you.",
@@ -494,12 +513,15 @@
     },
     "events": {
       "endAfterStart": "The event's end time must be after its start time.",
+      "repeatEndsBeforeStart": "The repeat end date can't be before the event starts.",
       "badReminderLead": "Unsupported reminder lead time.",
       "hostCharacterNotYours": "That host character isn't yours.",
       "roomNotInServer": "The linked room isn't in this server.",
       "forumNotInServer": "The linked forum isn't in this server.",
       "rsvpClosed": "This event is closed to RSVPs.",
-      "characterNotYours": "That character isn't yours."
+      "characterNotYours": "That character isn't yours.",
+      "oneLink": "An event can link to only one place.",
+      "badMessageLink": "That message link doesn't look right."
     },
     "faqs": {
       "slugRule": "Slug must be 3-40 chars: lowercase letters, numbers, underscore (and not reserved).",

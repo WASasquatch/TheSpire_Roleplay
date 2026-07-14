@@ -7,6 +7,7 @@ import { ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage } from "../compo
 import { StoryCatalogModal } from "../components/scriptorium/StoryCatalogModal.js";
 import { StoryReaderModal } from "../components/scriptorium/StoryReaderModal.js";
 import { ForumPublicLanding } from "../components/forums/ForumPublicLanding.js";
+import { ServerInviteLanding } from "../components/servers/ServerInviteLanding.js";
 import { ServerPublicLanding } from "../components/servers/ServerPublicLanding.js";
 import { applyTheme, resolveSplashTheme, splashBgClass, themeStyle } from "./theme.js";
 import { parseScriptoriumFromUrl, storyPermalink } from "./scriptoriumUrl.js";
@@ -122,6 +123,21 @@ export function UnauthRouter(props: {
       return (
         <PublicViewerShell isAuthenticated={false}>
           <ServerPublicLanding slug={sm[1]} onNavigate={navigate} />
+        </PublicViewerShell>
+      );
+    }
+  }
+
+  // Invite landing (/i/<code>): the shareable face of a server invite link.
+  // Logged-out visitors get the branded page with register / sign-in-and-join
+  // CTAs; the code is remembered through the auth round-trip. Signed-in
+  // visitors are handled in App (same component, one-click join).
+  if (!hasDeepLinkHint && serversEnabled) {
+    const im = /^\/i\/([A-Za-z0-9_-]{4,64})\/?$/.exec(path);
+    if (im?.[1]) {
+      return (
+        <PublicViewerShell isAuthenticated={false}>
+          <ServerInviteLanding code={im[1]} onNavigate={navigate} />
         </PublicViewerShell>
       );
     }

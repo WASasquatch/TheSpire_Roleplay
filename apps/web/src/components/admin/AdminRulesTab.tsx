@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { VERSION, isBetaVersion } from "@thekeep/shared";
 import DOMPurify from "dompurify";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
 import { readError } from "../../lib/http.js";
@@ -103,6 +104,9 @@ export function RulesTab() {
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         splashMessages24hEnabled: j.splashMessages24hEnabled,
+        // The admin response carries the RAW toggle; branding carries the
+        // toggle ANDed with the version gate (mirrors the /site payload).
+        betaBadgeEnabled: j.betaBadgeEnabled && isBetaVersion(VERSION),
         profileDesignerEnabled: j.profileDesignerEnabled,
         serversEnabled: j.serversEnabled,
         defaultStyleKey: j.defaultStyleKey,

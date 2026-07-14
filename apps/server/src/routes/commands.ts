@@ -1,10 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import { asc, eq } from "drizzle-orm";
+import { isModeratorRole } from "@thekeep/shared";
 import type { CommandDoc, SubcommandDocWire } from "@thekeep/shared";
 import type { CommandRegistry } from "../commands/registry.js";
 import { customCommandAliases, customCommands, titleKinds } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { hasPermission } from "../auth/permissions.js";
+import {
+  commandUnavailableWith,
+  isServerStaffOf,
+  loadCommandRules,
+  type CommandRule,
+} from "../lib/commandRules.js";
+import { usergroupIdsFor } from "../lib/roleGates.js";
 import { parseAcceptLanguage, tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 
@@ -36,7 +44,7 @@ export async function registerCommandsRoutes(
   db: Db,
   registry: CommandRegistry,
 ): Promise<void> {
-  app.get("/commands", async (req) => {
+  app.get<{ Querystring: { serverId?: string } }>("/commands", async (req) => {
     const me = await getSessionUser(req, db);
     // Recipient language for the doc PROSE (descriptions): the account pref
     // when signed in, else Accept-Language (the Help modal is reachable
@@ -45,6 +53,26 @@ export async function registerCommandsRoutes(
     // own constant via defaultValue, so en output is byte-identical.
     const locale = me?.locale ?? parseAcceptLanguage(req.headers["accept-language"]);
     const docKey = (s: string): string => s.replace(/[.:]/g, "_");
+    // Per-server availability (server_command_rules, migration 0355). When
+    // the client scopes the fetch (`?serverId=`), commands the VIEWER can't
+    // run in that server are dropped from the doc list so the composer
+    // completer and the /help modal never advertise them — dispatch still
+    // enforces regardless. No param = the historic unscoped list,
+    // byte-identical (old bundles keep working). Staff (site or that
+    // server's owner/admin/mod) bypass rules, so their list never shrinks.
+    const serverId = typeof req.query.serverId === "string" && req.query.serverId ? req.query.serverId : null;
+    let rules: Map<string, CommandRule> | null = null;
+    let ruleStaff = false;
+    let viewerGroupIds: ReadonlySet<string> = new Set<string>();
+    if (serverId) {
+      rules = await loadCommandRules(db, serverId);
+      if (rules.size > 0 && me) {
+        ruleStaff = isModeratorRole(me.role) || (await isServerStaffOf(db, me.id, serverId));
+        if (!ruleStaff) viewerGroupIds = await usergroupIdsFor(db, me.id);
+      }
+    }
+    const ruleHidden = (name: string, permission?: string): boolean =>
+      !!rules && rules.size > 0 && commandUnavailableWith({ name, permission }, rules, ruleStaff, viewerGroupIds);
     const builtins = registry.listCanonical();
     // Filter out commands the caller can't run. Anonymous viewers
     // (no session) drop every permission-gated command.
@@ -53,6 +81,11 @@ export async function registerCommandsRoutes(
       if (c.permission) {
         if (!me || !(await hasPermission(me, c.permission, db))) continue;
       }
+      // listCanonical also carries custom-command handlers; on a scoped
+      // fetch, drop the ones that don't resolve in that server (the same
+      // reach dispatch has). True builtins always resolve.
+      if (serverId && registry.resolve(c.name, serverId) !== c) continue;
+      if (ruleHidden(c.name, c.permission)) continue;
       visibleBuiltins.push(c);
     }
     const builtinDocs: CommandDoc[] = visibleBuiltins.map((c) => ({
@@ -128,7 +161,14 @@ export async function registerCommandsRoutes(
       list.push(a.alias);
       aliasesByCmd.set(a.commandId, list);
     }
-    const customDocs: CommandDoc[] = customRows.map((c) => ({
+    // Server-scoped fetches also drop custom commands the registry would
+    // never resolve there (another server's flavor) plus any rule-hidden
+    // name — the same reach `registry.resolve(name, serverId)` gives
+    // dispatch. Unscoped fetches keep the historic full list.
+    const visibleCustomRows = serverId
+      ? customRows.filter((c) => (c.serverId == null || c.serverId === serverId) && !ruleHidden(c.name))
+      : customRows;
+    const customDocs: CommandDoc[] = visibleCustomRows.map((c) => ({
       name: c.name,
       aliases: aliasesByCmd.get(c.id) ?? [],
       usage: `/${c.name} [args]`,

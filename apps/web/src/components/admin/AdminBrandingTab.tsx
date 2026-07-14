@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { VERSION, isBetaVersion } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
 import { useChat } from "../../state/store.js";
 import { AdminSaveFooter, useAdminShell, type SettingsRow } from "./adminShell.js";
@@ -168,6 +169,9 @@ export function BrandingTab() {
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         splashMessages24hEnabled: j.splashMessages24hEnabled,
+        // The admin response carries the RAW toggle; branding carries the
+        // toggle ANDed with the version gate (mirrors the /site payload).
+        betaBadgeEnabled: j.betaBadgeEnabled && isBetaVersion(VERSION),
         profileDesignerEnabled: j.profileDesignerEnabled,
         serversEnabled: j.serversEnabled,
         defaultStyleKey: j.defaultStyleKey,
@@ -348,6 +352,7 @@ export function BrandingTab() {
               activityFeedsEnabled: j.settings.activityFeedsEnabled,
               featuredWorldsEnabled: j.settings.featuredWorldsEnabled,
               splashMessages24hEnabled: j.settings.splashMessages24hEnabled,
+              betaBadgeEnabled: j.settings.betaBadgeEnabled && isBetaVersion(VERSION),
               profileDesignerEnabled: j.settings.profileDesignerEnabled,
               defaultStyleKey: j.settings.defaultStyleKey,
               themeDesignMap: j.settings.themeDesignMap ?? {},

@@ -429,8 +429,10 @@ export const profileViews = sqliteTable(
  * target columns).
  *
  * Reason vocabulary lives in apps/server/src/earning/ledger.ts.
- * Common values: message_ic, message_ooc, forum_topic, forum_reply,
- * presence_ic, presence_ooc, purchase_<cosmetic_key>,
+ * Common values: message_say, message_action, message_whisper (IC vs
+ * OOC is the routing `scope`: character = IC, user = OOC), forum_topic,
+ * forum_reply, presence_ic, presence_ooc, purchase_<cosmetic_key>,
+ * item_purchase_<item_key>, item_use_<item_key>, command_<kind>,
  * border_purchase_<rank_key>, currency_send_out, currency_send_in,
  * character_deleted_currency_rollover, admin_grant, admin_revoke,
  * backfill_message_xp.

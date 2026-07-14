@@ -20,11 +20,12 @@
  * contract is `{ serverId, viewer, busy, run, onSaved }` — the orchestrator
  * passes the active server's id directly.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import type { ServerViewerState } from "@thekeep/shared";
 import { i18n } from "../../lib/i18n.js";
+import { safeCssColor } from "../shared/RoleBadgeChips.js";
 
 /* ============================================================
  * Props (matches the console tab action contract; serverId passed directly).
@@ -81,6 +82,18 @@ interface SocialGameRow {
   rewardItemCount: number;
   durationMs: number | null;
 }
+/** One controllable command in the availability editor (built-in without its
+ *  own staff permission gate, or this server's custom command). */
+interface RuleCommandRow {
+  name: string;
+  aliases: string[];
+  description: string;
+  isCustom: boolean;
+}
+interface RuleGroupRow { id: string; name: string; color: string | null }
+interface CommandRuleWire { command: string; mode: "disabled" | "roles"; roleIds: string[] }
+type RuleMode = "everyone" | "disabled" | "roles";
+
 interface TitleKindRow {
   id: string;
   slug: string;
@@ -134,6 +147,14 @@ async function apiSetSocialGame(serverId: string, name: string, body: Record<str
     method: "PUT", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
   }));
 }
+async function apiGetCommandRules(serverId: string): Promise<{ commands: RuleCommandRow[]; groups: RuleGroupRow[]; rules: CommandRuleWire[] }> {
+  return jsonOrThrow(await fetch(`/servers/${sid(serverId)}/command-rules`, { credentials: "include" }));
+}
+async function apiPutCommandRule(serverId: string, command: string, body: { mode: RuleMode; roleIds?: string[] }): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(serverId)}/command-rules/${sid(command)}`, {
+    method: "PUT", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
+  }));
+}
 async function apiGetTitles(serverId: string): Promise<{ kinds: TitleKindRow[] }> {
   return jsonOrThrow(await fetch(`/servers/${sid(serverId)}/titles`, { credentials: "include" }));
 }
@@ -167,6 +188,7 @@ export default function CommandsTitlesTab({ serverId, viewer, busy, run, onSaved
   return (
     <div className="space-y-6">
       {canCommands ? <CommandsSection serverId={serverId} busy={busy} run={run} onSaved={onSaved} /> : null}
+      {canCommands ? <CommandAvailabilitySection serverId={serverId} busy={busy} run={run} onSaved={onSaved} /> : null}
       {canTitles ? <TitlesSection serverId={serverId} busy={busy} run={run} onSaved={onSaved} /> : null}
       {!canCommands && !canTitles ? (
         <p className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">
@@ -559,6 +581,242 @@ function CommandForm({ mode, initial, busy, onSubmit, onCancel, onDelete }: {
         </button>
       </div>
     </form>
+  );
+}
+
+/* ============================================================
+ * Command availability section (server_command_rules, migration 0355)
+ * ============================================================ */
+
+/** Per-server availability rules over the FULL command list (built-ins
+ *  without their own staff gate + this server's custom commands): each row
+ *  is Everyone / Specific roles / Off. Staff-gated builtins and /help +
+ *  /report never appear — they can't be restricted. Zero rules = today's
+ *  behavior; the blurb states the staff bypass and the zero-role fallback
+ *  honestly. */
+function CommandAvailabilitySection({ serverId, busy, run, onSaved }: { serverId: string; busy: boolean; run: CommandsTitlesTabProps["run"]; onSaved: () => void }) {
+  const { t } = useTranslation("servers");
+  const [data, setData] = useState<{ commands: RuleCommandRow[]; groups: RuleGroupRow[]; rules: CommandRuleWire[] } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [tick, setTick] = useState(0);
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    setErr(null);
+    apiGetCommandRules(serverId)
+      .then((j) => { if (alive) setData(j); })
+      .catch((e) => { if (alive) setErr(e instanceof Error ? e.message : t("shared.loadFailed")); });
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverId, tick]);
+
+  const ruleByCommand = useMemo(() => {
+    const m = new Map<string, CommandRuleWire>();
+    for (const r of data?.rules ?? []) m.set(r.command, r);
+    return m;
+  }, [data]);
+
+  const filtered = useMemo(() => {
+    if (!data) return [];
+    const q = query.trim().toLowerCase().replace(/^\//, "");
+    if (!q) return data.commands;
+    return data.commands.filter((c) =>
+      c.name.includes(q)
+      || c.aliases.some((a) => a.includes(q))
+      || c.description.toLowerCase().includes(q));
+  }, [data, query]);
+
+  function save(command: string, mode: RuleMode, roleIds: string[]) {
+    void run(async () => {
+      // Refetch on failure too: the row's key derives from the fetched rule,
+      // so reseeding from server truth reverts a select left showing a mode
+      // the PUT never landed. The rejection still reaches run()'s error line.
+      try {
+        await apiPutCommandRule(serverId, command, mode === "roles" ? { mode, roleIds } : { mode });
+        onSaved();
+      } finally {
+        setTick((n) => n + 1);
+      }
+    });
+  }
+
+  return (
+    <section className="space-y-3 border-t border-keep-rule pt-5" data-admin-anchor="commandsTab.availability.heading">
+      <div className="text-xs text-keep-muted sm:max-w-[80%]">
+        <span className="mb-1 block text-sm font-semibold text-keep-text">{t("commandsTab.availability.heading")}</span>
+        {t("commandsTab.availability.blurb")}{" "}
+        <span className="text-keep-muted/90">{t("commandsTab.availability.staffNote")}</span>
+      </div>
+
+      {err ? (
+        <div className="rounded border border-keep-accent/40 bg-keep-accent/10 p-2 text-xs text-keep-accent">
+          {err}{" "}
+          <button type="button" onClick={() => setTick((n) => n + 1)} className="underline hover:text-keep-text">
+            {t("commandsTab.availability.retry")}
+          </button>
+        </div>
+      ) : null}
+
+      {!data && !err ? <div className="text-xs text-keep-muted">{t("commandsTab.loading")}</div> : null}
+
+      {data ? (
+        <>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("commandsTab.availability.searchPlaceholder")}
+            aria-label={t("commandsTab.availability.searchPlaceholder")}
+            className="w-full max-w-xs rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs outline-none focus:border-keep-action"
+          />
+          {filtered.length === 0 ? (
+            <div className="rounded border border-keep-rule bg-keep-bg p-4 text-center text-sm text-keep-muted">
+              {t("commandsTab.availability.noMatches")}
+            </div>
+          ) : (
+            <ul className="divide-y divide-keep-rule/60 rounded border border-keep-rule bg-keep-bg/40">
+              {filtered.map((c) => {
+                const rule = ruleByCommand.get(c.name);
+                return (
+                  <CommandRuleRow
+                    // Remount on every saved state change so local edits
+                    // always reseed from the server's truth after a save.
+                    key={`${c.name}:${rule ? `${rule.mode}:${rule.roleIds.join(",")}` : "everyone"}`}
+                    cmd={c}
+                    groups={data.groups}
+                    rule={rule}
+                    busy={busy}
+                    onSave={(mode, roleIds) => save(c.name, mode, roleIds)}
+                  />
+                );
+              })}
+            </ul>
+          )}
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+/** One command's availability control. "Everyone" / "Off" save on pick;
+ *  "Specific roles" expands the role chips + an explicit Save (blocked at
+ *  zero roles, same convention as the room editor's role gates). */
+function CommandRuleRow({ cmd, groups, rule, busy, onSave }: {
+  cmd: RuleCommandRow;
+  groups: RuleGroupRow[];
+  rule: CommandRuleWire | undefined;
+  busy: boolean;
+  onSave: (mode: RuleMode, roleIds: string[]) => void;
+}) {
+  const { t } = useTranslation("servers");
+  const savedMode: RuleMode = rule ? (rule.mode === "disabled" ? "disabled" : "roles") : "everyone";
+  const [mode, setMode] = useState<RuleMode>(savedMode);
+  const [roleIds, setRoleIds] = useState<Set<string>>(new Set(rule?.roleIds ?? []));
+  const rolesDirty = mode === "roles" && (savedMode !== "roles"
+    || roleIds.size !== (rule?.roleIds.length ?? 0)
+    || (rule?.roleIds ?? []).some((id) => !roleIds.has(id)));
+  const needsRole = mode === "roles" && roleIds.size === 0;
+
+  function pickMode(next: RuleMode) {
+    setMode(next);
+    // Everyone / Off apply immediately; roles waits for an explicit Save so
+    // a half-picked chip set never hits the server.
+    if (next !== "roles" && next !== savedMode) onSave(next, []);
+  }
+
+  return (
+    <li className="px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-baseline gap-1.5">
+            <span className="font-mono text-xs text-keep-text">/{cmd.name}</span>
+            {cmd.aliases.length ? (
+              <span className="font-mono text-[10px] text-keep-muted">{cmd.aliases.map((a) => `/${a}`).join(" ")}</span>
+            ) : null}
+            {cmd.isCustom ? (
+              <span className="rounded border border-keep-action/60 bg-keep-action/10 px-1 py-px text-[9px] font-semibold uppercase tracking-widest text-keep-action">
+                {t("commandsTab.availability.customChip")}
+              </span>
+            ) : null}
+          </div>
+          {cmd.description ? (
+            <p className="truncate text-[11px] text-keep-muted" title={cmd.description}>{cmd.description}</p>
+          ) : null}
+        </div>
+        <select
+          value={mode}
+          disabled={busy}
+          onChange={(e) => pickMode(e.target.value as RuleMode)}
+          aria-label={t("commandsTab.availability.controlAria", { name: cmd.name })}
+          className="shrink-0 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
+        >
+          <option value="everyone">{t("commandsTab.availability.everyone")}</option>
+          <option value="roles">{t("commandsTab.availability.roles")}</option>
+          <option value="disabled">{t("commandsTab.availability.off")}</option>
+        </select>
+      </div>
+      {mode === "roles" ? (
+        <div className="mt-1.5">
+          {groups.length === 0 ? (
+            <p className="text-[10px] italic text-keep-muted">{t("console.rooms.roleGates.noGroups")}</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("commandsTab.availability.roles")}>
+              {groups.map((g) => {
+                const color = safeCssColor(g.color);
+                const checked = roleIds.has(g.id);
+                return (
+                  <label
+                    key={g.id}
+                    className={`inline-flex cursor-pointer items-center gap-1.5 rounded border px-2 py-1 text-xs ${
+                      checked
+                        ? "border-keep-action bg-keep-action/10 text-keep-text"
+                        : "border-keep-rule bg-keep-bg text-keep-muted hover:border-keep-action/60 hover:text-keep-text"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className="h-3 w-3"
+                      checked={checked}
+                      onChange={() => setRoleIds((cur) => {
+                        const next = new Set(cur);
+                        if (next.has(g.id)) next.delete(g.id); else next.add(g.id);
+                        return next;
+                      })}
+                    />
+                    <span
+                      aria-hidden
+                      className="h-2 w-2 shrink-0 rounded-full bg-keep-muted/60"
+                      style={color ? { background: color } : undefined}
+                    />
+                    {g.name}
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          {/* Zero roles on the server: the noGroups line above is the only
+              guidance — "check at least one role" would be impossible to
+              follow with no chips rendered. */}
+          {groups.length === 0 ? null : needsRole ? (
+            <span className="mt-1 block text-[10px] text-keep-accent/90">{t("commandsTab.availability.needsRole")}</span>
+          ) : (
+            <span className="mt-1 block text-[10px] text-keep-muted">{t("commandsTab.availability.zeroRoleFallback")}</span>
+          )}
+          {rolesDirty ? (
+            <div className="mt-1 flex justify-end">
+              <button
+                type="button"
+                disabled={busy || needsRole}
+                onClick={() => onSave("roles", [...roleIds])}
+                className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50"
+              >
+                {t("shared.save")}
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </li>
   );
 }
 

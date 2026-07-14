@@ -457,6 +457,16 @@ export const users = sqliteTable(
      */
     firstSpokeAt: integer("first_spoke_at", { mode: "timestamp_ms" }),
     /**
+     * One-shot signup carry-through (migration 0356): the community whose
+     * invite link this account registered through, stamped only when the
+     * invite join actually succeeded. The first socket landing consumes it
+     * (placing the newcomer in that server's landing room, ahead of the
+     * liveliest-room tier) and clears it back to NULL. `REFERENCES
+     * servers(id) ON DELETE SET NULL` lives in the SQL migration only (see
+     * lastRoomId's note on FK cycles).
+     */
+    invitedServerId: text("invited_server_id"),
+    /**
      * Last room the user occupied when their previous session disconnected
      * or idled out. Set on disconnect / room switch; consumed on the next
      * connect to drop them back where they were. Null = first connect, or

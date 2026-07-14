@@ -180,6 +180,8 @@ export interface SiteSettings {
   featuredWorldsEnabled: boolean;
   /** Splash stat: surface the rolling 24h chat message count. Independent of `activityFeedsEnabled`, each toggle gates its own section, so admins can show this alone, the online/room cluster alone, or both together. Off by default. */
   splashMessages24hEnabled: boolean;
+  /** Splash "Beta" chip + hero line (migration 0357). ANDed with the app-version gate (< 1.0.0) in the /site payload, so it self-retires at 1.0.0. Default on. */
+  betaBadgeEnabled: boolean;
   /** Visual bio Designer (GrapesJS) availability. Off by default; admin opt-in. */
   profileDesignerEnabled: boolean;
   /** Sanitized HTML for the post-login welcome/announcement modal. Empty string = no welcome to show. */
@@ -215,6 +217,13 @@ export interface SiteSettings {
    * kill-switch.
    */
   serversEnabled: boolean;
+  /**
+   * World map image uploads (migration 0360). When true, world-map create/
+   * edit accepts an `imageDataUrl` stored under /uploads/worldmaps/ (6MB cap,
+   * per-world quota). Off by default — disk is shared with the DB, so
+   * uploads are an explicit admin opt-in; external https links always work.
+   */
+  worldMapUploadsEnabled: boolean;
   /**
    * Escalating chat anti-spam master switch (migration 0313). When true, a
    * rapid-fire message flood from an ordinary user climbs a warn->auto-mute
@@ -402,6 +411,8 @@ export interface SettingsPatch {
   featuredWorldsEnabled?: boolean;
   /** Splash stat for the rolling 24h chat message count. Independent toggle. */
   splashMessages24hEnabled?: boolean;
+  /** Splash "Beta" chip toggle (migration 0357). Version gate applies on top. */
+  betaBadgeEnabled?: boolean;
   /** Visual bio Designer availability. */
   profileDesignerEnabled?: boolean;
   /** Pre-sanitized HTML; route handler sanitizes before invoking. Empty string clears it. */
@@ -429,6 +440,8 @@ export interface SettingsPatch {
    * route handler gates this to masteradmin.
    */
   serversEnabled?: boolean;
+  /** World map image uploads switch (migration 0360). */
+  worldMapUploadsEnabled?: boolean;
   antiSpamEnabled?: boolean;
   /** Auto-moderation master switch (migration 0319). */
   automodEnabled?: boolean;
@@ -510,6 +523,7 @@ export async function updateSettings(
   if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
   if (patch.featuredWorldsEnabled !== undefined) update.featuredWorldsEnabled = patch.featuredWorldsEnabled;
   if (patch.splashMessages24hEnabled !== undefined) update.splashMessages24hEnabled = patch.splashMessages24hEnabled;
+  if (patch.betaBadgeEnabled !== undefined) update.betaBadgeEnabled = patch.betaBadgeEnabled;
   if (patch.profileDesignerEnabled !== undefined) update.profileDesignerEnabled = patch.profileDesignerEnabled;
   if (patch.defaultStyleKey !== undefined) update.defaultStyleKey = patch.defaultStyleKey;
   if (patch.themeDesignMap !== undefined) {
@@ -525,6 +539,7 @@ export async function updateSettings(
         : JSON.stringify(normalizeEarningConfig(patch.earningConfig));
   }
   if (patch.serversEnabled !== undefined) update.serversEnabled = patch.serversEnabled;
+  if (patch.worldMapUploadsEnabled !== undefined) update.worldMapUploadsEnabled = patch.worldMapUploadsEnabled;
   if (patch.antiSpamEnabled !== undefined) update.antiSpamEnabled = patch.antiSpamEnabled;
   if (patch.automodEnabled !== undefined) update.automodEnabled = patch.automodEnabled;
   if (patch.allowMinorSignups !== undefined) update.allowMinorSignups = patch.allowMinorSignups;
@@ -627,6 +642,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     activityFeedsEnabled: row.activityFeedsEnabled,
     featuredWorldsEnabled: row.featuredWorldsEnabled,
     splashMessages24hEnabled: row.splashMessages24hEnabled,
+    betaBadgeEnabled: !!row.betaBadgeEnabled,
     profileDesignerEnabled: row.profileDesignerEnabled,
     newUserWelcomeHtml: row.newUserWelcomeHtml,
     newUserWelcomeHash: hashWelcome(row.newUserWelcomeHtml),
@@ -636,6 +652,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     worldsSeedVersion: row.worldsSeedVersion,
     earningConfig: parseEarningConfig(row.earningConfigJson),
     serversEnabled: !!row.serversEnabled,
+    worldMapUploadsEnabled: !!row.worldMapUploadsEnabled,
     antiSpamEnabled: !!row.antiSpamEnabled,
     automodEnabled: !!row.automodEnabled,
     allowMinorSignups: !!row.allowMinorSignups,

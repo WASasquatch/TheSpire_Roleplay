@@ -3,6 +3,7 @@ import {
   index,
   integer,
   primaryKey,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -451,6 +452,93 @@ export const worldSessions = sqliteTable(
   }),
 );
 export type DbWorldSession = typeof worldSessions.$inferSelect;
+
+/**
+ * Interactive maps attached to a world. `imageUrl` is an external https
+ * URL while `imageKind = "external"` ("upload" is reserved for the
+ * admin-gated upload mode). `width`/`height` are natural-dimension hints
+ * measured client-side on first load and PATCHed back by editors; marker
+ * math always uses the live natural dimensions of the loaded image.
+ * World-scoped slug uniqueness lives in the migration as a lower()
+ * expression index (drizzle's typed builder can't model it). Migration 0359.
+ */
+export const worldMaps = sqliteTable(
+  "world_maps",
+  {
+    id: id(),
+    worldId: text("world_id")
+      .notNull()
+      .references(() => worlds.id, { onDelete: "cascade" }),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    /** Sanitized HTML blurb rendered with the map. */
+    description: text("description").notNull().default(""),
+    imageUrl: text("image_url").notNull(),
+    imageKind: text("image_kind", { enum: ["external", "upload"] })
+      .notNull()
+      .default("external"),
+    width: integer("width"),
+    height: integer("height"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    orderIdx: index("world_maps_order_idx").on(t.worldId, t.sortOrder),
+  }),
+);
+export type DbWorldMap = typeof worldMaps.$inferSelect;
+
+/**
+ * Markers on a world map. `x`/`y` are REAL fractions 0..1 of the image's
+ * NATURAL dimensions (resolution/zoom independent; clamped at the route
+ * layer). `kind` is an entity kind key, "lore", or a builtin marker kind
+ * (poi/town/event/label) — route-validated, plain TEXT here. `entryKind`/
+ * `entrySlug` soft-link to a knowledge-base entry (route-validated, no
+ * FK). `eventId` references server_events with ON DELETE SET NULL — the
+ * FK lives in the migration only because the servers schema module
+ * already imports this one (importing it back would cycle). `isSecret`
+ * rows are stripped server-side for non-editors. Migration 0359.
+ */
+export const worldMapMarkers = sqliteTable(
+  "world_map_markers",
+  {
+    id: id(),
+    mapId: text("map_id")
+      .notNull()
+      .references(() => worldMaps.id, { onDelete: "cascade" }),
+    kind: text("kind").notNull().default("poi"),
+    label: text("label").notNull(),
+    x: real("x").notNull().default(0.5),
+    y: real("y").notNull().default(0.5),
+    /** Author-picked CSS color, clamped via safeCssColor at render. */
+    color: text("color"),
+    /** Curated lucide slug or short emoji glyph. */
+    icon: text("icon"),
+    size: text("size", { enum: ["sm", "md", "lg", "xl"] }).notNull().default("md"),
+    scaleMode: text("scale_mode", { enum: ["fixed", "map"] }).notNull().default("fixed"),
+    /** On-map label display: glyph pin, text only, or both (migration 0361). */
+    labelMode: text("label_mode", { enum: ["icon", "text", "both"] }).notNull().default("icon"),
+    /** Zoom visibility band in fit-relative zoom factor; null = unbounded. */
+    minZoom: real("min_zoom"),
+    maxZoom: real("max_zoom"),
+    entryKind: text("entry_kind"),
+    entrySlug: text("entry_slug"),
+    /** Soft column mirror of the migration's FK to server_events (see above). */
+    eventId: text("event_id"),
+    /** Sanitized HTML shown in the marker popover. */
+    body: text("body").notNull().default(""),
+    isSecret: integer("is_secret", { mode: "boolean" }).notNull().default(false),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: ts("created_at"),
+    updatedAt: ts("updated_at"),
+  },
+  (t) => ({
+    mapIdx: index("world_map_markers_map_idx").on(t.mapId, t.sortOrder),
+  }),
+);
+export type DbWorldMapMarker = typeof worldMapMarkers.$inferSelect;
+
 export type DbWorld = typeof worlds.$inferSelect;
 export type DbWorldPage = typeof worldPages.$inferSelect;
 export type DbRoomWorldLink = typeof roomWorldLinks.$inferSelect;

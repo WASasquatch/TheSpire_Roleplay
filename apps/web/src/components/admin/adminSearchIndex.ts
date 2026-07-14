@@ -27,6 +27,10 @@ import type { AdminTab } from "./AdminPanel.js";
  *  one union without an import cycle. */
 export type SettingsSubtab = "accounts" | "chat" | "safety" | "theme" | "features";
 
+/** Subtab ids for the Analytics tab split (same mounted-hidden pattern as
+ *  Settings). Ids double as `recordNav` suffixes — never change. */
+export type AnalyticsSubtab = "overview" | "engagement" | "traffic" | "features";
+
 /** One findable thing. `key` is an admin-namespace catalog key; its
  *  translated text is the row title AND the data-admin-anchor value. */
 export interface AdminSearchEntry {
@@ -35,6 +39,9 @@ export interface AdminSearchEntry {
   /** Only present when `tab === "settings"`: which Settings subtab the
    *  anchor lives on once the subtab split lands. */
   subtab?: SettingsSubtab;
+  /** Only present when `tab === "analytics"`: which Analytics subtab owns
+   *  the anchor, so the jump can un-hide it before scroll + flash. */
+  analyticsSubtab?: AnalyticsSubtab;
   /** Extra catalog keys folded into the match text (hints, on/off labels)
    *  so "flood" finds Anti-spam even though the label never says it. */
   also?: readonly string[];
@@ -81,8 +88,10 @@ export const ADMIN_SEARCH_ENTRIES: readonly AdminSearchEntry[] = [
   { key: "settings.activityFeedsLabel", tab: "settings", subtab: "features", also: ["settings.activityFeedsHint", "settings.activityFeedsOn", "settings.activityFeedsOff"] },
   { key: "settings.messages24hLabel", tab: "settings", subtab: "features", also: ["settings.messages24hHint", "settings.messages24hOn", "settings.messages24hOff"] },
   { key: "settings.featuredWorldsLabel", tab: "settings", subtab: "features", also: ["settings.featuredWorldsHint", "settings.featuredWorldsOn", "settings.featuredWorldsOff"] },
+  { key: "settings.betaBadgeLabel", tab: "settings", subtab: "features", also: ["settings.betaBadgeHint", "settings.betaBadgeOn", "settings.betaBadgeOff"] },
   { key: "settings.designerLabel", tab: "settings", subtab: "features", also: ["settings.designerHint", "settings.designerOn", "settings.designerOff"] },
   { key: "settings.multiServerLabel", tab: "settings", subtab: "features", also: ["settings.multiServerHint", "settings.multiServerOn", "settings.multiServerOff"] },
+  { key: "settings.worldMapUploadsLabel", tab: "settings", subtab: "features", also: ["settings.worldMapUploadsHint", "settings.worldMapUploadsOn", "settings.worldMapUploadsOff"] },
 
   // ----- Branding fieldsets -----
   { key: "branding.siteNameLegend", tab: "branding" },
@@ -121,14 +130,21 @@ export const ADMIN_SEARCH_ENTRIES: readonly AdminSearchEntry[] = [
   { key: "overview.moderation7d", tab: "overview", also: ["overview.moderation7dHint"] },
   { key: "overview.thisWeek", tab: "overview", also: ["overview.seriesLogins", "overview.seriesRegistrations"] },
 
-  // ----- Analytics sections -----
-  { key: "analytics.hitsOverTime", tab: "analytics", also: ["analytics.pageviews", "analytics.uniqueVisitors"] },
-  { key: "analytics.topReferrers", tab: "analytics" },
-  { key: "analytics.geoBreakdown", tab: "analytics", also: ["analytics.geoHint"] },
-  { key: "analytics.geoAccuracyTitle", tab: "analytics", also: ["analytics.geoAccuracyHint", "analytics.accountId", "analytics.licenseKey"] },
-  { key: "analytics.topPages", tab: "analytics" },
-  { key: "analytics.inAppTitle", tab: "analytics", also: ["analytics.inAppHint"] },
-  { key: "analytics.entityTitle", tab: "analytics", also: ["analytics.entityHint"] },
+  // ----- Analytics sections (each entry names its owning subtab so the
+  // jump can un-hide the mounted-hidden section first) -----
+  { key: "analytics.kpiTitle", tab: "analytics", analyticsSubtab: "overview", also: ["analytics.kpiActivesYesterday", "analytics.kpiRetentionD1", "analytics.kpiMessagesYesterday", "analytics.kpiRegistrations7d"] },
+  { key: "analytics.engRegistrations", tab: "analytics", analyticsSubtab: "engagement", also: ["analytics.seriesRegistrations"] },
+  { key: "analytics.engActives", tab: "analytics", analyticsSubtab: "engagement", also: ["analytics.engActivesHint"] },
+  { key: "analytics.engMessages", tab: "analytics", analyticsSubtab: "engagement", also: ["analytics.engMessagesHint", "analytics.seriesChat", "analytics.seriesForum"] },
+  { key: "analytics.engRetention", tab: "analytics", analyticsSubtab: "engagement", also: ["analytics.engRetentionHint"] },
+  { key: "analytics.hitsOverTime", tab: "analytics", analyticsSubtab: "traffic", also: ["analytics.pageviews", "analytics.uniqueVisitors"] },
+  { key: "analytics.topReferrers", tab: "analytics", analyticsSubtab: "traffic" },
+  { key: "analytics.geoBreakdown", tab: "analytics", analyticsSubtab: "traffic", also: ["analytics.geoHint"] },
+  { key: "analytics.geoAccuracyTitle", tab: "analytics", analyticsSubtab: "traffic", also: ["analytics.geoAccuracyHint", "analytics.accountId", "analytics.licenseKey"] },
+  { key: "analytics.topPages", tab: "analytics", analyticsSubtab: "traffic" },
+  { key: "analytics.featureUsageTitle", tab: "analytics", analyticsSubtab: "features", also: ["analytics.featureUsageHint", "analytics.serverFilterLabel"] },
+  { key: "analytics.inAppTitle", tab: "analytics", analyticsSubtab: "features", also: ["analytics.inAppHint"] },
+  { key: "analytics.entityTitle", tab: "analytics", analyticsSubtab: "features", also: ["analytics.entityHint"] },
 
   // ----- Users: directory columns + per-user tools (tools anchor inside
   // the row's Edit form, so the jump may stop at the tab switch) -----

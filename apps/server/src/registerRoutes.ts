@@ -76,7 +76,7 @@ export async function registerAllRoutes(
   await registerDataExportRoutes(baseApp, db, uploadsRoot);
   await registerAffiliateRoutes(baseApp, db);
   await registerBookmarkRoutes(baseApp, db);
-  await registerWorldRoutes(baseApp, db, io);
+  await registerWorldRoutes(baseApp, db, io, uploadsRoot);
   await registerStoryRoutes(baseApp, db, io);
   await registerForumRoutes(baseApp, db, io, uploadsRoot);
   await registerServerRoutes(baseApp, db, io, uploadsRoot, registry);

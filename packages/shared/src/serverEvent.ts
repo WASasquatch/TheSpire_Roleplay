@@ -34,12 +34,18 @@ export interface ServerEvent {
   linkedRoomId: string | null;
   /** Optional deep link to a forum board tied to the event. */
   linkedForumId: string | null;
+  /** Optional `<roomId>:<messageId>` chat-message link (see messageLink.ts).
+   *  No FK behind it — the message may prune; dead links fail at click. */
+  linkedMessageId: string | null;
+  /** Optional http(s) external destination. At most ONE of the four link
+   *  fields is ever set (enforced at write). */
+  externalUrl: string | null;
   status: ServerEventStatus;
   /** Opt-in reminder lead time in ms before startsAt; null = no reminder. */
   reminderLeadMs: number | null;
   /** When the reminder fired (fires at most once); null = not yet. */
   reminderFiredAt: number | null;
-  /** RESERVED for future repeating-event rules (unused today). */
+  /** Preset repeat rule JSON (shared EventRecurrence); null = one-off. */
   recurrenceJson: string | null;
   createdAt: number;
   updatedAt: number;

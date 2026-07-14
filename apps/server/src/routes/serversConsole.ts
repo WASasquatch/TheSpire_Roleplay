@@ -6,6 +6,7 @@
 import {
   SERVER_MAX_AUTO_RULES,
   SERVER_MAX_USERGROUPS,
+  SERVER_MEMBER_INVITE_CAP,
   SERVER_MOD_DEFAULT_PERMISSIONS,
   SERVER_MOD_PERMISSIONS,
   SERVER_NAME_MAX,
@@ -50,6 +51,7 @@ import {
   worlds,
 } from "../db/schema.js";
 import { serverAuthority, serverCan } from "../servers/authority.js";
+import { canCreateServerInvite, countLiveInvitesBy, isInviteStaff, revokeInvitesOfMember } from "../servers/inviteLinks.js";
 import { ensureDefaultUsergroup, serverRoomIds } from "../servers/usergroups.js";
 import { evictMinorsFromServer, setRoomNsfw } from "../lib/nsfwRooms.js";
 import { recordAudit } from "../audit.js";
@@ -88,13 +90,21 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     return nanoid(16);
   }
 
-  const inviteWire = (r: typeof serverInvites.$inferSelect, origin?: string) => ({
+  const inviteWire = (
+    r: typeof serverInvites.$inferSelect,
+    origin?: string,
+    createdByUsername?: string | null,
+  ) => ({
     code: r.code,
-    link: origin ? `${origin}/servers/join/${r.code}` : null,
+    // The shareable public URL: the /i/<code> landing (anonymous-viewable
+    // branded page with join/register CTAs).
+    link: origin ? `${origin}/i/${r.code}` : null,
     maxUses: r.maxUses ?? null,
     usedCount: r.usedCount,
     expiresAt: r.expiresAt ? +r.expiresAt : null,
     createdAt: +r.createdAt,
+    createdByUserId: r.createdByUserId ?? null,
+    createdByUsername: createdByUsername ?? null,
   });
 
   /** Origin for the shareable join link, derived from the request (mirrors how
@@ -113,34 +123,90 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     expiresInHours: z.number().int().min(1).max(24 * 365).nullable().optional(),
   }).strict();
 
-  /** POST /servers/:id/invites — mint a fresh invite code (manage_invites). */
+  /** POST /servers/:id/invites — mint a fresh invite code. Staff
+   *  (manage_invites) always may; regular members per the owner's
+   *  `invite_create_mode` policy ('all' / 'roles', migration 0356), subject
+   *  to the per-creator active-invite cap. Same route for the console and
+   *  the member-facing panel so the policy check can't fork. */
   app.post<{ Params: { id: string }; Body: unknown }>("/servers/:id/invites", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
-    const gate = await requireServerPermission(req, req.params.id, "manage_invites");
-    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const a = await serverAuthority(db, me, req.params.id);
+    if (!a.server) { reply.code(404); return { error: "no server" }; }
+    const staff = isInviteStaff(a);
+    if (!staff && !(await canCreateServerInvite(db, a, me.id))) {
+      reply.code(403); return { error: tFor(me.locale, "errors:server.invites.createNotAllowed") };
+    }
     let body: z.infer<typeof createInviteBody>;
     try { body = createInviteBody.parse(req.body ?? {}); }
     catch { reply.code(400); return { error: "invalid body" }; }
+    if (!staff) {
+      const live = await countLiveInvitesBy(db, a.server.id, me.id);
+      if (live >= SERVER_MEMBER_INVITE_CAP) {
+        reply.code(409);
+        return { error: tFor(me.locale, "errors:server.invites.capReached", { cap: SERVER_MEMBER_INVITE_CAP }) };
+      }
+    }
     const expiresAt = body.expiresInHours ? new Date(Date.now() + body.expiresInHours * 3_600_000) : null;
     const id = nanoid();
     const code = mintInviteCode();
     await db.insert(serverInvites).values({
       id,
-      serverId: gate.server.id,
+      serverId: a.server.id,
       code,
-      createdByUserId: gate.me.id,
+      createdByUserId: me.id,
       maxUses: body.maxUses ?? null,
       expiresAt,
     });
     await auditServer(db, {
-      serverId: gate.server.id, actorUserId: gate.me.id, action: "server_invite_create",
-      metadata: { slug: gate.server.slug, code, maxUses: body.maxUses ?? null, expiresAt: expiresAt ? +expiresAt : null },
+      serverId: a.server.id, actorUserId: me.id, action: "server_invite_create",
+      metadata: {
+        slug: a.server.slug, code, maxUses: body.maxUses ?? null,
+        expiresAt: expiresAt ? +expiresAt : null,
+        ...(staff ? {} : { memberCreated: true }),
+      },
     });
     const row = (await db.select().from(serverInvites).where(eq(serverInvites.id, id)).limit(1))[0]!;
-    return { invite: inviteWire(row, requestOrigin(req) ?? undefined) };
+    return { invite: inviteWire(row, requestOrigin(req) ?? undefined, me.username) };
   });
 
-  /** GET /servers/:id/invites — list LIVE invites (non-revoked, non-expired)
+  /** GET /servers/:id/invites/mine — the caller's own LIVE invites plus
+   *  whether they may create at all (drives the member-facing "Invite
+   *  people" affordance). The caller's own live invites are ALWAYS
+   *  returned, even when the policy no longer admits them — a tightened
+   *  who-can-create setting must not strand previously minted links
+   *  invisible and unrevocable (DELETE always allows revoking one's own).
+   *  Liveness matches countLiveInvitesBy: spent invites free their slot. */
+  app.get<{ Params: { id: string } }>("/servers/:id/invites/mine", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const a = await serverAuthority(db, me, req.params.id);
+    if (!a.server) { reply.code(404); return { error: "no server" }; }
+    const staff = isInviteStaff(a);
+    const canCreate = staff || (await canCreateServerInvite(db, a, me.id));
+    const now = Date.now();
+    const rows = await db.select().from(serverInvites)
+      .where(and(
+        eq(serverInvites.serverId, a.server.id),
+        eq(serverInvites.createdByUserId, me.id),
+        isNull(serverInvites.revokedAt),
+        sql`(${serverInvites.expiresAt} is null or ${serverInvites.expiresAt} > ${now})`,
+        sql`(${serverInvites.maxUses} is null or ${serverInvites.usedCount} < ${serverInvites.maxUses})`,
+      ))
+      .orderBy(desc(serverInvites.createdAt));
+    const origin = requestOrigin(req) ?? undefined;
+    return {
+      canCreate,
+      staff,
+      cap: SERVER_MEMBER_INVITE_CAP,
+      invites: rows.map((r) => inviteWire(r, origin, me.username)),
+    };
+  });
+
+  /** GET /servers/:id/invites — list LIVE invites (non-revoked, non-expired,
+   *  not used up — the same liveness countLiveInvitesBy and redemption use)
    *  with usage counts (manage_invites). */
   app.get<{ Params: { id: string } }>("/servers/:id/invites", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
@@ -152,29 +218,45 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         eq(serverInvites.serverId, gate.server.id),
         isNull(serverInvites.revokedAt),
         sql`(${serverInvites.expiresAt} is null or ${serverInvites.expiresAt} > ${now})`,
+        sql`(${serverInvites.maxUses} is null or ${serverInvites.usedCount} < ${serverInvites.maxUses})`,
       ))
       .orderBy(desc(serverInvites.createdAt));
+    // Creator attribution for the console list (member-created invites show
+    // who minted them; a deleted creator reads as null).
+    const creatorIds = [...new Set(rows.map((r) => r.createdByUserId).filter((x): x is string => !!x))];
+    const creators = creatorIds.length
+      ? await db.select({ id: users.id, username: users.username }).from(users).where(inArray(users.id, creatorIds))
+      : [];
+    const nameBy = new Map(creators.map((c) => [c.id, c.username]));
     const origin = requestOrigin(req) ?? undefined;
-    return { invites: rows.map((r) => inviteWire(r, origin)) };
+    return { invites: rows.map((r) => inviteWire(r, origin, r.createdByUserId ? nameBy.get(r.createdByUserId) ?? null : null)) };
   });
 
-  /** DELETE /servers/:id/invites/:code — revoke an invite (manage_invites). */
+  /** DELETE /servers/:id/invites/:code — revoke an invite. Staff
+   *  (manage_invites) may revoke ANY invite; a regular member only their
+   *  own. */
   app.delete<{ Params: { id: string; code: string } }>("/servers/:id/invites/:code", async (req, reply) => {
     if (!(await serversLive(reply))) return { error: "not found" };
-    const gate = await requireServerPermission(req, req.params.id, "manage_invites");
-    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const a = await serverAuthority(db, me, req.params.id);
+    if (!a.server) { reply.code(404); return { error: "no server" }; }
     const existing = (await db.select().from(serverInvites)
       .where(and(
-        eq(serverInvites.serverId, gate.server.id),
+        eq(serverInvites.serverId, a.server.id),
         eq(serverInvites.code, req.params.code),
         isNull(serverInvites.revokedAt),
       )).limit(1))[0];
     if (!existing) { reply.code(404); return { error: "no such invite" }; }
+    const staff = isInviteStaff(a);
+    if (!staff && existing.createdByUserId !== me.id) {
+      reply.code(403); return { error: tFor(me.locale, "errors:server.invites.revokeNotYours") };
+    }
     await db.update(serverInvites).set({ revokedAt: new Date() })
       .where(eq(serverInvites.id, existing.id));
     await auditServer(db, {
-      serverId: gate.server.id, actorUserId: gate.me.id, action: "server_invite_revoke",
-      metadata: { slug: gate.server.slug, code: existing.code },
+      serverId: a.server.id, actorUserId: me.id, action: "server_invite_revoke",
+      metadata: { slug: a.server.slug, code: existing.code },
     });
     return { ok: true };
   });
@@ -205,6 +287,12 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     bannerHeight: z.number().int().min(48).max(240).nullable().optional(),
     publicBrowsing: z.boolean().optional(),
     joinMode: z.enum(["open", "application", "invite"]).optional(),
+    /** Who may mint invite links (migration 0356): staff (default) /
+     *  roles (the usergroups in inviteCreateGroupIds) / all members. */
+    inviteCreateMode: z.enum(["staff", "roles", "all"]).optional(),
+    /** Usergroup ids for the 'roles' mode; clamped server-side to groups that
+     *  actually belong to this server. Empty array clears the list. */
+    inviteCreateGroupIds: z.array(z.string().trim().min(1).max(64)).max(SERVER_MAX_USERGROUPS).optional(),
     applicationPrompt: z.string().trim().max(300).nullable().optional(),
     /** "18+ community" flag (age plan, Phase 2). Adults only to change; the
      *  system server is refused below; flipping ON evicts minor members. */
@@ -266,6 +354,16 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         reply.code(409); return { error: tFor(gate.me.locale, "errors:server.servers.homeCantBeGated") };
       }
       update.joinMode = body.joinMode;
+    }
+    // Invite-creation policy (migration 0356). Owner-gated by riding this
+    // manage_appearance PATCH; the group list is clamped to THIS server's
+    // usergroups so a foreign group id can never grant creation here.
+    if (body.inviteCreateMode !== undefined) update.inviteCreateMode = body.inviteCreateMode;
+    if (body.inviteCreateGroupIds !== undefined) {
+      const own = new Set((await db.select({ id: serverUsergroups.id }).from(serverUsergroups)
+        .where(eq(serverUsergroups.serverId, gate.server.id))).map((g) => g.id));
+      const kept = body.inviteCreateGroupIds.filter((gid) => own.has(gid));
+      update.inviteCreateGroupIds = kept.length ? JSON.stringify(kept) : null;
     }
     // "18+ community" flag (age plan, Phase 2). The system/default server is
     // locked SFW — the flagship partition puts the adult side in a SIBLING
@@ -504,6 +602,13 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       postMode: body.postMode ?? "everyone",
       richTextDisabled: body.richTextDisabled ?? false,
     });
+    // Creating a room AS an info room can be the install's first: the
+    // presence-attribution short-circuit caches "no info rooms exist" and
+    // must learn otherwise now, not at TTL expiry.
+    if ((body.postMode ?? "everyone") === "staff") {
+      const { invalidateInfoRoomsExistCache } = await import("../lib/postMode.js");
+      invalidateInfoRoomsExistCache(db);
+    }
     // Optional 18+ channel alongside the fresh room. Failure here is
     // non-fatal for the create itself (the room exists); surface the
     // channel error so the admin can retry from the editor's checkbox.
@@ -1351,6 +1456,18 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     }
     await db.delete(serverMembers)
       .where(and(eq(serverMembers.serverId, gate.server.id), eq(serverMembers.userId, req.params.userId)));
+    // Invites die with the membership: a removed member's live invite links
+    // stop working immediately. Best-effort — the removal already committed.
+    try {
+      const revoked = await revokeInvitesOfMember(db, gate.server.id, req.params.userId);
+      if (revoked.length) {
+        await auditServer(db, {
+          serverId: gate.server.id, actorUserId: gate.me.id, action: "server_invite_revoke",
+          targetUserId: req.params.userId,
+          metadata: { slug: gate.server.slug, codes: revoked, reason: "membership_ended" },
+        });
+      }
+    } catch { /* best-effort */ }
     await auditServer(db, {
       serverId: gate.server.id, actorUserId: gate.me.id, action: "server_member_remove",
       targetUserId: req.params.userId, metadata: { slug: gate.server.slug },

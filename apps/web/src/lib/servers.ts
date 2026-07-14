@@ -199,6 +199,114 @@ export async function fetchPublicServer(slug: string): Promise<PublicServerLandi
   return (await r.json()) as PublicServerLanding;
 }
 
+/**
+ * Anonymous landing data for a server invite link (`GET /servers/invite/:code`)
+ * — the `/i/<code>` page. Same public-safe shape as {@link PublicServerLanding}
+ * plus the code + slug; a dead/revoked/expired code (or an archived/moderated
+ * server) throws "not found" and the page renders its graceful invalid state.
+ */
+export interface PublicServerInvite extends Omit<PublicServerLanding, "world"> {
+  code: string;
+  isNsfw: boolean;
+  world?: { id: string; slug: string; name: string } | null;
+}
+
+export async function fetchServerInvite(code: string): Promise<PublicServerInvite> {
+  const r = await fetch(`/servers/invite/${encodeURIComponent(code)}`, { credentials: "include" });
+  if (!r.ok) throw new Error(r.status === 404 ? "not found" : i18n.t("errors:servers.communityLoad", { status: r.status }));
+  return (await r.json()) as PublicServerInvite;
+}
+
+/** Result of the one-click invite join. `alreadyMember` short-circuits without
+ *  consuming a use. Refusals throw with the server's localized message
+ *  (age-gated, banned, application-required, dead code). */
+export interface InviteJoinResult {
+  ok: true;
+  alreadyMember: boolean;
+  serverId: string;
+  slug: string;
+  name: string;
+}
+
+export async function joinServerInvite(code: string): Promise<InviteJoinResult> {
+  const r = await fetch(`/servers/invite/${encodeURIComponent(code)}/join`, {
+    method: "POST",
+    credentials: "include",
+  });
+  return jsonOrThrow<InviteJoinResult>(r);
+}
+
+/** One invite link on the wire (console list + the member panel). `link` is
+ *  the full shareable URL (origin + /i/<code>); null when the server couldn't
+ *  resolve its own origin. */
+export interface ServerInviteWire {
+  code: string;
+  link: string | null;
+  maxUses: number | null;
+  usedCount: number;
+  expiresAt: number | null;
+  createdAt: number;
+  createdByUserId: string | null;
+  createdByUsername: string | null;
+}
+
+/** GET /servers/:id/invites — every live invite (staff, manage_invites). */
+export async function listServerInvites(serverId: string): Promise<ServerInviteWire[]> {
+  const r = await fetch(`/servers/${encodeURIComponent(serverId)}/invites`, { credentials: "include" });
+  const j = await jsonOrThrow<{ invites: ServerInviteWire[] }>(r);
+  return j.invites;
+}
+
+/** GET /servers/:id/invites/mine — the caller's own live invites plus whether
+ *  they may create at all (drives the member-facing "Invite people" button).
+ *  `invites` is always the caller's live links, even when `canCreate` is
+ *  false (a tightened policy must not hide existing links from their
+ *  creator). Rejects on failure so callers can tell a load error apart from
+ *  a genuine "can't create" — a fabricated cap-0 shape would masquerade as
+ *  a policy limit. */
+export interface MyServerInvites {
+  canCreate: boolean;
+  staff: boolean;
+  cap: number;
+  invites: ServerInviteWire[];
+}
+
+export async function fetchMyServerInvites(serverId: string): Promise<MyServerInvites> {
+  const r = await fetch(`/servers/${encodeURIComponent(serverId)}/invites/mine`, { credentials: "include" });
+  return jsonOrThrow<MyServerInvites>(r);
+}
+
+/** POST /servers/:id/invites — mint an invite. Server enforces the owner's
+ *  who-can-create policy + the non-staff cap. */
+export async function createServerInvite(
+  serverId: string,
+  input: { maxUses?: number | null; expiresInHours?: number | null },
+): Promise<ServerInviteWire> {
+  const r = await fetch(`/servers/${encodeURIComponent(serverId)}/invites`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(input),
+  });
+  const j = await jsonOrThrow<{ invite: ServerInviteWire }>(r);
+  return j.invite;
+}
+
+/** DELETE /servers/:id/invites/:code — staff revoke any; members their own. */
+export async function revokeServerInvite(serverId: string, code: string): Promise<void> {
+  const r = await fetch(`/servers/${encodeURIComponent(serverId)}/invites/${encodeURIComponent(code)}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  await jsonOrThrow(r);
+}
+
+/** The full shareable URL for an invite code from THIS browser's origin —
+ *  the fallback when the server couldn't resolve one from headers. */
+export function inviteLinkFor(invite: { code: string; link: string | null }): string {
+  return invite.link ?? `${window.location.origin}/i/${invite.code}`;
+}
+
 /** Pull `{ error }` out of a non-OK response, falling back to the status. */
 async function jsonOrThrow<T>(r: Response): Promise<T> {
   const j = (await r.json().catch(() => null)) as ({ error?: string } & T) | null;

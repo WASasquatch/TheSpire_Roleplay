@@ -2114,9 +2114,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                   characterId={target.kind === "character" ? target.id : null}
                 />
 
-                {/* Read-only birth date (age plan Phase 0). Master-only,
-                    the date is account-level. No edit control on purpose:
-                    corrections go through staff. */}
+                {/* Birth date (age plan Phase 0). Master-only, the date is
+                    account-level. Read-only once set (corrections go
+                    through staff); legacy accounts with no date on file
+                    get a one-time set flow with an explicit confirm. */}
                 {!isCharacter ? <BirthDateRow /> : null}
                 {/* Rank-visibility toggles + metric privacy. Both
                     are per-master-account preferences; characters

@@ -98,7 +98,10 @@
     "profileView": "Estás intentando ver el perfil de <1>{{name}}</1>. Inicia sesión o regístrate para continuar.",
     "worldPrivate": "<0>{{name}}</0> es un mundo <2>privado</2>. Inicia sesión o regístrate para verlo.",
     "returnForumRegister": "Estás creando una cuenta en <1>{{siteName}}</1> para acceder al foro <3>{{forum}}</3>. En cuanto te registres, te llevaremos directo de vuelta.",
-    "returnForumLogin": "Después de iniciar sesión, te regresaremos al foro <1>{{forum}}</1>."
+    "returnForumLogin": "Después de iniciar sesión, te regresaremos al foro <1>{{forum}}</1>.",
+    "inviteRegister": "Estás creando una cuenta en <1>{{siteName}}</1> para unirte a <3>{{community}}</3>. En cuanto te registres, te llevaremos directo allí.",
+    "inviteLogin": "Después de iniciar sesión, te llevaremos a <1>{{community}}</1>.",
+    "inviteCommunityFallback": "la comunidad que te invitó"
   },
   "googleFinish": {
     "heading": "termina tu recipiente",
@@ -168,8 +171,9 @@
     "tabFaq": "FAQ",
     "tabRules": "Reglas",
     "tabForums": "Foros",
-    "joinTitle": "Únete a la historia",
-    "joinBody": "Entra a salas de rol en vivo, crea un elenco de personajes, explora mundos compartidos y escribe junto a toda una comunidad.",
+    "joinKicker": "Acabamos de abrir las puertas",
+    "joinTitle": "Conviértete en miembro fundador",
+    "joinBody": "Esta comunidad es completamente nueva, y quienes escriben aquí ahora deciden en qué se convierte. Únete hoy, trae a tus personajes y marca el tono para todos los que lleguen después de ti.",
     "createAccount": "Crea tu cuenta gratis",
     "reassurance": "Gratis para siempre. Sin descargas, sin tarjeta. Entra a una sala en menos de un minuto.",
     "onlineNow_one": "<0>{{formatted}}</0> jugador de rol en línea ahora",
@@ -177,8 +181,9 @@
     "onlineNow_many": "<0>{{formatted}}</0> jugadores de rol en línea ahora",
     "google": "Google",
     "signInWithGoogle": "Iniciar sesión con Google",
+    "hostKicker": "Tu espacio, tus reglas",
     "hostTitle": "Crea tu propia comunidad",
-    "hostBody": "Administra tu propia comunidad: varios servidores, categorías de salas organizadas con íconos, salas informativas solo para el equipo cuyo historial nunca caduca, salas restringidas por rol con roles que los miembros eligen por sí mismos, el lore de tu mundo integrado, chat con texto enriquecido, emojis y comandos personalizados, y su propia economía. Empieza gratis, directo en tu navegador.",
+    "hostBody": "Administra tu propia comunidad: categorías de salas organizadas con íconos, salas informativas solo para el equipo cuyo historial nunca caduca, roles con insignias que los miembros eligen por sí mismos, el lore de tu mundo integrado, chat con texto enriquecido, emojis y comandos personalizados, su propia economía, y un solo enlace que invita a tus amistades directo a tus salas. Empieza gratis, directo en tu navegador.",
     "startCommunity": "Crea una comunidad",
     "seeLiveForum": "Mira un foro en vivo →",
     "bringCommunity": "Trae tu comunidad a {{siteName}}",
@@ -188,7 +193,7 @@
       "Salas de chat con texto enriquecido en categorías organizadas con íconos",
       "Salas informativas solo para el equipo cuyo historial nunca caduca, y salas restringidas por rol con roles que los miembros eligen por sí mismos",
       "El lore de tu mundo integrado, más economía y cosméticos propios",
-      "Emojis y comandos personalizados, y herramientas de moderación que tú controlas"
+      "Invitaciones de un solo enlace, emojis y comandos personalizados, y herramientas de moderación que tú controlas"
     ],
     "ownForumsTitle": "Tus propios foros",
     "ownForums": [
@@ -216,7 +221,9 @@
     "publicRoomsOpen_one": "sala pública abierta",
     "publicRoomsOpen_other": "salas públicas abiertas",
     "publicRoomsOpen_many": "salas públicas abiertas",
-    "languagePicker": "Idioma"
+    "languagePicker": "Idioma",
+    "betaChip": "Beta",
+    "betaLine": "{{siteName}} es joven y crece rápido. Espera novedades cada semana."
   },
   "features": {
     "kicker": "Lo que puedes hacer aquí",
@@ -241,11 +248,11 @@
       "communities": {
         "title": "Comunidades",
         "tagline": "Crea tu propia comunidad o únete a una",
-        "desc": "Además del espacio nativo de The Spire, cualquiera puede administrar su propia comunidad: varios servidores con categorías de salas organizadas con íconos, salas informativas solo para el equipo cuyo historial nunca caduca, salas restringidas por rol con roles que los miembros eligen por sí mismos, el lore de tu mundo integrado, chat con texto enriquecido, emojis y comandos personalizados, y su propia economía. Adminístrala a tu manera o únete a comunidades creadas por otros.",
+        "desc": "Además del espacio nativo de The Spire, cualquiera puede administrar su propia comunidad: categorías de salas organizadas con íconos, salas informativas solo para el equipo cuyo historial nunca caduca, roles con insignias que los miembros eligen por sí mismos, el lore de tu mundo en la página de tu comunidad, chat con texto enriquecido, emojis y comandos personalizados, y su propia economía. Adminístrala a tu manera o únete a comunidades creadas por otros.",
         "points": [
           "Categorías de salas con íconos, salas informativas y salas restringidas por rol",
           "Chat con texto enriquecido, con emojis y comandos personalizados",
-          "El lore de tu mundo integrado",
+          "Un solo enlace de invitación que lleva a tus amistades directo a tus salas",
           "Economía por comunidad y moderación que tú controlas"
         ],
         "ctaLabel": "Crea una comunidad"
@@ -318,8 +325,9 @@
       "community": {
         "title": "Encuentra tu círculo",
         "tagline": "Hecho para comunidades que perduran",
-        "desc": "Listas de amigos, presencia por personaje y herramientas de seguridad como el bloqueo y la lista de ignorados mantienen sana la comunidad. Temas que van de lo medieval a la ciencia ficción hacen que te sientas en casa.",
+        "desc": "Listas de amigos, presencia por personaje y herramientas de seguridad como el bloqueo y la lista de ignorados mantienen sana la comunidad. Quien recién llega recibe una bienvenida personal y aterriza en una sala con vida desde su primera visita. Temas que van de lo medieval a la ciencia ficción hacen que te sientas en casa.",
         "points": [
+          "Una bienvenida personal que te deja en una sala con vida desde el primer día",
           "Amigos y presencia en línea",
           "Herramientas de bloqueo, ignorados y moderación",
           "Temas claros y oscuros para todos los gustos + personaliza el tuyo"

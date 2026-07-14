@@ -89,6 +89,10 @@ export async function maybeFireFirstWords(
       room.type === "public" &&
       !room.forumId &&
       room.replyMode !== "nested" &&
+      // Info rooms (post_mode 'staff') never announce: only staff can speak
+      // there, and the "say hi" deep link would drop responders into a
+      // room they can't reply in (and that displays nobody).
+      room.postMode !== "staff" &&
       !(await effectiveRoomNsfw(db, room)) &&
       !(await roleLockedRoomIdsForServer(db, [room.id])).has(room.id);
 

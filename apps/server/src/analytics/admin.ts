@@ -5,6 +5,10 @@
  *                                 bot-vs-human split.
  *   GET /admin/analytics/inapp  — top modals / sub-tabs / rooms / servers /
  *                                 features + a per-day event series.
+ *   GET /admin/analytics/engagement — durable per-day series (registrations,
+ *                                 active users, messages, forum posts), D1/D7
+ *                                 retention cohorts and the per-feature /
+ *                                 per-server ledger breakdown (engagement.ts).
  *
  * Both are gated by `view_admin_analytics` via `requireSessionPermission` (same
  * helper the rest of /admin uses; the /admin preHandler in admin/routes.ts has
@@ -36,6 +40,7 @@ import {
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { requireSessionPermission } from "../auth/requireSessionPermission.js";
+import { computeEngagementWindow } from "./engagement.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -327,6 +332,140 @@ export async function registerAnalyticsAdminRoutes(app: FastifyInstance, db: Db)
         serverPages: topOf("serverPage", serverPageL),
         stories: topOf("story", storyL),
         faqs: topOf("faq", faqL),
+      };
+    },
+  );
+
+  /* ================= DURABLE ENGAGEMENT metrics ================= */
+  // Reads the engagement rollup families (engagement.ts) and tops "today"
+  // up live from the same append-only sources. No bot dimension: every
+  // source row is authenticated account activity. Retention values are
+  // retained-user COUNTS (the client divides by that day's registrations);
+  // a cohort whose window hasn't closed yet reports null, never 0.
+  app.get<{ Querystring: { range?: string } }>(
+    "/admin/analytics/engagement",
+    async (req, reply) => {
+      if (!(await requirePermission(req, reply, "view_admin_analytics"))) return;
+      const range = parseRange(req.query.range);
+      const now = Date.now();
+      const tStart = startOfUtcDayMs(now);
+      const fromDay = dayKey(tStart - (range - 1) * DAY_MS);
+
+      const dailyRows = await db
+        .select({
+          day: analyticsDaily.day,
+          metric: analyticsDaily.metric,
+          dim1: analyticsDaily.dim1,
+          dim2: analyticsDaily.dim2,
+          count: analyticsDaily.count,
+        })
+        .from(analyticsDaily)
+        .where(
+          and(
+            gte(analyticsDaily.day, fromDay),
+            inArray(analyticsDaily.metric, [
+              "registration",
+              "activeUser",
+              "message",
+              "forumPost",
+              "feature",
+              "retention",
+            ]),
+          ),
+        );
+
+      interface DayBucket {
+        registrations: number;
+        actives: number;
+        messages: number;
+        forumPosts: number;
+        /** null = no retention row rolled up for the cohort (distinct from
+         *  an explicit zero-retained row, see rollupRetention's allowZero). */
+        d1: number | null;
+        d7: number | null;
+      }
+      const series = new Map<string, DayBucket>();
+      for (let i = range - 1; i >= 0; i--) {
+        series.set(dayKey(tStart - i * DAY_MS), {
+          registrations: 0,
+          actives: 0,
+          messages: 0,
+          forumPosts: 0,
+          d1: null,
+          d7: null,
+        });
+      }
+      // Per (bucket, serverId) feature tallies over the window.
+      const features = new Map<string, { bucket: string; serverId: string; count: number }>();
+      const bumpFeature = (bucket: string, serverId: string, n: number) => {
+        const k = `${bucket}|${serverId}`;
+        const cur = features.get(k) ?? { bucket, serverId, count: 0 };
+        cur.count += n;
+        features.set(k, cur);
+      };
+
+      for (const r of dailyRows) {
+        const s = series.get(r.day);
+        if (!s) continue;
+        if (r.metric === "registration") s.registrations += r.count;
+        else if (r.metric === "activeUser") s.actives += r.count;
+        else if (r.metric === "message") s.messages += r.count;
+        else if (r.metric === "forumPost") s.forumPosts += r.count;
+        else if (r.metric === "feature") bumpFeature(r.dim1 ?? "other", r.dim2 ?? "", r.count);
+        else if (r.metric === "retention") {
+          if (r.dim1 === "d1") s.d1 = (s.d1 ?? 0) + r.count;
+          else if (r.dim1 === "d7") s.d7 = (s.d7 ?? 0) + r.count;
+        }
+      }
+
+      /* ----- live "today" top-up from the append-only sources ----- */
+      const today = await computeEngagementWindow(db, tStart, now);
+      const todayBucket = series.get(dayKey(now));
+      if (todayBucket) {
+        todayBucket.registrations = today.registrations;
+        todayBucket.actives = today.actives;
+        todayBucket.messages = today.messages.reduce((a, r) => a + r.n, 0);
+        todayBucket.forumPosts = today.forumPosts.reduce((a, r) => a + r.n, 0);
+      }
+      for (const r of today.features) bumpFeature(r.dim1, r.serverId, r.n);
+
+      /* ----- resolve server names for the per-server feature dim ----- */
+      const serverIds = [...new Set([...features.values()].map((f) => f.serverId).filter(Boolean))];
+      const serverRows = serverIds.length
+        ? await db
+            .select({ id: servers.id, name: servers.name })
+            .from(servers)
+            .where(inArray(servers.id, serverIds))
+        : [];
+      const serverLabel = new Map(serverRows.map((r) => [r.id, r.name]));
+
+      return {
+        range,
+        series: [...series.entries()].map(([day, v]) => ({
+          day,
+          registrations: v.registrations,
+          actives: v.actives,
+          messages: v.messages,
+          forumPosts: v.forumPosts,
+        })),
+        // Cohort rows: counts + null while the D+1 / D+7 window is open.
+        // A closed cohort with NO rolled-up row (rollup gap longer than the
+        // retention sweep's lookback) also stays null — never a false 0.
+        retention: [...series.entries()].map(([day, v]) => {
+          const cohortStart = Date.parse(`${day}T00:00:00Z`);
+          const d1Closed = now >= cohortStart + 2 * DAY_MS;
+          const d7Closed = now >= cohortStart + 8 * DAY_MS;
+          return {
+            day,
+            registrations: v.registrations,
+            d1: d1Closed ? v.d1 : null,
+            d7: d7Closed ? v.d7 : null,
+          };
+        }),
+        features: [...features.values()].sort((a, b) => b.count - a.count),
+        servers: serverIds
+          .map((id) => ({ id, label: serverLabel.get(id) ?? id }))
+          .sort((a, b) => a.label.localeCompare(b.label)),
       };
     },
   );

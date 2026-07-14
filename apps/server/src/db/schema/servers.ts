@@ -85,6 +85,19 @@ export const servers = sqliteTable(
     /** Owner-set prompt above the membership application's answer field. */
     applicationPrompt: text("application_prompt"),
     /**
+     * Who may mint invite links for this server (migration 0356):
+     * 'staff' (default — manage_invites holders only, the pre-existing
+     * behavior), 'roles' (members of the usergroups in
+     * inviteCreateGroupIds), or 'all' (any member).
+     */
+    inviteCreateMode: text("invite_create_mode", { enum: ["staff", "roles", "all"] })
+      .notNull()
+      .default("staff"),
+    /** JSON string[] of server_usergroups ids allowed to mint invites under
+     *  the 'roles' mode (migration 0356). NULL = none selected. No FK by
+     *  design — a deleted group's id is skipped by the policy check. */
+    inviteCreateGroupIds: text("invite_create_group_ids"),
+    /**
      * Community world link (migration 0346). The lore world this server
      * brands itself with. Server payloads resolve it per viewer through the
      * world's own visibility gates (a private/unlisted world reads as NULL
@@ -523,10 +536,14 @@ export type DbUserServerLastRoom = typeof userServerLastRoom.$inferSelect;
  * Scheduled community events (calendar) per server, plus RSVPs. An event is
  * scoped to a server (FK cascade), created by a member optionally voicing a
  * character; starts/ends are ms epoch (ends nullable = open-ended). Optional
- * deep links to a room/forum. `status` moves scheduled -> live -> ended /
- * cancelled. `reminderLeadMs`/`reminderFiredAt` drive an opt-in "starting
- * soon" ping fired at most once. `recurrenceJson` is RESERVED for future
- * repeating events. Gated by the `manage_events` SERVER permission. */
+ * deep links to a room / chat message / forum / external URL (at most ONE of
+ * the four is set — enforced at write). `status` moves scheduled -> live ->
+ * ended / cancelled; the reminder sweep auto-flips scheduled->live->ended at
+ * occurrence boundaries (migration 0358). `reminderLeadMs`/`reminderFiredAt`
+ * drive an opt-in "starting soon" ping fired at most once; recurring events
+ * use `reminderFiredFor` (the occurrence start last reminded) instead.
+ * `recurrenceJson` holds the preset repeat rule (shared EventRecurrence
+ * shape); NULL = one-off. Gated by the `manage_events` SERVER permission. */
 export const serverEvents = sqliteTable(
   "server_events",
   {
@@ -546,13 +563,21 @@ export const serverEvents = sqliteTable(
     endsAt: integer("ends_at"),
     linkedRoomId: text("linked_room_id").references(() => rooms.id, { onDelete: "set null" }),
     linkedForumId: text("linked_forum_id").references(() => forums.id, { onDelete: "set null" }),
+    /** `<roomId>:<messageId>` chat-message link. NO FK: messages prune on
+     *  retention; a dead link is handled at click time (migration 0358). */
+    linkedMessageId: text("linked_message_id"),
+    /** https-only external destination, validated at write (migration 0358). */
+    externalUrl: text("external_url"),
     /** scheduled | live | ended | cancelled. */
     status: text("status").notNull().default("scheduled"),
     /** Opt-in reminder lead time in ms before startsAt; null = no reminder. */
     reminderLeadMs: integer("reminder_lead_ms"),
     /** Stamped when the reminder fired so it only fires once; null = not yet. */
     reminderFiredAt: integer("reminder_fired_at"),
-    /** RESERVED for future repeating-event rules (unused today). */
+    /** Occurrence start (ms epoch) the reminder last fired for — the
+     *  per-occurrence guard for RECURRING events (migration 0358). */
+    reminderFiredFor: integer("reminder_fired_for"),
+    /** Preset repeat rule (shared EventRecurrence JSON); NULL = one-off. */
     recurrenceJson: text("recurrence_json"),
     createdAt: ts("created_at"),
     updatedAt: ts("updated_at"),

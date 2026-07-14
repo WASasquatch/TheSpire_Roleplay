@@ -319,6 +319,37 @@ export function SplashLanding({ onNavigate }: Props) {
           >
             {t("landing.tagline")}
           </p>
+          {/* Beta badge (admin-gated + version-gated): the /site payload sends
+              betaBadgeEnabled ONLY while the admin toggle is on AND the app
+              version is below 1.0.0, so this whole block self-retires at
+              release with no client change. Colors are fixed (teal on a dark
+              scrim + shadowed white) like the rest of the hero because it
+              sits over the background art on BOTH palettes. */}
+          {branding.betaBadgeEnabled ? (
+            <div className="mt-2.5 flex flex-wrap items-center justify-center gap-x-2 gap-y-1">
+              <span
+                className="rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.25em]"
+                style={{
+                  color: "#8ee6e0",
+                  borderColor: "rgba(142, 230, 224, 0.65)",
+                  background: "rgba(8, 18, 24, 0.45)",
+                  textShadow: "0 1px 4px rgba(0, 0, 0, 0.8)",
+                }}
+              >
+                {t("landing.betaChip")}
+              </span>
+              <p
+                className="text-xs sm:text-sm"
+                style={{
+                  color: "rgba(255, 255, 255, 0.92)",
+                  textShadow:
+                    "0 2px 8px rgba(0, 0, 0, 0.85), 0 0 4px rgba(0, 0, 0, 0.6)",
+                }}
+              >
+                {t("landing.betaLine", { siteName })}
+              </p>
+            </div>
+          ) : null}
         </header>
 
         <div
@@ -367,6 +398,12 @@ export function SplashLanding({ onNavigate }: Props) {
                         "linear-gradient(120deg, rgb(var(--keep-action) / 0.12), rgb(var(--keep-panel) / 0.25) 55%, rgb(var(--keep-accent) / 0.1))",
                     }}
                   >
+                    {/* Founding-member kicker: this card owns the "brand-new
+                        community" story. Its HOST twin carries a kicker too so
+                        the side-by-side headers stay on the same baseline. */}
+                    <p className="mb-1.5 text-[11px] uppercase tracking-[0.3em] text-keep-action">
+                      {t("landing.joinKicker")}
+                    </p>
                     <div className="mb-2 flex items-center gap-2.5">
                       <div
                         aria-hidden
@@ -471,6 +508,9 @@ export function SplashLanding({ onNavigate }: Props) {
                         "linear-gradient(120deg, rgb(var(--keep-accent) / 0.12), rgb(var(--keep-panel) / 0.25) 55%, rgb(var(--keep-action) / 0.1))",
                     }}
                   >
+                    <p className="mb-1.5 text-[11px] uppercase tracking-[0.3em] text-keep-accent">
+                      {t("landing.hostKicker")}
+                    </p>
                     <div className="mb-2 flex items-center gap-2.5">
                       <div
                         aria-hidden

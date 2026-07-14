@@ -311,6 +311,9 @@
     "createRoomAria": "Crear una sala",
     "createRoomTitle": "Crear una sala nueva",
     "new": "Nueva",
+    "invite": "Invitar",
+    "invitePeopleAria": "Invita gente a esta comunidad",
+    "invitePeopleTitle": "Invitar gente - crea y comparte enlaces de invitación a esta comunidad",
     "closeRoomsAria": "Cerrar salas",
     "closeRoomsTitle": "Cerrar el panel de salas",
     "noRooms": "(sin salas)",
@@ -333,6 +336,8 @@
     "idleTitle": "Inactivo, cerró o recargó la pestaña, puede volver",
     "online": "En línea",
     "idle": "Inactivo",
+    "readingInfo": "Leyendo una sala informativa",
+    "readingInfoTitle": "Inactivo, leyendo una sala informativa",
     "moderate": "Moderar a {{name}}",
     "kick": "Expulsar",
     "kickTitle": "Expulsar de esta sala (puede volver a entrar)",
@@ -572,7 +577,10 @@
     "minutesShort": "{{value}}m",
     "secondsShort": "{{value}}s",
     "pinMessageTitle": "Fijar este mensaje en la parte superior de la sala",
-    "pinMessage": "Fijar este mensaje"
+    "pinMessage": "Fijar este mensaje",
+    "copyMessageLink": "Copiar enlace del mensaje",
+    "linkCopied": "Enlace copiado",
+    "linkCopyFailed": "No se pudo copiar el enlace"
   },
   "markdown": {
     "composeChipTitle": "Toca para cargar este comando en tu cuadro de mensaje",

@@ -158,6 +158,14 @@ const credentialsSchema = z.object({
    * Bots that fill in every input post a value; we silently 400 them.
    */
   hp: z.string().max(200).optional(),
+  /**
+   * Server invite carry-through (migration 0356): the /i/<code> landing's
+   * register CTA threads the code here so the fresh account auto-joins the
+   * inviting community (through every join gate — see redeemInviteForSignup)
+   * and lands there first. A dead/refused code NEVER fails the signup; the
+   * client's post-boot join attempt surfaces the localized refusal.
+   */
+  inviteCode: z.string().trim().min(1).max(64).optional(),
 });
 
 /**
@@ -382,6 +390,28 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       }).onConflictDoNothing();
     } catch (err) {
       req.log.error({ err }, "default-server auto-join failed (non-fatal)");
+    }
+
+    // Invite carry-through (server invite links). Joins the inviting
+    // community through the full gate stack (age / moderation / bans /
+    // application-mode review) and stamps users.invited_server_id so the
+    // FIRST socket landing places the newcomer there. Strictly additive:
+    // default-server membership above and every global onboarding step are
+    // untouched, and no failure here may fail the signup.
+    if (body.inviteCode) {
+      try {
+        const { areServersEnabled } = await import("../settings.js");
+        if (areServersEnabled(settings)) {
+          const { redeemInviteForSignup } = await import("../servers/inviteLinks.js");
+          await redeemInviteForSignup(
+            db,
+            { id, role: isFirstUser ? "masteradmin" : "user", isAdult: isAdultUser({ birthdate: body.birthdate }) },
+            body.inviteCode,
+          );
+        }
+      } catch (err) {
+        req.log.error({ err }, "invite carry-through failed (non-fatal)");
+      }
     }
 
     const sessionToken = await issueSession(db, id, req);

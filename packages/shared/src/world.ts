@@ -325,6 +325,13 @@ export interface WorldDetail {
    * the full list via the editor's Applications pane instead.
    */
   viewerApplication: WorldApplicationEntry | null;
+  /**
+   * Light map rows (no image URLs / markers) so the viewer knows
+   * whether to show the Map tab and can render the map picker. Full
+   * map data is lazy-fetched per map. Optional so older payload
+   * shapes stay assignable; absent/empty means no Map tab.
+   */
+  maps?: WorldMapLight[];
 }
 
 /**
@@ -581,10 +588,15 @@ export const BUILTIN_WORLD_ENTITY_KINDS: readonly WorldEntityKindDef[] = [
   { key: "location", label: "Locations", description: "Places & sites", icon: "📍", color: "#e0894a", sortOrder: 2, builtIn: true },
   { key: "faction", label: "Factions", description: "Powers & alliances", icon: "⚑", color: "#9b6cff", sortOrder: 3, builtIn: true },
   { key: "item", label: "Items", description: "Relics & artifacts", icon: "⚔", color: "#d4a44c", sortOrder: 4, builtIn: true },
+  // poi/town keep the kind set 1:1 with the map-marker kinds, so every
+  // content-bearing marker type has a same-typed wiki page. Colors match
+  // BUILTIN_MAP_MARKER_KIND_META so wiki cards and pins read as one thing.
+  { key: "poi", label: "Points of interest", description: "Landmarks & sites", icon: "✪", color: "#e05c5c", sortOrder: 5, builtIn: true },
+  { key: "town", label: "Settlements", description: "Towns & cities", icon: "🏘", color: "#d4a44c", sortOrder: 6, builtIn: true },
 ] as const;
 
 /** Real entity kinds (world_entities rows) — excludes synthetic "lore". */
-export const BUILTIN_ENTITY_KIND_KEYS = ["npc", "location", "faction", "item"] as const;
+export const BUILTIN_ENTITY_KIND_KEYS = ["npc", "location", "faction", "item", "poi", "town"] as const;
 export type BuiltinWorldEntityKindKey = (typeof BUILTIN_ENTITY_KIND_KEYS)[number];
 
 /** A full typed entry (with body). */
@@ -668,3 +680,178 @@ export interface WorldSession {
 export type WorldSessionLight = Omit<WorldSession, "bodyHtml">;
 
 export const WORLD_SESSIONS_CAP = 2000;
+
+/* ----- Maps (interactive world maps + markers) ----- */
+
+export const WORLD_MAPS_CAP = 12;
+export const WORLD_MAP_MARKERS_CAP = 300;
+export const WORLD_MAP_NAME_MAX = 80;
+export const WORLD_MAP_DESCRIPTION_MAX = 2000;
+export const WORLD_MAP_MARKER_LABEL_MAX = 80;
+export const WORLD_MAP_MARKER_BODY_MAX = 2000;
+
+/** Stored (uploaded) map images allowed per world while the admin-gated
+ *  upload mode is on. External https links never count against it. */
+export const WORLD_MAP_UPLOADS_PER_WORLD_CAP = 10;
+/** Raw byte cap for one uploaded map image. */
+export const WORLD_MAP_UPLOAD_MAX_BYTES = 6 * 1024 * 1024;
+
+/**
+ * Marker-only kinds, valid alongside the world's entity kinds (built-in +
+ * synthetic lore + the per-world custom registry). "poi" and "town" are
+ * ALSO builtin entity kinds (kind parity: every content-bearing marker
+ * type has a same-typed wiki page); "label" stays a map-only text
+ * annotation with no wiki twin, and "event" ties a marker to a server
+ * event rather than a wiki entry.
+ */
+export const BUILTIN_MAP_MARKER_KINDS = ["poi", "town", "event", "label"] as const;
+export type BuiltinMapMarkerKind = (typeof BUILTIN_MAP_MARKER_KINDS)[number];
+
+/** Marker glyph size tiers, rendered as fixed pixel footprints. */
+export const WORLD_MAP_MARKER_SIZES = ["sm", "md", "lg", "xl"] as const;
+export type WorldMapMarkerSize = (typeof WORLD_MAP_MARKER_SIZES)[number];
+
+/**
+ * How a marker responds to map zoom:
+ *   - "fixed": constant on-screen size regardless of zoom (default; pins).
+ *   - "map":   scales with the map image (region labels, area badges).
+ */
+export type WorldMapMarkerScaleMode = "fixed" | "map";
+
+/**
+ * How a marker displays its label on the map:
+ *   - "icon": glyph pin only, label in tooltip/popover (default).
+ *   - "text": the label text only, no glyph.
+ *   - "both": glyph pin with the label text under it.
+ */
+export const WORLD_MAP_MARKER_LABEL_MODES = ["icon", "text", "both"] as const;
+export type WorldMapMarkerLabelMode = (typeof WORLD_MAP_MARKER_LABEL_MODES)[number];
+
+/**
+ * Light map row carried on WorldDetail so the viewer can decide whether
+ * to show the Map tab (and render the picker) without loading image or
+ * marker data. Markers + the image URL arrive via the lazy per-map GET.
+ */
+export interface WorldMapLight {
+  id: string;
+  worldId: string;
+  slug: string;
+  name: string;
+  sortOrder: number;
+}
+
+/** Full map row, returned by GET /worlds/:idOrSlug/maps/:idOrSlug. */
+export interface WorldMap extends WorldMapLight {
+  /** Sanitized HTML shown above/beside the map stage. */
+  description: string;
+  /** https image URL when imageKind === "external"; a same-origin
+   *  /uploads/worldmaps/… path when imageKind === "upload". */
+  imageUrl: string;
+  /** "external" = hotlinked https URL. "upload" = stored on this server's
+   *  disk via the admin-gated upload mode (site_settings
+   *  .world_map_uploads_enabled, default off). */
+  imageKind: "external" | "upload";
+  /** Natural image dimension hints, measured client-side on first load
+   *  and PATCHed back by editors. Null until measured. Marker math
+   *  always uses the live naturalWidth/naturalHeight of the loaded
+   *  image; these are stability hints only. */
+  width: number | null;
+  height: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * One marker on a world map. `x`/`y` are FRACTIONS (0..1) of the image's
+ * natural dimensions, so positions survive any zoom or container resize.
+ *
+ * Secret markers (`isSecret`) are DM-only: the server strips them from
+ * the payload for viewers who can't edit the world; editors see them
+ * rendered dimmed/dashed.
+ */
+export interface WorldMapMarker {
+  id: string;
+  mapId: string;
+  /** Entity kind key (built-in or custom), "lore", or a builtin marker
+   *  kind (poi/town/event/label). Drives layer toggles + default color. */
+  kind: string;
+  label: string;
+  x: number;
+  y: number;
+  /** Author-picked CSS color, clamped via safeCssColor at render. Null = kind color. */
+  color: string | null;
+  /** Curated lucide icon slug OR a short emoji glyph. Null = kind default. */
+  icon: string | null;
+  size: WorldMapMarkerSize;
+  scaleMode: WorldMapMarkerScaleMode;
+  /** On-map label display: glyph pin, text only, or both. */
+  labelMode: WorldMapMarkerLabelMode;
+  /** Zoom visibility band, in fit-relative zoom factor (1 = fitted, 8 = max).
+   *  Null = no bound on that side. */
+  minZoom: number | null;
+  maxZoom: number | null;
+  /** Optional knowledge-base entry link (kind + slug), opened via the
+   *  viewer's entry-flash flow. Both set or both null. */
+  entryKind: string | null;
+  entrySlug: string | null;
+  /** Optional server event link. The marker row only carries the id; the
+   *  event's details ride the map GET separately, resolved per viewer
+   *  against the owning community's membership (WorldMapMarkerEvent). */
+  eventId: string | null;
+  /** Sanitized HTML shown in the marker popover. */
+  body: string;
+  isSecret: boolean;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
+ * Per-viewer event details attached to the map GET when markers link server
+ * events (marker.eventId). The server resolves these against the viewer's
+ * authority in the OWNING community: only viewers who can participate there
+ * receive an entry — non-members and anonymous visitors get the bare marker
+ * and render a neutral members-only line instead. `startsAt`/`endsAt` are
+ * the NEXT occurrence for recurring series (the series anchor when none
+ * remains or the event is cancelled).
+ */
+export interface WorldMapMarkerEvent {
+  id: string;
+  serverId: string;
+  title: string;
+  status: "scheduled" | "live" | "ended" | "cancelled";
+  startsAt: number;
+  endsAt: number | null;
+  goingCount: number;
+}
+
+/**
+ * One pickable entry in the map editor's "Linked event" list: an upcoming
+ * (scheduled/live, ~90-day horizon; recurring series appear once at their
+ * next occurrence) event of a community featuring this world that the
+ * EDITOR can participate in.
+ */
+export interface WorldMapLinkableEvent {
+  id: string;
+  serverId: string;
+  serverName: string;
+  title: string;
+  icon: string | null;
+  status: "scheduled" | "live";
+  startsAt: number;
+  recurring: boolean;
+}
+
+/**
+ * One "this entry is placed on a map" reference, from the light reverse
+ * lookup GET /worlds/:idOrSlug/entity-map-refs. Powers the wiki's
+ * "Show on map" chip. The server applies the same secret-marker scrub as
+ * the map GET: non-editors never receive refs from secret markers.
+ */
+export interface WorldEntityMapRef {
+  entryKind: string;
+  entrySlug: string;
+  mapId: string;
+  mapSlug: string;
+  markerId: string;
+}

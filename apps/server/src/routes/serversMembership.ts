@@ -30,6 +30,7 @@ import {
 } from "../db/schema.js";
 import { hasPermission } from "../auth/permissions.js";
 import { serverAuthority } from "../servers/authority.js";
+import { findLiveInvite, redeemInviteMembership, revokeInvitesOfMember } from "../servers/inviteLinks.js";
 import { isServerModerationActive, serverModerationNotice } from "../servers/moderation.js";
 import { notifyUser, emitServersChanged } from "../servers/notifications.js";
 import {
@@ -299,6 +300,17 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
     if (!a.role) { reply.code(409); return { error: tFor(me.locale, "errors:server.membership.notMember") }; }
     await db.delete(serverMembers)
       .where(and(eq(serverMembers.serverId, a.server.id), eq(serverMembers.userId, me.id)));
+    // Invites die with the membership: a leaver's live invite links stop
+    // working the moment they go. Best-effort — the leave already committed.
+    try {
+      const revoked = await revokeInvitesOfMember(db, a.server.id, me.id);
+      if (revoked.length) {
+        await auditServer(db, {
+          serverId: a.server.id, actorUserId: me.id, action: "server_invite_revoke",
+          metadata: { slug: a.server.slug, codes: revoked, reason: "membership_ended" },
+        });
+      }
+    } catch { /* best-effort */ }
     return { ok: true };
   });
 
@@ -505,6 +517,104 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
       themeJson: s.themeJson,
       themeStyleKey: s.themeStyleKey,
     };
+  });
+
+  /* =========================================================
+   *  Public invite links (/i/<code>)
+   * ========================================================= */
+
+  /** Anonymous + cheap → same 120/min/IP cap the other public endpoints
+   *  (/site, /stats, /servers/public/:slug's registrar) use. */
+  const inviteInfoLimit = {
+    config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+  } as const;
+
+  /** GET /servers/invite/:code — ANONYMOUS public landing data for an invite
+   *  link, the face of `/i/<code>`. Mirrors /servers/public/:slug field-for-
+   *  field (same public-safe posture: an 18+ community's page swaps in its
+   *  public-safe banner or none, and the world ref resolves for the anonymous
+   *  viewer), but keys on the CODE — the code itself is the capability, so
+   *  unlisted/invite-only communities resolve here too. Dead codes, archived
+   *  servers, and moderated servers are all one uniform 404 (moderation
+   *  status is never disclosed). */
+  app.get<{ Params: { code: string } }>("/servers/invite/:code", inviteInfoLimit, async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const hit = await findLiveInvite(db, req.params.code);
+    if (!hit) { reply.code(404); return { error: "not found" }; }
+    const s = hit.server;
+    const owner = (await db
+      .select({ username: users.username })
+      .from(users)
+      .where(eq(users.id, s.ownerUserId))
+      .limit(1))[0];
+    // Same member-count rule as /servers/public/:slug: the system server is
+    // implicit-membership, so count the registered base.
+    const memberCount = s.isSystem
+      ? Number((await db.select({ n: sql<number>`count(*)` }).from(users).where(isNull(users.disabledAt)))[0]?.n ?? 0)
+      : Number((await db.select({ n: sql<number>`count(*)` }).from(serverMembers).where(eq(serverMembers.serverId, s.id)))[0]?.n ?? 0);
+    return {
+      code: hit.invite.code,
+      slug: s.slug,
+      name: s.name,
+      tagline: s.tagline,
+      descriptionHtml: s.descriptionHtml,
+      // Public-safe branding (age plan, decision #10): anonymous can never
+      // see NSFW — an 18+ community's invite page shows its public-safe
+      // banner, or no banner art at all.
+      bannerImageUrl: s.isNsfw ? (s.sfwBannerUrl ?? null) : s.bannerImageUrl,
+      bannerFocusY: s.bannerFocusY ?? 50,
+      logoUrl: s.logoUrl,
+      iconColor: s.iconColor,
+      ownerUsername: owner?.username ?? null,
+      memberCount,
+      joinMode: s.joinMode,
+      isSystem: !!s.isSystem,
+      // Plain "18+ community" statement instead of a dead join button.
+      isNsfw: !!s.isNsfw,
+      world: await resolveServerWorldRef(db, s.worldId ?? null, null),
+      createdAt: +s.createdAt,
+      themeJson: s.themeJson,
+      themeStyleKey: s.themeStyleKey,
+    };
+  });
+
+  /** POST /servers/invite/:code/join — one-click join through an invite link
+   *  (session required). Composes with every existing gate: dead/moderated
+   *  codes are a uniform 404; the 18+ community refuses minors honestly;
+   *  bans hold; and application-mode servers keep their review queue (a code
+   *  does NOT bypass approval — the same semantics the pre-existing
+   *  /servers/:id/join enforces). Members short-circuit to alreadyMember
+   *  without consuming a use; a genuine join claims one use atomically. */
+  app.post<{ Params: { code: string } }>("/servers/invite/:code/join", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const hit = await findLiveInvite(db, req.params.code);
+    if (!hit) { reply.code(404); return { error: tFor(me.locale, "errors:server.invites.invalidOrExpired") }; }
+    const { invite, server } = hit;
+    const a = await serverAuthority(db, me, server.id);
+    if (a.isMember) {
+      return { ok: true, alreadyMember: true, serverId: server.id, slug: server.slug, name: server.name };
+    }
+    // HARD age gate — honest refusal, same copy the direct join uses.
+    if (server.isNsfw && !me.isAdult) {
+      reply.code(403); return { error: tFor(me.locale, "errors:server.servers.adultsOnly"), code: "AGE_RESTRICTED" };
+    }
+    if (a.ban) { reply.code(403); return { error: tFor(me.locale, "errors:server.servers.banned") }; }
+    if (server.joinMode === "application") {
+      reply.code(409);
+      return {
+        error: tFor(me.locale, "errors:server.servers.reviewsApplications"),
+        code: "APPLICATION_REQUIRED",
+        serverId: server.id, slug: server.slug, name: server.name,
+      };
+    }
+    if (!redeemInviteMembership(db, invite.id, server.id, me.id)) {
+      reply.code(409); return { error: tFor(me.locale, "errors:server.servers.inviteUnusable") };
+    }
+    // Live-add the joined server to the member's rail (fade-in).
+    await emitServersChanged(io, me.id, server.id);
+    return { ok: true, alreadyMember: false, serverId: server.id, slug: server.slug, name: server.name };
   });
 
   /* =========================================================

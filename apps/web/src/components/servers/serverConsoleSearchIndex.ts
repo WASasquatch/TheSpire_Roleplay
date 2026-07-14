@@ -62,6 +62,15 @@ export const SERVER_CONSOLE_SEARCH_ENTRIES: readonly ServerConsoleSearchEntry[] 
   // Staff tab (id `roles`): the appoint box. Its blurbs carry the
   // "moderator"/"admin" keywords so those searches land on Staff.
   { key: "console.roles.appointStaff", tab: "roles", also: ["console.roles.moderatorBlurb", "console.roles.adminBlurb"] },
+  // Commands & Titles tab: per-command availability rules (Everyone /
+  // Specific roles / Off; migration 0355). Anchor on the section wrapper.
+  { key: "commandsTab.availability.heading", tab: "commands-titles", also: ["commandsTab.availability.blurb", "commandsTab.availability.off", "commandsTab.availability.roles"] },
+  // Invites tab: invite creation + the owner's "who can create invite
+  // links" policy (migration 0356). Anchored on the create section, which
+  // renders for EVERY viewer who can open the tab — the policy fieldset is
+  // owner-only, so anchoring there would give manage_invites mods nothing
+  // to flash.
+  { key: "console.invites.createTitle", tab: "invites", also: ["console.invites.whoLabel", "console.invites.who.staff", "console.invites.who.roles", "console.invites.who.all"] },
 ];
 
 /** "Not in this console" redirect rows. None curated for v1. */

@@ -56,9 +56,11 @@ import {
   userIsOnline,
 } from "./realtime/broadcast.js";
 import { clearAllAwayForUser } from "./realtime/awayState.js";
+import { consumeInvitedLanding } from "./servers/inviteLinks.js";
 import { applyControl, parsePlaylist } from "./realtime/theaterState.js";
 import { anyConnectedRoomController, callerCanEditRoom } from "./auth/roomPermissions.js";
 import { effectiveRoomNsfw } from "./lib/nsfwRooms.js";
+import { isInfoRoom } from "./lib/postMode.js";
 import { effectiveBoardNsfw } from "./forums/nsfw.js";
 import { clearAllMoodForUser } from "./realtime/moodState.js";
 import { clearTyperEverywhere, clearTyperFromRoom, markTyping } from "./realtime/typing.js";
@@ -243,6 +245,21 @@ export function wireSocketHandlers(
       : undefined;
     if (!initialRoomId) {
       initialRoomId = await validateRoomForUser(userRow?.lastRoomId ?? null, { resurrect: true });
+    }
+    // INVITED signup landing (migration 0356): an account registered through
+    // a server invite link (/i/<code>) lands FIRST in the invited server's
+    // landing room — deliberately ahead of the liveliest-room tier below, so
+    // the invite's promise wins over the default server's busiest room. One-
+    // shot: consumeInvitedLanding clears users.invited_server_id whatever
+    // happens, and re-checks the join gates (moderation / age / ban) so a
+    // server that changed since signup degrades to the normal walk. The
+    // greeter (greetNewcomerOnce, inside joinRoom) then fires in that room.
+    if (!initialRoomId && serversEnabled && userRow?.invitedServerId) {
+      const invited = await consumeInvitedLanding(db, user);
+      if (invited) {
+        if (invited.healed) emitTreeChanged(io, invited.serverId);
+        initialRoomId = await validateRoomForUser(invited.roomId);
+      }
     }
     // FIRST-EVER landing (migration 0353): a brand-new account — no
     // account-global last room AND no per-server last-room memory, i.e. it
@@ -1338,6 +1355,16 @@ export function wireSocketHandlers(
       // (b) ghosting the identity into the userlist as idle so a
       // returning tab doesn't churn the rail or the chat log.
       const exitIntent = (socket.data as { exitIntent?: boolean }).exitIntent === true;
+      // Phantom presence: if this socket was reading an info room, its row
+      // has been displayed in the stamped anchor room. Snapshot that room
+      // so the deferred cleanup can repaint it after the socket is gone —
+      // otherwise the attributed (reading) row lingers there until the
+      // next tree refetch. Null when not reading or anchored to the
+      // landing fallback (the tree pulse covers that path).
+      const presenceSd = socket.data as { presenceInfoRoomId?: string | null; presenceAnchorRoomId?: string | null };
+      const readingAnchorRoomId = presenceSd.presenceInfoRoomId
+        ? (presenceSd.presenceAnchorRoomId ?? null)
+        : null;
 
       // Defer the work so the socket actually finishes leaving its rooms first;
       // otherwise expireIfEmpty would still see this socket present.
@@ -1409,8 +1436,9 @@ export function wireSocketHandlers(
               if (!stillThere) {
                 const r = (await db.select().from(rooms).where(eq(rooms.id, id)).limit(1))[0];
                 // Forum rooms suppress regardless of intent, the topic
-                // feed isn't a chat log.
-                if (r?.replyMode !== "nested") {
+                // feed isn't a chat log. Info rooms suppress too: a room
+                // that displays nobody never announces a departure.
+                if (r?.replyMode !== "nested" && !(r && isInfoRoom(r))) {
                   await addSystemMessage(io, db, id, renderPresenceTemplate(
                     sessionExitTemplate,
                     DEFAULT_PRESENCE_TEMPLATES.sessionExit,
@@ -1448,6 +1476,12 @@ export function wireSocketHandlers(
             // even if the identity stayed live, a sibling socket is
             // still present so the room isn't empty.
             await broadcastPresence(io, db, id);
+          }
+          // The reader's attributed row lived in the anchor room, not in
+          // any room this socket held a band for — repaint it so the
+          // (reading) row drops promptly now the socket is gone.
+          if (readingAnchorRoomId) {
+            await broadcastPresence(io, db, readingAnchorRoomId).catch(() => {});
           }
         })().catch((err) => log.error({ err }, "disconnecting cleanup failed"));
       }, 0);

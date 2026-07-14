@@ -20,7 +20,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import type { Server as IoServer } from "socket.io";
-import { isAdultUser } from "../auth/ageGate.js";
+import { exceedsMaximumPlausibleAge, isAdultUser, meetsMinimumAge } from "../auth/ageGate.js";
 import { hasPermission } from "../auth/permissions.js";
 import { characterPortraits, characters, tourSeen, userPortraits, users } from "../db/schema.js";
 import { bioHtmlForEdit, sanitizeBio } from "../auth/html.js";
@@ -42,6 +42,13 @@ const createCharacterBody = z.object({ name: z.string().min(1).max(40) }).strict
 const activeCharacterBody = z.object({
   /** null clears the active character (drops the user back to OOC). */
   characterId: z.string().nullable(),
+}).strict();
+
+/** One-time DOB set for legacy accounts. Shape only; calendar validity +
+ *  the plausibility ceiling are checked in the handler (same helpers as
+ *  the signup paths). */
+const setBirthdateBody = z.object({
+  birthdate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 }).strict();
 
 /** Per-identity portrait gallery cap. Hard upper bound; admins might tune
@@ -1355,6 +1362,72 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       for (const roomId of rooms) await broadcastPresence(io, db, roomId);
     }
     return { ok: true };
+  });
+
+  /**
+   * One-time date-of-birth set for legacy accounts (rows where
+   * `users.birthdate` IS NULL — pre-feature signups that attested 18+).
+   * Writable ONLY while the stored date is NULL and immutable afterwards,
+   * matching the signup posture: corrections stay staff-only via
+   * PATCH /admin/users/:id (`edit_user_dob`).
+   *
+   * Validation reuses the signup helpers with a fixed 13-year floor: an
+   * existing member recording a true under-18 date must always be storable,
+   * whatever the `allowMinorSignups` SIGNUP flag says (the flag gates new
+   * registrations, not honest corrections), but an under-13 date is never
+   * stored anywhere in the age system (COPPA floor). A date that derives minor
+   * force-logs the account out on the same authoritative path the admin
+   * adult→minor correction uses — `isAdult` is stamped on session/socket
+   * context at build time, so a live adult context would otherwise keep
+   * passing every age gate until it happened to reconnect. Leaving the
+   * date unset changes nothing: NULL keeps deriving legacy-adult.
+   */
+  app.post<{ Body: unknown }>("/me/birthdate", async (req, reply) => {
+    const me = await getSessionUser(req, db);
+    if (!me) { reply.code(401); return { error: "auth" }; }
+    const body = setBirthdateBody.parse(req.body);
+    const current = (await db
+      .select({ birthdate: users.birthdate })
+      .from(users)
+      .where(eq(users.id, me.id))
+      .limit(1))[0];
+    if (!current) { reply.code(404); return { error: "not found" }; }
+    if (current.birthdate !== null) {
+      reply.code(409);
+      return { error: tFor(me.locale, "errors:server.characters.birthdateAlreadySet") };
+    }
+    // `meetsMinimumAge(date, 0)` = real calendar date that isn't in the
+    // future; the shared ceiling catches century typos (1911 for 2011).
+    if (!meetsMinimumAge(body.birthdate, 0) || exceedsMaximumPlausibleAge(body.birthdate)) {
+      reply.code(400);
+      return { error: tFor(me.locale, "errors:server.auth.implausibleBirthdate") };
+    }
+    // Under-13 dates are never stored anywhere in the age system (COPPA
+    // floor) — a permanent one-click write can't be allowed to record one.
+    if (!meetsMinimumAge(body.birthdate, 13)) {
+      reply.code(400);
+      return { error: tFor(me.locale, "errors:server.characters.birthdateUnderFloor") };
+    }
+    await db.update(users).set({ birthdate: body.birthdate }).where(eq(users.id, me.id));
+    const nowAdult = isAdultUser({ birthdate: body.birthdate });
+    // Same audit action as the staff correction so age-record changes read
+    // as one stream; `selfService` distinguishes the two paths.
+    await recordAudit(db, {
+      actorUserId: me.id,
+      action: "user_dob_update",
+      targetUserId: me.id,
+      metadata: {
+        priorBirthdate: null,
+        nextBirthdate: body.birthdate,
+        selfService: true,
+        forcedLogout: !nowAdult,
+      },
+    });
+    if (!nowAdult) {
+      const { forceLogoutUser } = await import("../auth/session.js");
+      await forceLogoutUser(io, db, me.id, tFor(me.locale, "errors:server.characters.birthdateMinorSignedOut"));
+    }
+    return { ok: true, isAdult: nowAdult };
   });
 
   /**

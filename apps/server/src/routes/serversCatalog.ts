@@ -25,6 +25,7 @@ import {
 import { hasPermission } from "../auth/permissions.js";
 import { canSeeNsfw } from "../auth/ageGate.js";
 import { serverAuthority } from "../servers/authority.js";
+import { parseInviteCreateGroupIds } from "../servers/inviteLinks.js";
 import { isServerModerationActive } from "../servers/moderation.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { getSessionUser } from "./auth.js";
@@ -506,6 +507,10 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
         sfwBannerUrl: server.sfwBannerUrl ?? null,
         publicBrowsing: !!server.publicBrowsing,
         applicationPrompt: server.applicationPrompt ?? null,
+        // Invite-creation policy (migration 0356) — the console's invites
+        // section renders/edits these; advisory for everyone else.
+        inviteCreateMode: server.inviteCreateMode,
+        inviteCreateGroupIds: parseInviteCreateGroupIds(server.inviteCreateGroupIds),
         world,
         ownerUserId: server.ownerUserId,
         ownerUsername: owner?.username ?? "unknown",

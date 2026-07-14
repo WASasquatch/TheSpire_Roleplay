@@ -103,6 +103,12 @@ export default defineConfig({
       // in prod; the dev proxy needs the same passthrough so an
       // admin's uploaded sheet image isn't a 404 at /uploads/...
       "/uploads": "http://localhost:3001",
+      // Analytics ingest beacon (POST /a/e from lib/nav-metrics.ts).
+      // Without this entry dev-mode beacons fall through to Vite's SPA
+      // fallback (a 200 with index.html), so in-app nav events silently
+      // never reach the server in dev while prod works fine. The trailing
+      // slash keeps the prefix match from swallowing other /a… paths.
+      "/a/": "http://localhost:3001",
       "/socket.io": {
         target: "http://localhost:3001",
         ws: true,

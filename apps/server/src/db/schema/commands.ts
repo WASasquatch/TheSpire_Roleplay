@@ -8,7 +8,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { id, ts } from "./_helpers.js";
-import { servers } from "./servers.js";
+import { servers, serverUsergroups } from "./servers.js";
 import { users } from "./users.js";
 
 /* ---------- custom_commands ----------
@@ -150,3 +150,54 @@ export const serverBuiltinCommandConfig = sqliteTable("server_builtin_command_co
   pk: primaryKey({ columns: [t.serverId, t.commandName] }),
 }));
 export type DbServerBuiltinCommandConfig = typeof serverBuiltinCommandConfig.$inferSelect;
+
+/* ---------- server_command_rules ----------
+ * Per-server command availability (migration 0355) — the room_role_gates
+ * idiom lifted to commands. One rule per (server, command):
+ *   mode = 'disabled' — refused for everyone in the server's rooms (server
+ *                       staff owner/admin/mod and site staff bypass);
+ *   mode = 'roles'    — only holders of a usergroup with a matching row in
+ *                       `server_command_role_gates` may run it; a rule whose
+ *                       LAST role row vanishes (group-delete cascade) falls
+ *                       back to available-to-everyone by design (the console
+ *                       calls this out).
+ * `command` stores the registry's canonical lowercase name — aliases resolve
+ * to it before the check, and custom commands ride the same lane by name.
+ * /help + /report and any builtin already gated by its own `permission`
+ * field can never carry an effective rule (the console refuses to write one;
+ * dispatch ignores stray rows). Zero rows = everything available, exactly
+ * the pre-migration behavior. */
+export const serverCommandRules = sqliteTable(
+  "server_command_rules",
+  {
+    serverId: text("server_id")
+      .notNull()
+      .references(() => servers.id, { onDelete: "cascade" }),
+    command: text("command").notNull(),
+    mode: text("mode", { enum: ["disabled", "roles"] }).notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.serverId, t.command] }),
+  }),
+);
+
+/* ---------- server_command_role_gates ----------
+ * The role rows behind mode='roles' above. Both FKs cascade: deleting the
+ * server removes its rules and rows; deleting a usergroup removes only its
+ * rows (see the zero-row fallback note on server_command_rules). */
+export const serverCommandRoleGates = sqliteTable(
+  "server_command_role_gates",
+  {
+    serverId: text("server_id")
+      .notNull()
+      .references(() => servers.id, { onDelete: "cascade" }),
+    command: text("command").notNull(),
+    usergroupId: text("usergroup_id")
+      .notNull()
+      .references(() => serverUsergroups.id, { onDelete: "cascade" }),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.serverId, t.command, t.usergroupId] }),
+    groupIdx: index("server_command_role_gates_group_idx").on(t.usergroupId),
+  }),
+);

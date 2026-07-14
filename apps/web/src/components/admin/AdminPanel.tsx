@@ -31,7 +31,7 @@ import { ReportsTab } from "./AdminReportsTab.js";
 import { AuditTab } from "./AdminAuditTab.js";
 import { AffiliatesTab } from "./AdminAffiliatesTab.js";
 import { FindSetting, flashAnchor } from "./FindSetting.js";
-import { ADMIN_SEARCH_ENTRIES, ADMIN_SEARCH_REDIRECTS, type AdminSearchEntry, type SettingsSubtab } from "./adminSearchIndex.js";
+import { ADMIN_SEARCH_ENTRIES, ADMIN_SEARCH_REDIRECTS, type AdminSearchEntry, type AnalyticsSubtab, type SettingsSubtab } from "./adminSearchIndex.js";
 
 // Re-export the shared admin-shell primitives + the style picker on their
 // original import path so existing importers of "./AdminPanel.js" keep working
@@ -220,6 +220,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
     // re-arms AFTER calling this (same batch), so search jumps still land.
     setPendingFind(null);
     setSettingsFind(null);
+    setAnalyticsFind(null);
     setTab(next);
   };
   // Calm mode: ease each tab's body in with a soft opacity fade instead of an
@@ -301,6 +302,9 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
   // jumps ride a prop into SettingsTab instead (it owns the subtab state).
   const [pendingFind, setPendingFind] = useState<{ tab: Tab; anchor: string } | null>(null);
   const [settingsFind, setSettingsFind] = useState<{ subtab: SettingsSubtab; anchor: string } | null>(null);
+  // Analytics jumps ride a prop into AnalyticsTab the same way Settings
+  // jumps do — that tab owns its subtab state (mounted-hidden sections).
+  const [analyticsFind, setAnalyticsFind] = useState<{ subtab: AnalyticsSubtab; anchor: string } | null>(null);
   const desktopSearchRef = useRef<HTMLInputElement>(null);
   // Breadcrumb pieces for a search hit: group › tab (› settings subtab).
   // All already-translated; FindSetting adds the aria-hidden separators.
@@ -308,6 +312,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
     (entry: AdminSearchEntry): readonly string[] => {
       const pieces = [t(TAB_GROUP_LABEL_KEY[TAB_GROUP_BY_ID[entry.tab]]), t(`panel.tab.${entry.tab}`)];
       if (entry.subtab) pieces.push(t(`settings.subtab.${entry.subtab}`));
+      if (entry.analyticsSubtab) pieces.push(t(`analytics.subtab.${entry.analyticsSubtab}`));
       return pieces;
     },
     [t],
@@ -320,6 +325,8 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
     if (entry.key.startsWith("panel.tab.")) return;
     if (entry.tab === "settings") {
       setSettingsFind({ subtab: entry.subtab ?? "accounts", anchor: entry.key });
+    } else if (entry.tab === "analytics") {
+      setAnalyticsFind({ subtab: entry.analyticsSubtab ?? "overview", anchor: entry.key });
     } else {
       setPendingFind({ tab: entry.tab, anchor: entry.key });
     }
@@ -352,6 +359,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
     return () => cancelAnimationFrame(raf);
   }, [pendingFind, tab, reduceMotion]);
   const onSettingsFindHandled = useCallback(() => setSettingsFind(null), []);
+  const onAnalyticsFindHandled = useCallback(() => setAnalyticsFind(null), []);
   // Keyboard path: Ctrl/Cmd+K anywhere inside the panel focuses the
   // search (desktop) or opens the mobile search row, which autofocuses.
   const onShellKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -526,7 +534,7 @@ export function AdminPanel({ onClose, onLinksChanged, onOpenServerConsole, onEnt
                 helper so a user with a deep-linked stale tab id
                 can't render a panel they don't have access to. */}
             {tab === "overview" ? <OverviewTab /> : null}
-            {tab === "analytics" && canSeeTab("view_admin_analytics") ? <AnalyticsTab /> : null}
+            {tab === "analytics" && canSeeTab("view_admin_analytics") ? <AnalyticsTab findRequest={analyticsFind} onFindHandled={onAnalyticsFindHandled} /> : null}
             {tab === "settings" && canSeeTab("view_admin_settings") ? <SettingsTab findRequest={settingsFind} onFindHandled={onSettingsFindHandled} /> : null}
             {tab === "branding" && canSeeTab("view_admin_branding") ? <BrandingTab /> : null}
             {tab === "rules" && canSeeTab("view_admin_rules") ? <RulesTab /> : null}

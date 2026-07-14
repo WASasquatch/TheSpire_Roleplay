@@ -19,11 +19,12 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Landmark, Lock, LogIn, MessagesSquare, UserPlus, Users } from "lucide-react";
-import { normalizeTheme } from "@thekeep/shared";
+import { CalendarDays, Landmark, Lock, LogIn, MessagesSquare, Repeat, UserPlus, Users } from "lucide-react";
+import { normalizeTheme, parseEventRecurrence } from "@thekeep/shared";
 import type { ChatMessage, ForumDetail, ThreadCategory } from "@thekeep/shared";
 import { fetchForumDetail, fetchRoomCategories, locateForumTopic, relTime } from "../../lib/forums.js";
-import { formatDate, formatNumber } from "../../lib/intlFormat.js";
+import { formatDate, formatDateTime, formatNumber } from "../../lib/intlFormat.js";
+import { EventIcon } from "../../lib/eventIcons.js";
 import { DEFAULT_STYLE_KEY } from "../../lib/ornaments/index.js";
 import { forumBannerInk, inkClass, isDarkSurface, themeStyle, useActiveTheme, useImageAverageColor, useScopedRootDesign } from "../../lib/theme.js";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
@@ -59,6 +60,84 @@ interface AnonBucket {
 }
 
 const NOOP = () => { /* anonymous reader: no-op */ };
+
+/** One read-only upcoming-event card from `GET /forums/:slug/events` (an
+ *  occurrence of a possibly-recurring event; RSVP lives in the member panel). */
+interface StripEvent {
+  event: {
+    id: string;
+    title: string;
+    icon: string | null;
+    startsAt: number;
+    endsAt: number | null;
+    status: string;
+    recurrenceJson: string | null;
+  };
+  occurrenceStartsAt: number;
+  occurrenceEndsAt: number | null;
+  counts: { going: number };
+}
+
+/**
+ * "Upcoming events" strip on the public landing: the forum's linked community
+ * events, read-only (title/when/repeats/going count). Anon-safe by
+ * construction — the route composes the forum's own visibility gates and
+ * returns an empty list rather than teasing withheld content, and the whole
+ * section renders nothing when there's nothing to show.
+ */
+function UpcomingEventsStrip({ slug }: { slug: string }) {
+  const { t } = useTranslation("forums");
+  const [events, setEvents] = useState<StripEvent[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`/forums/${encodeURIComponent(slug)}/events`, { credentials: "include" })
+      .then(async (r) => (r.ok ? ((await r.json()) as { events?: StripEvent[] }).events ?? [] : []))
+      .then((list) => { if (alive) setEvents(list); })
+      .catch(() => { /* strip stays hidden */ });
+    return () => { alive = false; };
+  }, [slug]);
+
+  if (events.length === 0) return null;
+  return (
+    <section className="border-b border-keep-rule px-5 py-5 md:px-8">
+      <h2 className="mb-3 flex items-center gap-1.5 text-xs uppercase tracking-widest text-keep-muted">
+        <CalendarDays className="h-3.5 w-3.5" aria-hidden="true" />
+        {t("landing.upcomingEvents")}
+      </h2>
+      <ul className="space-y-2">
+        {events.map((row) => {
+          const repeats = !!parseEventRecurrence(row.event.recurrenceJson);
+          return (
+            <li
+              key={`${row.event.id}:${row.occurrenceStartsAt}`}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-keep-rule bg-keep-panel/30 px-4 py-2.5"
+            >
+              <EventIcon name={row.event.icon} className="h-4 w-4 shrink-0 text-keep-muted" />
+              <span className="min-w-0 flex-1 truncate text-sm font-semibold text-keep-text">{row.event.title}</span>
+              {row.event.status === "live" ? (
+                <span className="shrink-0 rounded bg-keep-accent px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-bg">{t("landing.eventLive")}</span>
+              ) : null}
+              {repeats ? (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-muted">
+                  <Repeat className="h-3 w-3" aria-hidden="true" />
+                  {t("landing.eventRepeats")}
+                </span>
+              ) : null}
+              <span className="shrink-0 text-[11px] tabular-nums text-keep-muted">
+                {formatDateTime(row.occurrenceStartsAt, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
+              </span>
+              {row.counts.going > 0 ? (
+                <span className="shrink-0 text-[11px] text-keep-muted">{t("landing.eventGoing", { count: row.counts.going })}</span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-2 text-[11px] italic text-keep-muted">{t("landing.eventsRsvpHint")}</p>
+    </section>
+  );
+}
 
 /**
  * Read-only board browser for PUBLIC-BROWSING forums — the same
@@ -465,6 +544,11 @@ export function ForumPublicLanding({ slug, initialTopicId = null, initialPostId 
                 dangerouslySetInnerHTML={{ __html: descriptionHtml }}
               />
             ) : null}
+
+            {/* Upcoming community events linked to this forum (read-only;
+                RSVP lives inside the community). Renders nothing when there
+                are none, so event-less landings are unchanged. */}
+            <UpcomingEventsStrip slug={slug} />
 
             {detail.publicBrowsing ? (
               /* PUBLIC BROWSING: the real forum renderer, read-only.

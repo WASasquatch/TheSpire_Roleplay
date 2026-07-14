@@ -416,6 +416,16 @@ export interface ServerStaffEntry {
  *  the owner/mods; `invite` = only via an `server_invites` code. */
 export type ServerJoinMode = "open" | "application" | "invite";
 
+/** Who may mint invite links for a server (migration 0356): `staff` =
+ *  manage_invites holders only (default — the pre-existing behavior);
+ *  `roles` = members of the owner-picked usergroups; `all` = any member. */
+export const SERVER_INVITE_CREATE_MODES = ["staff", "roles", "all"] as const;
+export type ServerInviteCreateMode = (typeof SERVER_INVITE_CREATE_MODES)[number];
+
+/** Active (live, unexpired) invite links a NON-staff creator may hold per
+ *  server. Staff (manage_invites) are exempt. Anti-abuse backstop. */
+export const SERVER_MEMBER_INVITE_CAP = 10;
+
 /** `featured` pins to the top of the rail/catalog (admin-curated, like
  *  forums); owners flip between active and archived. */
 export type ServerStatus = "active" | "featured" | "archived";
@@ -446,7 +456,7 @@ export const RESERVED_SERVER_SLUGS: ReadonlySet<string> = new Set([
   // Static segments under /servers/* — a server with one of these slugs
   // would be unreachable behind the same-named API route.
   "applications", "slug_availability", "slug-availability", "mine", "by_slug",
-  "membership-applications", "invites", "join", "leave", "transfer",
+  "membership-applications", "invites", "invite", "join", "leave", "transfer",
 ]);
 
 export const SERVER_NAME_MIN = 3;

@@ -100,7 +100,7 @@ const FEATURES: ReadonlyArray<Feature> = [
   {
     key: "community",
     icon: HeartHandshake,
-    pointCount: 3,
+    pointCount: 4,
   },
 ];
 

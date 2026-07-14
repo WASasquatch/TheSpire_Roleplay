@@ -484,6 +484,12 @@ export function expandInlineCommands(
   /** The room's server — scopes which custom `!cmd` inlines resolve. Omitted →
    *  the default/home server (flag-off single-server behavior unchanged). */
   serverId?: string | null,
+  /** Canonical names carrying an effective server_command_rules restriction
+   *  for THIS author (migration 0355). Matching tokens stay literal text —
+   *  the same degradation unknown inline names get — so the inline lane
+   *  can't outrun the slash-command gate. The caller resolves staff bypass
+   *  and role membership before building the set. */
+  blocked?: ReadonlySet<string>,
 ): string {
   // Always strip pre-existing markers first, this is what guarantees
   // every marker the client sees came from this function on this call.
@@ -500,6 +506,7 @@ export function expandInlineCommands(
           if (prefix === "\\") return arg ? `!${name}:${arg}` : `!${name}`;
           const entry = registry.resolveInline(name, serverId);
           if (!entry) return match;
+          if (blocked?.has(entry.canonicalName)) return match;
           const rendered = entry.render(arg ?? "", user, roomId);
           if (rendered === null) return match;
           // Build the replacement so the captured prefix character isn't

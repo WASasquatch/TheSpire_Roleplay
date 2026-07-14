@@ -15,4 +15,28 @@
  * patch bumps are bug fixes / small adjustments, and a 1.0 release
  * signals "feature-complete for the original scope, API surface settled."
  */
-export const VERSION = "0.32.19";
+export const VERSION = "0.33.0";
+
+/**
+ * True when `version` sorts below the 1.0.0 release under SemVer ordering.
+ * Drives self-retiring "Beta" surfaces: any 0.x.y build qualifies, as does
+ * a 1.0.0 prerelease (e.g. "1.0.0-rc.1", which SemVer places BEFORE 1.0.0).
+ * bump.sh only ever writes plain x.y.z, but the prerelease branch keeps the
+ * gate correct if a tagged prerelease build ever ships. Unparseable input
+ * fails CLOSED (returns false) so a malformed version can't pin the badge on
+ * forever.
+ */
+export function isBetaVersion(version: string): boolean {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z.-]+)?$/.exec(
+    version.trim(),
+  );
+  if (!m) return false;
+  const major = Number(m[1]);
+  const minor = Number(m[2]);
+  const patch = Number(m[3]);
+  const prerelease = m[4];
+  if (major < 1) return true;
+  if (major > 1) return false;
+  // major === 1: only the 1.0.0 prereleases sort below 1.0.0.
+  return minor === 0 && patch === 0 && prerelease !== undefined;
+}

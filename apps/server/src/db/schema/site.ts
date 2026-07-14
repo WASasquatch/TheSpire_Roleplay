@@ -267,6 +267,14 @@ export const siteSettings = sqliteTable("site_settings", {
    * one beat. Default off, see migration 0116 for the rationale.
    */
   splashMessages24hEnabled: integer("splash_messages_24h_enabled", { mode: "boolean" }).notNull().default(false),
+  /**
+   * Splash "Beta" badge (migration 0357). When true, the anonymous splash
+   * hero shows a small "Beta" chip plus a one-line "young and growing" note.
+   * The /site payload ANDs this with a version gate (app VERSION < 1.0.0,
+   * SemVer order), so the badge self-retires at 1.0.0 regardless of the
+   * toggle. Default ON — the version gate is the real off-switch.
+   */
+  betaBadgeEnabled: integer("beta_badge_enabled", { mode: "boolean" }).notNull().default(true),
   /** Visual bio "Designer" (GrapesJS) availability (migration 0241; flipped on
    *  by default in 0242). When off, the bio editor is the raw-HTML source
    *  textarea only. Admins can disable it from site settings. */
@@ -350,6 +358,15 @@ export const siteSettings = sqliteTable("site_settings", {
    * trusted users, mods, and admins.
    */
   antiSpamEnabled: integer("anti_spam_enabled", { mode: "boolean" }).notNull().default(false),
+  /**
+   * World map image uploads (migration 0360). When true, the world-map
+   * create/edit routes accept an `imageDataUrl` (PNG/JPG/WEBP/GIF, 6MB cap,
+   * ≤10 stored images per world) written under /uploads/worldmaps/. Off by
+   * default: the hosting volume is small and shared with the database, so
+   * disk-backed member uploads are an explicit admin opt-in. External https
+   * image links work regardless of this flag.
+   */
+  worldMapUploadsEnabled: integer("world_map_uploads_enabled", { mode: "boolean" }).notNull().default(false),
   /**
    * Denote unverified users (migration 0353). When true, accounts whose
    * `users.email_verified_at` is NULL wear a subtle "Unverified" chip in the

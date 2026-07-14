@@ -102,7 +102,13 @@
     "topicCount_one": "{{count}} topic",
     "topicCount_other": "{{count}} topics",
     "teaserApplication": "Sign in to read the boards - posting needs the keeper's approval.",
-    "teaserOpen": "Sign in to read the boards and join the conversation."
+    "teaserOpen": "Sign in to read the boards and join the conversation.",
+    "upcomingEvents": "Upcoming events",
+    "eventLive": "Live",
+    "eventRepeats": "Repeats",
+    "eventGoing_one": "{{count}} going",
+    "eventGoing_other": "{{count}} going",
+    "eventsRsvpHint": "Sign in and join the community to RSVP."
   },
   "footer": {
     "whosOnline": "Who's online",

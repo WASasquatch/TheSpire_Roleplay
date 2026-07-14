@@ -3,6 +3,7 @@ import DOMPurify from "dompurify";
 import { Trans, useTranslation } from "react-i18next";
 import { useChat } from "../state/store.js";
 import { Field, SplashShell, earliestAllowedBirthdate, isoAgeUtc, latestAllowedBirthdate } from "./AuthGate.js";
+import { readPendingInvite } from "./servers/ServerInviteLanding.js";
 
 /**
  * Finish-signup screen for the Google sign-in flow.
@@ -46,6 +47,10 @@ export function GoogleFinishSignup({
    * register form; changeable later in the profile editor's Privacy tab.
    */
   const [isolatePref, setIsolatePref] = useState(false);
+  // Server invite carry-through: a code from an /i/<code> landing survives
+  // the OAuth round-trip in localStorage; ride it on the finish POST so the
+  // fresh account auto-joins the inviting community. `slug` holds the code.
+  const [pendingInvite] = useState(() => readPendingInvite());
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -88,6 +93,9 @@ export function GoogleFinishSignup({
           // Only under-18 signups carry the isolation opt-in; the server
           // clamps it to minor accounts regardless.
           ...(enteredAge < 18 && isolatePref ? { isolateFromAdults: true } : {}),
+          // Invite carry-through — the server joins the invited community
+          // (through its gates) alongside the normal default enrollment.
+          ...(pendingInvite ? { inviteCode: pendingInvite.slug } : {}),
         }),
       });
       if (!res.ok) {
@@ -131,6 +139,27 @@ export function GoogleFinishSignup({
             {"."}
           </Trans>
         </div>
+
+        {/* Invite-bound signup: same banner idiom as the password register
+            form — name the community and promise the landing. */}
+        {pendingInvite ? (
+          <div className="rounded border border-keep-accent/40 bg-keep-accent/10 px-3 py-2 text-xs text-keep-text/90">
+            <Trans
+              t={t}
+              i18nKey="auth.inviteRegister"
+              values={{
+                siteName: branding.siteName || "The Spire",
+                community: pendingInvite.name ?? t("auth.inviteCommunityFallback"),
+              }}
+            >
+              {"You're creating an account on "}
+              <b>{"{{siteName}}"}</b>
+              {" to join "}
+              <b>{"{{community}}"}</b>
+              {". Once you've registered, we'll take you straight there."}
+            </Trans>
+          </div>
+        ) : null}
 
         <Field
           label={t("auth.masterUsername")}

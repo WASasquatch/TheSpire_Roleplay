@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { Bookmark, BookmarkCheck, Flag, Pencil, Pin, PinOff, Reply, SmilePlus, Trash2 } from "lucide-react";
-import { canonicalizeNameForLookup, customCmdCssToStyle, extractMentions, renderUiRouteChipsInHtml, resolveMessageColor, richHtmlToText, type AvatarCrop, type ChatMessage, type MentionRef } from "@thekeep/shared";
+import { Bookmark, BookmarkCheck, Check, Flag, Link2, Pencil, Pin, PinOff, Reply, SmilePlus, Trash2 } from "lucide-react";
+import { buildMessageLinkUrl, canonicalizeNameForLookup, customCmdCssToStyle, extractMentions, renderUiRouteChipsInHtml, resolveMessageColor, richHtmlToText, type AvatarCrop, type ChatMessage, type MentionRef } from "@thekeep/shared";
 import { useActiveTheme } from "../../lib/theme.js";
 import { BorderedAvatar } from "../cosmetics/BorderedAvatar.js";
 import { UserNameTag } from "../UserNameTag.js";
@@ -1189,6 +1189,11 @@ export function Line({
           pair, then Bookmark (save) follows. */}
       {chatReactButton}
       {showBookmark ? <BookmarkButton msg={msg} /> : null}
+      {/* Copy link rides the same kind gate as Bookmark: both target
+          content-bearing rows someone might want to come back to. The link
+          is only as reachable as the room's own gates allow — the server
+          re-checks on every jump. */}
+      {showBookmark ? <CopyMessageLinkButton msg={msg} /> : null}
       {/* Pin/Unpin sits beside Bookmark (both are "keep this around" saves,
           but Pin is the shared, mod-gated one). */}
       {showPinMessage ? <PinToggleButton msg={msg} isPinned={isPinned} /> : null}
@@ -1738,6 +1743,51 @@ function PinToggleButton({ msg, isPinned }: { msg: ChatMessage; isPinned: boolea
       }
     >
       {isPinned ? <PinOff className="h-3 w-3" aria-hidden /> : <Pin className="h-3 w-3" aria-hidden />}
+    </button>
+  );
+}
+
+/**
+ * Hover-revealed "Copy message link" control. Puts a shareable
+ * `<origin>/?m=<roomId>:<messageId>` URL on the clipboard — the same marker
+ * shape the app parses on boot (like the `?n=` notification marker) and the
+ * token the event console's message-link field accepts. Deliberately no
+ * client-side permission math: whoever opens the link goes through
+ * jumpToMessage, whose server routes are the authorization boundary.
+ */
+function CopyMessageLinkButton({ msg }: { msg: ChatMessage }) {
+  const { t } = useTranslation("chat");
+  const [done, setDone] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  async function copy() {
+    const url = buildMessageLinkUrl(window.location.origin, msg.roomId, msg.id);
+    try {
+      await navigator.clipboard.writeText(url);
+      setFailed(false);
+      setDone(true);
+      window.setTimeout(() => setDone(false), 1200);
+    } catch {
+      setFailed(true);
+      window.setTimeout(() => setFailed(false), 2000);
+    }
+  }
+
+  const label = done
+    ? t("row.linkCopied")
+    : failed
+      ? t("row.linkCopyFailed")
+      : t("row.copyMessageLink");
+  return (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      title={label}
+      aria-label={label}
+      // Matches the h-5 / rounded / 10px shape of the sibling row controls.
+      className="flex h-5 items-center gap-1 rounded border border-keep-rule bg-keep-bg/80 px-1.5 text-[10px] leading-none text-keep-muted hover:border-keep-action/60 hover:bg-keep-banner hover:text-keep-action md:invisible md:group-hover:visible md:group-focus-within:visible"
+    >
+      {done ? <Check className="h-3 w-3 text-keep-action" aria-hidden /> : <Link2 className="h-3 w-3" aria-hidden />}
     </button>
   );
 }

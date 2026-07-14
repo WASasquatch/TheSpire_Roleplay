@@ -90,6 +90,7 @@ import { FindSetting, afterNextPaint, flashAnchor } from "../admin/FindSetting.j
 import { groupVisibleTabs, withGroupSeparators } from "../shared/tabGroups.js";
 import { ThemePicker } from "../cosmetics/ThemePicker.js";
 import { useActiveTheme, useScopedRootDesign } from "../../lib/theme.js";
+import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { recordNav } from "../../lib/nav-metrics.js";
 import { parseDurationMs } from "../../lib/duration.js";
@@ -136,6 +137,11 @@ interface ServerConsoleDetail {
   joinMode: ServerJoinMode;
   publicBrowsing: boolean;
   applicationPrompt: string | null;
+  /** Who may mint invite links (migration 0356). Absent (older backend) =
+   *  staff-only, the historical behavior. */
+  inviteCreateMode?: "staff" | "roles" | "all";
+  /** Usergroup ids allowed to mint invites under the 'roles' mode. */
+  inviteCreateGroupIds?: string[];
   /** Owner-set "18+ community" flag (age-restriction plan, Phase 2).
    *  Optional: absent until the backend populates it = all-ages. */
   isNsfw?: boolean;
@@ -385,6 +391,31 @@ async function apiAddUsergroupMember(id: string, gid: string, target: string): P
 }
 async function apiRemoveUsergroupMember(id: string, gid: string, userId: string): Promise<void> {
   await jsonOrThrow(await fetch(`/servers/${sid(id)}/usergroups/${sid(gid)}/members/${sid(userId)}`, { method: "DELETE", credentials: "include" }));
+}
+/** One invite link off GET /servers/:id/invites (live rows only). */
+interface ServerInviteRow {
+  code: string;
+  /** Full shareable URL (origin + /i/<code>); null when the server couldn't
+   *  resolve its origin — the row falls back to the browser's own origin. */
+  link: string | null;
+  maxUses: number | null;
+  usedCount: number;
+  expiresAt: number | null;
+  createdAt: number;
+  createdByUserId: string | null;
+  createdByUsername: string | null;
+}
+async function apiGetInvites(id: string): Promise<ServerInviteRow[]> {
+  const j = await jsonOrThrow<{ invites: ServerInviteRow[] }>(await fetch(`/servers/${sid(id)}/invites`, { credentials: "include" }));
+  return j.invites;
+}
+async function apiCreateInvite(id: string, body: { maxUses?: number | null; expiresInHours?: number | null }): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(id)}/invites`, {
+    method: "POST", headers: { "content-type": "application/json" }, credentials: "include", body: JSON.stringify(body),
+  }));
+}
+async function apiRevokeInvite(id: string, code: string): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(id)}/invites/${sid(code)}`, { method: "DELETE", credentials: "include" }));
 }
 async function apiGetApplications(id: string): Promise<{ pending: ServerMembershipApplicationWire[]; recent: ServerMembershipApplicationWire[] }> {
   return jsonOrThrow(await fetch(`/servers/${sid(id)}/membership-applications`, { credentials: "include" }));
@@ -2260,6 +2291,208 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
 }
 
 /* ============================================================
+ * Tab: Invites — invite links (manage_invites)
+ *
+ * Every live invite link (with creator attribution + revoke), a create
+ * form, and — for the OWNER — the "who can create invite links" policy
+ * (servers.invite_create_mode, migration 0356), which rides the
+ * manage_appearance PATCH like every other servers-table setting.
+ * ============================================================ */
+
+const INVITE_EXPIRY_CHOICES = [
+  { key: "day", hours: 24 },
+  { key: "week", hours: 24 * 7 },
+  { key: "month", hours: 24 * 30 },
+  { key: "never", hours: null },
+] as const;
+
+/** Copy-the-full-URL button for one invite row (origin + /i/<code>). */
+function InviteCopyButton({ link, code }: { link: string | null; code: string }) {
+  const { t } = useTranslation("servers");
+  const { copied, copy } = useCopyToClipboard({
+    onError: (text) => window.prompt(t("console.invites.copyManual"), text),
+  });
+  const url = link ?? `${window.location.origin}/i/${code}`;
+  return (
+    <button type="button" onClick={() => void copy(url)}
+      title={copied ? t("console.invites.copied") : t("console.invites.copyLink")}
+      aria-label={copied ? t("console.invites.copied") : t("console.invites.copyLink")}
+      className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-widest ${copied ? "border-keep-action text-keep-action" : "border-keep-rule text-keep-muted hover:border-keep-action hover:text-keep-action"}`}>
+      {copied ? t("console.invites.copied") : t("console.invites.copyLink")}
+    </button>
+  );
+}
+
+function InvitesTab({ detail, viewer, busy, run, onSaved }: TabProps) {
+  const { t } = useTranslation("servers");
+  const [invites, setInvites] = useState<ServerInviteRow[] | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    apiGetInvites(detail.id).then((rows) => { if (alive) setInvites(rows); }).catch(() => { if (alive) setInvites([]); });
+    return () => { alive = false; };
+  }, [detail.id, tick]);
+
+  // Create form. Defaults: 7-day expiry, unlimited uses.
+  const [expiry, setExpiry] = useState<(typeof INVITE_EXPIRY_CHOICES)[number]["key"]>("week");
+  const [maxUses, setMaxUses] = useState("");
+  const maxUsesInvalid = maxUses.trim() !== "" && (!Number.isInteger(Number(maxUses)) || Number(maxUses) < 1);
+
+  // Who-can-create policy (owner only; the group list excludes the default
+  // group — everyone holds it, so it would just mean "all members").
+  const savedMode = detail.inviteCreateMode ?? "staff";
+  const savedGroupIds = useMemo(() => detail.inviteCreateGroupIds ?? [], [detail.inviteCreateGroupIds]);
+  const [mode, setMode] = useState<"staff" | "roles" | "all">(savedMode);
+  const [groupIds, setGroupIds] = useState<string[]>(savedGroupIds);
+  const [groups, setGroups] = useState<ServerUsergroupWire[] | null>(null);
+  useEffect(() => {
+    if (!viewer.isOwner) return;
+    let alive = true;
+    apiGetUsergroups(detail.id)
+      .then((d) => { if (alive) setGroups(d.groups.filter((g) => !g.isDefault)); })
+      .catch(() => { if (alive) setGroups([]); });
+    return () => { alive = false; };
+  }, [detail.id, viewer.isOwner]);
+  // Re-sync local policy state after a save refetch.
+  useEffect(() => { setMode(savedMode); setGroupIds(savedGroupIds); }, [savedMode, savedGroupIds]);
+  const policyDirty = mode !== savedMode
+    || [...groupIds].sort().join(",") !== [...savedGroupIds].sort().join(",");
+  const rolesEmpty = mode === "roles" && groupIds.length === 0;
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      {/* Owner-only: who may create invite links. */}
+      {viewer.isOwner ? (
+        <fieldset className="rounded border border-keep-rule bg-keep-panel/30 p-3" data-admin-anchor="console.invites.whoLabel">
+          <legend className="px-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.invites.whoLabel")}</legend>
+          <div className="space-y-1.5 text-xs text-keep-text">
+            {(["staff", "roles", "all"] as const).map((m) => (
+              <label key={m} className="flex items-start gap-2">
+                <input type="radio" name="invite-create-mode" className="mt-0.5" checked={mode === m} onChange={() => setMode(m)} />
+                <span>
+                  <span className="block">{t(`console.invites.who.${m}`)}</span>
+                  <span className="block text-[10px] text-keep-muted">{t(`console.invites.whoHint.${m}`)}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          {mode === "roles" ? (
+            groups === null ? (
+              <p className="mt-2 text-[10px] italic text-keep-muted">{t("shared.loading")}</p>
+            ) : groups.length === 0 ? (
+              <p className="mt-2 text-[10px] text-keep-muted">{t("console.invites.noRoles")}</p>
+            ) : (
+              <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label={t("console.invites.who.roles")}>
+                {groups.map((g) => {
+                  const on = groupIds.includes(g.id);
+                  return (
+                    <button key={g.id} type="button" aria-pressed={on}
+                      onClick={() => setGroupIds((cur) => (on ? cur.filter((x) => x !== g.id) : [...cur, g.id]))}
+                      className={`rounded-full border px-2 py-0.5 text-[11px] ${on ? "border-keep-action bg-keep-action/15 text-keep-action" : "border-keep-rule text-keep-muted hover:text-keep-text"}`}
+                      style={g.color && on ? { borderColor: safeCssColor(g.color) ?? undefined } : undefined}>
+                      {g.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )
+          ) : null}
+          {rolesEmpty ? (
+            <p className="mt-1.5 text-[10px] text-keep-accent/90">{t("console.invites.rolesEmptyWarn")}</p>
+          ) : null}
+          <div className="mt-2 flex justify-end">
+            <button type="button" disabled={busy || !policyDirty}
+              onClick={() => void run(async () => {
+                await apiPatchServer(detail.id, { inviteCreateMode: mode, inviteCreateGroupIds: mode === "roles" ? groupIds : [] });
+                onSaved();
+              })}
+              className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
+              {t("console.invites.savePolicy")}
+            </button>
+          </div>
+        </fieldset>
+      ) : null}
+
+      {/* Create a fresh link. */}
+      <div className="rounded border border-keep-rule bg-keep-panel/30 p-3" data-admin-anchor="console.invites.createTitle">
+        <p className="mb-2 text-xs uppercase tracking-widest text-keep-muted">{t("console.invites.createTitle")}</p>
+        <div className="flex flex-wrap items-end gap-2">
+          <label className="block text-xs">
+            <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.invites.expiresLabel")}</span>
+            <select value={expiry} onChange={(e) => setExpiry(e.target.value as typeof expiry)}
+              className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
+              {INVITE_EXPIRY_CHOICES.map((c) => (
+                <option key={c.key} value={c.key}>{t(`console.invites.expiry.${c.key}`)}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-xs">
+            <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.invites.maxUsesLabel")}</span>
+            <input type="number" min={1} value={maxUses} onChange={(e) => setMaxUses(e.target.value)}
+              placeholder={t("console.invites.maxUsesPlaceholder")}
+              aria-invalid={maxUsesInvalid || undefined}
+              className={`w-32 rounded border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action ${maxUsesInvalid ? "border-keep-accent" : "border-keep-rule"}`} />
+          </label>
+          <button type="button" disabled={busy || maxUsesInvalid}
+            onClick={() => void run(async () => {
+              const hours = INVITE_EXPIRY_CHOICES.find((c) => c.key === expiry)?.hours ?? null;
+              await apiCreateInvite(detail.id, {
+                expiresInHours: hours,
+                maxUses: maxUses.trim() ? Number(maxUses) : null,
+              });
+              setTick((n) => n + 1);
+            })}
+            className="rounded border border-keep-action bg-keep-action px-3 py-1 text-[11px] font-semibold uppercase tracking-widest text-keep-bg disabled:opacity-50">
+            {t("console.invites.create")}
+          </button>
+        </div>
+        {maxUsesInvalid ? (
+          <p className="mt-1 text-[10px] text-keep-accent">{t("console.invites.maxUsesInvalid")}</p>
+        ) : null}
+        <p className="mt-1.5 text-[10px] text-keep-muted">{t("console.invites.createHint")}</p>
+      </div>
+
+      {/* Every live link, newest first, with creator attribution. */}
+      <div>
+        <p className="mb-1.5 text-xs uppercase tracking-widest text-keep-muted">
+          {t("console.invites.listTitle", { n: invites?.length ?? 0 })}
+        </p>
+        {!invites ? (
+          <p className="text-sm italic text-keep-muted">{t("shared.loading")}</p>
+        ) : invites.length === 0 ? (
+          <p className="rounded border border-dashed border-keep-rule px-3 py-4 text-center text-xs italic text-keep-muted">{t("console.invites.empty")}</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {invites.map((inv) => (
+              <li key={inv.code} className="flex items-center gap-2 rounded border border-keep-rule bg-keep-panel/30 px-2.5 py-1.5">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-mono text-xs text-keep-text">{inv.link ?? `${window.location.origin}/i/${inv.code}`}</span>
+                  <span className="block text-[10px] text-keep-muted">
+                    {t("console.invites.byLine", { name: inv.createdByUsername ?? t("console.invites.unknownCreator") })}
+                    {" · "}
+                    {inv.maxUses != null
+                      ? t("console.invites.usesOf", { used: inv.usedCount, max: inv.maxUses })
+                      : t("console.invites.uses", { count: inv.usedCount })}
+                    {" · "}
+                    {inv.expiresAt ? t("console.invites.expires", { date: formatDate(inv.expiresAt) }) : t("console.invites.neverExpires")}
+                  </span>
+                </span>
+                <InviteCopyButton link={inv.link} code={inv.code} />
+                <button type="button" disabled={busy}
+                  onClick={() => { if (window.confirm(t("console.invites.revokeConfirm"))) void run(async () => { await apiRevokeInvite(detail.id, inv.code); setTick((n) => n + 1); }); }}
+                  className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[10px] uppercase tracking-widest text-keep-accent hover:bg-keep-accent/10 disabled:opacity-50">
+                  {t("console.invites.revoke")}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
  * Tab: Members
  * ============================================================ */
 
@@ -3176,6 +3409,23 @@ function modLogLabel(t: TFunction<"servers">, action: string, meta: Record<strin
     case "server_mute": return { text: `${t("console.modLog.mute")}${typeof m.hours === "number" ? t("console.modLog.muteForSuffix", { hours: m.hours }) : ""}`, tone: "text-keep-system" };
     case "server_unmute": return { text: t("console.modLog.unmute"), tone: "text-keep-muted" };
     case "server_transfer": return { text: t("console.modLog.transfer"), tone: "text-keep-system" };
+    case "server_invite_create": return { text: t("console.modLog.inviteCreate"), tone: "text-keep-muted" };
+    // One revoke action covers manual revocations AND the automatic
+    // invites-die-with-membership sweep (metadata.reason=membership_ended).
+    case "server_invite_revoke": return {
+      text: m.reason === "membership_ended" ? t("console.modLog.inviteRevokeMembership") : t("console.modLog.inviteRevoke"),
+      tone: "text-keep-muted",
+    };
+    case "server_command_rule_set": {
+      // The /name is protocol and stays literal; the metadata's mode token
+      // maps onto the same localized labels the console's select shows.
+      const cmd = typeof m.command === "string" ? ` → /${m.command}` : "";
+      const modeLabel = m.mode === "disabled" ? t("commandsTab.availability.off")
+        : m.mode === "roles" ? t("commandsTab.availability.roles")
+        : m.mode === "everyone" ? t("commandsTab.availability.everyone")
+        : "";
+      return { text: `${t("console.modLog.commandRule")}${cmd}${modeLabel ? ` (${modeLabel})` : ""}`, tone: "text-keep-muted" };
+    }
     default: return { text: action.replace(/^server_/, "").replace(/_/g, " "), tone: "text-keep-muted" };
   }
 }
@@ -3649,7 +3899,7 @@ function OnboardingTab({ detail, busy, run, onSaved }: TabProps) {
  * The console shell + tab router
  * ============================================================ */
 
-export type ServerSettingsTab = "overview" | "appearance" | "rooms" | "members" | "users" | "roles" | "usergroups" | "applications" | "reports" | "modcases" | "bans" | "modlog" | "emoticons" | "announcements" | "events" | "faqs" | "commands-titles" | "earning" | "rules" | "onboarding" | "settings";
+export type ServerSettingsTab = "overview" | "appearance" | "rooms" | "members" | "users" | "roles" | "usergroups" | "applications" | "invites" | "reports" | "modcases" | "bans" | "modlog" | "emoticons" | "announcements" | "events" | "faqs" | "commands-titles" | "earning" | "rules" | "onboarding" | "settings";
 
 interface TabProps {
   detail: ServerConsoleDetail;
@@ -3667,7 +3917,7 @@ interface TabProps {
 const TAB_LABEL_KEY: Record<ServerSettingsTab, string> = {
   overview: "console.tabs.overview", appearance: "console.tabs.appearance", rooms: "console.tabs.rooms", members: "console.tabs.members",
   users: "console.tabs.users",
-  roles: "console.tabs.roles", usergroups: "console.tabs.usergroups", applications: "console.tabs.applications", reports: "console.tabs.reports",
+  roles: "console.tabs.roles", usergroups: "console.tabs.usergroups", applications: "console.tabs.applications", invites: "console.tabs.invites", reports: "console.tabs.reports",
   modcases: "console.tabs.modcases",
   bans: "console.tabs.bans", modlog: "console.tabs.modlog", emoticons: "console.tabs.emoticons", announcements: "console.tabs.announcements",
   events: "console.tabs.events",
@@ -3681,7 +3931,7 @@ const TAB_LABEL_KEY: Record<ServerSettingsTab, string> = {
 const TAB_DESC_KEY: Record<ServerSettingsTab, string> = {
   overview: "console.tabDesc.overview", appearance: "console.tabDesc.appearance", rooms: "console.tabDesc.rooms", members: "console.tabDesc.members",
   users: "console.tabDesc.users",
-  roles: "console.tabDesc.roles", usergroups: "console.tabDesc.usergroups", applications: "console.tabDesc.applications", reports: "console.tabDesc.reports",
+  roles: "console.tabDesc.roles", usergroups: "console.tabDesc.usergroups", applications: "console.tabDesc.applications", invites: "console.tabDesc.invites", reports: "console.tabDesc.reports",
   modcases: "console.tabDesc.modcases",
   bans: "console.tabDesc.bans", modlog: "console.tabDesc.modlog", emoticons: "console.tabDesc.emoticons", announcements: "console.tabDesc.announcements",
   events: "console.tabDesc.events",
@@ -3722,6 +3972,7 @@ const CONSOLE_TAB_ITEMS: readonly ConsoleTabItem[] = [
   { id: "roles", group: "people" },
   { id: "usergroups", group: "people" },
   { id: "applications", group: "people" },
+  { id: "invites", group: "people" },
   // ----- Safety: reports, cases, bans, and the paper trail -----
   { id: "reports", group: "safety" },
   { id: "modcases", group: "safety" },
@@ -3764,6 +4015,8 @@ function consoleTabVisible(id: ServerSettingsTab, can: (k: ServerModPermission) 
       return can("manage_usergroups");
     case "applications":
       return can("manage_applications");
+    case "invites":
+      return can("manage_invites");
     case "reports":
       return can("manage_reports");
     case "modcases":
@@ -3946,6 +4199,7 @@ function ServerSettingsBody({ detail, viewer, onSaved, findRequest, onFindHandle
           : tab === "roles" ? <RolesTab {...props} />
           : tab === "usergroups" ? <UsergroupsTab {...props} />
           : tab === "applications" ? <ApplicationsTab {...props} />
+          : tab === "invites" ? <InvitesTab {...props} />
           : tab === "reports" ? <ReportsTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
           : tab === "modcases" ? <ModCasesTab serverId={detail.id} viewer={viewer} busy={busy} run={run} onSaved={onSaved} />
           : tab === "bans" ? <BansTab {...props} />

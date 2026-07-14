@@ -5487,3 +5487,21 @@ html.calm-cosmetics .av *::before,
 html.calm-cosmetics .av *::after {
   box-shadow: none !important;
 }
+
+/* --- World map marker text labels ------------------------------
+ * Fixed white ink with a layered dark shadow outline: the backdrop is
+ * the MAP IMAGE, not the theme, so the ink must not follow theme
+ * variables — this stays legible over pale parchment and near-black
+ * dungeon art alike, in every theme preset. Long labels clamp to
+ * ~24ch; the marker popover carries the full text. */
+.map-marker-label {
+  color: #fff;
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 0 3px rgba(0, 0, 0, 0.9),
+    0 0 10px rgba(0, 0, 0, 0.5);
+}

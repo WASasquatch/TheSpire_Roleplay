@@ -13,6 +13,7 @@ import { resolveSplashTheme, splashBgClass, themeStyle } from "../lib/theme.js";
 import { GoogleFinishSignup } from "./GoogleFinishSignup.js";
 import { SplashLanguagePicker } from "./marketing/SplashLanguagePicker.js";
 import { readReturnForum } from "./forums/ForumPublicLanding.js";
+import { readPendingInvite } from "./servers/ServerInviteLanding.js";
 
 /**
  * The marketing-namespace `t` shape, for the plain-function helpers below
@@ -713,6 +714,11 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
   // Register buttons). Read once on mount; the key itself stays in
   // storage — the authed boot consumes it to reopen the forum.
   const [returnForum] = useState(() => readReturnForum());
+  // Invite-bound visitor (came from an /i/<code> landing's CTAs). The code
+  // rides the register POST as `inviteCode` so the server joins the invited
+  // community at signup; a plain LOGIN leaves the key in storage for the
+  // authed boot to redeem. `slug` holds the invite CODE.
+  const [pendingInviteDest] = useState(() => readPendingInvite());
   // When the admin closes registration, snap any stale "register" mode back
   // to "login" so the form can't show fields that the server will reject.
   if (!branding.registrationOpen && mode === "register") setMode("login");
@@ -838,6 +844,9 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
             acceptDisclaimer: true,
             birthdate,
             ...(registeringAsMinor && isolatePref ? { isolateFromAdults: true } : {}),
+            // Server invite carry-through: the account auto-joins the
+            // inviting community (server-side gates decide) and lands there.
+            ...(pendingInviteDest ? { inviteCode: pendingInviteDest.slug } : {}),
             captchaId: captcha.id,
             captchaAnswer: captchaAnswer.trim(),
             hp,
@@ -1078,6 +1087,39 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
               >
                 {"After you sign in, we'll return you to the forum "}
                 <b>{"{{forum}}"}</b>
+                {"."}
+              </Trans>
+            )}
+          </div>
+        ) : null}
+
+        {/* Invite-bound visitor: name the community the account is for and
+            promise the landing. Same banner idiom as the forum return hint. */}
+        {pendingInviteDest ? (
+          <div className="rounded border border-keep-accent/40 bg-keep-accent/10 px-3 py-2 text-xs text-keep-text/90">
+            {mode === "register" ? (
+              <Trans
+                t={t}
+                i18nKey="auth.inviteRegister"
+                values={{
+                  siteName: branding.siteName || "The Spire",
+                  community: pendingInviteDest.name ?? t("auth.inviteCommunityFallback"),
+                }}
+              >
+                {"You're creating an account on "}
+                <b>{"{{siteName}}"}</b>
+                {" to join "}
+                <b>{"{{community}}"}</b>
+                {". Once you've registered, we'll take you straight there."}
+              </Trans>
+            ) : (
+              <Trans
+                t={t}
+                i18nKey="auth.inviteLogin"
+                values={{ community: pendingInviteDest.name ?? t("auth.inviteCommunityFallback") }}
+              >
+                {"After you sign in, we'll take you to "}
+                <b>{"{{community}}"}</b>
                 {"."}
               </Trans>
             )}

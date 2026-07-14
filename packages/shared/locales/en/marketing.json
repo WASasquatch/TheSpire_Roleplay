@@ -90,7 +90,10 @@
     "profileView": "You're trying to view <1>{{name}}</1>'s profile. Sign in or register to continue.",
     "worldPrivate": "<0>{{name}}</0> is a <2>private</2> world. Please sign in or register to view it.",
     "returnForumRegister": "You're creating an account on <1>{{siteName}}</1> to access the forum <3>{{forum}}</3>. Once you've registered, we'll take you straight back to it.",
-    "returnForumLogin": "After you sign in, we'll return you to the forum <1>{{forum}}</1>."
+    "returnForumLogin": "After you sign in, we'll return you to the forum <1>{{forum}}</1>.",
+    "inviteRegister": "You're creating an account on <1>{{siteName}}</1> to join <3>{{community}}</3>. Once you've registered, we'll take you straight there.",
+    "inviteLogin": "After you sign in, we'll take you to <1>{{community}}</1>.",
+    "inviteCommunityFallback": "the community that invited you"
   },
   "googleFinish": {
     "heading": "finish your vessel",
@@ -160,16 +163,18 @@
     "tabFaq": "FAQ",
     "tabRules": "Rules",
     "tabForums": "Forums",
-    "joinTitle": "Join the story",
-    "joinBody": "Step into live roleplay rooms, build a cast of characters, explore shared worlds, and write alongside a whole community.",
+    "joinKicker": "We just opened our doors",
+    "joinTitle": "Become a founding member",
+    "joinBody": "This community is brand new, and the writers here now are shaping what it becomes. Join today, bring your characters, and help set the tone for everyone who finds us after you.",
     "createAccount": "Create my free account",
     "reassurance": "Free forever. No download, no card. Jump into a room in under a minute.",
     "onlineNow_one": "<0>{{formatted}}</0> roleplayer online now",
     "onlineNow_other": "<0>{{formatted}}</0> roleplayers online now",
     "google": "Google",
     "signInWithGoogle": "Sign in with Google",
+    "hostKicker": "Your space, your rules",
     "hostTitle": "Host your own community",
-    "hostBody": "Run your own community: multiple servers, organized room categories with icons, staff-only info rooms whose history never expires, role-gated rooms with roles members pick themselves, your world's lore built in, rich text chat, custom emoji & commands, its own economy. Free to start, right in your browser.",
+    "hostBody": "Run your own community: organized room categories with icons, staff-only info rooms whose history never expires, role badges and roles members pick themselves, your world's lore built in, rich text chat, custom emoji & commands, its own economy, and one link that invites your friends straight in. Free to start, right in your browser.",
     "startCommunity": "Start a community",
     "seeLiveForum": "See a live forum →",
     "bringCommunity": "Bring your community to {{siteName}}",
@@ -179,7 +184,7 @@
       "Rich text chat rooms in organized categories with icons",
       "Staff-only info rooms whose history never expires, and role-gated rooms with roles members pick themselves",
       "Your world's lore built in, plus its own economy and cosmetics",
-      "Custom emoji & commands, and moderation tools you control"
+      "One-link invites, custom emoji & commands, and moderation tools you control"
     ],
     "ownForumsTitle": "Your own forums",
     "ownForums": [
@@ -205,7 +210,9 @@
     "onlineRightNow": "online right now",
     "publicRoomsOpen_one": "public room open",
     "publicRoomsOpen_other": "public rooms open",
-    "languagePicker": "Language"
+    "languagePicker": "Language",
+    "betaChip": "Beta",
+    "betaLine": "{{siteName}} is young and growing fast. Expect new things weekly."
   },
   "features": {
     "kicker": "What you can do here",
@@ -230,11 +237,11 @@
       "communities": {
         "title": "Communities",
         "tagline": "Host your own community, or join one",
-        "desc": "Beyond the native Spire, anyone can run their own community: multiple servers with organized room categories and icons, staff-only info rooms whose history never expires, role-gated rooms with roles members pick themselves, your world's lore built in, rich text chat, custom emoji & commands, and its own economy. Run it your way, or join communities other people have built.",
+        "desc": "Beyond the native Spire, anyone can run their own community: organized room categories and icons, staff-only info rooms whose history never expires, roles with badges that members pick themselves, your world's lore on your community's page, rich text chat, custom emoji & commands, and its own economy. Run it your way, or join communities other people have built.",
         "points": [
           "Room categories with icons, info rooms & role-gated rooms",
           "Rich text chat with custom emoji & commands",
-          "Your world's lore built in",
+          "One invite link that drops friends right into your rooms",
           "Per-community economy & moderation you control"
         ],
         "ctaLabel": "Start a community"
@@ -307,8 +314,9 @@
       "community": {
         "title": "Find Your Circle",
         "tagline": "Built for long-lived communities",
-        "desc": "Friends lists, per-character presence, and safety tools like blocking and ignores keep the community healthy. Themes from medieval to sci-fi make it feel like home.",
+        "desc": "Friends lists, per-character presence, and safety tools like blocking and ignores keep the community healthy. New arrivals get a personal welcome and land in a lively room from their very first visit. Themes from medieval to sci-fi make it feel like home.",
         "points": [
+          "A personal welcome that lands you in a lively room on day one",
           "Friends & online presence",
           "Blocking, ignore & moderation tools",
           "Light & dark themes for every taste + customize your own"

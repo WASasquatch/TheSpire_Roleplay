@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { createPortal, flushSync } from "react-dom";
 import { Trans, useTranslation } from "react-i18next";
 import type { ChatMessage, PermissionKey, PinnedMessage, PrivateWorldStub, ProfileView, Role, RoomCategorySummary, Theme, ThreadCategory, TourId, UiRouteRankingBoard, WorldDetail } from "@thekeep/shared";
-import { arcadeGameByKey, DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, VERSION } from "@thekeep/shared";
+import { arcadeGameByKey, DEFAULT_PRESET_DESIGNS, DEFAULT_THEME, isDarkPalette, legibleAgainstBg, matchThemePreset, normalizeTheme, parseMessageLink, VERSION } from "@thekeep/shared";
 import { lazyModal } from "./components/shared/lazyModal.js";
 // Heavy, authenticated-only surfaces are code-split (B1, plan.md §3) so
 // the anonymous splash / login / boot bundle never downloads them. Each
@@ -33,7 +33,7 @@ import { RoomsTree, type RoomWithOccupants } from "./components/chat/RoomsTree.j
 import { ServerRail } from "./components/servers/ServerRail.js";
 const ServerSettingsView = lazyModal(() => import("./components/servers/ServerSettingsView.js").then((m) => ({ default: m.ServerSettingsView })));
 const ServerDiscoverModal = lazyModal(() => import("./components/servers/ServerDiscoverModal.js").then((m) => ({ default: m.ServerDiscoverModal })));
-import { listServers, resolveServerSlug, visitServer, type ServerSummary } from "./lib/servers.js";
+import { fetchMyServerInvites, joinServerInvite, listServers, resolveServerSlug, visitServer, type ServerSummary } from "./lib/servers.js";
 const MessagesModal = lazyModal(() => import("./components/chat/MessagesModal.js").then((m) => ({ default: m.MessagesModal })));
 import { RulesModal } from "./components/servers/RulesModal.js";
 import { RulesPage } from "./components/servers/RulesPage.js";
@@ -75,6 +75,8 @@ import { StoryCatalogModal } from "./components/scriptorium/StoryCatalogModal.js
 const ForumsCatalogModal = lazyModal(() => import("./components/forums/ForumsCatalogModal.js").then((m) => ({ default: m.ForumsCatalogModal })));
 import { readReturnForum, RETURN_FORUM_STORAGE_KEY } from "./components/forums/ForumPublicLanding.js";
 import { readReturnServer, RETURN_SERVER_STORAGE_KEY } from "./components/servers/ServerPublicLanding.js";
+import { clearPendingInvite, readPendingInvite, ServerInviteLanding } from "./components/servers/ServerInviteLanding.js";
+import { ServerInvitePanel } from "./components/servers/ServerInvitePanel.js";
 import { fetchForumNotifications, locateForumTopic } from "./lib/forums.js";
 import { fetchNotifBadge } from "./lib/notificationCenter.js";
 // Always-mounted (the bell renders with the shell, not on user action), so
@@ -85,7 +87,7 @@ const StoryEditorModal = lazyModal(() => import("./components/scriptorium/StoryE
 import { StoryReaderModal } from "./components/scriptorium/StoryReaderModal.js";
 import { WelcomeModal } from "./components/WelcomeModal.js";
 import { ServerOnboardingModal } from "./components/servers/ServerOnboardingModal.js";
-import { ServerEventsPanel, OPEN_SERVER_EVENT, type OpenServerEventDetail } from "./components/servers/ServerEventsPanel.js";
+import { ServerEventsPanel, JUMP_TO_MESSAGE_EVENT, OPEN_FORUM_CATALOG_EVENT, OPEN_SERVER_EVENT, REQUEST_OPEN_SERVER_EVENT, type JumpToMessageDetail, type OpenForumCatalogDetail, type OpenServerEventDetail, type RequestOpenServerEventDetail } from "./components/servers/ServerEventsPanel.js";
 import { SiteTour } from "./components/tours/SiteTour.js";
 import { getSocket, disconnect as disconnectSocket, hasSessionBeenAnnounced, loadTabCharacter, markLoginIntent, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
@@ -678,6 +680,27 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, [arrivedViaDeepLink]);
 
+  // A map marker's "View event" button inside the standalone /w/<slug>
+  // viewer: no Chat shell (and thus no listener) is mounted here, so the
+  // request re-routes through the boot-time "?n=event:<id>:<serverId>"
+  // marker — leave standalone mode and let Chat's boot deep-link effect
+  // switch to the owning server and focus the event. Anonymous visitors
+  // never receive event details (the map GET membership-gates them), so
+  // an unauthenticated dispatch is ignored.
+  useEffect(() => {
+    if (!arrivedViaDeepLink) return;
+    const onRequestOpenEvent = (e: Event) => {
+      const d = (e as CustomEvent<RequestOpenServerEventDetail>).detail;
+      if (!d?.eventId || !me) return;
+      const marker = d.serverId ? `event:${d.eventId}:${d.serverId}` : `event:${d.eventId}`;
+      window.history.replaceState(null, "", `/?n=${encodeURIComponent(marker)}`);
+      setPendingPublicWorld(null);
+      setArrivedViaDeepLink(false);
+    };
+    window.addEventListener(REQUEST_OPEN_SERVER_EVENT, onRequestOpenEvent);
+    return () => window.removeEventListener(REQUEST_OPEN_SERVER_EVENT, onRequestOpenEvent);
+  }, [arrivedViaDeepLink, me]);
+
   if (!authChecked) return <BootSplash />;
 
   // Resolve deep-link verdicts shared by every code path below.
@@ -1090,6 +1113,58 @@ function Chat() {
       .finally(() => { window.history.replaceState(null, "", "/"); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serversEnabled]);
+
+  // /i/<code> for SIGNED-IN visitors (anonymous ones get the public landing
+  // in UnauthRouter): show the same branded invite page as a full-screen
+  // layer with a one-click Join / Enter. Captured once at mount; consumed
+  // when the visitor joins or dismisses.
+  const [inviteLandingCode, setInviteLandingCode] = useState<string | null>(
+    () => /^\/i\/([A-Za-z0-9_-]{4,64})\/?$/.exec(window.location.pathname)?.[1] ?? null,
+  );
+
+  // Pending invite from an /i/<code> landing's auth round-trip: after login
+  // (or the register carry-through, where the account is already a member —
+  // the join is idempotent) redeem the code and enter the community. A
+  // refusal (dead code, 18+ community for a minor account, application-
+  // reviewed server) surfaces the server's localized message instead of a
+  // silent drop, and the visitor simply stays on their normal landing.
+  const inviteRedeemDone = useRef(false);
+  useEffect(() => {
+    if (inviteRedeemDone.current || !serversEnabled) return;
+    inviteRedeemDone.current = true;
+    const pending = readPendingInvite();
+    if (!pending) return;
+    clearPendingInvite();
+    void joinServerInvite(pending.slug)
+      .then((res) => enterServerById(res.serverId, res.name))
+      .catch((e) => {
+        setNotice({
+          code: "INVITE_JOIN",
+          message: e instanceof Error ? e.message : i18n.t("notifications:toast.inviteJoinFailed"),
+        });
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serversEnabled]);
+
+  // "Invite people" affordance: resolved per server from GET
+  // /servers/:id/invites/mine (canCreate folds in the owner's who-may-create
+  // policy). Existing live links keep the pill visible even when creation is
+  // no longer allowed — their creator must still be able to copy/revoke them.
+  // Errors read as "can't" so the pill simply hides.
+  const [canInvitePeople, setCanInvitePeople] = useState(false);
+  const [invitePanelOpen, setInvitePanelOpen] = useState(false);
+  useEffect(() => {
+    setCanInvitePeople(false);
+    setInvitePanelOpen(false);
+    if (!serversEnabled || !currentServerId) return;
+    let cancelled = false;
+    void fetchMyServerInvites(currentServerId)
+      .then((m) => {
+        if (!cancelled) setCanInvitePeople(m.canCreate || m.invites.length > 0);
+      })
+      .catch(() => { /* pill stays hidden */ });
+    return () => { cancelled = true; };
+  }, [serversEnabled, currentServerId]);
 
   // Seed the forum-notification badge once per boot; the socket's
   // forum:notifications pulse keeps it live from then on.
@@ -4097,6 +4172,66 @@ function Chat() {
     setHighlightMessageId(messageId);
   }
 
+  // Latest jump closure for one-shot listeners/boot effects below (they
+  // register once; the closure re-binds every render so they never act on a
+  // stale room map).
+  const jumpToMessageRef = useRef(jumpToMessage);
+  jumpToMessageRef.current = jumpToMessage;
+
+  // Boot: "/?m=<roomId>:<messageId>" — a copied message link opened a fresh
+  // tab. Same contract as the "?n=" notification marker: act once signed in,
+  // then strip the marker so a refresh doesn't replay it. No client-side
+  // permission math — the jump routes' server checks are the boundary.
+  useEffect(() => {
+    if (!me) return;
+    const link = parseMessageLink(window.location.href);
+    if (!link) return;
+    void jumpToMessageRef.current(link.roomId, link.messageId);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("m");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, [me]);
+
+  // Event-bus deep links from decoupled surfaces (the events panel's link
+  // cards): a message link rides jumpToMessage (pruned/denied targets surface
+  // its own "message is gone" toast), a forum link opens the catalog with the
+  // same email-verification gate as every other forums entry point.
+  useEffect(() => {
+    const onJump = (e: Event) => {
+      const d = (e as CustomEvent<JumpToMessageDetail>).detail;
+      if (d?.roomId && d?.messageId) void jumpToMessageRef.current(d.roomId, d.messageId);
+    };
+    const onOpenForum = (e: Event) => {
+      const d = (e as CustomEvent<OpenForumCatalogDetail>).detail;
+      if (!d?.key) return;
+      if (isEmailBlockGate(useChat.getState().me)) {
+        setNotice({ code: "EMAIL_UNVERIFIED", message: i18n.t("notifications:toast.forumsHiddenUnverified") });
+        return;
+      }
+      setForumsOpen({ key: d.key });
+    };
+    // A world-map marker's "View event" button: same resolution as a
+    // reminder deep-link (switch to the owning server, then focus the
+    // event in the panel) via openNotifTarget's existing 'event' branch.
+    // The world viewer closes first — on mobile it renders as a
+    // fullscreen z-50 window that would bury the events panel's modal.
+    const onRequestOpenEvent = (e: Event) => {
+      const d = (e as CustomEvent<RequestOpenServerEventDetail>).detail;
+      if (!d?.eventId) return;
+      setWorldViewerId(null);
+      setPendingWorldApplicationId(null);
+      openNotifTarget("event", d.eventId, d.serverId ?? null);
+    };
+    window.addEventListener(JUMP_TO_MESSAGE_EVENT, onJump);
+    window.addEventListener(OPEN_FORUM_CATALOG_EVENT, onOpenForum);
+    window.addEventListener(REQUEST_OPEN_SERVER_EVENT, onRequestOpenEvent);
+    return () => {
+      window.removeEventListener(JUMP_TO_MESSAGE_EVENT, onJump);
+      window.removeEventListener(OPEN_FORUM_CATALOG_EVENT, onOpenForum);
+      window.removeEventListener(REQUEST_OPEN_SERVER_EVENT, onRequestOpenEvent);
+    };
+  }, [setNotice, openNotifTarget]);
+
   // "Return to live", refresh the buffer with the recent backlog and
   // drop the historical-view flag. Re-issues room:join, which on the
   // server returns the standard last-50 message:bulk we get on connect.
@@ -4151,6 +4286,31 @@ function Chat() {
     return merged;
   }, [ownBucket, siblingBucket, pairMergeSiblingId]);
   const occ = currentRoomId ? occupants[currentRoomId] ?? [] : [];
+  // Info room (postMode 'staff', not a forum board): displays no occupants
+  // (phantom presence), so anything derived from this room's occupant list
+  // needs a fallback source.
+  const isInfoRoomView = !!room && room.postMode === "staff" && !room.forumId;
+  // Author cosmetics for the info-room feed. MessageList builds its
+  // name-style / border / admin-italics maps from the occupant list, which
+  // is always empty here — but the authors are online SOMEWHERE (their
+  // attributed rows live in their anchor rooms' lists), so merge identity
+  // rows from every other room. Feeds the cosmetic maps only; nothing here
+  // renders a userlist for the info room.
+  const occForFeed = useMemo(() => {
+    if (!isInfoRoomView || !currentRoomId) return occ;
+    const merged = [...occ];
+    const seen = new Set(occ.map((o) => `${o.userId}::${o.characterId ?? ""}`));
+    for (const [rid, list] of Object.entries(occupants)) {
+      if (rid === currentRoomId) continue;
+      for (const o of list) {
+        const key = `${o.userId}::${o.characterId ?? ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(o);
+      }
+    }
+    return merged;
+  }, [isInfoRoomView, occ, occupants, currentRoomId]);
   // Per-room banner dismissals. Keyed by (roomId, kind) in
   // localStorage; the stored value is the world id or topic text the
   // user dismissed, so the banner reappears automatically when the
@@ -4195,9 +4355,18 @@ function Chat() {
   // Pin CHAT messages (migration 0316): the sitewide `pin_message` grant OR
   // the room owner/mod (per-room role from the viewer's own occupant row).
   // Server re-checks the same tiered gate on POST/DELETE /messages/:id/pin.
+  //
+  // Info rooms display no occupants, so the viewer's own occupant row — the
+  // per-room crown source — is never present there. The per-viewer
+  // `postLocked` stamp covers the same authority set for an info room
+  // (posting is restricted to site staff, the room owner, room mods, and
+  // server staff — the pin-capable set), so an unlocked composer doubles as
+  // the crown proxy. Affordance only — the server re-checks every action.
+  const infoRoomCrownProxy = isInfoRoomView && !room?.postLocked;
   const canPinMessage = !!me && (
     me.permissions.includes("pin_message")
     || me.permissions.includes("edit_any_room_metadata")
+    || infoRoomCrownProxy
     || occ.some((o) => o.userId === me.id && (o.role === "owner" || o.role === "mod"))
   );
   // Seed the pinned-messages strip on room open (migration 0316). The live
@@ -4234,6 +4403,9 @@ function Chat() {
   const canControlTheater =
     !!me &&
     (me.permissions.includes("edit_any_room_metadata") ||
+      // Same info-room crown proxy as canPinMessage: the occupant row this
+      // gate normally reads never exists in a room that displays nobody.
+      infoRoomCrownProxy ||
       occ.some((o) => o.userId === me.id && (o.role === "owner" || o.role === "mod")));
   // Cross-author edit gate. The moderation lever for author touch-up
   // requests that miss the normal grace window. The server re-checks
@@ -4396,6 +4568,7 @@ function Chat() {
       />
       <StaleVersionBanner />
       <IncognitoBanner />
+      <SetBirthdateNotice />
       <VerifyEmailGate />
       {/* Per-room view wrapper. Bundles the room's own banners (world /
           topic / expiry), the header accent rail, and the chat+rooms row
@@ -4559,7 +4732,7 @@ function Chat() {
           ) : (
           <MessageList
             messages={messages}
-            occupants={occ}
+            occupants={occForFeed}
             selfUserId={me?.id ?? null}
             selfNames={selfNames}
             roomType={room?.type ?? null}
@@ -4798,6 +4971,11 @@ function Chat() {
             setRailOpen(false);
           }}
           onClose={() => setRailOpen(false)}
+          onInvitePeople={
+            serversEnabled && currentServerId && canInvitePeople
+              ? () => { setInvitePanelOpen(true); setRailOpen(false); }
+              : null
+          }
           fontStep={fontStep}
         />
         {/* Server Rail (Multi-Server Lift) — the OUTERMOST RIGHT column, sitting
@@ -4819,6 +4997,43 @@ function Chat() {
           />
         ) : null}
         </div>{/* /right-side navigation cluster */}
+      {/* Member-facing invite panel: create/copy/revoke the viewer's own
+          invite links for the community they're standing in. */}
+      {invitePanelOpen && serversEnabled && currentServerId ? (
+        <ServerInvitePanel
+          serverId={currentServerId}
+          serverName={servers?.find((s) => s.id === currentServerId)?.name ?? ""}
+          onClose={() => setInvitePanelOpen(false)}
+        />
+      ) : null}
+      {/* Signed-in visit to /i/<code>: the branded invite page as a full-
+          screen layer over the shell, with one-click Join / Enter. */}
+      {inviteLandingCode && serversEnabled ? (
+        <div className="fixed inset-0 z-[80] overflow-y-auto bg-keep-bg">
+          <PublicViewerShell isAuthenticated>
+            <ServerInviteLanding
+              code={inviteLandingCode}
+              onNavigate={() => { /* authed page never routes to /login|/register */ }}
+              authed={{
+                alreadyMember: (slug) =>
+                  !!servers?.some((s) => s.slug === slug && (s.viewerRole != null || s.isSystem)),
+                onEntered: (serverId, name) => {
+                  setInviteLandingCode(null);
+                  window.history.replaceState(null, "", "/");
+                  // Refresh the rail so the new membership appears, then
+                  // enter through the normal /visit + room-join path.
+                  void listServers().then(setServers).catch(() => {});
+                  void enterServerById(serverId, name);
+                },
+                onDismiss: () => {
+                  setInviteLandingCode(null);
+                  window.history.replaceState(null, "", "/");
+                },
+              }}
+            />
+          </PublicViewerShell>
+        </div>
+      ) : null}
       {notice ? <Toast notice={notice} onDismiss={() => setNotice(null)} /> : null}
       {openProfile ? (
         <ProfileModal
@@ -5456,6 +5671,48 @@ function IncognitoBanner() {
         className="keep-button rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/30 disabled:opacity-50"
       >
         {t("incognito.leave")}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * One-line nudge for legacy accounts with no date of birth on file (they
+ * predate the age gate and count as adults by attestation): points them at
+ * the one-time birth-date setting on the Privacy tab. Deliberately gentle —
+ * a dismissible strip, never a modal, and dismissing it persists per
+ * account (same `useDismissed` idiom as the stale-version banner, key
+ * suffixed with the user id so a shared device doesn't hide it for a
+ * different account). Gated on `viewerAgeLoaded` because the pre-seed
+ * store default for `birthdate` is also null.
+ */
+function SetBirthdateNotice() {
+  const { t } = useTranslation("profile");
+  const meId = useChat((s) => s.me?.id ?? null);
+  const birthdate = useChat((s) => s.viewerAge.birthdate);
+  const viewerAgeLoaded = useChat((s) => s.viewerAgeLoaded);
+  const openEditor = useChat((s) => s.openEditor);
+  const dismissKey = `set-birthdate:${meId ?? ""}`;
+  const dismissed = useDismissed(dismissKey);
+  if (!meId || !viewerAgeLoaded || birthdate !== null || dismissed) return null;
+  return (
+    <div className="keep-notice keep-notice-accent flex flex-wrap items-center justify-center gap-2 px-3 py-1 text-xs">
+      <span>{t("birthDate.notice.line")}</span>
+      <button
+        type="button"
+        onClick={() => openEditor({ mode: "master", characterId: null, initialTab: "privacy" })}
+        className="keep-button rounded border border-keep-action bg-keep-action/20 px-2 py-0.5 text-xs font-semibold text-keep-action hover:bg-keep-action/30"
+      >
+        {t("birthDate.notice.open")}
+      </button>
+      <button
+        type="button"
+        onClick={() => dismissPersisted(dismissKey)}
+        title={t("birthDate.notice.dismissTitle")}
+        aria-label={t("birthDate.notice.dismissAria")}
+        className="shrink-0 rounded px-1 text-base leading-none text-keep-muted opacity-60 hover:opacity-100 hover:text-keep-text"
+      >
+        ×
       </button>
     </div>
   );

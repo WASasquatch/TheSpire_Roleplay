@@ -192,8 +192,12 @@ export interface SettingsRow {
   activityFeedsEnabled: boolean;
   featuredWorldsEnabled: boolean;
   splashMessages24hEnabled: boolean;
+  /** Splash "Beta" chip + hero line toggle. The /site payload also version-gates it (< 1.0.0). */
+  betaBadgeEnabled: boolean;
   profileDesignerEnabled: boolean;
   serversEnabled: boolean;
+  /** World map image uploads (default off — disk is shared with the DB). */
+  worldMapUploadsEnabled: boolean;
   antiSpamEnabled: boolean;
   /** Content auto-moderation master switch. */
   automodEnabled: boolean;

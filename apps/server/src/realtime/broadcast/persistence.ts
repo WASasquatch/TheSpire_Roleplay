@@ -45,6 +45,7 @@ import { roomVisibilityWhere } from "../targetedMessages.js";
 import { blockedUserIdsFor } from "../../auth/blocks.js";
 import type { CommandContext, SessionUser } from "../../commands/types.js";
 import { expandInlineCommands } from "../../commands/registry.js";
+import { blockedCommandNamesFor } from "../../lib/commandRules.js";
 import { getSettings, areServersEnabledCached } from "../../settings.js";
 import { awardForForum, awardForMessage } from "../../earning/award.js";
 import { bumpLifetimeForMessage, classifyMessageForLifetime } from "../../lib/lifetimePostCounts.js";
@@ -244,12 +245,27 @@ export async function addMessage(
   // TOO_LONG channel the dispatcher uses for raw-input rejections.
   let body = payload.body;
   const isRichBody = payload.format === "html";
+  // Per-server command rules (migration 0355) bind the inline lane too:
+  // without this a `!roll` token would outrun a rule that refuses `/roll`
+  // at dispatch. Blocked tokens degrade to literal text — the same fate
+  // unknown inline names get. Uses the NULL→default serverId coalescing
+  // dispatch uses; the loads only run when the body can hold a trigger.
+  let inlineBlocked: ReadonlySet<string> | undefined;
+  if (!isRichBody && body.includes("!")) {
+    const ruleServerId = await resolveRoomServerId(ctx.db, ctx.roomId);
+    inlineBlocked = await blockedCommandNamesFor(
+      ctx.db,
+      ctx.user,
+      ruleServerId,
+      (name) => ctx.registry.resolve(name, ruleServerId)?.permission,
+    );
+  }
   // Inline `!cmd` expansion is an MD-grammar feature: a rich body keeps
   // its bytes (an exclamation token inside HTML is prose, and splicing
   // expander output into markup would corrupt the tree).
   const expanded = isRichBody
     ? body
-    : expandInlineCommands(body, ctx.registry, ctx.user, ctx.roomId, (ctx.socket.data as { serverId?: string }).serverId);
+    : expandInlineCommands(body, ctx.registry, ctx.user, ctx.roomId, (ctx.socket.data as { serverId?: string }).serverId, inlineBlocked);
   if (expanded !== body) {
     const { maxMessageLength } = await getSettings(ctx.db);
     if (expanded.length > maxMessageLength) {

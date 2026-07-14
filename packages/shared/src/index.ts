@@ -47,6 +47,8 @@ export * from "./notifications.js";
 export * from "./affiliate.js";
 export * from "./pinnedMessage.js";
 export * from "./serverEvent.js";
+export * from "./eventRecurrence.js";
+export * from "./messageLink.js";
 export * from "./automod.js";
 export * from "./onboarding.js";
 export * from "./time.js";

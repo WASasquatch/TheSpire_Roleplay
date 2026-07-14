@@ -240,6 +240,17 @@ export interface RoomOccupant {
    * while live.
    */
   idle: boolean;
+  /**
+   * True when this row is ATTRIBUTED here rather than physically present:
+   * the user is actually standing in an info room (`postMode` "staff"),
+   * which displays no readers, so their presence is shown in their anchor
+   * room (the last normal room they stood in, else the server's landing
+   * room) instead. Rendered like idle (dimmed row, grey sphere) with its
+   * own "reading an info room" tooltip; `idle` is also set on these rows
+   * so older bundles degrade to the plain idle presentation. Absent =
+   * physically present (or a plain disconnect-grace ghost).
+   */
+  reading?: boolean;
   /** Hex chat color (e.g. "#990000") if user has set one */
   chatColor: string | null;
   /** Resolved gender - character.stats.gender if active, else user.gender */

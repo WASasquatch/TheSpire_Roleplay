@@ -39,6 +39,7 @@ import { useChat } from "../../state/store.js";
 import { WorldEntitiesTab } from "./WorldEntitiesTab.js";
 import { WorldArcsTab } from "./WorldArcsTab.js";
 import { WorldSessionsTab } from "./WorldSessionsTab.js";
+import { WorldMapsTab } from "./WorldMapsTab.js";
 
 interface Props {
   worldId: string;
@@ -60,7 +61,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
   const [creatingUnderParent, setCreatingUnderParent] = useState<string | "root" | null>(null);
   // Which knowledge-base surface (if any) the right pane is showing instead of
   // the page / world-settings editors.
-  const [kbView, setKbView] = useState<null | "entries" | "arcs" | "sessions">(null);
+  const [kbView, setKbView] = useState<null | "entries" | "arcs" | "sessions" | "maps">(null);
 
   async function load() {
     setError(null);
@@ -176,6 +177,7 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
                   ["entries", t("editor.navEntries"), t("editor.navEntriesTitle")],
                   ["arcs", t("editor.navArcs"), t("editor.navArcsTitle")],
                   ["sessions", t("editor.navSessions"), t("editor.navSessionsTitle")],
+                  ["maps", t("editor.navMaps"), t("editor.navMapsTitle")],
                 ] as const).map(([key, label, title]) => (
                   <button
                     key={key}
@@ -211,6 +213,8 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
                 <WorldArcsTab worldId={worldId} detail={detail} onChanged={load} />
               ) : kbView === "sessions" ? (
                 <WorldSessionsTab worldId={worldId} detail={detail} onChanged={load} />
+              ) : kbView === "maps" ? (
+                <WorldMapsTab worldId={worldId} detail={detail} onChanged={load} />
               ) : creatingUnderParent !== null ? (
                 <NewPageForm
                   worldId={worldId}

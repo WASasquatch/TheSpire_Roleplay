@@ -56,7 +56,7 @@
  * the orchestrator should expose a registry-reload accessor (or pass `registry`
  * into this register call) — see the return notes.
  */
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import { z } from "zod";
@@ -74,10 +74,15 @@ import {
   customCommands,
   mutualTitles,
   serverBuiltinCommandConfig,
+  serverCommandRoleGates,
+  serverCommandRules,
+  serverUsergroups,
   titleKinds,
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "../routes/auth.js";
+import { isRuleExemptCommand, loadCommandRules } from "../lib/commandRules.js";
+import { tFor } from "../i18n.js";
 import { areServersEnabled, getSettings } from "../settings.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -197,7 +202,7 @@ export async function registerServerCommandTitleRoutes(app: FastifyInstance, db:
     key: "manage_commands" | "manage_titles",
   ): Promise<
     | { fail: { code: number; error: string } }
-    | { me: { id: string }; serverId: string }
+    | { me: { id: string; locale: string | null }; serverId: string }
   > {
     if (!areServersEnabled(await getSettings(db))) return { fail: { code: 404, error: "not found" } };
     const me = await getSessionUser(req, db);
@@ -206,7 +211,7 @@ export async function registerServerCommandTitleRoutes(app: FastifyInstance, db:
     const a = await serverAuthority(db, me, serverId);
     if (!a.server) return { fail: { code: 404, error: "no server" } };
     if (!serverCan(a, key)) return { fail: { code: 403, error: "forbidden" } };
-    return { me: { id: me.id }, serverId };
+    return { me: { id: me.id, locale: me.locale ?? null }, serverId };
   }
 
   /* ---------------------------------------------------------
@@ -428,6 +433,22 @@ export async function registerServerCommandTitleRoutes(app: FastifyInstance, db:
         await db.insert(customCommandAliases).values(aliasList.map((a) => ({ alias: a, commandId: req.params.cmdId })));
       }
     }
+    // Availability rules key on the command NAME: a rename re-keys this
+    // server's rows so the restriction follows the command instead of
+    // silently evaporating. Stale rows already keyed to the new name (from
+    // an earlier same-named command) are dropped first so the re-key can't
+    // trip the (server_id, command) PK.
+    if (body.name !== undefined && body.name.toLowerCase() !== existing.name) {
+      const next = body.name.toLowerCase();
+      await db.delete(serverCommandRules)
+        .where(and(eq(serverCommandRules.serverId, g.serverId), eq(serverCommandRules.command, next)));
+      await db.delete(serverCommandRoleGates)
+        .where(and(eq(serverCommandRoleGates.serverId, g.serverId), eq(serverCommandRoleGates.command, next)));
+      await db.update(serverCommandRules).set({ command: next })
+        .where(and(eq(serverCommandRules.serverId, g.serverId), eq(serverCommandRules.command, existing.name)));
+      await db.update(serverCommandRoleGates).set({ command: next })
+        .where(and(eq(serverCommandRoleGates.serverId, g.serverId), eq(serverCommandRoleGates.command, existing.name)));
+    }
     await registry.reloadCustom(db); // hot-swap dispatch so the edit applies immediately
     emitCommandsUpdated(io, g.serverId);
     await auditServer(db, { serverId: g.serverId, actorUserId: g.me.id, action: "server_custom_command_update", metadata: { id: req.params.cmdId, keys: Object.keys(body) } });
@@ -445,9 +466,146 @@ export async function registerServerCommandTitleRoutes(app: FastifyInstance, db:
     if (!existing) { reply.code(404); return { error: "no such command in this server" }; }
     // Aliases cascade by FK; delete the command row.
     await db.delete(customCommands).where(and(eq(customCommands.id, req.params.cmdId), eq(customCommands.serverId, g.serverId)));
+    // Availability rules key on the name (no FK): drop this server's rows so
+    // a stale restriction can't invisibly re-apply to a later same-named
+    // command.
+    await db.delete(serverCommandRules)
+      .where(and(eq(serverCommandRules.serverId, g.serverId), eq(serverCommandRules.command, existing.name)));
+    await db.delete(serverCommandRoleGates)
+      .where(and(eq(serverCommandRoleGates.serverId, g.serverId), eq(serverCommandRoleGates.command, existing.name)));
     await registry.reloadCustom(db); // hot-swap dispatch so the edit applies immediately
     emitCommandsUpdated(io, g.serverId);
     await auditServer(db, { serverId: g.serverId, actorUserId: g.me.id, action: "server_custom_command_delete", metadata: { id: req.params.cmdId, name: existing.name } });
+    return { ok: true };
+  });
+
+  /* ---------------------------------------------------------
+   *  Command availability (manage_commands) — server_command_rules +
+   *  server_command_role_gates (migration 0355). Rules key on the
+   *  registry's CANONICAL name; /help, /report and permission-gated
+   *  builtins never appear in the list nor accept a rule.
+   * --------------------------------------------------------- */
+
+  /** Resolve rule-role ids against THIS server's named (non-default)
+   *  usergroups — the room role-gate validation, verbatim: null when any id
+   *  is foreign/unknown/default so a stale id never half-applies a rule. */
+  async function ruleGroupsFor(serverId: string, ids: readonly string[]) {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return [];
+    const rows = await db
+      .select({ id: serverUsergroups.id, name: serverUsergroups.name })
+      .from(serverUsergroups)
+      .where(and(
+        inArray(serverUsergroups.id, unique),
+        eq(serverUsergroups.serverId, serverId),
+        eq(serverUsergroups.isDefault, false),
+      ));
+    return rows.length === unique.length ? rows : null;
+  }
+
+  app.get<{ Params: { id: string } }>("/servers/:id/command-rules", async (req, reply) => {
+    const g = await gate(req, req.params.id, "manage_commands");
+    if ("fail" in g) { reply.code(g.fail.code); return { error: g.fail.error }; }
+
+    // The controllable set: every builtin without its own permission gate
+    // (staff commands would be dead toggles — staff bypass anyway), minus
+    // the always-available safety set, plus THIS server's custom commands.
+    // `registry.resolve(name, serverId) === handler` is the scope test: it
+    // holds for every builtin and only for customs this server may run.
+    const commands = registry
+      .listCanonical()
+      .filter((h) => !isRuleExemptCommand(h) && registry.resolve(h.name, g.serverId) === h)
+      .map((h) => ({
+        name: h.name,
+        aliases: [...(h.aliases ?? [])],
+        // Same doc-prose localization as GET /commands: catalog key with the
+        // handler's own constant as fallback so untranslated entries still read.
+        description: h.description
+          ? tFor(g.me.locale, `commands:docs.${h.name}.description`, { defaultValue: h.description })
+          : "",
+        isCustom: registry.isCustomCommand(h.name, g.serverId),
+      }));
+
+    const groups = await db
+      .select({ id: serverUsergroups.id, name: serverUsergroups.name, color: serverUsergroups.color })
+      .from(serverUsergroups)
+      .where(and(eq(serverUsergroups.serverId, g.serverId), eq(serverUsergroups.isDefault, false)))
+      .orderBy(asc(serverUsergroups.sortOrder), asc(serverUsergroups.createdAt));
+
+    const ruleMap = await loadCommandRules(db, g.serverId);
+    return {
+      commands,
+      groups: groups.map((r) => ({ id: r.id, name: r.name, color: r.color ?? null })),
+      rules: [...ruleMap.entries()].map(([command, r]) => ({
+        command,
+        mode: r.mode,
+        roleIds: [...r.roleIds],
+      })),
+    };
+  });
+
+  const commandRuleBody = z.object({
+    mode: z.enum(["everyone", "disabled", "roles"]),
+    roleIds: z.array(z.string().min(1).max(64)).max(64).optional(),
+  }).strict();
+
+  app.put<{ Params: { id: string; cmdName: string }; Body: unknown }>("/servers/:id/command-rules/:cmdName", async (req, reply) => {
+    const g = await gate(req, req.params.id, "manage_commands");
+    if ("fail" in g) { reply.code(g.fail.code); return { error: g.fail.error }; }
+    let body: z.infer<typeof commandRuleBody>;
+    try { body = commandRuleBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+
+    // Canonicalize through the registry so an alias PUT lands on the one
+    // stored name, and a foreign server's custom command 404s here.
+    const handler = registry.resolve(req.params.cmdName.toLowerCase(), g.serverId);
+    if (!handler) {
+      reply.code(404);
+      return { error: tFor(g.me.locale, "errors:server.servers.commandRuleUnknown") };
+    }
+    if (isRuleExemptCommand(handler)) {
+      reply.code(400);
+      return { error: tFor(g.me.locale, "errors:server.servers.commandRuleExempt") };
+    }
+    const command = handler.name.toLowerCase();
+
+    let roleNames: string[] = [];
+    if (body.mode === "roles") {
+      const groups = await ruleGroupsFor(g.serverId, body.roleIds ?? []);
+      if (!groups) {
+        reply.code(404);
+        return { error: tFor(g.me.locale, "errors:server.rooms.roleGateUnknownGroup") };
+      }
+      roleNames = groups.map((r) => r.name);
+    }
+
+    // Full-replace semantics, mirroring the room role-gate writes.
+    await db.delete(serverCommandRoleGates)
+      .where(and(eq(serverCommandRoleGates.serverId, g.serverId), eq(serverCommandRoleGates.command, command)));
+    if (body.mode === "everyone") {
+      await db.delete(serverCommandRules)
+        .where(and(eq(serverCommandRules.serverId, g.serverId), eq(serverCommandRules.command, command)));
+    } else {
+      await db.insert(serverCommandRules)
+        .values({ serverId: g.serverId, command, mode: body.mode })
+        .onConflictDoUpdate({
+          target: [serverCommandRules.serverId, serverCommandRules.command],
+          set: { mode: body.mode },
+        });
+      if (body.mode === "roles" && (body.roleIds ?? []).length) {
+        await db.insert(serverCommandRoleGates)
+          .values([...new Set(body.roleIds)].map((rid) => ({ serverId: g.serverId, command, usergroupId: rid })))
+          .onConflictDoNothing();
+      }
+    }
+
+    emitCommandsUpdated(io, g.serverId);
+    await auditServer(db, {
+      serverId: g.serverId,
+      actorUserId: g.me.id,
+      action: "server_command_rule_set",
+      metadata: { command, mode: body.mode, ...(body.mode === "roles" ? { roles: roleNames } : {}) },
+    });
     return { ok: true };
   });
 

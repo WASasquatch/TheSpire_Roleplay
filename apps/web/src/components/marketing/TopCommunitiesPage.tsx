@@ -110,7 +110,10 @@ export function TopCommunitiesPage() {
         document.body,
       )}
 
-      <div className="relative z-10 mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-4 py-8 md:py-12">
+      {/* Desktop (≥1280px viewport) stretches the board wide: min 80rem,
+          max 120rem. Gated at xl so smaller windows keep the classic
+          max-w-5xl column instead of overflowing sideways. */}
+      <div className="relative z-10 mx-auto flex min-h-screen max-w-5xl flex-col gap-6 px-4 py-8 md:py-12 xl:min-w-[80rem] xl:max-w-[120rem]">
         <header className="flex flex-col items-center gap-3 text-center">
           <a
             href="/"

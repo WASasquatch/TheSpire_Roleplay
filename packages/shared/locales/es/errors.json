@@ -71,6 +71,8 @@
       "forumBoardRefusal": "Eso es un tablero de foro - vive en el Catálogo de foros. Escribe /forums para abrirlo.",
       "roomReadOnly": "Solo el equipo puede publicar en esta sala.",
       "roomReadOnlyRoles": "Solo los miembros con ciertos roles pueden publicar en esta sala.",
+      "commandDisabled": "Este comando está desactivado en este servidor.",
+      "commandNeedsRole": "Este comando está limitado a ciertos roles en este servidor.",
       "adultsOnlyRoom": "Esta sala es solo para adultos.",
       "banishedFromRoom": "Te desterraron de esta sala.",
       "joinServerFirst": "Necesitas unirte a este servidor antes de entrar a sus salas.",
@@ -247,7 +249,10 @@
       "characterLimit": "Límite de {{max}} personajes por cuenta.",
       "portraitLimitCharacter": "Límite de {{max}} retratos adicionales por personaje.",
       "portraitLimitProfile": "Límite de {{max}} retratos adicionales por perfil.",
-      "minorOnlySetting": "Esta configuración solo está disponible para cuentas de menores de 18."
+      "minorOnlySetting": "Esta configuración solo está disponible para cuentas de menores de 18.",
+      "birthdateAlreadySet": "Tu fecha de nacimiento ya está registrada y no se puede cambiar. Contacta al equipo si hace falta corregirla.",
+      "birthdateUnderFloor": "Esa fecha no se puede guardar: los miembros deben tener al menos 13 años. Si de verdad es tu fecha de nacimiento, contacta al equipo.",
+      "birthdateMinorSignedOut": "Tu fecha de nacimiento se guardó. Como tienes menos de 18 años, las áreas marcadas 18+ ya no están disponibles. Vuelve a iniciar sesión."
     },
     "forums": {
       "applicationsNotAvailable": "Las solicitudes para crear foros no están disponibles para ti.",
@@ -295,6 +300,12 @@
       "bannedFromNamedUntil": "Tienes un baneo en el foro \"{{name}}\" hasta {{date}}.",
       "approvedMembersOnly": "\"{{name}}\" acepta publicaciones de miembros aprobados. Solicita unirte desde la página del foro."
     },
+    "invites": {
+      "createNotAllowed": "No puedes crear enlaces de invitación para esta comunidad.",
+      "capReached": "Ya tienes {{cap}} enlaces de invitación activos aquí. Revoca uno para hacer espacio.",
+      "revokeNotYours": "Solo puedes revocar tus propios enlaces de invitación.",
+      "invalidOrExpired": "Ese enlace de invitación no es válido o ya caducó."
+    },
     "servers": {
       "applicationsNotAvailable": "Las solicitudes para crear servidores no están disponibles para ti.",
       "agreeRules": "Lee y acepta las reglas de registro de servidores antes de solicitar.",
@@ -336,6 +347,8 @@
       "privateSwitchNeedsPassword": "cambiar a privada requiere una contraseña",
       "systemRoomOwnerOnly": "solo el propietario del servidor puede quitar una sala del sistema",
       "lastSystemRoom": "no se puede quitar la única sala del sistema del servidor; crea otra sala primero",
+      "commandRuleUnknown": "Ese comando no existe en este servidor.",
+      "commandRuleExempt": "Ese comando siempre está disponible y no se puede restringir.",
       "roomRemoved": "Se eliminó la sala \"{{name}}\".",
       "ownerHoldsAllPowers": "El propietario ya tiene todos los poderes.",
       "onlyOwnerRemovesAdmin": "Solo el propietario puede quitar a un admin.",
@@ -411,7 +424,13 @@
       "tooManyKinds": "demasiados tipos personalizados",
       "tooManyArcs": "demasiados arcos",
       "tooManySessions": "demasiadas sesiones",
-      "kindHasEntries": "el tipo todavía tiene entradas; elimínalas o reasígnalas primero"
+      "kindHasEntries": "el tipo todavía tiene entradas; elimínalas o reasígnalas primero",
+      "mapSlugExists": "ya existe un mapa con ese slug",
+      "tooManyMaps": "demasiados mapas",
+      "tooManyMarkers": "demasiados marcadores en este mapa",
+      "tooManyMapUploads": "este mundo ya guarda {{max}} imágenes de mapa subidas; elimina una o usa un enlace externo",
+      "mapUploadsDisabled": "la subida de imágenes de mapas está desactivada en este sitio; usa un enlace https externo",
+      "eventNotLinkable": "ese evento no se puede vincular; debe pertenecer a una comunidad que destaque este mundo"
     },
     "arcade": {
       "eidolonUnavailable": "El Eidolon Tamer no está disponible para ti.",
@@ -497,12 +516,15 @@
     },
     "events": {
       "endAfterStart": "La hora de fin del evento debe ser posterior a la de inicio.",
+      "repeatEndsBeforeStart": "La fecha de fin de la repetición no puede ser anterior al inicio del evento.",
       "badReminderLead": "Tiempo de aviso del recordatorio no compatible.",
       "hostCharacterNotYours": "Ese personaje anfitrión no es tuyo.",
       "roomNotInServer": "La sala vinculada no está en este servidor.",
       "forumNotInServer": "El foro vinculado no está en este servidor.",
       "rsvpClosed": "Este evento ya no acepta confirmaciones de asistencia.",
-      "characterNotYours": "Ese personaje no es tuyo."
+      "characterNotYours": "Ese personaje no es tuyo.",
+      "oneLink": "Un evento solo puede vincular a un lugar.",
+      "badMessageLink": "Ese enlace de mensaje no parece válido."
     },
     "faqs": {
       "slugRule": "El slug debe tener de 3 a 40 caracteres: letras minúsculas, números, guion bajo (y no estar reservado).",

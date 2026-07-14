@@ -666,14 +666,25 @@ export function Composer({
   // reloaded their tab.
   const [commands, setCommands] = useState<CommandDoc[] | null>(null);
   const commandsVersion = useChat((s) => s.commandsVersion);
+  // Scope the doc list to the room's server (falling back to the home
+  // server) so per-server command rules (disabled / role-gated) drop
+  // unavailable commands from this completer. Null (flag off / not yet
+  // resolved) keeps the historic unscoped fetch; the server enforces at
+  // dispatch either way, this only governs what the popup advertises.
+  const currentServerId = useChat((s) => s.currentServerId);
+  const defaultServerId = useChat((s) => s.defaultServerId);
+  const commandsServerId = currentServerId ?? defaultServerId;
   useEffect(() => {
     let cancelled = false;
-    fetch("/commands", { credentials: "include" })
+    const url = commandsServerId
+      ? `/commands?serverId=${encodeURIComponent(commandsServerId)}`
+      : "/commands";
+    fetch(url, { credentials: "include" })
       .then((r) => (r.ok ? r.json() as Promise<{ commands: CommandDoc[] }> : null))
       .then((j) => { if (!cancelled && j) setCommands(j.commands); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [commandsVersion]);
+  }, [commandsVersion, commandsServerId]);
 
   // Caret-driven trigger detection, in PLAIN-TEXT coordinates. The
   // editor reports caret moves through onStateChange; Escape force-

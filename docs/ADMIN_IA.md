@@ -103,7 +103,8 @@ test box against `/admin/automod/*`. It must stay outside the form.
 
 ### 1.3 Server Admin console (apps/web/src/components/servers/ServerSettingsView.tsx)
 
-21 tabs (`ServerSettingsTab` union), labels at `servers:console.tabs.*`
+22 tabs (`ServerSettingsTab` union; `invites` added with server invite links,
+migration 0356), labels at `servers:console.tabs.*`
 (currently lowercase words, no grouping, flat mobile `<select>`). Gates are
 per-server permissions (`can(...)`), listed for reference; they DO NOT change:
 
@@ -117,6 +118,7 @@ per-server permissions (`can(...)`), listed for reference; they DO NOT change:
 | roles | console.tabs.roles | manage_members |
 | usergroups | console.tabs.usergroups | manage_usergroups |
 | applications | console.tabs.applications | manage_applications |
+| invites | console.tabs.invites | manage_invites |
 | reports | console.tabs.reports | manage_reports |
 | modcases | console.tabs.modcases | manage_mod_cases |
 | bans | console.tabs.bans | ban_member or unban_member |
@@ -269,7 +271,9 @@ Subtab ids (`type SettingsSubtab = "accounts" | "chat" | "safety" | "theme" |
 
 ### features, "Homepage & extras"
 - NEW fieldset `settings.homepageTogglesLegend` ("Homepage stats"):
-  activity feeds, messages in last 24h, featured worlds carousel.
+  activity feeds, messages in last 24h, featured worlds carousel, beta badge
+  (`settings.betaBadgeLabel`, migration 0357; splash-side it is additionally
+  version-gated to builds below 1.0.0).
 - NEW fieldset `settings.featureTogglesLegend` ("Big feature switches"):
   profile bio Designer, multi-server.
 
@@ -419,6 +423,7 @@ the haystack):
 | settings.activityFeedsLabel | features | activityFeedsHint, activityFeedsOn, activityFeedsOff |
 | settings.messages24hLabel | features | messages24hHint, messages24hOn, messages24hOff |
 | settings.featuredWorldsLabel | features | featuredWorldsHint, featuredWorldsOn, featuredWorldsOff |
+| settings.betaBadgeLabel | features | betaBadgeHint, betaBadgeOn, betaBadgeOff |
 | settings.designerLabel | features | designerHint, designerOn, designerOff |
 | settings.multiServerLabel | features | multiServerHint, multiServerOn, multiServerOff |
 

@@ -255,6 +255,14 @@ export const kickCommand: CommandHandler = {
       if (data.userId !== target.id) continue;
       if (!s.rooms.has(`room:${ctx.roomId}`)) continue;
       s.leave(`room:${ctx.roomId}`);
+      // Phantom-presence stamps survive a band move that skips joinRoom;
+      // the landing is a normal room, so clear them or the next info-room
+      // join would reuse a pre-kick anchor.
+      {
+        const sd = s.data as { presenceInfoRoomId?: string | null; presenceAnchorRoomId?: string | null };
+        sd.presenceInfoRoomId = null;
+        sd.presenceAnchorRoomId = null;
+      }
       // Recipient-locale notice: goes to the KICKED user's sockets.
       s.emit("error:notice", {
         code: "KICKED",
@@ -756,6 +764,14 @@ export const banCommand: CommandHandler = {
       if (data.userId !== target.id) continue;
       if (!s.rooms.has(`room:${ctx.roomId}`)) continue;
       s.leave(`room:${ctx.roomId}`);
+      // Phantom-presence stamps survive a band move that skips joinRoom;
+      // the landing is a normal room, so clear them or the next info-room
+      // join would reuse a pre-ban anchor.
+      {
+        const sd = s.data as { presenceInfoRoomId?: string | null; presenceAnchorRoomId?: string | null };
+        sd.presenceInfoRoomId = null;
+        sd.presenceAnchorRoomId = null;
+      }
       // Recipient-locale notice: goes to the BANNED user's sockets.
       s.emit("error:notice", {
         code: "BANNED",

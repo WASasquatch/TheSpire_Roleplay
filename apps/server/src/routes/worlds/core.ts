@@ -25,6 +25,7 @@ import {
   worldCollaborators,
   worldEntities,
   worldEntityKinds,
+  worldMaps,
   worldPages,
   worldSessions,
   worlds,
@@ -57,6 +58,7 @@ import {
   entityLightToWire,
   entityKindRowToWire,
   arcRowToWire,
+  mapLightToWire,
   sessionLightToWire,
   depthOf,
 } from "./shared.js";
@@ -428,6 +430,14 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       .from(worldSessions)
       .where(eq(worldSessions.worldId, w.id))
       .orderBy(desc(worldSessions.sessionDate), asc(worldSessions.sortOrder), asc(worldSessions.createdAt));
+    // Light map rows only (no image URLs / markers): enough for the
+    // viewer to decide whether to show the Map tab and render the
+    // picker. Full map data is lazy-fetched per map.
+    const mapRows = await db
+      .select()
+      .from(worldMaps)
+      .where(eq(worldMaps.worldId, w.id))
+      .orderBy(asc(worldMaps.sortOrder), asc(worldMaps.createdAt));
     const detail: WorldDetail = {
       world: await toSummary(db, w),
       pages: pages.map(pageRowToWire),
@@ -441,6 +451,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       arcs: arcRows.map(arcRowToWire),
       sessions: sessionRows.map(sessionLightToWire),
       viewerApplication,
+      maps: mapRows.map(mapLightToWire),
     };
     return detail;
   });

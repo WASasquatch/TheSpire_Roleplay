@@ -59,7 +59,22 @@
   "birthDate": {
     "title": "Fecha de nacimiento",
     "notSet": "Sin definir",
-    "hint": "Tu fecha de nacimiento se define al crear tu cuenta y solo tú puedes verla. Si hace falta corregirla, contacta al equipo."
+    "hint": "Tu fecha de nacimiento está registrada y solo tú puedes verla. Si hace falta corregirla, contacta al equipo.",
+    "setHint": "Tu cuenta se creó antes de que pidiéramos la fecha de nacimiento, así que no hay ninguna registrada. Puedes agregarla aquí una sola vez. Decide si puedes entrar a las áreas marcadas 18+, y después solo el equipo puede cambiarla. Dejarla sin definir no cambia nada en tu cuenta.",
+    "inputLabel": "Fecha de nacimiento",
+    "saveButton": "Guardar fecha de nacimiento",
+    "confirmTitle": "Revisa bien tu fecha de nacimiento",
+    "confirmDate": "Escribiste: {{date}}",
+    "confirmPermanent": "Una vez guardada, esta fecha es permanente: no podrás cambiarla tú. Decide si puedes entrar a las áreas marcadas 18+.",
+    "confirmMinor": "Esta fecha indica que tienes menos de 18 años. Al guardarla se cerrarán de inmediato todas las áreas marcadas 18+ y se cerrará tu sesión, para que vuelvas a entrar con el acceso correcto.",
+    "confirmCancel": "Volver",
+    "confirmSave": "Guardar de forma permanente",
+    "notice": {
+      "line": "Tu cuenta no tiene fecha de nacimiento registrada. Agrégala una sola vez en tu configuración para que tu acceso a las áreas marcadas 18+ quede definido correctamente.",
+      "open": "Definirla ahora",
+      "dismissTitle": "Ocultar este aviso",
+      "dismissAria": "Ocultar el aviso de fecha de nacimiento"
+    }
   },
   "createCharacter": {
     "title": "Nuevo personaje",

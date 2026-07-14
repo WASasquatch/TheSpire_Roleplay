@@ -16,7 +16,7 @@ import type {
   TourId,
   TypingEntry,
 } from "@thekeep/shared";
-import { DEFAULT_THEME } from "@thekeep/shared";
+import { DEFAULT_THEME, VERSION, isBetaVersion } from "@thekeep/shared";
 import { recordNav } from "../lib/nav-metrics.js";
 
 export interface AuthMe {
@@ -154,6 +154,13 @@ export interface SiteBranding {
    * the same "·"-separated row so the cluster still reads as one beat.
    */
   splashMessages24hEnabled: boolean;
+  /**
+   * Splash "Beta" chip + hero line. The server computes this as the admin
+   * toggle ANDed with the app-version gate (VERSION < 1.0.0), so the client
+   * renders it verbatim; it goes false on its own once a 1.0.0 build ships.
+   * Optional so cached branding from a pre-feature build hydrates to off.
+   */
+  betaBadgeEnabled?: boolean;
   /** Visual bio Designer (GrapesJS) availability. When on, the profile editor's
    *  bio tab offers a Designer/Source toggle (desktop only). Off by default. */
   profileDesignerEnabled: boolean;
@@ -174,6 +181,14 @@ export interface SiteBranding {
    * "off". Flipped on by an admin once servers are ready to surface.
    */
   serversEnabled?: boolean;
+  /**
+   * World map image uploads (admin-gated, default off). When true the world
+   * editor's Maps tab offers a file picker beside the external-URL field
+   * (PNG/JPG/WEBP/GIF, 6MB); the map routes enforce the switch server-side
+   * either way. Optional so cached branding from a pre-feature build
+   * hydrates to off.
+   */
+  worldMapUploadsEnabled?: boolean;
   /**
    * Whether Google sign-in is available (env-gated on the server:
    * GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET set). When false the AuthGate
@@ -230,6 +245,9 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // as healthy. Independent of `activityFeedsEnabled`, each toggle gates
   // its own splash section.
   splashMessages24hEnabled: false,
+  // Off until /site answers: the server owns the toggle+version AND, and a
+  // first paint without the chip beats flashing "Beta" on a 1.0.0+ build.
+  betaBadgeEnabled: false,
   // ON by default so the bio Designer reliably shows on desktop without
   // depending on a server round-trip; admins can turn it OFF in settings.
   profileDesignerEnabled: true,
@@ -240,6 +258,9 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // Off by default — the chat shell stays exactly as it is today until an
   // admin turns the Multi-Server Lift on.
   serversEnabled: false,
+  // Off by default — the map routes reject uploads until an admin opts in,
+  // so the editor shouldn't offer the picker on first paint either.
+  worldMapUploadsEnabled: false,
   // Off by default — env-gated on the server; the /site payload flips these
   // on once GOOGLE_CLIENT_ID/SECRET (google) and YOUTUBE_API_KEY (youtube)
   // are configured.
@@ -318,6 +339,11 @@ export function loadCachedBranding(): SiteBranding {
       splashMessages24hEnabled: typeof parsed.splashMessages24hEnabled === "boolean"
         ? parsed.splashMessages24hEnabled
         : DEFAULT_BRANDING.splashMessages24hEnabled,
+      // Re-apply the version gate to the cached flag so a stale true from a
+      // 0.x build can't flash the Beta chip on a 1.0.0+ bundle's first paint.
+      betaBadgeEnabled: typeof parsed.betaBadgeEnabled === "boolean"
+        ? parsed.betaBadgeEnabled && isBetaVersion(VERSION)
+        : DEFAULT_BRANDING.betaBadgeEnabled ?? false,
       profileDesignerEnabled: typeof parsed.profileDesignerEnabled === "boolean"
         ? parsed.profileDesignerEnabled
         : DEFAULT_BRANDING.profileDesignerEnabled,
@@ -327,6 +353,9 @@ export function loadCachedBranding(): SiteBranding {
       serversEnabled: typeof parsed.serversEnabled === "boolean"
         ? parsed.serversEnabled
         : DEFAULT_BRANDING.serversEnabled ?? false,
+      worldMapUploadsEnabled: typeof parsed.worldMapUploadsEnabled === "boolean"
+        ? parsed.worldMapUploadsEnabled
+        : DEFAULT_BRANDING.worldMapUploadsEnabled ?? false,
       googleAuthEnabled: typeof parsed.googleAuthEnabled === "boolean"
         ? parsed.googleAuthEnabled
         : DEFAULT_BRANDING.googleAuthEnabled ?? false,
@@ -1016,6 +1045,13 @@ interface ChatState {
     birthdate: string | null;
   };
   setViewerAge: (a: { isAdult: boolean; hideNsfw: boolean; isolateFromAdults: boolean; birthdate: string | null }) => void;
+  /**
+   * True once setViewerAge has run (the /me/profile seed landed). Surfaces
+   * keyed on `viewerAge.birthdate === null` (the legacy set-your-birthdate
+   * notice) must wait for this — the pre-seed default is ALSO null, so
+   * without the latch they'd flash for every account during load.
+   */
+  viewerAgeLoaded: boolean;
   /**
    * Counter bumped each time the socket (re)connects. Any open
    * ThreadPane watches this and re-runs its history seed when it
@@ -1839,7 +1875,8 @@ export const useChat = create<ChatState>((set, get) => ({
   localePref: null,
   setLocalePref: (locale) => set({ localePref: locale }),
   viewerAge: { isAdult: true, hideNsfw: false, isolateFromAdults: false, birthdate: null },
-  setViewerAge: (a) => set({ viewerAge: a }),
+  setViewerAge: (a) => set({ viewerAge: a, viewerAgeLoaded: true }),
+  viewerAgeLoaded: false,
   dmReseedTick: 0,
 
   setDmConversations: (list) => set(() => {

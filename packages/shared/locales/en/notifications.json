@@ -139,6 +139,7 @@
   "toast": {
     "ageRestrictedProfile": "This profile is marked 18+ and can't be viewed from your account.",
     "serverLinkGone": "That server link is private or no longer exists.",
+    "inviteJoinFailed": "That invite couldn't be used.",
     "noMemberToShow": "No member to show right now.",
     "arcadeUnavailable": "The Spire Arcade isn't available to you.",
     "gameUnavailable": "That game isn't available to you.",

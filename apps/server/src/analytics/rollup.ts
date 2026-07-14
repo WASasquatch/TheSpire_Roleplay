@@ -16,6 +16,11 @@
  *   - "geo"       dim1=geoCountry,  dim2=null            → country breakdown
  *   - "event"     dim1=kind,        dim2=key             → in-app nav breakdown
  *
+ * The durable ENGAGEMENT families (registration / activeUser / message /
+ * forumPost / feature / retention) ride the same daily pass via
+ * engagement.ts — derived from append-only sources (users, earning_ledger,
+ * user_ip_log), never from the pruned raw tables.
+ *
  * Bots are counted separately so the dashboard can include/exclude them: every
  * metric above is emitted with a bot flag folded into `metric` as a suffix
  * ("pageview" vs "pageview:bot"), keeping the rollup a single pass and the
@@ -39,6 +44,7 @@ import {
 } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSettings } from "../settings.js";
+import { rollupEngagementYesterday } from "./engagement.js";
 
 /** 'YYYY-MM-DD' for a ms-epoch instant, UTC. */
 function dayKey(ms: number): string {
@@ -157,6 +163,9 @@ export async function rollupYesterday(db: Db, now: number = Date.now()): Promise
   for (const r of evRows) {
     await upsertDaily(db, day, metricName("event", r.isBot), r.kind, r.key, r.n);
   }
+
+  /* ---- durable engagement metrics (append-only sources) ---- */
+  await rollupEngagementYesterday(db, now);
 
   /* ---- retention sweep: delete raw rows past the window ---- */
   const settings = await getSettings(db);

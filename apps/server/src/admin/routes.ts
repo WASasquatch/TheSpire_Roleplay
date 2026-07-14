@@ -1357,6 +1357,8 @@ export async function registerAdminRoutes(
     /** Surfaces live community activity counters on the splash + future feed rails. Off during cold-start. */
     activityFeedsEnabled: z.boolean().optional(),
     serversEnabled: z.boolean().optional(),
+    /** World map image uploads (default off — disk is shared with the DB). */
+    worldMapUploadsEnabled: z.boolean().optional(),
     /** Escalating chat anti-spam master switch. */
     antiSpamEnabled: z.boolean().optional(),
     /** Content auto-moderation master switch. */
@@ -1377,6 +1379,8 @@ export async function registerAdminRoutes(
     featuredWorldsEnabled: z.boolean().optional(),
     /** Splash stat: rolling 24h chat message count. Independent toggle. */
     splashMessages24hEnabled: z.boolean().optional(),
+    /** Splash "Beta" chip + hero line. The /site payload version-gates it (< 1.0.0) on top. */
+    betaBadgeEnabled: z.boolean().optional(),
     /** Visual bio Designer availability on the profile bio tab (desktop). */
     profileDesignerEnabled: z.boolean().optional(),
     /** Sanitized HTML for the post-login welcome modal. Empty string clears the welcome. Same 50KB cap as other rich-text settings. */
@@ -1451,6 +1455,7 @@ export async function registerAdminRoutes(
       maxmindConfigured: !!(s.maxmindAccountId && s.maxmindLicenseKey),
       activityFeedsEnabled: s.activityFeedsEnabled,
       serversEnabled: s.serversEnabled,
+      worldMapUploadsEnabled: s.worldMapUploadsEnabled,
       antiSpamEnabled: s.antiSpamEnabled,
       automodEnabled: s.automodEnabled,
       allowMinorSignups: s.allowMinorSignups,
@@ -1459,6 +1464,7 @@ export async function registerAdminRoutes(
       minorFilterAllow: s.minorFilterAllow,
       featuredWorldsEnabled: s.featuredWorldsEnabled,
       splashMessages24hEnabled: s.splashMessages24hEnabled,
+      betaBadgeEnabled: s.betaBadgeEnabled,
       profileDesignerEnabled: s.profileDesignerEnabled,
       newUserWelcomeHtml: s.newUserWelcomeHtml,
       defaultStyleKey: s.defaultStyleKey,
@@ -1597,6 +1603,9 @@ export async function registerAdminRoutes(
     if (body.splashMessages24hEnabled !== undefined) {
       patch.splashMessages24hEnabled = body.splashMessages24hEnabled;
     }
+    if (body.betaBadgeEnabled !== undefined) {
+      patch.betaBadgeEnabled = body.betaBadgeEnabled;
+    }
     if (body.profileDesignerEnabled !== undefined) {
       patch.profileDesignerEnabled = body.profileDesignerEnabled;
     }
@@ -1604,6 +1613,11 @@ export async function registerAdminRoutes(
     // edit_site_settings (it changes sitewide behavior, not just chrome).
     if (body.serversEnabled !== undefined) {
       patch.serversEnabled = body.serversEnabled;
+    }
+    // World map uploads: writes member images to the shared data volume.
+    // Sitewide storage-behavior change → edit_site_settings.
+    if (body.worldMapUploadsEnabled !== undefined) {
+      patch.worldMapUploadsEnabled = body.worldMapUploadsEnabled;
     }
     // Escalating chat anti-spam. Sitewide behavior change → edit_site_settings.
     if (body.antiSpamEnabled !== undefined) {

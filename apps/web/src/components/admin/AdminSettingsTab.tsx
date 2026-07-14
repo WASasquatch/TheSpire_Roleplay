@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import type { AutomodRule, Theme } from "@thekeep/shared";
-import { DEFAULT_THEME, normalizeTheme, THEME_PRESETS } from "@thekeep/shared";
+import { DEFAULT_THEME, VERSION, isBetaVersion, normalizeTheme, THEME_PRESETS } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
 import { parseDurationMs } from "../../lib/duration.js";
 import { useChat } from "../../state/store.js";
@@ -77,8 +77,12 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
   const [activityFeedsEnabled, setActivityFeedsEnabled] = useState(false);
   const [featuredWorldsEnabled, setFeaturedWorldsEnabled] = useState(false);
   const [splashMessages24hEnabled, setSplashMessages24hEnabled] = useState(false);
+  // Default true, mirrors the schema default: the badge ships ON and the
+  // version gate (< 1.0.0) is the real off-switch.
+  const [betaBadgeEnabled, setBetaBadgeEnabled] = useState(true);
   const [profileDesignerEnabled, setProfileDesignerEnabled] = useState(false);
   const [serversEnabled, setServersEnabled] = useState(false);
+  const [worldMapUploadsEnabled, setWorldMapUploadsEnabled] = useState(false);
   const [antiSpamEnabled, setAntiSpamEnabled] = useState(false);
   const [automodEnabled, setAutomodEnabled] = useState(false);
   const [allowMinorSignups, setAllowMinorSignups] = useState(false);
@@ -157,8 +161,10 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
       setActivityFeedsEnabled(j.activityFeedsEnabled);
       setFeaturedWorldsEnabled(j.featuredWorldsEnabled);
       setSplashMessages24hEnabled(j.splashMessages24hEnabled);
+      setBetaBadgeEnabled(j.betaBadgeEnabled);
       setProfileDesignerEnabled(j.profileDesignerEnabled);
       setServersEnabled(j.serversEnabled);
+      setWorldMapUploadsEnabled(j.worldMapUploadsEnabled);
       setAntiSpamEnabled(j.antiSpamEnabled);
       setAutomodEnabled(j.automodEnabled);
       setAllowMinorSignups(j.allowMinorSignups);
@@ -225,8 +231,10 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
         activityFeedsEnabled,
         featuredWorldsEnabled,
         splashMessages24hEnabled,
+        betaBadgeEnabled,
         profileDesignerEnabled,
         serversEnabled,
+        worldMapUploadsEnabled,
         antiSpamEnabled,
         automodEnabled,
         allowMinorSignups,
@@ -272,8 +280,13 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
         activityFeedsEnabled: j.activityFeedsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         splashMessages24hEnabled: j.splashMessages24hEnabled,
+        // The admin response carries the RAW toggle; branding carries the
+        // toggle ANDed with the version gate (mirrors the /site payload) so
+        // the splash never shows a Beta chip on a 1.0.0+ build.
+        betaBadgeEnabled: j.betaBadgeEnabled && isBetaVersion(VERSION),
         profileDesignerEnabled: j.profileDesignerEnabled,
         serversEnabled: j.serversEnabled,
+        worldMapUploadsEnabled: j.worldMapUploadsEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls
@@ -797,6 +810,20 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
                 {t("settings.featuredWorldsHint")}
               </span>
             </label>
+            <label data-admin-anchor="settings.betaBadgeLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.betaBadgeLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={betaBadgeEnabled}
+                  onChange={(e) => setBetaBadgeEnabled(e.target.checked)}
+                />
+                <span>{betaBadgeEnabled ? t("settings.betaBadgeOn") : t("settings.betaBadgeOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.betaBadgeHint")}
+              </span>
+            </label>
           </div>
         </fieldset>
 
@@ -829,6 +856,20 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
               </div>
               <span className="mt-0.5 block text-[10px] text-keep-muted">
                 {t("settings.multiServerHint")}
+              </span>
+            </label>
+            <label data-admin-anchor="settings.worldMapUploadsLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.worldMapUploadsLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={worldMapUploadsEnabled}
+                  onChange={(e) => setWorldMapUploadsEnabled(e.target.checked)}
+                />
+                <span>{worldMapUploadsEnabled ? t("settings.worldMapUploadsOn") : t("settings.worldMapUploadsOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.worldMapUploadsHint")}
               </span>
             </label>
           </div>

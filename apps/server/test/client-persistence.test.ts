@@ -207,15 +207,35 @@ describe("pendingDestination", () => {
     assert.equal(make().read(), null);
   });
 
-  test("write stores JSON {slug,name} and round-trips; set throwing swallowed", () => {
+  test("write stores JSON {slug,name,at} and round-trips; set throwing swallowed", () => {
     const pd = make();
+    const before = Date.now();
     pd.write("abyss", "The Abyss");
-    assert.equal(storage.store.get(KEY), JSON.stringify({ slug: "abyss", name: "The Abyss" }));
+    const stored = JSON.parse(storage.store.get(KEY)!) as { slug: string; name: string | null; at: number };
+    assert.equal(stored.slug, "abyss");
+    assert.equal(stored.name, "The Abyss");
+    assert.ok(stored.at >= before && stored.at <= Date.now(), "write stamps its timestamp");
     assert.deepEqual(pd.read(), { slug: "abyss", name: "The Abyss" });
     pd.write("plain", null);
     assert.deepEqual(pd.read(), { slug: "plain", name: null });
     storage.throwOnSet = true;
     assert.doesNotThrow(() => pd.write("x", null));
+  });
+
+  test("maxAgeMs: fresh reads, stale is removed, untimestamped legacy still reads", () => {
+    const pd = createPendingDestination(KEY, { maxAgeMs: 1_000 });
+    storage.store.set(KEY, JSON.stringify({ slug: "fresh", name: null, at: Date.now() }));
+    assert.deepEqual(pd.read(), { slug: "fresh", name: null });
+    storage.store.set(KEY, JSON.stringify({ slug: "stale", name: null, at: Date.now() - 5_000 }));
+    assert.equal(pd.read(), null);
+    assert.equal(storage.store.has(KEY), false, "expired entry is cleared");
+    // In-flight round-trips across a deploy: {slug,name} without `at` (and
+    // the plain-slug string) keep parsing.
+    storage.store.set(KEY, JSON.stringify({ slug: "legacy", name: null }));
+    assert.deepEqual(pd.read(), { slug: "legacy", name: null });
+    // Without maxAgeMs a timestamped entry never expires.
+    storage.store.set(KEY, JSON.stringify({ slug: "old", name: null, at: Date.now() - 5_000 }));
+    assert.deepEqual(make().read(), { slug: "old", name: null });
   });
 
   test("storageKey is exposed unchanged", () => {

@@ -43,7 +43,12 @@ import { getServerSettings, getSettings, areServersEnabled } from "../settings.j
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import { serverAuthority } from "../servers/authority.js";
 import { isServerModerationActive } from "../servers/moderation.js";
-import { buildRoomSummary, currentOccupants, type ServerWorldFallbackCache } from "../realtime/broadcast.js";
+import {
+  buildRoomSummary,
+  currentOccupants,
+  makePresenceAttributionCache,
+  type ServerWorldFallbackCache,
+} from "../realtime/broadcast.js";
 import { listArchivedOwnedRooms } from "../lib/archivedRooms.js";
 import { canSeeNsfw } from "../auth/ageGate.js";
 import { isolationHiddenSetFor, isolationVisibleSql } from "../auth/ageIsolation.js";
@@ -271,11 +276,16 @@ export async function registerRoomsRoutes(
     // server repeats the same servers/worlds/users reads on this hottest of
     // endpoints.
     const serverWorldCache: ServerWorldFallbackCache = new Map();
+    // One attribution cache for the whole tree (phantom presence): each
+    // info-room reader's anchor resolves ONCE per request instead of once
+    // per room. The room row is already in hand, so the occupant builder
+    // skips its own re-read too.
+    const attribution = makePresenceAttributionCache();
     const assembled = await Promise.all(
       allRooms.map(async (r) => ({
         room: r,
         summary: await buildRoomSummary(db, r, serverWorldCache),
-        occupants: await currentOccupants(io, db, r.id),
+        occupants: await currentOccupants(io, db, r.id, { room: r, attribution }),
       })),
     );
     // Isolation (age plan, Phase 5): occupants the viewer is isolated with

@@ -28,9 +28,9 @@
  *     computed per presence broadcast.
  */
 
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { isModeratorRole, type Role } from "@thekeep/shared";
-import { roomMembers, roomRoleGates, serverMembers, serverUsergroupMembers } from "../db/schema.js";
+import { roomMembers, roomRoleGates, rooms, serverMembers, serverUsergroupMembers } from "../db/schema.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
 
@@ -41,6 +41,48 @@ export interface PostModeRoom {
   serverId: string | null;
   postMode: "everyone" | "staff" | "roles";
   forumId: string | null;
+}
+
+/**
+ * Info room = a read-only chat room (`post_mode = 'staff'`). Forum boards
+ * are excluded (their permission system is separate and they never hold
+ * sockets). 'roles' rooms are conversation spaces for their role-holders
+ * and are NOT info rooms: they keep normal presence. Single predicate so
+ * the presence-attribution layer, the rail, and the landing pickers can't
+ * drift on what counts as "informational".
+ */
+export function isInfoRoom(room: Pick<PostModeRoom, "postMode" | "forumId">): boolean {
+  return room.postMode === "staff" && !room.forumId;
+}
+
+/**
+ * "Does ANY info room exist?" flag for the presence attribution pass.
+ * currentOccupants runs on every presence broadcast and its reader scan
+ * costs a full io.fetchSockets(); an install with zero info rooms must not
+ * pay that on the hot path. One indexed read refreshes the flag after the
+ * TTL; the post-mode write paths invalidate it so a flip (or an info-room
+ * creation) takes effect immediately rather than at TTL expiry. Keyed by
+ * the Db handle (a process singleton in production) so independent
+ * database instances can never read each other's flag.
+ */
+const infoRoomsExistCache = new WeakMap<object, { at: number; exists: boolean }>();
+const INFO_ROOMS_EXIST_TTL_MS = 15_000;
+
+export function invalidateInfoRoomsExistCache(db: Db): void {
+  infoRoomsExistCache.delete(db);
+}
+
+export async function anyInfoRoomsExist(db: Db): Promise<boolean> {
+  const now = Date.now();
+  const hit = infoRoomsExistCache.get(db);
+  if (hit && now - hit.at < INFO_ROOMS_EXIST_TTL_MS) return hit.exists;
+  const row = (await db
+    .select({ id: rooms.id })
+    .from(rooms)
+    .where(and(eq(rooms.postMode, "staff"), isNull(rooms.forumId)))
+    .limit(1))[0];
+  infoRoomsExistCache.set(db, { at: now, exists: !!row });
+  return !!row;
 }
 
 /**
@@ -156,9 +198,29 @@ export async function restampPostLockedForRoom(
   db: Db,
   room: PostModeRoom,
 ): Promise<void> {
+  // A mode flip can create (or retire) the install's only info room; the
+  // presence attribution short-circuit must learn that now, not at TTL
+  // expiry.
+  invalidateInfoRoomsExistCache(db);
   const sockets = await io.in(`room:${room.id}`).fetchSockets();
   for (const s of sockets) {
     const su = (s.data as { user?: { id: string; role: Role } }).user;
     if (su) await stampPostLocked(db, s, su, room);
+    // Phantom-presence stamps (info rooms display no readers): a LIVE mode
+    // flip must move every occupant between "normal presence" and
+    // "attributed to their anchor room" without a rejoin, or the occupant
+    // list and the attribution layer would double-count them. Occupants
+    // caught by a flip INTO 'staff' have no prior-room anchor; they fall
+    // back to the landing room at render time.
+    const sd = s.data as { presenceInfoRoomId?: string | null; presenceAnchorRoomId?: string | null };
+    if (isInfoRoom(room)) {
+      if (sd.presenceInfoRoomId !== room.id) {
+        sd.presenceInfoRoomId = room.id;
+        sd.presenceAnchorRoomId = sd.presenceAnchorRoomId ?? null;
+      }
+    } else if (sd.presenceInfoRoomId === room.id) {
+      sd.presenceInfoRoomId = null;
+      sd.presenceAnchorRoomId = null;
+    }
   }
 }

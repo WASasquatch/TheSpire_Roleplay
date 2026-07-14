@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import type { Server as IoServer, Socket } from "socket.io";
 import type {
@@ -65,8 +65,8 @@ import { userlistBadgesFor } from "../../servers/usergroups.js";
 import { effectiveRoomNsfw } from "../../lib/nsfwRooms.js";
 import { findLinkedAnnex } from "../../lib/roomLinks.js";
 import { stampPairStaffView } from "../../lib/pairStaffView.js";
-import { stampPostLocked } from "../../lib/postMode.js";
-import { roleLockedRoomIdsForServer, stampAnnexRoleDenied } from "../../lib/roleGates.js";
+import { anyInfoRoomsExist, isInfoRoom, stampPostLocked } from "../../lib/postMode.js";
+import { roleAccessDeniedFor, roleLockedRoomIdsForServer, stampAnnexRoleDenied } from "../../lib/roleGates.js";
 import { tFor } from "../../i18n.js";
 import { addSystemMessage, sendRoomBacklogTo } from "./persistence.js";
 import { isHiddenIncognitoIdentity } from "./incognito.js";
@@ -393,16 +393,28 @@ export function setGhostSweepIo(io: Io): void {
  *   3. The alphabetically-first system room as a last resort so a
  *      malformed install (no default, no Spire) still lands users
  *      somewhere deterministic instead of SQLite's natural row order.
+ *
+ * Info rooms (post_mode = 'staff') are skipped at every tier: they are
+ * read-only channels that DISPLAY no occupants, so a landing there would
+ * park arrivals in a room where nobody can see (or talk to) them.
  */
 export async function findCanonicalLanding(db: Db): Promise<typeof rooms.$inferSelect | null> {
-  const defaulted = (await db.select().from(rooms).where(eq(rooms.isDefault, true)).limit(1))[0];
+  const defaulted = (await db
+    .select()
+    .from(rooms)
+    .where(and(eq(rooms.isDefault, true), ne(rooms.postMode, "staff")))
+    .limit(1))[0];
   if (defaulted) return defaulted;
-  const named = (await db.select().from(rooms).where(eq(rooms.name, "The_Spire")).limit(1))[0];
+  const named = (await db
+    .select()
+    .from(rooms)
+    .where(and(eq(rooms.name, "The_Spire"), ne(rooms.postMode, "staff")))
+    .limit(1))[0];
   if (named) return named;
   const fallback = (await db
     .select()
     .from(rooms)
-    .where(eq(rooms.isSystem, true))
+    .where(and(eq(rooms.isSystem, true), ne(rooms.postMode, "staff")))
     .orderBy(asc(rooms.name))
     .limit(1))[0];
   return fallback ?? null;
@@ -450,6 +462,9 @@ export async function findLiveliestLanding(db: Db): Promise<typeof rooms.$inferS
       isNull(rooms.linkedRoomId),
       eq(rooms.replyMode, "flat"),
       eq(rooms.isNsfw, false),
+      // Never an info room (post_mode 'staff'): read-only, displays nobody —
+      // hostile as a first screen even when its announcements are recent.
+      ne(rooms.postMode, "staff"),
       or(eq(rooms.serverId, DEFAULT_SERVER_ID), isNull(rooms.serverId)),
     ))
     .groupBy(rooms.id)
@@ -481,15 +496,22 @@ export async function findLiveliestLanding(db: Db): Promise<typeof rooms.$inferS
 export async function findServerLanding(
   db: Db,
   serverId: string,
+  opts: { skipArchivedDefault?: boolean } = {},
 ): Promise<typeof rooms.$inferSelect | null> {
   // NOTE: the default room may come back ARCHIVED (pre-fix servers whose
   // front door got auto-parked). Callers that hand the id to a client for
   // joining must heal it first (see the /visit route) — a parked landing
   // 404s the join and bounces the visitor back to the home server.
+  // Callers that CANNOT heal (display-only resolution like the reader-
+  // attribution anchor) pass `skipArchivedDefault` so tier 1 falls through
+  // to the live-room tiers instead of handing back a dead landing.
   //
   // Role-locked rooms (room_role_gates kind='access', migration 0349) are
   // skipped at EVERY tier: the landing is where arbitrary members get
   // placed, so a room most of the server can't even see must never be it.
+  // Info rooms (post_mode 'staff') are skipped at every tier for the same
+  // reason as findCanonicalLanding: read-only channels display no
+  // occupants, so a landing there strands arrivals invisibly.
   // Tiers resolve LAZILY — the overwhelmingly common case (default room
   // exists, no access gate) costs one indexed rooms read plus one gate
   // read, and the wider fallback scans only run when an earlier tier is
@@ -499,7 +521,12 @@ export async function findServerLanding(
     .from(rooms)
     .where(and(eq(rooms.isDefault, true), eq(rooms.serverId, serverId)))
     .limit(1))[0];
-  if (defaulted && !(await roleLockedRoomIdsForServer(db, [defaulted.id])).has(defaulted.id)) {
+  if (
+    defaulted
+    && !isInfoRoom(defaulted)
+    && !(opts.skipArchivedDefault && defaulted.archivedAt)
+    && !(await roleLockedRoomIdsForServer(db, [defaulted.id])).has(defaulted.id)
+  ) {
     return defaulted;
   }
   // Fallbacks must be LIVE rooms: an archived non-default row can't be
@@ -508,7 +535,12 @@ export async function findServerLanding(
   const fallbacks = await db
     .select()
     .from(rooms)
-    .where(and(eq(rooms.isSystem, true), eq(rooms.serverId, serverId), isNull(rooms.archivedAt)))
+    .where(and(
+      eq(rooms.isSystem, true),
+      eq(rooms.serverId, serverId),
+      isNull(rooms.archivedAt),
+      ne(rooms.postMode, "staff"),
+    ))
     .orderBy(asc(rooms.name));
   if (fallbacks.length > 0) {
     const locked = await roleLockedRoomIdsForServer(db, fallbacks.map((c) => c.id));
@@ -526,6 +558,7 @@ export async function findServerLanding(
       isNull(rooms.archivedAt),
       isNull(rooms.forumId),
       isNull(rooms.linkedRoomId),
+      ne(rooms.postMode, "staff"),
     ))
     .orderBy(asc(rooms.name));
   if (anyLive.length > 0) {
@@ -842,6 +875,41 @@ async function joinRoomBody(
     .filter((r) => r.startsWith("room:") && r !== `room:${roomId}`)
     .map((r) => r.slice(5));
 
+  // Phantom presence (info rooms display no readers). Stamp the reading /
+  // anchor state for THIS join before anything broadcasts:
+  //   - entering an info room from a normal room anchors the presence to
+  //     that normal room (an info→info hop keeps the original anchor, so
+  //     the walk-back always lands on the last NORMAL room);
+  //   - entering any normal room clears both stamps and resumes ordinary
+  //     presence.
+  // The pre-move state is captured first: it drives the "returning to the
+  // room everyone still sees you in" announce suppression below and the
+  // prompt anchor-room repaints after the join broadcast.
+  const presenceData = socket.data as ReaderSocketData;
+  // Stale-stamp guard (same band check the render pass applies): a
+  // relocate (kick/boot/evict/room-delete) moves this socket's bands
+  // without a joinRoom pass, so a surviving stamp may describe an info
+  // room the socket no longer holds. Treating it as live would skip the
+  // anchor update below AND wrongly suppress the arrival announce via
+  // `returningToAnchor`, so clear it before reading.
+  if (
+    presenceData.presenceInfoRoomId
+    && !socket.rooms.has(`room:${presenceData.presenceInfoRoomId}`)
+  ) {
+    presenceData.presenceInfoRoomId = null;
+    presenceData.presenceAnchorRoomId = null;
+  }
+  const wasReadingInfo = !!presenceData.presenceInfoRoomId;
+  const priorAnchorRoomId = presenceData.presenceAnchorRoomId ?? null;
+  const enteringInfo = isInfoRoom(room);
+  if (enteringInfo) {
+    if (!wasReadingInfo) presenceData.presenceAnchorRoomId = priorRooms[0] ?? null;
+    presenceData.presenceInfoRoomId = roomId;
+  } else {
+    presenceData.presenceInfoRoomId = null;
+    presenceData.presenceAnchorRoomId = null;
+  }
+
   // Drop the user from any previous room before joining the new one.
   // Per-room "X has left the room." chat broadcasts fire on real
   // room switches, but ONLY when no OTHER socket of this account
@@ -876,6 +944,12 @@ async function joinRoomBody(
     if (isHiddenIncognitoIdentity(user, _leaveCharId)) continue;
     const prevRoom = (await db.select().from(rooms).where(eq(rooms.id, prevId)).limit(1))[0];
     if (!prevRoom || prevRoom.replyMode === "nested") continue;
+    // Info-room silence (phantom presence): departures are never announced
+    // in a room that displays nobody; and a move INTO an info room is not
+    // a departure at all — the mover keeps their displayed presence in
+    // this room via the anchor attribution, so a "has left" line would
+    // contradict the userlist.
+    if (enteringInfo || isInfoRoom(prevRoom)) continue;
     await addSystemMessage(io, db, prevId, renderPresenceTemplate(
       roomLeaveTemplate,
       DEFAULT_PRESENCE_TEMPLATES.roomLeave,
@@ -965,6 +1039,22 @@ async function joinRoomBody(
   // userlist). Emits both wire events, same as before.
   await broadcastRoomStateAndPresence(io, db, roomId);
 
+  // Phantom-presence repaints. The attribution pass only counts sockets
+  // that already hold the info room's band, so the leave-loop broadcast
+  // above ran BEFORE this socket's attribution could apply. Repaint the
+  // anchor room now that the join is complete:
+  //   - entering an info room → the anchor gains the attributed (reading)
+  //     row;
+  //   - leaving one for a normal room → the OLD anchor drops it (skipped
+  //     when the destination IS that anchor: the join broadcast above
+  //     already repainted it).
+  // Best-effort: the tree pulse + 20s poll are the backstop either way.
+  if (enteringInfo && !wasReadingInfo && presenceData.presenceAnchorRoomId) {
+    await broadcastPresence(io, db, presenceData.presenceAnchorRoomId).catch(() => {});
+  } else if (wasReadingInfo && !enteringInfo && priorAnchorRoomId && priorAnchorRoomId !== roomId) {
+    await broadcastPresence(io, db, priorAnchorRoomId).catch(() => {});
+  }
+
   // Send recent backlog to just this socket. Whisper privacy + ignore
   // filtering + soft-delete blanking all live in sendRoomBacklogTo so the
   // moderation-relocate path uses the same logic.
@@ -1023,7 +1113,11 @@ async function joinRoomBody(
   // join path pays one indexed UPDATE that matches zero rows. Forum rooms
   // skip it — their feed is a topic list, not a chat log. Best-effort: a
   // greeter failure must never break the join.
-  if (room.replyMode !== "nested") {
+  // Info rooms also skip the greeter: the welcome is a "say something
+  // here" prompt, and a read-only room can't take the reply. The atomic
+  // greeted_at claim stays unconsumed, so the greeting fires in the
+  // newcomer's first NORMAL room instead.
+  if (room.replyMode !== "nested" && !enteringInfo) {
     try {
       await greetNewcomerOnce(db, socket, { id: user.id, username: user.username }, { id: roomId, name: room.name });
     } catch (err) {
@@ -1097,14 +1191,20 @@ async function joinRoomBody(
   // is suppressed while the user is in incognito mode. Pair with the
   // suppress on the leave path above so the moderator can hop rooms
   // entirely silently.
-  const baseGate = !otherIdentitySocketHere && !isInBootGrace() && !isForumRoom && !isHiddenIncognitoIdentity(user, socketCharacterId);
+  // Info-room silence rides baseGate: arrivals ("has connected" included)
+  // are never announced in a room that displays nobody. `returningToAnchor`
+  // additionally silences the re-entry into the room the reader's presence
+  // never visibly left — everyone there watched them sit idle the whole
+  // time, so an "has entered" line would contradict the userlist.
+  const returningToAnchor = wasReadingInfo && priorAnchorRoomId === roomId;
+  const baseGate = !otherIdentitySocketHere && !isInBootGrace() && !isForumRoom && !enteringInfo && !isHiddenIncognitoIdentity(user, socketCharacterId);
   if (loginIntent && !isRoomSwitch && baseGate && !isReconnect) {
     await addSystemMessage(io, db, roomId, renderPresenceTemplate(
       sessionConnectTemplate,
       DEFAULT_PRESENCE_TEMPLATES.sessionConnect,
       { name: user.displayName, room: room.name },
     ));
-  } else if (isRoomSwitch && baseGate) {
+  } else if (isRoomSwitch && baseGate && !returningToAnchor) {
     await addSystemMessage(io, db, roomId, renderPresenceTemplate(
       roomJoinTemplate,
       DEFAULT_PRESENCE_TEMPLATES.roomJoin,
@@ -1608,7 +1708,7 @@ export async function broadcastRoomState(
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room) return;
   const summary = await buildRoomSummary(db, room);
-  const occupants = await currentOccupants(io, db, roomId);
+  const occupants = await currentOccupants(io, db, roomId, { room });
   await emitRoomStateWith(io, db, roomId, summary, occupants, room.serverId);
 }
 
@@ -1632,7 +1732,7 @@ async function broadcastRoomStateAndPresence(io: Io, db: Db, roomId: string): Pr
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room) return;
   const summary = await buildRoomSummary(db, room);
-  const occupants = await currentOccupants(io, db, roomId);
+  const occupants = await currentOccupants(io, db, roomId, { room });
   // Build the block graph ONCE (one fetchSockets + one blocksAmong) and reuse it
   // for both emits. Both wire events (room:state, presence:update) are still
   // sent; the tree pulse fires once per emit, exactly as the two old
@@ -1962,8 +2062,25 @@ export async function sendRoomStateTo(
 ): Promise<void> {
   const room = (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
   if (!room) return;
+  // Phantom-presence stamps: refresh the reading/anchor flags to describe
+  // the room the socket actually stands in now. The callers are /refresh
+  // and me:resync — usually a no-op, but a resync after a live post-mode
+  // flip (or any band move that skipped joinRoom) re-syncs a stale stamp
+  // here.
+  {
+    const sd = socket.data as ReaderSocketData;
+    if (isInfoRoom(room)) {
+      if (sd.presenceInfoRoomId !== room.id) {
+        sd.presenceInfoRoomId = room.id;
+        sd.presenceAnchorRoomId = sd.presenceAnchorRoomId ?? null;
+      }
+    } else if (sd.presenceInfoRoomId) {
+      sd.presenceInfoRoomId = null;
+      sd.presenceAnchorRoomId = null;
+    }
+  }
   const summary = await buildRoomSummary(db, room);
-  const occupants = await currentOccupants(io, db, roomId);
+  const occupants = await currentOccupants(io, db, roomId, { room });
   // Hide occupants this single viewer is blocked with (mutual). One viewer
   // here, so a direct block-set lookup is cheaper than the room graph.
   const viewerUserId = (socket.data as { userId?: string }).userId;
@@ -2016,7 +2133,164 @@ export async function sendRoomStateTo(
   if (tp) socket.emit("theater:sync", tp);
 }
 
-export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<RoomOccupant[]> {
+/**
+ * Phantom presence for info rooms (post_mode = 'staff').
+ *
+ * Info rooms are purely informational: they never DISPLAY their readers.
+ * A socket standing in one still holds real membership of the room's
+ * socket band (live messages + reactions keep flowing), but the presence
+ * layer attributes it to an ANCHOR room instead:
+ *
+ *   - `socket.data.presenceInfoRoomId`  = the info room being read (also
+ *     the "is reading" flag). Stamped on join; cleared on entering any
+ *     normal room; maintained by the post-mode flip restamp.
+ *   - `socket.data.presenceAnchorRoomId` = the last NORMAL room this
+ *     session (an info→info hop keeps the original anchor). Null when
+ *     there was no usable prior room.
+ *
+ * The anchor is VALIDATED at render time (`resolveReaderAnchor`): a dead
+ * anchor (archived / deleted / turned info or board / private the reader
+ * lost / reader banned) falls back to the server's landing room. The
+ * attributed occupant row is folded into `currentOccupants` for the
+ * anchor room BEFORE any per-viewer filtering, so blocks / isolation /
+ * incognito / identity dedup apply to it exactly as if the reader stood
+ * there. The info room itself reports ZERO occupants on every surface.
+ *
+ * Display-layer only: socket membership, message delivery, posting gates
+ * and the user's real /away state are untouched.
+ */
+interface ReaderSocketData {
+  userId?: string;
+  tabCharId?: string | null;
+  presenceInfoRoomId?: string | null;
+  presenceAnchorRoomId?: string | null;
+}
+
+/**
+ * Per-request memo for the attribution pass. GET /rooms rebuilds
+ * occupants for EVERY room in the tree; without this each room would
+ * re-fetch the socket list and re-resolve every reader's anchor. Values
+ * are PROMISES so concurrent rebuilds dedupe the first resolve.
+ */
+export interface PresenceAttributionCache {
+  /** socket.id → resolved effective anchor room id (null = display nowhere). */
+  anchorBySocket: Map<string, Promise<string | null>>;
+  /** room id → room row (anchor/info validation reads). */
+  roomById: Map<string, Promise<typeof rooms.$inferSelect | undefined>>;
+  /** One fetchSockets() for the whole batch. */
+  allSockets?: Promise<Awaited<ReturnType<Io["fetchSockets"]>>>;
+}
+
+export function makePresenceAttributionCache(): PresenceAttributionCache {
+  return { anchorBySocket: new Map(), roomById: new Map() };
+}
+
+function cachedRoomById(
+  db: Db,
+  cache: PresenceAttributionCache,
+  roomId: string,
+): Promise<typeof rooms.$inferSelect | undefined> {
+  let p = cache.roomById.get(roomId);
+  if (!p) {
+    p = db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1).then((r) => r[0]);
+    cache.roomById.set(roomId, p);
+  }
+  return p;
+}
+
+/**
+ * May the reader's attributed row DISPLAY in `room`? Mirrors the standing
+ * rules of actually being there: live, not a board, not itself an info
+ * room, not a private room the reader has no membership of, no active
+ * room ban, and no role-access gate the reader fails. Reads are bounded
+ * and indexed, and only run for readers; the role-gate re-check only runs
+ * when the room actually carries an access row.
+ */
+async function anchorUsableFor(
+  db: Db,
+  userId: string,
+  room: typeof rooms.$inferSelect | undefined,
+): Promise<boolean> {
+  if (!room || room.archivedAt || room.forumId || isInfoRoom(room)) return false;
+  const ban = (await db
+    .select({ until: bans.until })
+    .from(bans)
+    .where(and(eq(bans.roomId, room.id), eq(bans.userId, userId)))
+    .limit(1))[0];
+  if (ban && (!ban.until || +ban.until > Date.now())) return false;
+  if (room.type === "private" && room.ownerId !== userId) {
+    const member = (await db
+      .select({ userId: roomMembers.userId })
+      .from(roomMembers)
+      .where(and(eq(roomMembers.roomId, room.id), eq(roomMembers.userId, userId)))
+      .limit(1))[0];
+    if (!member) return false;
+  }
+  // Role-access gate (room_role_gates kind='access'): the reader's role can
+  // be revoked while they sit in the info room (the live evict only
+  // relocates sockets physically inside the gated room), so re-check the
+  // same gate the join path uses before displaying them there.
+  if ((await roleLockedRoomIdsForServer(db, [room.id])).has(room.id)) {
+    const viewer = (await db
+      .select({ id: users.id, role: users.role })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1))[0];
+    if (!viewer || (await roleAccessDeniedFor(db, viewer, room))) return false;
+  }
+  return true;
+}
+
+/**
+ * Resolve the room a reading socket's presence should display in:
+ * stamped anchor if still usable, else the server's landing room, else
+ * nowhere (null). Also re-validates that the socket really is reading an
+ * info room right now — a live post-mode flip or a relocate can leave a
+ * stale stamp, and a stale stamp must never double-display the user.
+ */
+async function resolveReaderAnchor(
+  db: Db,
+  sd: ReaderSocketData,
+  cache: PresenceAttributionCache,
+): Promise<string | null> {
+  const infoId = sd.presenceInfoRoomId;
+  const userId = sd.userId;
+  if (!infoId || !userId) return null;
+  const info = await cachedRoomById(db, cache, infoId);
+  if (!info || !isInfoRoom(info)) return null;
+  if (sd.presenceAnchorRoomId) {
+    const anchor = await cachedRoomById(db, cache, sd.presenceAnchorRoomId);
+    if (anchor && (await anchorUsableFor(db, userId, anchor))) return anchor.id;
+  }
+  // Fallback: the info room's server landing. This resolver is display-
+  // only (nothing here can heal an archived default the way /visit does),
+  // so tier 1 must skip an archived default rather than hand back a dead
+  // landing; the re-check below still guards bans/private membership.
+  const serverId = info.serverId ?? DEFAULT_SERVER_ID;
+  const landing = areServersEnabledCached() && serverId !== DEFAULT_SERVER_ID
+    ? await findServerLanding(db, serverId, { skipArchivedDefault: true })
+    : await findCanonicalLanding(db);
+  if (landing && (await anchorUsableFor(db, userId, landing))) return landing.id;
+  return null;
+}
+
+export async function currentOccupants(
+  io: Io,
+  db: Db,
+  roomId: string,
+  // Callers that already hold the room row pass it to skip the re-read;
+  // GET /rooms additionally shares one attribution cache across its whole
+  // tree so each reader's anchor resolves once per request, not per room.
+  opts: { room?: typeof rooms.$inferSelect; attribution?: PresenceAttributionCache } = {},
+): Promise<RoomOccupant[]> {
+  const room = opts.room
+    ?? (await db.select().from(rooms).where(eq(rooms.id, roomId)).limit(1))[0];
+  // Info rooms display NOBODY — live sockets and idle ghosts alike are
+  // invisible here (their presence is attributed to their anchor rooms by
+  // the reader pass below). Zero occupants on every surface: this one
+  // early return covers room:state, presence:update, GET /rooms and the
+  // /refresh resync path, since they all assemble through this function.
+  if (room && isInfoRoom(room)) return [];
   const sockets = await io.in(`room:${roomId}`).fetchSockets();
   // Per-tab character routing: each socket carries its own `tabCharId`
   // override (seeded from `users.activeCharacterId` at connect, then
@@ -2060,12 +2334,43 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   // the dedup pass below handles that automatically since live raws are
   // processed first.
   const ghosts = getIdleGhostsForRoom(roomId);
-  if (!raws.length && !ghosts.length) return [];
+  // Attributed readers (see the phantom-presence block above): sockets
+  // standing in an info room whose effective anchor is THIS room join the
+  // occupant set as if they stood here, marked `reading`. The socket must
+  // still hold the info room's band (`s.rooms`) — a kick/boot relocate
+  // moves bands without a joinRoom pass, and its stale stamp must not
+  // re-attribute a socket that already left. Skipped when the room row is
+  // unknown (deleted mid-broadcast).
+  type Reader = { userId: string; tabCharId: string | null | undefined };
+  const readers: Reader[] = [];
+  // Short-circuit for installs with no info rooms at all: the scan below
+  // costs a full io.fetchSockets() per broadcast batch and can only ever
+  // find readers when at least one info room exists. The flag is one
+  // TTL-cached indexed read (lib/postMode.ts), invalidated by the
+  // post-mode write paths.
+  if (room && (await anyInfoRoomsExist(db))) {
+    const cache = opts.attribution ?? makePresenceAttributionCache();
+    if (!cache.allSockets) cache.allSockets = io.fetchSockets();
+    for (const s of await cache.allSockets) {
+      const sd = s.data as ReaderSocketData;
+      if (!sd.presenceInfoRoomId || !sd.userId) continue;
+      if (!s.rooms.has(`room:${sd.presenceInfoRoomId}`)) continue;
+      let anchor = cache.anchorBySocket.get(s.id);
+      if (!anchor) {
+        anchor = resolveReaderAnchor(db, sd, cache);
+        cache.anchorBySocket.set(s.id, anchor);
+      }
+      if ((await anchor) !== roomId) continue;
+      readers.push({ userId: sd.userId, tabCharId: sd.tabCharId });
+    }
+  }
+  if (!raws.length && !ghosts.length && !readers.length) return [];
 
   const userIds = [
     ...new Set([
       ...raws.map((r) => r.userId),
       ...ghosts.map((g) => g.userId),
+      ...readers.map((r) => r.userId),
     ]),
   ];
   const userRows = await db
@@ -2099,6 +2404,23 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     if (seen.has(key)) continue;
     seen.add(key);
     resolvedIdentities.push({ userId: r.userId, characterId });
+  }
+  // Attributed readers resolve their identity exactly like live raws
+  // (per-tab /char override, else the DB-default active character) and
+  // pass the SAME incognito gate — attribution must never out a hidden
+  // moderator in their anchor room. A live socket of the same identity in
+  // this room wins the dedup (they're genuinely here on another tab).
+  const readingKeys = new Set<string>();
+  for (const r of readers) {
+    const u = userById.get(r.userId);
+    if (!u) continue;
+    const characterId = r.tabCharId !== undefined ? r.tabCharId : (u.activeCharacterId ?? null);
+    if (isHiddenIncognitoIdentity(u, characterId)) continue;
+    const key = `${r.userId}::${characterId ?? ""}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    resolvedIdentities.push({ userId: r.userId, characterId });
+    readingKeys.add(key);
   }
   // Ghost identities are explicit (characterId was resolved at
   // ghost-creation), so we add them straight to `resolvedIdentities`
@@ -2138,12 +2460,7 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
   //   - room MOD   → shown only on the exact identity a /promote targeted
   //     (room_mods, character_id '' = OOC).
   // Anyone else reads as "member" (no crown).
-  const roomOwnerRow = (await db
-    .select({ ownerId: rooms.ownerId })
-    .from(rooms)
-    .where(eq(rooms.id, roomId))
-    .limit(1))[0];
-  const roomOwnerId = roomOwnerRow?.ownerId ?? null;
+  const roomOwnerId = room?.ownerId ?? null;
   const modRows = await db
     .select({ userId: roomMods.userId, characterId: roomMods.characterId })
     .from(roomMods)
@@ -2484,13 +2801,18 @@ export async function currentOccupants(io: Io, db: Db, roomId: string): Promise<
     // in-memory store keys on the resolved (userId, characterId)
     // tuple, same key the rest of this loop's dedupe uses.
     const awayState = getAway(u.id, id.characterId);
+    const identityKey = `${u.id}::${id.characterId ?? ""}`;
     out.push({
       userId: u.id,
       displayName: c ? c.name : u.username,
       characterId: c?.id ?? null,
       away: awayState != null,
       awayMessage: awayState?.message ?? null,
-      idle: idleKeys.has(`${u.id}::${id.characterId ?? ""}`),
+      // Attributed readers also read as idle so older bundles degrade to
+      // the plain dimmed/idle presentation; the real /away state above is
+      // untouched (it's user-controlled).
+      idle: idleKeys.has(identityKey) || readingKeys.has(identityKey),
+      ...(readingKeys.has(identityKey) ? { reading: true as const } : {}),
       chatColor: effectiveColor,
       gender: resolveGender(u.gender, c?.statsJson),
       // Per-identity displayed role (see modIdentityKeys / roomOwnerId

@@ -2,11 +2,14 @@
  * ServerEventsPanel — the member-facing community calendar (Multi-Server Lift).
  *
  * A header entry (a Calendar button) that surfaces this server's upcoming
- * events. Opening it lists scheduled/live events with going/maybe/decline RSVP
- * buttons and live attendee counts; the caller RSVPs as their currently-voiced
- * identity (OOC when none is active), matching the per-identity contract. The
- * management surface (create/edit/cancel) lives in the Server Settings → Events
- * tab; this panel is read-and-RSVP only.
+ * events. Opening it lists upcoming OCCURRENCES (a repeating event appears
+ * once per occurrence inside the fetch window; RSVPs are per SERIES) with
+ * going/maybe/decline RSVP buttons and live attendee counts; the caller RSVPs
+ * as their currently-voiced identity (OOC when none is active), matching the
+ * per-identity contract. Cards carry a Server/Forum context chip and one
+ * navigation action per link kind (room join / message jump / forum open /
+ * confirmed external tab). The management surface (create/edit/cancel) lives
+ * in the Server Settings → Events tab; this panel is read-and-RSVP only.
  *
  * Self-contained: it reads `currentServerId` + `branding.serversEnabled` from
  * the store and mounts nothing when the feature is off or there's no server, so
@@ -26,15 +29,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { CalendarDays, ChevronLeft, ChevronRight, MapPin } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, ExternalLink, MapPin, MessageSquareQuote, MessagesSquare, Repeat } from "lucide-react";
 import type {
   ServerEvent,
   ServerEventRsvp,
   ServerEventRsvpStatus,
 } from "@thekeep/shared";
+import { parseEventRecurrence, parseMessageLink } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
 import { formatDate, formatDateTime } from "../../lib/intlFormat.js";
 import { EventIcon } from "../../lib/eventIcons.js";
+import { getSocket } from "../../lib/socket.js";
 import { useChat } from "../../state/store.js";
 import { Modal } from "../cosmetics/Modal.js";
 import { IconCloseButton } from "../shared/CloseButton.js";
@@ -46,13 +51,67 @@ export interface OpenServerEventDetail {
   serverId?: string | null;
 }
 
+/** Cross-shell REQUEST to open an event that may live on another server
+ *  (a world map's "View event" button). App routes it through the same
+ *  flow as a reminder deep-link: switch to the owning server first, THEN
+ *  dispatch OPEN_SERVER_EVENT — dispatching OPEN_SERVER_EVENT directly
+ *  would open this panel on whatever server happens to be current. */
+export const REQUEST_OPEN_SERVER_EVENT = "tk:request-open-server-event";
+export type RequestOpenServerEventDetail = OpenServerEventDetail;
+
+/** Cross-shell deep-link channels App subscribes to (this panel's link cards
+ *  live outside the Chat shell's prop tree, same posture as
+ *  OPEN_SERVER_EVENT). A message jump rides App's jumpToMessage — its server
+ *  routes are the only authorization boundary; a forum link opens the Forums
+ *  Catalog through App's usual gate. */
+export const JUMP_TO_MESSAGE_EVENT = "tk:jump-to-message";
+export interface JumpToMessageDetail {
+  roomId: string;
+  messageId: string;
+}
+export const OPEN_FORUM_CATALOG_EVENT = "tk:open-forum-catalog";
+export interface OpenForumCatalogDetail {
+  /** Forum id or slug, exactly what ForumsCatalog's initialKey accepts. */
+  key: string;
+}
+
 const sid = (id: string) => encodeURIComponent(id);
 
-/** One event with its aggregate counts + the caller's RSVP rows (list shape). */
+/** One event OCCURRENCE with its aggregate counts + the caller's RSVP rows
+ *  (the windowed list shape). Recurring events appear once per occurrence;
+ *  counts/RSVPs are per SERIES. */
 interface EventRow {
   event: ServerEvent;
+  occurrenceStartsAt?: number;
+  occurrenceEndsAt?: number | null;
   counts: { going: number; maybe: number; declined: number };
   myRsvps: ServerEventRsvp[];
+}
+
+/** Concrete start/end of a list row (old-bundle tolerance: fall back to the
+ *  event's own times when the occurrence fields are absent). */
+function occStart(row: EventRow): number {
+  return row.occurrenceStartsAt ?? row.event.startsAt;
+}
+function occEnd(row: EventRow): number | null {
+  return row.occurrenceEndsAt !== undefined ? row.occurrenceEndsAt : row.event.endsAt;
+}
+/** Stable list key — a recurring event renders once per occurrence. */
+function rowKey(row: EventRow): string {
+  return `${row.event.id}:${occStart(row)}`;
+}
+/** Derived context: forum-linked events are Forum events, all else Server. */
+function eventContext(ev: ServerEvent): "server" | "forum" {
+  return ev.linkedForumId ? "forum" : "server";
+}
+/** i18n key suffix for an event's repeat cadence, or null for one-offs. */
+function repeatKey(ev: ServerEvent): "repeatsDaily" | "repeatsWeekly" | "repeatsBiweekly" | "repeatsMonthly" | null {
+  const rule = parseEventRecurrence(ev.recurrenceJson);
+  if (!rule) return null;
+  return rule.freq === "daily" ? "repeatsDaily"
+    : rule.freq === "weekly" ? "repeatsWeekly"
+      : rule.freq === "biweekly" ? "repeatsBiweekly"
+        : "repeatsMonthly";
 }
 
 /** A friendly local datetime; open-ended events omit the end. */
@@ -137,6 +196,9 @@ export function ServerEventsPanel() {
   const serversEnabled = useChat((s) => s.branding.serversEnabled);
   const serverId = useChat((s) => s.currentServerId);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
+  // Room names for the "Go to room" link label (linked rooms always belong to
+  // the current server, so the store's room map covers them).
+  const roomsById = useChat((s) => s.rooms);
   // Only the elected owner listens for the open/deep-link event and renders the
   // modal (the panel mounts twice via the Banner's dual bell slots). Every
   // instance still shows its own trigger button + badge.
@@ -154,6 +216,8 @@ export function ServerEventsPanel() {
   const [viewYear, setViewYear] = useState(() => new Date().getFullYear());
   const [viewMonth, setViewMonth] = useState(() => new Date().getMonth());
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  // Server vs Forum event context filter (forum-linked = Forum event).
+  const [contextFilter, setContextFilter] = useState<"all" | "server" | "forum">("all");
 
   const load = useCallback(async () => {
     if (!serverId) return;
@@ -199,15 +263,16 @@ export function ServerEventsPanel() {
   }, [isOwner]);
 
   // Scroll the focused event into view once the rows land, and sync the calendar
-  // to its month + day so the grid reflects where the reminder landed.
+  // to its month + day so the grid reflects where the reminder landed. A
+  // recurring event focuses its NEXT occurrence (the first row of the series).
   useEffect(() => {
     if (!focusId || !rows) return;
     const row = rows.find((r) => r.event.id === focusId);
     if (row) {
-      const d = new Date(row.event.startsAt);
+      const d = new Date(occStart(row));
       setViewYear(d.getFullYear());
       setViewMonth(d.getMonth());
-      setSelectedDay(dayKey(row.event.startsAt));
+      setSelectedDay(dayKey(occStart(row)));
     }
     const el = focusRef.current;
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -216,23 +281,40 @@ export function ServerEventsPanel() {
     return () => clearTimeout(t);
   }, [focusId, rows]);
 
+  // Badge = distinct upcoming EVENTS (a weekly series counts once, however
+  // many occurrences its expansion returned).
   const upcomingCount = useMemo(
-    () => (rows ?? []).filter((r) => r.event.status === "scheduled" || r.event.status === "live").length,
+    () => new Set(
+      (rows ?? [])
+        .filter((r) => r.event.status === "scheduled" || r.event.status === "live")
+        .map((r) => r.event.id),
+    ).size,
     [rows],
   );
 
-  // Group events by local day (for the list) and per-day counts (for the
-  // calendar markers). Chronological within each day.
+  // Context filter first, then group by local day (for the list) and per-day
+  // counts (for the calendar markers). Chronological within each day.
+  const filteredRows = useMemo(
+    () => (rows ?? []).filter((r) => contextFilter === "all" || eventContext(r.event) === contextFilter),
+    [rows, contextFilter],
+  );
   const eventsByDay = useMemo(() => {
     const m = new Map<string, EventRow[]>();
-    for (const row of rows ?? []) {
-      const key = dayKey(row.event.startsAt);
+    for (const row of filteredRows) {
+      const key = dayKey(occStart(row));
       const list = m.get(key);
       if (list) list.push(row); else m.set(key, [row]);
     }
-    for (const list of m.values()) list.sort((a, b) => a.event.startsAt - b.event.startsAt);
+    for (const list of m.values()) list.sort((a, b) => occStart(a) - occStart(b));
     return m;
-  }, [rows]);
+  }, [filteredRows]);
+  // The row a reminder deep-link should flash: the focused event's first
+  // (soonest) occurrence in the current list.
+  const focusKey = useMemo(() => {
+    if (!focusId) return null;
+    const row = filteredRows.find((r) => r.event.id === focusId);
+    return row ? rowKey(row) : null;
+  }, [focusId, filteredRows]);
   // YYYY-MM-DD sorts chronologically as a plain string.
   const sortedDays = useMemo(() => [...eventsByDay.keys()].sort(), [eventsByDay]);
 
@@ -273,16 +355,64 @@ export function ServerEventsPanel() {
     return mine?.status ?? null;
   };
 
+  // One clear action per link kind. Room joins ride the same socket path /go
+  // uses (bans/passwords enforced by joinRoom); message links ride App's
+  // jumpToMessage (its server checks are the boundary — a pruned or denied
+  // message surfaces App's own "message is gone" toast); forum links open the
+  // Forums Catalog; external links confirm, naming the host, then open a
+  // noopener tab.
+  const openLink = (ev: ServerEvent) => {
+    if (ev.linkedRoomId) {
+      const roomId = ev.linkedRoomId;
+      getSocket().emit("room:join", { roomId }, (res) => {
+        // The modal is already closed when this ack lands, so a denied join
+        // (ban, password, role gate) must surface through the app-level
+        // notice — the same path App's own join uses — not modal-local state.
+        if (!res.ok) useChat.getState().setNotice({ code: res.code, message: res.message });
+      });
+      setOpen(false);
+      return;
+    }
+    if (ev.linkedMessageId) {
+      const link = parseMessageLink(ev.linkedMessageId);
+      if (!link) return;
+      window.dispatchEvent(new CustomEvent<JumpToMessageDetail>(JUMP_TO_MESSAGE_EVENT, {
+        detail: { roomId: link.roomId, messageId: link.messageId },
+      }));
+      setOpen(false);
+      return;
+    }
+    if (ev.linkedForumId) {
+      window.dispatchEvent(new CustomEvent<OpenForumCatalogDetail>(OPEN_FORUM_CATALOG_EVENT, {
+        detail: { key: ev.linkedForumId },
+      }));
+      setOpen(false);
+      return;
+    }
+    if (ev.externalUrl) {
+      let host = ev.externalUrl;
+      try { host = new URL(ev.externalUrl).hostname; } catch { /* show raw */ }
+      if (window.confirm(t("eventsPanel.externalConfirm", { host }))) {
+        window.open(ev.externalUrl, "_blank", "noopener,noreferrer");
+      }
+    }
+  };
+
   const renderEventCard = (row: EventRow) => {
     const ev = row.event;
+    const key = rowKey(row);
+    const startsAt = occStart(row);
+    const endsAt = occEnd(row);
     const mine = myStatusFor(row);
     const cancelled = ev.status === "cancelled";
     const ended = ev.status === "ended";
     const closed = cancelled || ended;
-    const flash = focusId === ev.id;
+    const flash = focusKey === key;
+    const repeats = repeatKey(ev);
+    const roomName = ev.linkedRoomId ? roomsById[ev.linkedRoomId]?.name ?? null : null;
     return (
       <li
-        key={ev.id}
+        key={key}
         ref={flash ? focusRef : undefined}
         className={`rounded border p-3 transition-colors ${
           flash ? "border-keep-action bg-keep-action/10" : "border-keep-rule bg-keep-panel/20"
@@ -300,9 +430,18 @@ export function ServerEventsPanel() {
                 <span className="shrink-0 rounded border border-keep-accent/60 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest text-keep-accent">{t("eventsPanel.cancelled")}</span>
               ) : null}
             </h3>
-            <p className="mt-0.5 text-xs text-keep-muted">
-              {formatWhen(t, ev.startsAt, ev.endsAt)}
-              {!closed ? <span className="ml-2 text-keep-action">{relativeStart(t, ev.startsAt)}</span> : null}
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-keep-muted">
+              <span>{formatWhen(t, startsAt, endsAt)}</span>
+              {!closed ? <span className="text-keep-action">{relativeStart(t, startsAt)}</span> : null}
+              {repeats ? (
+                <span className="inline-flex items-center gap-1 rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest">
+                  <Repeat className="h-3 w-3" aria-hidden="true" />
+                  {t(`eventsPanel.${repeats}`)}
+                </span>
+              ) : null}
+              <span className="inline-flex items-center rounded border border-keep-rule px-1.5 py-0.5 text-[10px] uppercase tracking-widest">
+                {eventContext(ev) === "forum" ? t("eventsPanel.forumEvent") : t("eventsPanel.serverEvent")}
+              </span>
             </p>
           </div>
         </div>
@@ -314,10 +453,35 @@ export function ServerEventsPanel() {
           />
         ) : null}
 
-        {ev.linkedRoomId ? (
-          <p className="mt-2 flex items-center gap-1 text-[11px] text-keep-muted">
-            <MapPin className="h-3 w-3" aria-hidden="true" />
-            <span>{t("eventsPanel.linkedRoom")}</span>
+        {ev.linkedRoomId || ev.linkedMessageId || ev.linkedForumId || ev.externalUrl ? (
+          <p className="mt-2">
+            <button
+              type="button"
+              onClick={() => openLink(ev)}
+              className="inline-flex items-center gap-1.5 rounded border border-keep-rule bg-keep-bg px-2.5 py-1 text-[11px] text-keep-muted hover:border-keep-action/60 hover:text-keep-action"
+            >
+              {ev.linkedRoomId ? (
+                <>
+                  <MapPin className="h-3 w-3" aria-hidden="true" />
+                  {roomName ? t("eventsPanel.goToRoomNamed", { name: roomName }) : t("eventsPanel.goToRoom")}
+                </>
+              ) : ev.linkedMessageId ? (
+                <>
+                  <MessageSquareQuote className="h-3 w-3" aria-hidden="true" />
+                  {t("eventsPanel.viewMessage")}
+                </>
+              ) : ev.linkedForumId ? (
+                <>
+                  <MessagesSquare className="h-3 w-3" aria-hidden="true" />
+                  {t("eventsPanel.openForum")}
+                </>
+              ) : (
+                <>
+                  <ExternalLink className="h-3 w-3" aria-hidden="true" />
+                  {t("eventsPanel.openExternal")}
+                </>
+              )}
+            </button>
           </p>
         ) : null}
 
@@ -346,6 +510,9 @@ export function ServerEventsPanel() {
             {row.counts.maybe ? t("eventsPanel.maybeCountSuffix", { n: row.counts.maybe }) : ""}
           </span>
         </div>
+        {repeats ? (
+          <p className="mt-1.5 text-[10px] italic text-keep-muted">{t("eventsPanel.seriesRsvpHint")}</p>
+        ) : null}
       </li>
     );
   };
@@ -402,6 +569,29 @@ export function ServerEventsPanel() {
                   onSelectDay={onSelectDay}
                 />
               </div>
+              {/* Server vs Forum context filter (forum-linked events are
+                  Forum events; everything else is a Server event). */}
+              <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-keep-rule px-4 py-2">
+                {([
+                  ["all", t("eventsPanel.filterAll")],
+                  ["server", t("eventsPanel.filterServer")],
+                  ["forum", t("eventsPanel.filterForum")],
+                ] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setContextFilter(key)}
+                    aria-pressed={contextFilter === key}
+                    className={`rounded border px-2.5 py-1 text-[11px] ${
+                      contextFilter === key
+                        ? "border-keep-action bg-keep-action/15 font-semibold text-keep-action"
+                        : "border-keep-rule bg-keep-bg text-keep-muted hover:text-keep-text"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
               {/* Below the calendar: a single day's detail when one is picked,
                   otherwise every upcoming event grouped by date (soonest first). */}
               <div className="min-h-0 flex-1 overflow-y-auto p-4">
@@ -427,7 +617,7 @@ export function ServerEventsPanel() {
                       </ul>
                     )}
                   </div>
-                ) : rows.length === 0 ? (
+                ) : filteredRows.length === 0 ? (
                   <p className="text-sm italic text-keep-muted">{t("eventsPanel.noneUpcoming")}</p>
                 ) : (
                   <div className="space-y-4">

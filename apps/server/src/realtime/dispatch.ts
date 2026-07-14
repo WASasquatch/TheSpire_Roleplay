@@ -707,6 +707,34 @@ export async function dispatchChatInput(args: {
     return;
   }
 
+  // Per-server command availability (server_command_rules, migration
+  // 0355). Runs AFTER resolution (rules key on the handler's CANONICAL
+  // name, so every alias — and every custom command — rides the same
+  // check) and BEFORE execution. `serverId` was resolved at the top of
+  // this dispatcher (NULL/legacy room → DEFAULT_SERVER_ID, matching the
+  // postMode staff checks). Server staff + site staff bypass inside the
+  // helper; /help, /report and permission-gated builtins are exempt by
+  // construction. This COMPOSES with every other gate here — the
+  // post-mode, mute and permission checks above/below all still apply.
+  {
+    const { commandRestrictionFor } = await import("../lib/commandRules.js");
+    const restriction = await commandRestrictionFor(db, user, serverId, handler);
+    if (restriction === "disabled") {
+      socket.emit("error:notice", {
+        code: "CMD_OFF",
+        message: tFor(user.locale, "errors:server.realtime.commandDisabled"),
+      });
+      return;
+    }
+    if (restriction === "role") {
+      socket.emit("error:notice", {
+        code: "CMD_NEEDS_ROLE",
+        message: tFor(user.locale, "errors:server.realtime.commandNeedsRole"),
+      });
+      return;
+    }
+  }
+
   // CommandHandler.permission is now a PermissionKey (was a Role
   // tier). The granular resolver layers per-user overrides + the
   // masteradmin bypass on top of the legacy role check, so an

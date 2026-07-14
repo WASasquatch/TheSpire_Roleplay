@@ -49,9 +49,15 @@ export async function registerWorldKnowledgeBaseRoutes(app: FastifyInstance, db:
   const entityStatsSchema = z
     .record(z.string().max(200))
     .refine((r) => Object.keys(r).length <= 50, { message: "too many stats" });
+  // Entry images render via <img> only, but the URL itself is locked to
+  // https like the map images: no data:/javascript:, and no plain-http
+  // downgrade (mixed content would be blocked under the site's CSP anyway).
   const entityImageUrl = z
-    .string().trim().max(2000)
-    .refine((s) => /^https?:\/\//i.test(s), { message: "imageUrl must be http(s)" });
+    .string().trim().min(1).max(2000)
+    .refine(
+      (s) => { try { return new URL(s).protocol === "https:"; } catch { return false; } },
+      { message: "imageUrl must use https" },
+    );
   const entityTag = z
     .string().min(1).max(32)
     .transform((s) => s.trim().toLowerCase())

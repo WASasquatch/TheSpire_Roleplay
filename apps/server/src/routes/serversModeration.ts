@@ -17,6 +17,7 @@ import {
   servers,
   users,
 } from "../db/schema.js";
+import { revokeInvitesOfMember } from "../servers/inviteLinks.js";
 import { notifyUser } from "../servers/notifications.js";
 import {
   broadcastPresence,
@@ -102,6 +103,18 @@ export function registerServerModerationRoutes(ctx: ServerRoutesCtx): void {
     // A banned member/mod/admin loses their chair with the ban.
     await db.delete(serverMembers)
       .where(and(eq(serverMembers.serverId, gate.server.id), eq(serverMembers.userId, target.userId)));
+    // Invites die with the membership: a banned member's live invite links
+    // stop working with them. Best-effort — the ban already committed.
+    try {
+      const revokedCodes = await revokeInvitesOfMember(db, gate.server.id, target.userId);
+      if (revokedCodes.length) {
+        await auditServer(db, {
+          serverId: gate.server.id, actorUserId: gate.me.id, action: "server_invite_revoke",
+          targetUserId: target.userId,
+          metadata: { slug: gate.server.slug, codes: revokedCodes, reason: "membership_ended" },
+        });
+      }
+    } catch { /* best-effort */ }
 
     // Evict live sockets from this server's rooms (mirrors the forum ban):
     // leave the room, notify, land them in the server's landing room (or none).

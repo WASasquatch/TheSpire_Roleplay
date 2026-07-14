@@ -12,7 +12,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { legibleAgainstBg, roleRank, type PermissionKey, type RoomCategorySummary, type RoomOccupant, type RoomSummary, type ServerModPermission, type Theme } from "@thekeep/shared";
-import { Ban, Bell, BellOff, Clapperboard, Landmark, Megaphone, MessagesSquare, Plus, ScrollText, ShieldAlert, UserX, VolumeX } from "lucide-react";
+import { Ban, Bell, BellOff, Clapperboard, Landmark, Megaphone, MessagesSquare, Plus, ScrollText, ShieldAlert, UserRoundPlus, UserX, VolumeX } from "lucide-react";
 import { useChat } from "../../state/store.js";
 import { useActiveTheme } from "../../lib/theme.js";
 import { AdminIcon, CharacterMaskIcon, MasterAdminIcon, ModIcon } from "../moderation/StaffIcons.js";
@@ -143,6 +143,13 @@ interface Props {
    *  wrapper in App (the full-screen Menu overlay); this just lets the in-rail
    *  ✕ button dismiss it. */
   onClose?: () => void;
+  /**
+   * "Invite people" affordance (server invite links). Present only when the
+   * viewer is inside a community whose owner allows them to mint invite
+   * links (App gates on GET /servers/:id/invites/mine → canCreate); renders
+   * a pill beside "New" that opens the invite panel. Null/absent = hidden.
+   */
+  onInvitePeople?: (() => void) | null;
   /**
    * Same 0–3 reading-size step the Tools menu cycles for the chat
    * surface. Applied to the rail's root container as a font-size in
@@ -442,6 +449,7 @@ export function RoomsTree({
   onOpenArcade,
   onOpenForums,
   onClose,
+  onInvitePeople,
   fontStep = 1,
 }: Props) {
   const { t } = useTranslation("chat");
@@ -725,6 +733,22 @@ export function RoomsTree({
           {t("rooms.header")} <span className="text-keep-rule">({visibleRooms.length})</span>
         </span>
         <div className="flex items-center gap-1.5">
+          {/* "Invite people" — only rendered when the owner's invite policy
+              admits this viewer (App resolves that per server). Same
+              ACTION_PILL styling as the create button so the pair reads as
+              one control family. */}
+          {onInvitePeople ? (
+            <button
+              type="button"
+              onClick={onInvitePeople}
+              className={`flex items-center gap-1 ${ACTION_PILL} transition-colors hover:border-keep-action hover:bg-keep-action/20`}
+              aria-label={t("rooms.invitePeopleAria")}
+              title={t("rooms.invitePeopleTitle")}
+            >
+              <UserRoundPlus className="h-3 w-3" aria-hidden="true" />
+              <span className="hidden sm:inline">{t("rooms.invite")}</span>
+            </button>
+          ) : null}
           {/* Floating-right create action. Icon-only, so it carries both a
               title (hover) and aria-label (assistive tech) per the icon-
               button convention. Available to everyone — anyone can mint a
@@ -999,6 +1023,12 @@ function RoomGroup({
   // distinct from a community-server owner). Reactive so a branding rename
   // repaints the crowns.
   const siteName = useChat((s) => s.branding.siteName);
+  // Info rooms (post_mode 'staff') are purely informational: the server
+  // reports them with zero occupants (readers display in their anchor room
+  // instead), so the row renders NO count and NO occupant/empty strip — the
+  // megaphone glyph alone carries the mode. 'roles' rooms are conversation
+  // spaces and keep the normal presence rendering.
+  const infoRoom = room.postMode === "staff" && !room.forumId;
 
   return (
     <li
@@ -1142,7 +1172,14 @@ function RoomGroup({
                 (entering marks it read). */}
             <RoomUnreadCue roomId={room.id} {...(pairAnnex ? { pairRoomId: pairAnnex.id } : {})} />
           </span>
-          <span className="ml-2 shrink-0 font-normal text-keep-muted">({displayedOccupants.length})</span>
+          {/* No count on info rooms — a number (even 0) would imply the room
+              displays its readers. The span keeps the flex slot so the name
+              truncation behaves the same on every row. */}
+          {infoRoom ? (
+            <span className="ml-2 shrink-0" aria-hidden />
+          ) : (
+            <span className="ml-2 shrink-0 font-normal text-keep-muted">({displayedOccupants.length})</span>
+          )}
         </button>
         {/* Per-room mute toggle — overlaid at the right edge (not in flow) so
             the room button stays full-width. Click-through wrapper; the toggle
@@ -1151,7 +1188,7 @@ function RoomGroup({
           <RoomMuteToggle roomId={room.id} {...(pairAnnex ? { pairRoomId: pairAnnex.id } : {})} />
         </div>
       </div>
-      {displayedOccupants.length === 0 ? (
+      {infoRoom ? null : displayedOccupants.length === 0 ? (
         <div className="px-5 pb-2 text-[11px] italic text-keep-muted lg:pb-1">{t("rooms.empty")}</div>
       ) : (
         <ul className="pb-1">
@@ -1292,11 +1329,13 @@ function RoomGroup({
                           title={
                             o.away
                               ? (o.awayMessage ? t("rooms.awayWithMessage", { message: o.awayMessage }) : t("rooms.away"))
+                              : o.reading
+                              ? t("rooms.readingInfoTitle")
                               : o.idle
                               ? t("rooms.idleTitle")
                               : t("rooms.online")
                           }
-                          aria-label={o.away ? t("rooms.away") : o.idle ? t("rooms.idle") : t("rooms.online")}
+                          aria-label={o.away ? t("rooms.away") : o.reading ? t("rooms.readingInfo") : o.idle ? t("rooms.idle") : t("rooms.online")}
                         />
                         {chip ? (
                           <span
@@ -1350,7 +1389,11 @@ function RoomGroup({
                           // side the viewer is standing in; other-side rows
                           // render read-only rather than offering actions
                           // that would no-op (or post false success lines).
-                          caps={currentSideKeys.has(`${o.userId}:${o.characterId ?? ""}`) ? modCaps : NO_MOD_CAPS}
+                          // Attributed reading rows are read-only for the same
+                          // reason: the target's sockets hold the info room's
+                          // band, not this room's, so a room-tier command here
+                          // boots nobody while still announcing success.
+                          caps={!o.reading && currentSideKeys.has(`${o.userId}:${o.characterId ?? ""}`) ? modCaps : NO_MOD_CAPS}
                           onCommand={onCommand}
                         />
                       </div>

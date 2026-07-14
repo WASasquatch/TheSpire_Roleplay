@@ -170,7 +170,14 @@ export function WorldEntitiesTab({
                     className="flex w-full items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1.5 text-left text-sm hover:border-keep-action/40"
                   >
                     {e.imageUrl ? (
-                      <img src={e.imageUrl} alt="" className="h-8 w-8 shrink-0 rounded border border-keep-rule/40 object-cover" />
+                      <img
+                        src={e.imageUrl}
+                        alt=""
+                        referrerPolicy="no-referrer"
+                        loading="lazy"
+                        onError={(ev) => { ev.currentTarget.style.display = "none"; }}
+                        className="h-8 w-8 shrink-0 rounded border border-keep-rule/40 object-cover"
+                      />
                     ) : null}
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-semibold">{e.name}</span>

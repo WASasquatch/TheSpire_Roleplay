@@ -59,7 +59,22 @@
   "birthDate": {
     "title": "Birth date",
     "notSet": "Not set",
-    "hint": "Your birth date is set when you create your account and is only visible to you. If it needs to be corrected, contact staff."
+    "hint": "Your birth date is on file and is only visible to you. If it needs to be corrected, contact staff.",
+    "setHint": "Your account was created before we asked for a date of birth, so there's none on file. You can add it here once. It decides whether you can enter areas marked 18+, and only staff can change it afterwards. Leaving it unset changes nothing about your account.",
+    "inputLabel": "Date of birth",
+    "saveButton": "Save date of birth",
+    "confirmTitle": "Please double-check your date of birth",
+    "confirmDate": "You entered: {{date}}",
+    "confirmPermanent": "Once saved, this date is permanent — you won't be able to change it yourself. It decides whether you can enter areas marked 18+.",
+    "confirmMinor": "This date means you're under 18. Saving it will immediately close off every area marked 18+ and sign you out, so you can sign back in with the right access.",
+    "confirmCancel": "Go back",
+    "confirmSave": "Save permanently",
+    "notice": {
+      "line": "Your account has no date of birth on file. Add it once in your settings so your access to areas marked 18+ is set up correctly.",
+      "open": "Set it now",
+      "dismissTitle": "Hide this notice",
+      "dismissAria": "Hide the date of birth notice"
+    }
   },
   "createCharacter": {
     "title": "New character",

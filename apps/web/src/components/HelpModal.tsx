@@ -43,6 +43,13 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
   // wouldn't show up in the help list until a full tab reload.
   const commandsVersion = useChat((s) => s.commandsVersion);
 
+  // Scope the command list to the current server (home server fallback) so
+  // per-server command rules hide commands this viewer can't run there —
+  // matching the composer completer. Null keeps the unscoped fetch.
+  const currentServerId = useChat((s) => s.currentServerId);
+  const defaultServerId = useChat((s) => s.defaultServerId);
+  const commandsServerId = currentServerId ?? defaultServerId;
+
   // Lets a returning player replay the first-run interface walkthrough on
   // demand. Closes this modal, then flips the shared flag the site tour
   // watches so the spotlight overlay opens over the live chat.
@@ -54,7 +61,10 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/commands", { credentials: "include" })
+    const url = commandsServerId
+      ? `/commands?serverId=${encodeURIComponent(commandsServerId)}`
+      : "/commands";
+    fetch(url, { credentials: "include" })
       .then(async (r) => {
         if (!r.ok) throw new Error(t("modal.loadStatus", { status: r.status }));
         return r.json() as Promise<{ commands: CommandDoc[] }>;
@@ -62,7 +72,7 @@ export function HelpModal({ initialFilter, initialGuide, onClose }: Props) {
       .then((j) => { if (!cancelled) setCommands(j.commands); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : t("modal.loadFailed")); });
     return () => { cancelled = true; };
-  }, [commandsVersion]);
+  }, [commandsVersion, commandsServerId]);
 
   // Focus the search input on open so / typing into the modal just works.
   // Only fires on the Commands tab - the Formatting tab has no search box.

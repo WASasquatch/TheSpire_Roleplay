@@ -86,6 +86,23 @@ export async function anyInfoRoomsExist(db: Db): Promise<boolean> {
 }
 
 /**
+ * Is this specific room id an info room? Short-circuits to false via the
+ * anyInfoRoomsExist cache when the install has no info rooms at all, so the
+ * common case pays nothing; otherwise one indexed read. Used to keep info
+ * rooms CLUTTER-FREE — they carry only the staff-posted announcement content,
+ * never system lines (joins/parts/topic/moderation) or announcement fan-out.
+ */
+export async function isInfoRoomId(db: Db, roomId: string): Promise<boolean> {
+  if (!(await anyInfoRoomsExist(db))) return false;
+  const row = (await db
+    .select({ postMode: rooms.postMode, forumId: rooms.forumId })
+    .from(rooms)
+    .where(eq(rooms.id, roomId))
+    .limit(1))[0];
+  return !!row && isInfoRoom(row);
+}
+
+/**
  * May `user` post into `room` when its post mode is 'staff'? Cheap
  * in-memory checks first (site staff, room owner), then one indexed read
  * each for the room-mod and server-staff tiers. Callers gate on

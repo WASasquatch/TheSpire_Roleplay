@@ -2096,6 +2096,13 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
   // an already-roles room.
   const postRolesInvalid = !!gates && postMode === "roles" && postIds.size === 0;
   const [persistent, setPersistent] = useState(room.persistent ?? true);
+  // Visibility (rooms.type) — EDITABLE post-creation (was create-only, the
+  // "can't turn a private room public" report). Private needs a password;
+  // switching to public clears it; an already-private room keeps its current
+  // password when the field is left blank.
+  const wasPrivate = room.type === "private";
+  const [visibility, setVisibility] = useState<"public" | "private">(wasPrivate ? "private" : "public");
+  const [password, setPassword] = useState("");
   // Staff-only access (migration 0363): hide the room from everyone but staff.
   const [staffOnly, setStaffOnly] = useState(room.staffOnly ?? false);
   const [nsfw, setNsfw] = useState(room.isNsfw ?? false);
@@ -2114,11 +2121,17 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
   const postModeDirty = postMode !== (room.postMode ?? "everyone");
   const richTextDirty = (richText === "simple") !== (room.richTextDisabled ?? false);
   const staffOnlyDirty = staffOnly !== (room.staffOnly ?? false);
+  const visibilityDirty = visibility !== (wasPrivate ? "private" : "public");
+  // A NEW password only matters while private; sending it clears/sets the hash.
+  const passwordDirty = visibility === "private" && password.length > 0;
+  // Turning a public room private needs a password; an already-private room
+  // keeps its current one when the field is left blank.
+  const visibilityInvalid = visibility === "private" && !wasPrivate && password.trim().length < 1;
   const lifetimeDirty = lifetime !== initialLifetime
     || (lifetime === "custom" && expiry !== String(room.messageExpiryMinutes ?? ""));
   // Custom mode needs an actual minutes value before Save makes sense.
   const lifetimeInvalid = lifetime === "custom" && !(Number(expiry) >= 1);
-  const dirty = name !== room.name || topic !== (room.topic ?? "") || lifetimeDirty || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty || iconDirty || categoryDirty || postModeDirty || richTextDirty || staffOnlyDirty || accessDirty || postRolesDirty;
+  const dirty = name !== room.name || topic !== (room.topic ?? "") || lifetimeDirty || persistent !== (room.persistent ?? true) || nsfwDirty || channelDirty || iconDirty || categoryDirty || postModeDirty || richTextDirty || staffOnlyDirty || visibilityDirty || passwordDirty || accessDirty || postRolesDirty;
   return (
     <div className="mt-2 space-y-2 border-t border-keep-rule/60 pt-2">
       <label className="block text-xs">
@@ -2148,6 +2161,27 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
           <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.categoryHint")}</span>
         </label>
       ) : null}
+      {/* Visibility (rooms.type). Editable here so a private room can be
+          opened up (or a public one locked) after creation — no field in this
+          editor is set-once. */}
+      <label className="block text-xs" data-admin-anchor="console.rooms.visibilityLabel">
+        <span className="mb-0.5 block uppercase tracking-widest text-keep-muted">{t("console.rooms.visibilityLabel")}</span>
+        <select value={visibility} onChange={(e) => setVisibility(e.target.value as "public" | "private")}
+          className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 text-sm">
+          <option value="public">{t("console.rooms.public")}</option>
+          <option value="private">{t("console.rooms.private")}</option>
+        </select>
+        {visibility === "private" ? (
+          <input type="text" value={password} onChange={(e) => setPassword(e.target.value)} maxLength={128}
+            placeholder={t(wasPrivate ? "console.rooms.passwordKeepPlaceholder" : "console.rooms.passwordPlaceholder")}
+            aria-label={t("console.rooms.passwordPlaceholder")}
+            className={`mt-1 w-full rounded border bg-keep-bg px-2 py-1 text-sm outline-none focus:border-keep-action ${visibilityInvalid ? "border-keep-accent" : "border-keep-rule"}`} />
+        ) : null}
+        {visibilityInvalid ? (
+          <span className="mt-0.5 block text-[10px] text-keep-accent/90">{t("console.rooms.passwordRequired")}</span>
+        ) : null}
+        <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rooms.visibilityHint")}</span>
+      </label>
       {/* Who can SEE the room (room_role_gates kind='access'). Rendered once
           the gate fetch lands so the picker never lies about current state;
           a failed fetch says so (with a retry) instead of vanishing. */}
@@ -2281,7 +2315,7 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
         </label>
       ) : null}
       <div className="flex justify-end">
-        <button type="button" disabled={busy || !dirty || lifetimeInvalid || accessInvalid || postRolesInvalid}
+        <button type="button" disabled={busy || !dirty || lifetimeInvalid || accessInvalid || postRolesInvalid || visibilityInvalid}
           onClick={() => void run(async () => {
             await apiPatchServerRoom(detail.id, room.id, {
               name: name.trim(),
@@ -2295,6 +2329,11 @@ function RoomEditForm({ detail, room, categories, busy, run, onSaved }: { detail
               ...(postModeDirty ? { postMode } : {}),
               ...(richTextDirty ? { richTextDisabled: richText === "simple" } : {}),
               ...(staffOnlyDirty ? { staffOnly } : {}),
+              // Visibility (type) + password. Switching to public clears the
+              // password server-side; a blank password on an already-private
+              // room keeps the current one.
+              ...(visibilityDirty ? { type: visibility } : {}),
+              ...(passwordDirty ? { password } : {}),
               // Role gates: full-replace lists, sent only when touched
               // ("Everyone" saves as an empty list = clear the lock).
               ...(accessDirty ? { accessRoleIds: [...effectiveAccessIds] } : {}),

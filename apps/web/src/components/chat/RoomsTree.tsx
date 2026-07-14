@@ -1102,21 +1102,26 @@ function RoomGroup({
                     </span>
                   );
                 }
-                const Icon = room.replyMode === "nested" ? MessagesSquare : ScrollText;
+                // Info rooms (staff-post announcement channels) take the
+                // megaphone as their MAIN glyph, REPLACING the stock scroll —
+                // the same way a custom room icon (handled above) does. A
+                // custom room.icon still wins over both.
+                const Icon = infoRoom ? Megaphone : room.replyMode === "nested" ? MessagesSquare : ScrollText;
                 return (
                   <span
-                    title={modeTitle}
+                    title={infoRoom ? t("rooms.staffOnlyTitle") : modeTitle}
                     className="mr-1 inline-flex shrink-0 align-middle text-keep-muted"
                   >
                     <Icon aria-hidden style={glyphStyle} />
                   </span>
                 );
               })()}
-              {/* Restricted-posting glyph (post_mode 'staff'/'roles',
-                  migrations 0345/0349): an announcements-style info room.
-                  Follows the mode glyph above; em-sized so it scales with
-                  the font step. Title says WHO can post. */}
-              {room.postMode === "staff" || room.postMode === "roles" ? (
+              {/* Restricted-posting badge (post_mode 'roles'). Info rooms
+                  (staff) now carry the megaphone as their MAIN glyph above, so
+                  the badge is only for 'roles' conversation rooms — plus the
+                  edge case of an info room that set a custom icon (which took
+                  the main slot), so its info signal still shows. */}
+              {room.postMode === "roles" || (infoRoom && !!room.icon) ? (
                 <span
                   title={room.postMode === "roles" ? t("rooms.rolesOnlyTitle") : t("rooms.staffOnlyTitle")}
                   className="mr-1 inline-flex shrink-0 align-middle text-keep-muted"

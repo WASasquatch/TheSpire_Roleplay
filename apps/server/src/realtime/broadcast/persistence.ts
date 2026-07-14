@@ -36,6 +36,7 @@ import {
   users,
 } from "../../db/schema.js";
 import { isAdultUser } from "../../auth/ageGate.js";
+import { isInfoRoomId } from "../../lib/postMode.js";
 import { canSeePairFeeds, emitToPairStaff, findPairSibling } from "../../lib/pairStaffView.js";
 import { isIsolatedBetween, isolationActiveFor, isolationVisibleSql } from "../../auth/ageIsolation.js";
 import { maskForMinors, maskMessageForMinors } from "../minorLanguageFilter.js";
@@ -238,6 +239,15 @@ export async function addMessage(
     isNsfw?: boolean;
   },
 ): Promise<string | null> {
+  // Info rooms (staff-post announcement channels) stay CLUTTER-FREE: they
+  // carry only the staff-authored info content, never system lines (topic /
+  // moderation / mode-change) or announce broadcasts. Whispers are private
+  // 2-party sends (only the pair ever see them, never other readers), so
+  // they aren't room clutter and pass through. Cheap: isInfoRoomId
+  // short-circuits via the anyInfoRoomsExist cache when no info rooms exist.
+  if ((payload.kind === "system" || payload.kind === "announce") && await isInfoRoomId(ctx.db, ctx.roomId)) {
+    return null;
+  }
   // Inline-command expansion. The body may carry user-authored
   // `!cmd` tokens, either from a plain chat send or from a slash
   // command's free-form arg ("/me dances and !random"). We run the
@@ -1358,6 +1368,9 @@ export async function addMessageDirect(opts: {
   color?: string | null;
 }): Promise<void> {
   const { db, io, roomId, userId, displayName, kind, body, bodyHtml, color } = opts;
+  // Info rooms stay clutter-free — drop system/announce broadcast chrome
+  // (including scheduled-announce fan-out) targeted at them.
+  if (await isInfoRoomId(db, roomId)) return;
   const id = nanoid();
   const now = new Date();
   await db.insert(messages).values({
@@ -1397,6 +1410,9 @@ export async function addSystemMessage(
   roomId: string,
   body: string,
 ): Promise<void> {
+  // Info rooms stay clutter-free: no system chrome (joins/parts/topic/
+  // moderation summaries) is ever posted into an announcement channel.
+  if (await isInfoRoomId(db, roomId)) return;
   const id = nanoid();
   const now = new Date();
   // System messages still need a userId column NOT NULL; we use the room owner

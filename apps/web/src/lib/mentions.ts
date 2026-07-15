@@ -64,12 +64,12 @@ const STYLED_SPAN_RE = new RegExp(
 );
 
 export function splitMentions(body: string): BodyPart[] {
-  const out: BodyPart[] = [];
+  const parts: BodyPart[] = [];
   for (const seg of splitOnCode(body)) {
     if (seg.kind === "code") {
       // Code regions pass through verbatim, downstream `parseInline`
       // re-tokenizes the backticks and renders them as <code>.
-      out.push({ kind: "text", text: seg.raw });
+      parts.push({ kind: "text", text: seg.raw });
       continue;
     }
     // Carve out color/style spans as protected text, run mention extraction
@@ -77,11 +77,29 @@ export function splitMentions(body: string): BodyPart[] {
     let last = 0;
     for (const m of seg.raw.matchAll(STYLED_SPAN_RE)) {
       const start = m.index ?? 0;
-      if (start > last) extractFromTextSegment(seg.raw.slice(last, start), out);
-      out.push({ kind: "text", text: m[0] });
+      if (start > last) extractFromTextSegment(seg.raw.slice(last, start), parts);
+      parts.push({ kind: "text", text: m[0] });
       last = start + m[0].length;
     }
-    if (last < seg.raw.length) extractFromTextSegment(seg.raw.slice(last), out);
+    if (last < seg.raw.length) extractFromTextSegment(seg.raw.slice(last), parts);
+  }
+  // Coalesce ADJACENT text parts back into one before returning. The code /
+  // styled-span carve-outs above split the body into separate text parts so
+  // mention extraction skips those regions — but that also drops a parse
+  // boundary in the MIDDLE of any inline construct (a `<b>`/`<strong>` tag, a
+  // `**` run) that ENCLOSES a protected `<span style>`/`<font>`/code region.
+  // Since `parseInline` runs per text part (renderParts), an enclosing tag
+  // whose open and close land in different parts could never balance-close and
+  // rendered literally (the "<b> breaks around a nested <span>" bug). Merging
+  // adjacent TEXT runs hands `parseInline` the whole construct so it nests to
+  // any depth. Mention / world-mention chips stay their own parts — a chip is
+  // a hard boundary formatting legitimately can't span — and extraction has
+  // already run, so this only re-joins pure text (never re-creates a mention).
+  const out: BodyPart[] = [];
+  for (const p of parts) {
+    const prev = out[out.length - 1];
+    if (p.kind === "text" && prev && prev.kind === "text") prev.text += p.text;
+    else out.push(p);
   }
   return out;
 }

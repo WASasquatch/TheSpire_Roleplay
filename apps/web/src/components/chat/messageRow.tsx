@@ -726,6 +726,17 @@ export function Line({
   const viewerActiveCharacterId = useChat((s) => s.activeCharacterId);
   const ageMs = Date.now() - msg.createdAt;
   const showOwnControls = isOwn && ageMs < editGraceMs && REPLYABLE_KINDS.has(msg.kind);
+  // In a quiet room nothing re-renders this row, so the author's Edit/Delete
+  // buttons lingered past the grace window and then failed on click. Schedule a
+  // one-shot re-render at the exact expiry so they disappear on time.
+  const [, setGraceTick] = useState(0);
+  useEffect(() => {
+    if (!(isOwn && REPLYABLE_KINDS.has(msg.kind))) return;
+    const remaining = msg.createdAt + editGraceMs - Date.now();
+    if (remaining <= 0) return;
+    const id = setTimeout(() => setGraceTick((n) => n + 1), remaining + 50);
+    return () => clearTimeout(id);
+  }, [isOwn, msg.kind, msg.createdAt, editGraceMs]);
   // Moderation affordances. Mods get Delete (hide a post); admins
   // additionally get Edit (rewrite the body). Both bypass the grace
   // window, that's the whole point of the moderation lever, and the

@@ -510,6 +510,16 @@ export const guides: HelpGuideTranslations = {
         </P>
         <Bullets>
           <li>
+            <K>{"{arg:1}"}</K>, <K>{"{arg:2}"}</K> y demás toman las palabras que la persona escribió
+            después del comando, una por una. Así, un comando <K>/hit goblin 6</K> puede leer{" "}
+            <K>{"{arg:1}"}</K> como "goblin" y <K>{"{arg:2}"}</K> como "6". Una que falte sale en
+            blanco, y <K>{"{target}"}</K> es solo otro nombre para <K>{"{arg:1}"}</K>.
+          </li>
+          <li>
+            <K>{"{rng:1:20}"}</K> inserta un número entero al azar desde el primer valor hasta el
+            segundo. Los extremos pueden ser números o piezas, como <K>{"{rng:1:{arg:2}}"}</K>.
+          </li>
+          <li>
             <K>{"{roll:1d20}"}</K> inserta el total de una tirada al azar. Muestra solo el número y
             no acepta bonos de más o menos, así que úsalo con dados simples como <K>{"{roll:2d6}"}</K>.
           </li>
@@ -518,15 +528,28 @@ export const guides: HelpGuideTranslations = {
             corta <K>{"{a|b|c}"}</K> hace lo mismo.
           </li>
           <li>
-            <K>{"{if:condition|then|else}"}</K> muestra el texto del "then" cuando la condición
-            tiene algo, o el del "else" cuando está vacía (o es 0, o false). La parte "else" es
-            opcional.
+            <K>{"{if:condition|then|else}"}</K> muestra el texto del "then" cuando la condición se
+            cumple, o el del "else" cuando no. Una condición con algo cuenta como verdadera, y también
+            puedes comparar con <K>{">"}</K> <K>{"<"}</K> <K>{">="}</K> <K>{"<="}</K> <K>{"=="}</K> o{" "}
+            <K>{"!="}</K>, como <K>{"{if:{arg:1}>15|un golpe demoledor|un roce sin fuerza}"}</K>. La
+            parte "else" es opcional.
+          </li>
+          <li>
+            <K>{"<loop:3>...</loop>"}</K> repite lo que está entre las etiquetas, aquí tres veces, con
+            un espacio entre cada una. La cuenta puede ser una pieza como <K>{"{arg:1}"}</K>, lo
+            aleatorio de adentro se vuelve a tirar en cada pasada y <K>{"{loop}"}</K> cuenta las
+            pasadas. Usa <K>{'sep=""'}</K> para no dejar espacio o <K>{'sep=", "'}</K> para comas.
           </li>
           <li>
             <K>{"{=10+5}"}</K> hace cuentas rápidas con + - * / y paréntesis. Hasta puedes anidar,
             como <K>{"{=10+{roll:1d20}}"}</K> para sumar un dado a un número base.
           </li>
         </Bullets>
+        <P>
+          Juntando todo, un comando de "tira los dados que quieras" como{" "}
+          <K>{"{sender} rolls {arg:1} d{arg:2}: <loop:{arg:1}>{rng:1:{arg:2}}</loop>"}</K> deja que
+          alguien escriba <K>/roll 3 20</K> y reciba algo como <K>WAS rolls 3 d20: 14 8 2</K>.
+        </P>
         <Tip label="Consejo">
           Lo que el comando no entiende queda en pantalla tal como lo escribiste, así que un{" "}
           <K>{"{algo}"}</K> perdido es fácil de ver y corregir.

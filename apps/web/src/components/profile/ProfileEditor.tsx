@@ -1503,7 +1503,13 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                     }
                   />
                 )}
-                <div className="mt-1 text-right text-[10px] text-keep-muted tabular-nums">
+                <div
+                  className={`mt-1 text-right text-[10px] tabular-nums ${
+                    bioHtml.length > (master?.limits?.maxBioLength ?? 50_000)
+                      ? "font-semibold text-keep-accent"
+                      : "text-keep-muted"
+                  }`}
+                >
                   {formatNumber(bioHtml.length)} / {formatNumber(master?.limits?.maxBioLength ?? 50_000)}
                 </div>
                 {designerAvailable && bioMode === "designer" && showDesignerTour ? (
@@ -2265,6 +2271,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
             profile={previewProfile}
             onClose={() => setPreviewing(false)}
             zIndex={isAdminEdit ? 70 : 60}
+            // Previewing is always your own identity (or a moderator in
+            // admin-edit mode, who bypasses anyway), so don't make the author
+            // click through the adult warning gate to see their own profile.
+            bypassNsfwGate
           />
         </div>
       ) : null}

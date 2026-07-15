@@ -4042,7 +4042,9 @@ function Chat() {
         ? i18n.t("notifications:toast.googleAlreadyLinked")
         : gErr === "disabled"
           ? i18n.t("notifications:toast.googleAccountDisabled")
-          : i18n.t("notifications:toast.googleSignInFailed");
+          : gErr === "email_exists"
+            ? i18n.t("notifications:toast.googleEmailExists")
+            : i18n.t("notifications:toast.googleSignInFailed");
     setNotice({ code: "GOOGLE_ERROR", message });
     url.searchParams.delete("googleError");
     window.history.replaceState(null, "", url.pathname + url.search + url.hash);

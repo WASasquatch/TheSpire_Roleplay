@@ -70,7 +70,8 @@
   "report": {
     "promptReason": "¿Por qué reportas esto ({{target}})? (opcional)",
     "reported": "Reportado",
-    "report": "Reportar"
+    "report": "Reportar",
+    "failed": "No se pudo enviar el reporte. Inténtalo de nuevo."
   },
   "privacy": {
     "loading": "Cargando privacidad del Scriptorium…",

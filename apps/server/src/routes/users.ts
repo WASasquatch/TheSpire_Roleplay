@@ -1219,6 +1219,14 @@ export async function registerUsersRoutes(
     const { id } = req.params;
     const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];
     if (!target || target.username === "system") { reply.code(404); return { error: "not found" }; }
+    // Role-hierarchy gate, mirroring /users/:id/ban and PATCH /admin/users/:id.
+    // The permission key makes the endpoint callable, but a delegated (non-owner)
+    // holder must not be able to reset a peer's or a higher-ranked account's
+    // password — resetting then logging in as that account is full takeover.
+    // Self-reset stays allowed (there's a normal change-password path anyway).
+    if (id !== me.id && roleRank(target.role) >= roleRank(me.role)) {
+      reply.code(403); return { error: "cannot reset the password of a user at or above your role" };
+    }
 
     const { z } = await import("zod");
     const body = z.object({
@@ -1260,6 +1268,12 @@ export async function registerUsersRoutes(
     if (id === me.id) { reply.code(400); return { error: "you cannot delete your own account" }; }
     const target = (await db.select().from(users).where(eq(users.id, id)).limit(1))[0];
     if (!target || target.username === "system") { reply.code(404); return { error: "not found" }; }
+    // Role-hierarchy gate, mirroring /users/:id/ban. A delegated (non-owner)
+    // holder of hard_delete_user must not be able to destroy a peer's or a
+    // higher-ranked account (e.g. the site owner).
+    if (roleRank(target.role) >= roleRank(me.role)) {
+      reply.code(403); return { error: "cannot delete a user at or above your role" };
+    }
 
     // Disconnect any live sockets so they stop receiving events immediately.
     const sockets = await io.fetchSockets();

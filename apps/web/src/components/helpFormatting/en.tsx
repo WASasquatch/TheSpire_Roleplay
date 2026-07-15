@@ -66,10 +66,22 @@ const CHECK_ROWS: Array<{ syntax: string; meaning: string; example: string }> = 
     example: "she waves at the newcomer !greet and smiles",
   },
   {
+    syntax: "{arg:1}  {arg:2}  …",
+    meaning:
+      "Inside a custom command: the words the caller typed after the command, one at a time. {arg:1} is the first, {arg:2} the second, and so on. A missing one comes out blank. {target} is the same as {arg:1}.",
+    example: "swings at {arg:1} for {arg:2} damage",
+  },
+  {
+    syntax: "{rng:A:B}",
+    meaning:
+      "Inside a custom command: a random whole number from A to B (both ends possible). A and B can be plain numbers or other pieces like {arg:2}.",
+    example: "today's luck: {rng:1:100}",
+  },
+  {
     syntax: "{if:condition|then|else}",
     meaning:
-      'Inside a custom command: show the "then" text when the condition has something in it, or the "else" text when it\'s empty. The else part is optional.',
-    example: "{if:{target}|hugs {target}|waves at nobody in particular}",
+      'Inside a custom command: show the "then" text when the condition holds, or the "else" text when it doesn\'t. A condition with something in it counts as true; it can also compare with > < >= <= == or != . The else part is optional.',
+    example: "{if:{arg:1}>15|a mighty blow|a glancing hit}",
   },
   {
     syntax: "{choose:a|b|c}",
@@ -82,6 +94,12 @@ const CHECK_ROWS: Array<{ syntax: string; meaning: string; example: string }> = 
     meaning:
       "Inside a custom command: drop in a random dice total (just the number). Plain dice only, no plus or minus bonus.",
     example: "You rolled a {roll:1d20}!",
+  },
+  {
+    syntax: '<loop:N>…</loop>  (or <loop:N sep=", ">…</loop>)',
+    meaning:
+      'Inside a custom command: repeat the part between the tags N times, with a space between each. N can be a number or a piece like {arg:1}, and anything random inside re-rolls each time. {loop} counts the passes. Add sep="" for no gap, or sep=", " for commas.',
+    example: "{sender} rolls {arg:1} d{arg:2}: <loop:{arg:1}>{rng:1:{arg:2}}</loop>",
   },
   {
     syntax: "{=math}",

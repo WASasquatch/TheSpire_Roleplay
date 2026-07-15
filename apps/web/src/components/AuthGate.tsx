@@ -698,6 +698,10 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
    */
   const [captcha, setCaptcha] = useState<{ id: string; question: string } | null>(null);
   const [captchaAnswer, setCaptchaAnswer] = useState("");
+  // Bumped by refreshCaptcha to force the fetch effect to re-run even when
+  // `captcha` is already null (e.g. the initial fetch failed) — otherwise the
+  // "New" button was a no-op because setting null-to-null triggers no effect.
+  const [captchaNonce, setCaptchaNonce] = useState(0);
   /**
    * Honeypot. Real users never see this field (display:none in the form);
    * bots that auto-fill every input land here and we silently 400 them
@@ -791,12 +795,15 @@ export function AuthGate({ pendingProfileHint, pendingWorldHint, initialMode = "
       .then((j) => { if (!cancelled && j) setCaptcha(j); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [mode, captcha]);
+  }, [mode, captcha, captchaNonce]);
 
-  /** Re-fetch a captcha after a submit attempt consumed the current one. */
+  /** Re-fetch a captcha after a submit attempt consumed the current one, or
+   *  when the user clicks "New" (works even if the previous fetch failed and
+   *  left `captcha` null). */
   function refreshCaptcha() {
     setCaptcha(null);
     setCaptchaAnswer("");
+    setCaptchaNonce((n) => n + 1);
   }
 
   async function submit(e: FormEvent) {

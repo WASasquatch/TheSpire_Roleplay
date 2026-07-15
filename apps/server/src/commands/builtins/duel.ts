@@ -391,8 +391,11 @@ export const duelCommand: CommandHandler = {
       characterId: resolution.target.characterId,
       displayName: resolution.target.displayName,
     };
-    if (opponent.userId === ctx.user.id
-      && (opponent.characterId ?? null) === (ctx.user.activeCharacterId ?? null)) {
+    // Account-level self-play guard. Comparing the exact identity let a caller
+    // voicing OOC (activeCharacterId null) challenge one of their OWN
+    // characters and farm the duel reward against themselves across two tabs.
+    // Reward-bearing games must involve two distinct ACCOUNTS.
+    if (opponent.userId === ctx.user.id) {
       return notice(ctx, "DUEL_SELF", tFor(ctx.user.locale, "commands:duel.self"));
     }
     const { challengerClass, opponentClass } = parseDuelStartArgs(rest);

@@ -1,6 +1,10 @@
-import { useEffect, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
+
+/** Tabbable elements inside the dialog, for the focus trap. */
+const FOCUSABLE_SEL =
+  'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface ModalProps {
   onClose: () => void;
@@ -36,6 +40,10 @@ interface ModalProps {
    * passed here so the stacking-order contract is preserved.
    */
   backdropStyle?: CSSProperties;
+  /** id of the element that labels the dialog → sets aria-labelledby. */
+  labelledById?: string;
+  /** Fallback accessible name when there's no visible title to point at. */
+  label?: string;
   children: ReactNode;
 }
 
@@ -94,12 +102,15 @@ export function Modal({
   zIndex = 40,
   variant = "centered",
   backdropStyle,
+  labelledById,
+  label,
   children,
 }: ModalProps) {
   // Under Reduce Motion, ease the whole modal (backdrop + card) in with a
   // gentle opacity fade instead of the default instant pop. Fade is applied to
   // the backdrop wrapper so the card rides along; pure opacity, no movement.
   const reduceMotion = useReducedMotion();
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!closeOnEscape) return;
@@ -109,6 +120,44 @@ export function Modal({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [closeOnEscape, onClose]);
+
+  // Accessibility: move focus into the dialog on open (unless a child, e.g. an
+  // autofocus input, already claimed it) and restore it to the opener on close.
+  // Paired with the Tab handler below this keeps keyboard focus inside the
+  // dialog while it's up. Runs once per mount.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const raf = requestAnimationFrame(() => {
+      const node = dialogRef.current;
+      if (!node || node.contains(document.activeElement)) return;
+      const first = node.querySelector<HTMLElement>(FOCUSABLE_SEL);
+      (first ?? node).focus();
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus();
+      }
+    };
+  }, []);
+
+  function onDialogKeyDown(e: ReactKeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Tab") return;
+    const node = dialogRef.current;
+    if (!node) return;
+    const focusables = Array.from(node.querySelectorAll<HTMLElement>(FOCUSABLE_SEL))
+      .filter((el) => el.offsetParent !== null || el === document.activeElement);
+    if (focusables.length === 0) { e.preventDefault(); node.focus(); return; }
+    const first = focusables[0]!;
+    const last = focusables[focusables.length - 1]!;
+    const active = document.activeElement;
+    if (e.shiftKey) {
+      if (active === first || !node.contains(active)) { e.preventDefault(); last.focus(); }
+    } else if (active === last || !node.contains(active)) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 
   // Portal to <body> so the backdrop's `position: fixed` always
   // resolves against the viewport. Without this, a modal opened
@@ -124,13 +173,18 @@ export function Modal({
   // Portaling lifts every modal out of those traps in one place.
   return createPortal(
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
+      aria-labelledby={labelledById}
+      aria-label={labelledById ? undefined : label}
+      tabIndex={-1}
+      onKeyDown={onDialogKeyDown}
       // Caller's backdropStyle first; zIndex applied last so it always
       // wins. Inline styles (backgroundImage from ProfileModal's BG
       // override) layer on top of the `bg-black/40` Tailwind class
       // since CSS paints background-image over background-color.
-      style={{ ...backdropStyle, zIndex }}
+      style={{ ...backdropStyle, zIndex, outline: "none" }}
       className={`fixed inset-0 bg-black/40 ${VARIANT_CLASS[variant]}${reduceMotion ? " tk-fade-in" : ""}`}
       onClick={closeOnBackdrop ? onClose : undefined}
     >

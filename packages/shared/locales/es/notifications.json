@@ -156,6 +156,7 @@
     "googleLinked": "Cuenta de Google vinculada.",
     "googleAlreadyLinked": "Esa cuenta de Google ya está conectada a otra cuenta.",
     "googleAccountDisabled": "Esa cuenta está deshabilitada. Contacta a un admin.",
+    "googleEmailExists": "Ya existe una cuenta con este correo. Inicia sesión con tu contraseña y luego vincula Google desde tu perfil.",
     "googleSignInFailed": "El inicio de sesión con Google no se completó. Inténtalo de nuevo.",
     "topicGone": "No se pudo abrir ese tema, puede que lo hayan eliminado.",
     "threadGone": "No se pudo abrir ese hilo, puede que lo hayan eliminado.",

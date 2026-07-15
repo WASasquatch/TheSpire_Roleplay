@@ -53,10 +53,22 @@ const CHECK_ROWS: Array<{ syntax: string; meaning: string; example: string }> = 
     example: "saluda a quien acaba de llegar !greet y sonríe",
   },
   {
+    syntax: "{arg:1}  {arg:2}  …",
+    meaning:
+      "Dentro de un comando personalizado: las palabras que escribió quien lo usó, una por una. {arg:1} es la primera, {arg:2} la segunda, y así. Una que falte sale en blanco. {target} es lo mismo que {arg:1}.",
+    example: "ataca a {arg:1} causando {arg:2} de daño",
+  },
+  {
+    syntax: "{rng:A:B}",
+    meaning:
+      "Dentro de un comando personalizado: un número entero al azar de A a B (ambos posibles). A y B pueden ser números o piezas como {arg:2}.",
+    example: "suerte de hoy: {rng:1:100}",
+  },
+  {
     syntax: "{if:condición|entonces|si no}",
     meaning:
-      'Dentro de un comando personalizado: muestra el texto de "entonces" cuando la condición tiene algo, o el de "si no" cuando está vacía. La parte del "si no" es opcional.',
-    example: "{if:{target}|abraza a {target}|saluda a nadie en particular}",
+      'Dentro de un comando personalizado: muestra el texto de "entonces" cuando la condición se cumple, o el de "si no" cuando no. Una condición con algo cuenta como verdadera; también puede comparar con > < >= <= == o != . La parte del "si no" es opcional.',
+    example: "{if:{arg:1}>15|un golpe demoledor|un roce sin fuerza}",
   },
   {
     syntax: "{choose:a|b|c}",
@@ -69,6 +81,12 @@ const CHECK_ROWS: Array<{ syntax: string; meaning: string; example: string }> = 
     meaning:
       "Dentro de un comando personalizado: inserta un total de dados aleatorio (solo el número). Dados simples, sin ajustes de más o menos.",
     example: "¡Sacaste un {roll:1d20}!",
+  },
+  {
+    syntax: '<loop:N>…</loop>  (o <loop:N sep=", ">…</loop>)',
+    meaning:
+      'Dentro de un comando personalizado: repite lo que está entre las etiquetas N veces, con un espacio entre cada una. N puede ser un número o una pieza como {arg:1}, y lo aleatorio de adentro se vuelve a tirar cada vez. {loop} cuenta las pasadas. Usa sep="" para no dejar espacio, o sep=", " para comas.',
+    example: "{sender} tira {arg:1} d{arg:2}: <loop:{arg:1}>{rng:1:{arg:2}}</loop>",
   },
   {
     syntax: "{=math}",

@@ -181,7 +181,7 @@ export function StyledName({ displayName, styleKey, config, baseColor, overrideR
     return (
       <Tag
         ref={styledRef as React.Ref<HTMLSpanElement>}
-        className={`${simple.className} ${instanceClass}`}
+        className={`keep-styled-name ${simple.className} ${instanceClass}`}
       >
         {displayName}
       </Tag>
@@ -204,7 +204,7 @@ export function StyledName({ displayName, styleKey, config, baseColor, overrideR
   }
   return (
     <span
-      className={instanceClass}
+      className={`keep-styled-name ${instanceClass}`}
       dangerouslySetInnerHTML={{ __html: clean }}
     />
   );

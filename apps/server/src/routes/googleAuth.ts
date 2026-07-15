@@ -167,7 +167,7 @@ async function findLinkByProviderUid(db: Db, sub: string) {
  */
 async function findUsersByEmail(db: Db, email: string) {
   return db
-    .select({ id: users.id })
+    .select({ id: users.id, emailVerifiedAt: users.emailVerifiedAt })
     .from(users)
     .where(sql`lower(${users.email}) = ${email.toLowerCase()}`)
     .limit(2);
@@ -389,20 +389,34 @@ export async function registerGoogleAuthRoutes(app: FastifyInstance, db: Db): Pr
     // new-user finish flow, which would dead-end at the per-email account cap
     // with a 409 and no way out.
     //
-    // Only auto-link when Google actually VERIFIED the address AND it's
-    // unambiguous (exactly one local account uses it) — that pairing proves the
-    // person controls both the Google account and the email the local account
-    // was registered under, which is the same assurance a password login gives.
-    // If the email is unverified, or more than one account shares it, we won't
-    // silently attach Google to someone's account; we bounce with a marker the
-    // client turns into "an account with this email already exists — log in with
-    // your password, then link Google from your profile."
+    // Auto-link a returning password user to their existing account by email —
+    // but ONLY when the local account's email ownership is actually proven.
+    // A local account's stored email is NOT proof of ownership on its own:
+    // registration never verifies the address, and when server-side email
+    // verification is OFF (the default) every account is stamped
+    // emailVerifiedAt on create. So an attacker could pre-register under a
+    // victim's address and have the victim's Google sign-in silently attach to
+    // (and log them into) the attacker's account. We therefore require: email
+    // verification is ENABLED on this install, Google verified the address, it
+    // is unambiguous (exactly one local account), AND that account itself has a
+    // confirmed email. Otherwise we never silently link — we bounce with a
+    // marker the client turns into "an account with this email already exists —
+    // log in with your password, then link Google from your profile" (linking
+    // from the profile requires a password login, which is what proves control
+    // of the pre-existing account).
     if (identity.email) {
       const sameEmail = await findUsersByEmail(db, identity.email);
       if (sameEmail.length > 0) {
-        if (identity.emailVerified && sameEmail.length === 1) {
-          await upsertLink(db, sameEmail[0]!.id, identity.sub, identity.email);
-          return signInExistingUser(db, reply, req, sameEmail[0]!.id);
+        const { emailVerificationEnabled } = await getSettings(db);
+        const only = sameEmail.length === 1 ? sameEmail[0]! : null;
+        if (
+          emailVerificationEnabled &&
+          identity.emailVerified &&
+          only &&
+          only.emailVerifiedAt != null
+        ) {
+          await upsertLink(db, only.id, identity.sub, identity.email);
+          return signInExistingUser(db, reply, req, only.id);
         }
         return redirect(reply, "/?googleError=email_exists");
       }

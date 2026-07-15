@@ -47,7 +47,13 @@ export function ScriptoriumReportButton({
           ...(reason.trim() ? { reason: reason.trim() } : {}),
         }),
       });
-      if (r.ok) setDone(true);
+      if (r.ok) { setDone(true); return; }
+      // Surface the failure instead of swallowing it, so the reporter knows
+      // nothing was sent (and can retry) rather than assuming it worked.
+      const j = (await r.json().catch(() => null)) as { error?: string } | null;
+      window.alert(j?.error ?? t("report.failed"));
+    } catch {
+      window.alert(t("report.failed"));
     } finally {
       setBusy(false);
     }

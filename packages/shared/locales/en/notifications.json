@@ -153,6 +153,7 @@
     "googleLinked": "Google account linked.",
     "googleAlreadyLinked": "That Google account is already connected to a different account.",
     "googleAccountDisabled": "That account is disabled. Please contact an admin.",
+    "googleEmailExists": "An account with this email already exists. Sign in with your password, then link Google from your profile.",
     "googleSignInFailed": "Google sign-in didn't complete. Please try again.",
     "topicGone": "Couldn't open that topic, it may have been removed.",
     "threadGone": "Couldn't open that thread, it may have been removed.",

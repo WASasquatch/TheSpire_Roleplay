@@ -5,7 +5,8 @@ import { z } from "zod";
 import { type Role, VERSION } from "@thekeep/shared";
 import { serverMembers, sessions, users } from "../db/schema.js";
 import { exceedsMaximumPlausibleAge, isAdultUser, meetsMinimumAge, minimumSignupAge } from "../auth/ageGate.js";
-import { hashPassword, verifyPassword } from "../auth/passwords.js";
+import { dummyVerifyPassword, hashPassword, verifyPassword } from "../auth/passwords.js";
+import { clientIpFromReq } from "../auth/ipLog.js";
 import { permissionsFor } from "../auth/permissions.js";
 import { getSettings } from "../settings.js";
 import { createEmailToken, consumeEmailToken } from "../email/tokens.js";
@@ -256,7 +257,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     // seek help without it confirming who was banned.
     {
       const { isIpBanned } = await import("../auth/ipBan.js");
-      if (await isIpBanned(db, req.ip)) {
+      if (await isIpBanned(db, clientIpFromReq(req))) {
         reply.code(403);
         return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.networkRegistrationRestricted") };
       }
@@ -471,7 +472,7 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     // 401 so a shared-network bystander knows to seek help, not retype.
     {
       const { isIpBanned } = await import("../auth/ipBan.js");
-      if (await isIpBanned(db, req.ip)) {
+      if (await isIpBanned(db, clientIpFromReq(req))) {
         reply.code(403);
         return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.networkRestricted") };
       }
@@ -490,6 +491,9 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
       .limit(1))[0];
 
     if (!u) {
+      // Burn a comparable argon2 verify so the response time doesn't reveal
+      // whether the account/email exists (timing side-channel).
+      await dummyVerifyPassword(body.password);
       reply.code(401);
       return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.invalidCredentials") };
     }
@@ -799,7 +803,10 @@ export async function issueSession(
     userId,
     expiresAt,
     userAgent: req.headers["user-agent"] ?? null,
-    ip: req.ip,
+    // Store the un-spoofable client IP: sessions.ip feeds the IP-ban set
+    // (banIpsForUser), so a spoofable value here would let a banned user
+    // poison it / evade collateral.
+    ip: clientIpFromReq(req),
   });
   return id;
 }

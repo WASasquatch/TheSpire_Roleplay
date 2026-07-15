@@ -131,25 +131,45 @@ export function recordHttpIp(
 }
 
 /**
+ * Authoritative client IP for an HTTP request. Fly's edge proxy sets
+ * `Fly-Client-IP` to the real connecting client AND appends that client to
+ * `X-Forwarded-For` — so `req.ip` (the leftmost XFF entry under
+ * `trustProxy: true`) is CLIENT-SPOOFABLE (an inbound `X-Forwarded-For:
+ * 9.9.9.9` header wins). Any security decision (ban checks, rate limiting,
+ * IP logging that later feeds IP bans) must prefer the un-spoofable Fly
+ * header; `req.ip` is the dev / non-Fly fallback.
+ */
+export function clientIpFromReq(req: {
+  ip: string;
+  headers: Record<string, string | string[] | undefined>;
+}): string {
+  const fly = req.headers["fly-client-ip"];
+  const flyStr = Array.isArray(fly) ? fly[0] : fly;
+  if (typeof flyStr === "string" && flyStr.trim()) return flyStr.trim();
+  return req.ip;
+}
+
+/**
  * Best-effort client IP for a websocket handshake. socket.io is attached to
  * the raw HTTP server and doesn't go through Fastify's `trustProxy`, so we
- * reproduce that resolution by hand: first hop of X-Forwarded-For, then Fly's
- * `Fly-Client-IP`, then the socket's own remote address. Mirrors what
- * `req.ip` yields for HTTP routes behind the same edge proxy.
+ * reproduce the same trust model by hand. Prefer Fly's authoritative
+ * `Fly-Client-IP` (the edge overwrites it, so it can't be spoofed by an
+ * inbound header); fall back to the first X-Forwarded-For hop then the
+ * socket's own remote address for non-Fly / dev setups.
  */
 export function extractSocketIp(handshake: {
   headers: Record<string, string | string[] | undefined>;
   address?: string;
 }): string | null {
+  const fly = handshake.headers["fly-client-ip"];
+  const flyStr = Array.isArray(fly) ? fly[0] : fly;
+  if (typeof flyStr === "string" && flyStr.trim()) return flyStr.trim();
   const xff = handshake.headers["x-forwarded-for"];
   const xffStr = Array.isArray(xff) ? xff[0] : xff;
   if (typeof xffStr === "string" && xffStr.length > 0) {
     const first = xffStr.split(",")[0]?.trim();
     if (first) return first;
   }
-  const fly = handshake.headers["fly-client-ip"];
-  const flyStr = Array.isArray(fly) ? fly[0] : fly;
-  if (typeof flyStr === "string" && flyStr.trim()) return flyStr.trim();
   const addr = handshake.address;
   return addr && addr.length > 0 ? addr : null;
 }

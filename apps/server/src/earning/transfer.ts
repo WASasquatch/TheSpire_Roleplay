@@ -30,15 +30,14 @@ import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "../db/index.js";
 import {
-  characterEarning,
   characters,
   earningLedger,
-  userEarning,
   users,
 } from "../db/schema.js";
 import { getSettings } from "../settings.js";
 import { tFor } from "../i18n.js";
-import { creditPool } from "./award.js";
+import { socketsForUser } from "../realtime/presence.js";
+import { creditPool, debitPool } from "./award.js";
 import { DEFAULT_SERVER_ID } from "./pool.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -223,23 +222,6 @@ async function sumDailyReceived(db: Db, serverId: string, scope: "user" | "chara
   return rows.reduce((acc, r) => acc + r.delta, 0);
 }
 
-async function readPoolCurrency(db: Db, serverId: string, scope: "user" | "character", ownerId: string): Promise<number> {
-  if (scope === "user") {
-    const row = (await db
-      .select({ c: userEarning.currency })
-      .from(userEarning)
-      .where(and(eq(userEarning.serverId, serverId), eq(userEarning.userId, ownerId)))
-      .limit(1))[0];
-    return row?.c ?? 0;
-  }
-  const row = (await db
-    .select({ c: characterEarning.currency })
-    .from(characterEarning)
-    .where(and(eq(characterEarning.serverId, serverId), eq(characterEarning.characterId, ownerId)))
-    .limit(1))[0];
-  return row?.c ?? 0;
-}
-
 export interface TransferInput {
   db: Db;
   io: Io;
@@ -408,9 +390,29 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
       };
     }
 
-    // Funds check.
-    const balance = await readPoolCurrency(input.db, source.serverId, source.kind, source.ownerId);
-    if (balance < input.amount) {
+    // Atomic funds-check + source debit in ONE transaction. The old
+    // read-check-then-creditPool sequence was a read-modify-write race: two
+    // concurrent /currency send commands both read the same balance, both
+    // passed the check, then both debited (creditPool floors at 0, hiding the
+    // overdraft) while both recipients were credited — a double-spend. debitPool
+    // with rejectOnInsufficient holds sqlite's write lock across read+check+write
+    // and refuses to drive the balance negative, leaving the pool untouched on
+    // rejection. Currency deltas don't move the (XP-based) rank, so skipping
+    // creditPool's rank-recompute here is correct; we replay its socket emit
+    // below since debitPool doesn't emit.
+    const debit = input.db.transaction((tx) =>
+      debitPool(tx, {
+        serverId: source.serverId,
+        scope: source.kind,
+        ownerId: source.ownerId,
+        currencyDelta: -input.amount,
+        reason: "currency_send_out",
+        metadata: { toScope: target.kind, toOwnerId: target.ownerId, toDisplayName: target.displayName },
+        rejectOnInsufficient: true,
+      }),
+    );
+    if (!debit.ok) {
+      const balance = debit.balance;
       return {
         ok: false,
         error: {
@@ -421,18 +423,23 @@ export async function transferCurrency(input: TransferInput): Promise<{ ok: true
         },
       };
     }
+    // Live balance update for the sender (debitPool doesn't emit; creditPool
+    // used to). Mirrors the earning:earned shape creditPool emits.
+    for (const s of await socketsForUser(input.io, source.userId)) {
+      s.emit("earning:earned", {
+        scope: source.kind,
+        ownerId: source.ownerId,
+        xpDelta: 0,
+        currencyDelta: -input.amount,
+        xpTotal: debit.final.xp,
+        currencyTotal: debit.final.currency,
+        rankKey: debit.final.rankKey,
+        tier: debit.final.tier,
+        reason: "currency_send_out",
+      });
+    }
 
-    // Paired ledger writes via creditPool.
-    await creditPool(input.db, input.io, {
-      serverId: source.serverId,
-      scope: source.kind,
-      ownerId: source.ownerId,
-      xpDelta: 0,
-      currencyDelta: -input.amount,
-      reason: "currency_send_out",
-      metadata: { toScope: target.kind, toOwnerId: target.ownerId, toDisplayName: target.displayName },
-      notifyUserId: source.userId,
-    });
+    // Credit the recipient (a credit is always safe; creditPool emits + records).
     await creditPool(input.db, input.io, {
       serverId: target.serverId,
       scope: target.kind,

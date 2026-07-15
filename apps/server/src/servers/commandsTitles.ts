@@ -61,6 +61,7 @@ import { nanoid } from "nanoid";
 import type { Server as IoServer } from "socket.io";
 import { z } from "zod";
 import {
+  COLOR_TOKEN_OR_HEX_RE,
   CUSTOM_CMD_CSS_MAX_LEN,
   sanitizeCustomCmdCss,
 } from "@thekeep/shared";
@@ -142,7 +143,11 @@ const customCommandBody = z.object({
   description: z.string().max(500).nullable().optional(),
   aliases: z.array(z.string().trim().min(1).max(32)).max(10).optional(),
   enabled: z.boolean().optional(),
-  color: z.string().max(64).nullable().optional(),
+  // Strict hex/token validation, matching the global admin route
+  // (admin/routes.ts). A free-form string here was a stored-XSS vector: the
+  // command color is snapshotted onto messages and later interpolated into a
+  // style="" attribute by the chat-log HTML export.
+  color: z.string().regex(COLOR_TOKEN_OR_HEX_RE, "color must be a 6-digit hex like #990000 or a theme:<slot> token").nullable().optional(),
   allowInline: z.boolean().optional(),
   inlineTemplate: z.string().max(2000).nullable().optional(),
   css: z.string().max(CUSTOM_CMD_CSS_MAX_LEN).nullable().optional(),

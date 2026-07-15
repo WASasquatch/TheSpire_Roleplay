@@ -505,6 +505,16 @@ export const GUIDES: HelpGuide[] = [
         </P>
         <Bullets>
           <li>
+            <K>{"{arg:1}"}</K>, <K>{"{arg:2}"}</K>, and so on pick up the words the person typed
+            after the command, one at a time. So a <K>/hit goblin 6</K> command can read{" "}
+            <K>{"{arg:1}"}</K> as "goblin" and <K>{"{arg:2}"}</K> as "6". A missing one comes out
+            blank, and <K>{"{target}"}</K> is just another name for <K>{"{arg:1}"}</K>.
+          </li>
+          <li>
+            <K>{"{rng:1:20}"}</K> drops in a random whole number from the first value to the second.
+            The ends can be plain numbers or other pieces, like <K>{"{rng:1:{arg:2}}"}</K>.
+          </li>
+          <li>
             <K>{"{roll:1d20}"}</K> drops in a random dice total. It shows just the number, and it
             doesn't take a plus or minus bonus, so keep it to plain dice like <K>{"{roll:2d6}"}</K>.
           </li>
@@ -513,15 +523,29 @@ export const GUIDES: HelpGuide[] = [
             <K>{"{a|b|c}"}</K> does the same thing.
           </li>
           <li>
-            <K>{"{if:condition|then|else}"}</K> shows the "then" text when the condition has
-            something in it, or the "else" text when it's empty (or 0, or false). The "else" part is
-            optional.
+            <K>{"{if:condition|then|else}"}</K> shows the "then" text when the condition holds, or the
+            "else" text when it doesn't. A condition with something in it counts as true, and you can
+            also compare with <K>{">"}</K> <K>{"<"}</K> <K>{">="}</K> <K>{"<="}</K> <K>{"=="}</K> or{" "}
+            <K>{"!="}</K>, like <K>{"{if:{arg:1}>15|a mighty blow|a glancing hit}"}</K>. The "else"
+            part is optional.
+          </li>
+          <li>
+            <K>{"<loop:3>...</loop>"}</K> repeats the part between the tags, here three times, with a
+            space between each. The count can be a piece like <K>{"{arg:1}"}</K>, anything random
+            inside re-rolls every pass, and <K>{"{loop}"}</K> counts the passes. Add{" "}
+            <K>{'sep=""'}</K> for no gap or <K>{'sep=", "'}</K> for commas.
           </li>
           <li>
             <K>{"{=10+5}"}</K> does quick math with + - * / and parentheses. You can even nest, like{" "}
             <K>{"{=10+{roll:1d20}}"}</K> to add a die to a base number.
           </li>
         </Bullets>
+        <P>
+          Put together, a "roll any dice" command like{" "}
+          <K>{"{sender} rolls {arg:1} d{arg:2}: <loop:{arg:1}>{rng:1:{arg:2}}</loop>"}</K> lets
+          someone type <K>/roll 3 20</K> and get back something like{" "}
+          <K>WAS rolls 3 d20: 14 8 2</K>.
+        </P>
         <Tip>
           Anything the command doesn't understand is left on screen exactly as you typed it, so a
           stray <K>{"{something}"}</K> is easy to spot and fix.

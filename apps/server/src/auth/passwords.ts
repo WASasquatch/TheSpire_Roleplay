@@ -18,3 +18,20 @@ export async function verifyPassword(hash: string, plaintext: string): Promise<b
     return false;
   }
 }
+
+/**
+ * Burn roughly one argon2-verify's worth of time on a throwaway hash, then
+ * always return false. Called on the login "no such user" path so the
+ * response time doesn't reveal whether an account/email exists (timing
+ * side-channel). The dummy hash is computed once and reused.
+ */
+let dummyHashPromise: Promise<string> | null = null;
+export async function dummyVerifyPassword(plaintext: string): Promise<false> {
+  if (!dummyHashPromise) dummyHashPromise = hashPassword("login-timing-equalizer");
+  try {
+    await argon2.verify(await dummyHashPromise, plaintext);
+  } catch {
+    /* ignore — the point is the work, not the result */
+  }
+  return false;
+}

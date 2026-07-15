@@ -1121,6 +1121,13 @@ export function Composer({
       setNotice({ code: "TOO_LONG", message: t("composer.tooRich") });
       return;
     }
+    // Guard the forum "new topic" title BEFORE touching send-history: an empty
+    // title used to silently no-op AND still push the unsent body into the
+    // recall buffer. Surface a hint and bail instead.
+    if (isForumRoom && topicCreateMode && !topicTitle.trim()) {
+      setNotice({ code: "TITLE_REQUIRED", message: t("composer.topicTitleRequired") });
+      return;
+    }
     const buf = historyRef.current;
     if (buf[buf.length - 1] !== outgoing) {
       buf.push(outgoing);

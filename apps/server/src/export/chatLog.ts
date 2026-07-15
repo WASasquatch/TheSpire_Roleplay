@@ -297,7 +297,13 @@ function fmtTimestamp(ms: number, tzMinutes: number): string {
  *  against the chosen theme (light vs dark). */
 function colorStyle(color: string | null, bgHex: string): string {
   const resolved = resolveMessageColor(color, bgHex);
-  return resolved ? ` style="color:${resolved}"` : "";
+  // Escape the resolved value before it lands in an HTML attribute.
+  // resolveMessageColor echoes unrecognized input verbatim, and a message's
+  // stored color can be attacker-controlled (a server custom-command color),
+  // so an unescaped `#000"><img onerror=…>` would break out of the style
+  // attribute and execute in the opened log file. Escaping is transparent for
+  // real color values (hex / rgb() contain none of &<>").
+  return resolved ? ` style="color:${escapeHtml(resolved)}"` : "";
 }
 
 function moodSpan(mood: string | null | undefined): string {

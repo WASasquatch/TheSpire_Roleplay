@@ -153,7 +153,10 @@ export async function resolveActiveServerId(
     areServersEnabled(await getSettings(db))
   ) {
     const authority = await serverAuthority(db, me, requestedServerId);
-    if (authority.server && authority.isMember) return requestedServerId;
+    // Require canParticipate, not raw membership, so a globally suspended/banned
+    // (or 18+-frozen) server can't keep serving its economy pool — the same
+    // moderation chokepoint the rest of the server surface uses.
+    if (authority.server && authority.isMember && authority.canParticipate) return requestedServerId;
   }
   return DEFAULT_SERVER_ID;
 }

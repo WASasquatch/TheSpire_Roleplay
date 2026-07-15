@@ -898,7 +898,18 @@ export async function registerRoomsRoutes(
       .orderBy(asc(messages.createdAt))
       .limit(after);
 
-    const window = [...olderOrEq.reverse(), ...newer];
+    // Drop rows authored by anyone this viewer /ignores or has a mutual block
+    // with — the SAME hide set the scroll-up backlog applies. Without this the
+    // jump-to-message window leaked blocked/ignored authors' lines (and the
+    // anchor itself), a hole the paginated backlog doesn't have.
+    const ignoredIds = new Set(
+      (await db
+        .select({ ignoredUserId: ignores.ignoredUserId })
+        .from(ignores)
+        .where(eq(ignores.userId, me.id))).map((r) => r.ignoredUserId),
+    );
+    for (const blockedId of await blockedUserIdsFor(db, me.id)) ignoredIds.add(blockedId);
+    const window = [...olderOrEq.reverse(), ...newer].filter((m) => !ignoredIds.has(m.userId));
 
     const canSeeOriginalBody = await hasPermission(me, "view_deleted_message_body", db);
     const wire: ChatMessage[] = window.map((m) => ({

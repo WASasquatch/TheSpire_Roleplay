@@ -89,7 +89,12 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       areServersEnabled(await getSettings(db))
     ) {
       const authority = await serverAuthority(db, me, requestedServerId);
-      if (authority.server && authority.isMember) return requestedServerId;
+      // Require canParticipate, not raw membership: a globally suspended/banned
+      // (or 18+-frozen) server must not keep serving its economy pool. This
+      // routes a frozen-server member back onto the DEFAULT pool, consistent
+      // with the other fallbacks, so the moderation gate stays the single
+      // chokepoint the server-moderation plan intends.
+      if (authority.server && authority.isMember && authority.canParticipate) return requestedServerId;
     }
     return DEFAULT_SERVER_ID;
   }

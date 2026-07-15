@@ -19,12 +19,15 @@
  *     link is fetched once, not once per message
  */
 import { lookup } from "node:dns/promises";
+import { lookup as lookupCb } from "node:dns";
+import { request as httpsRequest } from "node:https";
+import { request as httpRequest } from "node:http";
+import type { LookupFunction } from "node:net";
 import { eq, sql } from "drizzle-orm";
 import type { Server as IoServer } from "socket.io";
 import type { ClientToServerEvents, LinkPreview, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { messages, ogUnfurlCache } from "./db/schema.js";
-import { fetchWithTimeout } from "./lib/fetchWithTimeout.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -91,8 +94,102 @@ async function isSafeHost(hostname: string): Promise<boolean> {
   }
 }
 
+/**
+ * DNS lookup that resolves the hostname then REFUSES any private/loopback/
+ * link-local/ULA address, feeding the socket only a validated IP. Using this
+ * as the request's `lookup` closes the DNS-rebinding TOCTOU: the address that
+ * was validated is the exact address the socket connects to, so a hostile
+ * authoritative server can't answer the check with a public IP and the connect
+ * with 127.0.0.1 / 169.254.169.254 / an internal host. TLS SNI + cert
+ * validation still use the original hostname (unaffected by `lookup`).
+ */
+const safeLookup: LookupFunction = (hostname, options, callback) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  lookupCb(hostname, options as any, (err: NodeJS.ErrnoException | null, address: unknown, family?: number) => {
+    if (err) return callback(err, address as string, family as number);
+    const list = Array.isArray(address)
+      ? (address as Array<{ address: string; family: number }>)
+      : [{ address: address as string, family: family as number }];
+    for (const a of list) {
+      const priv = a.family === 6 ? isPrivateIPv6(a.address) : isPrivateIPv4(a.address);
+      if (priv) return callback(new Error("blocked: resolves to a private address"), "", 0);
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return callback(null, address as any, family as number);
+  });
+};
+
+type PinnedResult =
+  | { kind: "redirect"; location: string }
+  | { kind: "html"; body: string }
+  | { kind: "stop" };
+
+/** One GET with the pinning lookup, a hard timeout, a byte cap, and a
+ *  text/html-only gate. Compression is not advertised; a server that returns
+ *  a compressed body anyway is skipped rather than decompressed. */
+function pinnedGet(current: string, timeoutMs: number): Promise<PinnedResult> {
+  return new Promise((resolve) => {
+    let u: URL;
+    try { u = new URL(current); } catch { return resolve({ kind: "stop" }); }
+    const requestFn = u.protocol === "https:" ? httpsRequest : httpRequest;
+    let settled = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const done = (r: PinnedResult) => {
+      if (settled) return;
+      settled = true;
+      if (deadline) clearTimeout(deadline);
+      resolve(r);
+    };
+    const req = requestFn(
+      current,
+      {
+        method: "GET",
+        lookup: safeLookup,
+        headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" },
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        if (status >= 300 && status < 400) {
+          const loc = res.headers.location;
+          res.resume();
+          return done(loc ? { kind: "redirect", location: loc } : { kind: "stop" });
+        }
+        if (status < 200 || status >= 300) { res.resume(); return done({ kind: "stop" }); }
+        const ctype = res.headers["content-type"] ?? "";
+        if (!/text\/html|application\/xhtml/i.test(ctype)) { res.resume(); return done({ kind: "stop" }); }
+        const enc = String(res.headers["content-encoding"] ?? "").toLowerCase();
+        if (enc && enc !== "identity") { res.resume(); return done({ kind: "stop" }); }
+        // Byte-capped read — og tags live in <head>, so truncated HTML parses fine.
+        const chunks: Buffer[] = [];
+        let total = 0;
+        res.on("data", (c: Buffer) => {
+          total += c.length;
+          if (total <= MAX_BODY_BYTES) chunks.push(c);
+          else res.destroy();
+        });
+        const finish = () => done(chunks.length ? { kind: "html", body: Buffer.concat(chunks).toString("utf8") } : { kind: "stop" });
+        res.on("end", finish);
+        res.on("close", finish);
+        res.on("error", () => done({ kind: "stop" }));
+      },
+    );
+    // Absolute wall-clock cap on the whole hop (connect + body streaming),
+    // independent of the per-chunk idle timeout below. req.setTimeout is only a
+    // socket INACTIVITY timer, so without this a slow-drip origin that sends a
+    // byte every few seconds could hold the socket (and this pending promise)
+    // open far past timeoutMs — a slowloris-style outbound-resource drain.
+    deadline = setTimeout(() => req.destroy(), timeoutMs);
+    deadline.unref?.();
+    req.setTimeout(timeoutMs, () => req.destroy());
+    req.on("error", () => done({ kind: "stop" }));
+    req.end();
+  });
+}
+
 /** Fetch with manual redirects, per-hop validation, timeout, size cap.
- *  Returns the HTML text or null. */
+ *  Returns the HTML text or null. `isSafeHost` is a fast pre-check; the socket
+ *  connection is pinned to a validated IP by `safeLookup` (see pinnedGet),
+ *  which is what actually defeats DNS rebinding. */
 async function fetchHtml(startUrl: string): Promise<string | null> {
   let current = startUrl;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
@@ -101,40 +198,12 @@ async function fetchHtml(startUrl: string): Promise<string | null> {
     if (u.protocol !== "http:" && u.protocol !== "https:") return null;
     if (!(await isSafeHost(u.hostname))) return null;
 
-    try {
-      const res = await fetchWithTimeout(current, {
-        redirect: "manual",
-        headers: { "user-agent": USER_AGENT, accept: "text/html,application/xhtml+xml" },
-      }, FETCH_TIMEOUT_MS);
-      if (res.status >= 300 && res.status < 400) {
-        const loc = res.headers.get("location");
-        if (!loc) return null;
-        current = new URL(loc, current).toString();
-        continue;
-      }
-      if (!res.ok) return null;
-      const ctype = res.headers.get("content-type") ?? "";
-      if (!/text\/html|application\/xhtml/i.test(ctype)) return null;
-      // Stream with a hard byte cap — og tags live in <head>, so even
-      // truncated HTML parses fine.
-      const reader = res.body?.getReader();
-      if (!reader) return null;
-      const chunks: Uint8Array[] = [];
-      let total = 0;
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        if (value) {
-          total += value.byteLength;
-          chunks.push(value);
-          if (total >= MAX_BODY_BYTES) { void reader.cancel().catch(() => {}); break; }
-        }
-      }
-      const buf = Buffer.concat(chunks.map((c) => Buffer.from(c)));
-      return buf.toString("utf8");
-    } catch {
-      return null;
+    const r = await pinnedGet(current, FETCH_TIMEOUT_MS);
+    if (r.kind === "redirect") {
+      try { current = new URL(r.location, current).toString(); } catch { return null; }
+      continue;
     }
+    return r.kind === "html" ? r.body : null;
   }
   return null;
 }

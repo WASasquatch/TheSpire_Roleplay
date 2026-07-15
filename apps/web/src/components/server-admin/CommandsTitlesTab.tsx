@@ -178,6 +178,10 @@ function formatMs(ms: number): string {
   return `${ms}ms`;
 }
 
+/** Template-token quick reference shown under the command template field. These
+ *  are literal engine tokens (protocol, not translatable prose). */
+const TEMPLATE_TOKEN_HINTS = ["{sender}", "{arg:1}", "{rng:1:20}", "{if:cond|a|b}", "{choose:a|b}", "<loop:{arg:1}>…</loop>"];
+
 /* ============================================================
  * Tab
  * ============================================================ */
@@ -372,13 +376,15 @@ function SocialGameCard({ game: g, serverId, busy, run, onSaved }: {
 
   function save() {
     void run(async () => {
+      // Clamp to the server-accepted ranges so a too-large value can't bounce
+      // off the route with a raw untranslated "invalid body".
       await apiSetSocialGame(serverId, g.name, {
-        durationMs: durationSec.trim() === "" ? null : Math.max(1000, Math.round(Number(durationSec) * 1000)),
+        durationMs: durationSec.trim() === "" ? null : Math.min(30 * 60 * 1000, Math.max(1000, Math.round(Number(durationSec) * 1000))),
         ...(g.supportsReward ? {
-          rewardXp: Math.max(0, Number(xp) || 0),
-          rewardCurrency: Math.max(0, Number(currency) || 0),
+          rewardXp: Math.min(1_000_000, Math.max(0, Number(xp) || 0)),
+          rewardCurrency: Math.min(1_000_000, Math.max(0, Number(currency) || 0)),
           rewardItemKey: itemKey.trim() ? itemKey.trim() : null,
-          rewardItemCount: Math.max(0, Number(itemCount) || 0),
+          rewardItemCount: Math.min(1000, Math.max(0, Number(itemCount) || 0)),
         } : {}),
       });
       onSaved();
@@ -398,18 +404,18 @@ function SocialGameCard({ game: g, serverId, busy, run, onSaved }: {
       <p className="text-[11px] text-keep-muted">{g.description}</p>
       <label className="block">
         <span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{t("commandsTab.durationLabel", { label: g.durationLabel, default: formatMs(g.defaultDurationMs) })}</span>
-        <input type="number" min={1} value={durationSec} onChange={(e) => setDurationSec(e.target.value)} placeholder={t("commandsTab.defaultPlaceholder")} className={`${inputCls} w-28`} />
+        <input type="number" min={1} max={1800} value={durationSec} onChange={(e) => setDurationSec(e.target.value)} placeholder={t("commandsTab.defaultPlaceholder")} className={`${inputCls} w-28`} />
       </label>
       {g.supportsReward ? (
         <div className="grid grid-cols-2 gap-2">
           <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{t("commandsTab.xpPerWinner")}</span>
-            <input type="number" min={0} value={xp} onChange={(e) => setXp(e.target.value)} className={inputCls} /></label>
+            <input type="number" min={0} max={1000000} value={xp} onChange={(e) => setXp(e.target.value)} className={inputCls} /></label>
           <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{t("commandsTab.currencyPerWinner")}</span>
-            <input type="number" min={0} value={currency} onChange={(e) => setCurrency(e.target.value)} className={inputCls} /></label>
+            <input type="number" min={0} max={1000000} value={currency} onChange={(e) => setCurrency(e.target.value)} className={inputCls} /></label>
           <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{t("commandsTab.itemKeyLabel")}</span>
             <input value={itemKey} onChange={(e) => setItemKey(e.target.value)} placeholder={t("commandsTab.nonePlaceholder")} className={`${inputCls} font-mono`} /></label>
           <label className="block"><span className="mb-0.5 block text-[10px] uppercase tracking-widest text-keep-muted">{t("commandsTab.itemCountLabel")}</span>
-            <input type="number" min={0} value={itemCount} onChange={(e) => setItemCount(e.target.value)} disabled={!itemKey.trim()} className={inputCls} /></label>
+            <input type="number" min={0} max={1000} value={itemCount} onChange={(e) => setItemCount(e.target.value)} disabled={!itemKey.trim()} className={inputCls} /></label>
         </div>
       ) : (
         <p className="italic text-keep-muted">{t("commandsTab.rewardIgnored")}</p>
@@ -532,6 +538,12 @@ function CommandForm({ mode, initial, busy, onSubmit, onCancel, onDelete }: {
         <label className="col-span-1 sm:col-span-2">
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("commandsTab.colTemplate")}</span>
           <textarea required value={template} onChange={(e) => setTemplate(e.target.value)} placeholder={t("commandsTab.templatePlaceholder")} rows={2} className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono" />
+          <span className="mt-1 block text-[10px] text-keep-muted">{t("commandsTab.templateTokensHint")}</span>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {TEMPLATE_TOKEN_HINTS.map((tok) => (
+              <code key={tok} className="rounded bg-keep-banner/40 px-1 font-mono text-[10px] text-keep-action">{tok}</code>
+            ))}
+          </div>
         </label>
         <label className="col-span-1 sm:col-span-2">
           <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("commandsTab.descriptionLabel")}</span>

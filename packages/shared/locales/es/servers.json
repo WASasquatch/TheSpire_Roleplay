@@ -900,6 +900,7 @@
     "kindAction": "action - se muestra como /me (sin corchetes)",
     "kindSay": "say - se muestra como un mensaje normal",
     "templatePlaceholder": "abraza a {target} con fuerza.",
+    "templateTokensHint": "Inserta piezas como estas; la pestaña Ayuda, Formato las lista todas con ejemplos.",
     "descriptionLabel": "Descripción (opcional)",
     "aliasesLabel": "Alias (separados por espacios, opcional)",
     "aliasesPlaceholder": "abrazar mimar",

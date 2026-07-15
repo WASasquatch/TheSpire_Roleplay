@@ -451,6 +451,25 @@ html.reduce-motion .bookshelf-book[data-pulled="true"] .float-wrap {
     opacity: 0;
   }
 }
+/* Same freeze for the per-device Reduce Motion toggle (html.reduce-motion),
+ * which the OS media query above doesn't cover. The flash-sale bolt otherwise
+ * looped forever regardless of the calm-mode setting. */
+html.reduce-motion .flash-bolt-glyph,
+html.reduce-motion .flash-bolt-flash,
+html.reduce-motion .flash-bolt-streak,
+html.reduce-motion .flash-bolt-ground {
+  animation: none;
+}
+html.reduce-motion .flash-bolt-glyph {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  text-shadow: 0 0 8px rgba(108, 196, 255, 0.4);
+}
+html.reduce-motion .flash-bolt-flash,
+html.reduce-motion .flash-bolt-streak,
+html.reduce-motion .flash-bolt-ground {
+  opacity: 0;
+}
 
 .earn-burst {
   animation: earn-burst 3.2s cubic-bezier(0.22, 0.61, 0.36, 1) both;
@@ -3094,6 +3113,33 @@ aside.margin-note {
   position: relative;
   z-index: 1;
   pointer-events: auto;
+}
+/* ============================================================
+ *  Live equipped name-style — decoration click shield
+ * ============================================================
+ *
+ * The SAME admin-authored styles previewed above also render live via
+ * <StyledName> wherever a user's name appears — the userlist in the right
+ * rail, chat lines, and the profile editor. Their decorative pseudo-elements
+ * (fog overlays, ember particles, halos, sparkles) paint OUTSIDE the name box
+ * and default to `pointer-events: auto`, so an equipped style's decoration can
+ * drift over — or, if it ships `position: fixed`, blanket — nearby controls and
+ * SWALLOW their clicks. That surfaced as "my menu button / character switch /
+ * editor Save don't work," visible only to users who equipped such a style
+ * (which is why it couldn't be reproduced without the same style equipped).
+ *
+ * The preview above is shielded by clipping (`contain: paint`), but the live
+ * name is SUPPOSED to let its decoration extend past the glyphs, so we can't
+ * clip it. Instead we make every decoration layer click-transparent: the name
+ * text itself stays interactive (names are clickable → open profile), only the
+ * ::before/::after decoration can't intercept pointer input. `!important`
+ * guarantees the shield wins over any admin-authored `.ns-*` CSS injected at
+ * runtime (which loads AFTER this bundled sheet in document order). */
+.keep-styled-name::before,
+.keep-styled-name::after,
+.keep-styled-name *::before,
+.keep-styled-name *::after {
+  pointer-events: none !important;
 }
 /* Count digit pulses when reactor count changes, driven by a
  * key=count React trick on the chip's number span. */

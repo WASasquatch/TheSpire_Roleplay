@@ -171,6 +171,12 @@ export function ProfileModal({ profile, onClose, onWhisper, onMessage, onIgnore,
   const anyPortraitNsfw = isChar && profile.profile.portraits.some((p) => p.nsfw);
   const requiresGate = (profile.profile.isNsfw || anyPortraitNsfw) && !bypassNsfwGate;
   const [gateAccepted, setGateAccepted] = useState(false);
+  // Re-arm the gate whenever the viewed identity changes in place (following a
+  // bond / owner link swaps the profile prop without remounting the modal).
+  // Without this, one "View Profile" click carried over to every subsequent
+  // profile, skipping the NSFW warning on later ones.
+  const gateIdentityKey = isChar ? profile.profile.id : profile.profile.userId;
+  useEffect(() => { setGateAccepted(false); }, [gateIdentityKey]);
   const gated = requiresGate && !gateAccepted;
 
   // Age-blocked stub (age plan Phase 1). When the viewer's account is

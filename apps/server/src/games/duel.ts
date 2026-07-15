@@ -270,6 +270,13 @@ export function acceptChallenge(
   if (state.phase !== "challenge") {
     return { ok: false, reason: "Challenge already resolved." };
   }
+  // Defense-in-depth against self-farming: a reward-bearing duel must be
+  // between two distinct accounts (the /duel start guard already blocks
+  // challenging your own account, but re-check here in case a challenge is
+  // ever created another way).
+  if (state.challenger.participant.userId === accepter.userId) {
+    return { ok: false, reason: "You can't accept your own challenge." };
+  }
   if (!state.pendingOpponent
     || state.pendingOpponent.userId !== accepter.userId
     || (state.pendingOpponent.characterId ?? null) !== (accepter.characterId ?? null)) {

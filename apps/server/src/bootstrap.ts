@@ -15,7 +15,7 @@ import { ZodError, type ZodIssue } from "zod";
 import type { Logger } from "pino";
 import type { ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
-import { recordHttpIp } from "./auth/ipLog.js";
+import { clientIpFromReq, recordHttpIp } from "./auth/ipLog.js";
 import { isIpBannedCachedSync } from "./auth/ipBan.js";
 import { parseAcceptLanguage, tFor } from "./i18n.js";
 import { MASTER_USERNAME_RULE_MESSAGE, readBearerToken } from "./routes/auth.js";
@@ -165,17 +165,16 @@ export async function createApp(deps: {
   // is well under 1MB; the global cap is fine to keep loose since
   // each route still imposes its own zod max where it matters.
   //
-  // trustProxy: true makes `req.ip` honor `X-Forwarded-For` so we
-  // record the real client public IP instead of the proxy's
-  // RFC1918 hop address. The server runs behind Fly.io's edge
-  // proxy (and, in any reasonable deploy, some other reverse
-  // proxy); without this every user gets logged under the same
-  // 172.16.x.x internal address and the per-IP rate limiter
-  // collapses everyone into one bucket. Safe to leave on for
-  // Fly because the machine's listening port is only reachable
-  // through the edge proxy, there's no path for a direct client
-  // to spoof X-Forwarded-For. Local dev has no proxy hop at all,
-  // so `req.ip` cleanly falls back to the socket remote address.
+  // trustProxy: true makes `req.ip` honor `X-Forwarded-For` so a proxied
+  // request isn't logged under the proxy's RFC1918 hop address (which would
+  // also collapse the per-IP rate limiter into one bucket). BUT under
+  // trust-all, `req.ip` resolves to the LEFTMOST XFF entry, and Fly's edge
+  // APPENDS the real client to any inbound XFF rather than stripping it — so
+  // `req.ip` is client-spoofable (`X-Forwarded-For: 9.9.9.9` wins). Every
+  // security decision therefore reads `clientIpFromReq(req)`, which prefers
+  // Fly's un-spoofable `Fly-Client-IP` header and only falls back to `req.ip`
+  // in dev / non-Fly. Local dev has no proxy hop, so `req.ip` is the socket
+  // remote address.
   const app = Fastify({
     loggerInstance: log,
     bodyLimit: 12 * 1024 * 1024,
@@ -214,6 +213,11 @@ export async function createApp(deps: {
     global: false,
     timeWindow: "1 minute",
     max: 60,
+    // Key per-IP on the un-spoofable client IP (Fly-Client-IP behind Fly),
+    // NOT the default `req.ip` — the latter honors a client-supplied
+    // X-Forwarded-For, letting an attacker rotate it for a fresh bucket and
+    // defeat the auth-route throttles.
+    keyGenerator: (req) => clientIpFromReq(req),
     // The plugin's DEFAULT errorResponseBuilder returns an `Error`, and
     // `reply.send(error)` makes Fastify log a full stack trace for every
     // rejected request. A hammered public endpoint (e.g. the splash polling
@@ -339,12 +343,12 @@ export async function createApp(deps: {
   // request. Private/loopback IPs are never cached, so dev + NAT hops are
   // unaffected. Returns a plain 403 so a direct request still shows a reason.
   app.addHook("onRequest", async (req, reply) => {
-    if (isIpBannedCachedSync(req.ip)) {
+    if (isIpBannedCachedSync(clientIpFromReq(req))) {
       return reply.code(403).type("text/plain").send("Access from your network has been restricted.");
     }
   });
   app.addHook("onRequest", async (req) => {
-    recordHttpIp(db, readBearerToken(req), req.ip, req.headers["user-agent"] ?? null);
+    recordHttpIp(db, readBearerToken(req), clientIpFromReq(req), req.headers["user-agent"] ?? null);
   });
 
   // First-party analytics: server-side page-view recorder for server-rendered

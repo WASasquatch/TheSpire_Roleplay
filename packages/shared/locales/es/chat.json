@@ -114,6 +114,7 @@
     "replyingTo": "Respondiendo a",
     "newTopicHeader": "Nuevo tema",
     "topicTitlePlaceholder": "Título del tema",
+    "topicTitleRequired": "Agrega un título para iniciar un tema.",
     "categoryLabel": "Categoría:",
     "uncategorized": "Sin categoría",
     "threadLabel": "Hilo:",

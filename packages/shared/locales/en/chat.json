@@ -113,6 +113,7 @@
     "replyingTo": "Replying to",
     "newTopicHeader": "New topic",
     "topicTitlePlaceholder": "Topic title",
+    "topicTitleRequired": "Add a title to start a topic.",
     "categoryLabel": "Category:",
     "uncategorized": "Uncategorized",
     "threadLabel": "Thread:",

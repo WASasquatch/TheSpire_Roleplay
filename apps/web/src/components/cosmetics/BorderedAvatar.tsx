@@ -464,6 +464,18 @@ function TemplateAvatar({
           height: `${TEMPLATE_NATIVE_AV}px`,
           transformOrigin: "top left",
           transform: `scale(${scaleFactor})`,
+          // Decorations (petals, sparks, rays, glows) deliberately bleed past
+          // the frame via the wrapper's overflow:visible and into the row's
+          // gutter / the userlist rail. At the default pointer-events:auto that
+          // bleed would sit over — and SWALLOW clicks on — adjacent controls
+          // (the rail's menu / character-switch buttons, the editor's Save),
+          // breaking the app for anyone who equips such a border. Make the
+          // whole decoration layer click-transparent; pointer-events inherits,
+          // so the scaled template's descendant decorations + their
+          // pseudo-elements are covered too. The avatar itself stays clickable
+          // via the wrapping <button> when onClick is set (it catches the
+          // bubbled click regardless of this layer).
+          pointerEvents: "none",
           ...(customVars ?? {}),
         } as React.CSSProperties}
         dangerouslySetInnerHTML={{ __html: clean }}

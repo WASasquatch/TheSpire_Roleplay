@@ -8,7 +8,8 @@ import {
 import { customCommandAliases, customCommands } from "../db/schema.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
 import type { Db } from "../db/index.js";
-import type { CommandContext, CommandHandler, SessionUser } from "./types.js";
+import { renderCommandTemplate } from "./template.js";
+import type { CommandHandler, SessionUser } from "./types.js";
 
 /**
  * Per-name inline-command metadata. Populated alongside the regular
@@ -16,7 +17,7 @@ import type { CommandContext, CommandHandler, SessionUser } from "./types.js";
  * registration time (builtins that expose an `inline` handler).
  *
  * The `render` closure unifies the two sources, custom commands run
- * their template through `renderTemplateWithVars`, builtins run their
+ * their template through `renderCommandTemplate`, builtins run their
  * `inline()` callback. The `expandInlineCommands` site doesn't care
  * which kind it's invoking.
  *
@@ -183,14 +184,17 @@ export class CommandRegistry {
           // through to the FE which resolves theme tokens + nudges
           // hex against the viewer's theme bg.
           color: c.color ?? null,
-          render: (_args, user, roomId) =>
-            renderTemplateWithVars(inlineBody, {
+          render: (inlineArg, user, roomId) =>
+            renderCommandTemplate(inlineBody, {
               name: user.displayName,
-              sender: user.displayName,
-              target: "",
-              args: "",
+              // Inline calls carry a single `:arg` token (no spaces possible),
+              // so {arg:1}/{target}/{args} all resolve to it; richer
+              // parameterization needs the standalone `/cmd args` form.
+              target: inlineArg,
+              args: inlineArg,
               rest: "",
-              ...commonVars(roomId),
+              positional: inlineArg ? [inlineArg] : [],
+              roomId,
             }),
         };
         for (const n of allNames) {
@@ -305,7 +309,14 @@ function makeCustomHandler(
     aliases: aliases.map((a) => a.toLowerCase()),
     description: c.description ?? `(custom)`,
     async run(ctx) {
-      const rendered = renderTemplate(c.template, ctx);
+      const rendered = renderCommandTemplate(c.template, {
+        name: ctx.user.displayName,
+        target: ctx.args[0] ?? "",
+        args: ctx.argsText,
+        rest: ctx.argsText.replace(/^\S+\s*/, ""),
+        positional: ctx.args,
+        roomId: ctx.roomId,
+      });
       const { addMessage } = await import("../realtime/broadcast.js");
       // Custom commands always emit `kind: "cmd"` now. The renderer
       // for cmd kind does NOT auto-prepend the display name, the
@@ -327,94 +338,6 @@ function makeCustomHandler(
         ...(safeCss ? { cmdCss: safeCss } : {}),
       });
     },
-  };
-}
-
-/**
- * Custom-command template engine.
- *
- * Variables:
- *   {name} / {sender}  sender's display name (synonyms)
- *   {target}           first argument (e.g. "/hug Alice" → "Alice")
- *   {args}             full argument text
- *   {rest}             args without the first token
- *   {time}             HH:MM (24h)
- *   {date}             YYYY-MM-DD
- *   {room}             current room id
- *
- * Functions (prefix:body):
- *   {roll:NdM}                random dice roll
- *   {choose:a|b|c}            pick one at random
- *   {upper:text} {lower:text} case helpers
- *   {if:cond|then|else}       conditional - cond truthy iff non-empty,
- *                             non-zero, and not "false"
- *
- * Sugar:
- *   {a|b|c}                   bare-pipe random pick (sugar for {choose:})
- *   {=expr}                   safe arithmetic; numbers + + - * / % ( ) only
- *
- * Innermost braces evaluate first, so nesting works:
- *   {if:{target}|hugs {target}|waves to nobody in particular}
- *   {=10+{roll:1d20}}
- *   {choose:warmly|tightly|gently}
- *
- * The engine rejects anything it doesn't understand by leaving the original
- * tokens in place (so users see what didn't expand and can fix it).
- *
- * Safety contract: this function returns a STRING which becomes the
- * `body` field of a chat message. The web client renders message bodies
- * through `lib/markdown.tsx` as React elements (never innerHTML), so
- * anything substituted here - including arbitrary user-controlled values
- * like display names and free-form args - is text content first and
- * markdown second. The worst a hostile display name can do is style its
- * own appearance in bold/italics. Do not change the client to render
- * bodies via `dangerouslySetInnerHTML` without revisiting this engine.
- */
-function renderTemplate(tpl: string, ctx: CommandContext): string {
-  const target = ctx.args[0] ?? "";
-  const rest = ctx.argsText.replace(/^\S+\s*/, "");
-  return renderTemplateWithVars(tpl, {
-    name: ctx.user.displayName,
-    sender: ctx.user.displayName, // alias for {name} so authors can keep "{sender} did X"
-    target,
-    args: ctx.argsText,
-    rest,
-    ...commonVars(ctx.roomId),
-  });
-}
-
-/**
- * Render a template node-by-node against an arbitrary vars dict. Shared
- * between the standalone `/cmd` path (above) and the inline `!cmd`
- * expansion path. Caller is responsible for producing the vars map,
- * inline expansion in particular has no `target`/`args` to plug in.
- */
-function renderTemplateWithVars(tpl: string, vars: Record<string, string>): string {
-  // Process innermost {...} (no nested braces inside). Loop until stable so
-  // outer expressions can read inner results. Cap iterations as a guard.
-  let out = tpl;
-  for (let i = 0; i < 16; i++) {
-    let changed = false;
-    const next = out.replace(/\{([^{}]*)\}/g, (m, raw: string) => {
-      const replaced = evalNode(raw, vars);
-      if (replaced === null) return m;
-      changed = true;
-      return replaced;
-    });
-    out = next;
-    if (!changed) break;
-  }
-  return out;
-}
-
-function commonVars(roomId: string): Record<string, string> {
-  const now = new Date();
-  const hh = String(now.getHours()).padStart(2, "0");
-  const mm = String(now.getMinutes()).padStart(2, "0");
-  return {
-    time: `${hh}:${mm}`,
-    date: now.toISOString().slice(0, 10),
-    room: roomId,
   };
 }
 
@@ -524,96 +447,6 @@ export function expandInlineCommands(
       );
     })
     .join("");
-}
-
-/**
- * Evaluate a single template node (the contents of a `{...}` with no nested
- * braces). Returns the replacement string, or null when the node should be
- * left as-is (so users see "{notarealvar}" come through unchanged rather
- * than silently disappear).
- */
-function evalNode(raw: string, vars: Record<string, string>): string | null {
-  const body = raw.trim();
-  if (body === "") return null;
-
-  // Math: {=expr}
-  if (body.startsWith("=")) {
-    return safeEvalMath(body.slice(1));
-  }
-
-  // Function call: {fn:args} (fn is a single identifier).
-  const colon = body.indexOf(":");
-  if (colon > 0 && /^[a-zA-Z]+$/.test(body.slice(0, colon))) {
-    const fn = body.slice(0, colon).toLowerCase();
-    const arg = body.slice(colon + 1);
-    return evalFn(fn, arg);
-  }
-
-  // Bare-pipe random: {a|b|c}
-  if (body.includes("|")) {
-    const opts = body.split("|").map((s) => s.trim()).filter((s) => s.length > 0);
-    if (!opts.length) return "";
-    return opts[Math.floor(Math.random() * opts.length)] ?? "";
-  }
-
-  // Variable lookup
-  const v = vars[body.toLowerCase()];
-  return v !== undefined ? v : null;
-}
-
-function evalFn(fn: string, arg: string): string | null {
-  switch (fn) {
-    case "roll": {
-      const m = /^(\d*)d(\d+)$/i.exec(arg.trim());
-      if (!m) return null;
-      const count = Math.min(20, parseInt(m[1] || "1", 10) || 1);
-      const sides = Math.min(1000, parseInt(m[2] ?? "0", 10) || 0);
-      if (sides < 2) return null;
-      let total = 0;
-      for (let i = 0; i < count; i++) total += 1 + Math.floor(Math.random() * sides);
-      return String(total);
-    }
-    case "choose": {
-      const opts = arg.split("|").map((s) => s.trim()).filter((s) => s.length > 0);
-      if (!opts.length) return "";
-      return opts[Math.floor(Math.random() * opts.length)] ?? "";
-    }
-    case "upper":
-      return arg.toUpperCase();
-    case "lower":
-      return arg.toLowerCase();
-    case "if": {
-      // {if:cond|then|else} - cond is truthy unless empty, "0", or "false".
-      const parts = arg.split("|");
-      if (parts.length < 2) return null;
-      const cond = (parts[0] ?? "").trim();
-      const thenVal = parts[1] ?? "";
-      const elseVal = parts.slice(2).join("|");
-      const truthy = cond !== "" && cond !== "0" && cond.toLowerCase() !== "false";
-      return truthy ? thenVal : elseVal;
-    }
-    default:
-      return null;
-  }
-}
-
-/**
- * Evaluate a constrained arithmetic expression. Whitelisted to digits,
- * decimal points, parens, and the five binary operators - nothing else can
- * reach the Function constructor, so eval-style injection is impossible.
- */
-function safeEvalMath(expr: string): string | null {
-  const s = expr.replace(/\s+/g, "");
-  if (s === "" || !/^[\d.+\-*/%()]+$/.test(s)) return null;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    const result = Function(`"use strict"; return (${s});`)();
-    if (typeof result === "number" && Number.isFinite(result)) {
-      // Trim trailing .0 for clean display.
-      return Number.isInteger(result) ? String(result) : String(+result.toFixed(6));
-    }
-  } catch { /* fall through */ }
-  return null;
 }
 
 /* ------------ small utilities ------------ */

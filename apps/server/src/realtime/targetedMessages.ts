@@ -26,6 +26,7 @@ import type { Server as IoServer } from "socket.io";
 import type { ChatMessage, ClientToServerEvents, ServerToClientEvents } from "@thekeep/shared";
 import { messages, rooms, users } from "../db/schema.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { isInfoRoom, isInfoRoomId } from "../lib/postMode.js";
 import type { Db } from "../db/index.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
@@ -120,6 +121,10 @@ export async function persistTargetedSystemMessage(
   roomId: string,
   body: string,
 ): Promise<void> {
+  // Info rooms (staff-post announcement channels) stay clutter-free: no
+  // targeted notification (friend-online, request, description, greet) is ever
+  // stored there — only the staff-posted content belongs.
+  if (await isInfoRoomId(db, roomId)) return;
   const sysId = await systemUserId(db);
   if (!sysId) return;
   await db.insert(messages).values({
@@ -175,10 +180,14 @@ export async function persistTargetedSystemMessageToActiveRooms(
   if (allRooms.size === 0) return;
 
   const roomRows = await db
-    .select({ id: rooms.id, replyMode: rooms.replyMode })
+    .select({ id: rooms.id, replyMode: rooms.replyMode, postMode: rooms.postMode, forumId: rooms.forumId })
     .from(rooms)
     .where(inArray(rooms.id, [...allRooms]));
   const nested = new Set(roomRows.filter((r) => r.replyMode === "nested").map((r) => r.id));
+  // Info rooms (postMode='staff' announcement channels) get NO targeted
+  // notification clutter — skip them the same way forum/nested rooms are
+  // skipped so a friend-online line never lands in a welcome/rules channel.
+  const info = new Set(roomRows.filter((r) => isInfoRoom(r)).map((r) => r.id));
 
   const sysId = await systemUserId(db);
   if (!sysId) return;
@@ -186,7 +195,7 @@ export async function persistTargetedSystemMessageToActiveRooms(
   const rows = [];
   for (const [uid, rset] of roomsByUser) {
     for (const roomId of rset) {
-      if (nested.has(roomId)) continue;
+      if (nested.has(roomId) || info.has(roomId)) continue;
       rows.push({
         id: nanoid(),
         roomId,

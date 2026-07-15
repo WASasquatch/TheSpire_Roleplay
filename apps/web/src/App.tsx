@@ -2714,7 +2714,14 @@ function Chat() {
       const body = i18n.t("notifications:system.watchOnline", { name: displayName });
       const id = `watch-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const roomId = useChat.getState().currentRoomId;
-      if (roomId) {
+      const curRoom = roomId ? useChat.getState().rooms[roomId] : null;
+      // Info rooms (staff-post announcement channels) stay clutter-free: don't
+      // drop the live "X is online" line there — matches the server, which no
+      // longer persists targeted notifications into info rooms. The toast /
+      // desktop notification below still fires; only the in-room line is
+      // suppressed.
+      const curIsInfoRoom = !!curRoom && curRoom.postMode === "staff" && !curRoom.forumId;
+      if (roomId && !curIsInfoRoom) {
         appendMessage({
           id,
           roomId,

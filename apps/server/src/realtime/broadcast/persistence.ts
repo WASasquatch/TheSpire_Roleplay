@@ -1537,11 +1537,16 @@ export async function sendRoomBacklogTo(
       backlogRoomIds = [roomId, pair.siblingId];
     }
   }
+  // Info channels show only staff-posted content — no whispers, system lines,
+  // targeted notifications, or removed-message tombstones, no matter when they
+  // were written. The read-side guard (roomVisibilityWhere infoRoom mode)
+  // catches PRE-EXISTING rows the write-side guards can't.
+  const infoRoom = await isInfoRoomId(db, roomId);
   const recentPlusOne = await db
     .select()
     .from(messages)
     .where(and(
-      roomVisibilityWhere(backlogRoomIds, viewerUserId, backlogServerId, viewerIsAdult),
+      roomVisibilityWhere(backlogRoomIds, viewerUserId, backlogServerId, viewerIsAdult, infoRoom),
       clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
       // Isolation (Phase 5): scrollback authored by an account this viewer
       // is isolated with drops, exactly like the blocked-author filter

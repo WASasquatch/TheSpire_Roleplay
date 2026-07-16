@@ -66,10 +66,28 @@ export function roomVisibilityWhere(
   viewerUserId: string,
   targetServerId: string | undefined,
   viewerCanSeeNsfw: boolean,
+  // Info channel (post_mode='staff'): show ONLY the staff-posted content in
+  // THIS room — no whisper overlay, no targeted notifications, no system /
+  // announce lines, and no deleted tombstones. This READ-side guard is what
+  // keeps PRE-EXISTING clutter out of the channel (lines written before the
+  // room became an info channel, whispers a member sent while standing in it,
+  // and removed-message tombstones — none of which the write-side guards
+  // touch). The write guards stop NEW clutter; this stops it from EVER
+  // showing. Callers pass `isInfoRoom(room)`.
+  infoRoom = false,
 ) {
   const roomMatch = Array.isArray(roomId)
     ? inArray(messages.roomId, roomId as string[])
     : eq(messages.roomId, roomId as string);
+  if (infoRoom) {
+    return and(
+      roomMatch,
+      isNull(messages.targetUserId),
+      sql`${messages.kind} NOT IN ('whisper', 'system', 'announce')`,
+      isNull(messages.deletedAt),
+      ...(viewerCanSeeNsfw ? [] : [eq(messages.isNsfw, false)]),
+    );
+  }
   return or(
     // 1. Ordinary public rows in this room. `targetUserId IS NULL` excludes
     //    the per-user notifications so they never show to the whole room.

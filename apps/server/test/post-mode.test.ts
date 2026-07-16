@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import Fastify, { type FastifyInstance } from "fastify";
 import type { Role } from "@thekeep/shared";
@@ -18,6 +18,7 @@ import { registerRoomsRoutes } from "../src/routes/rooms.js";
 import { registerEmoticonRoutes } from "../src/routes/emoticons.js";
 import { enableAdultChannel } from "../src/lib/adultChannel.js";
 import { canPostInStaffRoom, isPostLockedFor } from "../src/lib/postMode.js";
+import { roomVisibilityWhere } from "../src/realtime/targetedMessages.js";
 import { auth, createUser, makeTestDb, tokenFor } from "./helpers/harness.js";
 
 /**
@@ -355,6 +356,55 @@ describe("per-viewer postLocked on GET /rooms", () => {
     assert.equal(infoRows.length, 1, "minor receives only the SFW base");
     assert.equal(infoRows[0]!.linkedNsfwRoomId, null, "annex pointer scrubbed");
     assert.equal(infoRows[0]!.postLocked, true, "minor is not staff, so the lock rides along");
+  });
+});
+
+describe("@cid:/@id: identity-token mentions resolve in a plain say", () => {
+  async function latestFrom(roomId: string, userId: string) {
+    return (await db.select().from(schema.messages)
+      .where(and(eq(schema.messages.roomId, roomId), eq(schema.messages.userId, userId)))
+      .orderBy(desc(schema.messages.createdAt)).limit(1))[0]!;
+  }
+  test("@cid: rewrites the plain-body token to the character name", async () => {
+    const charId = nanoid();
+    await db.insert(schema.characters).values({ id: charId, userId: member.id, name: "Sigrid" });
+    await dispatch(owner, openRoomId, `hey @cid:${charId} welcome`);
+    const row = await latestFrom(openRoomId, owner.id);
+    assert.ok(!row.body.includes("@cid:"), `token should be rewritten, got: ${row.body}`);
+    assert.ok(row.body.includes("Sigrid"), `resolved name should be in the body, got: ${row.body}`);
+  });
+  test("@id: rewrites the plain-body token to the master username", async () => {
+    await dispatch(owner, openRoomId, `ping @id:${member.id} please`);
+    const row = await latestFrom(openRoomId, owner.id);
+    assert.ok(!row.body.includes("@id:"), `token should be rewritten, got: ${row.body}`);
+  });
+});
+
+describe("info-room backlog shows only posted content", () => {
+  // The read-side guard (roomVisibilityWhere infoRoom mode) is what keeps
+  // whispers, system lines, targeted notifications, and removed-message
+  // tombstones out of an info channel — including rows that were written
+  // BEFORE the room became one, which the write-side guards can't touch.
+  test("filter excludes whispers, system, targeted, and deleted rows", async () => {
+    const rid = await insertRoom({ name: "Info_Backlog", ownerId: owner.id, serverId, postMode: "staff" });
+    const base = { roomId: rid, characterId: null, displayName: "x", body: "b" };
+    await db.insert(schema.messages).values([
+      { id: nanoid(), ...base, userId: owner.id, kind: "say", body: "the announcement" },       // content → shows
+      { id: nanoid(), ...base, userId: member.id, toUserId: owner.id, kind: "whisper", body: "psst" }, // whisper → hidden
+      { id: nanoid(), ...base, userId: owner.id, kind: "system", body: "someone joined" },        // system → hidden
+      { id: nanoid(), ...base, userId: owner.id, kind: "system", targetUserId: member.id, body: "[Description]: hi" }, // targeted → hidden
+      { id: nanoid(), ...base, userId: owner.id, kind: "say", body: "gone", deletedAt: new Date() }, // tombstone → hidden
+    ]);
+
+    const infoRows = await db.select().from(schema.messages)
+      .where(roomVisibilityWhere(rid, member.id, serverId, true, true));
+    assert.deepEqual(infoRows.map((r) => r.body), ["the announcement"]);
+
+    // Control: as a NON-info room the same viewer would also see the system
+    // line, their own whisper, their targeted line, and the tombstone.
+    const normalRows = await db.select().from(schema.messages)
+      .where(roomVisibilityWhere(rid, member.id, serverId, true, false));
+    assert.ok(normalRows.length >= 4, `non-info shows the rest (${normalRows.length})`);
   });
 });
 

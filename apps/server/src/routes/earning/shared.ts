@@ -65,6 +65,10 @@ export interface EarningRouteDeps {
   resolveActiveServerId: (
     me: NonNullable<Awaited<ReturnType<typeof getSessionUser>>>,
     requestedServerId: string | undefined,
+    // false for READ/display routes (catalog, wallet) so a member always sees
+    // their server's cosmetics even when canParticipate is revoked; true
+    // (default) for earning/spending writes.
+    requireParticipate?: boolean,
   ) => Promise<string>;
   resolveSubsystemToggles: (sid: string) => Promise<SubsystemToggles>;
 }

@@ -82,6 +82,16 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
   async function resolveActiveServerId(
     me: NonNullable<Awaited<ReturnType<typeof getSessionUser>>>,
     requestedServerId: string | undefined,
+    // WRITES (earning/spending mutations) pass true (the default) so a globally
+    // suspended/banned or 18+-frozen server can't keep minting or spending —
+    // the moderation gate the server-moderation plan intends. READS (the
+    // dashboard/catalog DISPLAY in catalog.ts) pass FALSE: a member must still
+    // SEE their server's cosmetics + wallet, and — crucially — the name-style /
+    // border CATALOG that renders EVERY user's equipped cosmetic must load from
+    // the server they're standing in, or those styles silently fall back to
+    // plain text for viewers whose canParticipate is revoked (e.g. a no-DOB
+    // account on an 18+ server). Gating the read here was a regression.
+    requireParticipate = true,
   ): Promise<string> {
     if (
       requestedServerId &&
@@ -89,12 +99,9 @@ export async function registerEarningRoutes(app: FastifyInstance, db: Db, io: Io
       areServersEnabled(await getSettings(db))
     ) {
       const authority = await serverAuthority(db, me, requestedServerId);
-      // Require canParticipate, not raw membership: a globally suspended/banned
-      // (or 18+-frozen) server must not keep serving its economy pool. This
-      // routes a frozen-server member back onto the DEFAULT pool, consistent
-      // with the other fallbacks, so the moderation gate stays the single
-      // chokepoint the server-moderation plan intends.
-      if (authority.server && authority.isMember && authority.canParticipate) return requestedServerId;
+      if (authority.server && authority.isMember && (!requireParticipate || authority.canParticipate)) {
+        return requestedServerId;
+      }
     }
     return DEFAULT_SERVER_ID;
   }

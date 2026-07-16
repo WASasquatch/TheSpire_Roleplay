@@ -78,8 +78,12 @@ export async function registerEarningCatalogRoutes(deps: EarningRouteDeps): Prom
     // resolver (see resolveActiveServerId above); absent / non-member /
     // flag-off resolves to DEFAULT_SERVER_ID, so every read below is
     // byte-identical to the legacy single-server behavior. The response
-    // SHAPE is unchanged — only the source server varies.
-    const sid = await resolveActiveServerId(me, req.query.serverId);
+    // SHAPE is unchanged — only the source server varies. `false` = a READ:
+    // the snapshot carries the name-style/border CATALOG used to render EVERY
+    // user's equipped cosmetic, so it must load from the server the member is
+    // in even when their canParticipate is revoked (else those styles render
+    // as plain text for that viewer).
+    const sid = await resolveActiveServerId(me, req.query.serverId, false);
 
     // Per-server subsystem toggles (migration 0293). A disabled subsystem
     // surfaces as an EMPTY catalog section below so the client hides its tab;
@@ -971,7 +975,7 @@ export async function registerEarningCatalogRoutes(deps: EarningRouteDeps): Prom
       // Resolve the active server the same way every other earning route does;
       // flag off / non-member / default → DEFAULT_SERVER_ID, byte-identical to
       // the legacy single-pool history.
-      const sid = await resolveActiveServerId(me, req.query.serverId);
+      const sid = await resolveActiveServerId(me, req.query.serverId, false); // read/display
       const scope = req.query.scope === "character" ? "character" : "user";
       let ownerId = me.id;
       if (scope === "character") {
@@ -1042,7 +1046,7 @@ export async function registerEarningCatalogRoutes(deps: EarningRouteDeps): Prom
     // non-member / flag-off) fall back to DEFAULT_SERVER_ID so the previews on
     // the splash stay byte-identical to the legacy single-server behavior.
     const me = await getSessionUser(req, db);
-    const sid = me ? await resolveActiveServerId(me, req.query.serverId) : DEFAULT_SERVER_ID;
+    const sid = me ? await resolveActiveServerId(me, req.query.serverId, false) : DEFAULT_SERVER_ID; // read/display
     // Per-server subsystem toggles (migration 0293): an off subsystem ships an
     // EMPTY section so the preview hides it. name_styles_enabled → nameStyles;
     // cosmetics_enabled → cosmetics; shop_enabled → items. DEFAULT_SERVER_ID /
@@ -1107,7 +1111,7 @@ export async function registerEarningCatalogRoutes(deps: EarningRouteDeps): Prom
     // active server too, or a key would resolve ambiguously across servers.
     // Anonymous / non-member / flag-off → DEFAULT_SERVER_ID (byte-identical).
     const me = await getSessionUser(req, db);
-    const sid = me ? await resolveActiveServerId(me, req.query.serverId) : DEFAULT_SERVER_ID;
+    const sid = me ? await resolveActiveServerId(me, req.query.serverId, false) : DEFAULT_SERVER_ID; // read/display
     const sale = await resolveTodayFlashSale(db, new Date(), sid);
     // Hydrate, but only surface rows the user can actually buy right
     // now. Admin overrides win at PICK time (intent over availability),
@@ -1177,7 +1181,7 @@ export async function registerEarningCatalogRoutes(deps: EarningRouteDeps): Prom
   app.get<{ Querystring: { characterId?: string; serverId?: string } }>("/earning/me/active-room-transition", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
-    const sid = await resolveActiveServerId(me, req.query.serverId);
+    const sid = await resolveActiveServerId(me, req.query.serverId, false); // read/display
     const characterId = req.query.characterId ?? null;
     let key: string | null = null;
     if (characterId) {

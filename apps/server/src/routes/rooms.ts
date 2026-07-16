@@ -64,6 +64,7 @@ import {
   usergroupIdsFor,
 } from "../lib/roleGates.js";
 import { canSeePairFeeds, findPairSibling } from "../lib/pairStaffView.js";
+import { isInfoRoom } from "../lib/postMode.js";
 import { boardAgeDenied, nsfwForumIds } from "../forums/nsfw.js";
 import { roomVisibilityWhere } from "../realtime/targetedMessages.js";
 import { blockedUserIdsFor } from "../auth/blocks.js";
@@ -864,7 +865,7 @@ export async function registerRoomsRoutes(
     // Cross-room whisper overlay, see the union in
     // sendRoomBacklogTo / GET /rooms/:id/messages for the rationale.
     // HARD tier on the stamped-history clause: adults always see it.
-    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult);
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult, isInfoRoom(room));
     // Isolation (Phase 5): the jump window drops rows authored by accounts
     // the viewer is isolated with, same author-keyed rule as the backlog.
     const isolationClause = isolationVisibleSql(me, messages.userId);
@@ -1038,7 +1039,7 @@ export async function registerRoomsRoutes(
         pageRoomIds = [room.id, pair.siblingId];
       }
     }
-    const roomOrPartyWhisper = roomVisibilityWhere(pageRoomIds, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult);
+    const roomOrPartyWhisper = roomVisibilityWhere(pageRoomIds, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult, isInfoRoom(room));
 
     // Per-viewer `/clear` marker: never page back past the point this
     // user cleared the room. Keeps the scroll-up loader from resurrecting
@@ -1210,7 +1211,7 @@ export async function registerRoomsRoutes(
         .where(eq(ignores.userId, me.id))).map((r) => r.ignoredUserId),
     );
     for (const blockedId of await blockedUserIdsFor(db, me.id)) ignoredIds.add(blockedId);
-    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult);
+    const roomOrPartyWhisper = roomVisibilityWhere(room.id, me.id, room.serverId ?? DEFAULT_SERVER_ID, me.isAdult, isInfoRoom(room));
     const clearedAt = await getClearedAt(db, me.id, room.id);
 
     // Most recent (window ∩ cap) rows DESC; overfetch one to detect that the

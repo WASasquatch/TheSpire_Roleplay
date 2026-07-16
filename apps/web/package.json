@@ -1,6 +1,6 @@
 {
   "name": "@thekeep/web",
-  "version": "0.0.0",
+  "version": "0.33.15",
   "private": true,
   "type": "module",
   "scripts": {

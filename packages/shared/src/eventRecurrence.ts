@@ -17,9 +17,17 @@ export type EventRecurrenceFreq = "daily" | "weekly" | "biweekly" | "monthly";
 
 export interface EventRecurrence {
   freq: EventRecurrenceFreq;
-  /** Weekly only: UTC weekdays (0 = Sunday … 6 = Saturday) the event repeats
-   *  on. Absent = the start's own weekday, every week. */
+  /** Weekly only: the weekdays (0 = Sunday … 6 = Saturday) the event repeats
+   *  on, in the creator's LOCAL frame (see `tzOffsetMinutes`). Absent = the
+   *  start's own weekday, every week. */
   byWeekday?: number[];
+  /** Weekly-with-`byWeekday` only: the creator's UTC offset in minutes at
+   *  authoring time, `Date.getTimezoneOffset()` semantics (UTC = local +
+   *  offset, so a zone WEST of UTC is a positive number). The weekday set +
+   *  day boundaries resolve in this frame so a "Friday" event created west of
+   *  UTC lands on Friday, not the viewer's Thursday. Absent = UTC (legacy
+   *  rows created before the fix; unchanged behavior). */
+  tzOffsetMinutes?: number;
   /** Series end: no occurrence STARTS after this ms epoch. */
   until?: number;
   /** Series end: total occurrences including the first (1–52). */
@@ -61,6 +69,13 @@ export function parseEventRecurrence(json: string | null | undefined): EventRecu
     const days = [...new Set(r.byWeekday)];
     if (!days.every((d) => typeof d === "number" && Number.isInteger(d) && d >= 0 && d <= 6)) return null;
     rule.byWeekday = (days as number[]).sort((a, b) => a - b);
+  }
+  if (r.tzOffsetMinutes !== undefined) {
+    // Only meaningful alongside a weekday set; anything past ±16h (covers
+    // UTC−12…UTC+14 with margin) is garbage. A bad value degrades the whole
+    // rule so we never silently expand in the wrong frame.
+    if (typeof r.tzOffsetMinutes !== "number" || !Number.isInteger(r.tzOffsetMinutes) || Math.abs(r.tzOffsetMinutes) > 16 * 60) return null;
+    if (rule.byWeekday) rule.tzOffsetMinutes = r.tzOffsetMinutes;
   }
   if (r.until !== undefined && r.count !== undefined) return null;
   if (r.until !== undefined) {
@@ -114,14 +129,20 @@ export function expandOccurrences(
   };
 
   if (rule.freq === "weekly" && rule.byWeekday && rule.byWeekday.length > 0) {
-    // Anchor the time-of-day to the original start, then walk UTC days from
-    // the start's day; a day counts when its UTC weekday is in the set and
-    // the instant isn't before the series anchor.
-    const timeOfDayMs = event.startsAt - startOfUtcDayMs(event.startsAt);
+    // Resolve the weekday set + day boundaries in the CREATOR's local frame,
+    // not UTC — otherwise a "Friday 7pm" event authored west of UTC (whose
+    // start is already Saturday in UTC) matches the next UTC Friday and lands
+    // on the viewer's Thursday, skipping the intended Friday. `offMs` shifts
+    // an absolute epoch into a stand-in "local wall clock as UTC" frame; we
+    // walk days there and shift each match back to a real epoch. Legacy rows
+    // (no stored offset) keep the old UTC behavior via offMs = 0.
+    const offMs = (rule.tzOffsetMinutes ?? 0) * 60_000;
+    const localStart = event.startsAt - offMs;
+    const timeOfDayMs = localStart - startOfUtcDayMs(localStart);
     const weekdaySet = new Set(rule.byWeekday);
-    let day = startOfUtcDayMs(event.startsAt);
+    let day = startOfUtcDayMs(localStart);
     for (let i = 0; i < MAX_ITERATIONS; i++, day += DAY_MS) {
-      const s = day + timeOfDayMs;
+      const s = day + timeOfDayMs + offMs; // back to the real UTC epoch
       if (s < event.startsAt) continue;
       if (!weekdaySet.has(new Date(day).getUTCDay())) {
         // Non-matching days still bound the walk so an empty stretch past the

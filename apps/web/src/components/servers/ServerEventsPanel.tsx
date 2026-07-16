@@ -41,8 +41,7 @@ import { formatDate, formatDateTime } from "../../lib/intlFormat.js";
 import { EventIcon } from "../../lib/eventIcons.js";
 import { getSocket } from "../../lib/socket.js";
 import { useChat } from "../../state/store.js";
-import { Modal } from "../cosmetics/Modal.js";
-import { IconCloseButton } from "../shared/CloseButton.js";
+import { FloatingWindow } from "../shared/FloatingWindow.js";
 
 /** Custom event NotificationCenter dispatches to jump to a specific event. */
 export const OPEN_SERVER_EVENT = "tk:open-server-event";
@@ -443,6 +442,9 @@ export function ServerEventsPanel() {
                 {eventContext(ev) === "forum" ? t("eventsPanel.forumEvent") : t("eventsPanel.serverEvent")}
               </span>
             </p>
+            {ev.hostName ? (
+              <p className="mt-0.5 text-[11px] text-keep-muted">{t("eventsPanel.hostedBy", { name: ev.hostName })}</p>
+            ) : null}
           </div>
         </div>
 
@@ -542,18 +544,19 @@ export function ServerEventsPanel() {
       </button>
 
       {open && isOwner ? (
-        <Modal onClose={() => setOpen(false)} variant="mobile-fullscreen">
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="flex h-full w-full flex-col overflow-hidden bg-keep-bg text-keep-text lg:h-[85vh] lg:max-h-[85vh] lg:w-[52rem] lg:max-w-4xl lg:rounded-lg lg:border lg:border-keep-rule lg:shadow-2xl"
-          >
-            <header className="flex shrink-0 items-center gap-2 border-b border-keep-rule px-4 py-3">
-              <CalendarDays className="h-5 w-5 text-keep-action" aria-hidden="true" />
-              <h2 className="min-w-0 flex-1 truncate text-base font-semibold text-keep-text">{t("eventsPanel.title")}</h2>
-              <IconCloseButton onClick={() => setOpen(false)} shrink />
-            </header>
-
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <FloatingWindow
+          title={
+            <span className="flex items-center gap-2">
+              <CalendarDays className="h-4 w-4 text-keep-action" aria-hidden="true" />
+              {t("eventsPanel.title")}
+            </span>
+          }
+          onClose={() => setOpen(false)}
+          initialWidth={840}
+          initialHeight={720}
+          className="keep-frame rounded border border-keep-rule bg-keep-bg text-keep-text"
+        >
+          <div className="flex h-full min-h-0 flex-col overflow-hidden">
               {error ? <p className="shrink-0 px-4 pt-3 text-xs text-keep-accent">{error}</p> : null}
               {/* Calendar (pinned): gives the panel a shape even with no upcoming
                   events, and shows at a glance which days have something on.
@@ -567,6 +570,7 @@ export function ServerEventsPanel() {
                   eventsByDay={eventsByDay}
                   selectedDay={selectedDay}
                   onSelectDay={onSelectDay}
+                  onOpenEvent={(key, eventId) => { setSelectedDay(key); setFocusId(eventId); }}
                 />
               </div>
               {/* Server vs Forum context filter (forum-linked events are
@@ -633,20 +637,27 @@ export function ServerEventsPanel() {
                 )}
               </div>
             </div>
-          </div>
-        </Modal>
+        </FloatingWindow>
       ) : null}
     </>
   );
 }
 
+/** How many event badges a calendar cell shows before collapsing the rest
+ *  into a "+N more" chip (which opens that day's full list). */
+const MAX_CELL_BADGES = 2;
+
 /**
- * A compact month grid for the events panel. Days that have events carry an
- * accent dot and are clickable (scrolls the list to that date); today gets a
- * ring. Purely presentational — the panel owns the month + selection state.
+ * A month grid for the events panel, laid out like a wall calendar: the date
+ * sits in each cell's top-left, and every event that day shows as a clickable
+ * badge (its icon + a truncated title) rather than a bare dot, so members can
+ * see AND open what's on at a glance. Clicking a badge opens that event;
+ * clicking the date (or "+N more") opens the whole day. Today gets a ring, the
+ * selected day a highlight. Purely presentational — the panel owns the month +
+ * selection state.
  */
 function MonthCalendar({
-  year, month, onPrev, onNext, eventsByDay, selectedDay, onSelectDay,
+  year, month, onPrev, onNext, eventsByDay, selectedDay, onSelectDay, onOpenEvent,
 }: {
   year: number;
   month: number;
@@ -655,6 +666,7 @@ function MonthCalendar({
   eventsByDay: Map<string, EventRow[]>;
   selectedDay: string | null;
   onSelectDay: (key: string) => void;
+  onOpenEvent: (key: string, eventId: string) => void;
 }) {
   const { t } = useTranslation("servers");
   const first = new Date(year, month, 1);
@@ -689,30 +701,63 @@ function MonthCalendar({
       </div>
       <div className="mt-1 grid grid-cols-7 gap-1">
         {cells.map((d, i) => {
-          if (d == null) return <div key={`b${i}`} className="aspect-square" />;
+          if (d == null) return <div key={`b${i}`} className="min-h-[3.75rem]" />;
           const key = dayKey(new Date(year, month, d).getTime());
-          const count = eventsByDay.get(key)?.length ?? 0;
+          const dayRows = eventsByDay.get(key) ?? [];
+          const count = dayRows.length;
           const has = count > 0;
           const isToday = key === todayKey;
           const isSelected = key === selectedDay;
           return (
-            <button
+            <div
               key={key}
-              type="button"
-              onClick={() => onSelectDay(key)}
-              title={has ? t("eventsPanel.dayEvents", { count }) : t("eventsPanel.noEvents")}
-              aria-label={`${monthLabel} ${d}${has ? t("eventsPanel.dayEventsSuffix", { count }) : ""}`}
-              className={`relative flex aspect-square cursor-pointer flex-col items-center justify-center rounded text-xs transition-colors ${
+              className={`flex min-h-[3.75rem] flex-col gap-0.5 rounded border p-1 transition-colors ${
                 isSelected
-                  ? "bg-keep-action/20 font-semibold text-keep-action ring-1 ring-keep-action"
-                  : has
-                    ? "font-semibold text-keep-text hover:bg-keep-panel"
-                    : "text-keep-muted hover:bg-keep-panel hover:text-keep-text"
-              } ${isToday && !isSelected ? "ring-1 ring-keep-rule" : ""}`}
+                  ? "border-keep-action bg-keep-action/10"
+                  : isToday
+                    ? "border-keep-rule bg-keep-panel/30"
+                    : "border-transparent hover:bg-keep-panel/40"
+              }`}
             >
-              <span>{d}</span>
-              {has ? <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-keep-action" aria-hidden="true" /> : null}
-            </button>
+              {/* Date, top-left, like a wall calendar; clicking it opens the
+                  whole day's list below. */}
+              <button
+                type="button"
+                onClick={() => onSelectDay(key)}
+                title={has ? t("eventsPanel.dayEvents", { count }) : t("eventsPanel.noEvents")}
+                aria-label={`${monthLabel} ${d}${has ? t("eventsPanel.dayEventsSuffix", { count }) : ""}`}
+                className={`self-start rounded px-1 text-[11px] leading-none ${
+                  isSelected || isToday ? "font-semibold text-keep-action" : has ? "font-semibold text-keep-text" : "text-keep-muted"
+                } hover:text-keep-action`}
+              >
+                {d}
+              </button>
+              {has ? (
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  {dayRows.slice(0, MAX_CELL_BADGES).map((row) => (
+                    <button
+                      key={rowKey(row)}
+                      type="button"
+                      onClick={() => onOpenEvent(key, row.event.id)}
+                      title={row.event.title}
+                      className="flex min-w-0 items-center gap-1 rounded bg-keep-action/15 px-1 py-0.5 text-left text-[10px] leading-tight text-keep-action hover:bg-keep-action/30"
+                    >
+                      <EventIcon name={row.event.icon} className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{row.event.title}</span>
+                    </button>
+                  ))}
+                  {count > MAX_CELL_BADGES ? (
+                    <button
+                      type="button"
+                      onClick={() => onSelectDay(key)}
+                      className="rounded px-1 text-left text-[10px] leading-tight text-keep-muted hover:text-keep-text"
+                    >
+                      {t("eventsPanel.dayMore", { n: count - MAX_CELL_BADGES })}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
           );
         })}
       </div>

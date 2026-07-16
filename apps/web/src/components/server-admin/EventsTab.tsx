@@ -472,7 +472,14 @@ function EventForm({
       let recurrence: EventRecurrence | null = null;
       if (repeatFreq !== "none") {
         recurrence = { freq: repeatFreq };
-        if (repeatFreq === "weekly" && repeatDays.length > 0) recurrence.byWeekday = [...repeatDays].sort((a, b) => a - b);
+        if (repeatFreq === "weekly" && repeatDays.length > 0) {
+          recurrence.byWeekday = [...repeatDays].sort((a, b) => a - b);
+          // Stamp the creator's offset AT THE START INSTANT (DST-correct for
+          // that date) so the server resolves "Friday" in this local frame
+          // rather than UTC — otherwise a Friday event west of UTC shows on
+          // Thursday. The weekday chips are already local weekdays.
+          recurrence.tzOffsetMinutes = new Date(startMs).getTimezoneOffset();
+        }
         if (repeatEndMode === "until") {
           const untilMs = localInputToMs(repeatUntil);
           if (untilMs == null || untilMs <= startMs) throw new Error(t("eventsTab.repeatUntilInvalid"));
@@ -535,7 +542,7 @@ function EventForm({
           )}
           <span className="ml-auto text-keep-muted">▾</span>
         </summary>
-        <div className="mt-1 flex flex-wrap gap-1 rounded border border-keep-rule bg-keep-bg p-2">
+        <div className="mt-1 flex max-h-52 flex-wrap gap-1 overflow-y-auto rounded border border-keep-rule bg-keep-bg p-2">
           <button
             type="button"
             onClick={() => { setIcon(null); if (iconMenuRef.current) iconMenuRef.current.open = false; }}
@@ -619,7 +626,7 @@ function EventForm({
             onChange={(e) => setHostCharacterId(e.target.value || null)}
             className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
           >
-            <option value="">{t("eventsTab.hostNone")}</option>
+            <option value="">{t("eventsTab.hostServer")}</option>
             {chars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </label>
@@ -728,6 +735,11 @@ function EventForm({
             </label>
           ) : null}
         </div>
+        {repeatFreq !== "none" ? (
+          <p className="mt-2 rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1.5 text-[10px] text-keep-muted">
+            {t("eventsTab.recurrenceStartHint")}
+          </p>
+        ) : null}
         {repeatFreq === "weekly" ? (
           <div className="mt-2">
             <span className="mb-1 block text-[10px] uppercase tracking-widest text-keep-muted">{t("eventsTab.repeatOnDays")}</span>

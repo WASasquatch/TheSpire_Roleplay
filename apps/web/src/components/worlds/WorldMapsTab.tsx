@@ -655,7 +655,7 @@ function MarkerForm({
           ) : null}
         </div>
         {showIcons ? (
-          <div className="mt-1 space-y-1 rounded border border-keep-rule/60 bg-keep-bg p-2">
+          <div className="mt-1 max-h-52 space-y-1 overflow-y-auto rounded border border-keep-rule/60 bg-keep-bg p-2">
             <div className="flex flex-wrap gap-1">
               {EVENT_ICON_NAMES.map((slug) => {
                 const Ico = EVENT_ICONS[slug];

@@ -19,8 +19,13 @@ export interface ServerEvent {
   serverId: string;
   /** Who created it (null after that account is deleted). */
   createdByUserId: string | null;
-  /** Host identity, when the creator voiced a character; null = OOC/none. */
+  /** Host identity, when the creator voiced a character; null = the server
+   *  itself hosts it. */
   hostCharacterId: string | null;
+  /** Display name of the host, resolved server-side: the host character's
+   *  name, or the server's own name when no character host is set (so the
+   *  card can always show "Hosted by …"). Null only on an old server build. */
+  hostName: string | null;
   title: string;
   /** Curated Lucide icon slug shown before the title; null = no icon. */
   icon: string | null;

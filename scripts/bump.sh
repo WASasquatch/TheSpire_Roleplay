@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# bump.sh - increment the SemVer-ish version in packages/shared/src/version.ts.
+# bump.sh - increment the SemVer-ish version in packages/shared/src/version.ts,
+# and mirror it into every package.json (root + workspaces) so pnpm output and
+# the deploy logs report the real release version instead of a bare "0.0.0".
 #
 # Usage:
 #   ./scripts/bump.sh patch   # 0.6.0 -> 0.6.1   (bug fixes, small adjustments)
@@ -64,5 +66,20 @@ NEW="$MAJ.$MIN.$PAT"
 # In-place edit. The expression matches `VERSION = "..."` with flexible
 # whitespace and writes back with single-space canonical form.
 sed -i -E "s/VERSION[[:space:]]*=[[:space:]]*\"[0-9]+\.[0-9]+\.[0-9]+\"/VERSION = \"$NEW\"/" "$FILE"
+
+# Keep the package.json versions in lockstep with the canonical version.ts, so
+# `pnpm` output, the deploy logs, and any tooling that reads package.json report
+# the real release version instead of the placeholder "0.0.0" (e.g. the
+# `thekeep@0.0.0` line the deploy printed). Each file has exactly ONE top-level
+# `"version"` field — dependencies are `"<name>": "<range>"`, never a bare
+# `"version"` key — so the anchored replace is unambiguous. A missing file is
+# skipped so a partial checkout can't fail the bump. `ship.sh` already stages
+# the root package.json, and the workspace package versions never appear in
+# pnpm-lock.yaml (workspace deps resolve via `workspace:*`, version-agnostic),
+# so no lockfile regeneration is needed.
+for PKG in package.json apps/server/package.json apps/web/package.json packages/shared/package.json; do
+  [[ -f "$PKG" ]] || continue
+  sed -i -E "s/\"version\"[[:space:]]*:[[:space:]]*\"[0-9]+\.[0-9]+\.[0-9]+\"/\"version\": \"$NEW\"/" "$PKG"
+done
 
 echo "$CURRENT -> $NEW"

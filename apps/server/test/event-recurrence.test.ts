@@ -99,6 +99,34 @@ describe("expandOccurrences", () => {
     assert.equal(occs[2]!.startsAt - occs[1]!.startsAt, 2 * DAY);
   });
 
+  test("weekly byWeekday: a stored tz offset resolves the weekday in the creator's LOCAL frame", () => {
+    // The bug: a "Friday 7pm" event created west of UTC has a start that is
+    // already SATURDAY in UTC, so a UTC-weekday match lands every occurrence
+    // on the viewer's Thursday and skips the intended Friday. With the
+    // creator's offset stored, the weekday + day boundaries resolve locally.
+    const off = 480; // UTC-8, getTimezoneOffset() semantics
+    const startUtc = Date.UTC(2030, 0, 5, 3, 0, 0); // Sat 03:00 UTC == Fri 19:00 local
+    const localStart = startUtc - off * 60_000;
+    const localWeekday = new Date(localStart).getUTCDay(); // the creator's Friday
+    const ev = {
+      startsAt: startUtc,
+      endsAt: null,
+      recurrenceJson: rule({ freq: "weekly", byWeekday: [localWeekday], tzOffsetMinutes: off, count: 3 }),
+    };
+    const occs = expandOccurrences(ev, startUtc - 30 * DAY, startUtc + 60 * DAY);
+    assert.equal(occs.length, 3);
+    assert.equal(occs[0]!.startsAt, startUtc, "the imminent local Friday is NOT skipped");
+    for (let i = 0; i < occs.length; i++) {
+      assert.equal(occs[i]!.startsAt, startUtc + i * 7 * DAY, "one local week apart");
+      const local = new Date(occs[i]!.startsAt - off * 60_000);
+      assert.equal(local.getUTCDay(), localWeekday, "every occurrence is the creator's chosen weekday");
+    }
+    // Sanity: the parser round-trips the offset only alongside a weekday set.
+    assert.equal(parseEventRecurrence(rule({ freq: "weekly", byWeekday: [5], tzOffsetMinutes: 480 }))!.tzOffsetMinutes, 480);
+    assert.equal(parseEventRecurrence(rule({ freq: "daily", tzOffsetMinutes: 480 }))!.tzOffsetMinutes, undefined);
+    assert.equal(parseEventRecurrence(rule({ freq: "weekly", byWeekday: [5], tzOffsetMinutes: 9999 })), null);
+  });
+
   test("monthly: same day-of-month, clamped to short months (Jan 31 → Feb 28)", () => {
     const jan31 = Date.UTC(2026, 0, 31, 12, 0, 0); // 2026 is not a leap year
     const ev = { startsAt: jan31, endsAt: null, recurrenceJson: rule({ freq: "monthly", count: 4 }) };

@@ -198,13 +198,16 @@ async function auditServerEvent(
   }
 }
 
-/** Serialize a stored event row to the shared wire shape. */
-function wireEvent(r: typeof serverEvents.$inferSelect): ServerEvent {
+/** Serialize a stored event row to the shared wire shape. `hostName` is the
+ *  resolved display host (a host character's name, or the server's own name
+ *  when there's no character host) so the member card can always show it. */
+function wireEvent(r: typeof serverEvents.$inferSelect, hostName: string | null): ServerEvent {
   return {
     id: r.id,
     serverId: r.serverId,
     createdByUserId: r.createdByUserId ?? null,
     hostCharacterId: r.hostCharacterId ?? null,
+    hostName,
     title: r.title,
     icon: r.icon ?? null,
     descriptionHtml: r.descriptionHtml ?? null,
@@ -248,7 +251,7 @@ async function gate(
   db: Db,
   serverId: string,
   opts: { manage: boolean },
-): Promise<{ meId: string; serverId: string; locale: string | null } | null> {
+): Promise<{ meId: string; serverId: string; serverName: string; locale: string | null } | null> {
   if (!areServersEnabled(await getSettings(db))) {
     reply.code(404);
     return null;
@@ -275,7 +278,32 @@ async function gate(
     reply.code(403);
     return null;
   }
-  return { meId: me.id, serverId: a.server.id, locale: me.locale };
+  return { meId: me.id, serverId: a.server.id, serverName: a.server.name, locale: me.locale };
+}
+
+/** Resolve display host names for a set of events: a host character's name
+ *  when set, else the server's own name (server-hosted). Missing/deleted host
+ *  characters also fall back to the server name so the card never shows a
+ *  blank host. One batched read for the whole list. */
+async function resolveHostNames(
+  db: Db,
+  rows: (typeof serverEvents.$inferSelect)[],
+  serverName: string,
+): Promise<Map<string, string>> {
+  const charIds = [...new Set(rows.map((r) => r.hostCharacterId).filter((v): v is string => !!v))];
+  const nameById = new Map<string, string>();
+  if (charIds.length) {
+    const found = await db
+      .select({ id: characters.id, name: characters.name })
+      .from(characters)
+      .where(inArray(characters.id, charIds));
+    for (const c of found) nameById.set(c.id, c.name);
+  }
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    out.set(r.id, r.hostCharacterId ? (nameById.get(r.hostCharacterId) ?? serverName) : serverName);
+  }
+  return out;
 }
 
 /** A host character must belong to the caller (never trust a client id). */
@@ -451,9 +479,10 @@ export async function registerServerEventRoutes(
         }
       }
 
+      const hostNames = await resolveHostNames(db, rows, g.serverName);
       return {
         events: items.map(({ row, occ }) => ({
-          event: wireEvent(row),
+          event: wireEvent(row, hostNames.get(row.id) ?? g.serverName),
           // Concrete occurrence this list entry stands for. Equal to the
           // event's own startsAt/endsAt for one-off rows, so pre-recurrence
           // consumers reading event.startsAt see identical times.
@@ -566,7 +595,8 @@ export async function registerServerEventRoutes(
         metadata: { id, title: body.title, startsAt: body.startsAt },
       });
       const row = (await db.select().from(serverEvents).where(eq(serverEvents.id, id)).limit(1))[0];
-      return { event: row ? wireEvent(row) : null, id };
+      const hostNames = row ? await resolveHostNames(db, [row], g.serverName) : null;
+      return { event: row ? wireEvent(row, hostNames?.get(row.id) ?? g.serverName) : null, id };
     },
   );
 
@@ -706,7 +736,8 @@ export async function registerServerEventRoutes(
         metadata: { id: req.params.eventId, keys: Object.keys(body) },
       });
       const row = (await db.select().from(serverEvents).where(eq(serverEvents.id, req.params.eventId)).limit(1))[0];
-      return { event: row ? wireEvent(row) : null };
+      const hostNames = row ? await resolveHostNames(db, [row], g.serverName) : null;
+      return { event: row ? wireEvent(row, hostNames?.get(row.id) ?? g.serverName) : null };
     },
   );
 

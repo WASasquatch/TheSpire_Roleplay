@@ -99,6 +99,8 @@ export async function loadSessionUser(db: Db, userId: string): Promise<SessionUs
     // localeForUser/tFor (src/i18n.ts) without a per-message DB hit.
     // Null = auto ("System default") → en for server-generated text.
     locale: u.locale,
+    // Display timezone preference (migration 0365); null = browser default.
+    timezone: u.timezone,
     displayName,
     chatColor: u.chatColor,
     awayMessage: u.awayMessage,

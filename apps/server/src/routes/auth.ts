@@ -840,6 +840,7 @@ export async function getSessionUser(
   hideNsfw: boolean;
   isolateFromAdults: boolean;
   locale: string | null;
+  timezone: string | null;
 } | null> {
   const sid = readBearerToken(req);
   if (!sid) return null;
@@ -878,6 +879,8 @@ export async function getSessionUser(
     // localeForUser/tFor (src/i18n.ts) without a second lookup.
     // Null = auto ("System default") → en for server-generated text.
     locale: u.locale,
+    // Display timezone preference (migration 0365); null = browser default.
+    timezone: u.timezone,
   };
 }
 

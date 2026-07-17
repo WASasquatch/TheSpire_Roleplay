@@ -1028,6 +1028,14 @@ interface ChatState {
   localePref: SupportedLocale | null;
   setLocalePref: (locale: SupportedLocale | null) => void;
   /**
+   * The viewer's saved display timezone (mirrors `users.timezone`, migration
+   * 0365). Null = "System default" (the browser's own zone). Seeded from
+   * /me/profile and kept in sync by `changeTimeZone` (lib/displayTimeZone.ts);
+   * the timezone select in the profile editor renders from this.
+   */
+  timeZonePref: string | null;
+  setTimeZonePref: (tz: string | null) => void;
+  /**
    * The viewer's age context (age-restriction plan Phase 0), seeded from
    * `/me/profile`. Purely a COSMETIC mirror — every real gate is enforced
    * server-side; the client reads this only to hide controls a minor could
@@ -1874,6 +1882,8 @@ export const useChat = create<ChatState>((set, get) => ({
   setDefaultForumId: (id) => set({ defaultForumId: id }),
   localePref: null,
   setLocalePref: (locale) => set({ localePref: locale }),
+  timeZonePref: null,
+  setTimeZonePref: (tz) => set({ timeZonePref: tz }),
   viewerAge: { isAdult: true, hideNsfw: false, isolateFromAdults: false, birthdate: null },
   setViewerAge: (a) => set({ viewerAge: a, viewerAgeLoaded: true }),
   viewerAgeLoaded: false,

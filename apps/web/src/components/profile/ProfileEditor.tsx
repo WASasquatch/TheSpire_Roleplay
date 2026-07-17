@@ -25,6 +25,7 @@ import {
 import { readError } from "../../lib/http.js";
 import { formatDate, formatNumber } from "../../lib/intlFormat.js";
 import { LOCALE_CHOICES, changeLocale } from "../../lib/i18n.js";
+import { changeTimeZone } from "../../lib/displayTimeZone.js";
 import { fetchEarningMe, patchEarningSettings, patchProfileBannerUrl } from "../../lib/earning.js";
 import { fetchBlocks, removeBlock, type BlockedUser } from "../../lib/blocks.js";
 import { useChat } from "../../state/store.js";
@@ -273,6 +274,19 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // save body: the Appearance-tab select applies + persists immediately via
   // changeLocale, mirroring the Menu row, so there's nothing to save here.
   const localePref = useChat((s) => s.localePref);
+  // Saved display timezone (null = "System default": the browser's own zone).
+  // Like the language select it applies + persists immediately via
+  // changeTimeZone, so it lives outside the editor's save body.
+  const timeZonePref = useChat((s) => s.timeZonePref);
+  // Full IANA zone list from the runtime (guarded — older engines lack it),
+  // plus the browser's detected zone to label the default option.
+  const timeZoneOptions = useMemo(
+    () => (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.("timeZone") ?? [],
+    [],
+  );
+  const browserTimeZone = useMemo(() => {
+    try { return Intl.DateTimeFormat().resolvedOptions().timeZone; } catch { return ""; }
+  }, []);
   const [isWideViewport, setIsWideViewport] = useState(isDesignerViewport);
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -2040,6 +2054,28 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
                           <option key={c.value} value={c.value}>{c.label}</option>
                         ))}
                       </select>
+                    </label>
+                    <label className="mt-3 block text-xs">
+                      <span className="mb-1 block uppercase tracking-widest text-keep-muted">
+                        {t("common:timezone.label")}
+                      </span>
+                      <select
+                        value={timeZonePref ?? ""}
+                        onChange={(e) => void changeTimeZone(e.target.value || null)}
+                        className="w-full rounded border border-keep-rule bg-keep-bg px-2 py-1"
+                      >
+                        <option value="">
+                          {browserTimeZone
+                            ? t("common:timezone.systemDefaultNamed", { zone: browserTimeZone })
+                            : t("common:timezone.systemDefault")}
+                        </option>
+                        {timeZoneOptions.map((z) => (
+                          <option key={z} value={z}>{z}</option>
+                        ))}
+                      </select>
+                      <span className="mt-1 block text-[10px] text-keep-muted">
+                        {t("common:timezone.hint")}
+                      </span>
                     </label>
                   </fieldset>
                 ) : null}

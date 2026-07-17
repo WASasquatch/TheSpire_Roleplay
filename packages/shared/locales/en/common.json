@@ -212,6 +212,12 @@
     "description": "Applies right away, no reload needed. System default follows your device's language.",
     "systemDefault": "System default"
   },
+  "timezone": {
+    "label": "Time zone",
+    "systemDefault": "System default (your device)",
+    "systemDefaultNamed": "System default ({{zone}})",
+    "hint": "Applies right away. Sets the time zone all dates and times are shown in, including the events calendar. System default follows your device."
+  },
   "infoModal": {
     "escHint": "Press <1>Esc</1> or click outside to close."
   },

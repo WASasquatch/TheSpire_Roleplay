@@ -44,6 +44,10 @@ export interface SessionUser {
    * (`Object.assign(user, fresh)`), same as `isolateFromAdults`.
    */
   locale: string | null;
+  /** Display timezone preference (migration 0365); IANA zone name or null for
+   *  the browser default. Display-only — the server keeps timestamps absolute;
+   *  it rides the session so a client bootstrap carries it. */
+  timezone: string | null;
   /** display name resolved from active character or master username */
   displayName: string;
   /** hex color (e.g. "#990000") snapshotted into outgoing messages; null = default */

@@ -472,12 +472,15 @@ function EventForm({
       let recurrence: EventRecurrence | null = null;
       if (repeatFreq !== "none") {
         recurrence = { freq: repeatFreq };
-        if (repeatFreq === "weekly" && repeatDays.length > 0) {
+        // Only a genuine MULTI-day set (Mon/Wed/Fri) needs the weekday list; a
+        // single day is just "weekly on the start's day", which the plain
+        // weekly rule already handles by stepping from the start — and that
+        // path lands on the right day with no timezone guesswork. For a real
+        // multi-day set, stamp the creator's offset AT THE START INSTANT
+        // (DST-correct) so the server resolves the weekdays in this local
+        // frame instead of UTC. The chips are already local weekdays.
+        if (repeatFreq === "weekly" && repeatDays.length > 1) {
           recurrence.byWeekday = [...repeatDays].sort((a, b) => a - b);
-          // Stamp the creator's offset AT THE START INSTANT (DST-correct for
-          // that date) so the server resolves "Friday" in this local frame
-          // rather than UTC — otherwise a Friday event west of UTC shows on
-          // Thursday. The weekday chips are already local weekdays.
           recurrence.tzOffsetMinutes = new Date(startMs).getTimezoneOffset();
         }
         if (repeatEndMode === "until") {

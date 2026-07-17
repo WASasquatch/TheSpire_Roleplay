@@ -5,12 +5,18 @@ import { App } from "./App.js";
 import { ErrorBoundary } from "./components/shared/ErrorBoundary.js";
 import { installAuthFetch } from "./lib/http.js";
 import { i18n } from "./lib/i18n.js";
+import { applyTimeZoneLocally, readStoredTimeZone } from "./lib/displayTimeZone.js";
 import "./styles.css";
 
 // Wire the session-token interceptor before anything else fires a
 // fetch (AuthGate's mount-time /auth/me probe needs to carry the
 // header, if a token is already in sessionStorage from a soft reload).
 installAuthFetch();
+
+// Seed the app-wide display timezone from this device's remembered choice
+// before first paint, so dates render in the user's zone immediately; the
+// account value from /me/profile overrides it once that request resolves.
+applyTimeZoneLocally(readStoredTimeZone());
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");

@@ -112,6 +112,13 @@ export const users = sqliteTable(
      */
     locale: text("locale"),
     /**
+     * Persisted display timezone (migration 0365). An IANA zone name
+     * ("America/New_York"; validated in PUT /me/profile). Null = "System
+     * default": the client uses the browser's own timezone. Controls only how
+     * dates/times RENDER for this user; stored timestamps stay absolute ms.
+     */
+    timezone: text("timezone"),
+    /**
      * Desktop notification preference:
      *   "off"      - never show toasts
      *   "mentions" - only whispers + announcements

@@ -99,32 +99,44 @@ describe("expandOccurrences", () => {
     assert.equal(occs[2]!.startsAt - occs[1]!.startsAt, 2 * DAY);
   });
 
-  test("weekly byWeekday: a stored tz offset resolves the weekday in the creator's LOCAL frame", () => {
-    // The bug: a "Friday 7pm" event created west of UTC has a start that is
-    // already SATURDAY in UTC, so a UTC-weekday match lands every occurrence
-    // on the viewer's Thursday and skips the intended Friday. With the
-    // creator's offset stored, the weekday + day boundaries resolve locally.
+  test("weekly with a single weekday repeats on the start's own day — no timezone guesswork, even with NO stored offset", () => {
+    // The reported bug: a "Friday 7pm" event created west of UTC has a start
+    // that is already SATURDAY in UTC. The old code matched a single-day
+    // byWeekday against the UTC weekday, so every occurrence landed on the
+    // viewer's THURSDAY and the imminent Friday was skipped. A single weekday
+    // is just "weekly on the start's day", so it now steps a fixed +7d from
+    // the start — which preserves the exact instant (and weekday) with no
+    // offset stored, so events created before the fix are correct too.
+    const startUtc = Date.UTC(2030, 0, 5, 3, 0, 0); // Sat 03:00 UTC == Fri 19:00 in UTC-8
+    const legacy = { startsAt: startUtc, endsAt: null, recurrenceJson: rule({ freq: "weekly", byWeekday: [5] }) };
+    const occs = expandOccurrences(legacy, startUtc - 30 * DAY, startUtc + 60 * DAY, 3);
+    assert.deepEqual(
+      occs.map((o) => o.startsAt),
+      [startUtc, startUtc + 7 * DAY, startUtc + 14 * DAY],
+      "fixed weekly step from the start, so the intended day is never skipped",
+    );
+  });
+
+  test("weekly with a real MULTI-day set resolves the weekdays in the creator's LOCAL frame via the stored offset", () => {
     const off = 480; // UTC-8, getTimezoneOffset() semantics
-    const startUtc = Date.UTC(2030, 0, 5, 3, 0, 0); // Sat 03:00 UTC == Fri 19:00 local
-    const localStart = startUtc - off * 60_000;
-    const localWeekday = new Date(localStart).getUTCDay(); // the creator's Friday
+    const startUtc = Date.UTC(2030, 0, 5, 3, 0, 0); // Fri 19:00 local
+    const localWeekday = new Date(startUtc - off * 60_000).getUTCDay(); // the creator's Friday
+    const otherDay = (localWeekday + 2) % 7;
+    const set = [localWeekday, otherDay].sort((a, b) => a - b);
     const ev = {
       startsAt: startUtc,
       endsAt: null,
-      recurrenceJson: rule({ freq: "weekly", byWeekday: [localWeekday], tzOffsetMinutes: off, count: 3 }),
+      recurrenceJson: rule({ freq: "weekly", byWeekday: set, tzOffsetMinutes: off, count: 6 }),
     };
     const occs = expandOccurrences(ev, startUtc - 30 * DAY, startUtc + 60 * DAY);
-    assert.equal(occs.length, 3);
-    assert.equal(occs[0]!.startsAt, startUtc, "the imminent local Friday is NOT skipped");
-    for (let i = 0; i < occs.length; i++) {
-      assert.equal(occs[i]!.startsAt, startUtc + i * 7 * DAY, "one local week apart");
-      const local = new Date(occs[i]!.startsAt - off * 60_000);
-      assert.equal(local.getUTCDay(), localWeekday, "every occurrence is the creator's chosen weekday");
-    }
-    // Sanity: the parser round-trips the offset only alongside a weekday set.
-    assert.equal(parseEventRecurrence(rule({ freq: "weekly", byWeekday: [5], tzOffsetMinutes: 480 }))!.tzOffsetMinutes, 480);
+    assert.equal(occs.length, 6);
+    assert.equal(occs[0]!.startsAt, startUtc, "the start's own local weekday is the first occurrence, not skipped");
+    const localDays = new Set(occs.map((o) => new Date(o.startsAt - off * 60_000).getUTCDay()));
+    assert.deepEqual([...localDays].sort((a, b) => a - b), set, "every occurrence lands on a chosen LOCAL weekday");
+    // The parser round-trips the offset only alongside a weekday set, and rejects a garbage offset.
+    assert.equal(parseEventRecurrence(rule({ freq: "weekly", byWeekday: [1, 3], tzOffsetMinutes: 480 }))!.tzOffsetMinutes, 480);
     assert.equal(parseEventRecurrence(rule({ freq: "daily", tzOffsetMinutes: 480 }))!.tzOffsetMinutes, undefined);
-    assert.equal(parseEventRecurrence(rule({ freq: "weekly", byWeekday: [5], tzOffsetMinutes: 9999 })), null);
+    assert.equal(parseEventRecurrence(rule({ freq: "weekly", byWeekday: [1, 3], tzOffsetMinutes: 9999 })), null);
   });
 
   test("monthly: same day-of-month, clamped to short months (Jan 31 → Feb 28)", () => {

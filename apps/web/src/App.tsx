@@ -103,6 +103,7 @@ import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
 // components registered). Render-path strings use `useTranslation` so a
 // language switch re-renders them live.
 import { applyServerLocale, i18n } from "./lib/i18n.js";
+import { applyServerTimeZone } from "./lib/displayTimeZone.js";
 import { identityArgFor } from "./lib/commandText.js";
 import { playAlert, playPing, playTap, playWhisper } from "./lib/sound.js";
 import { loadCachedActiveStyleKey, loadCachedActiveTheme, saveCachedActiveStyleKey, saveCachedActiveTheme, useChat, type SiteBranding } from "./state/store.js";
@@ -1754,6 +1755,7 @@ function Chat() {
           uiFontFamily?: string | null;
           uiFontScale?: UiFontScale | null;
           locale?: string | null;
+          timezone?: string | null;
           activeCharacterId: string | null;
           activeCharacterName?: string | null;
           notifyPref?: NotifyPref;
@@ -1918,6 +1920,12 @@ function Chat() {
           // live so the account's choice follows the user across devices.
           // Null = "System default" - the boot-time detection stands.
           applyServerLocale(u.locale ?? null);
+          // Saved display timezone (users.timezone). Seeds the app-wide
+          // date/time formatter so times render in the account's chosen zone
+          // across devices; explicit null = "System default" (browser zone).
+          // Pass the raw value: `undefined` (field absent on an older server
+          // build) must LEAVE the local choice, not clear it.
+          applyServerTimeZone(u.timezone);
           // Server-side gating: only present when there's an unseen
           // welcome to surface. Dismissal flips the user's stored hash
           // server-side, so re-fetches stop returning this field.

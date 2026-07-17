@@ -215,6 +215,12 @@
     "description": "Se aplica de inmediato, sin recargar. El predeterminado del sistema sigue el idioma de tu dispositivo.",
     "systemDefault": "Predeterminado del sistema"
   },
+  "timezone": {
+    "label": "Zona horaria",
+    "systemDefault": "Predeterminada del sistema (tu dispositivo)",
+    "systemDefaultNamed": "Predeterminada del sistema ({{zone}})",
+    "hint": "Se aplica de inmediato. Define la zona horaria en la que se muestran todas las fechas y horas, incluido el calendario de eventos. La predeterminada del sistema sigue tu dispositivo."
+  },
   "infoModal": {
     "escHint": "Presiona <1>Esc</1> o haz clic afuera para cerrar."
   },

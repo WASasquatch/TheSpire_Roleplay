@@ -37,7 +37,7 @@ import type {
 } from "@thekeep/shared";
 import { parseEventRecurrence, parseMessageLink } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
-import { formatDate, formatDateTime } from "../../lib/intlFormat.js";
+import { activeTimeZone, formatDate, formatDateTime } from "../../lib/intlFormat.js";
 import { EventIcon } from "../../lib/eventIcons.js";
 import { getSocket } from "../../lib/socket.js";
 import { useChat } from "../../state/store.js";
@@ -137,15 +137,29 @@ function relativeStart(t: TFunction<"servers">, startsAt: number): string {
   return t("eventsPanel.inDays", { n: Math.round(hours / 24) });
 }
 
-/** Local YYYY-MM-DD key for grouping events + marking calendar days. */
+/** The civil YYYY-MM-DD an instant falls on IN THE VIEWER'S CHOSEN TIMEZONE
+ *  (browser zone when none is set) — the key that groups events and marks
+ *  calendar days. Computed in the display zone so it agrees with the times on
+ *  the cards; the calendar cells use the same civil-date strings, so an event
+ *  always lands in the cell whose date matches its shown time. */
 function dayKey(ms: number): string {
+  const tz = activeTimeZone();
+  if (tz) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    }).formatToParts(ms);
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  }
   const d = new Date(ms);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-/** "Saturday, July 4" heading for a day group. */
+/** "Saturday, July 4" heading for a day group. The key is a CIVIL date, so
+ *  format it as one (fixed UTC noon + UTC zone) — never shifted by the active
+ *  display timezone, which would otherwise slide the label to the day before. */
 function formatDayHeader(key: string): string {
   const [y = 1970, m = 1, d = 1] = key.split("-").map(Number);
-  return formatDate(new Date(y, m - 1, d).getTime(), { weekday: "long", month: "long", day: "numeric" });
+  return formatDate(Date.UTC(y, m - 1, d, 12), { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" });
 }
 
 /**
@@ -702,7 +716,10 @@ function MonthCalendar({
       <div className="mt-1 grid grid-cols-7 gap-1">
         {cells.map((d, i) => {
           if (d == null) return <div key={`b${i}`} className="min-h-[3.75rem]" />;
-          const key = dayKey(new Date(year, month, d).getTime());
+          // A PURE civil-date key (not derived from a browser-local instant),
+          // so it matches dayKey's zone-aware bucketing regardless of how far
+          // the viewer's chosen zone is from their device's.
+          const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
           const dayRows = eventsByDay.get(key) ?? [];
           const count = dayRows.length;
           const has = count > 0;

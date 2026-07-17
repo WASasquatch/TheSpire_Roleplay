@@ -24,16 +24,44 @@ export function activeIntlLocale(): string | undefined {
   return lng;
 }
 
+/**
+ * The user's chosen display timezone (an IANA name like "America/New_York"),
+ * or undefined to use the browser's own zone (the default). Set from the
+ * persisted account preference on load and whenever it changes in Settings,
+ * and read on every format call so a change re-renders dates without a reload.
+ * Module-level (not React state) because these formatters are plain functions
+ * called from all over the app; a re-render is driven by the store update that
+ * accompanies a change.
+ */
+let userTimeZone: string | undefined;
+
+/** Set (or clear, with null/empty) the app-wide display timezone. */
+export function setDisplayTimeZone(tz: string | null | undefined): void {
+  userTimeZone = tz ? tz : undefined;
+}
+
+/** The active display timezone, or undefined for the browser default. */
+export function activeTimeZone(): string | undefined {
+  return userTimeZone;
+}
+
+/** Fold the user's timezone in as the DEFAULT; an explicit `options.timeZone`
+ *  still wins (a caller that must pin a specific zone). */
+function withTimeZone(options?: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions | undefined {
+  if (!userTimeZone) return options;
+  return { timeZone: userTimeZone, ...options };
+}
+
 export function formatDate(ms: number, options?: Intl.DateTimeFormatOptions): string {
-  return new Date(ms).toLocaleDateString(activeIntlLocale(), options);
+  return new Date(ms).toLocaleDateString(activeIntlLocale(), withTimeZone(options));
 }
 
 export function formatTime(ms: number, options?: Intl.DateTimeFormatOptions): string {
-  return new Date(ms).toLocaleTimeString(activeIntlLocale(), options);
+  return new Date(ms).toLocaleTimeString(activeIntlLocale(), withTimeZone(options));
 }
 
 export function formatDateTime(ms: number, options?: Intl.DateTimeFormatOptions): string {
-  return new Date(ms).toLocaleString(activeIntlLocale(), options);
+  return new Date(ms).toLocaleString(activeIntlLocale(), withTimeZone(options));
 }
 
 export function formatNumber(n: number, options?: Intl.NumberFormatOptions): string {

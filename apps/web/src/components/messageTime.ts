@@ -1,9 +1,15 @@
 import { fmtClockLocal } from "@thekeep/shared";
 import { i18n } from "../lib/i18n.js";
-import { formatDate, formatDateTime, formatTime } from "../lib/intlFormat.js";
+import { activeTimeZone, formatDate, formatDateTime, formatTime } from "../lib/intlFormat.js";
 import { relTimeParts } from "../lib/relativeTime.js";
 
 export function fmtTime(ms: number): string {
+  // Default (no chosen display timezone): the browser wall clock, byte-for-byte
+  // as before. When the user has picked a timezone in Settings, render the chat
+  // clock in THAT zone — still a 24-hour HH:MM:SS to match the untouched path.
+  if (activeTimeZone()) {
+    return formatTime(ms, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  }
   return fmtClockLocal(ms);
 }
 

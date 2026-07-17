@@ -17,11 +17,12 @@ export type EventRecurrenceFreq = "daily" | "weekly" | "biweekly" | "monthly";
 
 export interface EventRecurrence {
   freq: EventRecurrenceFreq;
-  /** Weekly only: the weekdays (0 = Sunday … 6 = Saturday) the event repeats
-   *  on, in the creator's LOCAL frame (see `tzOffsetMinutes`). Absent = the
-   *  start's own weekday, every week. */
+  /** Weekly only: 2+ weekdays (0 = Sunday … 6 = Saturday) the event repeats
+   *  on, in the creator's LOCAL frame (see `tzOffsetMinutes`). Absent — or a
+   *  single day — just repeats weekly on the start's own day (a fixed +7d
+   *  step, no timezone needed). */
   byWeekday?: number[];
-  /** Weekly-with-`byWeekday` only: the creator's UTC offset in minutes at
+  /** Weekly multi-day `byWeekday` only: the creator's UTC offset in minutes at
    *  authoring time, `Date.getTimezoneOffset()` semantics (UTC = local +
    *  offset, so a zone WEST of UTC is a positive number). The weekday set +
    *  day boundaries resolve in this frame so a "Friday" event created west of
@@ -128,14 +129,20 @@ export function expandOccurrences(
     return true;
   };
 
-  if (rule.freq === "weekly" && rule.byWeekday && rule.byWeekday.length > 0) {
-    // Resolve the weekday set + day boundaries in the CREATOR's local frame,
-    // not UTC — otherwise a "Friday 7pm" event authored west of UTC (whose
-    // start is already Saturday in UTC) matches the next UTC Friday and lands
-    // on the viewer's Thursday, skipping the intended Friday. `offMs` shifts
-    // an absolute epoch into a stand-in "local wall clock as UTC" frame; we
-    // walk days there and shift each match back to a real epoch. Legacy rows
-    // (no stored offset) keep the old UTC behavior via offMs = 0.
+  if (rule.freq === "weekly" && rule.byWeekday && rule.byWeekday.length > 1) {
+    // A weekday SET only matters when there are 2+ days (e.g. Mon/Wed/Fri); a
+    // single day is just "weekly on the start's own day" and falls through to
+    // the fixed +7d step below, which preserves the start's exact instant (and
+    // therefore its weekday, in EVERY viewer's clock) with no timezone info at
+    // all. That path is correct even for events stored before offsets existed.
+    //
+    // For a real multi-day set we must resolve the weekdays + day boundaries in
+    // the CREATOR's local frame, not UTC — otherwise a set authored west of
+    // UTC (whose start is already the next day in UTC) matches shifted UTC
+    // weekdays and lands a day early. `offMs` shifts an absolute epoch into a
+    // stand-in "local wall clock as UTC" frame; we walk days there and shift
+    // each match back to a real epoch. Legacy rows (no stored offset) keep the
+    // old UTC behavior via offMs = 0.
     const offMs = (rule.tzOffsetMinutes ?? 0) * 60_000;
     const localStart = event.startsAt - offMs;
     const timeOfDayMs = localStart - startOfUtcDayMs(localStart);

@@ -238,6 +238,18 @@ const updateBody = z.object({
   directMessengerEnabled: z.boolean().optional(),
 });
 
+/** True when `tz` is an IANA zone the runtime's Intl database recognizes.
+ *  The single source of truth for accepting a display-timezone preference —
+ *  a value the browser offered but the server can't resolve is rejected. */
+function isValidTimeZone(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const masterUpdateBody = z.object({
   bioHtml: z.string().max(BIO_HARD_CAP).optional(),
   avatarUrl: httpUrl.nullable().optional(),
@@ -283,6 +295,12 @@ const masterUpdateBody = z.object({
    * the language switcher, not the profile editor's save body.
    */
   locale: z.enum(SUPPORTED_LOCALES).nullable().optional(),
+  /**
+   * Display timezone (migration 0365). An IANA zone name validated against the
+   * runtime's Intl database; null clears it back to "System default" (the
+   * client uses the browser's own zone). Controls only how times render.
+   */
+  timezone: z.string().trim().min(1).max(64).refine(isValidTimeZone, { message: "invalid timezone" }).nullable().optional(),
   notifyPref: z.enum(["off", "mentions", "all"]).optional(),
   /**
    * Per-event sound toggles (account-level, not per-character). Each
@@ -774,6 +792,10 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
       // client keeps its own detection in that case. Seeds the store +
       // i18next on load so the account preference follows across devices.
       locale: u.locale,
+      // Saved display timezone (migration 0365). Null = browser default;
+      // seeds the app-wide date/time formatter on load so times render in the
+      // account's chosen zone across devices.
+      timezone: u.timezone,
       notifyPref: u.notifyPref,
       soundDmEnabled: u.soundDmEnabled,
       soundChatEnabled: u.soundChatEnabled,
@@ -1281,6 +1303,7 @@ export async function registerCharacterRoutes(app: FastifyInstance, db: Db, io: 
         ...(body.uiFontFamily !== undefined ? { uiFontFamily: body.uiFontFamily } : {}),
         ...(body.uiFontScale !== undefined ? { uiFontScale: body.uiFontScale } : {}),
         ...(body.locale !== undefined ? { locale: body.locale } : {}),
+        ...(body.timezone !== undefined ? { timezone: body.timezone } : {}),
         ...(body.notifyPref !== undefined ? { notifyPref: body.notifyPref } : {}),
         ...(body.soundDmEnabled !== undefined ? { soundDmEnabled: body.soundDmEnabled } : {}),
         ...(body.soundChatEnabled !== undefined ? { soundChatEnabled: body.soundChatEnabled } : {}),

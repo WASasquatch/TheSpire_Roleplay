@@ -68,6 +68,7 @@ import { stampPairStaffView } from "../../lib/pairStaffView.js";
 import { anyInfoRoomsExist, isInfoRoom, stampPostLocked } from "../../lib/postMode.js";
 import { roleAccessDeniedFor, roleLockedRoomIdsForServer, stampAnnexRoleDenied } from "../../lib/roleGates.js";
 import { tFor } from "../../i18n.js";
+import { maybeSendServerJoinWelcome } from "../serverWelcome.js";
 import { addSystemMessage, sendRoomBacklogTo } from "./persistence.js";
 import { isHiddenIncognitoIdentity } from "./incognito.js";
 
@@ -1021,6 +1022,10 @@ async function joinRoomBody(
   }
 
   socket.data.roomId = roomId;
+  // The server this socket was in BEFORE this join (undefined on first join of
+  // a connection) — used below to detect entering a NEW server and fire the
+  // once-ever join welcome. Captured before the stamp overwrites it.
+  const prevSocketServerId = (socket.data as { serverId?: string }).serverId;
   // Cache the room's server on the socket so command dispatch + inline `!cmd`
   // expansion can scope custom commands to THIS server without a per-message DB
   // read. Updated on every join, so it never goes stale on a room switch.
@@ -1221,6 +1226,20 @@ async function joinRoomBody(
       DEFAULT_PRESENCE_TEMPLATES.roomJoin,
       { name: user.displayName, room: room.name },
     ));
+  }
+  // First-ever appearance in this server → post the one-time in-chat welcome
+  // (main Spire on first connect, a community server on first join). Fires only
+  // when the server context actually CHANGED, so a same-server room hop doesn't
+  // re-check; the helper dedupes once per (user, server) regardless. Skipped
+  // for a hidden incognito identity so a silent mod hop never announces.
+  const enteredServerId = room.serverId ?? DEFAULT_SERVER_ID;
+  if (prevSocketServerId !== enteredServerId && !isHiddenIncognitoIdentity(user, socketCharacterId)) {
+    void maybeSendServerJoinWelcome(io, db, {
+      userId: user.id,
+      serverId: enteredServerId,
+      roomId,
+      displayName: user.displayName,
+    });
   }
   // Consume the loginIntent flag after the first room of the session
   // has been announced. Without this, any subsequent joinRoom on the

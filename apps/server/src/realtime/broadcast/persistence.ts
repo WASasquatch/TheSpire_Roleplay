@@ -61,7 +61,6 @@ import { readPoolRank } from "../../earning/resolver.js";
 import { resolveRoomServerId } from "../../earning/pool.js";
 import { routeMessage } from "../../earning/routing.js";
 import { tFor } from "../../i18n.js";
-import { maybeFireFirstWords } from "../welcomeWagon.js";
 import { emitTreeChanged, userIsOnline } from "./presence.js";
 import { isHiddenIncognitoIdentity } from "./incognito.js";
 
@@ -746,13 +745,6 @@ export async function addMessage(
   // author's display name - never the body. The user has to come back to
   // the chat to read what was said.
   void pushTriggers(ctx.io, ctx.db, out, ctx.user, payload.kind, messageIsNsfw);
-
-  // Welcome wagon (migration 0353): if this is the author's first-ever
-  // spoken message, ping online members of this server so someone says hi.
-  // `payload.kind` here is the POST-incognito-rewrite kind, so a hidden
-  // moderator's system-line rewrite can never announce. Fire-and-forget —
-  // the helper is best-effort by contract.
-  void maybeFireFirstWords(ctx.io, ctx.db, ctx.user, ctx.roomId, payload.kind, displayName);
 
   // Fire-and-forget link unfurl (OpenGraph preview). Off the hot path:
   // the card arrives via a message:update once the target site answers.

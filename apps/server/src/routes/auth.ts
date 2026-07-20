@@ -7,6 +7,7 @@ import { serverMembers, sessions, users } from "../db/schema.js";
 import { exceedsMaximumPlausibleAge, isAdultUser, meetsMinimumAge, minimumSignupAge } from "../auth/ageGate.js";
 import { dummyVerifyPassword, hashPassword, verifyPassword } from "../auth/passwords.js";
 import { clientIpFromReq } from "../auth/ipLog.js";
+import { isBlockedEmailDomain, parseBlockedEmailDomains } from "../auth/disposableEmail.js";
 import { permissionsFor } from "../auth/permissions.js";
 import { getSettings } from "../settings.js";
 import { createEmailToken, consumeEmailToken } from "../email/tokens.js";
@@ -278,6 +279,17 @@ export async function registerAuthRoutes(app: FastifyInstance, db: Db): Promise<
     if (exceedsMaximumPlausibleAge(body.birthdate)) {
       reply.code(400);
       return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.implausibleBirthdate") };
+    }
+
+    // Disposable / temporary email providers (temp-mail, 10minutemail,
+    // mailinator, …) are blocked: they let a banned or abusive person spin up
+    // endless throwaway accounts and never receive a verification / reset mail.
+    // A vendored list of known providers plus any domains an admin added in
+    // Settings; subdomains of a blocked host are caught too. Cheap field check,
+    // so it runs before the DB lookups and the captcha spend.
+    if (isBlockedEmailDomain(body.email, parseBlockedEmailDomains(settings.blockedEmailDomains))) {
+      reply.code(400);
+      return { error: tFor(parseAcceptLanguage(req.headers["accept-language"]), "errors:server.auth.disposableEmail") };
     }
 
     // Username + email cap checks. Both errors collapse to the same generic

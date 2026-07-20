@@ -162,6 +162,12 @@ export const siteSettings = sqliteTable("site_settings", {
    * the next day. Transactional account mail is not subject to it.
    */
   emailDailyCap: integer("email_daily_cap").notNull().default(300),
+  /**
+   * Extra disposable/temporary email domains to block at signup (migration
+   * 0367), on top of the vendored list in auth/disposableEmail.ts. Newline or
+   * comma separated; empty = just the vendored list.
+   */
+  blockedEmailDomains: text("blocked_email_domains").notNull().default(""),
   /** Master switch - when false, /auth/register returns 503. */
   registrationOpen: integer("registration_open", { mode: "boolean" }).notNull().default(true),
   /**

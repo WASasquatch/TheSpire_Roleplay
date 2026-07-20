@@ -157,6 +157,9 @@ export interface SettingsRow {
   logoUrl: string;
   maxCharactersPerUser: number;
   maxAccountsPerEmail: number;
+  /** Extra disposable/temporary email domains blocked at signup (migration
+   *  0367), newline/comma separated; on top of the vendored list. */
+  blockedEmailDomains: string;
   maxRoomsPerOwner: number;
   maxMessageLength: number;
   maxDirectMessageLength: number;

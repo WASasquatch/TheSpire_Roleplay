@@ -256,6 +256,10 @@ interface ServerSettingsWire {
   /** Onboarding flow (migration 0320): stored OnboardingConfig JSON + master switch. */
   onboardingConfigJson: string | null;
   onboardingEnabled: boolean;
+  /** First-join welcome (migration 0366): master switch (ON by default) +
+   *  custom template (null = built-in copy; {user}/{server} placeholders). */
+  joinWelcomeEnabled: boolean;
+  joinWelcomeTemplate: string | null;
 }
 
 /** A room row off GET /rooms (the only rooms list available to the web). */
@@ -3618,6 +3622,11 @@ function RulesTab({ detail, busy, run, onSaved }: TabProps) {
   const [newUserWelcome, setNewUserWelcome] = useState("");
   const [rules, setRules] = useState("");
   const [security, setSecurity] = useState("");
+  // First-join welcome (migration 0366): an in-chat greeting the first time
+  // someone appears in this server. ON by default; the template is plain text
+  // (posted as a system line, not HTML) with {user}/{server} placeholders.
+  const [joinWelcomeEnabled, setJoinWelcomeEnabled] = useState(true);
+  const [joinWelcomeTemplate, setJoinWelcomeTemplate] = useState("");
 
   useEffect(() => {
     let alive = true;
@@ -3628,6 +3637,8 @@ function RulesTab({ detail, busy, run, onSaved }: TabProps) {
       setNewUserWelcome(s.newUserWelcomeHtml ?? "");
       setRules(s.rulesHtml ?? "");
       setSecurity(s.securityNoticeHtml ?? "");
+      setJoinWelcomeEnabled(s.joinWelcomeEnabled);
+      setJoinWelcomeTemplate(s.joinWelcomeTemplate ?? "");
     }).catch(() => { if (alive) setLoaded(null); });
     return () => { alive = false; };
   }, [detail.id]);
@@ -3643,6 +3654,8 @@ function RulesTab({ detail, busy, run, onSaved }: TabProps) {
         newUserWelcomeHtml: htmlOrNull(newUserWelcome),
         rulesHtml: htmlOrNull(rules),
         securityNoticeHtml: htmlOrNull(security),
+        joinWelcomeEnabled,
+        joinWelcomeTemplate: joinWelcomeTemplate.trim() ? joinWelcomeTemplate.trim() : null,
       });
       onSaved();
     });
@@ -3665,6 +3678,21 @@ function RulesTab({ detail, busy, run, onSaved }: TabProps) {
           placeholder={t("console.rulesTab.newUserWelcomePlaceholder")}
           className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action" />
       </label>
+      <div className="rounded border border-keep-rule/60 p-3">
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={joinWelcomeEnabled} onChange={(e) => setJoinWelcomeEnabled(e.target.checked)} />
+          <span className="font-medium text-keep-text">{t("console.rulesTab.joinWelcomeLabel")}</span>
+        </label>
+        <p className="mt-1 text-[11px] text-keep-muted">{t("console.rulesTab.joinWelcomeHint")}</p>
+        <label className="mt-2 block text-sm">
+          <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">{t("console.rulesTab.joinWelcomeMessage")}</span>
+          <textarea value={joinWelcomeTemplate} onChange={(e) => setJoinWelcomeTemplate(e.target.value)} rows={2} maxLength={600}
+            disabled={!joinWelcomeEnabled}
+            placeholder={t("console.rulesTab.joinWelcomePlaceholder")}
+            className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1.5 text-sm outline-none focus:border-keep-action disabled:opacity-50" />
+          <span className="mt-0.5 block text-[10px] text-keep-muted">{t("console.rulesTab.joinWelcomeTokens")}</span>
+        </label>
+      </div>
       <label className="block text-sm">
         <span className="mb-0.5 block text-xs uppercase tracking-widest text-keep-muted">{t("console.rulesTab.houseRules")}</span>
         <textarea value={rules} onChange={(e) => setRules(e.target.value)} rows={6} maxLength={200_000}

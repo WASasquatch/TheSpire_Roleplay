@@ -125,6 +125,7 @@
       "captchaWrong": "el captcha era incorrecto o venció - inténtalo de nuevo",
       "minAge": "Debes tener al menos {{minAge}} años para crear una cuenta.",
       "implausibleBirthdate": "Esa fecha de nacimiento no parece correcta. Escribe tu fecha de nacimiento real.",
+      "disposableEmail": "Usa una dirección de correo permanente. No se permiten proveedores de correo temporal o desechable.",
       "registrationConflict": "conflicto de registro - prueba con otro correo u otro nombre de usuario",
       "registrationConflictUsername": "conflicto de registro - prueba con otro nombre de usuario",
       "networkRestricted": "El acceso desde tu red está restringido por ahora.",

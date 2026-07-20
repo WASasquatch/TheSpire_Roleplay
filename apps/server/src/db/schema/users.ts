@@ -456,11 +456,10 @@ export const users = sqliteTable(
     greetedAt: integer("greeted_at", { mode: "timestamp_ms" }),
     /**
      * When the account sent its first-ever public chat message (migration
-     * 0353) — speech kinds in public, non-forum, non-role-locked rooms.
-     * Drives the once-per-account welcome-wagon notification. Backfilled to
-     * created_at for pre-migration accounts (message retention makes an
-     * EXISTS-over-messages check unreliable), so only genuinely new accounts
-     * trigger it.
+     * 0353). DEPRECATED / unused: it drove the "welcome-wagon" first-words
+     * NOTIFICATION, which was removed (migration 0366) in favor of the in-chat
+     * first-join welcome (see server_welcomes / serverWelcome.ts). Column kept
+     * to avoid a drop-column migration; no code reads or writes it.
      */
     firstSpokeAt: integer("first_spoke_at", { mode: "timestamp_ms" }),
     /**

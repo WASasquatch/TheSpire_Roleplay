@@ -61,6 +61,7 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
   const [theme, setTheme] = useState<Theme | null>(null);
   const [maxChars, setMaxChars] = useState("");
   const [maxEmail, setMaxEmail] = useState("");
+  const [blockedDomains, setBlockedDomains] = useState("");
   const [maxRooms, setMaxRooms] = useState("");
   const [maxMsgLen, setMaxMsgLen] = useState("");
   const [maxDmLen, setMaxDmLen] = useState("");
@@ -149,6 +150,7 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
       setTheme(j.defaultThemeJson ? normalizeTheme(JSON.parse(j.defaultThemeJson)) : null);
       setMaxChars(String(j.maxCharactersPerUser));
       setMaxEmail(String(j.maxAccountsPerEmail));
+      setBlockedDomains(j.blockedEmailDomains ?? "");
       setMaxRooms(String(j.maxRoomsPerOwner));
       setMaxMsgLen(String(j.maxMessageLength));
       setMaxDmLen(String(j.maxDirectMessageLength));
@@ -219,6 +221,7 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
         idleGraceMs,
         maxCharactersPerUser: intOrThrow(t("settings.errMaxCharsPerUser"), maxChars, 1, 1000),
         maxAccountsPerEmail: intOrThrow(t("settings.errMaxAccountsPerEmail"), maxEmail, 1, 50),
+        blockedEmailDomains: blockedDomains,
         maxRoomsPerOwner: intOrThrow(t("settings.errMaxRoomsPerOwner"), maxRooms, 0, 1000),
         maxMessageLength: intOrThrow(t("settings.errMaxChatLen"), maxMsgLen, 100, 50_000),
         maxDirectMessageLength: intOrThrow(t("settings.errMaxDmLen"), maxDmLen, 100, 50_000),
@@ -451,6 +454,18 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
               max={200_000}
             />
           </div>
+          <label data-admin-anchor="settings.blockedEmailDomainsLabel" className="mt-2 block text-xs">
+            <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.blockedEmailDomainsLabel")}</span>
+            <textarea
+              value={blockedDomains}
+              onChange={(e) => setBlockedDomains(e.target.value)}
+              rows={3}
+              maxLength={20_000}
+              placeholder={t("settings.blockedEmailDomainsPlaceholder")}
+              className="w-full resize-y rounded border border-keep-rule bg-keep-bg px-2 py-1 font-mono text-[11px]"
+            />
+            <span className="mt-0.5 block text-[10px] text-keep-muted">{t("settings.blockedEmailDomainsHint")}</span>
+          </label>
         </fieldset>
       </section>
 

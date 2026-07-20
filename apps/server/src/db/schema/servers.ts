@@ -478,6 +478,11 @@ export const serverSettings = sqliteTable("server_settings", {
   // `onboardingEnabled` is the per-server master switch (NULL/false = off).
   onboardingConfigJson: text("onboarding_config_json"),
   onboardingEnabled: integer("onboarding_enabled", { mode: "boolean" }),
+  // Per-server "welcome on first join" in-chat line (migration 0366). NULL =
+  // ON (the default); false turns it off. `joinWelcomeTemplate` NULL = the
+  // built-in copy; it supports {user} and {server} placeholders.
+  joinWelcomeEnabled: integer("join_welcome_enabled", { mode: "boolean" }),
+  joinWelcomeTemplate: text("join_welcome_template"),
   createdAt: ts("created_at"),
   updatedAt: ts("updated_at"),
   updatedById: text("updated_by_id").references(() => users.id, { onDelete: "set null" }),
@@ -507,6 +512,29 @@ export const serverWelcomeSeen = sqliteTable(
   }),
 );
 export type DbServerWelcomeSeen = typeof serverWelcomeSeen.$inferSelect;
+
+/**
+ * Per-(user, server) once-ever claim for the first-join welcome message
+ * (migration 0366). An atomic insert (`onConflictDoNothing`) gates the in-chat
+ * "Welcome X to Server!" line so it posts exactly once per person per server —
+ * the presence hook fires on every server entry, this row makes it idempotent.
+ */
+export const serverWelcomes = sqliteTable(
+  "server_welcomes",
+  {
+    serverId: text("server_id")
+      .notNull()
+      .references(() => servers.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    welcomedAt: ts("welcomed_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.serverId, t.userId] }),
+  }),
+);
+export type DbServerWelcome = typeof serverWelcomes.$inferSelect;
 
 /**
  * Per-(user, server) last room (migration 0277, server-scoped mirror of

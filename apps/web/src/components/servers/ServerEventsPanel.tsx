@@ -116,7 +116,11 @@ function repeatKey(ev: ServerEvent): "repeatsDaily" | "repeatsWeekly" | "repeats
 /** A friendly local datetime; open-ended events omit the end. */
 function formatWhen(t: TFunction<"servers">, startsAt: number, endsAt: number | null): string {
   const start = formatDateTime(startsAt, {
-    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    // `timeZoneName` stamps the zone the time is shown IN (the viewer's own, or
+    // their chosen display zone) — the event is one absolute instant rendered
+    // per viewer, so the label makes clear "7:00 PM EDT" is already converted
+    // to your clock and everyone converges on the same moment.
+    weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short",
   });
   if (endsAt == null) return start;
   const sameDay = new Date(startsAt).toDateString() === new Date(endsAt).toDateString();
@@ -204,11 +208,42 @@ function useIsEventsPanelOwner(): boolean {
   return owner;
 }
 
+/**
+ * "Seen" memory behind the header badge. The pip flags NEW events — ones this
+ * account hasn't had in front of them yet — not a standing count of everything
+ * upcoming, so it clears when the panel is opened and only re-lights when
+ * something new lands. Per account + server in `tk:` localStorage (same
+ * posture as the newcomer panel's per-account keys). Every write replaces the
+ * stored set with the ids currently in the fetch window, which doubles as
+ * pruning — an id that left the window can never be counted again, so dropping
+ * it is safe and keeps the record from growing without bound. A module-level
+ * listener set keeps both mounted instances' badges in step when the owner
+ * (the only instance that opens the modal) marks events seen.
+ */
+const eventsSeenListeners = new Set<() => void>();
+function eventsSeenKey(userId: string, serverId: string): string {
+  return `tk:eventsSeen:${userId}:${serverId}`;
+}
+function loadSeenEventIds(userId: string, serverId: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(eventsSeenKey(userId, serverId));
+    const arr: unknown = raw ? JSON.parse(raw) : null;
+    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveSeenEventIds(userId: string, serverId: string, ids: Set<string>) {
+  try { localStorage.setItem(eventsSeenKey(userId, serverId), JSON.stringify([...ids])); } catch { /* best-effort */ }
+  eventsSeenListeners.forEach((l) => l());
+}
+
 export function ServerEventsPanel() {
   const { t } = useTranslation("servers");
   const serversEnabled = useChat((s) => s.branding.serversEnabled);
   const serverId = useChat((s) => s.currentServerId);
   const activeCharacterId = useChat((s) => s.activeCharacterId);
+  const meId = useChat((s) => s.me?.id ?? null);
   // Room names for the "Go to room" link label (linked rooms always belong to
   // the current server, so the store's room map covers them).
   const roomsById = useChat((s) => s.rooms);
@@ -248,8 +283,8 @@ export function ServerEventsPanel() {
     }
   }, [serverId, t]);
 
-  // Load on mount and whenever the server changes, so the header badge shows the
-  // upcoming count WITHOUT the panel ever being opened. Also reload on open to
+  // Load on mount and whenever the server changes, so the header badge can flag
+  // new events WITHOUT the panel ever being opened. Also reload on open to
   // refresh live attendee counts + the caller's RSVP just before they act.
   useEffect(() => {
     void load();
@@ -294,15 +329,41 @@ export function ServerEventsPanel() {
     return () => clearTimeout(t);
   }, [focusId, rows]);
 
-  // Badge = distinct upcoming EVENTS (a weekly series counts once, however
-  // many occurrences its expansion returned).
-  const upcomingCount = useMemo(
+  // The seen set for this account+server, kept live across both mounted
+  // instances (the listener fires after every mark-seen write).
+  const [seenIds, setSeenIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!meId || !serverId) { setSeenIds(new Set()); return; }
+    const sync = () => setSeenIds(loadSeenEventIds(meId, serverId));
+    eventsSeenListeners.add(sync);
+    sync();
+    return () => { eventsSeenListeners.delete(sync); };
+  }, [meId, serverId]);
+
+  // Opening the panel = the member has looked: record every event in the
+  // window as seen (replacing the stored set, which also prunes departed ids).
+  // Skipped on an empty window — nothing is countable then, and a failed load
+  // (rows = []) must not wipe the record and re-light pips for events the
+  // member already saw.
+  useEffect(() => {
+    if (!open || !rows || rows.length === 0 || !meId || !serverId) return;
+    // Mid server-switch, `rows` still holds the previous server's events until
+    // the refetch lands — don't record them under the new server's key.
+    if (rows.some((r) => r.event.serverId !== serverId)) return;
+    saveSeenEventIds(meId, serverId, new Set(rows.map((r) => r.event.id)));
+  }, [open, rows, meId, serverId]);
+
+  // Badge = distinct NEW upcoming EVENTS — ones not yet marked seen (a weekly
+  // series counts once, however many occurrences its expansion returned). It
+  // clears once the panel is opened; a bare upcoming count would never clear
+  // and would read as a standing tally rather than a notification.
+  const newCount = useMemo(
     () => new Set(
       (rows ?? [])
-        .filter((r) => r.event.status === "scheduled" || r.event.status === "live")
+        .filter((r) => (r.event.status === "scheduled" || r.event.status === "live") && !seenIds.has(r.event.id))
         .map((r) => r.event.id),
     ).size,
-    [rows],
+    [rows, seenIds],
   );
 
   // Context filter first, then group by local day (for the list) and per-day
@@ -546,13 +607,13 @@ export function ServerEventsPanel() {
           )
         }
         title={t("eventsPanel.title")}
-        aria-label={upcomingCount > 0 ? t("eventsPanel.titleWithCount", { n: upcomingCount }) : t("eventsPanel.title")}
+        aria-label={newCount > 0 ? t("eventsPanel.titleWithCount", { n: newCount }) : t("eventsPanel.title")}
         className="relative flex h-8 w-8 items-center justify-center rounded border border-keep-rule bg-keep-panel text-keep-muted hover:text-keep-text"
       >
         <CalendarDays className="h-4 w-4" aria-hidden="true" />
-        {upcomingCount > 0 ? (
+        {newCount > 0 ? (
           <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-keep-action px-1 text-[10px] font-bold leading-none text-keep-bg">
-            {upcomingCount > 9 ? t("eventsPanel.badgeOverflow") : upcomingCount}
+            {newCount > 9 ? t("eventsPanel.badgeOverflow") : newCount}
           </span>
         ) : null}
       </button>

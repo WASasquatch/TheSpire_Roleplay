@@ -467,7 +467,7 @@ export async function registerUsersRoutes(
   });
 
   /** Admin: same shape as /users plus email/role/disabled state. */
-  app.get<{ Querystring: { q?: string; offset?: string; limit?: string; ip?: string; state?: string } }>("/admin/users", async (req, reply) => {
+  app.get<{ Querystring: { q?: string; offset?: string; limit?: string; ip?: string; state?: string; registered?: string; sort?: string; dir?: string } }>("/admin/users", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me || !(await hasPermission(me, "view_user_directory_secure", db))) { reply.code(403); return { error: "admin only" }; }
 
@@ -483,6 +483,27 @@ export async function registerUsersRoutes(
     const stateFilter = (req.query.state ?? "").trim();
     const offset = Math.max(0, parseInt(req.query.offset ?? "0", 10) || 0);
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit ?? "100", 10) || 100));
+    // "Registered within" window (any|24h|5d|7d|30d). Pushed to SQL for the
+    // SAME reason as state=disabled/minor below: the client used to filter a
+    // username-ordered page of `limit` rows in memory, so recent signups whose
+    // usernames sorted past the first page never loaded and "last 5 days"
+    // surfaced almost nobody. `createdAt` is a ms epoch (timestamp_ms).
+    const registeredWindow = (req.query.registered ?? "").trim();
+    const windowDays: Record<string, number> = { "24h": 1, "5d": 5, "7d": 7, "30d": 30 };
+    const registeredCutoff = windowDays[registeredWindow]
+      ? Date.now() - windowDays[registeredWindow]! * 86_400_000
+      : null;
+    // DB-backed sorts (registration date / last seen) must ALSO order in SQL,
+    // or "newest users" would only ever re-sort the first alphabetical page —
+    // the globally-newest accounts would never be fetched. Other columns
+    // (role/state/chars) are derived/runtime and stay client-side over the
+    // now-correct page; the default order stays username-alphabetical.
+    const sortKey = (req.query.sort ?? "").trim();
+    const sortDesc = (req.query.dir ?? "desc").trim() !== "asc";
+    const orderExpr =
+      sortKey === "registered" ? (sortDesc ? sql`${users.createdAt} desc` : sql`${users.createdAt} asc`)
+        : sortKey === "lastSeen" ? (sortDesc ? sql`${users.lastLoginAt} desc` : sql`${users.lastLoginAt} asc`)
+          : sql`lower(${users.username})`;
     // Optional IP filter, when set, scopes the result to every user who has
     // touched this IP - either a login (sessions) or later event-time activity
     // (user_ip_log). Used by the UsersTab's "alts on this IP" click affordance
@@ -549,6 +570,8 @@ export async function registerUsersRoutes(
       stateFilter === "minor"
         ? sql`${users.birthdate} IS NOT NULL AND ${users.birthdate} > date('now', '-18 years')`
         : undefined,
+      // Registered-within window (see note above). createdAt is a ms epoch.
+      registeredCutoff != null ? sql`${users.createdAt} >= ${registeredCutoff}` : undefined,
     );
 
     // Total count + page in two queries, was: SELECT all, sort in
@@ -580,7 +603,7 @@ export async function registerUsersRoutes(
       })
       .from(users)
       .where(whereExpr)
-      .orderBy(sql`lower(${users.username})`)
+      .orderBy(orderExpr)
       .limit(limit)
       .offset(offset);
 

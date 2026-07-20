@@ -349,7 +349,10 @@ function EventsSection({ serverId, canManage }: { serverId: string; canManage: b
                     ) : null}
                   </td>
                   <td className="px-2 py-2">
-                    <div>{formatDateTime(ev.startsAt)}</div>
+                    {/* Stamp the zone so the manager sees the SAME converted,
+                        zone-labelled time an attendee sees — the event is one
+                        absolute instant shown in each viewer's own clock. */}
+                    <div>{formatDateTime(ev.startsAt, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" })}</div>
                     {ev.endsAt ? (
                       <div className="text-[10px] text-keep-muted">{t("eventsTab.toDate", { date: formatDateTime(ev.endsAt) })}</div>
                     ) : null}

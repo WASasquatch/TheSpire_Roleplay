@@ -73,6 +73,7 @@ export const ADMIN_SEARCH_ENTRIES: readonly AdminSearchEntry[] = [
   { key: "settings.registrationLabel", tab: "settings", subtab: "accounts", also: ["settings.registrationHint", "settings.registrationOn", "settings.registrationOff"] },
   { key: "settings.signupAgeLabel", tab: "settings", subtab: "accounts", also: ["settings.signupAgeHint", "settings.signupAgeOn", "settings.signupAgeOff"] },
   { key: "settings.maxEmailLabel", tab: "settings", subtab: "accounts", also: ["settings.maxEmailHint"] },
+  { key: "settings.blockedEmailDomainsLabel", tab: "settings", subtab: "accounts", also: ["settings.blockedEmailDomainsHint", "settings.blockedEmailDomainsPlaceholder"] },
   { key: "settings.maxCharsLabel", tab: "settings", subtab: "accounts", also: ["settings.maxCharsHint"] },
   { key: "settings.maxRoomsLabel", tab: "settings", subtab: "accounts", also: ["settings.maxRoomsHint"] },
   { key: "settings.maxBioLenLabel", tab: "settings", subtab: "accounts", also: ["settings.maxBioLenHint"] },

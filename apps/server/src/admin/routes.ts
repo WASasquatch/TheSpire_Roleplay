@@ -1305,6 +1305,8 @@ export async function registerAdminRoutes(
     emailDailyCap: z.number().int().min(1).max(100_000).optional(),
     /** Denote unverified users with a subtle chip (migration 0353). */
     denoteUnverifiedUsers: z.boolean().optional(),
+    /** Extra disposable email domains to block at signup (migration 0367). */
+    blockedEmailDomains: z.string().max(20_000).optional(),
     /** Master switch for /auth/register. */
     registrationOpen: z.boolean().optional(),
     // Long-form HTML fields. Caps tuned for "fully comprehensive rules,
@@ -1432,6 +1434,7 @@ export async function registerAdminRoutes(
       emailVerificationMode: s.emailVerificationMode,
       emailDailyCap: s.emailDailyCap,
       denoteUnverifiedUsers: s.denoteUnverifiedUsers,
+      blockedEmailDomains: s.blockedEmailDomains,
       registrationOpen: s.registrationOpen,
       welcomeHtml: s.welcomeHtml,
       rulesHtml: s.rulesHtml,
@@ -1544,6 +1547,7 @@ export async function registerAdminRoutes(
     if (body.emailVerificationMode !== undefined) patch.emailVerificationMode = body.emailVerificationMode;
     if (body.emailDailyCap !== undefined) patch.emailDailyCap = body.emailDailyCap;
     if (body.denoteUnverifiedUsers !== undefined) patch.denoteUnverifiedUsers = body.denoteUnverifiedUsers;
+    if (body.blockedEmailDomains !== undefined) patch.blockedEmailDomains = body.blockedEmailDomains;
     if (body.registrationOpen !== undefined) patch.registrationOpen = body.registrationOpen;
     if (body.welcomeHtml !== undefined) {
       // Sanitize on save (same allow-list as bios) - never trust admin HTML input.

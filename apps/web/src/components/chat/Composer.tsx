@@ -960,35 +960,70 @@ export function Composer({
     // server found first. The server resolves the token at send time, rewrites
     // the body to `@<displayName>` for display, and snapshots the id so the
     // chip opens the right profile and self-mentions highlight correctly.
-    // Sources are the same two as before, but both carry the id tuple:
-    // occupants (instant) + /identities/autocomplete (offline / out-of-room).
+    // Two sources, MERGED and ranked together so an out-of-room / offline
+    // person can out-rank a room occupant when they match better — you can
+    // mention ANYONE, not just who's here:
+    //   1. Room occupants (instant, no round-trip; substring-matched so "@ob"
+    //      finds "Bob", same as the server).
+    //   2. /identities/autocomplete (every user + character site-wide, online
+    //      or not, in this room or not).
+    // Both carry the id tuple, so the inserted value is always the identity
+    // TOKEN. Ranking: prefix match first, then in-room, then online, then
+    // name. Previously occupants were sorted and emitted BEFORE the directory
+    // results were appended, so a full room could crowd all the out-of-room
+    // matches past the cap — the merge fixes that.
     if (trigger.kind === "@") {
-      const out: CompletionItem[] = [];
-      const seen = new Set<string>();
-      const pushIdentity = (
-        userId: string,
-        characterId: string | null,
-        displayName: string,
-        sublabel?: string,
-      ) => {
-        const idKey = characterId ? `c:${characterId}` : `u:${userId}`;
-        if (seen.has(idKey)) return;
-        seen.add(idKey);
-        const token = characterId ? `@cid:${characterId}` : `@id:${userId}`;
-        out.push({ value: token, label: `@${displayName}`, ...(sublabel ? { sublabel } : {}) });
-      };
+      const q = trigger.query;
+      interface Cand {
+        userId: string;
+        characterId: string | null;
+        displayName: string;
+        sublabel?: string;
+        online: boolean;
+        inRoom: boolean;
+      }
+      const byKey = new Map<string, Cand>();
+      const keyOf = (userId: string, characterId: string | null) => (characterId ? `c:${characterId}` : `u:${userId}`);
       if (occupants) {
         for (const o of occupants) {
-          if (trigger.query.length > 0 && !o.displayName.toLowerCase().startsWith(trigger.query)) continue;
-          pushIdentity(o.userId, o.characterId, o.displayName, o.away ? t("composer.inRoomAway") : t("composer.inRoom"));
+          if (q.length > 0 && !o.displayName.toLowerCase().includes(q)) continue;
+          const k = keyOf(o.userId, o.characterId);
+          if (byKey.has(k)) continue;
+          byKey.set(k, {
+            userId: o.userId,
+            characterId: o.characterId,
+            displayName: o.displayName,
+            sublabel: o.away ? t("composer.inRoomAway") : t("composer.inRoom"),
+            online: true, // present in the room ⇒ connected (away is still online)
+            inRoom: true,
+          });
         }
       }
-      out.sort((a, b) => a.label.localeCompare(b.label));
       for (const s of identitySuggestions) {
-        const sublabel = s.kind === "character" ? t("identity.characterOf", { name: s.masterUsername }) : t("composer.user");
-        pushIdentity(s.userId, s.characterId, s.displayName, sublabel);
+        const k = keyOf(s.userId, s.characterId);
+        if (byKey.has(k)) continue; // an occupant's "in room" sublabel is more useful; keep it
+        byKey.set(k, {
+          userId: s.userId,
+          characterId: s.characterId,
+          displayName: s.displayName,
+          sublabel: s.kind === "character" ? t("identity.characterOf", { name: s.masterUsername }) : t("composer.user"),
+          online: s.online,
+          inRoom: false,
+        });
       }
-      return out.slice(0, MAX_COMPLETIONS);
+      const ranked = [...byKey.values()].sort((a, b) => {
+        const ap = a.displayName.toLowerCase().startsWith(q) ? 0 : 1;
+        const bp = b.displayName.toLowerCase().startsWith(q) ? 0 : 1;
+        if (ap !== bp) return ap - bp;
+        if (a.inRoom !== b.inRoom) return a.inRoom ? -1 : 1;
+        if (a.online !== b.online) return a.online ? -1 : 1;
+        return a.displayName.localeCompare(b.displayName);
+      });
+      return ranked.slice(0, MAX_COMPLETIONS).map((c) => ({
+        value: c.characterId ? `@cid:${c.characterId}` : `@id:${c.userId}`,
+        label: `@${c.displayName}`,
+        ...(c.sublabel ? { sublabel: c.sublabel } : {}),
+      }));
     }
     // whisper-target. Two sources, merged:
     //   1. Occupants of the current room (instant, fastest path for
@@ -1213,8 +1248,13 @@ export function Composer({
     const tokKind = tokenMatch?.[1];
     const tokId = tokenMatch?.[2];
     if (tokKind && tokId && item.label) {
-      markIdentityTokenKnown(tokKind as "id" | "cid", tokId, item.label);
-      markMentionKnown(item.label);
+      // The picker's label is the DISPLAY form `@<name>`, but both caches key
+      // on the bare name — the "Mentioning:" hint and the @name chip each add
+      // their own `@`. Seeding the prefixed label double-stamps it, so the
+      // hint reads "@@E D Erin". Strip the leading `@` first.
+      const name = item.label.startsWith("@") ? item.label.slice(1) : item.label;
+      markIdentityTokenKnown(tokKind as "id" | "cid", tokId, name);
+      markMentionKnown(name);
     }
   }, [trigger, caret]);
 

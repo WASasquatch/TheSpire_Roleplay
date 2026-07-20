@@ -128,6 +128,10 @@ export interface SiteSettings {
   emailDailyCap: number;
   /** When true, unverified accounts wear a subtle "Unverified" chip in the userlist and on profiles. */
   denoteUnverifiedUsers: boolean;
+  /** Extra disposable/temporary email domains blocked at signup (migration
+   *  0367), on top of the vendored list. Newline/comma separated; empty =
+   *  just the vendored list. */
+  blockedEmailDomains: string;
   /** When false, /auth/register returns 503. */
   registrationOpen: boolean;
   /** Sanitized HTML rendered above the splash login/register form. */
@@ -368,6 +372,8 @@ export interface SettingsPatch {
   emailDailyCap?: number;
   /** Denote unverified users with a subtle chip (migration 0353). */
   denoteUnverifiedUsers?: boolean;
+  /** Extra disposable email domains to block (newline/comma separated). */
+  blockedEmailDomains?: string;
   registrationOpen?: boolean;
   /** Pre-sanitized HTML; settings layer doesn't re-sanitize so the route handler must. */
   welcomeHtml?: string;
@@ -501,6 +507,7 @@ export async function updateSettings(
   if (patch.emailVerificationMode !== undefined) update.emailVerificationMode = patch.emailVerificationMode;
   if (patch.emailDailyCap !== undefined) update.emailDailyCap = patch.emailDailyCap;
   if (patch.denoteUnverifiedUsers !== undefined) update.denoteUnverifiedUsers = patch.denoteUnverifiedUsers;
+  if (patch.blockedEmailDomains !== undefined) update.blockedEmailDomains = patch.blockedEmailDomains;
   if (patch.registrationOpen !== undefined) update.registrationOpen = patch.registrationOpen;
   if (patch.welcomeHtml !== undefined) update.welcomeHtml = patch.welcomeHtml;
   if (patch.rulesHtml !== undefined) update.rulesHtml = patch.rulesHtml;
@@ -616,6 +623,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     emailVerificationMode: row.emailVerificationMode,
     emailDailyCap: row.emailDailyCap,
     denoteUnverifiedUsers: !!row.denoteUnverifiedUsers,
+    blockedEmailDomains: row.blockedEmailDomains ?? "",
     registrationOpen: row.registrationOpen,
     welcomeHtml: row.welcomeHtml,
     rulesHtml: row.rulesHtml,
@@ -803,6 +811,13 @@ export interface ServerSettings {
    */
   onboardingConfigJson: string | null;
   onboardingEnabled: boolean;
+  /**
+   * First-join welcome (migration 0366). Server-only. `joinWelcomeEnabled` is
+   * ON by default (stored NULL → true); `joinWelcomeTemplate` null = the
+   * built-in copy, and supports {user} + {server} placeholders.
+   */
+  joinWelcomeEnabled: boolean;
+  joinWelcomeTemplate: string | null;
 }
 
 /**
@@ -876,5 +891,9 @@ function mergeServerSettings(
     flashSaleEnabled: !!row?.flashSaleEnabled,
     onboardingConfigJson: row?.onboardingConfigJson ?? null,
     onboardingEnabled: !!row?.onboardingEnabled,
+    // ON by default: a stored NULL (never set) means enabled; only an explicit
+    // false turns it off.
+    joinWelcomeEnabled: row?.joinWelcomeEnabled ?? true,
+    joinWelcomeTemplate: row?.joinWelcomeTemplate ?? null,
   };
 }

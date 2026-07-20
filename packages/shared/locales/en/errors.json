@@ -125,6 +125,7 @@
       "captchaWrong": "captcha was wrong or expired - please try again",
       "minAge": "You must be at least {{minAge}} years old to create an account.",
       "implausibleBirthdate": "That birth date doesn't look right. Please enter your real date of birth.",
+      "disposableEmail": "Please use a permanent email address. Temporary or disposable email providers aren't allowed.",
       "registrationConflict": "registration conflict - try a different email or username",
       "registrationConflictUsername": "registration conflict - try a different username",
       "networkRestricted": "Access from your network is currently restricted.",

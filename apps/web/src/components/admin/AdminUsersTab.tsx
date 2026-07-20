@@ -111,6 +111,18 @@ export function UsersTab() {
       // presence).
       if (stateFilter === "disabled") params.set("state", "disabled");
       if (stateFilter === "minor") params.set("state", "minor");
+      // "Registered within" is DB-backed, so it must filter server-side too —
+      // otherwise a recent signup whose username sorts past the first page
+      // (username-ordered, limit 100) never loads and "last 5 days" finds
+      // almost nobody. The registration-date / last-seen SORTS likewise order
+      // server-side so the globally-newest accounts are actually fetched, not
+      // just the first alphabetical page reshuffled. Other sorts stay
+      // client-side over the returned page.
+      if (registeredFilter !== "any") params.set("registered", registeredFilter);
+      if (sortKey === "registered" || sortKey === "lastSeen") {
+        params.set("sort", sortKey);
+        params.set("dir", sortDir);
+      }
       const qs = params.toString();
       const url = qs ? `/admin/users?${qs}` : "/admin/users";
       const r = await fetch(url, { credentials: "include" });
@@ -124,10 +136,15 @@ export function UsersTab() {
       setLoading(false);
     }
   }
+  // Only the DB-backed sorts (registration date / last seen) need a server
+  // round-trip — those order in SQL so the globally-newest rows are fetched.
+  // The other sorts (role/state/chars) reorder the returned page in memory, so
+  // toggling them must NOT refetch (that would flash a needless loading state).
+  const serverSortSig = (sortKey === "registered" || sortKey === "lastSeen") ? `${sortKey}:${sortDir}` : "";
   useEffect(() => {
     const t = window.setTimeout(reload, 200);
     return () => window.clearTimeout(t);
-  }, [q, ipPivot, stateFilter]);
+  }, [q, ipPivot, stateFilter, registeredFilter, serverSortSig]);
 
   async function patch(id: string, body: Record<string, unknown>) {
     const r = await fetch(`/admin/users/${id}`, {

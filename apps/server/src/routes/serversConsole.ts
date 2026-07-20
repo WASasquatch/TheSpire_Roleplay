@@ -1238,6 +1238,10 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
         // these; the member-facing flow reads them via getServerSettings.
         onboardingConfigJson: row?.onboardingConfigJson ?? null,
         onboardingEnabled: !!row?.onboardingEnabled,
+        // First-join welcome (migration 0366): ON by default (stored NULL ⇒
+        // true); the template is the raw override (null = built-in copy).
+        joinWelcomeEnabled: row?.joinWelcomeEnabled ?? true,
+        joinWelcomeTemplate: row?.joinWelcomeTemplate ?? null,
       },
     };
   });
@@ -1262,6 +1266,11 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
     // null clears the override.
     onboardingConfigJson: z.string().max(200_000).nullable().optional(),
     onboardingEnabled: z.boolean().nullable().optional(),
+    // First-join welcome (migration 0366): master switch + custom template
+    // (with {user}/{server} placeholders). A blank template clears to the
+    // built-in copy.
+    joinWelcomeEnabled: z.boolean().nullable().optional(),
+    joinWelcomeTemplate: z.string().max(600).nullable().optional(),
   }).strict();
 
   app.patch<{ Params: { id: string }; Body: unknown }>("/servers/:id/settings", async (req, reply) => {
@@ -1287,6 +1296,12 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       update.onboardingConfigJson = body.onboardingConfigJson?.trim() ? body.onboardingConfigJson : null;
     }
     if (body.onboardingEnabled !== undefined) update.onboardingEnabled = body.onboardingEnabled ?? false;
+    // First-join welcome (migration 0366). The switch coerces null ⇒ true (ON
+    // is the default); a blank template clears back to the built-in copy.
+    if (body.joinWelcomeEnabled !== undefined) update.joinWelcomeEnabled = body.joinWelcomeEnabled ?? true;
+    if (body.joinWelcomeTemplate !== undefined) {
+      update.joinWelcomeTemplate = body.joinWelcomeTemplate?.trim() ? body.joinWelcomeTemplate.trim() : null;
+    }
     if (body.rulesHtml !== undefined || body.securityNoticeHtml !== undefined
       || body.welcomeHtml !== undefined || body.newUserWelcomeHtml !== undefined) {
       const { sanitizeBio } = await import("../auth/html.js");

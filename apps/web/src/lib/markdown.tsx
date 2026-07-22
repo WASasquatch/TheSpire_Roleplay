@@ -388,8 +388,12 @@ function tryHtmlTag(text: string, i: number, depth: number): TokenMatch | null {
             // a tiny punctuation-sized hint. align-middle keeps it
             // centered against the text baseline; the row's
             // line-height absorbs the extra height without breaking
-            // single-line message rhythm.
-            className="inline-block h-[1.75em] w-auto rounded-sm align-middle"
+            // single-line message rhythm. The width is fixed too (not
+            // w-auto): an auto width is 0 until the image loads, so a
+            // lazy icon scrolling in re-wrapped the line and shifted
+            // every row below it; object-contain letterboxes any
+            // non-square art inside the stable square.
+            className="inline-block h-[1.75em] w-[1.75em] rounded-sm object-contain align-middle"
           />
         ),
       };

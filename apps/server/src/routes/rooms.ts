@@ -968,23 +968,27 @@ export async function registerRoomsRoutes(
 
   /**
    * GET /rooms/:id/messages?before=<createdAt-ms>&limit=<N>
+   * GET /rooms/:id/messages?after=<createdAt-ms>&limit=<N>
    *
-   * Scroll-up pagination for the flat chat history. The initial backlog
-   * delivered via `room:join` / `message:bulk` is capped at the most
-   * recent 50 lines; this endpoint serves the older window that
-   * scrolling past the top edge of the buffer needs. Same privacy /
-   * ignore / whisper-party filters as the live backlog so the
-   * server-side posture is consistent between "first 50" and "older
-   * pages."
+   * Cursor pagination for the flat chat history, in EITHER direction.
+   * The initial backlog delivered via `room:join` / `message:bulk` is
+   * capped at the most recent 50 lines; `before` serves the older
+   * window that scrolling past the top edge of the buffer needs, and
+   * `after` serves the newer window that scrolling back DOWN from a
+   * jump-to-message history view needs (the jump swaps the buffer to a
+   * window around an old message, detaching it from the live bottom).
+   * Same privacy / ignore / whisper-party filters as the live backlog
+   * so the server-side posture is consistent across all three paths.
    *
    * Returns `{ messages, hasMore }` chronologically oldest → newest
-   * within the page so the client can prepend in order. `hasMore` is
+   * within the page so the client can splice in order. `hasMore` is
    * computed by overfetching one row past the limit so the client
-   * doesn't need a separate count round-trip.
+   * doesn't need a separate count round-trip; for `after` it means
+   * "there are still newer rows" (false = the page reaches the present).
    */
   app.get<{
     Params: { id: string };
-    Querystring: { before?: string; limit?: string };
+    Querystring: { before?: string; after?: string; limit?: string };
   }>("/rooms/:id/messages", async (req, reply) => {
     const me = await getSessionUser(req, db);
     if (!me) { reply.code(401); return { error: "auth" }; }
@@ -1005,9 +1009,12 @@ export async function registerRoomsRoutes(
       if (!member) { reply.code(403); return { error: "not a member" }; }
     }
     const before = req.query.before ? parseInt(req.query.before, 10) : NaN;
-    if (!Number.isFinite(before) || before <= 0) {
+    const after = req.query.after ? parseInt(req.query.after, 10) : NaN;
+    const pagingBack = Number.isFinite(before) && before > 0;
+    const pagingForward = !pagingBack && Number.isFinite(after) && after > 0;
+    if (!pagingBack && !pagingForward) {
       reply.code(400);
-      return { error: "before (ms) required" };
+      return { error: "before or after (ms) required" };
     }
     // Cap at 100: the scroll-up loader pulls 100-row batches so history
     // streams in a screenful at a time instead of dribbling; the default
@@ -1046,25 +1053,30 @@ export async function registerRoomsRoutes(
     // history a /clear was meant to hide.
     const clearedAt = await getClearedAt(db, me.id, room.id);
     // Overfetch by one to detect hasMore without a separate count.
+    // Direction picks the cursor comparison + scan order: `before` walks
+    // DESC from the cursor (older page), `after` walks ASC (newer page).
     const rows = await db
       .select()
       .from(messages)
       .where(and(
         roomOrPartyWhisper,
-        lt(messages.createdAt, new Date(before)),
+        pagingBack
+          ? lt(messages.createdAt, new Date(before))
+          : gt(messages.createdAt, new Date(after)),
         clearedAt ? gt(messages.createdAt, clearedAt) : undefined,
         // Isolation (Phase 5): older pages drop isolated-pair authors, the
         // same author rule the live backlog + hide set apply.
         isolationVisibleSql(me, messages.userId),
       ))
-      .orderBy(desc(messages.createdAt))
+      .orderBy(pagingBack ? desc(messages.createdAt) : asc(messages.createdAt))
       .limit(limit + 1);
     const hasMore = rows.length > limit;
     const window = (hasMore ? rows.slice(0, limit) : rows)
       .filter((m) => !ignoredIds.has(m.userId));
-    // The DB pull was DESC for the limit boundary; flip to ASC so the
-    // client can prepend in place without re-sorting.
-    window.reverse();
+    // The `before` pull was DESC for the limit boundary; flip to ASC so
+    // the client can splice in place without re-sorting. `after` pages
+    // are already ASC.
+    if (pagingBack) window.reverse();
     const canSeeOriginalBody = await hasPermission(me, "view_deleted_message_body", db);
     const wire: ChatMessage[] = window.map((m) => ({
       id: m.id,

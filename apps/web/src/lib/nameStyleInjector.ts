@@ -22,6 +22,7 @@
  */
 
 import type { NameStyleCatalogRow } from "./earning.js";
+import { requestCosmeticSweep } from "./cosmeticAnimationSync.js";
 import { createNonceStyleTag } from "./injectStyle.js";
 
 const CATALOG_TAG_ATTR = "data-name-styles";
@@ -67,4 +68,10 @@ function writeStyleTag(tagAttr: string, styles: readonly NameStyleCatalogRow[]):
   }
   if (tag.textContent === concatenated) return;
   tag.textContent = concatenated;
+  // The stylesheet (and therefore its @keyframes animations) may have
+  // arrived AFTER styled names already mounted — a cold load renders
+  // rows before the first /earning/me snapshot lands. Those instances'
+  // mount-time phase sync found no animations to pin, so re-anchor
+  // every cosmetic root now that the animations exist.
+  requestCosmeticSweep();
 }

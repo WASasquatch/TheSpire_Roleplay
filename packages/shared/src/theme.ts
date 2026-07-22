@@ -128,15 +128,15 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
   },
   {
     // Default DARK companion to Parchment. Picked to read against the
-    // dark splash artwork (the_spire_bg_dark.jpg), near-black bg/panel
-    // pulled from the artwork's deep blue-black sky, a dark sky-blue
-    // system slot taken from the moonlit highlight on the mountain
-    // ridge, a darker amber yellow accent matching the dragon glyphs
-    // on the parchment overlay, and a spire-energy cyan action color
-    // tying back to the magic circle's neon halo. The splash adds a
-    // matching pair of corner glows (cyan top-left, moon-white
-    // bottom-right) when this palette, or any palette whose bg
-    // luminance reads as "dark", is active.
+    // original dark splash artwork (now the_spire_bg_classic_dark.jpg),
+    // near-black bg/panel pulled from the artwork's deep blue-black sky,
+    // a dark sky-blue system slot taken from the moonlit highlight on
+    // the mountain ridge, a darker amber yellow accent matching the
+    // dragon glyphs on the parchment overlay, and a spire-energy cyan
+    // action color tying back to the magic circle's neon halo. The
+    // splash adds a matching pair of corner glows (cyan top-left,
+    // moon-white bottom-right) when this palette, or any palette whose
+    // bg luminance reads as "dark", is active.
     name: "Darkness",
     theme: {
       bg: "#0a0e1a",
@@ -188,7 +188,60 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
       system: "#ffc764",
     },
   },
+  {
+    // Keys the ORIGINAL painted splash artwork (the parchment map +
+    // spire landscape, preserved as the_spire_bg_classic.*). Palette
+    // sampled from that art: warm map-paper surfaces, sepia ink text,
+    // a deep teal action pulled from the spire's magic-circle glow,
+    // and a copper accent matching the map's ink linework. Selecting
+    // this preset (unmodified) is what routes the splash + glass shell
+    // to the classic background set, see isSpireClassicTheme.
+    name: "Spire Classic Light",
+    theme: {
+      bg: "#f0e8d5",
+      panel: "#e3d3ae",
+      border: "#a68c63",
+      text: "#241c10",
+      muted: "#6f6350",
+      action: "#1f6e6a",
+      accent: "#96421c",
+      system: "#7a5a1a",
+    },
+  },
+  {
+    // Dark companion, keyed to the original night artwork
+    // (the_spire_bg_classic_dark.*): near-black warm-neutral surfaces
+    // from the burnt-map side, teal action from the spire's glowing
+    // sigil ring, copper accent from the etched map lines, and a
+    // moonlit steel-blue system slot.
+    name: "Spire Classic Dark",
+    theme: {
+      bg: "#0c0e12",
+      panel: "#16191f",
+      border: "#333840",
+      text: "#e6e4dc",
+      muted: "#8d8878",
+      action: "#3fc2b8",
+      accent: "#c9964b",
+      system: "#7fa3b8",
+    },
+  },
 ];
+
+/**
+ * True when the palette is one of the "Spire Classic" presets
+ * (unmodified). These presets exist to keep the ORIGINAL splash /
+ * glass-shell artwork available after the commissioned character art
+ * became the default: background pickers (splash classes, glass chat
+ * shell) route to the `the_spire_bg_classic*` asset set for them and
+ * the new `the_spire_bg*` set for everything else. Tweaking any slot
+ * away from the preset drops back to the default art, same
+ * exact-match philosophy as the per-preset design map.
+ */
+export function isSpireClassicTheme(theme: Theme): boolean {
+  const name = matchThemePreset(theme);
+  return name === "Spire Classic Light" || name === "Spire Classic Dark";
+}
 
 /**
  * Built-in pairings: when a user lands on a named preset and neither
@@ -199,12 +252,17 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
  *
  * Only includes pairings that are strongly bound to the preset's
  * visual identity, Glass Light/Dark exist specifically to dress the
- * glass design. The medieval/modern/scifi-friendly presets (Parchment,
- * Twilight, etc.) stay unmapped so the admin or user picks what fits.
+ * glass design, and the Spire Classic pair exists to show the original
+ * splash artwork, which inside the chat shell is only visible through
+ * the glass design's backdrop. The medieval/modern/scifi-friendly
+ * presets (Parchment, Twilight, etc.) stay unmapped so the admin or
+ * user picks what fits.
  */
 export const DEFAULT_PRESET_DESIGNS: Readonly<Record<string, string>> = {
   "Glass Light": "glass",
   "Glass Dark": "glass",
+  "Spire Classic Light": "glass",
+  "Spire Classic Dark": "glass",
 };
 
 /**

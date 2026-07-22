@@ -44,7 +44,7 @@
  * initials chip in the keep-banner color.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import type { AvatarCrop } from "@thekeep/shared";
 import { extractFreeformBorderVars, freeformBorderInlineVars } from "@thekeep/shared";
@@ -52,6 +52,7 @@ import { useEarning } from "../../state/earning.js";
 import { useChat } from "../../state/store.js";
 import { applyFreeformBorderPlaceholders } from "../../lib/freeformBorderTemplate.js";
 import { cropStyleAttr, cropStyleFor } from "../../lib/avatarCrop.js";
+import { COSMETIC_SYNC_ATTR, requestCosmeticAnimationSync } from "../../lib/cosmeticAnimationSync.js";
 import { ensureInjectedStyle } from "../../lib/injectStyle.js";
 
 export type BorderedAvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
@@ -425,6 +426,18 @@ function TemplateAvatar({
     KEEP_CONTENT: true,
   });
 
+  // Pin the border's looping animations (decoration spans + their
+  // pseudo-elements) to the shared document-timeline origin so every
+  // rendered copy of the same frame animates in phase — chat line,
+  // userlist row, and profile card included (see
+  // lib/cosmeticAnimationSync). Keyed on the rendered markup + CSS so a
+  // template/config change re-requests; the module rAF-batches, so this
+  // runs after the injection effect above has the CSS in the document.
+  const rootRef = useRef<HTMLSpanElement | null>(null);
+  useEffect(() => {
+    requestCosmeticAnimationSync(rootRef.current);
+  }, [clean, styleCss]);
+
   // Resolve the per-identity color overrides into `--c-<name>: <value>`
   // inline declarations. `extractFreeformBorderVars` gates the keys
   // against what the template actually references, so a stale config
@@ -438,6 +451,12 @@ function TemplateAvatar({
 
   const visual = (
     <span
+      ref={rootRef}
+      // Marks this wrapper as a cosmetic root for the catalog-wide
+      // animation-phase sweep (cold-load CSS arrival, calm-cosmetics
+      // unfreeze), which can't find it by class the way StyledName's
+      // `keep-styled-name` elements are found.
+      {...{ [COSMETIC_SYNC_ATTR]: "" }}
       className={`relative inline-block shrink-0 ${className ?? ""}`}
       style={{
         width: `${wrapperPx}px`,

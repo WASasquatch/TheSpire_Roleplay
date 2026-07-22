@@ -92,7 +92,7 @@ import { SiteTour } from "./components/tours/SiteTour.js";
 import { getSocket, disconnect as disconnectSocket, hasSessionBeenAnnounced, loadTabCharacter, markLoginIntent, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
-import { ActiveThemeContext, applyFontPrefs, applyTheme, useActiveTheme, type UiFontScale } from "./lib/theme.js";
+import { ActiveThemeContext, applyFontPrefs, applyTheme, defaultBgUrl, useActiveTheme, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, permission as notifPermission, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
@@ -2090,7 +2090,8 @@ function Chat() {
     }
 
     // Glass shell-bg URL, character > master > Spire artwork
-    // (light or dark variant by palette luminance). Published as
+    // (light or dark variant by palette luminance; the classic art
+    // set when the palette is a Spire Classic preset). Published as
     // CSS vars on `<html>`; the actual paint happens via a CSS rule
     // on `.keep-bg-overlay` (a fixed full-viewport div INSIDE the
     // chat shell). Painting on the html element directly leaked the
@@ -2107,7 +2108,7 @@ function Chat() {
       // the master bg.
       const personalUrl = activeCharacterId ? characterBgUrl : userBgUrl;
       const personalMode = activeCharacterId ? characterBgMode : userBgMode;
-      const url = personalUrl ?? (isDarkPalette(activeTheme) ? "/the_spire_bg_dark.jpg" : "/the_spire_bg.jpg");
+      const url = personalUrl ?? defaultBgUrl(activeTheme);
       const size = personalUrl
         ? (personalMode === "stretch" ? "100% 100%" : personalMode)
         : "cover";
@@ -2656,6 +2657,13 @@ function Chat() {
           else byRoom.set(m.roomId, [m]);
         }
         for (const [roomId, rows] of byRoom) {
+          // A room showing a detached jump-to-message window keeps it: the
+          // join that accompanies a cross-room jump races the window fetch,
+          // and this bulk landing late used to clobber the window with the
+          // newest-50 backlog (the target vanished and the jump "gave up").
+          // returnToLive / room switches END the window first, so their
+          // re-join bulks apply normally.
+          if (useChat.getState().jumpWindows[roomId]) continue;
           setMessages(roomId, rows);
           // Seed the paginator optimistically. The authoritative value
           // lands a beat later via `room:history_meta` (sent by the
@@ -3465,6 +3473,11 @@ function Chat() {
       // on rejection, so a successful send never reaches here.
       if (res && res.ok === false) setNotice({ code: res.code, message: res.message });
     });
+    // Sending while parked in a jump-to-message history window returns the
+    // sender to the live bottom (Discord behavior). Their new line would
+    // otherwise be HELD with the rest of the live stream and they'd watch
+    // their own message not appear.
+    if (useChat.getState().jumpWindows[currentRoomId]) returnToLive();
   }
 
   /**
@@ -4108,7 +4121,14 @@ function Chat() {
   //    `ThreadModal` centered on the topic with `highlightMessageId`
   //    set so the modal scrolls to and flashes the specific hit.
   const [highlightMessageId, setHighlightMessageId] = useState<string | null>(null);
-  const [viewingHistory, setViewingHistory] = useState<boolean>(false);
+  // "Viewing older history" = the current room's buffer is a detached
+  // jump-to-message window (store.jumpWindows). Derived, not local state:
+  // the window can close from inside MessageList (scrolling down until the
+  // feed reaches the present flushes it), and a local flag couldn't see
+  // that — the banner used to linger until a manual click.
+  const viewingHistory = useChat((s) =>
+    s.currentRoomId ? !!s.jumpWindows[s.currentRoomId] : false,
+  );
   // Pinned messages per room (migration 0316). Seeded from GET /rooms/:id/pins
   // on room open and kept live by the `room:pins` socket broadcast (which
   // replaces a room's set wholesale). Local App state — pins are room-scoped
@@ -4207,8 +4227,12 @@ function Chat() {
           return;
         }
         const j = (await r.json()) as { messages: ChatMessage[] };
+        // Open the jump window BEFORE swapping the buffer: from this
+        // moment live rows are held (not appended after old history) and
+        // any late-racing `message:bulk` from the join above is ignored,
+        // so nothing can clobber the window out from under the highlight.
+        useChat.getState().beginJumpWindow(roomId);
         setMessages(roomId, j.messages);
-        setViewingHistory(true);
       } catch (err) {
         setNotice({ code: "JUMP_FAILED", message: err instanceof Error ? err.message : i18n.t("notifications:toast.loadFailed") });
         return;
@@ -4278,13 +4302,26 @@ function Chat() {
   }, [setNotice, openNotifTarget]);
 
   // "Return to live", refresh the buffer with the recent backlog and
-  // drop the historical-view flag. Re-issues room:join, which on the
-  // server returns the standard last-50 message:bulk we get on connect.
+  // drop the historical-view state. Ends the jump window FIRST (held
+  // live rows are discarded — the fresh backlog is authoritative), so
+  // the re-issued room:join's message:bulk isn't ignored by the
+  // windowed-room guard in the bulk handler.
   function returnToLive() {
     if (!currentRoomId) return;
+    useChat.getState().endJumpWindow(currentRoomId);
     socket.emit("room:join", { roomId: currentRoomId }, () => {});
-    setViewingHistory(false);
   }
+
+  // Leaving a room abandons its jump window: the pending held rows are
+  // discarded and the next join's message:bulk re-seeds the buffer
+  // fresh. Without this, revisiting a room whose window was left open
+  // would show the stale history window and ignore the fresh backlog.
+  const prevJumpRoomRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevJumpRoomRef.current;
+    prevJumpRoomRef.current = currentRoomId;
+    if (prev && prev !== currentRoomId) useChat.getState().endJumpWindow(prev);
+  }, [currentRoomId]);
 
   /** Display the per-room expiry window in the most natural unit. Lives
    *  inside Chat so it closes over `t` (the plural keys re-resolve on a

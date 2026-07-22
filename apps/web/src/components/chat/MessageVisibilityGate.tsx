@@ -8,6 +8,122 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
  */
 const VIEWPORT_PADDING_PX = 1200;
 
+/** How long a row must stay out of the padded zone before it's hidden. Keeps a
+ *  row parked at the boundary from flapping on/off while the reader jiggles
+ *  the scroll. */
+const HIDE_DELAY_MS = 300;
+
+/* =============================================================
+ * Shared observers.
+ *
+ * Every gate used to own an IntersectionObserver + a ResizeObserver +
+ * a per-row hide setTimeout. With the buffer at several hundred rows
+ * that's hundreds of observer instances the browser services on every
+ * scroll frame, and after a history prepend the off-zone rows' hide
+ * timers fired one by one — each a separate React commit + style
+ * recalc landing mid-scroll (part of the mobile jank).
+ *
+ * Instead: ONE IntersectionObserver and ONE ResizeObserver for all
+ * gates (both APIs are built to watch many targets), and hides are
+ * coalesced into a single deadline-sweep timeout, so a wave of rows
+ * leaving the zone flips in ONE batched React commit (React 18
+ * auto-batches inside timeouts) instead of ~90 staggered ones. Shows
+ * stay immediate, applied inside the IO callback — also one batch.
+ * ============================================================= */
+
+interface GateHandle {
+  setHidden: (hidden: boolean) => void;
+  /** performance.now() deadline for a pending hide; null = not pending. */
+  hideAt: number | null;
+}
+
+const gates = new Map<Element, GateHandle>();
+let sharedIO: IntersectionObserver | null = null;
+let sharedRO: ResizeObserver | null = null;
+const sizeCallbacks = new Map<Element, (h: number) => void>();
+let hideSweepTimer: number | null = null;
+
+function runHideSweep(): void {
+  hideSweepTimer = null;
+  const now = performance.now();
+  for (const handle of gates.values()) {
+    if (handle.hideAt != null && handle.hideAt <= now) {
+      handle.hideAt = null;
+      handle.setHidden(true);
+    }
+  }
+  scheduleHideSweep();
+}
+
+/** (Re)arm the sweep timer for the earliest pending hide, if any. */
+function scheduleHideSweep(): void {
+  if (hideSweepTimer != null) return;
+  let earliest = Infinity;
+  for (const handle of gates.values()) {
+    if (handle.hideAt != null && handle.hideAt < earliest) earliest = handle.hideAt;
+  }
+  if (earliest === Infinity) return;
+  hideSweepTimer = window.setTimeout(runHideSweep, Math.max(0, earliest - performance.now()));
+}
+
+function ensureSharedIO(): IntersectionObserver | null {
+  if (typeof IntersectionObserver === "undefined") return null;
+  if (!sharedIO) {
+    sharedIO = new IntersectionObserver(
+      (entries) => {
+        const now = performance.now();
+        for (const entry of entries) {
+          const handle = gates.get(entry.target);
+          if (!handle) continue;
+          if (entry.isIntersecting) {
+            handle.hideAt = null;
+            handle.setHidden(false);
+          } else {
+            handle.hideAt = now + HIDE_DELAY_MS;
+          }
+        }
+        scheduleHideSweep();
+      },
+      { rootMargin: `${VIEWPORT_PADDING_PX}px 0px ${VIEWPORT_PADDING_PX}px 0px` },
+    );
+  }
+  return sharedIO;
+}
+
+/** Register a gate element. Returns the unobserve cleanup. */
+function observeGate(el: Element, setHidden: (hidden: boolean) => void): (() => void) | null {
+  const io = ensureSharedIO();
+  if (!io) return null;
+  gates.set(el, { setHidden, hideAt: null });
+  io.observe(el);
+  return () => {
+    gates.delete(el);
+    io.unobserve(el);
+    // A pending sweep that finds nothing due simply doesn't re-arm.
+  };
+}
+
+/** Watch an element's size via the shared ResizeObserver. */
+function observeSize(el: Element, onHeight: (h: number) => void): (() => void) | null {
+  if (typeof ResizeObserver === "undefined") return null;
+  if (!sharedRO) {
+    sharedRO = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const cb = sizeCallbacks.get(entry.target);
+        if (!cb) continue;
+        const h = (entry.target as HTMLElement).offsetHeight;
+        if (h > 0) cb(h);
+      }
+    });
+  }
+  sizeCallbacks.set(el, onHeight);
+  sharedRO.observe(el);
+  return () => {
+    sizeCallbacks.delete(el);
+    sharedRO?.unobserve(el);
+  };
+}
+
 /**
  * Skip layout + paint for a chat row while it's far off-screen — WITHOUT
  * unmounting it — by toggling `content-visibility: hidden` (plus an EXACT
@@ -37,40 +153,11 @@ export function MessageVisibilityGate({ children }: { children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const [hidden, setHidden] = useState(false);
   const [measured, setMeasured] = useState<number | null>(null);
-  const hideTimerRef = useRef<number | null>(null);
 
-  // Visibility tracker. SHOW immediately (clear any pending hide); HIDE after a
-  // short delay so a boundary row doesn't flap during small scroll jitters.
   useEffect(() => {
     const el = ref.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const obs = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            if (hideTimerRef.current != null) {
-              clearTimeout(hideTimerRef.current);
-              hideTimerRef.current = null;
-            }
-            setHidden(false);
-          } else if (hideTimerRef.current == null) {
-            hideTimerRef.current = window.setTimeout(() => {
-              hideTimerRef.current = null;
-              setHidden(true);
-            }, 300);
-          }
-        }
-      },
-      { rootMargin: `${VIEWPORT_PADDING_PX}px 0px ${VIEWPORT_PADDING_PX}px 0px` },
-    );
-    obs.observe(el);
-    return () => {
-      obs.disconnect();
-      if (hideTimerRef.current != null) {
-        clearTimeout(hideTimerRef.current);
-        hideTimerRef.current = null;
-      }
-    };
+    if (!el) return;
+    return observeGate(el, setHidden) ?? undefined;
   }, []);
 
   // Keep the reserved (skipped) height matched to the real rendered height so a
@@ -79,13 +166,8 @@ export function MessageVisibilityGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (hidden) return;
     const el = ref.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => {
-      const h = el.offsetHeight;
-      if (h > 0) setMeasured(h);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
+    if (!el) return;
+    return observeSize(el, setMeasured) ?? undefined;
   }, [hidden]);
 
   const style: CSSProperties | undefined = hidden

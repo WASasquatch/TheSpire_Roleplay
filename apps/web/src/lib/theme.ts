@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { DEFAULT_THEME, isDarkPalette, legibleAgainstBg, legibleThemePalette, THEME_PRESETS, type Theme } from "@thekeep/shared";
+import { DEFAULT_THEME, isDarkPalette, isSpireClassicTheme, legibleAgainstBg, legibleThemePalette, THEME_PRESETS, type Theme } from "@thekeep/shared";
 import { loadCachedActiveTheme, useChat, type SiteBranding } from "../state/store.js";
 import { applyStyle } from "./ornaments/index.js";
 
@@ -182,18 +182,30 @@ export function resolveSplashTheme(_branding: SiteBranding): Theme {
   return preset ? preset.theme : DEFAULT_THEME;
 }
 
-/** Path for the splash background image (optimized WebP), dark / light variant
- *  chosen by the resolved splash palette. Used for the preload hint; the actual
- *  layer is painted via {@link splashBgClass} which also serves AVIF. */
-export function splashBgUrl(theme: Theme): string {
-  return isDarkPalette(theme) ? "/the_spire_bg_dark.webp" : "/the_spire_bg.webp";
+/** Path for the default Spire background art (optimized WebP): dark / light
+ *  variant by the palette's luminance, classic / current art set by whether
+ *  the palette is a Spire Classic preset. Feeds the glass chat shell's
+ *  default backdrop (App + ProfileEditor preview); the splash layer instead
+ *  paints via {@link splashBgClass} which also serves AVIF. The `?v=2` token
+ *  pairs with the year-long immutable cache on these files, bump it in sync
+ *  with styles.css + index.html when the art changes. */
+export function defaultBgUrl(theme: Theme): string {
+  const classic = isSpireClassicTheme(theme);
+  return isDarkPalette(theme)
+    ? (classic ? "/the_spire_bg_classic_dark.webp?v=2" : "/the_spire_bg_dark.webp?v=2")
+    : (classic ? "/the_spire_bg_classic.webp?v=2" : "/the_spire_bg.webp?v=2");
 }
 
 /** CSS class for the fixed splash background layer. Ships a universal WebP
  *  fallback plus an image-set() AVIF upgrade (see `.splash-bg-*` in styles.css),
- *  so the layer is a small AVIF on modern browsers and a WebP everywhere else. */
+ *  so the layer is a small AVIF on modern browsers and a WebP everywhere else.
+ *  Spire Classic palettes get the original painted art; everything else gets
+ *  the current character-lineup art, dark or light by palette luminance. */
 export function splashBgClass(theme: Theme): string {
-  return isDarkPalette(theme) ? "splash-bg-dark" : "splash-bg-light";
+  const classic = isSpireClassicTheme(theme);
+  return isDarkPalette(theme)
+    ? (classic ? "splash-bg-classic-dark" : "splash-bg-dark")
+    : (classic ? "splash-bg-classic-light" : "splash-bg-light");
 }
 
 /**

@@ -317,11 +317,11 @@ export function PublicViewerShell({
     >
       {/* Subtle backdrop image, same as the login splash, so the standalone
           page still feels like part of the site rather than a stripped
-          modal floating on a flat color. Same dark/light swap as the
-          login splash via splashBgUrl (resolved palette decides). */}
+          modal floating on a flat color. Same dark/light + classic swap as
+          the login splash via splashBgClass (resolved palette decides). */}
       <div
         aria-hidden
-        className={`absolute inset-0 bg-cover bg-[position:-175px_center] opacity-40 md:bg-center ${splashBgClass(resolveSplashTheme(branding))}`}
+        className={`absolute inset-0 bg-cover opacity-40 ${splashBgClass(resolveSplashTheme(branding))}`}
       />
       <div aria-hidden className="absolute inset-0 bg-keep-bg/70" />
       <a

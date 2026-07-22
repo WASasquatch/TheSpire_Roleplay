@@ -646,6 +646,38 @@ interface ChatState {
    */
   prependMessages: (roomId: string, msgs: ChatMessage[]) => void;
   /**
+   * Append a NEWER page of messages onto the end of a room's buffer,
+   * id-deduped. Counterpart to prependMessages for the jump-to-message
+   * history view: scrolling back down fetches `?after=` pages that
+   * splice onto the tail.
+   */
+  appendMessages: (roomId: string, msgs: ChatMessage[]) => void;
+  /**
+   * Jump-to-message windows. A key is present while the room's buffer is
+   * a DETACHED history window (jumpToMessage swapped it to ±N rows around
+   * an old message), i.e. the buffer's newest row is NOT the live newest.
+   * While detached:
+   *   - live `message:new` rows are HELD in the key's pending array
+   *     instead of appended (appending the present after old rows would
+   *     render a gapped timeline);
+   *   - `message:bulk` backlogs for the room are ignored (the join that
+   *     accompanies a cross-room jump races the window fetch; a late
+   *     bulk used to clobber the window — the "jump never lands" bug).
+   * The window ends via flushJumpWindow (the reader scrolled down and
+   * reached the present) or endJumpWindow (return-to-live / room switch:
+   * pending is discarded, the next join's bulk re-seeds the buffer).
+   */
+  jumpWindows: Record<string, ChatMessage[]>;
+  beginJumpWindow: (roomId: string) => void;
+  endJumpWindow: (roomId: string) => void;
+  /**
+   * Close a jump window by merging the final `?after=` page (the one
+   * whose hasMore came back false, meaning it reaches the present) plus
+   * every held live row into the buffer, deduped and time-sorted. From
+   * here the room is live again.
+   */
+  flushJumpWindow: (roomId: string, finalPage: ChatMessage[]) => void;
+  /**
    * Per-room "there are still older messages on the server" hint.
    * Seeded true when the room is joined (since the initial backlog
    * is capped at 50 and the user may have much more history), set
@@ -1286,6 +1318,21 @@ export const useChat = create<ChatState>((set, get) => ({
 
   appendMessage: (msg) =>
     set((s) => {
+      // Jump-to-message window (see jumpWindows): while the room shows a
+      // detached history window, live rows are HELD rather than appended —
+      // the buffer's tail is old history, and splicing the present after
+      // it would render a gapped timeline. Cap-dropped rows are safe to
+      // lose from pending: the scroll-down `?after=` pages re-fetch
+      // everything older than the pending tail, so pending only ever
+      // needs to cover the newest stretch.
+      const held = s.jumpWindows[msg.roomId];
+      if (held) {
+        for (let i = held.length - 1; i >= 0 && i >= held.length - 16; i--) {
+          if (held[i]!.id === msg.id) return {};
+        }
+        const nextHeld = held.length >= 400 ? [...held.slice(1), msg] : [...held, msg];
+        return { jumpWindows: { ...s.jumpWindows, [msg.roomId]: nextHeld } };
+      }
       const list = s.messagesByRoom[msg.roomId] ?? [];
       // Idempotent on duplicate id. The server may deliver the same
       // message via two paths (room broadcast + explicit sender emit, or
@@ -1303,6 +1350,18 @@ export const useChat = create<ChatState>((set, get) => ({
 
   updateMessage: (msg) =>
     set((s) => {
+      // A row still HELD by a jump window (a live edit/delete arriving
+      // while the room shows a detached history view) updates in place
+      // there, so the eventual flush doesn't resurrect the stale version.
+      const held = s.jumpWindows[msg.roomId];
+      if (held) {
+        const hIdx = held.findIndex((m) => m.id === msg.id);
+        if (hIdx >= 0) {
+          const nextHeld = held.slice();
+          nextHeld[hIdx] = msg;
+          return { jumpWindows: { ...s.jumpWindows, [msg.roomId]: nextHeld } };
+        }
+      }
       // Fast path: the update's roomId matches the bucket we cached it
       // in. True for every non-whisper message and for whispers between
       // people in the same room.
@@ -1428,6 +1487,55 @@ export const useChat = create<ChatState>((set, get) => ({
       if (extras.length === 0) return {};
       return {
         messagesByRoom: { ...s.messagesByRoom, [roomId]: [...extras, ...current] },
+      };
+    }),
+
+  appendMessages: (roomId, newer) =>
+    set((s) => {
+      if (newer.length === 0) return {};
+      const current = s.messagesByRoom[roomId] ?? [];
+      // Dedupe by id — a live row may have landed in the buffer before
+      // the jump window began, and pages can overlap a prior fetch.
+      const seen = new Set(current.map((m) => m.id));
+      const extras = newer.filter((m) => !seen.has(m.id));
+      if (extras.length === 0) return {};
+      return {
+        messagesByRoom: { ...s.messagesByRoom, [roomId]: [...current, ...extras] },
+      };
+    }),
+
+  jumpWindows: {},
+  beginJumpWindow: (roomId) =>
+    set((s) => ({ jumpWindows: { ...s.jumpWindows, [roomId]: [] } })),
+  endJumpWindow: (roomId) =>
+    set((s) => {
+      if (!s.jumpWindows[roomId]) return {};
+      const next = { ...s.jumpWindows };
+      delete next[roomId];
+      return { jumpWindows: next };
+    }),
+  flushJumpWindow: (roomId, finalPage) =>
+    set((s) => {
+      const held = s.jumpWindows[roomId];
+      const current = s.messagesByRoom[roomId] ?? [];
+      // Merge buffer + final page + held live rows; dedupe by id (a held
+      // row usually ALSO appears in the final page — it was persisted
+      // before the page was queried) and re-sort by time so the seam
+      // between paged history and held live rows is clean. Stable sort
+      // keeps same-ms rows in arrival order.
+      const seen = new Set<string>();
+      const merged: ChatMessage[] = [];
+      for (const m of [...current, ...finalPage, ...(held ?? [])]) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        merged.push(m);
+      }
+      merged.sort((a, b) => a.createdAt - b.createdAt);
+      const nextWindows = { ...s.jumpWindows };
+      delete nextWindows[roomId];
+      return {
+        messagesByRoom: { ...s.messagesByRoom, [roomId]: merged },
+        jumpWindows: nextWindows,
       };
     }),
 

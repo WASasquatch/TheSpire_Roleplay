@@ -426,6 +426,9 @@
     "loadingEarlier": "Loading earlier messages…",
     "retryEarlier": "Retry loading earlier messages",
     "tapForEarlier": "Tap or scroll up for earlier messages",
+    "loadingNewer": "Loading newer messages…",
+    "retryNewer": "Retry loading newer messages",
+    "tapForNewer": "Tap or scroll down for newer messages",
     "startOfHistory": "start of history",
     "nsfwChannelRow": "Sent in the 18+ channel"
   },

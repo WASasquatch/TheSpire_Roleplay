@@ -92,22 +92,31 @@ function SceneBanner({
         🎭 {renderedBody}
       </div>
       {hasImage && !collapsed ? (
-        <img
-          src={imageUrl}
-          alt=""
-          // `block mx-auto` centers the image even when shorter than
-          // the banner. `max-h-80` caps a tall poster at ~320px so a
-          // portrait scene image doesn't dominate the timeline.
-          // `object-contain` preserves aspect; rounded corners +
-          // soft shadow match the banner's chat-card feel. On image
-          // load failure we hide the element so the banner falls
-          // back to title-only instead of showing a broken-image
-          // glyph in the middle of the chat.
-          className="mx-auto mt-2 block max-h-80 max-w-full rounded-lg object-contain shadow"
-          loading="lazy"
-          draggable={false}
-          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-        />
+        // Fixed-height frame (h-80 = the old max-h-80 cap) so the banner's
+        // box size never depends on the image having loaded. The lazy image
+        // decodes whenever it scrolls near, and on WebKit there's no
+        // overflow-anchor to absorb a late height change above the viewport
+        // — an unreserved image made history scroll-up visibly jump. A
+        // shorter-than-cap image letterboxes inside the frame instead of
+        // shrinking it; the collapse toggle still reclaims the space.
+        <span className="mt-2 flex h-80 items-center justify-center">
+          <img
+            src={imageUrl}
+            alt=""
+            // `object-contain` preserves aspect inside the frame; rounded
+            // corners + soft shadow hug the bitmap (the img box shrinks to
+            // the rendered image, not the frame). On image load failure we
+            // hide the whole frame so the banner falls back to title-only
+            // instead of a broken-image glyph in the middle of the chat.
+            className="block max-h-full max-w-full rounded-lg object-contain shadow"
+            loading="lazy"
+            draggable={false}
+            onError={(e) => {
+              const frame = (e.target as HTMLImageElement).parentElement;
+              if (frame) frame.style.display = "none";
+            }}
+          />
+        </span>
       ) : null}
     </div>
   );

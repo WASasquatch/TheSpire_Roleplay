@@ -430,6 +430,9 @@
     "loadingEarlier": "Cargando mensajes anteriores…",
     "retryEarlier": "Reintentar cargar mensajes anteriores",
     "tapForEarlier": "Toca o desplázate hacia arriba para ver mensajes anteriores",
+    "loadingNewer": "Cargando mensajes más recientes…",
+    "retryNewer": "Reintentar cargar mensajes más recientes",
+    "tapForNewer": "Toca o desplázate hacia abajo para ver mensajes más recientes",
     "startOfHistory": "inicio del historial",
     "nsfwChannelRow": "Enviado en el canal 18+"
   },

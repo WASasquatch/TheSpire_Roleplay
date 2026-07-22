@@ -51,6 +51,12 @@ export const getReduceCosmeticsToggle = store.getToggle;
 /** Flip the cosmetics-only toggle (persists per-device, refreshes the gate). */
 export const setReduceCosmeticsToggle = store.setToggle;
 
+/** Plain-module subscription to calm-cosmetics flips (any of the three
+ *  signals), mirroring {@link onReduceMotionChange}. Returns an
+ *  unsubscribe. Used by the cosmetic animation-phase sync to re-anchor
+ *  animations recreated when the freeze lifts. */
+export const onCalmCosmeticsChange = store.subscribe;
+
 // Re-derive whenever either upstream gate flips. These subscriptions live for
 // the lifetime of the tab (the gate is global), so we never unsubscribe.
 onReduceMotionChange(store.refresh);

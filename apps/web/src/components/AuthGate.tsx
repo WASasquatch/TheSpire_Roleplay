@@ -37,11 +37,11 @@ interface SiteStats {
  * Splash shell - shared layout for the unauthenticated experience.
  *
  * Visual structure:
- *   - Full-viewport background image (the_spire_bg.jpg) with the spire on
- *     the left and a parchment-fade on the right.
- *   - A centered card pinned to the *right* third of the page so the spire
- *     remains visible. On narrow viewports we drop to a centered layout
- *     because there's no room for the side-aligned variant.
+ *   - Full-viewport Spire background art (splashBgClass picks light/dark
+ *     and the classic set for Spire Classic palettes).
+ *   - A centered card pinned to the *right* third of the page so the
+ *     artwork's subjects remain visible. On narrow viewports we drop to a
+ *     centered layout because there's no room for the side-aligned variant.
  *   - The card itself shows: site name → admin-configured welcome HTML →
  *     live "users online" stat → the children passed in (login form, or
  *     "checking session..." indicator from BootSplash).
@@ -136,11 +136,12 @@ export function SplashShell({
           (styles.css `html, body {…}`) paints right over it and the wallpaper
           stays blank. z-index:0 paints it ABOVE the body background; the splash
           foreground below is lifted to `z-10` so the card still sits on top.
-          The negative-x offset (-175px) centers the spire on portrait mobile;
-          md+ uses the natural cover-center. */}
+          Positioning comes with the `.splash-bg-*` class: the classic art
+          shifts toward its left-edge spire on portrait mobile, the current
+          art stays centered. */}
       {createPortal(
         <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: 0 }}>
-          <div className={`absolute inset-0 bg-cover bg-[position:-175px_center] md:bg-center ${splashBgClass(splashTheme)}`} />
+          <div className={`absolute inset-0 bg-cover ${splashBgClass(splashTheme)}`} />
           {/* Right-side veil so the card sits on a calm background; lighter on
               mobile where the glass card wants the artwork showing through. */}
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70" />

@@ -14,6 +14,7 @@
  */
 
 import type { FreeformBorderRow } from "./earning.js";
+import { requestCosmeticSweep } from "./cosmeticAnimationSync.js";
 import { createNonceStyleTag } from "./injectStyle.js";
 
 const CATALOG_TAG_ATTR = "data-freeform-borders";
@@ -99,4 +100,9 @@ function writeStyleTag(tagAttr: string, borders: readonly FreeformBorderRow[]): 
   }
   if (tag.textContent === concatenated) return;
   tag.textContent = concatenated;
+  // Mirror nameStyleInjector: on a cold load this CSS (and its
+  // @keyframes) can land after border wrappers already mounted and ran
+  // their mount-time phase sync against nothing. Re-anchor every
+  // cosmetic root now that the animations exist.
+  requestCosmeticSweep();
 }

@@ -1681,7 +1681,7 @@ html[data-theme-style="glass"] .keep-bg-overlay {
   background-color: rgb(var(--keep-bg));
   background-image:
     var(--orn-bg-overlay, none),
-    var(--keep-shell-bg-url, url("/the_spire_bg.jpg?v=1"));
+    var(--keep-shell-bg-url, url("/the_spire_bg.webp?v=2"));
   background-size:
     cover,
     var(--keep-shell-bg-size, cover);
@@ -3935,18 +3935,50 @@ html.reduce-motion .splash-flash { animation: none; box-shadow: 0 0 0 3px rgb(va
  * still gets the WebP, so no visitor loses the background. */
 /* A solid base color (sampled from each art's dominant tone) sits UNDER the
  * image so the layer never flashes white before the image decodes/loads. The
- * `?v=1` query is a cache-bust token paired with the year-long immutable cache
- * on these files: when the commissioned art lands, bump it to `?v=2` here (all
- * four lines) and in index.html's preload to invalidate every cached copy. */
+ * `?v=N` query is a cache-bust token paired with the year-long immutable cache
+ * on these files: whenever any of the art files is re-rendered, bump N on
+ * every line here AND in index.html's preload + lib/theme.ts's defaultBgUrl
+ * to invalidate every cached copy at once.
+ *
+ * Two art sets: the default `the_spire_bg*` files carry the commissioned
+ * character-lineup art (day / night); the `the_spire_bg_classic*` files
+ * preserve the original painted spire + parchment-map art, served when the
+ * viewer's palette is one of the Spire Classic presets (splashBgClass /
+ * defaultBgUrl in lib/theme.ts decide). Positioning lives here rather than
+ * as per-element utilities because the right crop depends on the art: the
+ * current art centers its subjects, while the classic spire hugs the left
+ * edge, so a centered phone crop would show mostly empty parchment. */
+.splash-bg-light,
+.splash-bg-dark,
+.splash-bg-classic-light,
+.splash-bg-classic-dark {
+  background-position: center;
+}
+@media (max-width: 767px) {
+  .splash-bg-classic-light,
+  .splash-bg-classic-dark {
+    background-position: -175px center;
+  }
+}
 .splash-bg-light {
-  background-color: #908370;
-  background-image: url("/the_spire_bg.webp?v=1");
-  background-image: image-set(url("/the_spire_bg.avif?v=1") type("image/avif"), url("/the_spire_bg.webp?v=1") type("image/webp"));
+  background-color: #989c9b;
+  background-image: url("/the_spire_bg.webp?v=2");
+  background-image: image-set(url("/the_spire_bg.avif?v=2") type("image/avif"), url("/the_spire_bg.webp?v=2") type("image/webp"));
 }
 .splash-bg-dark {
+  background-color: #1b2333;
+  background-image: url("/the_spire_bg_dark.webp?v=2");
+  background-image: image-set(url("/the_spire_bg_dark.avif?v=2") type("image/avif"), url("/the_spire_bg_dark.webp?v=2") type("image/webp"));
+}
+.splash-bg-classic-light {
+  background-color: #908370;
+  background-image: url("/the_spire_bg_classic.webp?v=2");
+  background-image: image-set(url("/the_spire_bg_classic.avif?v=2") type("image/avif"), url("/the_spire_bg_classic.webp?v=2") type("image/webp"));
+}
+.splash-bg-classic-dark {
   background-color: #111213;
-  background-image: url("/the_spire_bg_dark.webp?v=1");
-  background-image: image-set(url("/the_spire_bg_dark.avif?v=1") type("image/avif"), url("/the_spire_bg_dark.webp?v=1") type("image/webp"));
+  background-image: url("/the_spire_bg_classic_dark.webp?v=2");
+  background-image: image-set(url("/the_spire_bg_classic_dark.avif?v=2") type("image/avif"), url("/the_spire_bg_classic_dark.webp?v=2") type("image/webp"));
 }
 
 /* Fixed full-window container for the splash hero art (the SplashLanding portal

@@ -38,6 +38,7 @@ import { useChat } from "../../state/store.js";
 import type { NameStyleCatalogRow } from "../../lib/earning.js";
 import { applyNameStylePlaceholders } from "../../lib/nameStyleTemplate.js";
 import { createNonceStyleTag } from "../../lib/injectStyle.js";
+import { requestCosmeticAnimationSync } from "../../lib/cosmeticAnimationSync.js";
 import { useActiveTheme } from "../../lib/theme.js";
 
 interface Props {
@@ -165,6 +166,20 @@ export function StyledName({ displayName, styleKey, config, baseColor, overrideR
     el.setAttribute("style", cssText);
   }, [styleRow, cssVars]);
 
+  // Ref to the custom-template fallback wrapper (the DOMPurify path).
+  // Kept SEPARATE from styledRef: attaching styledRef there would make
+  // the inline-bake effect above stamp a style attribute the fallback
+  // path never carried.
+  const fallbackRef = useRef<HTMLSpanElement | null>(null);
+
+  // Pin this instance's looping animations to the shared document-
+  // timeline origin so every rendered copy of the same style animates
+  // in phase (see lib/cosmeticAnimationSync). The module rAF-batches
+  // and dedupes, so re-requesting on any style change is cheap.
+  useEffect(() => {
+    requestCosmeticAnimationSync(styledRef.current ?? fallbackRef.current);
+  }, [styleRow, cssVars]);
+
   if (!styleRow) {
     // 0.2em right padding so the surrounding "]" / ":" punctuation in
     // chat lines isn't flush against the last glyph. Matches the
@@ -204,6 +219,7 @@ export function StyledName({ displayName, styleKey, config, baseColor, overrideR
   }
   return (
     <span
+      ref={fallbackRef}
       className={`keep-styled-name ${instanceClass}`}
       dangerouslySetInnerHTML={{ __html: clean }}
     />

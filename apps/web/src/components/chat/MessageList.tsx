@@ -827,6 +827,20 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
   // center, and paint a brief accent tint. The transition-colors classes
   // on the row itself (see Line) handle the fade-out; we only toggle the
   // background class. Cleared via onHighlightDone after the flash window.
+  //
+  // Runs ONCE per highlight id — deliberately NOT keyed on `messages`.
+  // The old messages-keyed version re-ran on every buffer change, and a
+  // jump's own side effects churn the buffer (history pages landing, live
+  // rows arriving): each re-run re-issued the smooth scrollIntoView and
+  // each page's scroll adjustment cancelled it mid-flight, so the jump
+  // ended wherever the last cancellation left it instead of on the
+  // target. The churn is also suppressed at the source while a highlight
+  // is pending (the history loaders stand down — see `highlightActive`
+  // in FlatMessageView), so the one smooth scroll runs to completion.
+  // `onHighlightDone` rides a ref for the same reason: an unstable
+  // callback identity from the parent must not re-trigger the scroll.
+  const onHighlightDoneRef = useRef(onHighlightDone);
+  onHighlightDoneRef.current = onHighlightDone;
   useEffect(() => {
     if (!highlightMessageId) return;
     // A jump anchors the view on a specific message, so the viewer is NOT
@@ -839,41 +853,39 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     stickRef.current = false;
     const container = ref.current;
     if (!container) return;
-    const node = container.querySelector<HTMLElement>(
-      `[data-message-id="${CSS.escape(highlightMessageId)}"]`,
-    );
-    if (!node) {
-      // Target not rendered YET. The forum view may be expanding a
-      // capped reply window for this exact highlight (TopicCard's
-      // auto-expand keys on highlightMessageId in the same commit), so
-      // give the DOM one frame before giving up — without the retry,
-      // quote-reference jumps into "view earlier replies" territory
-      // cleared the flag before the row existed.
-      const raf = requestAnimationFrame(() => {
-        const late = container.querySelector<HTMLElement>(
-          `[data-message-id="${CSS.escape(highlightMessageId)}"]`,
-        );
-        if (!late) { onHighlightDone?.(); return; }
-        late.scrollIntoView({ behavior: "smooth", block: "center" });
-        late.classList.add("bg-keep-action/30");
-        window.setTimeout(() => {
-          late.classList.remove("bg-keep-action/30");
-          onHighlightDone?.();
-        }, 1800);
-      });
-      return () => cancelAnimationFrame(raf);
-    }
-    node.scrollIntoView({ behavior: "smooth", block: "center" });
-    node.classList.add("bg-keep-action/30");
-    const t = window.setTimeout(() => {
-      node.classList.remove("bg-keep-action/30");
-      onHighlightDone?.();
-    }, 1800);
-    return () => {
-      window.clearTimeout(t);
-      node.classList.remove("bg-keep-action/30");
+    let raf = 0;
+    let timer: number | null = null;
+    let attempts = 0;
+    let flashed: HTMLElement | null = null;
+    const arm = (node: HTMLElement) => {
+      flashed = node;
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+      node.classList.add("bg-keep-action/30");
+      timer = window.setTimeout(() => {
+        node.classList.remove("bg-keep-action/30");
+        onHighlightDoneRef.current?.();
+      }, 1800);
     };
-  }, [highlightMessageId, onHighlightDone, messages]);
+    // The target may not be in the DOM on the first frame — the forum
+    // view expands a capped reply window keyed on this same highlight,
+    // and a flat-room window swap can commit a beat behind the flag —
+    // so poll a handful of frames before giving up.
+    const seek = () => {
+      const node = container.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(highlightMessageId)}"]`,
+      );
+      if (node) { arm(node); return; }
+      attempts += 1;
+      if (attempts > 12) { onHighlightDoneRef.current?.(); return; }
+      raf = requestAnimationFrame(seek);
+    };
+    seek();
+    return () => {
+      cancelAnimationFrame(raf);
+      if (timer != null) window.clearTimeout(timer);
+      if (flashed) flashed.classList.remove("bg-keep-action/30");
+    };
+  }, [highlightMessageId]);
 
   // Whisper attention flash. Pulses any inbound whisper (`toUserId ===
   // selfUserId`) the first time it appears in the buffer for this
@@ -1067,6 +1079,7 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       roomId={roomId ?? null}
       fontStep={fontStep}
       lineFor={lineFor}
+      highlightActive={!!highlightMessageId}
     />
   );
 }
@@ -1093,6 +1106,7 @@ function FlatMessageView({
   roomId,
   fontStep,
   lineFor,
+  highlightActive,
 }: {
   scrollRef: React.MutableRefObject<HTMLDivElement | null>;
   /** Content-box ref the parent observes to re-pin to bottom on late
@@ -1102,17 +1116,32 @@ function FlatMessageView({
   roomId: string | null;
   fontStep: 0 | 1 | 2 | 3;
   lineFor: (m: ChatMessage) => ReactNode;
+  /** A jump-to-message highlight is pending: BOTH history loaders stand
+   *  down until it lands. Their prepend/append scroll adjustments cancel
+   *  an in-flight smooth scrollIntoView, which used to strand the jump
+   *  "somewhere random" whenever the target sat within prefetch range of
+   *  a buffer edge. */
+  highlightActive: boolean;
 }) {
   const { t } = useTranslation("chat");
   const hasMore = useChat((s) => (roomId ? (s.roomHistoryHasMore[roomId] ?? false) : false));
   const prependMessages = useChat((s) => s.prependMessages);
   const setRoomHistoryHasMore = useChat((s) => s.setRoomHistoryHasMore);
+  const appendMessages = useChat((s) => s.appendMessages);
+  const flushJumpWindow = useChat((s) => s.flushJumpWindow);
+  // Newer-side pagination exists only while this room shows a detached
+  // jump-to-message window (store.jumpWindows) — a live room's new rows
+  // are pushed over the socket, never paged.
+  const hasNewer = useChat((s) => (roomId ? !!s.jumpWindows[roomId] : false));
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [olderError, setOlderError] = useState<string | null>(null);
+  const [loadingNewer, setLoadingNewer] = useState(false);
+  const [newerError, setNewerError] = useState<string | null>(null);
   // Latch in a ref so the onScroll handler can early-out without
   // re-rendering. setState alone would race: scroll events fire faster
   // than React can commit a flag.
   const inflightRef = useRef(false);
+  const inflightNewerRef = useRef(false);
 
   const loadOlder = useCallback(async () => {
     if (!roomId) return;
@@ -1128,7 +1157,14 @@ function FlatMessageView({
     setLoadingOlder(true);
     setOlderError(null);
     try {
-      const r = await fetch(`/rooms/${roomId}/messages?before=${oldest.createdAt}&limit=100`, {
+      // 40-row pages (was 100): every prepended row mounts fully rendered in
+      // one commit, and the anchoring layout effect forces that layout
+      // synchronously before paint — a 100-row page was a single 100-row
+      // layout spike mid-scroll, the mobile "scroll catches" hitch. Smaller
+      // pages spread the same history across more, individually cheap
+      // commits; the FLAT_PREFETCH_AHEAD_PX prefetch hides the extra
+      // round-trips.
+      const r = await fetch(`/rooms/${roomId}/messages?before=${oldest.createdAt}&limit=40`, {
         credentials: "include",
       });
       if (!r.ok) throw new Error(await readError(r));
@@ -1152,11 +1188,69 @@ function FlatMessageView({
     }
   }, [roomId, hasMore, messages, prependMessages, setRoomHistoryHasMore, t]);
 
+  // Newer-side loader: pages FORWARD from the rendered feed's newest row
+  // while the room shows a detached jump-to-message window. The page whose
+  // hasMore comes back false reaches the present, so it FLUSHES the jump
+  // window (merging the held live rows) and the room is live again.
+  const loadNewer = useCallback(async () => {
+    if (!roomId) return;
+    if (inflightNewerRef.current) return;
+    if (!hasNewer) return;
+    // Cursor from the RENDERED feed (same rationale as loadOlder's oldest):
+    // under staff pair oversight the newest visible row may live in the
+    // sibling bucket.
+    const newest = messages[messages.length - 1];
+    if (!newest) return;
+    inflightNewerRef.current = true;
+    setLoadingNewer(true);
+    setNewerError(null);
+    try {
+      const r = await fetch(`/rooms/${roomId}/messages?after=${newest.createdAt}&limit=40`, {
+        credentials: "include",
+      });
+      if (!r.ok) throw new Error(await readError(r));
+      const j = (await r.json()) as { messages: ChatMessage[]; hasMore: boolean };
+      // Bucket by each row's OWN roomId: a staff pair-oversight page mixes
+      // both channels' rows. Sibling rows append normally (the sibling has
+      // no jump window); THIS room's rows append while pages remain, or
+      // flush the window when this page reaches the present.
+      const own: ChatMessage[] = [];
+      const sibling = new Map<string, ChatMessage[]>();
+      for (const m of j.messages) {
+        if (m.roomId === roomId) { own.push(m); continue; }
+        const list = sibling.get(m.roomId);
+        if (list) list.push(m);
+        else sibling.set(m.roomId, [m]);
+      }
+      for (const [rid, rows] of sibling) appendMessages(rid, rows);
+      if (j.hasMore) appendMessages(roomId, own);
+      else flushJumpWindow(roomId, own);
+    } catch (e) {
+      setNewerError(e instanceof Error ? e.message : t("feed.loadFailed"));
+    } finally {
+      inflightNewerRef.current = false;
+      setLoadingNewer(false);
+    }
+  }, [roomId, hasNewer, messages, appendMessages, flushJumpWindow, t]);
+
   function onScroll(e: React.UIEvent<HTMLDivElement>) {
+    // A jump-to-message scroll is in flight: both loaders stand down so
+    // their scroll adjustments can't cancel the smooth scrollIntoView
+    // mid-flight (the "jump stops somewhere random" bug). They resume
+    // when the flash clears (~1.8s).
+    if (highlightActive) return;
+    const el = e.currentTarget;
+    // Newer side (jump windows only): prefetch ~1 screen before the bottom
+    // edge so scrolling back toward the present streams as seamlessly as
+    // scrolling into the past.
+    if (hasNewer && !inflightNewerRef.current) {
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distFromBottom <= FLAT_PREFETCH_AHEAD_PX) void loadNewer();
+    }
     if (!hasMore || inflightRef.current) return;
     // Prefetch ~1 screen BEFORE the top so the next batch is already resident
     // as the reader scrolls into it — no stall-at-top-then-jump.
-    if (e.currentTarget.scrollTop <= FLAT_PREFETCH_AHEAD_PX) {
+    if (el.scrollTop <= FLAT_PREFETCH_AHEAD_PX) {
       void loadOlder();
     }
   }
@@ -1186,6 +1280,25 @@ function FlatMessageView({
     });
     return () => cancelAnimationFrame(id);
   }, [hasMore, loadingOlder, messages.length, loadOlder, scrollRef]);
+
+  // Auto-advance the newer side when the jump window's bottom edge is
+  // already within prefetch range without any scrolling — a short window
+  // (target near the present) may never fire the scroll trigger, leaving
+  // the room looking frozen (live rows held, nothing streaming). This is
+  // also the self-healing path when the window already reaches the
+  // present: one cheap fetch returns hasMore:false and flushes straight
+  // back to the live flow. Deferred while the jump's own smooth scroll is
+  // in flight (highlightActive), then re-checked when the flash clears.
+  useEffect(() => {
+    if (!hasNewer || loadingNewer || highlightActive) return;
+    const id = requestAnimationFrame(() => {
+      const el = scrollRef.current;
+      if (!el) return;
+      const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      if (distFromBottom <= FLAT_PREFETCH_AHEAD_PX) void loadNewer();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [hasNewer, loadingNewer, highlightActive, messages.length, loadNewer, scrollRef]);
 
   return (
     <div
@@ -1254,6 +1367,34 @@ function FlatMessageView({
         // measured height while skipped so scroll position never jumps.
         <MessageVisibilityGate key={m.id}>{lineFor(m)}</MessageVisibilityGate>
       ))}
+      {/* Newer-side loader strip: shown only while this room is a
+          detached jump-to-message window (mirror of the earlier-history
+          strip at the top). Scrolling near it streams pages toward the
+          present; the button is the no-scroll fallback. */}
+      {hasNewer || loadingNewer ? (
+        <div className="mt-1 flex items-center justify-center gap-2 text-[10px] uppercase tracking-widest text-keep-muted">
+          {loadingNewer ? (
+            <span>{t("feed.loadingNewer")}</span>
+          ) : newerError ? (
+            <button
+              type="button"
+              onClick={() => { void loadNewer(); }}
+              className="rounded border border-keep-accent/40 px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
+              title={newerError}
+            >
+              {t("feed.retryNewer")}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { void loadNewer(); }}
+              className="rounded px-2 py-0.5 hover:text-keep-text"
+            >
+              {t("feed.tapForNewer")}
+            </button>
+          )}
+        </div>
+      ) : null}
       </div>
     </div>
   );

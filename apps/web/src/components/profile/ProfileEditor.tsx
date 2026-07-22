@@ -7,7 +7,7 @@ import { LangFlag } from "../flags/LangFlag.js";
 import { applyStyle , DEFAULT_STYLE_KEY } from "../../lib/ornaments/index.js";
 import { DesignerTour } from "../tours/DesignerTour.js";
 import { ProfileFlairEditor, VisitorsVisibilityToggleRow } from "../cosmetics/ProfileFlairEditor.js";
-import { applyTheme } from "../../lib/theme.js";
+import { applyTheme, defaultBgUrl } from "../../lib/theme.js";
 import { GENDER_OPTIONS, type Gender } from "../../lib/gender.js";
 import {
   isSupported as notifyIsSupported,
@@ -1231,7 +1231,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
     const root = document.documentElement;
     if (userStyleKey === "glass") {
       const trimmed = publicProfileBgUrl.trim();
-      const url = trimmed || (isDarkPalette(previewTheme) ? "/the_spire_bg_dark.jpg" : "/the_spire_bg.jpg");
+      const url = trimmed || defaultBgUrl(previewTheme);
       const size = trimmed
         ? (publicProfileBgMode === "stretch" ? "100% 100%" : publicProfileBgMode)
         : "cover";

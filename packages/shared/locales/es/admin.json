@@ -1210,6 +1210,8 @@
     "topReferrers": "Principales referentes",
     "sourceMedium": "Fuente / medio",
     "noReferrers": "Aún no hay referentes registrados.",
+    "refExpand": "Mostrar las URLs exactas de referencia bajo {{host}}",
+    "refNoUrls": "No se registraron URLs específicas recientemente (solo ventana reciente).",
     "noneSource": "(ninguno)",
     "geoBreakdown": "Desglose geográfico",
     "geoHint": "País aproximado por IP (GeoLite2 incluida). Las visitas antiguas registradas antes de activar esto no muestran país. La Fly-Region del borde se guarda como etiqueta de respaldo débil en cada visita.",

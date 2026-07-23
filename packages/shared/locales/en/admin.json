@@ -1205,6 +1205,8 @@
     "topReferrers": "Top referrers",
     "sourceMedium": "Source / medium",
     "noReferrers": "No referrers recorded yet.",
+    "refExpand": "Show the exact referring URLs under {{host}}",
+    "refNoUrls": "No specific URLs recorded recently (recent window only).",
     "noneSource": "(none)",
     "geoBreakdown": "Geo breakdown",
     "geoHint": "Coarse country from IP (bundled GeoLite2). Older hits recorded before this was enabled show no country. Edge Fly-Region is stored as a weak fallback tag on each hit.",

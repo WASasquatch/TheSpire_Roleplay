@@ -1,6 +1,6 @@
 {
   "name": "@thekeep/server",
-  "version": "0.33.21",
+  "version": "0.33.22",
   "private": true,
   "type": "module",
   "scripts": {

@@ -27,8 +27,9 @@
  * table-view twins); ranked breakdowns keep the CountTable proportional bars.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { formatDate, formatNumber } from "../../lib/intlFormat.js";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
 import { recordNav } from "../../lib/nav-metrics.js";
@@ -185,6 +186,126 @@ function CountTable({
             <td className="py-1 text-right font-mono text-keep-text">{fmtNum(r.count)}</td>
           </tr>
         ))}
+      </tbody>
+    </table>
+  );
+}
+
+/**
+ * Referrers table with per-DOMAIN URL drill-down. Same ranked inline-bar
+ * look as CountTable, but each `medium === "referral"` row (an external
+ * site — the kind that can be a phishing lure) gets an expand toggle that
+ * fetches the exact referring URLs under that domain
+ * (GET /admin/analytics/referrer-urls). Search / social / direct rows have
+ * no host to drill and render flat. The drill-down reads the RAW table, so
+ * it only covers the recent retention window — exactly the horizon that
+ * matters for spotting live suspicious traffic.
+ */
+function ReferrerTable({
+  rows,
+  range,
+  includeBots,
+}: {
+  rows: Array<{ medium: string; source: string | null; count: number }>;
+  range: number;
+  includeBots: boolean;
+}) {
+  const { t } = useTranslation("admin");
+  const [openHost, setOpenHost] = useState<string | null>(null);
+  const [urlsByHost, setUrlsByHost] = useState<Record<string, { loading: boolean; urls: Array<{ url: string; count: number }> | null }>>({});
+  const max = Math.max(1, ...rows.map((r) => r.count));
+
+  if (rows.length === 0) return <p className="text-keep-muted">{t("analytics.noReferrers")}</p>;
+
+  async function toggle(host: string) {
+    if (openHost === host) { setOpenHost(null); return; }
+    setOpenHost(host);
+    if (urlsByHost[host]) return; // cached
+    setUrlsByHost((m) => ({ ...m, [host]: { loading: true, urls: null } }));
+    try {
+      const qs = `host=${encodeURIComponent(host)}&range=${range}${includeBots ? "&includeBots=1" : ""}`;
+      const r = await fetch(`/admin/analytics/referrer-urls?${qs}`, { credentials: "include" });
+      const j = r.ok ? ((await r.json()) as { urls: Array<{ url: string; count: number }> }) : { urls: [] };
+      setUrlsByHost((m) => ({ ...m, [host]: { loading: false, urls: j.urls ?? [] } }));
+    } catch {
+      setUrlsByHost((m) => ({ ...m, [host]: { loading: false, urls: [] } }));
+    }
+  }
+
+  return (
+    <table className="w-full text-left">
+      <thead>
+        <tr className="text-[10px] uppercase tracking-wider text-keep-muted">
+          <th className="pb-1 font-normal">{t("analytics.sourceMedium")}</th>
+          <th className="pb-1 text-right font-normal">{t("analytics.countHead")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => {
+          // Only external referrals have a real host to drill; for those the
+          // classifier stores the bare domain as `source`.
+          const host = r.medium === "referral" && r.source ? r.source : null;
+          const expanded = host != null && openHost === host;
+          const detail = host ? urlsByHost[host] : undefined;
+          return (
+            <Fragment key={i}>
+              <tr className="border-t border-keep-rule/50">
+                <td className="py-1 pr-2">
+                  <div className="relative">
+                    <div
+                      className="absolute inset-y-0 left-0 bg-keep-accent/15"
+                      style={{ width: `${(r.count / max) * 100}%` }}
+                      aria-hidden
+                    />
+                    <span className="relative flex items-center gap-1 truncate text-keep-text">
+                      {host ? (
+                        <button
+                          type="button"
+                          onClick={() => void toggle(host)}
+                          aria-expanded={expanded}
+                          title={t("analytics.refExpand", { host })}
+                          className="flex items-center gap-1 hover:text-keep-action"
+                        >
+                          {expanded
+                            ? <ChevronDown className="h-3 w-3 shrink-0" aria-hidden />
+                            : <ChevronRight className="h-3 w-3 shrink-0" aria-hidden />}
+                          <span className="truncate">{r.source}</span>
+                          <span className="text-keep-muted"> · {r.medium}</span>
+                        </button>
+                      ) : (
+                        <span className="truncate">
+                          {r.source ? r.source : <span className="text-keep-muted">{t("analytics.noneSource")}</span>}
+                          <span className="text-keep-muted"> · {r.medium}</span>
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </td>
+                <td className="py-1 text-right font-mono text-keep-text">{fmtNum(r.count)}</td>
+              </tr>
+              {expanded ? (
+                <tr>
+                  <td colSpan={2} className="pb-2 pl-4">
+                    {detail?.loading ? (
+                      <p className="py-1 text-[11px] text-keep-muted">{t("common:loading")}</p>
+                    ) : detail?.urls && detail.urls.length > 0 ? (
+                      <ul className="space-y-0.5 border-l border-keep-rule/50 pl-2">
+                        {detail.urls.map((u) => (
+                          <li key={u.url} className="flex items-baseline justify-between gap-2 text-[11px]">
+                            <span className="min-w-0 break-all font-mono text-keep-muted">{u.url}</span>
+                            <span className="shrink-0 font-mono text-keep-text">{fmtNum(u.count)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="py-1 text-[11px] text-keep-muted">{t("analytics.refNoUrls")}</p>
+                    )}
+                  </td>
+                </tr>
+              ) : null}
+            </Fragment>
+          );
+        })}
       </tbody>
     </table>
   );
@@ -732,16 +853,10 @@ export function AnalyticsTab({ findRequest, onFindHandled }: AnalyticsTabProps =
 
         <div className="grid gap-3 md:grid-cols-2">
           <Section anchor="analytics.topReferrers" title={t("analytics.topReferrers")}>
-            <CountTable
+            <ReferrerTable
               rows={pub?.referrers ?? []}
-              labelHead={t("analytics.sourceMedium")}
-              empty={t("analytics.noReferrers")}
-              renderLabel={(r) => (
-                <>
-                  {r.source ? <span>{r.source}</span> : <span className="text-keep-muted">{t("analytics.noneSource")}</span>}
-                  <span className="text-keep-muted"> · {r.medium}</span>
-                </>
-              )}
+              range={range}
+              includeBots={includeBots}
             />
           </Section>
 

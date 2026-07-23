@@ -26,7 +26,7 @@ import { analyticsEvent, analyticsPageView } from "../db/schema.js";
 import type { Db } from "../db/index.js";
 import { getSettings } from "../settings.js";
 import { isBotUA } from "./botFilter.js";
-import { classifyReferrer, hostnameOnly } from "./classify.js";
+import { classifyReferrer, hostAndPathOnly, hostnameOnly } from "./classify.js";
 import { readFlyRegion, resolveGeo } from "./geo.js";
 
 /** One effective page-view write per (visitorHash, path) per minute. */
@@ -107,6 +107,8 @@ export function cap(v: string | null | undefined, max: number): string | null {
 export interface PageViewRow {
   path: string;
   refHost?: string | null;
+  /** Referrer host + path (query/fragment stripped), migration 0370. */
+  refPath?: string | null;
   refSource?: string | null;
   refMedium?: string | null;
   utmSource?: string | null;
@@ -139,6 +141,7 @@ export async function insertPageViews(db: Db, rows: PageViewRow[]): Promise<void
       id: nanoid(21),
       path: r.path,
       refHost: r.refHost ?? null,
+      refPath: r.refPath ?? null,
       refSource: r.refSource ?? null,
       refMedium: r.refMedium ?? null,
       utmSource: r.utmSource ?? null,
@@ -175,6 +178,9 @@ export async function insertEvents(db: Db, rows: EventRow[]): Promise<void> {
 const HOST_MAX = 255;
 const UTM_MAX = 128;
 const GEO_MAX = 8;
+/** host + path cap. Longer than HOST_MAX to fit a deep path; still bounded
+ *  so a pathological referrer can't bloat the raw row. */
+const REF_PATH_MAX = 512;
 
 /**
  * Record a single server-rendered document GET as a page view. Called from the
@@ -244,6 +250,10 @@ export function recordServerPageView(
     if (!admit(throttleKey, now)) return;
 
     const refHost = hostnameOnly(input.referer);
+    // Host + path (query/fragment stripped) for the admin referrer-URL
+    // drill-down. Only meaningful for an external "referral" host — search /
+    // social / direct don't warrant path capture and needn't ride the column.
+    const refPath = hostAndPathOnly(input.referer);
     const cls = classifyReferrer(refHost);
     const flyRegion = readFlyRegion(input.headers);
     // Resolve coarse geo from the raw IP, then DISCARD the IP (never stored).
@@ -253,6 +263,10 @@ export function recordServerPageView(
       {
         path: cap(input.path, HOST_MAX) ?? input.path,
         refHost: cap(refHost, HOST_MAX),
+        // Only store the path for external referrals — the drill-down is a
+        // "who is this suspicious site" tool; search/social/direct don't
+        // need per-path rows cluttering the raw table.
+        refPath: cls.medium === "referral" ? cap(refPath, REF_PATH_MAX) : null,
         refSource: cap(cls.source, HOST_MAX),
         refMedium: cls.medium,
         geoCountry: cap(geo.country, GEO_MAX),

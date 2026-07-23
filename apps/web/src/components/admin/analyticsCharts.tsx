@@ -48,19 +48,41 @@ function niceMax(rawMax: number): number {
 }
 
 /** Track the rendered width of a container so the SVG re-measures on any
- *  resize — including FloatingWindow drags — via ResizeObserver. */
+ *  resize — including FloatingWindow drags — via ResizeObserver.
+ *
+ *  A chart mounts while its admin subtab is `hidden` (display:none), so
+ *  its first measurement is 0 and it renders at the 240px floor. A
+ *  ResizeObserver alone does NOT reliably fire when the element later
+ *  transitions display:none → visible inside this deeply nested
+ *  container-query + hidden-attribute layout, which stranded every
+ *  chart at its narrow mobile floor on desktop. An IntersectionObserver
+ *  re-measures the instant the chart becomes visible (0 → laid out),
+ *  which is exactly that transition; the ResizeObserver still handles
+ *  live width changes (window / FloatingWindow drags) once visible. */
 function useContainerWidth(): { ref: RefObject<HTMLDivElement>; width: number } {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    setWidth(el.clientWidth);
-    const ro = new ResizeObserver((entries) => {
-      for (const e of entries) setWidth(Math.round(e.contentRect.width));
-    });
+    const measure = () => {
+      // clientWidth is 0 while any ancestor is display:none; only commit a
+      // real measurement so we never overwrite a good width with a 0 when
+      // the subtab is hidden again.
+      const w = el.clientWidth;
+      if (w > 0) setWidth(w);
+    };
+    measure();
+    const ro = new ResizeObserver(() => measure());
     ro.observe(el);
-    return () => ro.disconnect();
+    let io: IntersectionObserver | undefined;
+    if (typeof IntersectionObserver !== "undefined") {
+      io = new IntersectionObserver((entries) => {
+        if (entries.some((e) => e.isIntersecting)) measure();
+      });
+      io.observe(el);
+    }
+    return () => { ro.disconnect(); io?.disconnect(); };
   }, []);
   return { ref, width };
 }

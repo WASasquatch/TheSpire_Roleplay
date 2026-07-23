@@ -209,6 +209,52 @@ export async function registerAnalyticsAdminRoutes(app: FastifyInstance, db: Db)
     },
   );
 
+  /* ================= REFERRER URL DRILL-DOWN ================= */
+  /**
+   * GET /admin/analytics/referrer-urls?host=<domain>&range=&includeBots=
+   *
+   * The exact referring URLs (host + path, query/fragment already stripped
+   * at ingest — plan_ext.md §7) under one referrer DOMAIN, so an admin can
+   * see whether a suspicious domain's traffic comes from a telltale
+   * phishing path rather than just eyeballing the bare domain. RAW-table
+   * only (migration 0370): `ref_path` isn't rolled into analytics_daily and
+   * is swept after analyticsRawRetentionDays, so this is a recent-window
+   * tool by design — exactly the horizon that matters for live abuse.
+   */
+  app.get<{ Querystring: { host?: string; range?: string; includeBots?: string } }>(
+    "/admin/analytics/referrer-urls",
+    async (req, reply) => {
+      if (!(await requirePermission(req, reply, "view_admin_analytics"))) return;
+      const host = (req.query.host ?? "").trim().toLowerCase();
+      if (!host || host.length > 255) { reply.code(400); return { error: "host required" }; }
+      const range = parseRange(req.query.range);
+      const includeBots = parseBool(req.query.includeBots);
+      const now = Date.now();
+      const from = new Date(startOfUtcDayMs(now) - (range - 1) * DAY_MS);
+      const botFilter = includeBots ? undefined : sql`${analyticsPageView.isBot} = 0`;
+
+      const rows = await db
+        .select({ url: analyticsPageView.refPath, n: sql<number>`count(*)` })
+        .from(analyticsPageView)
+        .where(and(
+          gte(analyticsPageView.createdAt, from),
+          // Match the domain exactly OR any subdomain of it, mirroring the
+          // classifier's suffix match, so "evil.example" also gathers
+          // "login.evil.example". refHost is the bare hostname column.
+          sql`(${analyticsPageView.refHost} = ${host} OR ${analyticsPageView.refHost} LIKE ${"%." + host})`,
+          sql`${analyticsPageView.refPath} is not null`,
+          botFilter,
+        ))
+        .groupBy(analyticsPageView.refPath);
+
+      const urls = rows
+        .map((r) => ({ url: r.url ?? host, count: Number(r.n) }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 100);
+      return { host, range, includeBots, urls };
+    },
+  );
+
   /* ================= IN-APP nav metrics ================= */
   app.get<{ Querystring: { range?: string; includeBots?: string } }>(
     "/admin/analytics/inapp",

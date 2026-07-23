@@ -1876,7 +1876,61 @@ export function Composer({
         // composer's left edge) so the 224px panel fits narrow phone
         // viewports instead of clipping off the right edge when anchored
         // to the 5th button.
-        <div className="relative flex flex-wrap items-center gap-0.5 text-xs">
+        // Toolbar. On MOBILE it's two tidy rows: the wide block/size
+        // dropdowns (plus the char counter) fill the TOP row, and every
+        // icon button sits on the BOTTOM row. On `lg` both groups become
+        // `display:contents`, dissolving their boxes so all controls
+        // rejoin ONE flat flex row exactly as before. This replaced a
+        // single flex-wrap where the two wide selects sat mid-flow and
+        // the `ml-auto` counter forced a ragged wrap that spilled over
+        // the counter on phones. `relative` still anchors the color panel.
+        <div className="relative flex flex-col gap-1.5 text-xs lg:flex-row lg:flex-wrap lg:items-center lg:gap-0.5">
+          <div className="flex items-center gap-1 lg:contents">
+            {/* Block format: Normal / Heading 1-3. Ships via the rich-HTML
+                message format, so it only renders where that format sends. */}
+            {richEnabled ? (
+              <select
+                value={activeBlock}
+                title={t("composer.fmt.block")}
+                aria-label={t("composer.fmt.block")}
+                onChange={(e) => editorRef.current?.applyBlock(e.target.value as ComposerBlockChoice)}
+                className="h-8 flex-1 cursor-pointer rounded border border-keep-rule/60 bg-keep-bg/60 px-1 text-base text-keep-muted hover:bg-keep-banner hover:text-keep-text lg:flex-none lg:text-xs"
+              >
+                <option value="normal">{t("composer.block.normal")}</option>
+                <option value="h1">{t("composer.block.h1")}</option>
+                <option value="h2">{t("composer.block.h2")}</option>
+                <option value="h3">{t("composer.block.h3")}</option>
+              </select>
+            ) : null}
+            {/* Size: Gmail-style buckets; "Normal" clears the mark. 16px
+                type below `lg` so iOS Safari doesn't auto-zoom on focus. */}
+            <select
+              value={activeSize}
+              title={t("composer.fmt.size")}
+              aria-label={t("composer.fmt.size")}
+              onChange={(e) => editorRef.current?.applySize(e.target.value as ComposerSizeChoice, null)}
+              className="h-8 flex-1 cursor-pointer rounded border border-keep-rule/60 bg-keep-bg/60 px-1 text-base text-keep-muted hover:bg-keep-banner hover:text-keep-text lg:flex-none lg:text-xs"
+            >
+              <option value="small">{t("composer.size.small")}</option>
+              <option value="normal">{t("composer.size.normal")}</option>
+              <option value="large">{t("composer.size.large")}</option>
+              <option value="huge">{t("composer.size.huge")}</option>
+            </select>
+            {/* Mobile-only counter, riding the top row's right edge. The
+                desktop counter lives in the trailing cluster below. */}
+            <div className="ml-auto lg:hidden">
+              <ComposerCharCount length={value.trimEnd().length} max={effectiveMaxLength} />
+            </div>
+          </div>
+          {/* Bottom row on mobile: every icon button, as an auto-fit GRID
+              of equal cells that stretch to fill the width. A plain
+              flex-wrap left one lonely button dangling on a third line
+              (ragged); a grid packs every row full and uniform, and when
+              it must wrap the extra buttons sit in a tidy second row at
+              the same cell size. `lg:contents` dissolves the grid on
+              desktop so the buttons rejoin the flat flex row at their
+              natural 32px. */}
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(2.25rem,1fr))] gap-1 lg:contents">
           {/* WYSIWYG toggles: each button flips a real editor mark at
               the caret/selection (and lights up while active); the
               serializer emits the same markdown the buttons used to
@@ -1943,43 +1997,9 @@ export function Composer({
             className="pointer-events-none absolute h-0 w-0 opacity-0"
             onChange={(e) => applyColor(e.target.value)}
           />
-          {/* Block format: Normal / Heading 1-3. Headings ship via the
-              rich-HTML message format, which forum surfaces and
-              rich-disabled rooms don't speak — the control only renders
-              where the format can be sent. */}
-          {richEnabled ? (
-            <select
-              value={activeBlock}
-              title={t("composer.fmt.block")}
-              aria-label={t("composer.fmt.block")}
-              onChange={(e) => editorRef.current?.applyBlock(e.target.value as ComposerBlockChoice)}
-              className="h-8 shrink-0 cursor-pointer rounded border border-keep-rule/60 bg-keep-bg/60 px-1 text-base text-keep-muted hover:bg-keep-banner hover:text-keep-text lg:text-xs"
-            >
-              <option value="normal">{t("composer.block.normal")}</option>
-              <option value="h1">{t("composer.block.h1")}</option>
-              <option value="h2">{t("composer.block.h2")}</option>
-              <option value="h3">{t("composer.block.h3")}</option>
-            </select>
-          ) : null}
-          {/* Size: Gmail-style buckets. Applies a size mark rendered at
-              a clamped em scale (<font size="1|3|4"> on the wire);
-              "Normal" clears the mark. The select mirrors the bucket
-              at the caret. */}
-          <select
-            value={activeSize}
-            title={t("composer.fmt.size")}
-            aria-label={t("composer.fmt.size")}
-            onChange={(e) => editorRef.current?.applySize(e.target.value as ComposerSizeChoice, null)}
-            // 16px type below `lg` for the same reason the editor uses
-            // `text-base … lg:text-sm`: iOS Safari auto-zooms the page
-            // when a focused form control's font-size is under 16px.
-            className="h-8 shrink-0 cursor-pointer rounded border border-keep-rule/60 bg-keep-bg/60 px-1 text-base text-keep-muted hover:bg-keep-banner hover:text-keep-text lg:text-xs"
-          >
-            <option value="small">{t("composer.size.small")}</option>
-            <option value="normal">{t("composer.size.normal")}</option>
-            <option value="large">{t("composer.size.large")}</option>
-            <option value="huge">{t("composer.size.huge")}</option>
-          </select>
+          {/* Block + size selects now lead the toolbar (see the selects
+              group above). On lg both groups are `display:contents`, so
+              the flat row reads: block, size, then all the icon buttons. */}
           <FmtButton title={t("composer.fmt.code")} active={!!activeFmt.code} onClick={() => editorRef.current?.toggleMark("code")}>
             <Code className="h-4 w-4" aria-hidden="true" />
           </FmtButton>
@@ -2035,24 +2055,17 @@ export function Composer({
           <EmoticonPickerButton
             onPick={(slug, idx) => insertAtCursor(`:${slug}:${idx}:`)}
             onPickUnicode={(char) => insertAtCursor(char)}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none text-keep-muted hover:bg-keep-banner hover:text-keep-text"
+            className="flex h-8 w-full items-center justify-center rounded border border-keep-rule/60 bg-keep-bg/60 text-sm leading-none text-keep-muted hover:bg-keep-banner hover:text-keep-text lg:w-8 lg:shrink-0"
           />
-          {/* Right-aligned group: character counter + earning strip
-              together. Earlier each had its own `ml-auto` and flex
-              split the slack between them, leaving the counter
-              floating in the middle of the row. Wrapping both in a
-              single `ml-auto` container collapses that to one
-              right-aligned cluster with a tiny gap between them.
-              The earning strip stays desktop-only via `hidden
-              lg:flex`; on mobile the strip lives in its own row
-              above (see the conditional just above), so this
-              container only renders the counter on small screens. */}
-          <div className="ml-auto flex shrink-0 items-center gap-3">
+          </div>{/* end bottom-row icon-button group */}
+          {/* Trailing cluster: character counter + earning strip, right-
+              aligned on the desktop flat row. DESKTOP-ONLY (`hidden
+              lg:flex`) — on mobile the counter rides the top selects row
+              and the earning strip has its own row up in the hero. */}
+          <div className="ml-auto hidden shrink-0 items-center gap-3 lg:flex">
             <ComposerCharCount length={value.trimEnd().length} max={effectiveMaxLength} />
             {onOpenEarning ? (
-              <div className="hidden lg:flex">
-                <EarningStatsStrip onOpenEarning={onOpenEarning} />
-              </div>
+              <EarningStatsStrip onOpenEarning={onOpenEarning} />
             ) : null}
           </div>
         </div>
@@ -2324,7 +2337,10 @@ function FmtButton({
       // the row on mobile (which is where the misalignment was most
       // visible, because mobile renders emoji and text with bigger
       // baseline differences than desktop).
-      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded border text-sm leading-none ${
+      // `w-full lg:w-8`: on mobile the button fills its auto-fit grid
+      // cell (even, gap-free rows); on the desktop flat flex row it's
+      // the fixed 32px square, `lg:shrink-0` keeping it from squeezing.
+      className={`flex h-8 w-full items-center justify-center rounded border text-sm leading-none lg:w-8 lg:shrink-0 ${
         active
           ? "border-keep-action bg-keep-action/15 text-keep-action"
           : "border-keep-rule/60 bg-keep-bg/60 text-keep-muted hover:bg-keep-banner hover:text-keep-text"

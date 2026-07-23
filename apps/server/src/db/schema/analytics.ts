@@ -68,6 +68,17 @@ export const analyticsPageView = sqliteTable(
     path: text("path").notNull(),
     /** Referrer hostname only (path + query dropped), may be null/direct. */
     refHost: text("ref_host"),
+    /**
+     * Referrer host + PATH ("evil-phish.example/login/verify"), migration
+     * 0370. The QUERY STRING and FRAGMENT are always stripped (that's
+     * where capability URLs / tokens / PII live — plan_ext.md §7), so
+     * this is the path only. Lets an admin drill a suspicious referrer
+     * DOMAIN down to the exact pages sending traffic (phishing lures
+     * often live at a telltale path). RAW-only + short-retention like the
+     * rest of this row: swept after analyticsRawRetentionDays, never
+     * rolled into analytics_daily, so drill-down is a recent-window tool.
+     */
+    refPath: text("ref_path"),
     /** Classified named source, e.g. "google", "reddit", "chatgpt". */
     refSource: text("ref_source"),
     /** search | social | email | referral | paid | direct. */

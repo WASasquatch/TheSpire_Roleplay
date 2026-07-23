@@ -29,7 +29,7 @@ import type { Db } from "../db/index.js";
 import { readBearerToken } from "../routes/auth.js";
 import { getSettings } from "../settings.js";
 import { isBotUA } from "./botFilter.js";
-import { classifyReferrer, hostnameOnly } from "./classify.js";
+import { classifyReferrer, hostAndPathOnly, hostnameOnly } from "./classify.js";
 import { readFlyRegion, resolveGeo } from "./geo.js";
 import {
   cap,
@@ -43,6 +43,8 @@ import {
 /** Field length caps. */
 const PATH_MAX = 255;
 const HOST_MAX = 255;
+/** host + path cap (matches recorder.ts REF_PATH_MAX). */
+const REF_PATH_MAX = 512;
 const UTM_MAX = 128;
 const GEO_MAX = 8;
 const KEY_MAX = 128;
@@ -150,6 +152,7 @@ export async function registerAnalyticsRoutes(app: FastifyInstance, db: Db): Pro
       for (const item of items) {
         if (item.t === "pv") {
           const refHost = hostnameOnly(item.ref ?? null);
+          const refPath = hostAndPathOnly(item.ref ?? null);
           const cls = classifyReferrer(refHost, {
             source: item.utmSource ?? null,
             medium: item.utmMedium ?? null,
@@ -157,6 +160,8 @@ export async function registerAnalyticsRoutes(app: FastifyInstance, db: Db): Pro
           pageViews.push({
             path: cap(item.path, PATH_MAX) ?? item.path,
             refHost: cap(refHost, HOST_MAX),
+            // Path only for external referrals (drill-down target); see recorder.ts.
+            refPath: cls.medium === "referral" ? cap(refPath, REF_PATH_MAX) : null,
             refSource: cap(cls.source, HOST_MAX),
             refMedium: cls.medium,
             utmSource: cap(item.utmSource ?? null, UTM_MAX)?.toLowerCase() ?? null,

@@ -135,3 +135,30 @@ export function hostnameOnly(raw: string | null | undefined): string | null {
     return null;
   }
 }
+
+/**
+ * Reduce a raw referrer to `host + pathname` ("evil.example/login/verify"),
+ * dropping scheme, QUERY STRING, and FRAGMENT. Unlike {@link hostnameOnly}
+ * this keeps the PATH — the security-drill-down signal (migration 0370) —
+ * but the query/fragment are always removed because that's where another
+ * site's capability URLs / tokens / PII live (plan_ext.md §7). Returns null
+ * for empty / unparseable input. Result is lowercased on the host and
+ * length-capped by the caller.
+ */
+export function hostAndPathOnly(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  try {
+    const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : "http://" + trimmed;
+    const u = new URL(withScheme);
+    const host = u.hostname.toLowerCase();
+    if (!host) return null;
+    // pathname always starts with "/"; a bare host yields "/". Drop a lone
+    // trailing "/" so "host/" reads as "host". search + hash are ignored.
+    const path = u.pathname === "/" ? "" : u.pathname;
+    return host + path;
+  } catch {
+    return null;
+  }
+}

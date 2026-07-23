@@ -239,8 +239,14 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
             invisible + aria-hidden + `inert` (raw attribute — React 18
             has no typed prop for it) so their links can't be tabbed to
             or clicked while hidden. The slide-in animation replays when
-            a slide GAINS the class on activation. */}
-        <div className="grid">
+            a slide GAINS the class on activation.
+
+            `grid-cols-1` (not a bare `grid`): a bare grid's implicit column
+            is max-content, so on a phone the 600px screenshot / long copy
+            would set the column wider than the viewport and overflow.
+            grid-cols-1 = minmax(0,1fr), which caps the column to the
+            container and lets w-full / truncation resolve correctly. */}
+        <div className="grid grid-cols-1">
           <div
             className={`col-start-1 row-start-1 flex flex-col justify-center ${isIntro ? "feature-panel-in" : "invisible"}`}
             aria-hidden={!isIntro}

@@ -142,11 +142,16 @@ export function MemberRankingsMarquee({ data }: { data: SplashRankingsPayload })
         <p className="mt-1 text-sm text-keep-muted">{t("memberRankings.sub")}</p>
       </header>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
+      {/* `grid-cols-1` (not a bare `grid`) matters on mobile: a bare grid's
+          single implicit column is sized to max-content, so a wide ranking
+          row would push the whole section past the viewport (the reported
+          off-screen overflow). grid-cols-1 = minmax(0,1fr), which lets the
+          column — and every truncating child inside it — shrink to fit. */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
         {data.featured ? <FeaturedMemberCard member={data.featured} sinceFmt={sinceFmt} nf={nf} /> : null}
 
         <div
-          className="rounded-lg border border-keep-rule bg-keep-bg/60 p-3"
+          className="min-w-0 rounded-lg border border-keep-rule bg-keep-bg/60 p-3"
           onMouseEnter={() => setPaused(true)}
           onMouseLeave={() => setPaused(false)}
           onFocus={() => setPaused(true)}
@@ -189,13 +194,13 @@ export function MemberRankingsMarquee({ data }: { data: SplashRankingsPayload })
               sections don't fetch a hundred avatars on page load. The
               swap animation replays when a section GAINS the class on
               activation; suppressed under reduce-motion in CSS. */}
-          <div className="grid">
+          <div className="grid grid-cols-1">
             {sections.map((s, si) => {
               const isActive = s.key === section.key;
               return (
                 <ol
                   key={s.key}
-                  className={`col-start-1 row-start-1 space-y-1.5 ${isActive ? "member-rankings-swap" : "invisible"}`}
+                  className={`col-start-1 row-start-1 min-w-0 space-y-1.5 ${isActive ? "member-rankings-swap" : "invisible"}`}
                   aria-hidden={!isActive}
                   {...(isActive ? {} : INERT)}
                 >
@@ -302,7 +307,7 @@ function FeaturedMemberCard({ member, sinceFmt, nf }: {
     meta.push({ label: t("memberRankings.meta.languages"), value: member.languages.join(", ") });
   }
   return (
-    <article className="flex flex-col items-center gap-3 rounded-lg border border-keep-accent/40 bg-keep-panel/30 p-4 text-center">
+    <article className="flex min-w-0 flex-col items-center gap-3 rounded-lg border border-keep-accent/40 bg-keep-panel/30 p-4 text-center">
       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-keep-accent">
         {t("memberRankings.featuredKicker")}
       </p>

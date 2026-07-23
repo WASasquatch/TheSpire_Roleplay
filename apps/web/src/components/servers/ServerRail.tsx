@@ -304,13 +304,17 @@ function ServerIcon({
           ) : (
             <span className={tint ? "" : "text-keep-text"}>{letter}</span>
           )}
-          {server.hasUnseen && !active ? (
-            <span
-              aria-hidden="true"
-              className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-keep-accent ring-2 ring-keep-panel"
-            />
-          ) : null}
         </button>
+        {/* Unseen dot lives on the icon WRAPPER, not inside the button: the
+            button is `overflow-hidden` to clip the round logo crop, which
+            also clipped a dot placed inside it. Anchored to the same 48px
+            wrapper box, it sits at the tile's top-right corner unclipped. */}
+        {server.hasUnseen && !active ? (
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-keep-accent ring-2 ring-keep-panel"
+          />
+        ) : null}
         {/* Settings gear: a hover/focus affordance on servers the viewer manages.
             Sits over the tile's bottom-right; keyboard-reachable (it's a real
             button) so the console isn't gated behind hover/long-press alone. */}

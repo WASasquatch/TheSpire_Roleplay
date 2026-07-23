@@ -229,6 +229,47 @@ export const THEME_PRESETS: ReadonlyArray<{ name: string; theme: Theme }> = [
 ];
 
 /**
+ * One uploaded background's rendered variant bundle, produced by the
+ * server-side pipeline (apps/server/src/images.ts) when a global admin
+ * uploads site background art or a server owner uploads a per-server
+ * background override. Stored as JSON text (site_settings.bg_light_json /
+ * bg_dark_json, servers.background_json) and shipped to the client on
+ * the branding / server payloads.
+ */
+export interface BackgroundArt {
+  /** 2560w WebP display variant — the universal-support layer. */
+  webpUrl: string;
+  /** 2560w AVIF variant, served via image-set() where supported. */
+  avifUrl: string | null;
+  /** `#rrggbb` average color painted under the image while it decodes. */
+  color: string;
+}
+
+/** Tolerant unknown→BackgroundArt validation; null on garbage. Used both
+ *  for freshly-JSON.parsed DB values and for rehydrating cached client
+ *  state (localStorage) that may predate the feature or have been edited. */
+export function normalizeBackgroundArt(value: unknown): BackgroundArt | null {
+  if (!value || typeof value !== "object") return null;
+  const o = value as Partial<BackgroundArt>;
+  if (typeof o.webpUrl !== "string" || o.webpUrl === "") return null;
+  return {
+    webpUrl: o.webpUrl,
+    avifUrl: typeof o.avifUrl === "string" && o.avifUrl !== "" ? o.avifUrl : null,
+    color: typeof o.color === "string" && /^#[0-9a-fA-F]{6}$/.test(o.color) ? o.color : "#000000",
+  };
+}
+
+/** Tolerant JSON→BackgroundArt parse; null on missing/garbage input. */
+export function parseBackgroundArt(raw: string | null | undefined): BackgroundArt | null {
+  if (!raw) return null;
+  try {
+    return normalizeBackgroundArt(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * True when the palette is one of the "Spire Classic" presets
  * (unmodified). These presets exist to keep the ORIGINAL splash /
  * glass-shell artwork available after the commissioned character art

@@ -19,9 +19,14 @@
  * Privacy gates:
  *   hideCurrencyCount → excluded from the currency board
  *   hideXpCount       → excluded from the XP board
- *   users.isPublic=false → excluded from EVERY board (a user who
- *     hides their master profile shouldn't have their wealth
- *     leak via leaderboard)
+ *   users.isPublic=false → MASKED on every board: the row keeps its
+ *     honest position but carries no identity (private:true, empty
+ *     name, no avatar/cosmetics, anonymized ownerId) and renders as
+ *     an italic "Private User". Masking rather than dropping keeps
+ *     positions consistent for everyone else — a private whale no
+ *     longer shifts the whole board up a slot — while leaking only
+ *     a bare metric value. (Champions still skip masked entries;
+ *     the spotlight celebrates someone visible.)
  *   users.disabledAt is not null → excluded everywhere
  *
  * Performance posture: one query per board (nine total), each
@@ -31,6 +36,7 @@
  * given the dashboard is opened a few times per session at most.
  */
 
+import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, isNull, isNotNull, sql } from "drizzle-orm";
 import type { Db } from "../db/index.js";
 import {
@@ -90,6 +96,14 @@ export interface RankingPoolEntry {
   rankName: string | null;
   tierLabel: string | null;
   sigilImageUrl: string | null;
+  /**
+   * TRUE when the pool's master profile is private (users.isPublic=false):
+   * the entry holds its honest board position but carries NO identity —
+   * displayName/userId are empty, avatar + cosmetics null, and ownerId is
+   * an anonymized digest (stable for React keys, useless for lookup).
+   * Renderers show an italic "Private User" and disable profile opens.
+   */
+  private?: true;
   /** The metric value for the board this entry was returned on. */
   value: number;
 }
@@ -213,7 +227,9 @@ async function computeRankings(db: Db): Promise<RankingsResponse> {
   collect(messagesRaw); collect(bordersRaw); collect(stylesRaw);
   collect(topicsRaw); collect(reactionsRaw);
 
-  const displayInfo = await fetchDisplayInfo(db, [...referenced.values()]);
+  // maskPrivate: private masters resolve to identity-less stubs instead
+  // of dropping, so every board keeps honest positions (see header doc).
+  const displayInfo = await fetchDisplayInfo(db, [...referenced.values()], { maskPrivate: true });
 
   function stitch(raws: RawEntry[]): RankingPoolEntry[] {
     const out: RankingPoolEntry[] = [];
@@ -239,12 +255,14 @@ async function computeRankings(db: Db): Promise<RankingsResponse> {
     { key: "reactions", ...BOARD_LABELS.reactions, entries: stitch(reactionsRaw) },
   ];
 
-  // Champion = the top entry of each non-empty board. The carousel
-  // rotates through these so every board gets a spotlight even
-  // when its own card sits below the fold.
+  // Champion = the top VISIBLE entry of each non-empty board. The
+  // carousel rotates through these so every board gets a spotlight
+  // even when its own card sits below the fold. Masked private rows
+  // are skipped — the spotlight exists to celebrate someone by name,
+  // and an anonymous silhouette hero would read as a glitch.
   const champions: RankingChampion[] = [];
   for (const b of boards) {
-    const top = b.entries[0];
+    const top = b.entries.find((e) => !e.private);
     if (!top) continue;
     champions.push({
       boardKey: b.key,
@@ -266,10 +284,15 @@ async function computeRankings(db: Db): Promise<RankingsResponse> {
  *  prune and risk returning fewer than TOP_N rows after the prune.
  * ========================================================= */
 
-/** Common privacy gate, joinable into the user lookup so disabled
- *  / private master accounts drop before the LIMIT applies. */
-function publicUserFilter() {
-  return and(isNull(users.disabledAt), eq(users.isPublic, true));
+/** Common eligibility gate, joinable into the user lookup so disabled
+ *  accounts drop before the LIMIT applies. PRIVATE masters are kept:
+ *  they stay in every board at their honest position and get masked
+ *  to an identity-less "Private User" stub at the display-info step
+ *  (fetchDisplayInfo maskPrivate) — dropping them here would shift
+ *  everyone else's position by whether a private account outranks
+ *  them. Disabled (which a ban also sets) stays a hard exclusion. */
+function eligibleUserFilter() {
+  return isNull(users.disabledAt);
 }
 
 async function queryCurrencyBoard(db: Db): Promise<RawEntry[]> {
@@ -281,7 +304,7 @@ async function queryCurrencyBoard(db: Db): Promise<RawEntry[]> {
     .select({ ownerId: userEarning.userId, value: userEarning.currency })
     .from(userEarning)
     .innerJoin(users, eq(users.id, userEarning.userId))
-    .where(and(eq(userEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), eq(userEarning.hideCurrencyCount, false)))
+    .where(and(eq(userEarning.serverId, RANKINGS_SERVER_ID), eligibleUserFilter(), eq(userEarning.hideCurrencyCount, false)))
     .orderBy(desc(userEarning.currency))
     .limit(TOP_N);
   const charRows = await db
@@ -290,7 +313,7 @@ async function queryCurrencyBoard(db: Db): Promise<RawEntry[]> {
     .innerJoin(characters, eq(characters.id, characterEarning.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
     .leftJoin(userEarning, and(eq(userEarning.userId, characters.userId), eq(userEarning.serverId, RANKINGS_SERVER_ID)))
-    .where(and(eq(characterEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideCurrencyCount, false)))
+    .where(and(eq(characterEarning.serverId, RANKINGS_SERVER_ID), eligibleUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideCurrencyCount, false)))
     .orderBy(desc(characterEarning.currency))
     .limit(TOP_N);
   return mergeTop(
@@ -304,7 +327,7 @@ async function queryXpBoard(db: Db): Promise<RawEntry[]> {
     .select({ ownerId: userEarning.userId, value: userEarning.xp })
     .from(userEarning)
     .innerJoin(users, eq(users.id, userEarning.userId))
-    .where(and(eq(userEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), eq(userEarning.hideXpCount, false)))
+    .where(and(eq(userEarning.serverId, RANKINGS_SERVER_ID), eligibleUserFilter(), eq(userEarning.hideXpCount, false)))
     .orderBy(desc(userEarning.xp))
     .limit(TOP_N);
   const charRows = await db
@@ -313,7 +336,7 @@ async function queryXpBoard(db: Db): Promise<RawEntry[]> {
     .innerJoin(characters, eq(characters.id, characterEarning.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
     .leftJoin(userEarning, and(eq(userEarning.userId, characters.userId), eq(userEarning.serverId, RANKINGS_SERVER_ID)))
-    .where(and(eq(characterEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideXpCount, false)))
+    .where(and(eq(characterEarning.serverId, RANKINGS_SERVER_ID), eligibleUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideXpCount, false)))
     .orderBy(desc(characterEarning.xp))
     .limit(TOP_N);
   return mergeTop(
@@ -340,7 +363,7 @@ async function queryRankBoard(db: Db): Promise<RawEntry[]> {
     // (server_id, key). userEarning is already pinned to RANKINGS_SERVER_ID, so
     // this keeps a same-key rank on another server from multiplying rows.
     .leftJoin(ranks, and(eq(ranks.serverId, userEarning.serverId), eq(ranks.key, userEarning.rankKey)))
-    .where(and(eq(userEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), eq(userEarning.hideXpCount, false), isNotNull(userEarning.rankKey)))
+    .where(and(eq(userEarning.serverId, RANKINGS_SERVER_ID), eligibleUserFilter(), eq(userEarning.hideXpCount, false), isNotNull(userEarning.rankKey)))
     .orderBy(desc(ranks.order), desc(userEarning.tier))
     .limit(TOP_N);
   const charRows = await db
@@ -358,7 +381,7 @@ async function queryRankBoard(db: Db): Promise<RawEntry[]> {
     // (server_id, key). characterEarning is pinned to RANKINGS_SERVER_ID below,
     // so a same-key rank on another server can't multiply rows.
     .leftJoin(ranks, and(eq(ranks.serverId, characterEarning.serverId), eq(ranks.key, characterEarning.rankKey)))
-    .where(and(eq(characterEarning.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideXpCount, false), isNotNull(characterEarning.rankKey)))
+    .where(and(eq(characterEarning.serverId, RANKINGS_SERVER_ID), eligibleUserFilter(), isNull(characters.deletedAt), eq(userEarning.hideXpCount, false), isNotNull(characterEarning.rankKey)))
     .orderBy(desc(ranks.order), desc(characterEarning.tier))
     .limit(TOP_N);
   function encode(orderVal: number | null, tier: number | null): number {
@@ -414,7 +437,7 @@ async function queryMessagesBoard(db: Db): Promise<RawEntry[]> {
     })
     .from(messages)
     .innerJoin(users, eq(users.id, messages.userId))
-    .where(and(publicUserFilter(), isNull(messages.characterId), sql`${messages.kind} != 'system'`))
+    .where(and(eligibleUserFilter(), isNull(messages.characterId), sql`${messages.kind} != 'system'`))
     .groupBy(messages.userId)
     .orderBy(desc(sql`COUNT(*)`))
     .limit(TOP_N);
@@ -426,7 +449,7 @@ async function queryMessagesBoard(db: Db): Promise<RawEntry[]> {
     .from(messages)
     .innerJoin(characters, eq(characters.id, messages.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(publicUserFilter(), isNull(characters.deletedAt), isNotNull(messages.characterId), sql`${messages.kind} != 'system'`))
+    .where(and(eligibleUserFilter(), isNull(characters.deletedAt), isNotNull(messages.characterId), sql`${messages.kind} != 'system'`))
     .groupBy(messages.characterId)
     .orderBy(desc(sql`COUNT(*)`))
     .limit(TOP_N);
@@ -443,27 +466,27 @@ async function queryBordersBoard(db: Db): Promise<RawEntry[]> {
     .select({ ownerId: userOwnedBorders.userId, value: sql<number>`COUNT(*)` })
     .from(userOwnedBorders)
     .innerJoin(users, eq(users.id, userOwnedBorders.userId))
-    .where(and(eq(userOwnedBorders.serverId, RANKINGS_SERVER_ID), publicUserFilter()))
+    .where(and(eq(userOwnedBorders.serverId, RANKINGS_SERVER_ID), eligibleUserFilter()))
     .groupBy(userOwnedBorders.userId);
   const masterFreeformBorders = await db
     .select({ ownerId: userOwnedFreeformBorders.userId, value: sql<number>`COUNT(*)` })
     .from(userOwnedFreeformBorders)
     .innerJoin(users, eq(users.id, userOwnedFreeformBorders.userId))
-    .where(and(eq(userOwnedFreeformBorders.serverId, RANKINGS_SERVER_ID), publicUserFilter()))
+    .where(and(eq(userOwnedFreeformBorders.serverId, RANKINGS_SERVER_ID), eligibleUserFilter()))
     .groupBy(userOwnedFreeformBorders.userId);
   const charRankBorders = await db
     .select({ ownerId: characterOwnedBorders.characterId, value: sql<number>`COUNT(*)` })
     .from(characterOwnedBorders)
     .innerJoin(characters, eq(characters.id, characterOwnedBorders.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(eq(characterOwnedBorders.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt)))
+    .where(and(eq(characterOwnedBorders.serverId, RANKINGS_SERVER_ID), eligibleUserFilter(), isNull(characters.deletedAt)))
     .groupBy(characterOwnedBorders.characterId);
   const charFreeformBorders = await db
     .select({ ownerId: characterOwnedFreeformBorders.characterId, value: sql<number>`COUNT(*)` })
     .from(characterOwnedFreeformBorders)
     .innerJoin(characters, eq(characters.id, characterOwnedFreeformBorders.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(eq(characterOwnedFreeformBorders.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt)))
+    .where(and(eq(characterOwnedFreeformBorders.serverId, RANKINGS_SERVER_ID), eligibleUserFilter(), isNull(characters.deletedAt)))
     .groupBy(characterOwnedFreeformBorders.characterId);
   return mergeBorderLikeCounts(
     [masterRankBorders, masterFreeformBorders],
@@ -476,14 +499,14 @@ async function queryStylesBoard(db: Db): Promise<RawEntry[]> {
     .select({ ownerId: userOwnedNameStyles.userId, value: sql<number>`COUNT(*)` })
     .from(userOwnedNameStyles)
     .innerJoin(users, eq(users.id, userOwnedNameStyles.userId))
-    .where(and(eq(userOwnedNameStyles.serverId, RANKINGS_SERVER_ID), publicUserFilter()))
+    .where(and(eq(userOwnedNameStyles.serverId, RANKINGS_SERVER_ID), eligibleUserFilter()))
     .groupBy(userOwnedNameStyles.userId);
   const charStyles = await db
     .select({ ownerId: characterOwnedNameStyles.characterId, value: sql<number>`COUNT(*)` })
     .from(characterOwnedNameStyles)
     .innerJoin(characters, eq(characters.id, characterOwnedNameStyles.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(eq(characterOwnedNameStyles.serverId, RANKINGS_SERVER_ID), publicUserFilter(), isNull(characters.deletedAt)))
+    .where(and(eq(characterOwnedNameStyles.serverId, RANKINGS_SERVER_ID), eligibleUserFilter(), isNull(characters.deletedAt)))
     .groupBy(characterOwnedNameStyles.characterId);
   return mergeTop(
     masterStyles.map((r) => ({ scope: "user" as const, ownerId: r.ownerId, value: Number(r.value) })),
@@ -501,7 +524,7 @@ async function queryTopicsBoard(db: Db): Promise<RawEntry[]> {
     })
     .from(messages)
     .innerJoin(users, eq(users.id, messages.userId))
-    .where(and(publicUserFilter(), isNull(messages.characterId), isNotNull(messages.title)))
+    .where(and(eligibleUserFilter(), isNull(messages.characterId), isNotNull(messages.title)))
     .groupBy(messages.userId)
     .orderBy(desc(sql`COUNT(*)`))
     .limit(TOP_N);
@@ -513,7 +536,7 @@ async function queryTopicsBoard(db: Db): Promise<RawEntry[]> {
     .from(messages)
     .innerJoin(characters, eq(characters.id, messages.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(publicUserFilter(), isNull(characters.deletedAt), isNotNull(messages.characterId), isNotNull(messages.title)))
+    .where(and(eligibleUserFilter(), isNull(characters.deletedAt), isNotNull(messages.characterId), isNotNull(messages.title)))
     .groupBy(messages.characterId)
     .orderBy(desc(sql`COUNT(*)`))
     .limit(TOP_N);
@@ -533,7 +556,7 @@ async function queryReactionsBoard(db: Db): Promise<RawEntry[]> {
     })
     .from(messageReactions)
     .innerJoin(users, eq(users.id, messageReactions.userId))
-    .where(and(publicUserFilter(), isNull(messageReactions.characterId)))
+    .where(and(eligibleUserFilter(), isNull(messageReactions.characterId)))
     .groupBy(messageReactions.userId)
     .orderBy(desc(sql`COUNT(*)`))
     .limit(TOP_N);
@@ -545,7 +568,7 @@ async function queryReactionsBoard(db: Db): Promise<RawEntry[]> {
     .from(messageReactions)
     .innerJoin(characters, eq(characters.id, messageReactions.characterId))
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(publicUserFilter(), isNull(characters.deletedAt), isNotNull(messageReactions.characterId)))
+    .where(and(eligibleUserFilter(), isNull(characters.deletedAt), isNotNull(messageReactions.characterId)))
     .groupBy(messageReactions.characterId)
     .orderBy(desc(sql`COUNT(*)`))
     .limit(TOP_N);
@@ -593,9 +616,11 @@ function mergeBorderLikeCounts(
   return mergeTop(masters, chars);
 }
 
-/** Items board doesn't get a privacy filter inside the aggregation
+/** Items board doesn't get an eligibility filter inside the aggregation
  *  (the GROUP BY would have to JOIN through both possible owner
- *  tables). Filter post-fetch instead. */
+ *  tables). Filter post-fetch instead — drops disabled owners and
+ *  deleted characters only; private owners survive to be masked at
+ *  the display-info step like every other board. */
 async function filterByPublicOwner(db: Db, entries: RawEntry[]): Promise<RawEntry[]> {
   const userIds = entries.filter((e) => e.scope === "user").map((e) => e.ownerId);
   const charIds = entries.filter((e) => e.scope === "character").map((e) => e.ownerId);
@@ -603,7 +628,7 @@ async function filterByPublicOwner(db: Db, entries: RawEntry[]): Promise<RawEntr
     ? new Set((await db
         .select({ id: users.id })
         .from(users)
-        .where(and(publicUserFilter(), inArray(users.id, userIds)))
+        .where(and(eligibleUserFilter(), inArray(users.id, userIds)))
       ).map((r) => r.id))
     : new Set<string>();
   const charRows = charIds.length > 0
@@ -611,7 +636,7 @@ async function filterByPublicOwner(db: Db, entries: RawEntry[]): Promise<RawEntr
         .select({ id: characters.id })
         .from(characters)
         .innerJoin(users, eq(users.id, characters.userId))
-        .where(and(publicUserFilter(), isNull(characters.deletedAt), inArray(characters.id, charIds)))
+        .where(and(eligibleUserFilter(), isNull(characters.deletedAt), inArray(characters.id, charIds)))
     : [];
   const eligibleChars = new Set(charRows.map((r) => r.id));
   return entries.filter((e) =>
@@ -623,14 +648,20 @@ async function filterByPublicOwner(db: Db, entries: RawEntry[]): Promise<RawEntr
 /** Display-info batch fetch. Resolves the (scope, ownerId) tuples
  *  the boards referenced into the full PoolEntry shape minus
  *  `value` (filled per-board). Keyed `${scope}::${ownerId}`. Applies
- *  the same privacy gate as the boards (disabled / non-public masters
- *  and deleted characters are omitted), so callers should treat a
- *  missing key as "drop this row." Exported so the social-game
- *  rankings (earning/gameRankings.ts) reuse the exact same cosmetic
+ *  the same privacy gate as the boards (disabled masters and deleted
+ *  characters are omitted), so callers should treat a missing key as
+ *  "drop this row." NON-PUBLIC masters are omitted too BY DEFAULT —
+ *  arcade gifting and the game/familiar/scriptorium boards rely on
+ *  that drop as their privacy gate — but `maskPrivate: true` (the
+ *  main nine boards) resolves them to an identity-less stub
+ *  (`private: true`, anonymized ownerId) instead, so those boards
+ *  keep honest positions. Exported so the social-game rankings
+ *  (earning/gameRankings.ts) reuse the exact same cosmetic
  *  resolution + privacy posture instead of duplicating it. */
 export async function fetchDisplayInfo(
   db: Db,
   pools: ReadonlyArray<{ scope: RankingScope; ownerId: string }>,
+  opts?: { maskPrivate?: boolean },
 ): Promise<Map<string, Omit<RankingPoolEntry, "value">>> {
   const out = new Map<string, Omit<RankingPoolEntry, "value">>();
   const userIds = pools.filter((p) => p.scope === "user").map((p) => p.ownerId);
@@ -667,7 +698,11 @@ export async function fetchDisplayInfo(
       .filter((r) => r.selectedFreeformBorderKey != null)
       .map((r) => [r.userId, r.selectedFreeformBorderKey!] as [string, string]));
     for (const r of rows) {
-      if (r.disabledAt || !r.isPublic) continue;
+      if (r.disabledAt) continue;
+      if (!r.isPublic) {
+        if (opts?.maskPrivate) out.set(`user::${r.userId}`, maskedPoolStub("user", r.userId));
+        continue;
+      }
       const rt = r.rankKey && r.tier != null ? rankTierMap.get(`${r.rankKey}::${r.tier}`) ?? null : null;
       out.set(`user::${r.userId}`, {
         scope: "user",
@@ -722,7 +757,15 @@ export async function fetchDisplayInfo(
       .filter((r) => r.selectedFreeformBorderKey != null)
       .map((r) => [r.characterId, r.selectedFreeformBorderKey!] as [string, string]));
     for (const r of rows) {
-      if (r.deletedAt || r.masterDisabled || !r.masterPublic) continue;
+      if (r.deletedAt || r.masterDisabled) continue;
+      if (!r.masterPublic) {
+        // A character inherits its master's privacy — mask it the same
+        // way, and never leak the character name either (naming the
+        // character of a private master is naming the master to anyone
+        // who knows them).
+        if (opts?.maskPrivate) out.set(`character::${r.characterId}`, maskedPoolStub("character", r.characterId));
+        continue;
+      }
       const rt = r.rankKey && r.tier != null ? rankTierMap.get(`${r.rankKey}::${r.tier}`) ?? null : null;
       out.set(`character::${r.characterId}`, {
         scope: "character",
@@ -749,6 +792,35 @@ export async function fetchDisplayInfo(
     }
   }
   return out;
+}
+
+/** Identity-less board entry for a private master's pool. The ownerId
+ *  is a truncated digest of the real id: stable across rebuilds (so
+ *  client list keys don't churn) and unique per pool (so two masked
+ *  rows on one board never collide), but useless for identifying or
+ *  looking anyone up. Every display field is empty/null; renderers
+ *  key off `private` and show an italic "Private User". */
+function maskedPoolStub(scope: RankingScope, realOwnerId: string): Omit<RankingPoolEntry, "value"> {
+  const anon = createHash("sha256").update(`mask::${scope}::${realOwnerId}`).digest("hex").slice(0, 12);
+  return {
+    scope,
+    ownerId: `private-${anon}`,
+    userId: "",
+    characterId: null,
+    displayName: "",
+    avatarUrl: null,
+    borderRankKey: null,
+    freeformBorderKey: null,
+    freeformBorderConfigJson: null,
+    activeNameStyleKey: null,
+    nameStyleConfigJson: null,
+    rankKey: null,
+    tier: null,
+    rankName: null,
+    tierLabel: null,
+    sigilImageUrl: null,
+    private: true,
+  };
 }
 
 interface RankTierDisplay {

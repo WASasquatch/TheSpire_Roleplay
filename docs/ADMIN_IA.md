@@ -425,6 +425,7 @@ the haystack):
 | settings.featuredWorldsLabel | features | featuredWorldsHint, featuredWorldsOn, featuredWorldsOff |
 | settings.betaBadgeLabel | features | betaBadgeHint, betaBadgeOn, betaBadgeOff |
 | settings.designerLabel | features | designerHint, designerOn, designerOff |
+| settings.memberRankingsLabel | features | memberRankingsHint, memberRankingsOn, memberRankingsOff |
 | settings.multiServerLabel | features | multiServerHint, multiServerOn, multiServerOff |
 
 (`also` values above are all within the `settings.` prefix; write them fully
@@ -433,6 +434,7 @@ qualified in the module.)
 Branding fieldset entries (tab `branding`, anchor on each `<fieldset>`):
 `branding.siteNameLegend`, `branding.siteUrlLegend`,
 `branding.taglineLegend`, `branding.logoImageLegend`,
+`branding.backgroundsLegend`,
 `branding.logoColorLegend`, `branding.logoFontLegend`,
 `branding.bannerCoverLegend`, `branding.welcomeLegend`,
 `branding.seoDescLegend`, `branding.seoKeywordsLegend`,

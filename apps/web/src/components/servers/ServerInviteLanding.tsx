@@ -23,6 +23,7 @@ import { fetchServerInvite, joinServerInvite, type PublicServerInvite } from "..
 import { formatDate, formatNumber } from "../../lib/intlFormat.js";
 import { DEFAULT_STYLE_KEY } from "../../lib/ornaments/index.js";
 import {
+  backgroundArtCss,
   forumBannerInk,
   inkClass,
   isDarkSurface,
@@ -166,6 +167,23 @@ export function ServerInviteLanding({ code, onNavigate, authed }: {
   const bannerInk = hasBanner ? forumBannerInk(heroPalette, bannerColor) : null;
 
   return (
+    <>
+      {/* Owner-uploaded background art (migration 0368) — same fixed
+          backdrop treatment as the /s/<slug> landing; the payload drops
+          it for 18+ communities so nothing NSFW-adjacent reaches an
+          anonymous invite page. */}
+      {detail.background ? (
+        <div
+          aria-hidden
+          className="fixed inset-0 z-0 bg-cover bg-center"
+          style={{
+            backgroundColor: detail.background.color,
+            backgroundImage: backgroundArtCss(detail.background),
+          }}
+        >
+          <div className="absolute inset-0 bg-keep-bg/50" />
+        </div>
+      ) : null}
     <div className="relative z-10 mx-auto min-h-screen w-full px-0 py-0 md:px-6 md:py-8 lg:w-[min(100%,max(82vw,80rem))]">
       <article
         className="keep-frame overflow-hidden border-y border-keep-rule bg-keep-bg text-keep-text shadow-2xl md:rounded-lg md:border"
@@ -356,6 +374,7 @@ export function ServerInviteLanding({ code, onNavigate, authed }: {
         </footer>
       </article>
     </div>
+    </>
   );
 }
 

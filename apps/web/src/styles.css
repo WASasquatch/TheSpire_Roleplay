@@ -4891,6 +4891,30 @@ html.reduce-motion .splash-flash { animation: none; box-shadow: 0 0 0 3px rgb(va
 }
 
 /* ============================================================
+ * Splash member-rankings marquee (MemberRankingsMarquee)
+ * ============================================================
+ * Gentle fade+rise as the rotating board swaps sections. Suppressed
+ * under BOTH reduce-motion signals (OS media query + the in-app
+ * per-device toggle's html.reduce-motion class) — the rotation
+ * itself is already frozen in JS there; this covers the manual
+ * prev/next swap too. */
+@keyframes member-rankings-swap-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.member-rankings-swap {
+  animation: member-rankings-swap-in 280ms ease-out;
+}
+html.reduce-motion .member-rankings-swap {
+  animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .member-rankings-swap {
+    animation: none;
+  }
+}
+
+/* ============================================================
  * Splash worlds orb, crystal-ball carousel (FeaturedWorldsCarousel)
  * ============================================================ */
 .orb-section {

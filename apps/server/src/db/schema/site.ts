@@ -229,6 +229,18 @@ export const siteSettings = sqliteTable("site_settings", {
    */
   ogImageUrl: text("og_image_url").notNull().default(""),
   /**
+   * Admin-uploaded site background art (migration 0368), replacing the
+   * built-in Spire art on the splash pages and the glass chat shell when
+   * set. Two slots — light and dark — picked by the viewer's palette
+   * luminance, same fork the static art uses. Each holds a BackgroundArt
+   * JSON bundle ({webpUrl, avifUrl, color}) rendered by images.ts from
+   * the admin's upload; NULL = the built-in art. The Spire Classic
+   * presets keep the original painted art regardless (an explicit user
+   * choice of that art, not a slot for operator branding).
+   */
+  bgLightJson: text("bg_light_json"),
+  bgDarkJson: text("bg_dark_json"),
+  /**
    * Tagline appended after the site name in the homepage / login / register
    * `<title>` (`{siteName} - {tagline}`). Empty falls back to the built-in
    * HOMEPAGE_TAGLINE in seo.ts. Migration 0309.
@@ -263,6 +275,16 @@ export const siteSettings = sqliteTable("site_settings", {
   activityFeedsEnabled: integer("activity_feeds_enabled", { mode: "boolean" }).notNull().default(false),
   /** Splash page renders a randomized carousel of up to 10 open worlds when enabled. Off by default so brand-new installs with a thin catalog don't show empty rotation. */
   featuredWorldsEnabled: integer("featured_worlds_enabled", { mode: "boolean" }).notNull().default(false),
+  /**
+   * Homepage member-rankings marquee (migration 0369): the splash "Our
+   * members" section — every earning leaderboard rotating one board at a
+   * time, the daily talkative/actions boards, and the featured-member
+   * spotlight — plus its nav tab. ON by default (unlike the other splash
+   * feeds): it only ever shows public or identity-masked data, and the
+   * section additionally self-hides while a cold install has no ranking
+   * rows at all, so a fresh site never shows an empty shell.
+   */
+  memberRankingsEnabled: integer("member_rankings_enabled", { mode: "boolean" }).notNull().default(true),
   /**
    * Splash stat: surface the rolling 24h chat message count on the
    * splash. Independent of `activityFeedsEnabled`, each toggle gates

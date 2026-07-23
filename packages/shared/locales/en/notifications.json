@@ -81,7 +81,8 @@
   },
   "history": {
     "returnToLiveTitle": "Reload the recent backlog and return to live chat",
-    "viewingOlder": "Viewing older history, click to return to live"
+    "viewingOlder": "Viewing older history, click to return to live",
+    "jumpToPresent": "Jump to present"
   },
   "incognito": {
     "banner": "You're incognito as <1>{{alias}}</1>. The userlist hides you and your messages render as system lines.",

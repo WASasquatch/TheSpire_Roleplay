@@ -246,7 +246,7 @@ export const PERMISSION_DESCRIPTIONS: Record<PermissionKey, string> = {
 
   // site_admin
   edit_site_settings: "Edit retention, session TTL, content limits, HTML rules, and other site config.",
-  upload_logo: "Upload a replacement banner / logo image.",
+  upload_logo: "Upload branding images: the logo, the site backgrounds, and the social share card.",
   manage_custom_commands: "Create, edit, or delete admin-authored `!cmd` commands.",
   manage_title_kinds: "Manage the mutual-title catalog (marriage, partner, etc.).",
   manage_nav_links: "Manage the banner-navigation link rows.",

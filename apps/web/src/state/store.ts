@@ -16,7 +16,8 @@ import type {
   TourId,
   TypingEntry,
 } from "@thekeep/shared";
-import { DEFAULT_THEME, VERSION, isBetaVersion } from "@thekeep/shared";
+import type { BackgroundArt } from "@thekeep/shared";
+import { DEFAULT_THEME, VERSION, isBetaVersion, normalizeBackgroundArt } from "@thekeep/shared";
 import { recordNav } from "../lib/nav-metrics.js";
 
 export interface AuthMe {
@@ -198,6 +199,20 @@ export interface SiteBranding {
    */
   googleAuthEnabled?: boolean;
   /**
+   * Admin-uploaded site background art (migration 0368) — light / dark
+   * slots picked by the resolved palette's luminance, exactly like the
+   * static art fork. Null/absent = the built-in Spire art. The Spire
+   * Classic presets keep the original painted art regardless.
+   */
+  bgLight?: BackgroundArt | null;
+  bgDark?: BackgroundArt | null;
+  /**
+   * Homepage member-rankings marquee + featured-member spotlight
+   * (migration 0369). Defaults ON server-side; optional so cached
+   * pre-feature branding hydrates to ON too.
+   */
+  memberRankingsEnabled?: boolean;
+  /**
    * Admin-configured per-preset design map. Keys are THEME_PRESETS names
    * (Parchment, Twilight, …); values are design keys (medieval/modern/
    * scifi). When the user's active palette matches a preset, this map
@@ -265,6 +280,11 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // on once GOOGLE_CLIENT_ID/SECRET (google) and YOUTUBE_API_KEY (youtube)
   // are configured.
   googleAuthEnabled: false,
+  // No custom art until the /site payload delivers the admin's uploads.
+  bgLight: null,
+  bgDark: null,
+  // On by default, mirrors the schema default (migration 0369).
+  memberRankingsEnabled: true,
   // Empty by default, every theme falls straight through to
   // defaultStyleKey. Admins seed pinned designs via the migration and
   // can edit them in the admin settings UI.
@@ -359,6 +379,11 @@ export function loadCachedBranding(): SiteBranding {
       googleAuthEnabled: typeof parsed.googleAuthEnabled === "boolean"
         ? parsed.googleAuthEnabled
         : DEFAULT_BRANDING.googleAuthEnabled ?? false,
+      bgLight: normalizeBackgroundArt(parsed.bgLight),
+      bgDark: normalizeBackgroundArt(parsed.bgDark),
+      memberRankingsEnabled: typeof parsed.memberRankingsEnabled === "boolean"
+        ? parsed.memberRankingsEnabled
+        : true,
       themeDesignMap: sanitizeThemeDesignMap(parsed.themeDesignMap),
     };
   } catch {

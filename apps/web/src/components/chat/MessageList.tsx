@@ -269,6 +269,23 @@ interface Props {
    *  render Unpin (filled) vs Pin (outline). Fed from App's `room:pins`
    *  state. */
   pinnedMessageIds?: ReadonlySet<string>;
+  /**
+   * Reports threshold crossings of "the reader has scrolled well up into
+   * loaded history" (FAR_FROM_BOTTOM_PX; flat mode only). Fired from the
+   * scroll listener ONLY on state change, so the parent re-renders twice
+   * per excursion, not per scroll frame. App floats the centered
+   * "Jump to present" pill off this.
+   */
+  onFarFromBottomChange?: (far: boolean) => void;
+  /**
+   * Receives an imperative "pin the feed to its newest line" the pill's
+   * no-jump-window path calls. Routed through MessageList (rather than a
+   * raw scrollTop write in App) so the write stamps programmaticScrollAtRef
+   * — the echo discipline every framework scroll must follow — and re-arms
+   * the bottom stick. No-ops while the buffer is a detached jump window;
+   * that case goes through returnToLive instead.
+   */
+  jumpToPresentRef?: React.MutableRefObject<(() => void) | null>;
   /** Anonymous forum reader (/f/ landing): hide every action toolbar —
    *  read-only browsing, copy-link only. */
   readOnly?: boolean;
@@ -394,6 +411,15 @@ const NEAR_BOTTOM_PX = 120;
 const STICK_BOTTOM_PX = 24;
 
 /**
+ * Scrolled-up distance past which the reader counts as "in loaded
+ * history" for the floating Jump-to-present pill (App renders it off
+ * onFarFromBottomChange). Roughly two screens: far enough that a casual
+ * few-lines re-read never flashes the pill, near enough that anyone
+ * genuinely reading back always has the exit within reach.
+ */
+const FAR_FROM_BOTTOM_PX = 1400;
+
+/**
  * Flat-buffer windowing bounds. While the reader is parked at the
  * bottom, the in-memory message buffer is trimmed back to the newest
  * `SOFT_CAP` once it grows past `HARD_CAP`. The gap between the two is
@@ -423,7 +449,7 @@ const FLAT_BUFFER_HARD_CAP = 300;
  */
 const PROGRAMMATIC_ECHO_MS = 100;
 
-export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canPinMessage = false, pinnedMessageIds, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, forumTourAnchors = false, postPermalink, nsfwTintRoomId = null, pairSiblingRoomId = null }: Props) {
+export function MessageList({ messages, occupants, selfUserId, selfNames, roomType, replyMode = "flat", onIconClick, onNameClick, onMentionClick, onWorldClick, onTimeClick, onJumpToReply, fontStep, highlightMessageId, onHighlightDone, roomId, threadCategories, activeTopicId, onSetActiveTopic, onPopoutTopic, canModerate = false, canPin = false, canPinMessage = false, pinnedMessageIds, onFarFromBottomChange, jumpToPresentRef, canAdminEdit = false, onQuotePost, forumBuckets, onGoToForumPage, onFlushPendingTopics, onActivateCategory, onStartTopicInCategory, renderTopicComposer, renderNewTopicForm, unreadTopicIds, watchedTopicIds, onToggleTopicWatch, readOnly = false, forumTourAnchors = false, postPermalink, nsfwTintRoomId = null, pairSiblingRoomId = null }: Props) {
   const { t } = useTranslation("chat");
   const ref = useRef<HTMLDivElement | null>(null);
   /**
@@ -442,10 +468,64 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
    * past the near-bottom threshold and read as "scrolled away."
    */
   const stickRef = useRef(true);
+  /**
+   * TRUE while this room's buffer is a DETACHED jump-to-message window
+   * (store.jumpWindows): the buffer's tail is old history, not the live
+   * newest. Being at the bottom of the CONTAINER then means "reading the
+   * bottom of the loaded window", NOT "parked at the live tail" — so
+   * every bottom-stick mechanism must stand down. Without this, a
+   * loadNewer page appending while the reader sat at the window's bottom
+   * edge end-pinned them past the freshly loaded rows, which put them at
+   * the new bottom, which re-fired the prefetch… cascading page-by-page
+   * straight to the present (the "scroll down twice and it flips to
+   * present" bug). The layout/observer paths read the REF: it updates in
+   * an effect AFTER the commit, so the very commit that flushes the
+   * window back to live (its final page + held rows appending below)
+   * still counts as detached and doesn't end-pin over the rows the
+   * reader hasn't read yet.
+   */
+  const detachedTail = useChat((s) => (roomId ? !!s.jumpWindows[roomId] : false));
+  const detachedTailRef = useRef(detachedTail);
+  useEffect(() => {
+    detachedTailRef.current = detachedTail;
+    // Disarm a stick left over from BEFORE the jump (the reader was
+    // parked at the live bottom when they clicked the notification):
+    // late media loading inside the history window must not re-pin them
+    // to the window's bottom edge and start the same cascade.
+    if (detachedTail) stickRef.current = false;
+  }, [detachedTail]);
   // Current user id, so the append-follow can tell the reader's OWN send
   // (always jump to it) apart from someone else's live message (which must
   // NOT yank a reader who has scrolled up to read).
   const myUserId = useChat((s) => s.me?.id ?? null);
+  // Far-from-bottom reporting (the Jump-to-present pill). The scroll
+  // listener is bound once, so it reads the live callback through a ref;
+  // lastFarRef makes the report change-only.
+  const onFarFromBottomChangeRef = useRef(onFarFromBottomChange);
+  useEffect(() => { onFarFromBottomChangeRef.current = onFarFromBottomChange; }, [onFarFromBottomChange]);
+  const lastFarRef = useRef(false);
+  // Re-baseline on room switch, in step with App's own reset of the pill
+  // state. Without this, leaving room A while "far" wedges the ref true,
+  // and the first genuine far-crossing in room B would go unreported
+  // (change-only reporting) — the pill would never show there.
+  useEffect(() => { lastFarRef.current = false; }, [roomId]);
+  // Imperative "pin to the newest line" for the pill's no-window path.
+  // Lives here (not a raw scrollTop write in App) so the write stamps
+  // programmaticScrollAtRef and re-arms the stick like every other
+  // framework scroll. Detached jump windows go through returnToLive
+  // instead — guard anyway so a stray call can't arm the stick mid-window.
+  useEffect(() => {
+    if (!jumpToPresentRef) return;
+    jumpToPresentRef.current = () => {
+      const el = ref.current;
+      if (!el || detachedTailRef.current) return;
+      programmaticScrollAtRef.current = performance.now();
+      el.scrollTop = el.scrollHeight;
+      stickRef.current = true;
+      el.style.overflowAnchor = "none";
+    };
+    return () => { jumpToPresentRef.current = null; };
+  }, [jumpToPresentRef]);
   /**
    * Scroll-bookkeeping for flat-mode auto-scroll-vs-preserve. We
    * capture the scroll geometry from BEFORE the upcoming commit and
@@ -542,7 +622,20 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       // bottom, so manually scrolling up even a little releases the stick
       // and stops the "bounce." The looser NEAR_BOTTOM_PX now governs only
       // whether the reader's OWN new message (append, below) scrolls to follow.
-      stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_BOTTOM_PX;
+      // Never arm the stick while the buffer is a detached history window:
+      // its bottom edge is old history, not the live tail.
+      stickRef.current = !detachedTailRef.current
+        && el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_BOTTOM_PX;
+      // Report "scrolled well up into history" crossings for the floating
+      // Jump-to-present pill. Change-only so the parent isn't re-rendered
+      // per scroll frame; flat chat only (forums read top-down).
+      if (replyModeRef.current !== "nested") {
+        const far = el.scrollHeight - el.scrollTop - el.clientHeight > FAR_FROM_BOTTOM_PX;
+        if (far !== lastFarRef.current) {
+          lastFarRef.current = far;
+          onFarFromBottomChangeRef.current?.(far);
+        }
+      }
       // Native scroll-anchoring, toggled by where the reader is:
       //   - at the bottom (stick) → OFF: the manual re-pin owns the position
       //     there, and browser anchoring would fight it into a wobble.
@@ -624,7 +717,14 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
       // Full-replacement: BOTH endpoints changed (room switch, jump-window
       // swap). End-pin so the user lands at the newest.
       const replaced = firstChanged && lastChanged;
-      if (replaced || dist <= STICK_BOTTOM_PX || (newestIsMine && dist < NEAR_BOTTOM_PX)) {
+      // Detached history window: an appended `?after=` page extends BELOW
+      // the reader — never end-pin over it, even from the window's bottom
+      // edge (that edge is history, not the live tail). The ref still
+      // reads detached on the flush commit itself, so the final page +
+      // held live rows also land without a pin and the reader scrolls
+      // into the present at their own pace.
+      const detached = detachedTailRef.current;
+      if (replaced || (!detached && (dist <= STICK_BOTTOM_PX || (newestIsMine && dist < NEAR_BOTTOM_PX)))) {
         // Mark our write so its (async) scroll echo isn't read as a user
         // scroll: unmarked, the echo stamped lastUserScrollTsRef and tripped
         // the re-pin's "user just scrolled" deferral, delaying the follow-up
@@ -710,7 +810,11 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     let forceNextPin = false;
     const pin = () => {
       pinHandleRef.current = null;
-      if (!stickRef.current || highlightMessageId) { forceNextPin = false; return; } // jump owns scroll
+      // Detached history window → the container's bottom is not the live
+      // tail; a late-media re-pin would grab the reader to the window's
+      // edge and kick off the prefetch cascade. (stickRef is disarmed
+      // while detached, this is belt-and-braces for the transition edge.)
+      if (!stickRef.current || detachedTailRef.current || highlightMessageId) { forceNextPin = false; return; } // jump owns scroll
       const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
       if (dist <= 2) { forceNextPin = false; return; } // (b) already pinned — don't re-trigger the gates
       // A FORCED pin (container resize) stands down if the reader just scrolled
@@ -812,6 +916,11 @@ export function MessageList({ messages, occupants, selfUserId, selfNames, roomTy
     if (replyMode === "nested") return;
     if (!roomId) return;
     if (!stickRef.current) return;
+    // Detached jump window: never trim — it would drop the rows around
+    // the jump target out from under the reader. stickRef is already
+    // disarmed while detached, so this is defense-in-depth for any
+    // future stick-arming path.
+    if (detachedTailRef.current) return;
     if (messages.length <= FLAT_BUFFER_HARD_CAP) return;
     trimRoomToRecent(roomId, FLAT_BUFFER_SOFT_CAP);
     // Staff pair oversight: the rendered feed is TWO buckets merged, and

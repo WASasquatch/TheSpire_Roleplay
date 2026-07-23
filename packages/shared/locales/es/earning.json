@@ -147,6 +147,7 @@
     "winLabel_other": "victorias",
     "winLabel_many": "victorias",
     "characterScope": "personaje",
+    "privateUser": "Usuario privado",
     "spotlight": "Destacado",
     "showChampion": "Mostrar al campeón de {{board}}",
     "spotlightRank": "#1 · {{board}}",

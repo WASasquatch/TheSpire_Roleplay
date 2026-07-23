@@ -1,6 +1,6 @@
 {
   "name": "@thekeep/server",
-  "version": "0.33.19",
+  "version": "0.33.20",
   "private": true,
   "type": "module",
   "scripts": {
@@ -38,6 +38,7 @@
     "pino": "^9.4.0",
     "pino-pretty": "^11.2.2",
     "sanitize-html": "^2.13.1",
+    "sharp": "^0.35.3",
     "socket.io": "^4.8.0",
     "tsx": "^4.19.1",
     "web-push": "^3.6.7",

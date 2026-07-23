@@ -91,6 +91,7 @@ export const ADMIN_SEARCH_ENTRIES: readonly AdminSearchEntry[] = [
   { key: "settings.featuredWorldsLabel", tab: "settings", subtab: "features", also: ["settings.featuredWorldsHint", "settings.featuredWorldsOn", "settings.featuredWorldsOff"] },
   { key: "settings.betaBadgeLabel", tab: "settings", subtab: "features", also: ["settings.betaBadgeHint", "settings.betaBadgeOn", "settings.betaBadgeOff"] },
   { key: "settings.designerLabel", tab: "settings", subtab: "features", also: ["settings.designerHint", "settings.designerOn", "settings.designerOff"] },
+  { key: "settings.memberRankingsLabel", tab: "settings", subtab: "features", also: ["settings.memberRankingsHint", "settings.memberRankingsOn", "settings.memberRankingsOff"] },
   { key: "settings.multiServerLabel", tab: "settings", subtab: "features", also: ["settings.multiServerHint", "settings.multiServerOn", "settings.multiServerOff"] },
   { key: "settings.worldMapUploadsLabel", tab: "settings", subtab: "features", also: ["settings.worldMapUploadsHint", "settings.worldMapUploadsOn", "settings.worldMapUploadsOff"] },
 
@@ -99,6 +100,7 @@ export const ADMIN_SEARCH_ENTRIES: readonly AdminSearchEntry[] = [
   { key: "branding.siteUrlLegend", tab: "branding" },
   { key: "branding.taglineLegend", tab: "branding" },
   { key: "branding.logoImageLegend", tab: "branding" },
+  { key: "branding.backgroundsLegend", tab: "branding", also: ["branding.backgroundsHelp", "branding.bgLightLabel", "branding.bgDarkLabel"] },
   { key: "branding.logoColorLegend", tab: "branding" },
   { key: "branding.logoFontLegend", tab: "branding" },
   { key: "branding.bannerCoverLegend", tab: "branding" },

@@ -84,7 +84,8 @@
   },
   "history": {
     "returnToLiveTitle": "Recargar el historial reciente y volver al chat en vivo",
-    "viewingOlder": "Viendo historial anterior, haz clic para volver al chat en vivo"
+    "viewingOlder": "Viendo historial anterior, haz clic para volver al chat en vivo",
+    "jumpToPresent": "Ir al presente"
   },
   "incognito": {
     "banner": "Estás en modo incógnito como <1>{{alias}}</1>. La lista de usuarios te oculta y tus mensajes se muestran como líneas del sistema.",

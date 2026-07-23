@@ -40,6 +40,8 @@ export type AuditAction =
   | "custom_command_delete"
   | "builtin_command_config_update"
   | "logo_upload"
+  | "background_upload"
+  | "og_card_upload"
   // Backup / restore (admin Backups tab)
   | "backup_create"
   | "backup_import"
@@ -213,6 +215,8 @@ export const AUDIT_ACTION_GROUPS: Record<string, { label: string; actions: reado
       "custom_command_delete",
       "builtin_command_config_update",
       "logo_upload",
+      "background_upload",
+      "og_card_upload",
       "faq_create",
       "faq_update",
       "faq_delete",

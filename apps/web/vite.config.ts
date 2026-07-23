@@ -60,6 +60,11 @@ export default defineConfig({
       "/api": "http://localhost:3001",
       "/thesaurus": "http://localhost:3001",
       "/earning": "http://localhost:3001",
+      // Homepage member-rankings marquee (GET /rankings/splash). Without
+      // this the splash's fetch hits Vite's SPA fallback, gets index.html
+      // with a 200, fails the JSON parse silently (the section swallows
+      // errors by design), and the marquee never appears in dev.
+      "/rankings": "http://localhost:3001",
       // Forums Catalog API (catalog list/detail, board topics, posting
       // gates, applications, owner console, visit markers). Without this
       // the catalog's fetch("/forums") falls through to Vite's SPA

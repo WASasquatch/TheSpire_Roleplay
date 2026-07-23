@@ -159,7 +159,9 @@
       "badBase64": "contenido base64 inválido",
       "emptyImage": "imagen vacía",
       "tooLarge": "imagen demasiado grande (máx. {{kb}}KB)",
-      "unsupportedType": "tipo de imagen no compatible (solo png, jpg, webp, gif)"
+      "unsupportedType": "tipo de imagen no compatible (solo png, jpg, webp, gif)",
+      "bgTooSmall": "la imagen es demasiado pequeña para un fondo (mínimo 640x360)",
+      "unreadable": "no se pudo decodificar esa imagen"
     },
     "identity": {
       "targetRequired": "Se requiere un nombre o un token @id:/@cid:.",

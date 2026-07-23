@@ -368,6 +368,8 @@
       "publicBannerHint": "Se muestra en las tarjetas de Descubrir, las páginas para compartir y las vistas previas de enlaces. Si lo dejas vacío, esos lugares muestran el nombre y los colores de tu comunidad en lugar del arte del banner.",
       "wordmark": "Logotipo de texto",
       "wordmarkHint": "Reemplaza el logo de la app en la barra superior para que los miembros sepan en qué servidor están.",
+      "background": "Fondo",
+      "backgroundHint": "Tu propio arte de fondo para este servidor. Los miembros con el estilo de cristal lo ven detrás del chat mientras están aquí, y respalda tu página pública y tus enlaces de invitación. Una imagen ancha (mínimo 2560x1080) funciona mejor; se convierte automáticamente a formatos web rápidos. Las comunidades 18+ nunca lo muestran en páginas públicas.",
       "theme": "Tema",
       "themeHint": "Una paleta solo para las páginas de este servidor. El chat y la lista de usuarios no cambian.",
       "addTheme": "Agregar un tema personalizado",

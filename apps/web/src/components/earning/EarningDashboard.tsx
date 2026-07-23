@@ -1386,7 +1386,17 @@ function RankingEntryCard({ rank, entry, metric }: { rank: number; entry: Rankin
       <div className={`w-6 shrink-0 text-center font-bold tabular-nums ${rank <= 3 ? "text-keep-action" : "text-keep-muted"}`}>
         {rank}
       </div>
-      <ProfileLinkAvatar entry={entry} size="sm" />
+      {entry.private ? (
+        // Masked private pool: neutral silhouette circle (sized to the
+        // BorderedAvatar `sm` clamp) with no click affordance.
+        <div
+          aria-hidden
+          className="shrink-0 rounded-full border border-keep-rule/70 bg-keep-panel/60"
+          style={{ width: "clamp(32px, 2.2rem, 40px)", height: "clamp(32px, 2.2rem, 40px)" }}
+        />
+      ) : (
+        <ProfileLinkAvatar entry={entry} size="sm" />
+      )}
       <div className="min-w-0 flex-1">
         {/* `overflow-clip` + a 1.75em margin matches the userlist's
             UserNameTag pattern: still ellipsizes long names, but the
@@ -1395,7 +1405,9 @@ function RankingEntryCard({ rank, entry, metric }: { rank: number; entry: Rankin
             being chopped at the text baseline. Plain `truncate`
             (overflow:hidden) clipped the Synthwave glow off mid-stroke. */}
         <div className="min-w-0 overflow-clip whitespace-nowrap text-ellipsis text-sm font-semibold [overflow-clip-margin:1.75em]">
-          <StyledEntryName entry={entry} />
+          {entry.private
+            ? <span className="italic font-normal text-keep-muted">{t("rankings.privateUser")}</span>
+            : <StyledEntryName entry={entry} />}
         </div>
         {entry.scope === "character" || entry.rankName ? (
           <div className="truncate text-[10px] uppercase tracking-wide text-keep-muted">

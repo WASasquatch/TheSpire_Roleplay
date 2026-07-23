@@ -19,7 +19,10 @@ import {
   type PermissionKey,
   type Role,
   type AutomodRule,
+  parseBackgroundArt,
+  type BackgroundArt,
 } from "@thekeep/shared";
+import { BackgroundRenderError, renderBackgroundVariants, renderOgCard } from "../images.js";
 import {
   auditLog,
   automodRules,
@@ -1358,6 +1361,7 @@ export async function registerAdminRoutes(
     analyticsRespectDnt: z.boolean().optional(),
     /** Surfaces live community activity counters on the splash + future feed rails. Off during cold-start. */
     activityFeedsEnabled: z.boolean().optional(),
+    memberRankingsEnabled: z.boolean().optional(),
     serversEnabled: z.boolean().optional(),
     /** World map image uploads (default off — disk is shared with the DB). */
     worldMapUploadsEnabled: z.boolean().optional(),
@@ -1457,6 +1461,7 @@ export async function registerAdminRoutes(
       // Only whether the MaxMind geo upgrade is configured — never the raw key.
       maxmindConfigured: !!(s.maxmindAccountId && s.maxmindLicenseKey),
       activityFeedsEnabled: s.activityFeedsEnabled,
+      memberRankingsEnabled: s.memberRankingsEnabled,
       serversEnabled: s.serversEnabled,
       worldMapUploadsEnabled: s.worldMapUploadsEnabled,
       antiSpamEnabled: s.antiSpamEnabled,
@@ -1600,6 +1605,9 @@ export async function registerAdminRoutes(
     if (body.analyticsRespectDnt !== undefined) patch.analyticsRespectDnt = body.analyticsRespectDnt;
     if (body.activityFeedsEnabled !== undefined) {
       patch.activityFeedsEnabled = body.activityFeedsEnabled;
+    }
+    if (body.memberRankingsEnabled !== undefined) {
+      patch.memberRankingsEnabled = body.memberRankingsEnabled;
     }
     if (body.featuredWorldsEnabled !== undefined) {
       patch.featuredWorldsEnabled = body.featuredWorldsEnabled;
@@ -2009,6 +2017,163 @@ export async function registerAdminRoutes(
       actorUserId: sessionUser.id,
       action: "logo_upload",
       metadata: { url, bytes: bytes.length, mime: detected.mime },
+    });
+    return { ok: true, url, settings: result };
+  });
+
+  /* ---------- site background + social-card uploads ----------
+   * Same transport posture as the logo upload (base64 data URL in plain
+   * JSON), but these run the sharp pipeline in images.ts instead of
+   * storing bytes verbatim: a background upload is re-rendered into the
+   * 2560w WebP + AVIF pair plus a sampled average color — the same
+   * variant set the built-in Spire art ships as static files — and the
+   * social-card upload is cover-cropped to the standard 1200x630 JPEG.
+   * Masters are not kept: the rendered variants ARE the stored artifacts;
+   * re-uploading re-renders. Both gated on `upload_logo`, the granular
+   * branding-image-upload key. */
+
+  /** Best-effort unlink of a replaced /uploads/<subdir>/ file. Never
+   *  throws: a missing file just means a restore/manual cleanup got
+   *  there first, and the new upload already succeeded. */
+  async function unlinkUploadedFile(url: string | null | undefined, subdir: string): Promise<void> {
+    const prefix = `/uploads/${subdir}/`;
+    if (!url?.startsWith(prefix)) return;
+    const filename = url.slice(prefix.length);
+    if (filename.includes("/") || filename.includes("..")) return;
+    const { unlink } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    try { await unlink(join(uploadsRoot, subdir, filename)); } catch { /* best-effort */ }
+  }
+
+  const uploadBackgroundBody = z.union([
+    z.object({
+      slot: z.enum(["light", "dark"]),
+      /** Source image data URL; ~15MB of base64 ≈ 11MB of image, room
+       *  for a full-res 4K PNG master under the 16MB route bodyLimit. */
+      dataUrl: z.string().min(32).max(15 * 1024 * 1024),
+    }).strict(),
+    z.object({ slot: z.enum(["light", "dark"]), clear: z.literal(true) }).strict(),
+  ]);
+
+  app.post<{ Body: unknown }>("/admin/upload/background", { bodyLimit: 16 * 1024 * 1024 }, async (req, reply) => {
+    if (!(await requirePermission(req, reply, "upload_logo"))) return;
+    let body: z.infer<typeof uploadBackgroundBody>;
+    try { body = uploadBackgroundBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const column = body.slot === "light" ? ("bgLightJson" as const) : ("bgDarkJson" as const);
+    const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    const prev = parseBackgroundArt((await getSettings(db))[column]);
+    if ("clear" in body) {
+      const result = await updateSettings(db, { [column]: null }, sessionUser.id);
+      await unlinkUploadedFile(prev?.webpUrl, "backgrounds");
+      await unlinkUploadedFile(prev?.avifUrl, "backgrounds");
+      await recordAudit(db, {
+        actorUserId: sessionUser.id,
+        action: "background_upload",
+        metadata: { slot: body.slot, cleared: true },
+      });
+      return { ok: true, background: null, settings: result };
+    }
+    const m = /^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(body.dataUrl.trim());
+    if (!m) { reply.code(400); return { error: "expected a base64 data URL" }; }
+    let bytes: Buffer;
+    try { bytes = Buffer.from(m[2]!, "base64"); }
+    catch { reply.code(400); return { error: "invalid base64 payload" }; }
+    if (!detectImage(bytes)) {
+      reply.code(415);
+      return { error: "unsupported image type (png, jpg, webp, gif only)" };
+    }
+    let rendered: Awaited<ReturnType<typeof renderBackgroundVariants>>;
+    try { rendered = await renderBackgroundVariants(bytes); }
+    catch (err) {
+      if (err instanceof BackgroundRenderError) {
+        reply.code(422);
+        return {
+          error: err.code === "tooSmall"
+            ? "image is too small for a background (needs at least 640x360)"
+            : "could not decode that image",
+        };
+      }
+      throw err;
+    }
+    const { createHash } = await import("node:crypto");
+    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const dir = join(uploadsRoot, "backgrounds");
+    await mkdir(dir, { recursive: true });
+    const stem = `site-${body.slot}-${hash}-2560`;
+    await writeFile(join(dir, `${stem}.webp`), rendered.webp);
+    await writeFile(join(dir, `${stem}.avif`), rendered.avif);
+    const art: BackgroundArt = {
+      webpUrl: `/uploads/backgrounds/${stem}.webp`,
+      avifUrl: `/uploads/backgrounds/${stem}.avif`,
+      color: rendered.color,
+    };
+    const result = await updateSettings(db, { [column]: JSON.stringify(art) }, sessionUser.id);
+    if (prev && prev.webpUrl !== art.webpUrl) {
+      await unlinkUploadedFile(prev.webpUrl, "backgrounds");
+      await unlinkUploadedFile(prev.avifUrl, "backgrounds");
+    }
+    await recordAudit(db, {
+      actorUserId: sessionUser.id,
+      action: "background_upload",
+      metadata: { slot: body.slot, url: art.webpUrl, sourceBytes: bytes.length, width: rendered.width, height: rendered.height },
+    });
+    return { ok: true, background: art, settings: result };
+  });
+
+  const uploadOgCardBody = z.object({
+    dataUrl: z.string().min(32).max(15 * 1024 * 1024),
+  });
+
+  app.post<{ Body: unknown }>("/admin/upload/og-card", { bodyLimit: 16 * 1024 * 1024 }, async (req, reply) => {
+    if (!(await requirePermission(req, reply, "upload_logo"))) return;
+    let body: z.infer<typeof uploadOgCardBody>;
+    try { body = uploadOgCardBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const m = /^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,(.+)$/.exec(body.dataUrl.trim());
+    if (!m) { reply.code(400); return { error: "expected a base64 data URL" }; }
+    let bytes: Buffer;
+    try { bytes = Buffer.from(m[2]!, "base64"); }
+    catch { reply.code(400); return { error: "invalid base64 payload" }; }
+    if (!detectImage(bytes)) {
+      reply.code(415);
+      return { error: "unsupported image type (png, jpg, webp, gif only)" };
+    }
+    const prevUrl = (await getSettings(db)).ogImageUrl;
+    let card: Buffer;
+    try { card = await renderOgCard(bytes); }
+    catch (err) {
+      if (err instanceof BackgroundRenderError) {
+        reply.code(422);
+        return {
+          error: err.code === "tooSmall"
+            ? "image is too small for a share card (needs at least 640x360)"
+            : "could not decode that image",
+        };
+      }
+      throw err;
+    }
+    // Hash the RENDERED card, not the source: two different source
+    // crops of the same art produce distinct card bytes → distinct
+    // URLs, which is what scraper caches key on.
+    const { createHash } = await import("node:crypto");
+    const hash = createHash("sha256").update(card).digest("hex").slice(0, 16);
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    const { join } = await import("node:path");
+    const dir = join(uploadsRoot, "og");
+    await mkdir(dir, { recursive: true });
+    const filename = `card-${hash}.jpg`;
+    await writeFile(join(dir, filename), card);
+    const url = `/uploads/og/${filename}`;
+    const sessionUser = (req as FastifyRequest & { sessionUser?: SessionUserCtx }).sessionUser!;
+    const result = await updateSettings(db, { ogImageUrl: url }, sessionUser.id);
+    if (prevUrl && prevUrl !== url) await unlinkUploadedFile(prevUrl, "og");
+    await recordAudit(db, {
+      actorUserId: sessionUser.id,
+      action: "og_card_upload",
+      metadata: { url, sourceBytes: bytes.length },
     });
     return { ok: true, url, settings: result };
   });

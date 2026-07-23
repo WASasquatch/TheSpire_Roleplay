@@ -20,12 +20,13 @@ import {
 } from "lucide-react";
 import { useChat } from "../../state/store.js";
 import { formatNumber } from "../../lib/intlFormat.js";
-import { resolveSplashTheme, splashBgClass, themeStyle } from "../../lib/theme.js";
+import { resolveSplashTheme, splashBgClass, splashBgStyle, themeStyle } from "../../lib/theme.js";
 import { SPLASH_GLOW, SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 import { BookshelfStrip } from "../scriptorium/BookshelfStrip.js";
 import { SplashNav, type SplashTab } from "./SplashNav.js";
 import { SplashLanguagePicker } from "./SplashLanguagePicker.js";
 import { FeatureShowcase } from "./FeatureShowcase.js";
+import { MemberRankingsMarquee, fetchSplashRankings, type SplashRankingsPayload } from "./MemberRankingsMarquee.js";
 import { FeaturedWorldCards } from "./FeaturedWorldCards.js";
 import { PopularCommunities } from "./PopularCommunities.js";
 import { RoleplayCommunities } from "./RoleplayCommunities.js";
@@ -118,6 +119,24 @@ export function SplashLanding({ onNavigate }: Props) {
     const id = window.setInterval(load, 30_000);
     return () => { cancelled = true; window.clearInterval(id); };
   }, [statsEnabled]);
+
+  // Member rankings marquee payload (admin toggle, migration 0369). One
+  // fetch per visit — the server caches the build; the boards don't need
+  // to tick live. Fetched HERE (not inside the section component) so the
+  // "Members" nav tab and the section render off the same resolved
+  // state: no dead tab when the payload is empty or unreachable.
+  const [memberRankings, setMemberRankings] = useState<SplashRankingsPayload | null>(null);
+  useEffect(() => {
+    if (!branding.memberRankingsEnabled) {
+      setMemberRankings(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchSplashRankings().then((j) => {
+      if (!cancelled && j) setMemberRankings(j);
+    });
+    return () => { cancelled = true; };
+  }, [branding.memberRankingsEnabled]);
 
   const logoStyle: React.CSSProperties = {};
   if (branding.logoColor) logoStyle.color = branding.logoColor;
@@ -219,6 +238,12 @@ export function SplashLanding({ onNavigate }: Props) {
     ...(branding.serversEnabled
       ? [{ label: t("landing.tabCommunities"), kind: "anchor", id: "popular" } as SplashTab]
       : []),
+    // Members rankings marquee — the tab appears only once the payload
+    // has actually resolved with sections, so it can never scroll to a
+    // section that isn't rendering (fresh install, cold API, toggle off).
+    ...(memberRankings
+      ? [{ label: t("memberRankings.tab"), kind: "anchor", id: "members" } as SplashTab]
+      : []),
     { label: t("landing.tabFeatures"), kind: "anchor", id: "features" },
     { label: t("landing.tabFaq"), kind: "anchor", id: "faq" },
     { label: t("landing.tabRules"), kind: "route", href: "/rules" },
@@ -251,7 +276,7 @@ export function SplashLanding({ onNavigate }: Props) {
           `z-10` so the hero + card still sit on top. */}
       {createPortal(
         <div aria-hidden className="splash-bg-fixed" style={{ ...themeStyle(splashTheme), zIndex: 0 }}>
-          <div className={`absolute inset-0 bg-cover ${splashBgClass(splashTheme)}`} />
+          <div className={`absolute inset-0 bg-cover ${splashBgClass(splashTheme)}`} style={splashBgStyle(branding, splashTheme)} />
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70" />
           {splashIsDark ? (
             <>
@@ -552,6 +577,19 @@ export function SplashLanding({ onNavigate }: Props) {
                     registrationOpen={branding.registrationOpen}
                   />
                 </div>
+
+                {/* MEMBER RANKINGS MARQUEE, the community itself as social
+                    proof: every earning leaderboard rotating one section at a
+                    time + a featured-member spotlight. Gated by the admin
+                    toggle (branding.memberRankingsEnabled drives the fetch)
+                    AND on the payload actually carrying sections, so a
+                    fresh install / cold API shows nothing — and the nav tab
+                    above follows the same resolved state. */}
+                {memberRankings ? (
+                  <div className="rounded-md">
+                    <MemberRankingsMarquee data={memberRankings} />
+                  </div>
+                ) : null}
 
                 {/* POPULAR CHAT SERVERS, social proof + a browse hook: the site's
                     own most-popular public chat servers. Sits BELOW the feature

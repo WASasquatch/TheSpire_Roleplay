@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
 import { and, desc, eq, isNull, ne, or, sql } from "drizzle-orm";
 import type { FastifyRequest } from "fastify";
-import { DEFAULT_LOCALE, SUPPORTED_LOCALES, escapeHtml, type SupportedLocale } from "@thekeep/shared";
+import { DEFAULT_LOCALE, SUPPORTED_LOCALES, escapeHtml, parseBackgroundArt, type SupportedLocale } from "@thekeep/shared";
 import type { Db } from "./db/index.js";
 import { characters, faqs, forums, servers, stories, users, worlds } from "./db/schema.js";
 import { tFor } from "./i18n.js";
@@ -301,6 +301,18 @@ export async function renderSplashHtml(
     /^https?:\/\//i.test(u) ? u : `${origin}${u.startsWith("/") ? "" : "/"}${u}`;
   const socialImage = perRoute.imageUrl?.trim() || s.ogImageUrl?.trim() || "";
   const routeOgImage = socialImage ? absolutize(socialImage) : null;
+
+  // When the admin has uploaded custom site background art (migration
+  // 0368), retarget the static splash preload — index.html preloads the
+  // built-in light AVIF, but the splash will actually paint the uploaded
+  // art, so the LCP hint must follow it or it preloads dead bytes.
+  const bgLightArt = parseBackgroundArt(s.bgLightJson);
+  if (bgLightArt) {
+    html = html.replace(
+      /<link rel="preload" as="image" href="\/the_spire_bg\.avif[^"]*" type="image\/avif"/,
+      `<link rel="preload" as="image" href="${escapeHtmlAttr(bgLightArt.avifUrl ?? bgLightArt.webpUrl)}" type="${bgLightArt.avifUrl ? "image/avif" : "image/webp"}"`,
+    );
+  }
 
   // Replace tags by exact-attribute match. Each replace is targeted to a
   // specific tag name + attribute so they don't trip over each other.

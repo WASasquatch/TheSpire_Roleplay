@@ -12,6 +12,7 @@
  */
 import type {
   AvatarCrop,
+  BackgroundArt,
   ServerRole,
   ServerStatus,
   ServerVisibility,
@@ -54,6 +55,11 @@ export interface ServerSummary {
   /** Wide wordmark logo that replaces the app logo in the top bar inside this
    *  server (distinct from {@link logoUrl}, the square rail icon). */
   horizontalLogoUrl?: string | null;
+  /** Owner-uploaded background override (migration 0368): rendered
+   *  server-side into the WebP/AVIF + average-color bundle. Paints this
+   *  server's glass chat shell while the viewer is on it, and backs its
+   *  public / invite landing pages. Null/absent = no override. */
+  background?: BackgroundArt | null;
   isSystem: boolean;
   isDefault: boolean;
   status: ServerStatus;
@@ -191,6 +197,10 @@ export interface PublicServerLanding {
    *  public/open, non-18+ world ever appears here. Null/absent = none (or
    *  one the public can't read). Renders the "read the lore" card. */
   world?: { id: string; slug: string; name: string } | null;
+  /** Owner-uploaded background art, painted as the landing's full-page
+   *  backdrop. Always null for 18+ communities on these anonymous pages
+   *  (public-safe posture, same as the banner). */
+  background?: BackgroundArt | null;
 }
 
 export async function fetchPublicServer(slug: string): Promise<PublicServerLanding> {

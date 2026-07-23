@@ -63,6 +63,7 @@ import {
   type ServerViewerState,
   type OnboardingConfig,
   type OnboardingPrompt,
+  type BackgroundArt,
   type OnboardingOption,
   type ProfileView,
   type RoomCategorySummary,
@@ -128,6 +129,9 @@ interface ServerConsoleDetail {
   bannerImageUrl: string | null;
   bannerFocusY: number | null;
   bannerHeight: number | null;
+  /** Owner-uploaded background override (migration 0368); the Appearance
+   *  tab previews the WebP variant. Null = no override. */
+  background?: BackgroundArt | null;
   themeJson: string | null;
   themeStyleKey: string | null;
   isSystem: boolean;
@@ -332,6 +336,15 @@ async function apiSetServerImage(id: string, kind: "logo" | "banner" | "horizont
     body: JSON.stringify(imageDataUrl ? { imageDataUrl } : { clear: true }),
   }));
   return j.url;
+}
+/** Upload (or clear) the server's background override. The route renders
+ *  the WebP/AVIF + average-color bundle server-side (images.ts) and stores
+ *  it as BackgroundArt JSON; POST /servers/:id/background. */
+async function apiSetServerBackground(id: string, imageDataUrl: string | null): Promise<void> {
+  await jsonOrThrow(await fetch(`/servers/${sid(id)}/background`, {
+    method: "POST", headers: { "content-type": "application/json" }, credentials: "include",
+    body: JSON.stringify(imageDataUrl ? { imageDataUrl } : { clear: true }),
+  }));
 }
 /** One option in the Overview tab's community-world picker. */
 interface MyWorldOption {
@@ -1259,6 +1272,29 @@ function AppearanceTab({ detail, busy, run, onSaved }: TabProps) {
             onClear={() => clearImage("horizontal-logo")}
             onCropChange={() => { /* no crop persisted for the wordmark */ }}
             hint={t("console.appearance.wordmarkHint")}
+          />
+        </div>
+      </section>
+
+      {/* Background override (migration 0368). The upload is re-rendered
+          server-side into web-friendly variants; no crop is persisted —
+          it always paints cover, like the site art it replaces. */}
+      <section>
+        <p className="mb-1 text-xs uppercase tracking-widest text-keep-muted">{t("console.appearance.background")}</p>
+        <div className="space-y-2 rounded border border-keep-rule bg-keep-panel/20 p-2.5">
+          <ImageCropField
+            shape="rect"
+            fullWidth
+            aspect={1.92}
+            label={t("console.appearance.background")}
+            url={detail.background?.webpUrl ?? null}
+            crop={AVATAR_CROP_DEFAULTS}
+            maxBytes={8 * 1024 * 1024}
+            busy={busy}
+            onPickFile={(dataUrl) => { void run(async () => { await apiSetServerBackground(detail.id, dataUrl); onSaved(); }); }}
+            onClear={() => { void run(async () => { await apiSetServerBackground(detail.id, null); onSaved(); }); }}
+            onCropChange={() => { /* no crop persisted for the background */ }}
+            hint={t("console.appearance.backgroundHint")}
           />
         </div>
       </section>

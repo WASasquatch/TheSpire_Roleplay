@@ -221,6 +221,7 @@
     "listAria": "Feature list",
     "overview": "Overview",
     "introHeading": "Play and pick-up games on any device",
+    "introSummary": "The Spire runs right in your browser — no download, no install. Play at your desk and pick up right where you left off on your phone, with the same rooms, characters, and stories on every screen.",
     "introAlt": "A look inside The Spire",
     "items": {
       "characters": {
@@ -322,6 +323,73 @@
           "Light & dark themes for every taste + customize your own"
         ]
       }
+    }
+  },
+  "memberRankings": {
+    "tab": "Members",
+    "kicker": "Community spotlight",
+    "heading": "Our roleplayers, front and center",
+    "sub": "Live rankings straight from the Spire's halls — wealth, words, wins, and the writers behind them.",
+    "privateUser": "Private User",
+    "featuredKicker": "Featured member",
+    "viewProfile": "View profile",
+    "meta": {
+      "memberSince": "Member since",
+      "messages": "Messages",
+      "characters": "Characters",
+      "forumPosts": "Forum posts",
+      "gender": "Gender",
+      "languages": "Languages"
+    },
+    "gender": {
+      "male": "Male",
+      "female": "Female",
+      "nonbinary": "Nonbinary",
+      "other": "Other"
+    },
+    "prev": "Previous ranking",
+    "next": "Next ranking",
+    "counter": "{{current}} / {{total}}",
+    "boards": {
+      "today-talkative": "Most Talkative Today",
+      "today-actions": "Most Actions Today",
+      "currency": "Wealthiest",
+      "xp": "Most XP",
+      "rank": "Highest Rank",
+      "items": "Most Items",
+      "messages": "Most Talkative",
+      "borders": "Most Borders",
+      "styles": "Most Styles",
+      "topics": "Forum Founders",
+      "reactions": "Reactor",
+      "scriptorium-publishers": "Top Publishers",
+      "scriptorium-words": "Most Words",
+      "scriptorium-applause": "Top Books",
+      "scriptorium-rated": "Highest Rated Books",
+      "games-overall": "Game Champions",
+      "familiar-level": "Mightiest Eidolons",
+      "familiar-age": "Eldest Eidolons",
+      "familiar-streak": "Best Care Streaks"
+    },
+    "metrics": {
+      "today-talkative": "Messages",
+      "today-actions": "Actions",
+      "currency": "Currency",
+      "xp": "XP",
+      "items": "Items",
+      "messages": "Messages",
+      "borders": "Borders",
+      "styles": "Styles",
+      "topics": "Topics",
+      "reactions": "Reactions",
+      "scriptorium-publishers": "Books",
+      "scriptorium-words": "Words",
+      "scriptorium-applause": "Applause",
+      "scriptorium-rated": "Rating",
+      "games-overall": "Wins",
+      "familiar-level": "Level",
+      "familiar-age": "Age",
+      "familiar-streak": "Days"
     }
   },
   "featuredWorlds": {

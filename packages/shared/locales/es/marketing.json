@@ -232,6 +232,7 @@
     "listAria": "Lista de funciones",
     "overview": "Resumen",
     "introHeading": "Juega y retoma partidas en cualquier dispositivo",
+    "introSummary": "The Spire funciona directamente en tu navegador, sin descargas ni instalación. Juega en tu escritorio y continúa justo donde lo dejaste desde tu teléfono, con las mismas salas, personajes e historias en cada pantalla.",
     "introAlt": "Un vistazo al interior de The Spire",
     "items": {
       "characters": {
@@ -333,6 +334,73 @@
           "Temas claros y oscuros para todos los gustos + personaliza el tuyo"
         ]
       }
+    }
+  },
+  "memberRankings": {
+    "tab": "Miembros",
+    "kicker": "Comunidad destacada",
+    "heading": "Nuestros roleros, en primer plano",
+    "sub": "Clasificaciones en vivo directamente desde los salones de la Aguja: riqueza, palabras, victorias y quienes escriben detrás.",
+    "privateUser": "Usuario privado",
+    "featuredKicker": "Miembro destacado",
+    "viewProfile": "Ver perfil",
+    "meta": {
+      "memberSince": "Miembro desde",
+      "messages": "Mensajes",
+      "characters": "Personajes",
+      "forumPosts": "Publicaciones en el foro",
+      "gender": "Género",
+      "languages": "Idiomas"
+    },
+    "gender": {
+      "male": "Masculino",
+      "female": "Femenino",
+      "nonbinary": "No binario",
+      "other": "Otro"
+    },
+    "prev": "Clasificación anterior",
+    "next": "Clasificación siguiente",
+    "counter": "{{current}} / {{total}}",
+    "boards": {
+      "today-talkative": "Más habladores hoy",
+      "today-actions": "Más acciones hoy",
+      "currency": "Más adinerados",
+      "xp": "Más XP",
+      "rank": "Mayor rango",
+      "items": "Más objetos",
+      "messages": "Más habladores",
+      "borders": "Más bordes",
+      "styles": "Más estilos",
+      "topics": "Fundadores del foro",
+      "reactions": "Reactores",
+      "scriptorium-publishers": "Mejores editores",
+      "scriptorium-words": "Más palabras",
+      "scriptorium-applause": "Mejores libros",
+      "scriptorium-rated": "Libros mejor valorados",
+      "games-overall": "Campeones de juegos",
+      "familiar-level": "Eidolones más poderosos",
+      "familiar-age": "Eidolones más antiguos",
+      "familiar-streak": "Mejores rachas de cuidado"
+    },
+    "metrics": {
+      "today-talkative": "Mensajes",
+      "today-actions": "Acciones",
+      "currency": "Monedas",
+      "xp": "XP",
+      "items": "Objetos",
+      "messages": "Mensajes",
+      "borders": "Bordes",
+      "styles": "Estilos",
+      "topics": "Temas",
+      "reactions": "Reacciones",
+      "scriptorium-publishers": "Libros",
+      "scriptorium-words": "Palabras",
+      "scriptorium-applause": "Aplausos",
+      "scriptorium-rated": "Valoración",
+      "games-overall": "Victorias",
+      "familiar-level": "Nivel",
+      "familiar-age": "Edad",
+      "familiar-streak": "Días"
     }
   },
   "featuredWorlds": {

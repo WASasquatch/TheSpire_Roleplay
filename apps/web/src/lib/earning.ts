@@ -625,6 +625,10 @@ export interface RankingPoolEntry {
   rankName: string | null;
   tierLabel: string | null;
   sigilImageUrl: string | null;
+  /** Private master's pool: honest position, no identity (empty name,
+   *  anonymized ownerId, no avatar/cosmetics). Render as an italic
+   *  "Private User" with no profile affordance. */
+  private?: boolean;
   value: number;
 }
 

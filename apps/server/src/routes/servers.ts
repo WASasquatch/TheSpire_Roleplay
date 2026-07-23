@@ -27,7 +27,8 @@ import { mkdir, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Server as IoServer } from "socket.io";
 import type { FastifyInstance } from "fastify";
-import type { ClientToServerEvents, ServerPermission, ServerToClientEvents } from "@thekeep/shared";
+import { type BackgroundArt, type ClientToServerEvents, type ServerPermission, type ServerToClientEvents } from "@thekeep/shared";
+import { BackgroundRenderError, renderBackgroundVariants } from "../images.js";
 import type { Db } from "../db/index.js";
 import { serverAuthority, serverCan } from "../servers/authority.js";
 import { resolveIdentityArg } from "../commands/identityArg.js";
@@ -123,6 +124,51 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     return { url: `/uploads/servers/${filename}` };
   }
 
+  /** Render + write a server background upload. Unlike writeServerImage
+   *  (bytes stored verbatim), this runs the images.ts sharp pipeline: the
+   *  source is re-encoded into the 2560w WebP + AVIF pair plus a sampled
+   *  average color — the same variant set the built-in Spire art ships as
+   *  static files. The source master is not kept; re-uploading re-renders. */
+  async function writeServerBackground(
+    prefix: string,
+    dataUrl: string,
+    maxBytes: number,
+    locale?: string | null,
+  ): Promise<{ art: BackgroundArt } | { error: string; status: number }> {
+    const decoded = decodeServerDataUrl(dataUrl, maxBytes, locale);
+    if ("error" in decoded) return { error: decoded.error, status: 400 };
+    if (!sniffServerImage(decoded)) {
+      return { error: tFor(locale ?? null, "errors:server.upload.unsupportedType"), status: 415 };
+    }
+    let rendered: Awaited<ReturnType<typeof renderBackgroundVariants>>;
+    try {
+      rendered = await renderBackgroundVariants(decoded);
+    } catch (err) {
+      if (err instanceof BackgroundRenderError) {
+        return {
+          error: tFor(
+            locale ?? null,
+            err.code === "tooSmall" ? "errors:server.upload.bgTooSmall" : "errors:server.upload.unreadable",
+          ),
+          status: 422,
+        };
+      }
+      throw err;
+    }
+    const hash = createHash("sha256").update(decoded).digest("hex").slice(0, 16);
+    const stem = `${prefix}-${hash}-2560`;
+    await mkdir(serversImgDir, { recursive: true });
+    await writeFile(join(serversImgDir, `${stem}.webp`), rendered.webp);
+    await writeFile(join(serversImgDir, `${stem}.avif`), rendered.avif);
+    return {
+      art: {
+        webpUrl: `/uploads/servers/${stem}.webp`,
+        avifUrl: `/uploads/servers/${stem}.avif`,
+        color: rendered.color,
+      },
+    };
+  }
+
   /** Best-effort removal of a replaced /uploads/servers/ file. */
   function unlinkServerImage(url: string | null | undefined): void {
     if (!url?.startsWith("/uploads/servers/")) return;
@@ -196,6 +242,7 @@ export async function registerServerRoutes(app: FastifyInstance, db: Db, io: Io,
     requireServerPermission,
     resolveServerTarget,
     writeServerImage,
+    writeServerBackground,
     unlinkServerImage,
   };
   registerServerCatalogRoutes(ctx);

@@ -144,6 +144,7 @@
     "winLabel_one": "win",
     "winLabel_other": "wins",
     "characterScope": "character",
+    "privateUser": "Private User",
     "spotlight": "Spotlight",
     "showChampion": "Show {{board}} champion",
     "spotlightRank": "#1 · {{board}}",

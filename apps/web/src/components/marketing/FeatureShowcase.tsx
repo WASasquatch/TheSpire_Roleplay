@@ -32,6 +32,12 @@ import { SPLASH_PANEL, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 
 const ROTATE_MS = 6000;
 
+/** Raw `inert` attribute for inactive grid-stacked slides (React 18 has
+ *  no typed prop for it; the DOM accepts the attribute fine). Inert
+ *  blocks focus AND pointer events, so an invisible slide's CTA link
+ *  can't be tabbed to or clicked. */
+const INERT = { inert: "" } as unknown as React.HTMLAttributes<HTMLDivElement>;
+
 /**
  * Feature catalog metadata. All user-facing copy (title / tagline / desc /
  * bullet points / CTA label) lives in the `marketing` catalog under
@@ -142,9 +148,6 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
   }
 
   const isIntro = index === 0;
-  const active = isIntro ? null : FEATURES[index - 1]!;
-  const Icon = active?.icon;
-  const showCta = !!active?.cta && (!active.ctaNeedsRegistration || registrationOpen);
 
   function go(e: React.MouseEvent, path: string) {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
@@ -226,88 +229,125 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
 
         {/* Panel. Slide 0 is the full product screenshot (no text); every
             other slide is a feature (icon-inline header + copy + bullets).
-            Keyed on the slide so the slide-in replays on every advance. */}
-        {isIntro ? (
-          <div key="overview" className="feature-panel-in overflow-hidden">
-            {/* Themed headline above the screenshot (the baked-in image text
-                didn't match the palette). */}
-            <h3 className="font-action mb-4 text-center text-2xl uppercase tracking-[0.12em] text-keep-text sm:text-3xl lg:text-4xl">
-              {t("features.introHeading")}
-            </h3>
-            {/* Explicit intrinsic size + aspect-ratio reserves the slot before
-                the image loads so it can't shove the layout (CLS). The image is
-                fluid-width (w-full h-auto), so aspect-ratio does the real
-                reserving; the width/height attributes are the fallback. */}
-            <img
-              src="/spire_screenshots.png"
-              alt={t("features.introAlt")}
-              width={2605}
-              height={969}
-              className="h-auto w-full select-none rounded"
-              style={{ aspectRatio: "2605 / 969" }}
-              draggable={false}
-            />
-          </div>
-        ) : (
-          <div
-            key={active!.key}
-            className="feature-panel-in"
-          >
-            {/* Header: icon inline with the title + tagline. */}
-            <div className="mb-4 flex items-center gap-3 sm:gap-4">
-              <div
-                aria-hidden
-                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-keep-accent/40 sm:h-14 sm:w-14"
-                style={{
-                  background:
-                    "radial-gradient(circle at 30% 25%, rgb(var(--keep-accent) / 0.25), rgb(var(--keep-panel) / 0.4) 70%)",
-                }}
-              >
-                {Icon ? <Icon className="h-6 w-6 text-keep-accent sm:h-7 sm:w-7" aria-hidden /> : null}
-              </div>
-              <div className="min-w-0">
-                <h3 className="font-action text-xl text-keep-text sm:text-2xl">
-                  {t(`features.items.${active!.key}.title`)}
-                </h3>
-                <p className="text-xs uppercase tracking-[0.2em] text-keep-accent sm:text-sm">
-                  {t(`features.items.${active!.key}.tagline`)}
-                </p>
-              </div>
-            </div>
 
-            {/* Copy + highlight bullets. Two columns on wide panels so the
-                line length stays readable. */}
-            <div className="gap-8 lg:grid lg:grid-cols-[3fr_2fr]">
-              <div className="min-w-0">
-                <p className="text-base leading-relaxed text-keep-text/85 lg:text-lg">
-                  {t(`features.items.${active!.key}.desc`)}
+            GRID-STACK: every slide stays mounted, all in the same grid
+            cell (col-start-1 row-start-1), so the panel's height is the
+            TALLEST slide's height at the current breakpoint/locale — the
+            page never reflows as the rotation advances. (The old
+            render-one-slide version resized the panel per slide, bouncing
+            everything below it every 6 seconds.) Inactive slides are
+            invisible + aria-hidden + `inert` (raw attribute — React 18
+            has no typed prop for it) so their links can't be tabbed to
+            or clicked while hidden. The slide-in animation replays when
+            a slide GAINS the class on activation. */}
+        <div className="grid">
+          <div
+            className={`col-start-1 row-start-1 flex flex-col justify-center ${isIntro ? "feature-panel-in" : "invisible"}`}
+            aria-hidden={!isIntro}
+            {...(isIntro ? {} : INERT)}
+          >
+            {/* Side-by-side, packed to the LEFT: screenshot then the
+                header + browser-support blurb inline beside it (stacks on
+                narrow). A stretched two-column grid shoved the image to
+                the far-right edge and the text to the far-left, leaving a
+                dead gulf between them; a left-aligned flex row keeps them
+                together. The image is capped at 600px and shares the row
+                rather than spanning full-width, so the intro slide isn't
+                dramatically taller than the text slides (the grid-stack
+                sizes the whole panel to the tallest slide, and a
+                full-bleed screenshot made every other slide swim in dead
+                space). */}
+            <div className="lg:flex lg:items-center lg:justify-center lg:gap-6">
+              {/* Explicit intrinsic size + aspect-ratio reserves the slot
+                  before the image loads so it can't shove the layout (CLS).
+                  Capped at 600px; shrinks if the row gets tight. */}
+              <img
+                src="/spire_screenshots.png"
+                alt={t("features.introAlt")}
+                width={2605}
+                height={969}
+                className="mx-auto h-auto w-full max-w-[600px] shrink select-none rounded lg:mx-0"
+                style={{ aspectRatio: "2605 / 969" }}
+                draggable={false}
+              />
+              <div className="mt-5 text-center lg:mt-0 lg:min-w-0 lg:text-left">
+                <h3 className="font-action text-2xl uppercase tracking-[0.12em] text-keep-text sm:text-3xl">
+                  {t("features.introHeading")}
+                </h3>
+                <p className="mx-auto mt-3 max-w-md text-base leading-relaxed text-keep-text/85 lg:mx-0 lg:text-lg">
+                  {t("features.introSummary")}
                 </p>
-                {showCta ? (
-                  <a
-                    href={active!.cta!.path}
-                    onClick={(e) => go(e, active!.cta!.path)}
-                    className="mt-5 inline-flex items-center gap-1 text-base font-semibold text-keep-action underline-offset-4 hover:underline lg:text-lg"
-                  >
-                    {t(`features.items.${active!.key}.ctaLabel`)} →
-                  </a>
-                ) : null}
               </div>
-              <ul className="mt-4 space-y-2.5 lg:mt-0">
-                {Array.from({ length: active!.pointCount }, (_, i) =>
-                  t(`features.items.${active!.key}.points.${i}`),
-                ).map((p) => (
-                  <li
-                    key={p}
-                    className="flex items-start gap-2.5 text-[15px] text-keep-text/85 lg:text-base"
-                  >
-                    <Check className="mt-1 h-4 w-4 shrink-0 text-keep-accent lg:h-5 lg:w-5" aria-hidden />
-                    {p}
-                  </li>
-                ))}
-              </ul>
             </div>
           </div>
-        )}
+          {FEATURES.map((f, fi) => {
+            const isActive = index === fi + 1;
+            const FIcon = f.icon;
+            const showCta = !!f.cta && (!f.ctaNeedsRegistration || registrationOpen);
+            return (
+              <div
+                key={f.key}
+                className={`col-start-1 row-start-1 flex flex-col justify-center ${isActive ? "feature-panel-in" : "invisible"}`}
+                aria-hidden={!isActive}
+                {...(isActive ? {} : INERT)}
+              >
+                {/* Header: icon inline with the title + tagline. */}
+                <div className="mb-4 flex items-center gap-3 sm:gap-4">
+                  <div
+                    aria-hidden
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-keep-accent/40 sm:h-14 sm:w-14"
+                    style={{
+                      background:
+                        "radial-gradient(circle at 30% 25%, rgb(var(--keep-accent) / 0.25), rgb(var(--keep-panel) / 0.4) 70%)",
+                    }}
+                  >
+                    <FIcon className="h-6 w-6 text-keep-accent sm:h-7 sm:w-7" aria-hidden />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="font-action text-xl text-keep-text sm:text-2xl">
+                      {t(`features.items.${f.key}.title`)}
+                    </h3>
+                    <p className="text-xs uppercase tracking-[0.2em] text-keep-accent sm:text-sm">
+                      {t(`features.items.${f.key}.tagline`)}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Copy + highlight bullets. Two columns on wide panels so the
+                    line length stays readable. */}
+                <div className="gap-8 lg:grid lg:grid-cols-[3fr_2fr]">
+                  <div className="min-w-0">
+                    <p className="text-base leading-relaxed text-keep-text/85 lg:text-lg">
+                      {t(`features.items.${f.key}.desc`)}
+                    </p>
+                    {showCta ? (
+                      <a
+                        href={f.cta!.path}
+                        onClick={(e) => go(e, f.cta!.path)}
+                        className="mt-5 inline-flex items-center gap-1 text-base font-semibold text-keep-action underline-offset-4 hover:underline lg:text-lg"
+                      >
+                        {t(`features.items.${f.key}.ctaLabel`)} →
+                      </a>
+                    ) : null}
+                  </div>
+                  <ul className="mt-4 space-y-2.5 lg:mt-0">
+                    {Array.from({ length: f.pointCount }, (_, i) =>
+                      t(`features.items.${f.key}.points.${i}`),
+                    ).map((p) => (
+                      <li
+                        key={p}
+                        className="flex items-start gap-2.5 text-[15px] text-keep-text/85 lg:text-base"
+                      >
+                        <Check className="mt-1 h-4 w-4 shrink-0 text-keep-accent lg:h-5 lg:w-5" aria-hidden />
+                        {p}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </section>
   );

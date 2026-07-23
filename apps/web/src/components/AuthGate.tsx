@@ -9,7 +9,7 @@ import { useChat, type AuthMe } from "../state/store.js";
 import { setSessionToken } from "../lib/http.js";
 import { markLoginIntent } from "../lib/socket.js";
 import { formatNumber } from "../lib/intlFormat.js";
-import { resolveSplashTheme, splashBgClass, themeStyle } from "../lib/theme.js";
+import { resolveSplashTheme, splashBgClass, splashBgStyle, themeStyle } from "../lib/theme.js";
 import { GoogleFinishSignup } from "./GoogleFinishSignup.js";
 import { SplashLanguagePicker } from "./marketing/SplashLanguagePicker.js";
 import { readReturnForum } from "./forums/ForumPublicLanding.js";
@@ -141,7 +141,7 @@ export function SplashShell({
           art stays centered. */}
       {createPortal(
         <div aria-hidden style={{ ...themeStyle(splashTheme), position: "fixed", inset: 0, zIndex: 0 }}>
-          <div className={`absolute inset-0 bg-cover ${splashBgClass(splashTheme)}`} />
+          <div className={`absolute inset-0 bg-cover ${splashBgClass(splashTheme)}`} style={splashBgStyle(branding, splashTheme)} />
           {/* Right-side veil so the card sits on a calm background; lighter on
               mobile where the glass card wants the artwork showing through. */}
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-keep-bg/30 md:to-keep-bg/70" />

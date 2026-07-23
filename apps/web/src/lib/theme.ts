@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
-import { DEFAULT_THEME, isDarkPalette, isSpireClassicTheme, legibleAgainstBg, legibleThemePalette, THEME_PRESETS, type Theme } from "@thekeep/shared";
+import { DEFAULT_THEME, isDarkPalette, isSpireClassicTheme, legibleAgainstBg, legibleThemePalette, THEME_PRESETS, type BackgroundArt, type Theme } from "@thekeep/shared";
 import { loadCachedActiveTheme, useChat, type SiteBranding } from "../state/store.js";
 import { applyStyle } from "./ornaments/index.js";
 
@@ -182,18 +182,76 @@ export function resolveSplashTheme(_branding: SiteBranding): Theme {
   return preset ? preset.theme : DEFAULT_THEME;
 }
 
-/** Path for the default Spire background art (optimized WebP): dark / light
- *  variant by the palette's luminance, classic / current art set by whether
- *  the palette is a Spire Classic preset. Feeds the glass chat shell's
- *  default backdrop (App + ProfileEditor preview); the splash layer instead
- *  paints via {@link splashBgClass} which also serves AVIF. The `?v=2` token
- *  pairs with the year-long immutable cache on these files, bump it in sync
- *  with styles.css + index.html when the art changes. */
-export function defaultBgUrl(theme: Theme): string {
-  const classic = isSpireClassicTheme(theme);
-  return isDarkPalette(theme)
-    ? (classic ? "/the_spire_bg_classic_dark.webp?v=2" : "/the_spire_bg_dark.webp?v=2")
-    : (classic ? "/the_spire_bg_classic.webp?v=2" : "/the_spire_bg.webp?v=2");
+/* ============================================================
+ * Background art resolution (static Spire art + uploaded overrides)
+ * ============================================================ */
+
+/** Lazy one-shot probe: can this browser take an image-set() with a type()
+ *  hint? Practically universal since 2023, but the check keeps the WebP
+ *  fallback honest on older engines — an unsupported function inside an
+ *  inline style would otherwise silently drop the whole declaration. */
+let imageSetSupport: boolean | null = null;
+function supportsImageSet(): boolean {
+  if (imageSetSupport === null) {
+    imageSetSupport =
+      typeof CSS !== "undefined" &&
+      typeof CSS.supports === "function" &&
+      CSS.supports("background-image", 'image-set(url("x.avif") type("image/avif"))');
+  }
+  return imageSetSupport;
+}
+
+/** CSS `<image>` value for an uploaded BackgroundArt bundle: an image-set()
+ *  that upgrades capable browsers to the AVIF, else the plain WebP url().
+ *  The static art gets the same treatment via the `.splash-bg-*` classes;
+ *  this is the runtime equivalent for admin/server uploads. */
+export function backgroundArtCss(art: BackgroundArt): string {
+  if (!art.avifUrl || !supportsImageSet()) return `url("${art.webpUrl}")`;
+  return `image-set(url("${art.avifUrl}") type("image/avif"), url("${art.webpUrl}") type("image/webp"))`;
+}
+
+/** The admin-uploaded site art slot for a palette (dark art for dark
+ *  palettes), or null when the operator hasn't uploaded any. */
+export function brandingBgArt(branding: SiteBranding, theme: Theme): BackgroundArt | null {
+  return (isDarkPalette(theme) ? branding.bgDark : branding.bgLight) ?? null;
+}
+
+/** CSS `<image>` value for the glass chat shell's default backdrop (App +
+ *  ProfileEditor preview) — NOT a bare URL; assign it to
+ *  `--keep-shell-bg-url` as-is. Resolution order:
+ *
+ *    1. `serverArt` — the current community server's uploaded override.
+ *       The server owner's branding wins on their own turf, even over a
+ *       Spire Classic palette: that's the whole point of the override.
+ *    2. Spire Classic palettes → the original painted art (an explicit
+ *       user choice of that art; admin uploads don't replace it).
+ *    3. Admin-uploaded site art (light/dark by palette luminance).
+ *    4. The built-in art (`?v=2` cache token — bump in sync with
+ *       styles.css + index.html when the static files change).
+ *
+ *  A user's own personal background (character/master) is the caller's
+ *  business and sits ABOVE all of these. */
+export function defaultShellBgCss(theme: Theme, branding: SiteBranding, serverArt?: BackgroundArt | null): string {
+  if (serverArt) return backgroundArtCss(serverArt);
+  const dark = isDarkPalette(theme);
+  if (isSpireClassicTheme(theme)) {
+    return dark ? 'url("/the_spire_bg_classic_dark.webp?v=2")' : 'url("/the_spire_bg_classic.webp?v=2")';
+  }
+  const custom = brandingBgArt(branding, theme);
+  if (custom) return backgroundArtCss(custom);
+  return dark ? 'url("/the_spire_bg_dark.webp?v=2")' : 'url("/the_spire_bg.webp?v=2")';
+}
+
+/** Inline-style override for the splash background layers when the admin
+ *  has uploaded custom site art: paints the uploaded image (+ its sampled
+ *  base color) OVER the static `.splash-bg-*` class. Returns undefined
+ *  when the class should paint as-is (no upload, or a Spire Classic
+ *  palette, which keeps the original art by definition). */
+export function splashBgStyle(branding: SiteBranding, theme: Theme): CSSProperties | undefined {
+  if (isSpireClassicTheme(theme)) return undefined;
+  const art = brandingBgArt(branding, theme);
+  if (!art) return undefined;
+  return { backgroundColor: art.color, backgroundImage: backgroundArtCss(art) };
 }
 
 /** CSS class for the fixed splash background layer. Ships a universal WebP

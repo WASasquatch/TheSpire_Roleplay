@@ -44,6 +44,7 @@ import { registerArcadeRoutes } from "./routes/arcade.js";
 import { registerUrugalRoutes } from "./routes/arcadeUrugal.js";
 import { registerGrimholdRoutes } from "./routes/arcadeGrimhold.js";
 import { registerStatsRoutes } from "./routes/stats.js";
+import { registerSplashRankingRoutes } from "./routes/splashRankings.js";
 import { registerAnalyticsRoutes } from "./analytics/ingest.js";
 import { registerAnalyticsAdminRoutes } from "./analytics/admin.js";
 import { registerThesaurusRoutes } from "./routes/thesaurus.js";
@@ -101,6 +102,8 @@ export async function registerAllRoutes(
   // Idempotent on subsequent starts; survives deploys via the persisted keys.
   await initPush(db);
   await registerStatsRoutes(baseApp, db, io);
+  // Public homepage member-rankings marquee (anonymous, cached).
+  await registerSplashRankingRoutes(baseApp, db);
   // First-party analytics ingest (client beacon) + admin read endpoints
   // (plan_ext.md §5). Both no-op / stay staff-gated when the master
   // `analyticsEnabled` switch is off. `/a/e` is anonymous-safe + rate-limited;

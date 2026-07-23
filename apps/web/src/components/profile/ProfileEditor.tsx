@@ -7,7 +7,7 @@ import { LangFlag } from "../flags/LangFlag.js";
 import { applyStyle , DEFAULT_STYLE_KEY } from "../../lib/ornaments/index.js";
 import { DesignerTour } from "../tours/DesignerTour.js";
 import { ProfileFlairEditor, VisitorsVisibilityToggleRow } from "../cosmetics/ProfileFlairEditor.js";
-import { applyTheme, defaultBgUrl } from "../../lib/theme.js";
+import { applyTheme, defaultShellBgCss } from "../../lib/theme.js";
 import { GENDER_OPTIONS, type Gender } from "../../lib/gender.js";
 import {
   isSupported as notifyIsSupported,
@@ -270,6 +270,10 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
   // onto <html> for every freshly-registered (no-theme) user the moment they
   // open the editor, and stick because the editor applies it directly.
   const siteDefaultTheme = useChat((s) => s.branding.defaultTheme);
+  // Whole branding object for the glass preview's default backdrop —
+  // defaultShellBgCss picks the admin-uploaded art (or the built-ins) the
+  // same way the live chat shell does, so the preview matches post-save.
+  const brandingAll = useChat((s) => s.branding);
   // Saved UI language (null = "System default"). Lives outside the editor's
   // save body: the Appearance-tab select applies + persists immediately via
   // changeLocale, mirroring the Menu row, so there's nothing to save here.
@@ -1231,7 +1235,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
     const root = document.documentElement;
     if (userStyleKey === "glass") {
       const trimmed = publicProfileBgUrl.trim();
-      const url = trimmed || defaultBgUrl(previewTheme);
+      const bgCss = trimmed ? `url("${trimmed}")` : defaultShellBgCss(previewTheme, brandingAll);
       const size = trimmed
         ? (publicProfileBgMode === "stretch" ? "100% 100%" : publicProfileBgMode)
         : "cover";
@@ -1240,7 +1244,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
       // `.keep-bg-overlay` (inside the chat shell) so the image
       // never leaks past the shell when a devtools / extension UI
       // shifts the document.
-      root.style.setProperty("--keep-shell-bg-url", `url("${url}")`);
+      root.style.setProperty("--keep-shell-bg-url", bgCss);
       root.style.setProperty("--keep-shell-bg-size", size);
       root.style.setProperty("--keep-shell-bg-repeat", repeat);
       // Luminance-aware glass tints, mirror App.tsx so the live
@@ -1268,7 +1272,7 @@ export function ProfileEditor({ mode: initialMode, characterId: initialCharId, i
       root.style.removeProperty("--keep-glass-tool-tint");
       root.style.removeProperty("--keep-glass-chat-tint");
     }
-  }, [theme, siteDefaultTheme, userStyleKey, publicProfileBgUrl, publicProfileBgMode, loadingTarget]);
+  }, [theme, siteDefaultTheme, brandingAll, userStyleKey, publicProfileBgUrl, publicProfileBgMode, loadingTarget]);
 
   return (
     <FloatingWindow

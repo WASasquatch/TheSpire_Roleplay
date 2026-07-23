@@ -17,6 +17,7 @@ import {
   isGrantableServerModPermission,
   isServerFeaturePermission,
   normalizeTheme,
+  parseBackgroundArt,
   serializeTags,
   parseServerAutoRules,
   parseServerFeaturePermissions,
@@ -77,7 +78,7 @@ import {
 import type { ServerRoutesCtx } from "./serversShared.js";
 
 export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
-  const { app, db, io, serversLive, requireServerOwner, requireServerPermission, resolveServerTarget, writeServerImage, unlinkServerImage } = ctx;
+  const { app, db, io, serversLive, requireServerOwner, requireServerPermission, resolveServerTarget, writeServerImage, writeServerBackground, unlinkServerImage } = ctx;
 
   /* =========================================================
    *  Invites (joinMode = "invite")
@@ -497,6 +498,53 @@ export function registerServerConsoleRoutes(ctx: ServerRoutesCtx): void {
       return { ok: true, url: null };
     });
   }
+
+  /* ---------- Background override upload ----------
+   * POST /servers/:id/background — upload (or clear) this server's
+   * background art. Unlike the identity images above (stored verbatim),
+   * the source is re-rendered server-side into the 2560w WebP + AVIF +
+   * average-color bundle (BackgroundArt JSON on servers.background_json).
+   * The override paints this server's glass chat shell for members
+   * currently ON the server, and backs its public /s/ landing + invite
+   * splash — where NSFW servers never expose it (public payloads drop it,
+   * same posture as sfwBannerUrl). Same manage_appearance gate as the
+   * other appearance surfaces. The 11MB data-URL cap (≈8MB of image)
+   * rides under the global 12MB bodyLimit. */
+  const serverBackgroundBody = z.union([
+    z.object({ imageDataUrl: z.string().min(32).max(11_000_000) }).strict(),
+    z.object({ clear: z.literal(true) }).strict(),
+  ]);
+  app.post<{ Params: { id: string }; Body: unknown }>("/servers/:id/background", async (req, reply) => {
+    if (!(await serversLive(reply))) return { error: "not found" };
+    const gate = await requireServerPermission(req, req.params.id, "manage_appearance");
+    if ("fail" in gate) { reply.code(gate.fail.code); return { error: gate.fail.error }; }
+    let body: z.infer<typeof serverBackgroundBody>;
+    try { body = serverBackgroundBody.parse(req.body); }
+    catch { reply.code(400); return { error: "invalid body" }; }
+    const prev = parseBackgroundArt(gate.server.backgroundJson);
+    if ("clear" in body) {
+      await db.update(servers).set({ backgroundJson: null, updatedAt: new Date() }).where(eq(servers.id, gate.server.id));
+      unlinkServerImage(prev?.webpUrl);
+      unlinkServerImage(prev?.avifUrl);
+      await auditServer(db, {
+        serverId: gate.server.id, actorUserId: gate.me.id, action: "server_appearance_update",
+        metadata: { slug: gate.server.slug, fields: ["backgroundJson"], cleared: true },
+      });
+      return { ok: true, background: null };
+    }
+    const written = await writeServerBackground(`${gate.server.id}-bg`, body.imageDataUrl, 8 * 1024 * 1024, gate.me.locale);
+    if ("error" in written) { reply.code(written.status); return { error: written.error }; }
+    await db.update(servers).set({ backgroundJson: JSON.stringify(written.art), updatedAt: new Date() }).where(eq(servers.id, gate.server.id));
+    if (prev && prev.webpUrl !== written.art.webpUrl) {
+      unlinkServerImage(prev.webpUrl);
+      unlinkServerImage(prev.avifUrl);
+    }
+    await auditServer(db, {
+      serverId: gate.server.id, actorUserId: gate.me.id, action: "server_appearance_update",
+      metadata: { slug: gate.server.slug, fields: ["backgroundJson"] },
+    });
+    return { ok: true, background: written.art };
+  });
 
   /* =========================================================
    *  Owner console: per-server ROOM admin (manage_rooms)

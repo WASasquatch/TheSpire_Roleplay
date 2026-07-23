@@ -9,7 +9,7 @@ import { StoryReaderModal } from "../components/scriptorium/StoryReaderModal.js"
 import { ForumPublicLanding } from "../components/forums/ForumPublicLanding.js";
 import { ServerInviteLanding } from "../components/servers/ServerInviteLanding.js";
 import { ServerPublicLanding } from "../components/servers/ServerPublicLanding.js";
-import { applyTheme, resolveSplashTheme, splashBgClass, themeStyle } from "./theme.js";
+import { applyTheme, resolveSplashTheme, splashBgClass, splashBgStyle, themeStyle } from "./theme.js";
 import { parseScriptoriumFromUrl, storyPermalink } from "./scriptoriumUrl.js";
 
 /**
@@ -322,6 +322,7 @@ export function PublicViewerShell({
       <div
         aria-hidden
         className={`absolute inset-0 bg-cover opacity-40 ${splashBgClass(resolveSplashTheme(branding))}`}
+        style={splashBgStyle(branding, resolveSplashTheme(branding))}
       />
       <div aria-hidden className="absolute inset-0 bg-keep-bg/70" />
       <a

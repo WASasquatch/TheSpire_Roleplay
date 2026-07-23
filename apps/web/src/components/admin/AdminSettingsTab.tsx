@@ -76,6 +76,9 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
   const [maxBioLen, setMaxBioLen] = useState("");
   const [regOpen, setRegOpen] = useState(true);
   const [activityFeedsEnabled, setActivityFeedsEnabled] = useState(false);
+  // Default true, mirrors the schema default (migration 0369): the member
+  // rankings marquee ships ON — it only ever shows public/masked data.
+  const [memberRankingsEnabled, setMemberRankingsEnabled] = useState(true);
   const [featuredWorldsEnabled, setFeaturedWorldsEnabled] = useState(false);
   const [splashMessages24hEnabled, setSplashMessages24hEnabled] = useState(false);
   // Default true, mirrors the schema default: the badge ships ON and the
@@ -161,6 +164,7 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
       setMaxBioLen(String(j.maxBioLength));
       setRegOpen(j.registrationOpen);
       setActivityFeedsEnabled(j.activityFeedsEnabled);
+      setMemberRankingsEnabled(j.memberRankingsEnabled);
       setFeaturedWorldsEnabled(j.featuredWorldsEnabled);
       setSplashMessages24hEnabled(j.splashMessages24hEnabled);
       setBetaBadgeEnabled(j.betaBadgeEnabled);
@@ -232,6 +236,7 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
         maxBioLength: intOrThrow(t("settings.errMaxBioLen"), maxBioLen, 1000, 200_000),
         registrationOpen: regOpen,
         activityFeedsEnabled,
+        memberRankingsEnabled,
         featuredWorldsEnabled,
         splashMessages24hEnabled,
         betaBadgeEnabled,
@@ -281,6 +286,7 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
         editGraceMs: j.editGraceMs,
         defaultTheme: j.defaultTheme,
         activityFeedsEnabled: j.activityFeedsEnabled,
+        memberRankingsEnabled: j.memberRankingsEnabled,
         featuredWorldsEnabled: j.featuredWorldsEnabled,
         splashMessages24hEnabled: j.splashMessages24hEnabled,
         // The admin response carries the RAW toggle; branding carries the
@@ -795,6 +801,20 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
               </div>
               <span className="mt-0.5 block text-[10px] text-keep-muted">
                 {t("settings.activityFeedsHint")}
+              </span>
+            </label>
+            <label data-admin-anchor="settings.memberRankingsLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.memberRankingsLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={memberRankingsEnabled}
+                  onChange={(e) => setMemberRankingsEnabled(e.target.checked)}
+                />
+                <span>{memberRankingsEnabled ? t("settings.memberRankingsOn") : t("settings.memberRankingsOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.memberRankingsHint")}
               </span>
             </label>
             <label data-admin-anchor="settings.messages24hLabel" className="text-xs">

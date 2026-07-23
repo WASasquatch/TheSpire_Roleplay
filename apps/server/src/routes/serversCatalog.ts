@@ -5,6 +5,7 @@
  */
 import {
   hasTag,
+  parseBackgroundArt,
   parseTagsJson,
 } from "@thekeep/shared";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
@@ -492,6 +493,10 @@ export function registerServerCatalogRoutes(ctx: ServerRoutesCtx): void {
         borderColor: server.borderColor ?? null,
         iconCrop: parseCrop(server.iconCrop),
         horizontalLogoUrl: server.horizontalLogoUrl ?? null,
+        // Background override (migration 0368): the console's Appearance
+        // tab shows the current upload; members' shells read it from the
+        // catalog summary instead.
+        background: parseBackgroundArt(server.backgroundJson),
         themeJson: server.themeJson ?? null,
         themeStyleKey: server.themeStyleKey ?? null,
         isSystem: !!server.isSystem,

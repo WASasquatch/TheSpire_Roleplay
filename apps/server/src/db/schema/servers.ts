@@ -132,6 +132,13 @@ export const servers = sqliteTable(
     bannerCrop: text("banner_crop"),
     /** Owner-set top-bar banner height in px. NULL = default responsive height. */
     bannerHeight: integer("banner_height"),
+    /** Owner-uploaded background override (migration 0368): BackgroundArt
+     *  JSON ({webpUrl, avifUrl, color}) rendered server-side from the
+     *  upload. Overrides the site/theme background art on this server's
+     *  glass chat shell and its public / invite landing backdrop. NULL =
+     *  no override. Public surfaces omit it for NSFW servers (same
+     *  public-safe posture as sfwBannerUrl). */
+    backgroundJson: text("background_json"),
     /** JSON array of roomIds giving the owner's explicit room ordering in the rail. */
     roomOrderJson: text("room_order_json").notNull().default("[]"),
     /** Owner-set genre/category tags for discovery search (migration 0301).

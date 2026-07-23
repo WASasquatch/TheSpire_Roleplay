@@ -363,6 +363,8 @@
       "publicBannerHint": "Shown on discovery cards, share pages, and link previews. If you leave this empty, those places show your community name and colors instead of banner art.",
       "wordmark": "Wordmark logo",
       "wordmarkHint": "Replaces the app logo in the top bar so members know which server they're in.",
+      "background": "Background",
+      "backgroundHint": "Your own background art for this server. Members with the glass look see it behind chat while they're here, and it backs your public page and invite links. A wide image (at least 2560x1080) works best; it's converted to fast web formats automatically. 18+ communities never show it on public pages.",
       "theme": "Theme",
       "themeHint": "A palette for this server's pages only. Chat and the userlist are untouched.",
       "addTheme": "Add a custom theme",

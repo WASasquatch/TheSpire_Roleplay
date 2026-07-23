@@ -180,6 +180,9 @@ export interface SettingsRow {
   customHeadHtml: string;
   /** Default social-card image URL (og:image / twitter:image fallback). "" = index.html default. */
   ogImageUrl: string;
+  /** Admin-uploaded site background art (BackgroundArt JSON) — light / dark slots. Null = built-in art. */
+  bgLightJson: string | null;
+  bgDarkJson: string | null;
   /** Tagline appended after the site name in the homepage/login/register title. "" = built-in. */
   homepageTagline: string;
   /** Keyword shelf for <meta name="keywords">. "" = built-in default. */
@@ -193,6 +196,8 @@ export interface SettingsRow {
   /** Newline-separated social profile URLs for Organization.sameAs. */
   socialProfileUrls: string;
   activityFeedsEnabled: boolean;
+  /** Homepage member-rankings marquee + featured-member spotlight (migration 0369). */
+  memberRankingsEnabled: boolean;
   featuredWorldsEnabled: boolean;
   splashMessages24hEnabled: boolean;
   /** Splash "Beta" chip + hero line toggle. The /site payload also version-gates it (< 1.0.0). */

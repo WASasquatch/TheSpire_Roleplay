@@ -9,8 +9,9 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { Server as IoServer } from "socket.io";
 import { eq, isNull, or } from "drizzle-orm";
 import { nanoid } from "nanoid";
-import { parseTagsJson } from "@thekeep/shared";
+import { parseBackgroundArt, parseTagsJson } from "@thekeep/shared";
 import type {
+  BackgroundArt,
   ClientToServerEvents,
   Role,
   ServerPermission,
@@ -65,6 +66,12 @@ export const SERVER_SUMMARY_COLUMNS = {
   bannerCrop: servers.bannerCrop,
   bannerHeight: servers.bannerHeight,
   horizontalLogoUrl: servers.horizontalLogoUrl,
+  // Owner-uploaded background override (migration 0368). Rides the catalog
+  // so the glass chat shell can swap its backdrop the moment the viewer
+  // lands on this server, without a detail fetch. NSFW gating is handled
+  // by the catalog/discover filters (18+ servers never reach viewers who
+  // can't see NSFW), so the summary carries it plainly.
+  backgroundJson: servers.backgroundJson,
   isSystem: servers.isSystem,
   isDefault: servers.isDefault,
   status: servers.status,
@@ -174,6 +181,8 @@ export function buildServerSummary(s: ServerSummaryRow, ctx: SummaryViewerCtx) {
     bannerCrop: parseCrop(s.bannerCrop),
     bannerHeight: s.bannerHeight ?? null,
     horizontalLogoUrl: s.horizontalLogoUrl ?? null,
+    // Background override as the parsed BackgroundArt bundle (or null).
+    background: parseBackgroundArt(s.backgroundJson),
     isSystem: !!s.isSystem,
     isDefault: !!s.isDefault,
     status: s.status,
@@ -291,5 +300,8 @@ export interface ServerRoutesCtx {
   requireServerPermission: (req: FastifyRequest, serverId: string, key: ServerPermission) => Promise<ServerGateResult>;
   resolveServerTarget: (raw: string, locale?: string | null) => Promise<ResolveTargetResult>;
   writeServerImage: (prefix: string, dataUrl: string, maxBytes: number, locale?: string | null) => Promise<{ url: string } | { error: string; status: number }>;
+  /** Background override upload: renders the 2560w WebP/AVIF + average-color
+   *  bundle via the images.ts sharp pipeline instead of storing bytes verbatim. */
+  writeServerBackground: (prefix: string, dataUrl: string, maxBytes: number, locale?: string | null) => Promise<{ art: BackgroundArt } | { error: string; status: number }>;
   unlinkServerImage: (url: string | null | undefined) => void;
 }

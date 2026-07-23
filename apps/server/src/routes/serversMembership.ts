@@ -13,6 +13,7 @@ import {
   SERVER_REAPPLY_COOLDOWN_DAYS,
   SERVER_SLUG_RE,
   normalizeServerSlug,
+  parseBackgroundArt,
 } from "@thekeep/shared";
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -466,6 +467,7 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
         isNsfw: servers.isNsfw,
         sfwBannerUrl: servers.sfwBannerUrl,
         worldId: servers.worldId,
+        backgroundJson: servers.backgroundJson,
       })
       .from(servers)
       .where(eq(servers.slug, slug))
@@ -516,6 +518,10 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
       createdAt: +s.createdAt,
       themeJson: s.themeJson,
       themeStyleKey: s.themeStyleKey,
+      // Owner-uploaded background override (migration 0368), painted as the
+      // landing's full-page backdrop. Same public-safe rule as the banner:
+      // an 18+ community's art never reaches an anonymous page.
+      background: s.isNsfw ? null : parseBackgroundArt(s.backgroundJson),
     };
   });
 
@@ -575,6 +581,8 @@ export function registerServerMembershipRoutes(ctx: ServerRoutesCtx): void {
       createdAt: +s.createdAt,
       themeJson: s.themeJson,
       themeStyleKey: s.themeStyleKey,
+      // Same public-safe background rule as /servers/public/:slug.
+      background: s.isNsfw ? null : parseBackgroundArt(s.backgroundJson),
     };
   });
 

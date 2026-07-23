@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { VERSION, isBetaVersion } from "@thekeep/shared";
+import { VERSION, isBetaVersion, parseBackgroundArt, type BackgroundArt } from "@thekeep/shared";
 import { readError } from "../../lib/http.js";
 import { useChat } from "../../state/store.js";
 import { AdminSaveFooter, useAdminShell, type SettingsRow } from "./adminShell.js";
@@ -69,6 +69,18 @@ export function BrandingTab() {
   const [error, setError] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  /** Completion handler for both background slot rows: mirror the fresh
+   *  settings row locally and push the parsed art into the live branding
+   *  store so the splash + glass backdrop swap without a reload. */
+  function onBackgroundDone(j: { background: BackgroundArt | null; settings: SettingsRow }): void {
+    setData(j.settings);
+    setBranding({
+      ...useChat.getState().branding,
+      bgLight: parseBackgroundArt(j.settings.bgLightJson),
+      bgDark: parseBackgroundArt(j.settings.bgDarkJson),
+    });
+  }
 
   async function load() {
     setError(null);
@@ -333,9 +345,14 @@ export function BrandingTab() {
             // The upload endpoint returns the full freshly-saved
             // settings row. Mirror it straight into the store so the
             // banner refreshes without waiting for the form save.
+            // Spread the CURRENT branding first: setBranding replaces
+            // the whole object, and fields this handler doesn't list
+            // (serversEnabled, uploaded background art, …) must survive
+            // a logo upload rather than reset until the next /site load.
             setData(j.settings);
             setDraft((d) => (d ? { ...d, logoUrl: j.url } : d));
             setBranding({
+              ...useChat.getState().branding,
               siteName: j.settings.siteName,
               siteUrl: j.settings.siteUrl ?? "",
               bannerCoverCss: j.settings.bannerCoverCss,
@@ -360,6 +377,25 @@ export function BrandingTab() {
             });
           }}
         />
+      </fieldset>
+
+      <fieldset data-admin-anchor="branding.backgroundsLegend" className="rounded border border-keep-rule p-3 text-xs">
+        <legend className="px-1 uppercase tracking-widest text-keep-muted">{t("branding.backgroundsLegend")}</legend>
+        <p className="mb-2 text-keep-muted">{t("branding.backgroundsHelp")}</p>
+        <div className="space-y-3">
+          <BackgroundSlotRow
+            slot="light"
+            art={data ? parseBackgroundArt(data.bgLightJson) : null}
+            canUpload={canUploadLogo}
+            onDone={onBackgroundDone}
+          />
+          <BackgroundSlotRow
+            slot="dark"
+            art={data ? parseBackgroundArt(data.bgDarkJson) : null}
+            canUpload={canUploadLogo}
+            onDone={onBackgroundDone}
+          />
+        </div>
       </fieldset>
 
       <fieldset data-admin-anchor="branding.logoColorLegend" className="rounded border border-keep-rule p-3 text-xs">
@@ -463,6 +499,17 @@ export function BrandingTab() {
         <p className="mt-1 text-keep-muted">
           {t("branding.ogImageHelp")}
         </p>
+        {canUploadLogo ? (
+          <OgCardUploadRow
+            onUploaded={(j) => {
+              // The endpoint renders the 1200x630 card, saves it under
+              // /uploads/og/, and persists ogImageUrl — mirror both the
+              // fresh row and the URL field so the preview updates live.
+              setData(j.settings);
+              setDraft((d) => (d ? { ...d, ogImageUrl: j.url } : d));
+            }}
+          />
+        ) : null}
         {draft.ogImageUrl.trim() ? (
           <div className="mt-2">
             <img
@@ -712,6 +759,201 @@ export function BrandingTab() {
  *      want the new logo live as soon as they pick it. The parent
  *      callback then syncs the local draft + branding store.
  */
+/** Read a picked file as a data URL, with basic type/size validation.
+ *  Shared by the background + OG-card upload rows; returns null (and
+ *  reports via setError) when the pick is unusable. */
+async function readPickedImage(
+  f: File,
+  maxBytes: number,
+  setError: (msg: string | null) => void,
+  typeError: string,
+  sizeError: string,
+  readFailed: string,
+): Promise<string | null> {
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(f.type)) {
+    setError(typeError);
+    return null;
+  }
+  if (f.size > maxBytes) {
+    setError(sizeError);
+    return null;
+  }
+  setError(null);
+  return await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result ?? ""));
+    r.onerror = () => reject(new Error(readFailed));
+    r.readAsDataURL(f);
+  });
+}
+
+/** One background art slot (light or dark): thumbnail of the current
+ *  upload (or a "built-in art" note), an Upload picker, and a Remove
+ *  action. The server renders the WebP/AVIF/color variants; this row
+ *  only ships the source bytes up and mirrors the result back. */
+function BackgroundSlotRow({
+  slot,
+  art,
+  canUpload,
+  onDone,
+}: {
+  slot: "light" | "dark";
+  art: BackgroundArt | null;
+  canUpload: boolean;
+  onDone: (j: { background: BackgroundArt | null; settings: SettingsRow }) => void;
+}) {
+  const { t } = useTranslation("admin");
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function send(body: unknown): Promise<void> {
+    setBusy(true);
+    try {
+      const res = await fetch("/admin/upload/background", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      onDone((await res.json()) as { ok: true; background: BackgroundArt | null; settings: SettingsRow });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("uploadFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    let dataUrl: string | null;
+    try {
+      dataUrl = await readPickedImage(
+        f, 10 * 1024 * 1024, setError,
+        t("branding.bgTypeError"), t("branding.bgSizeError"), t("branding.fileReadFailed"),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("uploadFailed"));
+      return;
+    }
+    if (dataUrl) await send({ slot, dataUrl });
+  }
+
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="w-28 shrink-0 uppercase tracking-widest text-keep-muted">
+          {slot === "light" ? t("branding.bgLightLabel") : t("branding.bgDarkLabel")}
+        </span>
+        {art ? (
+          <img
+            src={art.webpUrl}
+            alt={slot === "light" ? t("branding.bgLightLabel") : t("branding.bgDarkLabel")}
+            className="h-12 w-24 rounded border border-keep-rule object-cover"
+          />
+        ) : (
+          <span className="text-keep-muted">{t("branding.bgBuiltIn")}</span>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          onChange={onPick}
+          className="hidden"
+        />
+        {canUpload ? (
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={busy}
+            className="rounded border border-keep-rule bg-keep-banner px-3 py-1 hover:bg-keep-banner/80 disabled:opacity-50"
+          >
+            {busy ? t("branding.uploading") : t("branding.upload")}
+          </button>
+        ) : null}
+        {canUpload && art ? (
+          <button
+            type="button"
+            onClick={() => void send({ slot, clear: true })}
+            disabled={busy}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-1 text-keep-muted hover:text-keep-text disabled:opacity-50"
+            title={t("branding.bgRemoveTitle")}
+          >
+            {t("common:clear")}
+          </button>
+        ) : null}
+      </div>
+      {error ? <div className="text-[11px] text-keep-accent">{error}</div> : null}
+    </div>
+  );
+}
+
+/** Upload picker for the social share card: the server cover-crops the
+ *  source to the standard 1200x630 JPEG and persists its URL. */
+function OgCardUploadRow({
+  onUploaded,
+}: {
+  onUploaded: (j: { url: string; settings: SettingsRow }) => void;
+}) {
+  const { t } = useTranslation("admin");
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setBusy(true);
+    try {
+      const dataUrl = await readPickedImage(
+        f, 10 * 1024 * 1024, setError,
+        t("branding.bgTypeError"), t("branding.bgSizeError"), t("branding.fileReadFailed"),
+      );
+      if (!dataUrl) return;
+      const res = await fetch("/admin/upload/og-card", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataUrl }),
+      });
+      if (!res.ok) throw new Error(await readError(res));
+      onUploaded((await res.json()) as { ok: true; url: string; settings: SettingsRow });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("uploadFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          onChange={onPick}
+          className="hidden"
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          className="rounded border border-keep-rule bg-keep-banner px-3 py-1 hover:bg-keep-banner/80 disabled:opacity-50"
+        >
+          {busy ? t("branding.uploading") : t("branding.ogUpload")}
+        </button>
+        <span className="text-keep-muted">{t("branding.ogUploadHelp")}</span>
+      </div>
+      {error ? <div className="text-[11px] text-keep-accent">{error}</div> : null}
+    </div>
+  );
+}
+
 function LogoImageRow({
   value,
   onChange,

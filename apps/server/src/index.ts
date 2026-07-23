@@ -25,7 +25,7 @@ import { db } from "./db/index.js";
 // boot so `tFor` is ready before any request lands. `parseAcceptLanguage`
 // resolves the splash-page language for logged-out visitors (plan §7).
 import { parseAcceptLanguage } from "./i18n.js";
-import { matchSupportedLocale } from "@thekeep/shared";
+import { matchSupportedLocale, parseBackgroundArt } from "@thekeep/shared";
 import { createApp, createIo } from "./bootstrap.js";
 import { installHandshake } from "./handshake.js";
 import { wireSocketHandlers } from "./socketHandlers.js";
@@ -373,6 +373,10 @@ async function main() {
       // hides its user/room counters when this is false (default during
       // cold-start so an empty community doesn't telegraph "dead site").
       activityFeedsEnabled: s.activityFeedsEnabled,
+      // Homepage member-rankings marquee toggle (migration 0369). The
+      // splash gates the section AND its nav tab on this; the section
+      // also self-hides while the rankings payload is empty.
+      memberRankingsEnabled: s.memberRankingsEnabled,
       // Splash carousel toggle. When true the AuthGate fetches a
       // randomized slice of open worlds via /worlds/featured.
       featuredWorldsEnabled: s.featuredWorldsEnabled,
@@ -412,6 +416,13 @@ async function main() {
       // it server-side regardless. Boolean only — same public posture as
       // profileDesignerEnabled.
       worldMapUploadsEnabled: s.worldMapUploadsEnabled,
+      // Admin-uploaded site background art (migration 0368). Parsed
+      // BackgroundArt bundles ({webpUrl, avifUrl, color}) or null for
+      // "use the built-in Spire art". Public because the splash pages
+      // need them pre-auth; the client picks light/dark by the resolved
+      // palette's luminance, exactly like the static art fork.
+      bgLight: parseBackgroundArt(s.bgLightJson),
+      bgDark: parseBackgroundArt(s.bgDarkJson),
       // Env-gated: whether the operator configured Google OAuth credentials, so
       // the client hides the sign-in-with-Google button when it can't work. Pure
       // env boolean (no admin toggle). (YouTube for /theater needs no client

@@ -152,6 +152,10 @@ export interface SiteSettings {
   customHeadHtml: string;
   /** Default social-card image URL. When set, used as the og:image / twitter:image fallback in renderSplashHtml. Empty = the image baked into index.html. */
   ogImageUrl: string;
+  /** Admin-uploaded site background art (BackgroundArt JSON, images.ts pipeline) — light slot. Null = built-in art. */
+  bgLightJson: string | null;
+  /** Dark-palette companion slot to bgLightJson. */
+  bgDarkJson: string | null;
   /** Tagline appended after the site name in the homepage/login/register title. Empty = built-in HOMEPAGE_TAGLINE. */
   homepageTagline: string;
   /** Keyword shelf for <meta name="keywords">. Empty = built-in DEFAULT_KEYWORDS. */
@@ -182,6 +186,8 @@ export interface SiteSettings {
   activityFeedsEnabled: boolean;
   /** Splash page shows a randomized carousel of up to 10 open worlds when on. Off by default. */
   featuredWorldsEnabled: boolean;
+  /** Homepage member-rankings marquee + featured-member spotlight (migration 0369). On by default; only public/masked data ever shows. */
+  memberRankingsEnabled: boolean;
   /** Splash stat: surface the rolling 24h chat message count. Independent of `activityFeedsEnabled`, each toggle gates its own section, so admins can show this alone, the online/room cluster alone, or both together. Off by default. */
   splashMessages24hEnabled: boolean;
   /** Splash "Beta" chip + hero line (migration 0357). ANDed with the app-version gate (< 1.0.0) in the /site payload, so it self-retires at 1.0.0. Default on. */
@@ -393,6 +399,9 @@ export interface SettingsPatch {
   customHeadHtml?: string;
   /** Default social-card image URL. Route handler trims; empty clears. */
   ogImageUrl?: string;
+  /** Set only by the background upload/clear endpoints (never the generic settings form). */
+  bgLightJson?: string | null;
+  bgDarkJson?: string | null;
   /** Homepage title tagline. Route handler trims; empty falls back to the built-in. */
   homepageTagline?: string;
   /** Keyword shelf. Route handler trims; empty falls back to DEFAULT_KEYWORDS. */
@@ -415,6 +424,8 @@ export interface SettingsPatch {
   activityFeedsEnabled?: boolean;
   /** Splash page featured-worlds carousel toggle. */
   featuredWorldsEnabled?: boolean;
+  /** Homepage member-rankings marquee toggle (migration 0369). */
+  memberRankingsEnabled?: boolean;
   /** Splash stat for the rolling 24h chat message count. Independent toggle. */
   splashMessages24hEnabled?: boolean;
   /** Splash "Beta" chip toggle (migration 0357). Version gate applies on top. */
@@ -518,6 +529,8 @@ export async function updateSettings(
   if (patch.metaDescription !== undefined) update.metaDescription = patch.metaDescription;
   if (patch.customHeadHtml !== undefined) update.customHeadHtml = patch.customHeadHtml;
   if (patch.ogImageUrl !== undefined) update.ogImageUrl = patch.ogImageUrl;
+  if (patch.bgLightJson !== undefined) update.bgLightJson = patch.bgLightJson;
+  if (patch.bgDarkJson !== undefined) update.bgDarkJson = patch.bgDarkJson;
   if (patch.homepageTagline !== undefined) update.homepageTagline = patch.homepageTagline;
   if (patch.seoKeywords !== undefined) update.seoKeywords = patch.seoKeywords;
   if (patch.googleSiteVerification !== undefined) update.googleSiteVerification = patch.googleSiteVerification;
@@ -528,6 +541,7 @@ export async function updateSettings(
   if (patch.analyticsRawRetentionDays !== undefined) update.analyticsRawRetentionDays = patch.analyticsRawRetentionDays;
   if (patch.analyticsRespectDnt !== undefined) update.analyticsRespectDnt = patch.analyticsRespectDnt;
   if (patch.activityFeedsEnabled !== undefined) update.activityFeedsEnabled = patch.activityFeedsEnabled;
+  if (patch.memberRankingsEnabled !== undefined) update.memberRankingsEnabled = patch.memberRankingsEnabled;
   if (patch.featuredWorldsEnabled !== undefined) update.featuredWorldsEnabled = patch.featuredWorldsEnabled;
   if (patch.splashMessages24hEnabled !== undefined) update.splashMessages24hEnabled = patch.splashMessages24hEnabled;
   if (patch.betaBadgeEnabled !== undefined) update.betaBadgeEnabled = patch.betaBadgeEnabled;
@@ -634,6 +648,8 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     metaDescription: row.metaDescription,
     customHeadHtml: row.customHeadHtml,
     ogImageUrl: row.ogImageUrl,
+    bgLightJson: row.bgLightJson,
+    bgDarkJson: row.bgDarkJson,
     homepageTagline: row.homepageTagline,
     seoKeywords: row.seoKeywords,
     googleSiteVerification: row.googleSiteVerification,
@@ -648,6 +664,7 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     vapidPublicKey: row.vapidPublicKey,
     vapidPrivateKey: row.vapidPrivateKey,
     activityFeedsEnabled: row.activityFeedsEnabled,
+    memberRankingsEnabled: row.memberRankingsEnabled,
     featuredWorldsEnabled: row.featuredWorldsEnabled,
     splashMessages24hEnabled: row.splashMessages24hEnabled,
     betaBadgeEnabled: !!row.betaBadgeEnabled,

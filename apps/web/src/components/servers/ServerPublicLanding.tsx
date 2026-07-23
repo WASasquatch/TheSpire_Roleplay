@@ -24,6 +24,7 @@ import {
   useActiveTheme,
   useImageAverageColor,
   useScopedRootDesign,
+  backgroundArtCss,
 } from "../../lib/theme.js";
 import { sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../../lib/userHtml.js";
 import { useChat } from "../../state/store.js";
@@ -117,6 +118,23 @@ export function ServerPublicLanding({ slug, onNavigate }: {
   const bannerInk = hasBanner ? forumBannerInk(heroPalette, bannerColor) : null;
 
   return (
+    <>
+      {/* Owner-uploaded background art (migration 0368): a fixed full-
+          viewport layer behind the card, veiled with the server palette's
+          bg so the card stays the star. Absent (or an 18+ community,
+          where the payload drops it) the page keeps its flat theme bg. */}
+      {detail.background ? (
+        <div
+          aria-hidden
+          className="fixed inset-0 z-0 bg-cover bg-center"
+          style={{
+            backgroundColor: detail.background.color,
+            backgroundImage: backgroundArtCss(detail.background),
+          }}
+        >
+          <div className="absolute inset-0 bg-keep-bg/50" />
+        </div>
+      ) : null}
     <div className="relative z-10 mx-auto min-h-screen w-full px-0 py-0 md:px-6 md:py-8 lg:w-[min(100%,max(82vw,80rem))]">
       <article
         className="keep-frame overflow-hidden border-y border-keep-rule bg-keep-bg text-keep-text shadow-2xl md:rounded-lg md:border"
@@ -243,5 +261,6 @@ export function ServerPublicLanding({ slug, onNavigate }: {
         </footer>
       </article>
     </div>
+    </>
   );
 }

@@ -159,7 +159,9 @@
       "badBase64": "bad base64 payload",
       "emptyImage": "empty image",
       "tooLarge": "image too large (max {{kb}}KB)",
-      "unsupportedType": "unsupported image type (png, jpg, webp, gif only)"
+      "unsupportedType": "unsupported image type (png, jpg, webp, gif only)",
+      "bgTooSmall": "image is too small for a background (needs at least 640x360)",
+      "unreadable": "could not decode that image"
     },
     "identity": {
       "targetRequired": "Name or @id:/@cid: token required.",

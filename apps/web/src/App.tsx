@@ -92,7 +92,7 @@ import { SiteTour } from "./components/tours/SiteTour.js";
 import { getSocket, disconnect as disconnectSocket, hasSessionBeenAnnounced, loadTabCharacter, markLoginIntent, rememberTabCharacter, rememberTabRoom } from "./lib/socket.js";
 import { parseWorldFromUrl, syncWorldUrl } from "./lib/worlds.js";
 import { parseProfileFromUrl, syncProfileUrl, type PrivateProfileStub } from "./lib/profiles.js";
-import { ActiveThemeContext, applyFontPrefs, applyTheme, defaultBgUrl, useActiveTheme, type UiFontScale } from "./lib/theme.js";
+import { ActiveThemeContext, applyFontPrefs, applyTheme, defaultShellBgCss, useActiveTheme, type UiFontScale } from "./lib/theme.js";
 import { applyStyle, DEFAULT_STYLE_KEY } from "./lib/ornaments/index.js";
 import { fire as fireNotification, permission as notifPermission, shouldNotify, type NotifyPref } from "./lib/notifications.js";
 import { clearSessionToken, withIdentityQuery } from "./lib/http.js";
@@ -2108,12 +2108,20 @@ function Chat() {
       // the master bg.
       const personalUrl = activeCharacterId ? characterBgUrl : userBgUrl;
       const personalMode = activeCharacterId ? characterBgMode : userBgMode;
-      const url = personalUrl ?? defaultBgUrl(activeTheme);
+      // The community server's uploaded background override paints this
+      // server's shell for everyone ON it (below the member's own personal
+      // background, above every site-level default — see defaultShellBgCss).
+      const serverArt = serversEnabled && currentServerId
+        ? servers?.find((sv) => sv.id === currentServerId)?.background ?? null
+        : null;
+      const bgCss = personalUrl
+        ? `url("${personalUrl}")`
+        : defaultShellBgCss(activeTheme, branding, serverArt);
       const size = personalUrl
         ? (personalMode === "stretch" ? "100% 100%" : personalMode)
         : "cover";
       const repeat = personalUrl && personalMode === "tile" ? "repeat" : "no-repeat";
-      root.style.setProperty("--keep-shell-bg-url", `url("${url}")`);
+      root.style.setProperty("--keep-shell-bg-url", bgCss);
       root.style.setProperty("--keep-shell-bg-size", size);
       root.style.setProperty("--keep-shell-bg-repeat", repeat);
       // Luminance-aware glass overlay tints. On dark themes the
@@ -2152,7 +2160,7 @@ function Chat() {
       root.style.removeProperty("--keep-glass-tool-tint");
       root.style.removeProperty("--keep-glass-chat-tint");
     }
-  }, [activeTheme, activeCharacterId, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap, me, characterBgUrl, characterBgMode, userBgUrl, userBgMode, scopedRootDesign]);
+  }, [activeTheme, activeCharacterId, characterStyleKey, userStyleKey, siteStyleKey, themeDesignMap, me, characterBgUrl, characterBgMode, userBgUrl, userBgMode, scopedRootDesign, branding, serversEnabled, currentServerId, servers]);
 
   // Per-user font/size accessibility. Independent of the palette effect
   // above because font preferences don't layer through character/room
@@ -4129,6 +4137,14 @@ function Chat() {
   const viewingHistory = useChat((s) =>
     s.currentRoomId ? !!s.jumpWindows[s.currentRoomId] : false,
   );
+  // Floating "Jump to present" pill over the feed's bottom edge. Shows
+  // while the buffer is a detached jump window OR the reader has scrolled
+  // well up into loaded history (MessageList reports threshold crossings,
+  // change-only). Reset on room switch so a stale `true` can't flash the
+  // pill before the new room's feed settles at its end-pin.
+  const [feedFarFromBottom, setFeedFarFromBottom] = useState(false);
+  const feedJumpToPresentRef = useRef<(() => void) | null>(null);
+  useEffect(() => { setFeedFarFromBottom(false); }, [currentRoomId]);
   // Pinned messages per room (migration 0316). Seeded from GET /rooms/:id/pins
   // on room open and kept live by the `room:pins` socket broadcast (which
   // replaces a room's set wholesale). Local App state — pins are room-scoped
@@ -4781,24 +4797,6 @@ function Chat() {
               />
             </ErrorBoundary>
           ) : null}
-          {/* "Viewing older history" only applies to flat rooms, for
-              forum rooms the topic buckets paginate independently and
-              there's no single "live" chronological view to return to.
-              The forum jump path opens ThreadModal and never sets
-              viewingHistory, but this gate is a belt-and-suspenders
-              against any future caller that flips the flag in a
-              nested room. */}
-          {viewingHistory && !isForumRoom ? (
-            <button
-              type="button"
-              onClick={returnToLive}
-              className="flex w-full items-center justify-center gap-2 border-b border-keep-action/40 bg-keep-action/15 px-3 py-1 text-xs text-keep-action hover:bg-keep-action/25"
-              title={t("history.returnToLiveTitle")}
-            >
-              <span aria-hidden>↓</span>
-              {t("history.viewingOlder")}
-            </button>
-          ) : null}
           {/* Relative wrapper so the TypingIndicator inside can anchor
               `absolute bottom-0` over the chat feed's reserved bottom
               padding (see MessageList's `pb-6`). This is the Discord
@@ -4844,6 +4842,8 @@ function Chat() {
             canPin={canPin}
             canPinMessage={canPinMessage}
             pinnedMessageIds={pinnedMessageIdsForRoom}
+            onFarFromBottomChange={setFeedFarFromBottom}
+            jumpToPresentRef={feedJumpToPresentRef}
             canAdminEdit={canAdminEdit}
             nsfwTintRoomId={pairNsfwSideId}
             pairSiblingRoomId={pairMergeSiblingId}
@@ -4897,6 +4897,33 @@ function Chat() {
               Renders null when nobody else is typing, so the reserved
               padding strip is just empty space at rest. */}
           <TypingIndicator roomId={currentRoomId} />
+          {/* Centered "Jump to present" pill floating over the feed's
+              bottom edge (replaces the old full-width "viewing older
+              history" bar above the feed). Shows while the buffer is a
+              detached jump window OR the reader has scrolled well up into
+              loaded history. Two exits, one button: a jump window goes
+              through returnToLive (end window + re-join → the fresh bulk
+              re-seeds the newest page and the replaced buffer end-pins);
+              a plain scroll-up pins the CURRENT buffer to its newest line
+              imperatively via MessageList — returnToLive would be wrong
+              there, the re-seeded bulk shares the same newest row so the
+              layout effect reads it as a PREPEND and anchors instead of
+              pinning. Flat rooms only: forum rooms read top-down and the
+              far-from-bottom signal never fires for them. */}
+          {!emailBlocked && !isForumRoom && (viewingHistory || feedFarFromBottom) ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (viewingHistory) { returnToLive(); return; }
+                feedJumpToPresentRef.current?.();
+              }}
+              className="absolute bottom-9 left-1/2 z-20 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-keep-action/50 bg-keep-panel/90 px-3.5 py-1.5 text-xs font-semibold text-keep-action shadow-lg backdrop-blur-sm hover:bg-keep-panel"
+              title={t("history.returnToLiveTitle")}
+            >
+              <span aria-hidden>↓</span>
+              {t("history.jumpToPresent")}
+            </button>
+          ) : null}
           </div>
           {/* Newcomer "start here" panel (retention package): a warm,
               dismissible strip between the feed and the composer for

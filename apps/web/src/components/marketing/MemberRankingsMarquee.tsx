@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useReducedMotion } from "../../lib/reducedMotion.js";
+import { SPLASH_GLOW, SPLASH_PANEL_HOVER } from "../../lib/splashPanel.js";
 
 /**
  * "Our members" rankings marquee for the anonymous marketing homepage.
@@ -151,7 +152,7 @@ export function MemberRankingsMarquee({ data }: { data: SplashRankingsPayload })
         {data.featured ? <FeaturedMemberCard member={data.featured} sinceFmt={sinceFmt} nf={nf} /> : null}
 
         <div
-          className="min-w-0 rounded-lg border border-keep-rule bg-keep-bg/60 p-3"
+          className={`min-w-0 rounded-lg border border-keep-rule bg-keep-bg/60 p-3 ${SPLASH_PANEL_HOVER}`}
           onMouseEnter={() => setPaused(true)}
           onMouseLeave={() => setPaused(false)}
           onFocus={() => setPaused(true)}
@@ -307,7 +308,7 @@ function FeaturedMemberCard({ member, sinceFmt, nf }: {
     meta.push({ label: t("memberRankings.meta.languages"), value: member.languages.join(", ") });
   }
   return (
-    <article className="flex min-w-0 flex-col items-center gap-3 rounded-lg border border-keep-accent/40 bg-keep-panel/30 p-4 text-center">
+    <article className={`flex min-w-0 flex-col items-center gap-3 rounded-lg border border-keep-accent/40 bg-keep-panel/30 p-4 text-center ${SPLASH_GLOW}`}>
       <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-keep-accent">
         {t("memberRankings.featuredKicker")}
       </p>

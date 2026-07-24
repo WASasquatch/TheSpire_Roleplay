@@ -351,8 +351,8 @@
     "next": "Next ranking",
     "counter": "{{current}} / {{total}}",
     "boards": {
-      "today-talkative": "Most Talkative Today",
-      "today-actions": "Most Actions Today",
+      "today-talkative": "Most Talkative (Last 24h)",
+      "today-actions": "Most Actions (Last 24h)",
       "currency": "Wealthiest",
       "xp": "Most XP",
       "rank": "Highest Rank",

@@ -362,8 +362,8 @@
     "next": "Clasificación siguiente",
     "counter": "{{current}} / {{total}}",
     "boards": {
-      "today-talkative": "Más habladores hoy",
-      "today-actions": "Más acciones hoy",
+      "today-talkative": "Más habladores (últimas 24 h)",
+      "today-actions": "Más acciones (últimas 24 h)",
       "currency": "Más adinerados",
       "xp": "Más XP",
       "rank": "Mayor rango",

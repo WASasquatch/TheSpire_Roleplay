@@ -47,18 +47,19 @@ function niceMax(rawMax: number): number {
   return 10 * mag;
 }
 
-/** Track the rendered width of a container so the SVG re-measures on any
- *  resize — including FloatingWindow drags — via ResizeObserver.
+/** Track the rendered width of a container so the SVG fills it and
+ *  re-measures on resize (window / FloatingWindow drag) via ResizeObserver.
  *
- *  A chart mounts while its admin subtab is `hidden` (display:none), so
- *  its first measurement is 0 and it renders at the 240px floor. A
- *  ResizeObserver alone does NOT reliably fire when the element later
- *  transitions display:none → visible inside this deeply nested
- *  container-query + hidden-attribute layout, which stranded every
- *  chart at its narrow mobile floor on desktop. An IntersectionObserver
- *  re-measures the instant the chart becomes visible (0 → laid out),
- *  which is exactly that transition; the ResizeObserver still handles
- *  live width changes (window / FloatingWindow drags) once visible. */
+ *  A chart used to mount while its admin subtab was `hidden`
+ *  (display:none) → first measurement 0 → stuck at the 240px floor on
+ *  desktop, and neither a ResizeObserver nor an IntersectionObserver
+ *  re-measured reliably on un-hide inside the FloatingWindow's nested
+ *  layout. The real fix is upstream: AnalyticsTab now CONDITIONALLY
+ *  renders only the active subtab (AdminPanel already conditionally
+ *  renders the active tab), so a chart always mounts into a visible,
+ *  laid-out container and this initial measure gets the true width.
+ *  The ResizeObserver then keeps it correct as the window resizes. The
+ *  `w > 0` guard is belt-and-suspenders against a transient 0. */
 function useContainerWidth(): { ref: RefObject<HTMLDivElement>; width: number } {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
@@ -66,23 +67,13 @@ function useContainerWidth(): { ref: RefObject<HTMLDivElement>; width: number } 
     const el = ref.current;
     if (!el) return;
     const measure = () => {
-      // clientWidth is 0 while any ancestor is display:none; only commit a
-      // real measurement so we never overwrite a good width with a 0 when
-      // the subtab is hidden again.
       const w = el.clientWidth;
       if (w > 0) setWidth(w);
     };
     measure();
     const ro = new ResizeObserver(() => measure());
     ro.observe(el);
-    let io: IntersectionObserver | undefined;
-    if (typeof IntersectionObserver !== "undefined") {
-      io = new IntersectionObserver((entries) => {
-        if (entries.some((e) => e.isIntersecting)) measure();
-      });
-      io.observe(el);
-    }
-    return () => { ro.disconnect(); io?.disconnect(); };
+    return () => ro.disconnect();
   }, []);
   return { ref, width };
 }

@@ -341,9 +341,9 @@ async function buildTodayBoards(db: Db): Promise<SplashRankingSection[]> {
 
   const out: SplashRankingSection[] = [];
   const talk = stitch(talkRaw);
-  if (talk.length > 0) out.push({ key: "today-talkative", label: "Most Talkative Today", metric: "Messages", rows: talk });
+  if (talk.length > 0) out.push({ key: "today-talkative", label: "Most Talkative (Last 24h)", metric: "Messages", rows: talk });
   const actions = stitch(actionRaw);
-  if (actions.length > 0) out.push({ key: "today-actions", label: "Most Actions Today", metric: "Actions", rows: actions });
+  if (actions.length > 0) out.push({ key: "today-actions", label: "Most Actions (Last 24h)", metric: "Actions", rows: actions });
   return out;
 }
 

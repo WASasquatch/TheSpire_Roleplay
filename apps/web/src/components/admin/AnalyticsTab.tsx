@@ -733,7 +733,15 @@ export function AnalyticsTab({ findRequest, onFindHandled }: AnalyticsTabProps =
       </nav>
 
       {/* ================= OVERVIEW ================= */}
-      <section hidden={subtab !== "overview"} className="space-y-3">
+      {/* Subtabs are CONDITIONALLY RENDERED (not `hidden`): a chart mounted
+          inside a display:none section measures 0 width and never re-sizes
+          reliably on un-hide, stranding every graph at its narrow mobile
+          floor on desktop. Mounting only the active subtab means each chart
+          measures its real, laid-out container width. Find-a-setting still
+          works: its handler calls setSubtab(...) first, so the target
+          section is mounted before afterNextPaint scrolls to the anchor. */}
+      {subtab === "overview" ? (
+      <section className="space-y-3">
         <Section anchor="analytics.kpiTitle" title={t("analytics.kpiTitle")} hint={t("analytics.kpiHint")}>
           <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
             <StatTile
@@ -782,9 +790,11 @@ export function AnalyticsTab({ findRequest, onFindHandled }: AnalyticsTabProps =
           />
         </Section>
       </section>
+      ) : null}
 
       {/* ================= ENGAGEMENT ================= */}
-      <section hidden={subtab !== "engagement"} className="space-y-3">
+      {subtab === "engagement" ? (
+      <section className="space-y-3">
         <Section
           anchor="analytics.engRegistrations"
           title={t("analytics.engRegistrations")}
@@ -834,9 +844,11 @@ export function AnalyticsTab({ findRequest, onFindHandled }: AnalyticsTabProps =
           />
         </Section>
       </section>
+      ) : null}
 
       {/* ================= TRAFFIC ================= */}
-      <section hidden={subtab !== "traffic"} className="space-y-3">
+      {subtab === "traffic" ? (
+      <section className="space-y-3">
         <Section anchor="analytics.hitsOverTime" title={t("analytics.hitsOverTime")}>
           <div className="mb-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Stat label={t("analytics.pageviews")} value={fmtNum(totals.pageviews)} />
@@ -881,9 +893,11 @@ export function AnalyticsTab({ findRequest, onFindHandled }: AnalyticsTabProps =
           />
         </Section>
       </section>
+      ) : null}
 
       {/* ================= FEATURES ================= */}
-      <section hidden={subtab !== "features"} className="space-y-3">
+      {subtab === "features" ? (
+      <section className="space-y-3">
         <Section
           anchor="analytics.featureUsageTitle"
           title={t("analytics.featureUsageTitle")}
@@ -1048,6 +1062,7 @@ export function AnalyticsTab({ findRequest, onFindHandled }: AnalyticsTabProps =
           </div>
         </Section>
       </section>
+      ) : null}
     </div>
   );
 }

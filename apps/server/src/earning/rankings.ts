@@ -17,8 +17,9 @@
  * rotating "Spotlight" carousel at the top of the tab.
  *
  * Privacy gates:
- *   hideCurrencyCount → excluded from the currency board
- *   hideXpCount       → excluded from the XP board
+ *   hideCurrencyCount    → excluded from the currency board
+ *   hideXpCount          → excluded from the XP board
+ *   hideChatMessageCount → excluded from the messages board
  *   users.isPublic=false → MASKED on every board: the row keeps its
  *     honest position but carries no identity (private:true, empty
  *     name, no avatar/cosmetics, anonymized ownerId) and renders as
@@ -425,33 +426,33 @@ async function queryItemsBoard(db: Db): Promise<RawEntry[]> {
 }
 
 async function queryMessagesBoard(db: Db): Promise<RawEntry[]> {
-  // Master OOC = messages with characterId IS NULL.
-  // Character = messages with characterId IS NOT NULL.
-  // System messages are excluded (kind != 'system') so the
-  // "talkative" tally reflects actual roleplay, not the join /
-  // leave broadcasts the user passively triggers.
+  // Rank by the DURABLE lifetime counters (users/characters
+  // .lifetimeChatMessages), NOT a live COUNT(*) over `messages`. The chat
+  // janitor purges messages after the room's retention window (e.g. 5
+  // days), so a COUNT decays as history ages out and undercounts anyone
+  // whose messages have been swept — the "Most Talkative" board would
+  // then reflect "messages still on disk," not who actually talks most.
+  // These counters are bumped at insert and never decremented (migration
+  // 0176) — the same source the profile's "total chat messages" shows.
+  //   - master  = the whole account (OOC + every character), matching
+  //               the profile's headline total.
+  //   - character = that persona's own durable tally.
+  // Respect hideChatMessageCount the way the currency/XP boards respect
+  // hideCurrencyCount/hideXpCount: don't rank (and thereby expose) a
+  // count the user chose to hide on their profile. The hide flag lives
+  // on the master account and covers its characters too.
   const masterRows = await db
-    .select({
-      ownerId: messages.userId,
-      value: sql<number>`COUNT(*)`,
-    })
-    .from(messages)
-    .innerJoin(users, eq(users.id, messages.userId))
-    .where(and(eligibleUserFilter(), isNull(messages.characterId), sql`${messages.kind} != 'system'`))
-    .groupBy(messages.userId)
-    .orderBy(desc(sql`COUNT(*)`))
+    .select({ ownerId: users.id, value: users.lifetimeChatMessages })
+    .from(users)
+    .where(and(eligibleUserFilter(), eq(users.hideChatMessageCount, false)))
+    .orderBy(desc(users.lifetimeChatMessages))
     .limit(TOP_N);
   const charRows = await db
-    .select({
-      ownerId: sql<string>`${messages.characterId}`,
-      value: sql<number>`COUNT(*)`,
-    })
-    .from(messages)
-    .innerJoin(characters, eq(characters.id, messages.characterId))
+    .select({ ownerId: characters.id, value: characters.lifetimeChatMessages })
+    .from(characters)
     .innerJoin(users, eq(users.id, characters.userId))
-    .where(and(eligibleUserFilter(), isNull(characters.deletedAt), isNotNull(messages.characterId), sql`${messages.kind} != 'system'`))
-    .groupBy(messages.characterId)
-    .orderBy(desc(sql`COUNT(*)`))
+    .where(and(eligibleUserFilter(), isNull(characters.deletedAt), eq(users.hideChatMessageCount, false)))
+    .orderBy(desc(characters.lifetimeChatMessages))
     .limit(TOP_N);
   return mergeTop(
     masterRows.map((r) => ({ scope: "user" as const, ownerId: r.ownerId, value: Number(r.value) })),

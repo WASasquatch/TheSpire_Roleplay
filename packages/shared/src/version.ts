@@ -15,7 +15,7 @@
  * patch bumps are bug fixes / small adjustments, and a 1.0 release
  * signals "feature-complete for the original scope, API surface settled."
  */
-export const VERSION = "0.33.25";
+export const VERSION = "0.33.26";
 
 /**
  * True when `version` sorts below the 1.0.0 release under SemVer ordering.

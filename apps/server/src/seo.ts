@@ -593,16 +593,20 @@ export async function renderSplashHtml(
   return html;
 }
 
-/** Robots.txt body. Allows everything (auth wall handles privacy) and
- *  points crawlers at our sitemap.
+/** Robots.txt body. Normal search engines (Googlebot, Bingbot, and friends)
+ *  are welcome to index the public entrance via the wildcard Allow. But we do
+ *  NOT let AI companies scrape the site to TRAIN models on members' roleplay
+ *  and writing, matching the front-page privacy stance: the training and
+ *  dataset crawlers below each get an explicit Disallow.
  *
- *  Explicit AI-crawler stanzas: we WANT discovery via LLM search + answer
- *  engines, so we name the major training / retrieval agents and allow them
- *  outright. Without a named stanza some of these ignore the `User-agent: *`
- *  wildcard (or a publisher's absence of an explicit allow reads as a soft
- *  opt-out to their tooling). Covers OpenAI (GPTBot training, OAI-SearchBot +
- *  ChatGPT-User retrieval), Perplexity, Anthropic's ClaudeBot, and Google's
- *  Google-Extended (Gemini / Vertex training control, separate from Googlebot). */
+ *  The split is "cite me, don't train on me": AI answer-engine / search
+ *  retrieval bots (OpenAI's OAI-SearchBot + ChatGPT-User, Perplexity) are
+ *  allowed outright so the site can still surface as a live citation, while the
+ *  training / dataset harvesters (GPTBot, ClaudeBot, Google-Extended, Common
+ *  Crawl, Bytespider, Meta's crawler, and so on) are refused. Named stanzas are
+ *  used both ways because, for these agents, the absence of an explicit stanza
+ *  is often read as a soft opt-out (or ignored) by their tooling. robots.txt is
+ *  a request compliant crawlers honor; it is not enforcement. */
 export async function renderRobotsTxt(db: Db, origin: string): Promise<string> {
   // Master indexing switch. When an admin turns indexing off (staging /
   // pre-launch), we serve a blanket disallow so compliant crawlers drop the
@@ -612,17 +616,41 @@ export async function renderRobotsTxt(db: Db, origin: string): Promise<string> {
   if (!s.searchIndexingEnabled) {
     return ["User-agent: *", "Disallow: /", ""].join("\n");
   }
-  const aiAgents = [
-    "GPTBot",
-    "OAI-SearchBot",
-    "ChatGPT-User",
-    "PerplexityBot",
-    "ClaudeBot",
-    "Google-Extended",
+  // AI answer-engine / search retrieval bots we DO allow (live citation, not
+  // training). Traditional search engines ride the wildcard Allow above them.
+  const allowedAiSearch = [
+    "OAI-SearchBot", // OpenAI ChatGPT search index
+    "ChatGPT-User", // ChatGPT browsing on a user's request
+    "PerplexityBot", // Perplexity search index
+    "Perplexity-User", // Perplexity on-demand retrieval
+  ];
+  // AI training / dataset-scraping crawlers we refuse. These ingest content to
+  // build or feed model training sets.
+  const blockedAiTrainers = [
+    "GPTBot", // OpenAI model training
+    "Google-Extended", // Google Gemini/Vertex training (separate from Googlebot indexing)
+    "Applebot-Extended", // Apple Intelligence training (separate from Applebot indexing)
+    "ClaudeBot", // Anthropic training crawler
+    "anthropic-ai", // Anthropic (legacy token)
+    "Claude-Web", // Anthropic (legacy token)
+    "CCBot", // Common Crawl (feeds many public training datasets)
+    "Bytespider", // ByteDance / TikTok scraper
+    "meta-externalagent", // Meta AI crawler
+    "FacebookBot", // Meta
+    "Amazonbot", // Amazon AI
+    "cohere-ai", // Cohere
+    "Diffbot", // Diffbot dataset crawler
+    "Omgilibot", // Webz.io / Omgili data resale
+    "ImagesiftBot", // Hive image scraper
+    "AI2Bot", // Allen Institute for AI
+    "Timpibot", // Timpi dataset crawler
   ];
   const lines: string[] = ["User-agent: *", "Allow: /", ""];
-  for (const agent of aiAgents) {
+  for (const agent of allowedAiSearch) {
     lines.push(`User-agent: ${agent}`, "Allow: /", "");
+  }
+  for (const agent of blockedAiTrainers) {
+    lines.push(`User-agent: ${agent}`, "Disallow: /", "");
   }
   lines.push(`Sitemap: ${origin}/sitemap.xml`, "");
   return lines.join("\n");

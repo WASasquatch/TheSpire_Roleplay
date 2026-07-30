@@ -223,6 +223,18 @@
     "introHeading": "Play and pick-up games on any device",
     "introSummary": "The Spire runs right in your browser — no download, no install. Play at your desk and pick up right where you left off on your phone, with the same rooms, characters, and stories on every screen.",
     "introAlt": "A look inside The Spire",
+    "awareness": {
+      "title": "Who's Reading?",
+      "tagline": "Your stories shouldn't train someone else's AI",
+      "desc": "Did you know? On many of the biggest platforms, the roleplay and fiction you post publicly gets pulled into AI. Some have spent years turning the posts you gave them into their own models; others sell your work to companies that do. It's usually opt-out by default, and once your words have trained a model, deleting them can't take them back.",
+      "points": [
+        "Public posts on X, Facebook, Reddit, and Tumblr already feed AI models",
+        "A 'private' group often just gates who can join, not what feeds AI",
+        "Opting out is usually on you, and often buried in settings",
+        "Deleting your work can't un-train a model it already shaped"
+      ],
+      "mission": "{{siteName}} is a tracking-free home for roleplay and writing. No data harvesting, and we never train AI on your stories or sell your words."
+    },
     "items": {
       "characters": {
         "title": "Characters",

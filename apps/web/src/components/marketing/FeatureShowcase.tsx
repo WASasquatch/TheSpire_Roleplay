@@ -10,6 +10,7 @@ import {
   MessagesSquare,
   Palette,
   Server,
+  ShieldCheck,
   VenetianMask,
   type LucideIcon,
 } from "lucide-react";
@@ -114,9 +115,11 @@ interface Props {
   onNavigate: (path: string) => void;
   /** Mirrors branding.registrationOpen; hides register-bound CTAs when closed. */
   registrationOpen: boolean;
+  /** Resolved site name (branding.siteName), for the awareness slide's mission line. */
+  siteName: string;
 }
 
-export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
+export function FeatureShowcase({ onNavigate, registrationOpen, siteName }: Props) {
   const { t } = useTranslation("marketing");
   const [index, setIndex] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -129,10 +132,12 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
   // two drift apart and the bar hits 100% before the advance fires.
   const [epoch, setEpoch] = useState(0);
 
-  // Slide 0 is the full-bleed product screenshot (no text); slides 1..N are
-  // the features. The carousel starts on the screenshot and rotates through
+  // Slide 0 is the privacy "Call to Awareness" (the mission pitch); slide 1 is
+  // the full-bleed product screenshot (no text); slides 2..N+1 are the
+  // features. The carousel opens on the awareness slide and rotates through
   // the whole set.
-  const SLIDE_COUNT = FEATURES.length + 1;
+  const AWARENESS_POINT_COUNT = 4;
+  const SLIDE_COUNT = FEATURES.length + 2;
 
   useEffect(() => {
     if (paused || pinned) return;
@@ -147,7 +152,8 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
     setEpoch((e) => e + 1);
   }
 
-  const isIntro = index === 0;
+  const isAwareness = index === 0;
+  const isIntro = index === 1;
 
   function go(e: React.MouseEvent, path: string) {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
@@ -195,12 +201,17 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
         >
           {Array.from({ length: SLIDE_COUNT }, (_, i) => {
             const activeDot = i === index;
-            // Slide 0 = the overview screenshot; 1..N = features.
+            // Slide 0 = awareness pitch; slide 1 = the overview screenshot;
+            // 2..N+1 = features.
             const label =
-              i === 0 ? t("features.overview") : t(`features.items.${FEATURES[i - 1]!.key}.title`);
+              i === 0
+                ? t("features.awareness.title")
+                : i === 1
+                  ? t("features.overview")
+                  : t(`features.items.${FEATURES[i - 2]!.key}.title`);
             return (
               <button
-                key={i === 0 ? "overview" : FEATURES[i - 1]!.key}
+                key={i === 0 ? "awareness" : i === 1 ? "overview" : FEATURES[i - 2]!.key}
                 type="button"
                 role="tab"
                 aria-selected={activeDot}
@@ -247,6 +258,60 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
             grid-cols-1 = minmax(0,1fr), which caps the column to the
             container and lets w-full / truncation resolve correctly. */}
         <div className="grid grid-cols-1">
+          {/* Slide 0: the "Call to Awareness" — why a tracking-free home for
+              roleplay + writing matters. Uses the same icon-header + copy +
+              bullets frame as a feature card, with a mission line as the
+              payoff. Leads the carousel so the mission is the first thing a
+              visitor reads. */}
+          <div
+            className={`col-start-1 row-start-1 flex flex-col justify-center ${isAwareness ? "feature-panel-in" : "invisible"}`}
+            aria-hidden={!isAwareness}
+            {...(isAwareness ? {} : INERT)}
+          >
+            <div className="mb-4 flex items-center gap-3 sm:gap-4">
+              <div
+                aria-hidden
+                className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-keep-accent/40 sm:h-14 sm:w-14"
+                style={{
+                  background:
+                    "radial-gradient(circle at 30% 25%, rgb(var(--keep-accent) / 0.25), rgb(var(--keep-panel) / 0.4) 70%)",
+                }}
+              >
+                <ShieldCheck className="h-6 w-6 text-keep-accent sm:h-7 sm:w-7" aria-hidden />
+              </div>
+              <div className="min-w-0">
+                <h3 className="font-action text-xl text-keep-text sm:text-2xl">
+                  {t("features.awareness.title")}
+                </h3>
+                <p className="text-xs uppercase tracking-[0.2em] text-keep-accent sm:text-sm">
+                  {t("features.awareness.tagline")}
+                </p>
+              </div>
+            </div>
+            <div className="gap-8 lg:grid lg:grid-cols-[3fr_2fr]">
+              <div className="min-w-0">
+                <p className="text-base leading-relaxed text-keep-text/85 lg:text-lg">
+                  {t("features.awareness.desc")}
+                </p>
+                <p className="mt-4 text-base font-semibold leading-relaxed text-keep-text lg:text-lg">
+                  {t("features.awareness.mission", { siteName })}
+                </p>
+              </div>
+              <ul className="mt-4 space-y-2.5 lg:mt-0">
+                {Array.from({ length: AWARENESS_POINT_COUNT }, (_, i) =>
+                  t(`features.awareness.points.${i}`),
+                ).map((p) => (
+                  <li
+                    key={p}
+                    className="flex items-start gap-2.5 text-[15px] text-keep-text/85 lg:text-base"
+                  >
+                    <Check className="mt-1 h-4 w-4 shrink-0 text-keep-accent lg:h-5 lg:w-5" aria-hidden />
+                    {p}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
           <div
             className={`col-start-1 row-start-1 flex flex-col justify-center ${isIntro ? "feature-panel-in" : "invisible"}`}
             aria-hidden={!isIntro}
@@ -287,7 +352,7 @@ export function FeatureShowcase({ onNavigate, registrationOpen }: Props) {
             </div>
           </div>
           {FEATURES.map((f, fi) => {
-            const isActive = index === fi + 1;
+            const isActive = index === fi + 2;
             const FIcon = f.icon;
             const showCta = !!f.cta && (!f.ctaNeedsRegistration || registrationOpen);
             return (

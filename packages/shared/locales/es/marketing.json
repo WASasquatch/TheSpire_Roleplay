@@ -234,6 +234,18 @@
     "introHeading": "Juega y retoma partidas en cualquier dispositivo",
     "introSummary": "The Spire funciona directamente en tu navegador, sin descargas ni instalación. Juega en tu escritorio y continúa justo donde lo dejaste desde tu teléfono, con las mismas salas, personajes e historias en cada pantalla.",
     "introAlt": "Un vistazo al interior de The Spire",
+    "awareness": {
+      "title": "¿Quién te lee?",
+      "tagline": "Tus historias no deberían entrenar la IA de otro",
+      "desc": "¿Sabías que en muchas de las plataformas más grandes el rol y la ficción que publicas en público acaban alimentando la IA? Algunas llevan años convirtiendo en sus propios modelos las publicaciones que les diste; otras venden tu trabajo a empresas que lo hacen. Y casi siempre te toca a ti excluirte. Una vez que tus palabras entrenaron un modelo, borrarlas ya no las recupera.",
+      "points": [
+        "Las publicaciones públicas en X, Facebook, Reddit y Tumblr ya alimentan modelos de IA",
+        "Un grupo «privado» a menudo solo controla quién entra, no qué alimenta la IA",
+        "Excluirte suele quedar en tus manos, y a menudo está escondido en los ajustes",
+        "Borrar tu trabajo no puede sacarlo de un modelo que ya lo aprendió"
+      ],
+      "mission": "{{siteName}} es un hogar sin rastreo para el rol y la escritura. Sin recolección de datos, y nunca entrenamos IA con tus historias ni vendemos tus palabras."
+    },
     "items": {
       "characters": {
         "title": "Personajes",

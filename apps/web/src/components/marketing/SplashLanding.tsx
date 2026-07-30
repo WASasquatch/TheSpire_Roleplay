@@ -575,6 +575,7 @@ export function SplashLanding({ onNavigate }: Props) {
                   <FeatureShowcase
                     onNavigate={onNavigate}
                     registrationOpen={branding.registrationOpen}
+                    siteName={siteName}
                   />
                 </div>
 

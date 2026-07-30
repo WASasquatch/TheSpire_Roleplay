@@ -166,6 +166,10 @@
     "switchFailed": "error al cambiar",
     "forumsHiddenUnverified": "Los foros están ocultos mientras verificas tu correo."
   },
+  "world": {
+    "collaboratorAddedTitle": "Te añadieron como colaborador",
+    "collaboratorAddedSnippet": "Ahora puedes ver y editar «{{world}}»."
+  },
   "worldBanner": {
     "openTitle": "Abrir el mundo vinculado a esta sala",
     "world": "Mundo",

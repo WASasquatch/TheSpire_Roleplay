@@ -38,6 +38,7 @@ import { tFor } from "../../i18n.js";
 import { getSessionUser } from "../auth.js";
 import { getSettings } from "../../settings.js";
 import { broadcastRoomState } from "../../realtime/broadcast.js";
+import { notify } from "../../notifications/engine.js";
 import type { Db } from "../../db/index.js";
 import {
   SLUG_RX,
@@ -83,13 +84,13 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
         ? eq(worlds.ownerUserId, me.id)
         : and(eq(worlds.ownerUserId, me.id), eq(worlds.isNsfw, false)))
       .orderBy(asc(worlds.name));
-    // ?collab=1 unions in the worlds the caller COLLABORATES on (the server
-    // console's community-world picker offers "owns or collaborates"). The
-    // bare route stays owned-only so existing pickers are byte-identical.
-    // Same minor 18+ drop as the owned list. PRIVATE collaborations are
-    // excluded: resolveWorld denies private worlds to everyone but their
-    // owner/admin, so such a pick could never read back for its setter (the
-    // console PATCH refuses it for the same reason).
+    // ?collab=1 unions in the worlds the caller COLLABORATES on (the "Shared
+    // with me" section of the Worlds list, and the server console's community-
+    // world picker). The bare route stays owned-only so existing pickers are
+    // byte-identical. Same minor 18+ drop as the owned list. Private
+    // collaborations ARE included now that `resolveWorld` grants collaborators
+    // view access regardless of visibility (so the setter/reader can read them
+    // back). The caller distinguishes owned vs shared by `ownerUserId`.
     if (req.query.collab === "1") {
       const owned = new Set(rows.map((w) => w.id));
       const collabRows = await db
@@ -101,7 +102,6 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
           : and(eq(worldCollaborators.userId, me.id), eq(worlds.isNsfw, false)))
         .orderBy(asc(worlds.name));
       for (const r of collabRows) {
-        if (r.w.visibility === "private") continue;
         if (!owned.has(r.w.id)) rows.push(r.w);
       }
       rows.sort((a, b) => a.name.localeCompare(b.name));
@@ -475,7 +475,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       if (!body.success) { reply.code(400); return { error: "invalid body" }; }
       const username = body.data.username.trim();
       const user = (await db
-        .select({ id: users.id, username: users.username })
+        .select({ id: users.id, username: users.username, locale: users.locale })
         .from(users)
         .where(sql`lower(${users.username}) = lower(${username})`)
         .limit(1))[0];
@@ -483,7 +483,9 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       if (user.id === w.ownerUserId) {
         reply.code(409); return { error: tFor(me.locale, "errors:server.worlds.ownerAlreadyEditor") };
       }
-      await db
+      // RETURNING tells a genuine new grant apart from a re-add of an existing
+      // collaborator (onConflictDoNothing yields no row) so we only notify once.
+      const inserted = await db
         .insert(worldCollaborators)
         .values({
           worldId: w.id,
@@ -492,7 +494,24 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
         })
         .onConflictDoNothing({
           target: [worldCollaborators.worldId, worldCollaborators.userId],
+        })
+        .returning({ userId: worldCollaborators.userId });
+      if (inserted.length > 0) {
+        // Tell the new collaborator via the Notification Center (bell + offline
+        // push) — adding a collaborator was previously silent, so they had no
+        // way to know or to find the world. Deep-links to the world viewer.
+        // Localized to the RECIPIENT's language; best-effort (never throws).
+        await notify(db, io, {
+          userId: user.id,
+          category: "system",
+          kind: "world_collaborator_added",
+          actor: { id: me.id, name: me.username },
+          title: tFor(user.locale, "notifications:world.collaboratorAddedTitle"),
+          snippet: tFor(user.locale, "notifications:world.collaboratorAddedSnippet", { world: w.name }),
+          target: { kind: "world", id: w.slug, url: `/w/${w.slug}` },
+          dedupeKey: `world_collab:${w.id}:${user.id}`,
         });
+      }
       return { ok: true, collaborators: await collaboratorListFor(db, w.id) };
     },
   );

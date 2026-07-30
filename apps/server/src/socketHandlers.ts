@@ -58,6 +58,7 @@ import {
 import { clearAllAwayForUser } from "./realtime/awayState.js";
 import { consumeInvitedLanding } from "./servers/inviteLinks.js";
 import { applyControl, parsePlaylist } from "./realtime/theaterState.js";
+import { reconcileTheaterTimer, recordTheaterSourceDuration } from "./realtime/theaterScheduler.js";
 import { anyConnectedRoomController, callerCanEditRoom } from "./auth/roomPermissions.js";
 import { effectiveRoomNsfw } from "./lib/nsfwRooms.js";
 import { isInfoRoom } from "./lib/postMode.js";
@@ -1055,6 +1056,21 @@ export function wireSocketHandlers(
         ack?.({ ok: false, code: "NO_THEATER", message: tFor(user.locale, "errors:server.realtime.theaterNotOn") });
         return;
       }
+      // `duration` caches the loaded source's length so the SERVER can advance
+      // an empty room. Controller-only + never touches playback state: a bogus
+      // length would make the server-side timer cut a video short for everyone,
+      // so we don't trust a plain viewer here (a controller is already trusted
+      // for all playback). Silent no-op for non-controllers (the client fires
+      // it blind on `onDuration` and there's nothing for a viewer to fix).
+      if (action === "duration") {
+        if (await callerCanEditRoom(db, user, roomId)) {
+          if (Number.isFinite(payload.index) && Number.isFinite(payload.durationSec)) {
+            await recordTheaterSourceDuration(io, db, roomId, payload.index as number, payload.durationSec as number);
+          }
+        }
+        ack?.({ ok: true });
+        return;
+      }
       // `ended` / `error` are PASSIVE end-of-source signals a viewer's
       // player emits; honoring them from non-controllers is what keeps the
       // playlist advancing (and skipping dead sources) when no mod is around.
@@ -1095,6 +1111,10 @@ export function wireSocketHandlers(
       // though; let the periodic sweep persist those rather than writing the
       // row on every beat.
       if (action !== "progress") await persistTheaterCheckpoint(db, roomId);
+      // Re-aim the server-side auto-advance timer to the new state: a pause
+      // cancels it, a play/seek re-arms it from the new position, an advance
+      // schedules the next source. This is what keeps an empty room looping.
+      await reconcileTheaterTimer(io, db, roomId);
       ack?.({ ok: true });
     });
 

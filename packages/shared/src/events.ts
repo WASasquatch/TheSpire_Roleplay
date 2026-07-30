@@ -262,13 +262,20 @@ export interface ClientToServerEvents {
    *                       anchors the server's position to reality so wall-
    *                       clock extrapolation can't drift ahead over a long
    *                       video; does not change index / play state.
+   *   duration          , the CONTROLLER's player learned the loaded source's
+   *                       length (`durationSec`, for `index`). Owner/mod-gated.
+   *                       Cached onto the playlist source so the SERVER can
+   *                       auto-advance an EMPTY room (no client to fire
+   *                       `onEnded`). Does not change index / play state.
    */
   "theater:control": (
     payload: {
       roomId: string;
-      action: "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error" | "progress";
+      action: "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error" | "progress" | "duration";
       positionSec?: number;
       index?: number;
+      /** Media length in seconds, sent with the `duration` action. */
+      durationSec?: number;
     },
     ack?: AckFn<{ ok: true } | AckError>,
   ) => void;

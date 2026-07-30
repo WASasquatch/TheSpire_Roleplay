@@ -3996,6 +3996,10 @@ function Chat() {
       setEarningOpen({});
     } else if (kind === "forum" || kind === "topic" || kind === "message") {
       setForumsOpen({});
+    } else if (kind === "world" && id) {
+      // World collaboration invite → open the world viewer (id here is the
+      // world slug; setWorldViewerId accepts a slug or id).
+      setWorldViewerId(id);
     }
   }, [servers, onServerSelect, currentServerId]);
 

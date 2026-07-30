@@ -209,6 +209,7 @@
     "browseCatalogTitle": "Explora mundos públicos que puedes usar en tus salas",
     "newWorld": "+ Nuevo mundo",
     "noWorlds": "Aún no hay mundos. Haz clic en \"+ Nuevo mundo\" para empezar uno.",
+    "sharedHeading": "Compartidos conmigo",
     "joinedHeading": "Mundos a los que me uní",
     "asIdentity": "como {{name}}",
     "joinedAsCharacterTitle": "Te uniste como tu personaje {{name}}",
@@ -606,7 +607,8 @@
     "remove": "Quitar",
     "none": "Aún no hay colaboradores.",
     "placeholder": "nombre de usuario a invitar",
-    "add": "Agregar"
+    "add": "Agregar",
+    "shareLabel": "Enlace para compartir:"
   },
   "page": {
     "bodyHtml": "Cuerpo (HTML)",

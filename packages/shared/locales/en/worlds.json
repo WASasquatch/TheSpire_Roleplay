@@ -208,6 +208,7 @@
     "browseCatalogTitle": "Browse public worlds you can use in your rooms",
     "newWorld": "+ New world",
     "noWorlds": "No worlds yet. Click \"+ New world\" to start one.",
+    "sharedHeading": "Shared with me",
     "joinedHeading": "Worlds I've joined",
     "asIdentity": "as {{name}}",
     "joinedAsCharacterTitle": "Joined as your character {{name}}",
@@ -597,7 +598,8 @@
     "remove": "Remove",
     "none": "No collaborators yet.",
     "placeholder": "username to invite",
-    "add": "Add"
+    "add": "Add",
+    "shareLabel": "Share link:"
   },
   "page": {
     "bodyHtml": "Body (HTML)",

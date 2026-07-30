@@ -28,10 +28,12 @@ import {
   buildWorldTree,
   deriveSlug,
   removeWorldCollaborator,
+  worldShareUrl,
   type WorldTreeNode,
 } from "../../lib/worlds.js";
 import { formatDateTime, formatTime } from "../../lib/intlFormat.js";
 import { readError } from "../../lib/http.js";
+import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
 import { ActiveThemeContext, themeStyle, useActiveTheme } from "../../lib/theme.js";
 import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { ThemePicker } from "../cosmetics/ThemePicker.js";
@@ -877,6 +879,7 @@ function WorldMetaEditor({
 
       <CollaboratorsPanel
         worldId={worldId}
+        worldSlug={detail.world.slug}
         viewerIsOwner={canManageCollaborators}
         initialCollaborators={detail.collaborators ?? []}
         onChanged={onSaved}
@@ -922,11 +925,13 @@ function WorldMetaEditor({
 
 function CollaboratorsPanel({
   worldId,
+  worldSlug,
   viewerIsOwner,
   initialCollaborators,
   onChanged,
 }: {
   worldId: string;
+  worldSlug: string;
   viewerIsOwner: boolean;
   initialCollaborators: WorldDetail["collaborators"];
   onChanged: () => Promise<void> | void;
@@ -936,6 +941,13 @@ function CollaboratorsPanel({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Share link, right where you add people: adding a collaborator doesn't make
+  // an unlisted world discoverable, so the owner must hand out the /w/<slug>
+  // link. It used to live only in the viewer, so owners couldn't find it here.
+  const { copied, copy: copyLink } = useCopyToClipboard({
+    resetMs: 1500,
+    onError: (url) => window.prompt(t("viewer.copyPrompt"), url),
+  });
   // Keep local list in sync if the parent re-fetches the world detail
   // (e.g. after the metadata save round-trips a fresh snapshot).
   useEffect(() => { setList(initialCollaborators); }, [initialCollaborators]);
@@ -985,6 +997,19 @@ function CollaboratorsPanel({
           ? t("collab.ownerDescription")
           : t("collab.viewerDescription")}
       </p>
+      {/* Share link: a collaborator can only reach an unlisted/private world
+          via this link, so surface it right beside the add form. */}
+      <div className="mt-2 flex flex-wrap items-center gap-2 rounded border border-keep-rule/60 bg-keep-bg/40 px-2 py-1.5">
+        <span className="text-[11px] text-keep-muted">{t("collab.shareLabel")}</span>
+        <button
+          type="button"
+          onClick={() => void copyLink(worldShareUrl(worldSlug))}
+          title={t("viewer.copyLinkTitle", { url: worldShareUrl(worldSlug) })}
+          className="rounded border border-keep-rule/60 px-1.5 py-0.5 font-mono text-[10px] hover:border-keep-action hover:text-keep-action"
+        >
+          {copied ? t("viewer.copied") : `/w/${worldSlug}`}
+        </button>
+      </div>
       {list.length > 0 ? (
         <ul className="mt-2 space-y-1">
           {list.map((c) => (

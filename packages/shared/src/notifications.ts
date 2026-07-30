@@ -51,6 +51,8 @@ export type NotificationKind =
   | "royalty"
   /** Welcome wagon: a newcomer just sent their first-ever public message. */
   | "first_words"
+  /** You were added as an editing collaborator on someone's world. */
+  | "world_collaborator_added"
   | "announcement"
   | "report_resolved"
   | "system";
@@ -66,7 +68,8 @@ export type NotificationTargetKind =
   | "server"
   | "profile"
   | "earning"
-  | "event";
+  | "event"
+  | "world";
 
 /** One inbox row as sent to the client (snapshots + freshly-joined display
  *  bits like the actor's current avatar and the server's current name). */

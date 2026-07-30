@@ -18,6 +18,7 @@ import {
   Award,
   Bell,
   Flag,
+  Globe,
   Landmark,
   Megaphone,
   MessageSquare,
@@ -80,6 +81,10 @@ const FILTERS: { key: NotificationCategory | "all"; labelKey: string }[] = [
 
 function categoryIcon(n: NotificationWire) {
   const cls = "h-4 w-4 shrink-0";
+  // Kind-specific override before the coarse category icon: a world
+  // collaboration invite rides the "system" category but reads better with a
+  // world glyph than the generic bell.
+  if (n.kind === "world_collaborator_added") return <Globe className={cls} aria-hidden />;
   switch (n.category) {
     case "mention": return <AtSign className={cls} aria-hidden />;
     case "dm": return <MessageSquare className={cls} aria-hidden />;

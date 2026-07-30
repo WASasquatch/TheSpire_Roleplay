@@ -767,9 +767,23 @@ export async function resolveWorld(
     // Missing row fails closed, same posture as ageGate's malformed-DOB rule.
     if (!viewer || isMinor(viewer)) return null;
   }
-  const viewable = w.visibility !== "private"
+  let viewable = w.visibility !== "private"
     || (viewerUserId && w.ownerUserId === viewerUserId)
     || viewerRole === "admin";
+  // A collaborator can VIEW (and therefore edit) the world regardless of its
+  // visibility — including a private one. Without this, `canEditWorld` grants
+  // edit rights that `resolveWorld` then 404s on a private world, and a
+  // collaborator can't even open a private/unlisted world they were added to.
+  // Only pay the extra lookup when the cheap checks didn't already allow it
+  // (i.e. a private world viewed by a logged-in non-owner/non-admin).
+  if (!viewable && viewerUserId) {
+    const collab = (await db
+      .select({ userId: worldCollaborators.userId })
+      .from(worldCollaborators)
+      .where(and(eq(worldCollaborators.worldId, w.id), eq(worldCollaborators.userId, viewerUserId)))
+      .limit(1))[0];
+    if (collab) viewable = true;
+  }
   if (!viewable) return null;
   return w;
 }

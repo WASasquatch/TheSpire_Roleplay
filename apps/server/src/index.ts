@@ -41,6 +41,7 @@ import {
   expireIfEmpty,
   setGhostSweepIo,
 } from "./realtime/broadcast.js";
+import { reconcileAllTheaterTimers } from "./realtime/theaterScheduler.js";
 import { restorePresenceSnapshot, writePresenceSnapshot } from "./realtime/presenceSnapshot.js";
 import { startTypingTracker } from "./realtime/typing.js";
 import { lookupProfile } from "./commands/builtins/profile.js";
@@ -522,14 +523,20 @@ async function main() {
   // Theater (watch-party) playback resilience. Rehydrate each theater
   // room's persisted checkpoint so reconnecting clients resync to where
   // viewers were before this restart (the boot re-anchor treats the
-  // downtime as a pause, not a fast-forward). Then checkpoint actively-
-  // playing rooms every 30s so the persisted position stays fresh while
-  // a long video runs without any control events. `.unref()` so the
-  // timer never keeps the process alive on shutdown.
-  void hydrateTheaterFromDb(db).catch(() => { /* a bad row shouldn't crash boot */ });
+  // downtime as a pause, not a fast-forward), then arm each room's server-
+  // side auto-advance timer so an EMPTY room keeps looping the playlist with
+  // no client present. Then checkpoint actively-playing rooms every 30s so
+  // the persisted position stays fresh while a long video runs without any
+  // control events, and re-reconcile timers each tick to self-heal a lost
+  // timer and pick up any duration the async metadata backfill just learned.
+  // `.unref()` so the timer never keeps the process alive on shutdown.
+  void hydrateTheaterFromDb(db)
+    .then(() => reconcileAllTheaterTimers(io, db))
+    .catch(() => { /* a bad row shouldn't crash boot */ });
   const THEATER_CHECKPOINT_MS = 30_000;
   setInterval(() => {
     void checkpointPlayingTheaters(db).catch(() => { /* swallow; next tick retries */ });
+    void reconcileAllTheaterTimers(io, db).catch(() => { /* swallow; next tick retries */ });
   }, THEATER_CHECKPOINT_MS).unref();
 
   // Account-ban expiry sweep. Timed bans set `bannedUntil`; when it

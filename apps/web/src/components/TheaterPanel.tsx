@@ -21,7 +21,7 @@ import { useCopyToClipboard } from "../lib/useCopyToClipboard.js";
  * the height persists per-device and the chat below takes the rest.
  */
 
-type ControlAction = "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error" | "progress";
+type ControlAction = "play" | "pause" | "seek" | "next" | "prev" | "select" | "ended" | "error" | "progress" | "duration";
 
 interface Props {
   socket: Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -378,7 +378,7 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
   }, [isHlsLive, ready, isPlaying, sync?.serverTimeMs, seekTo]);
 
   const emitControl = useCallback(
-    (action: ControlAction, extra?: { positionSec?: number; index?: number }) => {
+    (action: ControlAction, extra?: { positionSec?: number; index?: number; durationSec?: number }) => {
       socket.emit("theater:control", { roomId, action, ...(extra ?? {}) });
     },
     [socket, roomId],
@@ -521,7 +521,16 @@ export function TheaterPanel({ socket, roomId, room, canControl, onShowStreamGui
                 width="100%"
                 height="100%"
                 onReady={() => setReady(true)}
-                onDuration={(d) => setDuration(d)}
+                onDuration={(d) => {
+                  setDuration(d);
+                  // Report the learned length so the SERVER can auto-advance an
+                  // EMPTY room (no client → no onEnded). Controllers only; the
+                  // server ignores non-controllers (a bad length would cut a
+                  // video short for everyone). Live/embed have no fixed end.
+                  if (canControl && !isLive && !isEmbed && Number.isFinite(d) && d > 0) {
+                    emitControl("duration", { index: safeIndex, durationSec: d });
+                  }
+                }}
                 onProgress={(st) => {
                   if (!seekStillLanding(st.playedSeconds)) setPlayed(st.playedSeconds);
                   // Real playback happened → this source isn't dead.

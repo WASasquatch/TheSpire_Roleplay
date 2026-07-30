@@ -5,7 +5,8 @@ import { rooms } from "../../db/schema.js";
 import { callerCanEditRoom } from "../../auth/roomPermissions.js";
 import { hasPermission } from "../../auth/permissions.js";
 import { applyControl, clearTheater, getTheater, parsePlaylist, serializePlaylist, setTheater } from "../../realtime/theaterState.js";
-import { expandPlaylist, fetchVideoTitle, parseYoutubeIds, youtubeConfigured } from "../../lib/youtube.js";
+import { cancelTheaterTimer, reconcileTheaterTimer } from "../../realtime/theaterScheduler.js";
+import { expandPlaylist, fetchVideoMeta, fetchVideoMetas, parseYoutubeIds, youtubeConfigured, type VideoMeta } from "../../lib/youtube.js";
 import { tFor } from "../../i18n.js";
 import type { CommandContext, CommandHandler } from "../types.js";
 
@@ -156,12 +157,24 @@ export const theaterCommand: CommandHandler = {
             const remaining = 50 - playlist.length; // >0 (guarded above)
             const queued = items.slice(0, remaining);
             const skipped = items.length - queued.length;
-            const additions: TheaterSource[] = queued.map((it) => ({
-              id: nanoid(),
-              url: it.url,
-              kind: "youtube",
-              ...(it.title ? { title: it.title } : {}),
-            }));
+            // Fetch each queued video's length (one extra quota unit / 50 ids)
+            // so a freshly-queued playlist can loop an EMPTY room immediately,
+            // rather than waiting for the boot backfill or a first viewer.
+            const ids = queued
+              .map((it) => parseYoutubeIds(it.url).videoId)
+              .filter((v): v is string => !!v);
+            const metas = ids.length ? await fetchVideoMetas(ids) : new Map<string, VideoMeta>();
+            const additions: TheaterSource[] = queued.map((it) => {
+              const vid = parseYoutubeIds(it.url).videoId;
+              const dur = vid ? metas.get(vid)?.durationSec : undefined;
+              return {
+                id: nanoid(),
+                url: it.url,
+                kind: "youtube",
+                ...(it.title ? { title: it.title } : {}),
+                ...(dur ? { durationSec: dur } : {}),
+              };
+            });
             const wasEmpty = playlist.length === 0;
             const next = [...playlist, ...additions];
             await ctx.db.update(rooms).set({ theaterPlaylist: serializePlaylist(next) }).where(eq(rooms.id, ctx.roomId));
@@ -178,6 +191,7 @@ export const theaterCommand: CommandHandler = {
               await broadcastTheaterSync(ctx.io, ctx.roomId);
               await persistTheaterCheckpoint(ctx.db, ctx.roomId);
             }
+            await reconcileTheaterTimer(ctx.io, ctx.db, ctx.roomId);
             return;
           }
           // Expansion came back empty: a private/unavailable playlist, or the
@@ -199,12 +213,13 @@ export const theaterCommand: CommandHandler = {
             return appendSingle(url, title, kindOverride);
           }
           return notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.expandFailed", { detail }));
-        } else if (videoId && sniffKind(url) === "youtube" && !title) {
-          // Plain YouTube video with no operator-supplied title → try to
-          // fetch the real title so the playlist reads nicely. null → append
-          // titleless, exactly as before.
-          const fetched = await fetchVideoTitle(videoId);
-          return appendSingle(url, fetched ?? "", kindOverride);
+        } else if (videoId && sniffKind(url) === "youtube") {
+          // Plain YouTube video → fetch its metadata: the real title (so the
+          // playlist reads nicely, unless the operator gave one) AND the length
+          // (so the server can auto-advance an empty room without waiting for a
+          // viewer). null / missing fields → append as-is, exactly as before.
+          const meta = await fetchVideoMeta(videoId);
+          return appendSingle(url, title || meta?.title || "", kindOverride, meta?.durationSec);
         }
       }
 
@@ -213,7 +228,7 @@ export const theaterCommand: CommandHandler = {
 
     // Append exactly one source (the classic path): sniff kind, resolve the
     // live flag, persist, confirm, broadcast, and auto-start an empty room.
-    const appendSingle = async (rawUrl: string, title: string, kindOverride?: TheaterSourceKind) => {
+    const appendSingle = async (rawUrl: string, title: string, kindOverride?: TheaterSourceKind, durationSec?: number) => {
       // Queue a clean video URL. A YouTube watch link can arrive with a
       // `&list=` (e.g. the playlist-expansion fallback above, or a mix/radio
       // link), which makes the client player reject it as an "Invalid video
@@ -244,7 +259,17 @@ export const theaterCommand: CommandHandler = {
         // still needs `/theater live`.
         live = true;
       }
-      const source: TheaterSource = { id: nanoid(), url, kind, ...(title ? { title } : {}), ...(live ? { live: true } : {}) };
+      // Cache the length for server-side empty-room advancement, but never on a
+      // live source (no fixed end) - a live YouTube/Vimeo carries `live:true`.
+      const dur = !live && typeof durationSec === "number" && durationSec > 0 ? Math.round(durationSec) : undefined;
+      const source: TheaterSource = {
+        id: nanoid(),
+        url,
+        kind,
+        ...(title ? { title } : {}),
+        ...(live ? { live: true } : {}),
+        ...(dur ? { durationSec: dur } : {}),
+      };
       const next = [...playlist, source];
       await ctx.db.update(rooms).set({ theaterPlaylist: serializePlaylist(next) }).where(eq(rooms.id, ctx.roomId));
       const kindText = source.live
@@ -267,6 +292,7 @@ export const theaterCommand: CommandHandler = {
         await broadcastTheaterSync(ctx.io, ctx.roomId);
         await persistTheaterCheckpoint(ctx.db, ctx.roomId);
       }
+      await reconcileTheaterTimer(ctx.io, ctx.db, ctx.roomId);
     };
 
     if (verb === "on") {
@@ -294,6 +320,7 @@ export const theaterCommand: CommandHandler = {
       await ctx.db.update(rooms).set({ theaterMode: false }).where(eq(rooms.id, ctx.roomId));
       clearTheater(ctx.roomId);
       await persistTheaterCheckpoint(ctx.db, ctx.roomId); // clears the persisted checkpoint
+      cancelTheaterTimer(ctx.roomId); // no live state → stop the auto-advance
       await addMessage(ctx, { kind: "system", body: "Theater mode off." });
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
       return;
@@ -316,6 +343,9 @@ export const theaterCommand: CommandHandler = {
               : "Theater loop set to all - the playlist advances and loops continuously.",
       });
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
+      // The loop mode changes whether the last source advances or stops, so
+      // re-aim the auto-advance timer.
+      await reconcileTheaterTimer(ctx.io, ctx.db, ctx.roomId);
       return;
     }
 
@@ -362,6 +392,9 @@ export const theaterCommand: CommandHandler = {
         // doesn't restore a stale index pointing past the edited playlist.
         await persistTheaterCheckpoint(ctx.db, ctx.roomId);
       }
+      // Re-aim the auto-advance timer: the current source's length/duration may
+      // now sit at a different index, or the playlist may have emptied.
+      await reconcileTheaterTimer(ctx.io, ctx.db, ctx.roomId);
       notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.removed", { source: removed?.title || removed?.url }));
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
       return;
@@ -372,6 +405,7 @@ export const theaterCommand: CommandHandler = {
       await ctx.db.update(rooms).set({ theaterPlaylist: "[]" }).where(eq(rooms.id, ctx.roomId));
       clearTheater(ctx.roomId);
       await persistTheaterCheckpoint(ctx.db, ctx.roomId); // clears the persisted checkpoint
+      cancelTheaterTimer(ctx.roomId); // no playlist → stop the auto-advance
       notice(ctx, "THEATER", tFor(ctx.user.locale, "commands:theater.cleared"));
       await broadcastRoomState(ctx.io, ctx.db, ctx.roomId);
       return;

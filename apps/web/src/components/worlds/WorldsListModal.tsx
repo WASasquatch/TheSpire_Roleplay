@@ -4,6 +4,7 @@ import type { WorldMembership, WorldSummary, WorldVisibility } from "@thekeep/sh
 import { deriveSlug } from "../../lib/worlds.js";
 import { formatDate } from "../../lib/intlFormat.js";
 import { readError } from "../../lib/http.js";
+import { useChat } from "../../state/store.js";
 import { FloatingWindow } from "../shared/FloatingWindow.js";
 
 interface Props {
@@ -24,6 +25,7 @@ interface Props {
  */
 export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCatalog, initialCreate }: Props) {
   const { t } = useTranslation("worlds");
+  const meId = useChat((s) => s.me?.id ?? null);
   const [worlds, setWorlds] = useState<WorldSummary[] | null>(null);
   const [memberships, setMemberships] = useState<WorldMembership[] | null>(null);
   const [creating, setCreating] = useState(initialCreate ?? false);
@@ -32,8 +34,11 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
   async function load() {
     setError(null);
     try {
+      // `?collab=1` also returns worlds shared with the caller (added as a
+      // collaborator), split out into a "Shared with me" section below by
+      // owner. Without it a collaborator saw nothing here — the reported bug.
       const [wRes, mRes] = await Promise.all([
-        fetch("/me/worlds", { credentials: "include" }),
+        fetch("/me/worlds?collab=1", { credentials: "include" }),
         fetch("/me/worlds/memberships", { credentials: "include" }),
       ]);
       if (!wRes.ok) throw new Error(await readError(wRes));
@@ -67,11 +72,83 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
     }
   }
 
-  // Memberships in worlds the user OWNS show up in both lists naturally;
-  // we hide them from the "joined" section to avoid duplicates - the owned
-  // list is the source of truth for those.
-  const ownedIds = new Set((worlds ?? []).map((w) => w.id));
-  const joinedOnly = (memberships ?? []).filter((m) => !ownedIds.has(m.worldId));
+  // Split the list into worlds the caller OWNS vs worlds SHARED with them
+  // (added as a collaborator on someone else's world). `ownerUserId` is the
+  // discriminator — the server unions both when `?collab=1` is sent.
+  const allWorlds = worlds ?? [];
+  const ownedWorlds = allWorlds.filter((w) => w.ownerUserId === meId);
+  const sharedWorlds = allWorlds.filter((w) => w.ownerUserId !== meId);
+
+  // Memberships in worlds already listed above (owned OR shared) show up in
+  // both places naturally; we hide them from the "joined" section to avoid
+  // duplicates - the list above is the source of truth for those.
+  const listedIds = new Set(allWorlds.map((w) => w.id));
+  const joinedOnly = (memberships ?? []).filter((m) => !listedIds.has(m.worldId));
+
+  // One world card. `canDelete` is owner-only (a collaborator can't delete a
+  // world they were merely shared on — the server would 403 anyway).
+  function worldCard(w: WorldSummary, canDelete: boolean) {
+    return (
+      <li key={w.id} className="rounded border border-keep-rule/60 bg-keep-bg p-3">
+        <header className="flex items-baseline justify-between gap-2">
+          <div className="min-w-0">
+            <span className="font-semibold">{w.name}</span>
+            <span className="ml-2 text-[11px] text-keep-muted">/{w.slug}</span>
+            <span
+              className={`ml-2 rounded px-1 text-[10px] uppercase tracking-widest ${
+                w.visibility === "open"
+                  ? "bg-keep-action/20 text-keep-action"
+                  : w.visibility === "public"
+                    ? "bg-keep-system/20 text-keep-system"
+                    : "bg-keep-rule/30 text-keep-muted"
+              }`}
+            >
+              {t(`visibilityValue.${w.visibility}`)}
+            </span>
+            {w.isNsfw ? (
+              <span
+                className="ml-1 rounded bg-keep-accent/20 px-1 text-[10px] font-semibold uppercase tracking-widest text-keep-accent"
+                title={t("nsfwChipTitle")}
+              >
+                {t("common:rating.nsfw")}
+              </span>
+            ) : null}
+          </div>
+          <div className="shrink-0 text-[10px] text-keep-muted">
+            {t("pageCount", { count: w.pageCount })}
+          </div>
+        </header>
+        {w.description ? (
+          <p className="mt-1 text-sm text-keep-text/80">{w.description}</p>
+        ) : null}
+        <div className="mt-2 flex justify-end gap-2 text-xs">
+          <button
+            type="button"
+            onClick={() => onOpenViewer(w.id)}
+            className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
+          >
+            {t("actions.view")}
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenEditor(w.id)}
+            className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80"
+          >
+            {t("actions.edit")}
+          </button>
+          {canDelete ? (
+            <button
+              type="button"
+              onClick={() => remove(w)}
+              className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
+            >
+              {t("common:delete")}
+            </button>
+          ) : null}
+        </div>
+      </li>
+    );
+  }
 
   async function remove(w: WorldSummary) {
     if (!window.confirm(t("confirmDeleteWorld", { name: w.name, pages: w.pageCount }))) return;
@@ -124,69 +201,29 @@ export function WorldsListModal({ onClose, onOpenEditor, onOpenViewer, onOpenCat
           ) : null}
           {worlds === null ? (
             <p className="italic text-keep-muted">{t("common:loadingDots")}</p>
-          ) : worlds.length === 0 ? (
+          ) : ownedWorlds.length === 0 && sharedWorlds.length === 0 ? (
             <p className="italic text-keep-muted">{t("myWorlds.noWorlds")}</p>
           ) : (
-            <ul className="space-y-2">
-              {worlds.map((w) => (
-                <li key={w.id} className="rounded border border-keep-rule/60 bg-keep-bg p-3">
-                  <header className="flex items-baseline justify-between gap-2">
-                    <div className="min-w-0">
-                      <span className="font-semibold">{w.name}</span>
-                      <span className="ml-2 text-[11px] text-keep-muted">/{w.slug}</span>
-                      <span
-                        className={`ml-2 rounded px-1 text-[10px] uppercase tracking-widest ${
-                          w.visibility === "open"
-                            ? "bg-keep-action/20 text-keep-action"
-                            : w.visibility === "public"
-                              ? "bg-keep-system/20 text-keep-system"
-                              : "bg-keep-rule/30 text-keep-muted"
-                        }`}
-                      >
-                        {t(`visibilityValue.${w.visibility}`)}
-                      </span>
-                      {w.isNsfw ? (
-                        <span
-                          className="ml-1 rounded bg-keep-accent/20 px-1 text-[10px] font-semibold uppercase tracking-widest text-keep-accent"
-                          title={t("nsfwChipTitle")}
-                        >
-                          {t("common:rating.nsfw")}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="shrink-0 text-[10px] text-keep-muted">
-                      {t("pageCount", { count: w.pageCount })}
-                    </div>
-                  </header>
-                  {w.description ? (
-                    <p className="mt-1 text-sm text-keep-text/80">{w.description}</p>
-                  ) : null}
-                  <div className="mt-2 flex justify-end gap-2 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => onOpenViewer(w.id)}
-                      className="rounded border border-keep-rule bg-keep-bg px-2 py-0.5 hover:bg-keep-banner"
-                    >
-                      {t("actions.view")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onOpenEditor(w.id)}
-                      className="rounded border border-keep-rule bg-keep-banner px-2 py-0.5 hover:bg-keep-banner/80"
-                    >
-                      {t("actions.edit")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => remove(w)}
-                      className="rounded border border-keep-accent/50 bg-keep-bg px-2 py-0.5 text-keep-accent hover:bg-keep-accent/10"
-                    >
-                      {t("common:delete")}
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+            <>
+              {ownedWorlds.length > 0 ? (
+                <ul className="space-y-2">
+                  {ownedWorlds.map((w) => worldCard(w, true))}
+                </ul>
+              ) : null}
+
+              {/* Worlds shared with the caller (added as a collaborator on
+                  someone else's world). Full view + edit access; no delete. */}
+              {sharedWorlds.length > 0 ? (
+                <>
+                  <h3 className="mb-2 mt-5 font-action text-sm uppercase tracking-widest text-keep-muted">
+                    {t("myWorlds.sharedHeading")}
+                  </h3>
+                  <ul className="space-y-2">
+                    {sharedWorlds.map((w) => worldCard(w, false))}
+                  </ul>
+                </>
+              ) : null}
+            </>
           )}
 
           {/* Joined-but-not-owned worlds. Hidden when the user has no

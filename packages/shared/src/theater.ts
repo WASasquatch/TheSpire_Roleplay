@@ -52,6 +52,18 @@ export interface TheaterSource {
    * URL is indistinguishable from a VOD one, so it must be declared).
    */
   live?: boolean;
+  /**
+   * Cached media length in seconds. Learned from the YouTube Data API (on
+   * `/theater add` and the boot backfill) or a CONTROLLER's player reporting
+   * `onDuration`. It exists so the SERVER can advance the playlist on its own
+   * when the room is EMPTY - with no client present there is no player to fire
+   * `onEnded`, so the server-side timer (see realtime/theaterScheduler.ts)
+   * fires an `ended` once the extrapolated position crosses this length.
+   * Absent for live sources and for anything whose length isn't known yet
+   * (an unknown length simply means that source can't auto-advance an empty
+   * room until a controller watches it once).
+   */
+  durationSec?: number;
 }
 
 /**

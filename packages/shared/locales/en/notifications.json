@@ -163,6 +163,10 @@
     "switchFailed": "switch failed",
     "forumsHiddenUnverified": "Forums are hidden while you verify your email."
   },
+  "world": {
+    "collaboratorAddedTitle": "Added as a collaborator",
+    "collaboratorAddedSnippet": "You can now view and edit “{{world}}”."
+  },
   "worldBanner": {
     "openTitle": "Open this room's linked world",
     "world": "World",

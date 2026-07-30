@@ -225,35 +225,79 @@ export async function expandPlaylist(
 }
 
 type VideosResponse = {
-  items?: { id?: string; snippet?: { title?: string } }[];
+  items?: {
+    id?: string;
+    snippet?: { title?: string; liveBroadcastContent?: string };
+    contentDetails?: { duration?: string };
+  }[];
 };
 
 /**
- * Look up a single video's title by id, or null when unavailable.
- * Never throws — returns null on any API error, non-200, or missing item.
+ * Parse an ISO-8601 duration (YouTube `contentDetails.duration`, e.g.
+ * "PT1H2M10S", "PT45S", "P0DT0S") into whole seconds, or null when it carries
+ * no positive time component. A live broadcast / premiere reports "P0D" (or
+ * omits duration), which returns null so callers leave it un-timed — a live
+ * source has no fixed length and must never auto-advance.
  */
-export async function fetchVideoTitle(videoId: string): Promise<string | null> {
-  const { data } = await apiGet<VideosResponse>("videos", { part: "snippet", id: videoId });
-  return data?.items?.[0]?.snippet?.title ?? null;
+export function parseIso8601Duration(iso: string | null | undefined): number | null {
+  if (!iso || typeof iso !== "string") return null;
+  const m = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/.exec(iso);
+  if (!m) return null;
+  const d = m[1] ? parseInt(m[1], 10) : 0;
+  const h = m[2] ? parseInt(m[2], 10) : 0;
+  const min = m[3] ? parseInt(m[3], 10) : 0;
+  const s = m[4] ? parseInt(m[4], 10) : 0;
+  const total = d * 86_400 + h * 3600 + min * 60 + s;
+  return total > 0 ? total : null;
+}
+
+/** Title + length for one YouTube video. `durationSec` is absent for live
+ *  broadcasts / premieres (no fixed length). */
+export interface VideoMeta {
+  title?: string;
+  durationSec?: number;
+}
+
+/** Pull title + duration out of one `videos.list` item (part=snippet,contentDetails). */
+function metaFromItem(item: NonNullable<VideosResponse["items"]>[number]): VideoMeta {
+  const meta: VideoMeta = {};
+  const title = item.snippet?.title;
+  if (title) meta.title = title;
+  // A live/upcoming broadcast has no fixed length; leave duration unset so it
+  // never gets a server-side auto-advance timer.
+  const live = item.snippet?.liveBroadcastContent;
+  if (!live || live === "none") {
+    const dur = parseIso8601Duration(item.contentDetails?.duration);
+    if (dur) meta.durationSec = dur;
+  }
+  return meta;
 }
 
 /**
- * Batch-resolve video titles by id, returned as `id -> title`. The Data API's
- * `videos.list` accepts up to 50 ids for ONE unit of quota, so a retroactive
- * backfill of many legacy items is cheap. Ids that are unavailable (private /
- * deleted) simply don't appear in the map. Never throws — a failed batch is
- * skipped, leaving its ids unresolved for a later attempt.
+ * Look up a single video's title + duration by id, or null when unavailable.
+ * Never throws — returns null on any API error, non-200, or missing item.
  */
-export async function fetchVideoTitles(videoIds: string[]): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
+export async function fetchVideoMeta(videoId: string): Promise<VideoMeta | null> {
+  const { data } = await apiGet<VideosResponse>("videos", { part: "snippet,contentDetails", id: videoId });
+  const item = data?.items?.[0];
+  return item ? metaFromItem(item) : null;
+}
+
+/**
+ * Batch-resolve video title + duration by id, returned as `id -> meta`. The
+ * Data API's `videos.list` accepts up to 50 ids for ONE unit of quota, so a
+ * retroactive backfill of many legacy items is cheap. Ids that are unavailable
+ * (private / deleted) simply don't appear in the map. Never throws — a failed
+ * batch is skipped, leaving its ids unresolved for a later attempt.
+ */
+export async function fetchVideoMetas(videoIds: string[]): Promise<Map<string, VideoMeta>> {
+  const out = new Map<string, VideoMeta>();
   for (let i = 0; i < videoIds.length; i += 50) {
     const batch = videoIds.slice(i, i + 50);
     if (batch.length === 0) continue;
-    const { data } = await apiGet<VideosResponse>("videos", { part: "snippet", id: batch.join(",") });
+    const { data } = await apiGet<VideosResponse>("videos", { part: "snippet,contentDetails", id: batch.join(",") });
     for (const item of data?.items ?? []) {
-      const id = item.id;
-      const title = item.snippet?.title;
-      if (id && title) out.set(id, title);
+      if (item.id) out.set(item.id, metaFromItem(item));
     }
   }
   return out;

@@ -236,12 +236,15 @@ describe("console gate (PATCH /servers/:id worldId)", () => {
     await patchServer(serverA, ownerToken, { worldId: null });
   });
 
-  test("a PRIVATE collaborated world is refused: it could never read back for its setter", async () => {
-    // resolveWorld admits a private world only to its owner/admin, so a
-    // collaborator pick would save but show "None" on every read.
-    const r = await patchServer(serverA, ownerToken, { worldId: collabWorld });
-    assert.equal(r.status, 403);
-    assert.equal(await serverWorldId(serverA), null);
+  test("a PRIVATE collaborated world can now be featured (collaborators have view access)", async () => {
+    // resolveWorld now admits a private world to its COLLABORATORS too, so a
+    // collaborator's pick saves AND reads back for them — same as an owner
+    // featuring their own private world. (Server members who aren't
+    // collaborators still read null; that's the visibility block below.)
+    const set = await patchServer(serverA, ownerToken, { worldId: collabWorld });
+    assert.equal(set.status, 200);
+    assert.equal(await serverWorldId(serverA), collabWorld);
+    await patchServer(serverA, ownerToken, { worldId: null });
   });
 });
 
@@ -377,10 +380,24 @@ describe("GET /me/worlds ?collab=1 (the picker's option set)", () => {
     const wideIds = new Set(wide.worlds.map((w) => w.id));
     assert.ok(wideIds.has(privateWorld));
     assert.ok(wideIds.has(collabPublicWorld));
-    // A PRIVATE collaboration is excluded: the console PATCH refuses it (it
-    // could never read back through resolveWorld for its setter), so the
-    // picker must not offer it.
-    assert.ok(!wideIds.has(collabWorld));
+    // A PRIVATE collaboration is now INCLUDED: resolveWorld grants collaborators
+    // view access regardless of visibility, so both the "Shared with me" list
+    // and the console picker can offer it and it reads back for its setter.
+    assert.ok(wideIds.has(collabWorld));
+    // A world the caller neither owns nor collaborates on is still excluded.
     assert.ok(!wideIds.has(strangersWorld));
+  });
+});
+
+describe("collaborator view access (resolveWorld)", () => {
+  test("a collaborator can open a PRIVATE world they're on; a non-collaborator can't", async () => {
+    // The reported bug: a collaborator was added to a non-public world but
+    // couldn't view it at all (resolveWorld only admitted owner/admin).
+    const asCollab = await app.inject({ method: "GET", url: `/worlds/${collabWorld}`, headers: auth(ownerToken) });
+    assert.equal(asCollab.statusCode, 200);
+    // A user who is neither owner nor collaborator still gets a 404 on the
+    // private world (no name leak).
+    const asStranger = await app.inject({ method: "GET", url: `/worlds/${collabWorld}`, headers: auth(memberToken) });
+    assert.equal(asStranger.statusCode, 404);
   });
 });

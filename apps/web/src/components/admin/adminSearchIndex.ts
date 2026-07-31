@@ -94,6 +94,8 @@ export const ADMIN_SEARCH_ENTRIES: readonly AdminSearchEntry[] = [
   { key: "settings.memberRankingsLabel", tab: "settings", subtab: "features", also: ["settings.memberRankingsHint", "settings.memberRankingsOn", "settings.memberRankingsOff"] },
   { key: "settings.multiServerLabel", tab: "settings", subtab: "features", also: ["settings.multiServerHint", "settings.multiServerOn", "settings.multiServerOff"] },
   { key: "settings.worldMapUploadsLabel", tab: "settings", subtab: "features", also: ["settings.worldMapUploadsHint", "settings.worldMapUploadsOn", "settings.worldMapUploadsOff"] },
+  { key: "settings.overlookLabel", tab: "settings", subtab: "features", also: ["settings.overlookHint", "settings.overlookOn", "settings.overlookOff"] },
+  { key: "settings.overlookUploadsLabel", tab: "settings", subtab: "features", also: ["settings.overlookUploadsHint", "settings.overlookUploadsOn", "settings.overlookUploadsOff"] },
 
   // ----- Branding fieldsets -----
   { key: "branding.siteNameLegend", tab: "branding" },

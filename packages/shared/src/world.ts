@@ -154,6 +154,11 @@ export interface WorldSummary {
    * absent (older bundle, or not yet populated) means all-ages.
    */
   isNsfw?: boolean;
+  /**
+   * Owner opt-in for the world's Overlook canvas (migration 0371). Off by
+   * default. Optional so older payload shapes stay assignable; absent = off.
+   */
+  overlookEnabled?: boolean;
   pageCount: number;
   /** Number of users who've joined this world (excluding the owner unless they explicitly joined). */
   memberCount: number;
@@ -332,6 +337,19 @@ export interface WorldDetail {
    * shapes stay assignable; absent/empty means no Map tab.
    */
   maps?: WorldMapLight[];
+  /**
+   * Whether this world's Overlook canvas should surface, and whether it has
+   * anything on it. Just the two booleans, never the scene: the document can
+   * be megabytes and the world payload is already heavy, so the canvas is
+   * lazy-fetched from GET /overlook/world/:idOrSlug when the tab is opened.
+   *
+   * Optional so older payload shapes stay assignable; absent means blank.
+   * The EDITOR shows the tab whenever `world.overlookEnabled` is true (that's
+   * how you fill a blank one in); the VIEWER additionally requires
+   * `overlookHasContent`, so a switched-on-but-empty canvas doesn't grow a
+   * dead tab for readers.
+   */
+  overlookHasContent?: boolean;
 }
 
 /**

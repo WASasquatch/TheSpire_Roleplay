@@ -41,6 +41,11 @@ export default defineConfig({
       "/push": "http://localhost:3001",
       "/affiliates": "http://localhost:3001",
       "/worlds": "http://localhost:3001",
+      // Overlook canvas API (scene get/save, editor grants, image proxy).
+      // Without this the canvas fetch falls through to Vite's SPA fallback,
+      // gets index.html with a 200, and the JSON.parse fails, so the window
+      // would just show "the canvas couldn't be opened" in dev only.
+      "/overlook": "http://localhost:3001",
       "/stories": "http://localhost:3001",
       "/me": "http://localhost:3001",
       // Staff directory (GET /staff). Without this the fetch falls

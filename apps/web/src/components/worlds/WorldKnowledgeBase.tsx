@@ -7,7 +7,7 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { CalendarDays, MapPin, X } from "lucide-react";
+import { CalendarDays, MapPin, Mountain, X } from "lucide-react";
 import type {
   WorldDetail, WorldEntity, WorldEntityKindDef, WorldEntityLight, WorldEntityMapRef, WorldMapMarker, WorldMapMarkerEvent, WorldMemberRef, WorldPage, WorldSession,
 } from "@thekeep/shared";
@@ -16,6 +16,7 @@ import { legibleHtmlColors, sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../.
 import { useActiveTheme } from "../../lib/theme.js";
 import { cropStyleFor } from "../../lib/avatarCrop.js";
 import { formatDateTime } from "../../lib/intlFormat.js";
+import { openOverlook } from "../../lib/overlookOpen.js";
 import { buildWorldTree, type WorldTreeNode } from "../../lib/worlds.js";
 import { fetchWorldEntity, fetchWorldSession } from "../../lib/worldEntities.js";
 import { fetchWorldEntityMapRefs, fetchWorldMap, type WorldMapPayload } from "../../lib/worldMaps.js";
@@ -118,6 +119,13 @@ export function WorldKnowledgeBase({ worldId, detail, membership }: { worldId: s
   // The Map tab only exists when the world has maps, so map-less worlds
   // render byte-identically to before the feature existed.
   const hasMaps = (detail.maps?.length ?? 0) > 0;
+  // The Overlook entry surfaces once the owner has switched it on AND there
+  // is something to look at. Editors see it while it's still blank, because
+  // otherwise there is no way to reach the canvas and put the first thing on
+  // it from the viewer side.
+  const showOverlook =
+    (detail.world.overlookEnabled ?? false)
+    && ((detail.overlookHasContent ?? false) || detail.viewerCanEdit);
 
   // Entry → marker reverse lookup for the "Show on map" chip (secret
   // markers pre-stripped server-side for non-editors). Only fetched when
@@ -175,6 +183,26 @@ export function WorldKnowledgeBase({ worldId, detail, membership }: { worldId: s
               {label}
             </button>
           ))}
+          {/* Overlook sits in the tab strip but is NOT a view: it opens its
+              own floating window, so the canvas gets the whole screen and can
+              be resized next to the wiki instead of living inside it. */}
+          {showOverlook ? (
+            <button
+              type="button"
+              onClick={() =>
+                openOverlook({
+                  scope: "world",
+                  scopeId: worldId,
+                  name: detail.world.name,
+                  worldEntities: detail.entities,
+                })
+              }
+              className="flex items-center gap-1 rounded px-3 py-1 text-xs font-semibold uppercase tracking-widest text-keep-muted hover:bg-keep-muted/25"
+            >
+              <Mountain size={12} aria-hidden />
+              {t("kb.tabOverlook")}
+            </button>
+          ) : null}
         </nav>
         <input
           value={search}

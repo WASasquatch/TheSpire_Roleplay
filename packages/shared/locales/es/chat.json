@@ -423,7 +423,17 @@
     "pinnedBy": "fijado por {{name}}",
     "pinGone": "El mensaje original ya no existe; se muestra la copia fijada.",
     "unpin": "Desfijar este mensaje",
-    "rating": "Clasificación"
+    "rating": "Clasificación",
+    "overlook": "Overlook",
+    "overlookTitle": "Abre el lienzo Overlook de esta sala",
+    "overlookAria": "Abre el lienzo Overlook de esta sala",
+    "overlookCard": "Overlook",
+    "overlookOpen": "Abrir el lienzo",
+    "overlookEmpty": "Todavía no hay nada dibujado.",
+    "overlookEmptyHint": "Empieza uno con /overlook",
+    "overlookItems_one": "{{count}} elemento en el lienzo",
+    "overlookItems_many": "{{count}} elementos en el lienzo",
+    "overlookItems_other": "{{count}} elementos en el lienzo"
   },
   "feed": {
     "loadFailed": "error al cargar",

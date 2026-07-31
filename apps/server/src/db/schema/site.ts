@@ -396,6 +396,24 @@ export const siteSettings = sqliteTable("site_settings", {
    */
   worldMapUploadsEnabled: integer("world_map_uploads_enabled", { mode: "boolean" }).notNull().default(false),
   /**
+   * Overlook master switch (migration 0371). When true, rooms and worlds can
+   * open their sketch canvas (the `/overlook` command, the room-bar button,
+   * the world tab). ON by default: in the default configuration the canvas
+   * stores no member bytes, because images are external https URLs served
+   * through the same-origin proxy rather than written to disk.
+   */
+  overlookEnabled: integer("overlook_enabled", { mode: "boolean" }).notNull().default(true),
+  /**
+   * Overlook image uploads (migration 0371). When true, a saved scene may
+   * embed base64 `data:` image payloads; when false the save route REFUSES
+   * them and only external https URLs (proxied) are allowed. Off by default
+   * for the same reason as `worldMapUploadsEnabled`: the hosting volume is
+   * small and shared with the database. Note the storage shape differs from
+   * world maps: Overlook images ride inside `overlooks.scene_json`, so this
+   * flag guards database size rather than disk.
+   */
+  overlookUploadsEnabled: integer("overlook_uploads_enabled", { mode: "boolean" }).notNull().default(false),
+  /**
    * Denote unverified users (migration 0353). When true, accounts whose
    * `users.email_verified_at` is NULL wear a subtle "Unverified" chip in the
    * room userlist and on profiles. Off by default; the flag only rides the

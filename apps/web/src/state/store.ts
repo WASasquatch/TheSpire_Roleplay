@@ -191,6 +191,20 @@ export interface SiteBranding {
    */
   worldMapUploadsEnabled?: boolean;
   /**
+   * Overlook canvases (migration 0371). Drives whether the room bar shows
+   * the canvas launcher and whether the world editor offers the toggle. The
+   * routes enforce it server-side either way. Optional so cached branding
+   * from a pre-feature build hydrates cleanly.
+   */
+  overlookEnabled?: boolean;
+  /**
+   * Whether an Overlook scene may embed base64 image files. Off by default,
+   * since those bytes live in the database rather than on the volume. With it
+   * off the canvas offers add-by-link only and the save route refuses
+   * embedded payloads.
+   */
+  overlookUploadsEnabled?: boolean;
+  /**
    * Whether Google sign-in is available (env-gated on the server:
    * GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET set). When false the AuthGate
    * hides the "Continue with Google" button and ProfileEditor hides the
@@ -276,6 +290,11 @@ export const DEFAULT_BRANDING: SiteBranding = {
   // Off by default — the map routes reject uploads until an admin opts in,
   // so the editor shouldn't offer the picker on first paint either.
   worldMapUploadsEnabled: false,
+  // Overlook: the master switch defaults ON server-side, but the CLIENT
+  // default stays off so a pre-feature cached branding blob doesn't paint a
+  // launcher that 404s. The /site payload corrects it on first load.
+  overlookEnabled: false,
+  overlookUploadsEnabled: false,
   // Off by default — env-gated on the server; the /site payload flips these
   // on once GOOGLE_CLIENT_ID/SECRET (google) and YOUTUBE_API_KEY (youtube)
   // are configured.
@@ -376,6 +395,12 @@ export function loadCachedBranding(): SiteBranding {
       worldMapUploadsEnabled: typeof parsed.worldMapUploadsEnabled === "boolean"
         ? parsed.worldMapUploadsEnabled
         : DEFAULT_BRANDING.worldMapUploadsEnabled ?? false,
+      overlookEnabled: typeof parsed.overlookEnabled === "boolean"
+        ? parsed.overlookEnabled
+        : DEFAULT_BRANDING.overlookEnabled ?? false,
+      overlookUploadsEnabled: typeof parsed.overlookUploadsEnabled === "boolean"
+        ? parsed.overlookUploadsEnabled
+        : DEFAULT_BRANDING.overlookUploadsEnabled ?? false,
       googleAuthEnabled: typeof parsed.googleAuthEnabled === "boolean"
         ? parsed.googleAuthEnabled
         : DEFAULT_BRANDING.googleAuthEnabled ?? false,

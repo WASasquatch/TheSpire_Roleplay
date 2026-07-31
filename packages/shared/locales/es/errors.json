@@ -567,6 +567,16 @@
       "usernameRule": "ese nombre de usuario no sirve: usa de 2 a 40 letras, números o _ - ' . ` (sin espacios; prueba con un guion bajo, como Taberna_Roble)",
       "stringTooShort": "Debe contener al menos {{n}} caracteres",
       "stringTooLong": "Debe contener como máximo {{n}} caracteres"
+    },
+    "overlook": {
+      "notFound": "Ese Overlook no está disponible.",
+      "readOnly": "No tienes acceso de edición a este Overlook.",
+      "badScene": "No se pudo leer ese lienzo.",
+      "tooManyElements": "Un Overlook tiene un límite de {{max}} elementos.",
+      "uploadsDisabled": "La subida de imágenes está desactivada. Agrega imágenes por enlace.",
+      "noSuchUser": "No existe ese usuario.",
+      "editorCap": "Un Overlook tiene un límite de {{max}} editores invitados.",
+      "tooBig": "Ese lienzo es demasiado grande para guardarlo. Prueba a quitar algunas imágenes."
     }
   }
 }

@@ -816,7 +816,15 @@
     "minorFilterTryLabel": "Try it",
     "minorFilterTryPh": "Type a sentence to see what under-18 members would see",
     "minorFilterTryClean": "No changes. That sentence shows exactly as written.",
-    "minorFilterTryMasked": "Under-18 members would see: {{masked}}"
+    "minorFilterTryMasked": "Under-18 members would see: {{masked}}",
+    "overlookLabel": "Overlook canvases",
+    "overlookHint": "Lets rooms and worlds open a shared sketch canvas for mapping out places and how they connect.",
+    "overlookOn": "Rooms and worlds can open an Overlook",
+    "overlookOff": "Overlook is turned off everywhere",
+    "overlookUploadsLabel": "Overlook image uploads",
+    "overlookUploadsHint": "Lets people paste or drop image files straight onto a canvas. Off by default: those images are stored in the database, so leaving this off keeps canvases to images linked from elsewhere.",
+    "overlookUploadsOn": "Image files can be added to a canvas",
+    "overlookUploadsOff": "Images can only be added by link"
   },
   "affiliates": {
     "statusPending": "Pending review",

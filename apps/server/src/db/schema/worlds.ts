@@ -47,6 +47,14 @@ export const worlds = sqliteTable(
      */
     isNsfw: integer("is_nsfw", { mode: "boolean" }).notNull().default(false),
     /**
+     * Owner opt-in for the world's Overlook canvas (migration 0371). Off by
+     * default so the viewer's tab strip doesn't grow an empty tab on every
+     * world ever created. Turning it on reveals the Overlook tab in the
+     * EDITOR immediately; the VIEWER tab additionally requires the canvas to
+     * be non-blank, mirroring how `maps?` gates the Map tab.
+     */
+    overlookEnabled: integer("overlook_enabled", { mode: "boolean" }).notNull().default(false),
+    /**
      * Per-world theme JSON. Applied only when rendering the world's editor /
      * viewer modals - never bleeds into chat or the userlist. Null = use the
      * viewer's chat theme as a fallback.

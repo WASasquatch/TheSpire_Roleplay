@@ -419,7 +419,16 @@
     "pinnedBy": "pinned by {{name}}",
     "pinGone": "The original message is gone; showing the pinned copy.",
     "unpin": "Unpin this message",
-    "rating": "Rating"
+    "rating": "Rating",
+    "overlook": "Overlook",
+    "overlookTitle": "Open this room's Overlook canvas",
+    "overlookAria": "Open this room's Overlook canvas",
+    "overlookCard": "Overlook",
+    "overlookOpen": "Open the canvas",
+    "overlookEmpty": "Nothing sketched yet.",
+    "overlookEmptyHint": "Start one with /overlook",
+    "overlookItems_one": "{{count}} item on the canvas",
+    "overlookItems_other": "{{count}} items on the canvas"
   },
   "feed": {
     "loadFailed": "load failed",

@@ -39,6 +39,7 @@ import { getSessionUser } from "../auth.js";
 import { getSettings } from "../../settings.js";
 import { broadcastRoomState } from "../../realtime/broadcast.js";
 import { notify } from "../../notifications/engine.js";
+import { worldOverlookHasContent } from "../overlook.js";
 import type { Db } from "../../db/index.js";
 import {
   SLUG_RX,
@@ -452,6 +453,13 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       sessions: sessionRows.map(sessionLightToWire),
       viewerApplication,
       maps: mapRows.map(mapLightToWire),
+      // Just "does the canvas have anything on it", never the scene: an
+      // Overlook document can be megabytes and this payload is already heavy,
+      // so the canvas is lazy-fetched from GET /overlook/world/:idOrSlug when
+      // the tab is opened. Editors get the tab from `world.overlookEnabled`
+      // alone (that's how you fill a blank one in); readers additionally need
+      // this flag, so a switched-on-but-empty canvas grows no dead tab.
+      overlookHasContent: w.overlookEnabled ? await worldOverlookHasContent(db, w.id) : false,
     };
     return detail;
   });
@@ -573,6 +581,7 @@ export async function registerWorldCoreRoutes(app: FastifyInstance, db: Db, io: 
       }
       update.isNsfw = body.isNsfw;
     }
+    if (body.overlookEnabled !== undefined) update.overlookEnabled = body.overlookEnabled;
     if (body.theme !== undefined) {
       // null clears it; any object is normalized to a Theme shape (drops
       // unknown keys, falls back to defaults for missing ones).

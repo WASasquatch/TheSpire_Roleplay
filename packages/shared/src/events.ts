@@ -798,6 +798,12 @@ export type UiHint =
   | { kind: "open-world"; worldId: string }
   /** Open the Worlds manager modal (the caller's own worlds). */
   | { kind: "open-worlds-list" }
+  /**
+   * Open the Overlook canvas window for a room. Emitted by `/overlook` with
+   * no subcommand. The client already knows the room name, so only the id
+   * rides the wire; the window titles itself `<roomName> Overlook`.
+   */
+  | { kind: "open-overlook"; roomId: string }
   /** Open the World Catalog modal (browse open worlds). */
   | { kind: "open-world-catalog" }
   /**

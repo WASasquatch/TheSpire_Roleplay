@@ -299,7 +299,8 @@
     "pickLorePage": "Pick a Lore page.",
     "membersRegion": "World members",
     "members": "Members",
-    "memberTitle": "{{name}} ({{username}})"
+    "memberTitle": "{{name}} ({{username}})",
+    "tabOverlook": "Overlook"
   },
   "maps": {
     "stageRegion": "Map: {{name}}",
@@ -587,7 +588,10 @@
       "reject": "Reject",
       "recentDecisions": "Recent decisions ({{total}})",
       "reviewNoteQuoted": "“{{note}}”"
-    }
+    },
+    "overlook": "Overlook",
+    "overlookEnabledLabel": "Overlook canvas",
+    "overlookEnabledHint": "Adds a sketch canvas to this world for mapping out places, factions and how they connect. Readers only see the tab once you've put something on it."
   },
   "collab": {
     "heading": "Collaborators",

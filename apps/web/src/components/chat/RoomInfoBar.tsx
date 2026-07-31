@@ -10,6 +10,7 @@ import {
   Info,
   Megaphone,
   MessagesSquare,
+  Mountain,
   Pin,
   PinOff,
   ScrollText,
@@ -47,6 +48,9 @@ interface Props {
    *  or the pin row's own id when the source was hard-deleted (the DELETE
    *  route resolves either). Wired to `DELETE /messages/:id/pin`. */
   onUnpin?: (idForUnpin: string) => void;
+  /** Open this room's Overlook canvas (migration 0371). Absent when the
+   *  feature is switched off sitewide, which hides both launchers. */
+  onOpenOverlook?: () => void;
 }
 
 /** True when the icon string should render as an <img> rather than a glyph. */
@@ -81,7 +85,7 @@ function Bevel() {
  * fetched from GET /rooms/:id/info on first expand. The icon is set via the
  * `/icon` command (no inline editor here, by design).
  */
-export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMessage = false, onJumpToMessage, onUnpin }: Props) {
+export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMessage = false, onJumpToMessage, onUnpin, onOpenOverlook }: Props) {
   const { t } = useTranslation("chat");
   const [expanded, setExpanded] = useState(false);
   // Pins strip: collapsed to a "N pinned" summary by default, expands to a
@@ -229,6 +233,22 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
             <MessagesSquare size={12} aria-hidden />
             {formatNumber(room.messageCount)}
           </span>
+          {/* Overlook launcher, collapsed form. `stopPropagation` is
+              mandatory here: the parent strip is itself a button that toggles
+              the dossier, so without it opening the canvas also expands the
+              pullout behind it. */}
+          {onOpenOverlook ? (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onOpenOverlook(); }}
+              className="flex items-center gap-1 rounded border border-keep-rule px-1.5 py-0.5 text-keep-muted hover:border-keep-action hover:text-keep-action"
+              title={t("roomInfo.overlookTitle")}
+              aria-label={t("roomInfo.overlookAria")}
+            >
+              <Mountain size={12} aria-hidden />
+              <span className="hidden sm:inline">{t("roomInfo.overlook")}</span>
+            </button>
+          ) : null}
           {marqueeHidden ? (
             <button
               type="button"
@@ -328,6 +348,28 @@ export function RoomInfoBar({ room, canEdit = false, onOpenWorld, pins, canPinMe
                   <Empty text={t("roomInfo.noScene")} hint={canEdit ? t("roomInfo.sceneHint") : null} />
                 )}
               </Card>
+
+              {/* Overlook card, expanded form: the bigger launcher, with the
+                  canvas's current state so the button isn't a mystery box.
+                  Hidden entirely when the feature is off sitewide (the count
+                  arrives null), matching the collapsed launcher. */}
+              {onOpenOverlook && info.overlookElementCount != null ? (
+                <Card icon={<Mountain size={12} aria-hidden />} title={t("roomInfo.overlookCard")}>
+                  <p className="text-xs leading-snug text-keep-text/90">
+                    {info.overlookElementCount > 0
+                      ? t("roomInfo.overlookItems", { count: info.overlookElementCount })
+                      : t("roomInfo.overlookEmpty")}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={onOpenOverlook}
+                    className="mt-1.5 flex items-center gap-1 rounded border border-keep-action/40 bg-keep-action/15 px-2 py-1 text-xs text-keep-action hover:border-keep-action hover:bg-keep-action/30"
+                  >
+                    <Mountain size={12} aria-hidden />
+                    {t("roomInfo.overlookOpen")}
+                  </button>
+                </Card>
+              ) : null}
 
               <Card icon={<Users size={12} aria-hidden />} title={info.npcs.length > 0 ? t("roomInfo.npcsCount", { count: info.npcs.length }) : t("roomInfo.npcs")}>
                 {info.npcs.length > 0 ? (

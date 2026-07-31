@@ -235,6 +235,20 @@ export interface SiteSettings {
    */
   worldMapUploadsEnabled: boolean;
   /**
+   * Overlook master switch (migration 0371). When true, rooms and worlds can
+   * open their sketch canvas. ON by default: in the default configuration a
+   * canvas stores no member bytes (images are external https URLs served
+   * through the same-origin proxy), so unlike uploads it needs no opt-in.
+   */
+  overlookEnabled: boolean;
+  /**
+   * Overlook image uploads (migration 0371). When true, a saved scene may
+   * embed base64 `data:` images; when false the save route refuses them and
+   * only external https links work. Off by default. Note this guards DATABASE
+   * size, not disk: Overlook images ride inside the scene row.
+   */
+  overlookUploadsEnabled: boolean;
+  /**
    * Escalating chat anti-spam master switch (migration 0313). When true, a
    * rapid-fire message flood from an ordinary user climbs a warn->auto-mute
    * ladder in `realtime/antiSpam.ts`. Off by default; `bypass_anti_spam` exempts
@@ -459,6 +473,10 @@ export interface SettingsPatch {
   serversEnabled?: boolean;
   /** World map image uploads switch (migration 0360). */
   worldMapUploadsEnabled?: boolean;
+  /** Overlook master switch (migration 0371). */
+  overlookEnabled?: boolean;
+  /** Overlook embedded-image switch (migration 0371). */
+  overlookUploadsEnabled?: boolean;
   antiSpamEnabled?: boolean;
   /** Auto-moderation master switch (migration 0319). */
   automodEnabled?: boolean;
@@ -561,6 +579,8 @@ export async function updateSettings(
   }
   if (patch.serversEnabled !== undefined) update.serversEnabled = patch.serversEnabled;
   if (patch.worldMapUploadsEnabled !== undefined) update.worldMapUploadsEnabled = patch.worldMapUploadsEnabled;
+  if (patch.overlookEnabled !== undefined) update.overlookEnabled = patch.overlookEnabled;
+  if (patch.overlookUploadsEnabled !== undefined) update.overlookUploadsEnabled = patch.overlookUploadsEnabled;
   if (patch.antiSpamEnabled !== undefined) update.antiSpamEnabled = patch.antiSpamEnabled;
   if (patch.automodEnabled !== undefined) update.automodEnabled = patch.automodEnabled;
   if (patch.allowMinorSignups !== undefined) update.allowMinorSignups = patch.allowMinorSignups;
@@ -678,6 +698,8 @@ function rowToSettings(row: typeof siteSettings.$inferSelect): SiteSettings {
     earningConfig: parseEarningConfig(row.earningConfigJson),
     serversEnabled: !!row.serversEnabled,
     worldMapUploadsEnabled: !!row.worldMapUploadsEnabled,
+    overlookEnabled: !!row.overlookEnabled,
+    overlookUploadsEnabled: !!row.overlookUploadsEnabled,
     antiSpamEnabled: !!row.antiSpamEnabled,
     automodEnabled: !!row.automodEnabled,
     allowMinorSignups: !!row.allowMinorSignups,

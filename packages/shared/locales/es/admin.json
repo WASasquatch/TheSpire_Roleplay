@@ -821,7 +821,15 @@
     "minorFilterTryLabel": "Pruébalo",
     "minorFilterTryPh": "Escribe una frase para ver cómo la vería un miembro menor de 18",
     "minorFilterTryClean": "Sin cambios. Esa frase se muestra exactamente como se escribió.",
-    "minorFilterTryMasked": "Los menores de 18 verían: {{masked}}"
+    "minorFilterTryMasked": "Los menores de 18 verían: {{masked}}",
+    "overlookLabel": "Lienzos Overlook",
+    "overlookHint": "Permite que las salas y los mundos abran un lienzo compartido para trazar lugares y cómo se conectan.",
+    "overlookOn": "Las salas y los mundos pueden abrir un Overlook",
+    "overlookOff": "Overlook está desactivado en todas partes",
+    "overlookUploadsLabel": "Subida de imágenes en Overlook",
+    "overlookUploadsHint": "Permite pegar o soltar archivos de imagen directamente en un lienzo. Desactivado por defecto: esas imágenes se guardan en la base de datos, así que dejarlo desactivado limita los lienzos a imágenes enlazadas desde otro lugar.",
+    "overlookUploadsOn": "Se pueden agregar archivos de imagen a un lienzo",
+    "overlookUploadsOff": "Las imágenes solo se pueden agregar por enlace"
   },
   "affiliates": {
     "statusPending": "Pendiente de revisión",

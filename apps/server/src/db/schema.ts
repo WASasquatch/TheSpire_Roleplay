@@ -8,6 +8,7 @@ export * from "./schema/commands.js";
 export * from "./schema/site.js";
 export * from "./schema/affiliates.js";
 export * from "./schema/worlds.js";
+export * from "./schema/overlook.js";
 export * from "./schema/stories.js";
 export * from "./schema/messaging.js";
 export * from "./schema/forums.js";

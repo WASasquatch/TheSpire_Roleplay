@@ -32,6 +32,7 @@ export * from "./version.js";
 export * from "./siteTour.js";
 export * from "./tours.js";
 export * from "./world.js";
+export * from "./overlook.js";
 export * from "./story.js";
 export * from "./transitions.js";
 export * from "./export.js";

@@ -238,6 +238,14 @@ export interface RoomInfo {
   /** Effective 18+ rating (same semantics as RoomSummary.isNsfw); absent = all-ages. */
   isNsfw?: boolean;
   linkedWorld: LinkedWorldRef | null;
+  /**
+   * How many items are on this room's Overlook canvas (migration 0371), so
+   * the dossier can say "nothing sketched yet" versus "12 items" without a
+   * second request. Null when the feature is switched off sitewide; 0 when
+   * the canvas exists but is blank, or has never been opened.
+   * Optional so older payload shapes stay assignable.
+   */
+  overlookElementCount?: number | null;
 }
 
 export type Gender = "male" | "female" | "nonbinary" | "other" | "undisclosed";

@@ -206,6 +206,11 @@ export interface SettingsRow {
   serversEnabled: boolean;
   /** World map image uploads (default off — disk is shared with the DB). */
   worldMapUploadsEnabled: boolean;
+  /** Overlook canvases on rooms and worlds (default on). */
+  overlookEnabled: boolean;
+  /** Embedded image files inside an Overlook scene (default off, since those
+   *  bytes live in the database, not on the volume). */
+  overlookUploadsEnabled: boolean;
   antiSpamEnabled: boolean;
   /** Content auto-moderation master switch. */
   automodEnabled: boolean;

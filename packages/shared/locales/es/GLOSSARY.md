@@ -129,6 +129,7 @@ as a protocol token, §3 wins (it stays English).
 | library (Scriptorium shelf) | biblioteca | |
 | catalog | catálogo | |
 | theater (room feature) | teatro / Teatro | the shared-video watch feature; `/theater` stays |
+| Overlook (room/world canvas) | Overlook (el) | proper noun, stays untranslated like Scriptorium; `/overlook` stays. The generic surface it draws on is "lienzo" ("el lienzo Overlook"), never "lona" or "tela" |
 | playlist | lista de reproducción | |
 | arcade | arcade (el) | "Spire Arcade" is a proper noun, stays |
 | cabinet (arcade) | gabinete | |
@@ -390,7 +391,7 @@ Copy these byte-for-byte:
    codes; HTTP statuses.
 4. **Ratings & flags:** `NSFW`, `SFW`, `18+`, `G`, `PG`, `PG-13`, `R`, `NC-17`, `XP`,
    `OOC`, `IC`, `RP`, `NPC`, `DC` (dice difficulty), `HP`, `AM`/`PM`.
-5. **Brand & proper nouns:** The Spire, Scriptorium, Spire Arcade, Eidolon, Eidolon Tamer,
+5. **Brand & proper nouns:** The Spire, Scriptorium, Overlook, Spire Arcade, Eidolon, Eidolon Tamer,
    Urugal, Urugal's Descent, Grimhold (and its game titles: Runefall, Loong, Arrowstorm,
    The Spire, Graveward, Voidwake), Google, YouTube, Vimeo, VLC, OBS, Markdown, F-List.
    "The Spire" is invariable — write "The Spire" even where English says "the Spire"

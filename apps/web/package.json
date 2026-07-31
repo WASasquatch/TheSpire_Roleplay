@@ -1,15 +1,17 @@
 {
   "name": "@thekeep/web",
-  "version": "0.33.29",
+  "version": "0.34.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc -b && vite build",
+    "dev": "node scripts/sync-excalidraw-assets.mjs && vite",
+    "build": "node scripts/sync-excalidraw-assets.mjs && tsc -b && vite build",
+    "sync-assets": "node scripts/sync-excalidraw-assets.mjs",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@excalidraw/excalidraw": "^0.18.1",
     "@grapesjs/react": "^2.0.0",
     "@thekeep/shared": "workspace:*",
     "@tiptap/core": "^2.10.3",

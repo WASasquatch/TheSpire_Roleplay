@@ -1365,6 +1365,8 @@ export async function registerAdminRoutes(
     serversEnabled: z.boolean().optional(),
     /** World map image uploads (default off — disk is shared with the DB). */
     worldMapUploadsEnabled: z.boolean().optional(),
+    overlookEnabled: z.boolean().optional(),
+    overlookUploadsEnabled: z.boolean().optional(),
     /** Escalating chat anti-spam master switch. */
     antiSpamEnabled: z.boolean().optional(),
     /** Content auto-moderation master switch. */
@@ -1464,6 +1466,8 @@ export async function registerAdminRoutes(
       memberRankingsEnabled: s.memberRankingsEnabled,
       serversEnabled: s.serversEnabled,
       worldMapUploadsEnabled: s.worldMapUploadsEnabled,
+      overlookEnabled: s.overlookEnabled,
+      overlookUploadsEnabled: s.overlookUploadsEnabled,
       antiSpamEnabled: s.antiSpamEnabled,
       automodEnabled: s.automodEnabled,
       allowMinorSignups: s.allowMinorSignups,
@@ -1630,6 +1634,15 @@ export async function registerAdminRoutes(
     // Sitewide storage-behavior change → edit_site_settings.
     if (body.worldMapUploadsEnabled !== undefined) {
       patch.worldMapUploadsEnabled = body.worldMapUploadsEnabled;
+    }
+    // Overlook master switch. Sitewide feature availability → edit_site_settings.
+    if (body.overlookEnabled !== undefined) {
+      patch.overlookEnabled = body.overlookEnabled;
+    }
+    // Overlook embedded images: member bytes land in the database rather than
+    // the volume, so this is a sitewide storage-behavior change too.
+    if (body.overlookUploadsEnabled !== undefined) {
+      patch.overlookUploadsEnabled = body.overlookUploadsEnabled;
     }
     // Escalating chat anti-spam. Sitewide behavior change → edit_site_settings.
     if (body.antiSpamEnabled !== undefined) {

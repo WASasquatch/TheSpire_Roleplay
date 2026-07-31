@@ -73,6 +73,7 @@ import { signExportPayload } from "../export/sign.js";
 import { tFor } from "../i18n.js";
 import { getSessionUser } from "./auth.js";
 import { resolveTopicAuthorFlair } from "./forums.js";
+import { roomOverlookElementCount } from "./overlook.js";
 
 type Io = IoServer<ClientToServerEvents, ServerToClientEvents>;
 
@@ -634,6 +635,10 @@ export async function registerRoomsRoutes(
       // adults ever reach this line — the age gate above 404s everyone else.
       isNsfw: summary.isNsfw ?? false,
       linkedWorld: summary.linkedWorld,
+      // Item count only, never the scene: the dossier just needs to say
+      // "nothing sketched yet" versus "12 items". Null hides the card when
+      // Overlook is switched off sitewide.
+      overlookElementCount: await roomOverlookElementCount(db, room.id),
     };
     return { info };
   });

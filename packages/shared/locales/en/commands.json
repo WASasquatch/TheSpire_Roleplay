@@ -1175,5 +1175,21 @@
       "exclusive": "exclusive, one accepted at a time"
     },
     "_custom": "(custom - {{kind}})"
+  },
+  "overlook": {
+    "description": "Open this room's Overlook canvas, or manage who can draw on it.",
+    "usage": "/overlook [add|remove|list] [user]",
+    "subAdd": "Give someone edit access to this room's Overlook.",
+    "subRemove": "Take back someone's edit access.",
+    "subList": "Show who has been given edit access.",
+    "opened": "Opening the Overlook.",
+    "disabled": "The Overlook isn't available right now.",
+    "notAllowed": "Only the room owner and its mods can manage the Overlook.",
+    "added": "{{name}} can now draw on this room's Overlook.",
+    "removed": "{{name}} can no longer draw on this room's Overlook.",
+    "notAnEditor": "{{name}} didn't have edit access.",
+    "listEmpty": "Nobody has been invited to draw here yet. The room owner and its mods always can.",
+    "listHeader": "Invited to draw here: {{names}}",
+    "capReached": "This Overlook already has the maximum of {{max}} invited editors."
   }
 }

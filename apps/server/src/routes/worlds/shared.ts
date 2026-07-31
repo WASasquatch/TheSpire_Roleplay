@@ -185,6 +185,9 @@ export const updateWorldBody = z.object({
   visibility: visibilityEnum.optional(),
   // Adult owners (or edit_others_world staff) only; route-enforced.
   isNsfw: z.boolean().optional(),
+  // Overlook canvas opt-in (migration 0371). Plain editor setting: any
+  // collaborator can flip it, same as the rest of this body.
+  overlookEnabled: z.boolean().optional(),
   theme: z.union([z.record(z.unknown()), z.null()]).optional(),
   genre: genreEnum.optional(),
   tags: tagsArraySchema.optional(),
@@ -518,6 +521,7 @@ export async function toSummary(db: Db, w: typeof worlds.$inferSelect): Promise<
     description: w.description,
     visibility: w.visibility as WorldVisibility,
     isNsfw: w.isNsfw,
+    overlookEnabled: w.overlookEnabled,
     pageCount: await pageCount(db, w.id),
     memberCount: await memberCountFor(db, w.id),
     linkedRoomCount: await linkedRoomCountFor(db, w.id),

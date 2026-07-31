@@ -1177,5 +1177,21 @@
       "exclusive": "exclusivo, solo uno aceptado a la vez"
     },
     "_custom": "(personalizado - {{kind}})"
+  },
+  "overlook": {
+    "description": "Abre el lienzo Overlook de esta sala, o gestiona quién puede dibujar en él.",
+    "usage": "/overlook [add|remove|list] [usuario]",
+    "subAdd": "Da acceso de edición al Overlook de esta sala.",
+    "subRemove": "Quita el acceso de edición a alguien.",
+    "subList": "Muestra quién tiene acceso de edición.",
+    "opened": "Abriendo el Overlook.",
+    "disabled": "El Overlook no está disponible ahora mismo.",
+    "notAllowed": "Solo el propietario de la sala y sus moderadores pueden gestionar el Overlook.",
+    "added": "{{name}} ya puede dibujar en el Overlook de esta sala.",
+    "removed": "{{name}} ya no puede dibujar en el Overlook de esta sala.",
+    "notAnEditor": "{{name}} no tenía acceso de edición.",
+    "listEmpty": "Todavía no has invitado a nadie a dibujar aquí. El propietario de la sala y sus moderadores siempre pueden.",
+    "listHeader": "Invitados a dibujar aquí: {{names}}",
+    "capReached": "Este Overlook ya tiene el máximo de {{max}} editores invitados."
   }
 }

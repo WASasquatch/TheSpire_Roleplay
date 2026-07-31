@@ -52,6 +52,7 @@ import { BannerMarquee } from "./components/BannerMarquee.js";
 import { RoomInfoBar } from "./components/chat/RoomInfoBar.js";
 import { dismiss as dismissPersisted, useDismissed } from "./lib/dismissedBanners.js";
 import { onUiRouteOpen } from "./lib/uiRouteOpen.js";
+import { onOverlookOpen, type OverlookOpenDetail } from "./lib/overlookOpen.js";
 import { isEmailBlockGate } from "./lib/emailGate.js";
 import { recordNav, recordPageView, classifyPublicPath } from "./lib/nav-metrics.js";
 import { fetchLatestPublishedStory } from "./lib/latestStory.js";
@@ -69,6 +70,9 @@ import { WorldCatalogModal } from "./components/worlds/WorldCatalogModal.js";
 const WorldEditorModal = lazyModal(() => import("./components/worlds/WorldEditorModal.js").then((m) => ({ default: m.WorldEditorModal })));
 import { WorldViewerModal } from "./components/worlds/WorldViewerModal.js";
 const WorldsListModal = lazyModal(() => import("./components/worlds/WorldsListModal.js").then((m) => ({ default: m.WorldsListModal })));
+// Overlook drags in the whole Excalidraw runtime, so it stays behind its own
+// chunk and only downloads when someone actually opens a canvas.
+const OverlookWindow = lazyModal(() => import("./components/overlook/OverlookWindow.js").then((m) => ({ default: m.OverlookWindow })));
 import { StaffModal } from "./components/moderation/StaffModal.js";
 import { AffiliateSubmitPortal } from "./components/marketing/AffiliateSubmitPortal.js";
 import { StoryCatalogModal } from "./components/scriptorium/StoryCatalogModal.js";
@@ -912,6 +916,9 @@ function Chat() {
   // Server Rail (Multi-Server Lift) state. All inert when the feature flag is
   // off: serversEnabled gates the rail render + every server-scoped fetch.
   const serversEnabled = useChat((s) => s.branding.serversEnabled === true);
+  // Overlook master switch. Hides both room-bar launchers when off; the
+  // routes refuse regardless, so this is chrome only.
+  const overlookEnabled = useChat((s) => s.branding.overlookEnabled === true);
   const currentServerId = useChat((s) => s.currentServerId);
   const setCurrentServerId = useChat((s) => s.setCurrentServerId);
   const setDefaultServerId = useChat((s) => s.setDefaultServerId);
@@ -1003,6 +1010,12 @@ function Chat() {
   // Worldbuilding modals. Only one is visible at a time but state lives
   // independently so e.g. closing the viewer doesn't tear down the list.
   const [worldsListOpen, setWorldsListOpen] = useState(false);
+  // The Overlook canvas currently open, or null. Holds the whole target (not
+  // a boolean) so the window keeps showing what it was opened for even if the
+  // viewer wanders into another room behind it. Closing an editor full of
+  // unsaved strokes because someone clicked a different room would be the
+  // wrong call.
+  const [overlookTarget, setOverlookTarget] = useState<OverlookOpenDetail | null>(null);
   // My Worlds opens with the New World form already showing (the World
   // Catalog's "Create World" button). Reset on close.
   const [worldsListCreate, setWorldsListCreate] = useState(false);
@@ -1226,6 +1239,14 @@ function Chat() {
     setOpenStoryReader(null);
   }, [openStoryReaderId, setOpenStoryReader, setOpenProfile]);
   const [navLinksVersion, setNavLinksVersion] = useState(0);
+
+  /**
+   * Overlook opener. The world editor's nav and the world viewer's tab strip
+   * both live several components deep inside their own windows, so they fire
+   * an event rather than having a setter threaded down to them. The room-bar
+   * launchers call `setOverlookTarget` directly; they're right here.
+   */
+  useEffect(() => onOverlookOpen((detail) => setOverlookTarget(detail)), []);
 
   /**
    * UI route dispatcher, `{rules}` / `{modal:earning:items:shop}` /
@@ -2853,7 +2874,7 @@ function Chat() {
         "open-profile", "open-my-editor", "open-character-editor", "open-help",
         "open-users", "open-worlds-list", "open-world-catalog", "open-world",
         "open-scriptorium", "open-forums", "open-story-editor", "open-story",
-        "open-bookmarks", "open-earning",
+        "open-bookmarks", "open-earning", "open-overlook",
       ]);
       if (opensWindowSurface.has(h.kind)) setPoppedTopicId(null);
       switch (h.kind) {
@@ -2877,6 +2898,17 @@ function Chat() {
           break;
         case "open-worlds-list":
           setWorldsListOpen(true);
+          break;
+        case "open-overlook":
+          // `/overlook` only ever targets the room the command ran in, so the
+          // name comes from the local room list rather than the wire. An
+          // unknown id (the room list hasn't synced yet) still opens: the
+          // window fetches its own title from the payload.
+          setOverlookTarget({
+            scope: "room",
+            scopeId: h.roomId,
+            name: rooms[h.roomId]?.name ?? "",
+          });
           break;
         case "open-world-catalog":
           setWorldCatalogOpen(true);
@@ -4759,6 +4791,12 @@ function Chat() {
                   credentials: "include",
                 }).catch(() => { /* room:pins will resync; nothing to surface */ });
               }}
+              {...(overlookEnabled
+                ? {
+                    onOpenOverlook: () =>
+                      setOverlookTarget({ scope: "room", scopeId: room.id, name: room.name }),
+                  }
+                : {})}
             />
           ) : null}
           {/* Retention-exempt rooms never expire, so a stale per-room minutes
@@ -5420,6 +5458,17 @@ function Chat() {
       ) : null}
       {grimholdOpen ? (
         <GrimholdWindow characterId={activeCharacterId} onClose={() => setGrimholdOpen(false)} />
+      ) : null}
+      {overlookTarget ? (
+        <OverlookWindow
+          scope={overlookTarget.scope}
+          scopeId={overlookTarget.scopeId}
+          fallbackName={overlookTarget.name}
+          onClose={() => setOverlookTarget(null)}
+          {...(overlookTarget.worldEntities
+            ? { worldEntities: overlookTarget.worldEntities }
+            : {})}
+        />
       ) : null}
       {openItem ? (
         <ItemZoomView entry={openItem} onClose={() => setOpenItem(null)} />

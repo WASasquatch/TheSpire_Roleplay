@@ -33,6 +33,7 @@ import {
 } from "../../lib/worlds.js";
 import { formatDateTime, formatTime } from "../../lib/intlFormat.js";
 import { readError } from "../../lib/http.js";
+import { openOverlook } from "../../lib/overlookOpen.js";
 import { useCopyToClipboard } from "../../lib/useCopyToClipboard.js";
 import { ActiveThemeContext, themeStyle, useActiveTheme } from "../../lib/theme.js";
 import { FloatingWindow } from "../shared/FloatingWindow.js";
@@ -193,6 +194,28 @@ export function WorldEditorModal({ worldId, onClose, onDeleted }: Props) {
                     {label}
                   </button>
                 ))}
+                {/* Overlook is a nav entry but NOT a `kbView` pane: it opens
+                    its own floating window so the canvas gets the full screen
+                    and can be resized alongside the editor, rather than being
+                    squeezed into this scrolling column. Shown only once the
+                    owner has switched it on in world settings. */}
+                {detail.world.overlookEnabled ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openOverlook({
+                        scope: "world",
+                        scopeId: worldId,
+                        name: detail.world.name,
+                        worldEntities: detail.entities,
+                      })
+                    }
+                    className="block w-full rounded px-2 py-1 text-left text-xs uppercase tracking-widest text-keep-muted hover:bg-keep-muted/25"
+                    title={t("editor.overlook")}
+                  >
+                    {t("editor.overlook")}
+                  </button>
+                ) : null}
                 <div className="mt-1 border-t border-keep-rule/40 pt-1 text-[10px] uppercase tracking-widest text-keep-muted">{t("editor.lorePages")}</div>
                 {tree.length === 0 ? (
                   <p className="p-2 italic text-keep-muted">{t("editor.noPages")}</p>
@@ -352,11 +375,15 @@ function WorldMetaEditor({
   // simply doesn't render for viewers who can't flip it (age plan
   // Phase 4; collaborators edit pages, not the world's rating).
   const canSetNsfw = viewerIsAdult && canManageCollaborators;
+  // Sitewide Overlook switch. A world-level opt-in is pointless while the
+  // feature is off globally, so the row hides rather than 404ing later.
+  const siteOverlookEnabled = useChat((s) => s.branding.overlookEnabled === true);
   const [name, setName] = useState(w.name);
   const [slug, setSlug] = useState(w.slug);
   const [description, setDescription] = useState(w.description ?? "");
   const [visibility, setVisibility] = useState<WorldVisibility>(w.visibility);
   const [isNsfw, setIsNsfw] = useState<boolean>(w.isNsfw ?? false);
+  const [overlookEnabled, setOverlookEnabled] = useState<boolean>(w.overlookEnabled ?? false);
   // null = "no theme set" (fall back to viewer's chat theme); a Theme object
   // = author has explicit colors. Both states need to round-trip via PATCH.
   const [theme, setTheme] = useState<Theme | null>(w.theme);
@@ -416,6 +443,7 @@ function WorldMetaEditor({
       if ((description.trim() || null) !== w.description) body.description = description.trim() || null;
       if (visibility !== w.visibility) body.visibility = visibility;
       if (isNsfw !== (w.isNsfw ?? false)) body.isNsfw = isNsfw;
+      if (overlookEnabled !== (w.overlookEnabled ?? false)) body.overlookEnabled = overlookEnabled;
       // Theme diff: stringify-compare so we only send when something actually
       // changed. Null vs null is a no-op; null vs Theme (or vice versa) writes.
       if (JSON.stringify(theme) !== JSON.stringify(w.theme)) body.theme = theme;
@@ -534,6 +562,28 @@ function WorldMetaEditor({
             <span className="block uppercase tracking-widest text-keep-muted">{t("editor.nsfwLabel")}</span>
             <span className="mt-0.5 block text-[10px] text-keep-muted">
               {t("editor.nsfwHint")}
+            </span>
+          </span>
+        </label>
+      ) : null}
+
+      {/* Overlook opt-in. Hidden entirely when an admin has switched the
+          feature off sitewide, so a world owner can't turn on a toggle whose
+          nav entry would then 404. */}
+      {siteOverlookEnabled ? (
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            checked={overlookEnabled}
+            onChange={(e) => setOverlookEnabled(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span className="min-w-0">
+            <span className="block uppercase tracking-widest text-keep-muted">
+              {t("editor.overlookEnabledLabel")}
+            </span>
+            <span className="mt-0.5 block text-[10px] text-keep-muted">
+              {t("editor.overlookEnabledHint")}
             </span>
           </span>
         </label>

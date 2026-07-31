@@ -303,7 +303,8 @@
     "pickLorePage": "Elige una página de Lore.",
     "membersRegion": "Miembros del mundo",
     "members": "Miembros",
-    "memberTitle": "{{name}} ({{username}})"
+    "memberTitle": "{{name}} ({{username}})",
+    "tabOverlook": "Overlook"
   },
   "maps": {
     "stageRegion": "Mapa: {{name}}",
@@ -595,7 +596,10 @@
       "reject": "Rechazar",
       "recentDecisions": "Decisiones recientes ({{total}})",
       "reviewNoteQuoted": "“{{note}}”"
-    }
+    },
+    "overlook": "Overlook",
+    "overlookEnabledLabel": "Lienzo Overlook",
+    "overlookEnabledHint": "Agrega un lienzo a este mundo para trazar lugares, facciones y cómo se conectan. Los lectores solo ven la pestaña cuando ya hay algo dibujado."
   },
   "collab": {
     "heading": "Colaboradores",

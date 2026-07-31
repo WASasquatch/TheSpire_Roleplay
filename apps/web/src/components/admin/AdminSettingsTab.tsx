@@ -87,6 +87,8 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
   const [profileDesignerEnabled, setProfileDesignerEnabled] = useState(false);
   const [serversEnabled, setServersEnabled] = useState(false);
   const [worldMapUploadsEnabled, setWorldMapUploadsEnabled] = useState(false);
+  const [overlookEnabled, setOverlookEnabled] = useState(true);
+  const [overlookUploadsEnabled, setOverlookUploadsEnabled] = useState(false);
   const [antiSpamEnabled, setAntiSpamEnabled] = useState(false);
   const [automodEnabled, setAutomodEnabled] = useState(false);
   const [allowMinorSignups, setAllowMinorSignups] = useState(false);
@@ -171,6 +173,8 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
       setProfileDesignerEnabled(j.profileDesignerEnabled);
       setServersEnabled(j.serversEnabled);
       setWorldMapUploadsEnabled(j.worldMapUploadsEnabled);
+      setOverlookEnabled(j.overlookEnabled);
+      setOverlookUploadsEnabled(j.overlookUploadsEnabled);
       setAntiSpamEnabled(j.antiSpamEnabled);
       setAutomodEnabled(j.automodEnabled);
       setAllowMinorSignups(j.allowMinorSignups);
@@ -243,6 +247,8 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
         profileDesignerEnabled,
         serversEnabled,
         worldMapUploadsEnabled,
+        overlookEnabled,
+        overlookUploadsEnabled,
         antiSpamEnabled,
         automodEnabled,
         allowMinorSignups,
@@ -296,6 +302,8 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
         profileDesignerEnabled: j.profileDesignerEnabled,
         serversEnabled: j.serversEnabled,
         worldMapUploadsEnabled: j.worldMapUploadsEnabled,
+        overlookEnabled: j.overlookEnabled,
+        overlookUploadsEnabled: j.overlookUploadsEnabled,
         defaultStyleKey: j.defaultStyleKey,
         themeDesignMap: j.themeDesignMap ?? {},
         // Null = admin hasn't set an explicit override → splash falls
@@ -905,6 +913,35 @@ export function SettingsTab({ findRequest, onFindHandled }: SettingsTabProps = {
               </div>
               <span className="mt-0.5 block text-[10px] text-keep-muted">
                 {t("settings.worldMapUploadsHint")}
+              </span>
+            </label>
+            <label data-admin-anchor="settings.overlookLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.overlookLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={overlookEnabled}
+                  onChange={(e) => setOverlookEnabled(e.target.checked)}
+                />
+                <span>{overlookEnabled ? t("settings.overlookOn") : t("settings.overlookOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.overlookHint")}
+              </span>
+            </label>
+            <label data-admin-anchor="settings.overlookUploadsLabel" className="text-xs">
+              <span className="mb-1 block uppercase tracking-widest text-keep-muted">{t("settings.overlookUploadsLabel")}</span>
+              <div className="flex items-center gap-2 rounded border border-keep-rule bg-keep-bg px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={overlookUploadsEnabled}
+                  onChange={(e) => setOverlookUploadsEnabled(e.target.checked)}
+                  disabled={!overlookEnabled}
+                />
+                <span>{overlookUploadsEnabled ? t("settings.overlookUploadsOn") : t("settings.overlookUploadsOff")}</span>
+              </div>
+              <span className="mt-0.5 block text-[10px] text-keep-muted">
+                {t("settings.overlookUploadsHint")}
               </span>
             </label>
           </div>

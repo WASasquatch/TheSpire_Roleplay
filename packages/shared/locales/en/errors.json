@@ -564,6 +564,16 @@
       "usernameRule": "that username won't work - use 2-40 letters, numbers, or _ - ' . ` (no spaces; try an underscore instead, like Oak_Tavern)",
       "stringTooShort": "String must contain at least {{n}} character(s)",
       "stringTooLong": "String must contain at most {{n}} character(s)"
+    },
+    "overlook": {
+      "notFound": "That Overlook isn't available.",
+      "readOnly": "You don't have edit access to this Overlook.",
+      "badScene": "That canvas couldn't be read.",
+      "tooManyElements": "An Overlook is capped at {{max}} items.",
+      "uploadsDisabled": "Image uploads are turned off. Add images by link instead.",
+      "noSuchUser": "No such user.",
+      "editorCap": "An Overlook is capped at {{max}} invited editors.",
+      "tooBig": "That canvas is too big to save. Try removing some images."
     }
   }
 }

@@ -2,7 +2,7 @@ import argon2 from "argon2";
 import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { deriveSlug, slugRx } from "@thekeep/shared";
-import { bans, roomInvites, roomMembers, rooms } from "../../db/schema.js";
+import { bans, overlooks, roomInvites, roomMembers, rooms } from "../../db/schema.js";
 import { joinRoom } from "../../realtime/broadcast.js";
 import { getServerSettings } from "../../settings.js";
 import { hasPermission } from "../../auth/permissions.js";
@@ -142,6 +142,22 @@ async function resurrectArchivedRoom(
   await ctx.db.delete(roomMembers).where(eq(roomMembers.roomId, roomId));
   await ctx.db.delete(bans).where(eq(bans.roomId, roomId));
   await ctx.db.delete(roomInvites).where(eq(roomInvites.roomId, roomId));
+  // The Overlook canvas (migration 0371) is CONTENT, not config, so it
+  // deliberately survives archive/resurrect for the SAME owner: parking is
+  // automatic the moment a room empties, and losing your map every time you
+  // walked away would make the feature useless.
+  //
+  // A genuine TAKEOVER is different. Whoever claims an abandoned room name
+  // is a stranger to the previous incarnation, and a canvas can hold exactly
+  // the kind of thing an author would never hand over: unrevealed locations,
+  // plot notes, a GM's private layout. Carrying it across an ownership change
+  // is the same mistake the `linkedRoomId` reset above avoids, and the
+  // surviving `overlook_editors` rows would be worse still, silently leaving
+  // the OLD owner's invited artists able to draw in a room they no longer
+  // have anything to do with. Dropping the row cascades those grants away.
+  if (prior?.ownerId && prior.ownerId !== ctx.user.id) {
+    await ctx.db.delete(overlooks).where(eq(overlooks.roomId, roomId));
+  }
   // Re-seat the new caller as the owner-role member so /topic + other
   // owner-gated commands recognize them immediately.
   await ctx.db.insert(roomMembers).values({

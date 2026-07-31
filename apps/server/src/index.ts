@@ -417,6 +417,12 @@ async function main() {
       // it server-side regardless. Boolean only — same public posture as
       // profileDesignerEnabled.
       worldMapUploadsEnabled: s.worldMapUploadsEnabled,
+      // Overlook switches (migration 0371). The master flag drives whether
+      // the room bar shows the canvas button at all; the uploads flag tells
+      // the canvas whether to offer file drops or link-only. Both are
+      // re-checked server-side on every route; these are for chrome.
+      overlookEnabled: s.overlookEnabled,
+      overlookUploadsEnabled: s.overlookUploadsEnabled,
       // Admin-uploaded site background art (migration 0368). Parsed
       // BackgroundArt bundles ({webpUrl, avifUrl, color}) or null for
       // "use the built-in Spire art". Public because the splash pages
@@ -919,7 +925,7 @@ async function main() {
         // SPA route rendering a dedicated rules page. The JSON endpoint
         // moved to `/api/rules` (in the list below) so the SPA shell
         // doesn't shadow it.
-        const apiPrefixes = ["/api", "/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/affiliates", "/a", "/worlds", "/me", "/health", "/users", "/site", "/socket.io", "/thesaurus"];
+        const apiPrefixes = ["/api", "/auth", "/admin", "/characters", "/profiles", "/nav-links", "/rooms", "/stats", "/commands", "/messages", "/reports", "/push", "/affiliates", "/a", "/worlds", "/overlook", "/me", "/health", "/users", "/site", "/socket.io", "/thesaurus"];
         if (apiPrefixes.some((p) => req.url === p || req.url.startsWith(p + "/") || req.url.startsWith(p + "?"))) {
           reply.code(404);
           return reply.send({ error: "not found" });

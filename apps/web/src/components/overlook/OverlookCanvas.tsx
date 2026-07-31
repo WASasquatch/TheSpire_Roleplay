@@ -438,35 +438,100 @@ export function OverlookCanvas({
     api.scrollToContent(next, { fitToContent: true });
   }, [api, seedEntities]);
 
+  /**
+   * Take over the toolbar's own image button.
+   *
+   * Excalidraw's image tool opens a file picker the moment it activates
+   * (`setActiveTool` calls `onImageAction` synchronously when the type is
+   * "image"), and the library exposes no hook to change that. So we intercept
+   * the click before React sees it and open our own picker instead, which
+   * offers a link and, when the admin allows uploads, hands off to the native
+   * file flow.
+   *
+   * This replaces an earlier button floating in `renderTopRightUI`: that is
+   * the only slot Excalidraw offers up there, so an "add image" control
+   * stranded next to Library read as a bug rather than a feature. One image
+   * button that does the right thing beats two that disagree.
+   *
+   * Capture phase on our own host, so it runs before React's delegated
+   * handler at the app root. Matching is by `data-testid`, which the toolbar
+   * generates per tool. If a future Excalidraw renames it the intercept stops
+   * matching and the native picker returns; the save route still refuses
+   * embedded uploads, so the failure mode is a confusing dialog rather than a
+   * bypassed setting.
+   */
+  useEffect(() => {
+    if (!canEdit) return;
+    const host = hostRef.current;
+    if (!host) return;
+    const onClickCapture = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el?.closest) return;
+      // The tool renders as <label><input data-testid="toolbar-image">…</label>,
+      // so the click can land on the label, its icon, or the input itself.
+      const hit =
+        el.closest('[data-testid="toolbar-image"]')
+        ?? el.closest("label")?.querySelector('[data-testid="toolbar-image"]');
+      if (!hit) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setImageUrl((v) => (v === null ? "" : null));
+      setImageError(null);
+    };
+    host.addEventListener("click", onClickCapture, true);
+    return () => host.removeEventListener("click", onClickCapture, true);
+  }, [canEdit]);
+
+  /**
+   * Close the other two doors to an embedded upload while uploads are off.
+   *
+   * Blocking the toolbar alone would be theatre: dropping a file onto the
+   * canvas, or pasting one from the clipboard, both reach
+   * `insertImageElement` and produce base64 that the save route then refuses,
+   * so the author loses the work at save time instead of being told up front.
+   * Paste is handled by the `onPaste` prop below; drop needs a listener.
+   */
+  useEffect(() => {
+    if (uploadsEnabled || !canEdit) return;
+    const host = hostRef.current;
+    if (!host) return;
+    const blockFileDrop = (e: DragEvent) => {
+      if (!e.dataTransfer?.types?.includes("Files")) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    host.addEventListener("dragover", blockFileDrop, true);
+    host.addEventListener("drop", blockFileDrop, true);
+    return () => {
+      host.removeEventListener("dragover", blockFileDrop, true);
+      host.removeEventListener("drop", blockFileDrop, true);
+    };
+  }, [uploadsEnabled, canEdit]);
+
+  /** Hand off to Excalidraw's native file flow (uploads-enabled path only). */
+  const chooseFile = useCallback(() => {
+    setImageUrl(null);
+    api?.setActiveTool({ type: "image" });
+  }, [api]);
+
+  // Only the world-seeding tool lives up here now. It has no natural home in
+  // the tool island and reads fine beside Library, which is also an
+  // insert-content control.
   const topRight = useCallback(() => {
-    if (!canEdit) return null;
+    if (!canEdit || !seedEntities?.length) return null;
     return (
-      <div className="flex items-center gap-1">
-        {seedEntities?.length ? (
-          <button
-            type="button"
-            onClick={seedFromWorld}
-            title={t("overlook.seedFromWorldHint")}
-            aria-label={t("overlook.seedFromWorld")}
-            className="flex h-9 items-center gap-1 rounded border border-keep-rule bg-keep-panel px-2 text-xs text-keep-text hover:border-keep-action hover:text-keep-action"
-          >
-            <Sparkles size={14} aria-hidden />
-            <span className="hidden [@container(min-width:640px)]:inline">
-              {t("overlook.seedFromWorld")}
-            </span>
-          </button>
-        ) : null}
-        <button
-          type="button"
-          onClick={() => { setImageUrl((v) => (v === null ? "" : null)); setImageError(null); }}
-          title={t("overlook.addImage")}
-          aria-label={t("overlook.addImage")}
-          className="flex h-9 items-center gap-1 rounded border border-keep-rule bg-keep-panel px-2 text-xs text-keep-text hover:border-keep-action hover:text-keep-action"
-        >
-          <ImagePlus size={14} aria-hidden />
-          <span className="hidden [@container(min-width:640px)]:inline">{t("overlook.addImage")}</span>
-        </button>
-      </div>
+      <button
+        type="button"
+        onClick={seedFromWorld}
+        title={t("overlook.seedFromWorldHint")}
+        aria-label={t("overlook.seedFromWorld")}
+        className="flex h-9 items-center gap-1 rounded border border-keep-rule bg-keep-panel px-2 text-xs text-keep-text hover:border-keep-action hover:text-keep-action"
+      >
+        <Sparkles size={14} aria-hidden />
+        <span className="hidden [@container(min-width:640px)]:inline">
+          {t("overlook.seedFromWorld")}
+        </span>
+      </button>
     );
   }, [canEdit, seedEntities, seedFromWorld, t]);
 
@@ -480,11 +545,12 @@ export function OverlookCanvas({
        Pinning to the (already position:relative, definitely-sized) parent
        sidesteps the whole question. */
     <div ref={hostRef} className="absolute inset-0">
-      {/* Add-image-by-link popover. Deliberately our own chrome rather than an
-          Excalidraw dialog: the library has no URL entry point to extend, and
-          this keeps the affordance consistent with the rest of the app. */}
+      {/* The image picker, anchored under the tool island because that is what
+          opens it now (see the click intercept above). Our own chrome rather
+          than an Excalidraw dialog: the library has no URL entry point to
+          extend, and this keeps the affordance consistent with the app. */}
       {imageUrl !== null ? (
-        <div className="absolute right-2 top-12 z-10 w-[min(22rem,calc(100%-1rem))] rounded border border-keep-rule bg-keep-panel p-2 shadow-lg">
+        <div className="absolute left-1/2 top-16 z-10 w-[min(24rem,calc(100%-1rem))] -translate-x-1/2 rounded border border-keep-rule bg-keep-panel p-2 shadow-lg">
           <label className="block text-[10px] font-action uppercase tracking-widest text-keep-muted">
             {t("overlook.addImagePrompt")}
           </label>
@@ -504,16 +570,29 @@ export function OverlookCanvas({
             <button
               type="button"
               onClick={() => void insertImage(imageUrl)}
+              title={t("overlook.addImage")}
+              aria-label={t("overlook.addImage")}
               className="shrink-0 rounded border border-keep-action bg-keep-action/15 px-2 py-1 text-sm text-keep-action hover:bg-keep-action/30"
             >
               <Link2 size={14} aria-hidden />
-              <span className="sr-only">{t("overlook.addImage")}</span>
             </button>
           </div>
           {imageError ? <p className="mt-1 text-xs text-keep-accent">{imageError}</p> : null}
-          {!uploadsEnabled ? (
+          {uploadsEnabled ? (
+            // Uploads are on, so the native file flow is still reachable:
+            // hand back to Excalidraw's own tool rather than reimplementing
+            // its picker, decoding and placement.
+            <button
+              type="button"
+              onClick={chooseFile}
+              className="mt-1.5 flex items-center gap-1 text-[11px] text-keep-action hover:underline"
+            >
+              <ImagePlus size={12} aria-hidden />
+              {t("overlook.addImageFile")}
+            </button>
+          ) : (
             <p className="mt-1 text-[11px] leading-snug text-keep-muted">{t("overlook.uploadsOff")}</p>
-          ) : null}
+          )}
         </div>
       ) : null}
 
@@ -522,6 +601,14 @@ export function OverlookCanvas({
         initialData={initialData}
         onChange={handleChange}
         onLinkOpen={handleLinkOpen as never}
+        // Second of the three upload doors (the toolbar and drop are handled
+        // above). Returning false cancels the paste, so an image on the
+        // clipboard is refused up front instead of becoming base64 that the
+        // save route rejects minutes later. Text and element pastes are
+        // untouched.
+        onPaste={(data) =>
+          !(!uploadsEnabled && data.files != null && Object.keys(data.files).length > 0)
+        }
         viewModeEnabled={!canEdit}
         theme={bridge.theme}
         // Match the app's language so the toolbar and menus aren't stranded

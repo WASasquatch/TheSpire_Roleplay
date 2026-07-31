@@ -565,6 +565,7 @@
     "editorsHint": "El propietario y los moderadores siempre pueden dibujar aquí. Agrega a otros con /overlook add.",
     "editorsEmpty": "No has invitado a nadie más.",
     "removeEditor": "Quitar a {{name}}",
-    "addImagePlaceholder": "https://…"
+    "addImagePlaceholder": "https://…",
+    "addImageFile": "O elige un archivo de tu dispositivo"
   }
 }

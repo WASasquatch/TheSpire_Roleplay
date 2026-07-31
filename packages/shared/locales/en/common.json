@@ -560,6 +560,7 @@
     "editorsHint": "The owner and mods can always draw here. Add others with /overlook add.",
     "editorsEmpty": "No one else has been invited.",
     "removeEditor": "Remove {{name}}",
-    "addImagePlaceholder": "https://…"
+    "addImagePlaceholder": "https://…",
+    "addImageFile": "Or choose a file from your device"
   }
 }

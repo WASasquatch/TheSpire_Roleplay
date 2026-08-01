@@ -25,6 +25,7 @@ import { LanguageTagChips } from "../flags/LanguageTagChips.js";
 import { RoleBadgeChips } from "../shared/RoleBadgeChips.js";
 import { RankSigil } from "../earning/RankSigil.js";
 import { StyledName } from "../cosmetics/StyledName.js";
+import { itemThumbProps } from "../../lib/itemThumbs.js";
 import { useChat } from "../../state/store.js";
 import { ProfileMarquee, ProfileVisitorsChip, useTrackProfileView } from "../cosmetics/ProfileFlairSurfaces.js";
 import { AccountBanControl } from "../moderation/AccountBanControl.js";
@@ -1949,8 +1950,12 @@ function CollectionPin({
       }
     >
       {entry.iconUrl ? (
+        // Pets keep the full-size artwork: their tile grows to 256px on a wide
+        // container, which is past what the 256px thumbnail can serve cleanly.
+        // Everything else caps at 128px and takes the thumbnail, which is the
+        // bulk of a populated trophy case. See lib/itemThumbs.
         <img
-          src={entry.iconUrl}
+          {...(variant === "pet" ? { src: entry.iconUrl } : itemThumbProps(entry.iconUrl))}
           alt=""
           loading="lazy"
           className={`rounded border border-keep-rule/40 bg-keep-bg object-contain ${iconCls}`}

@@ -169,3 +169,7 @@ commit.md
 # Running ELI5 "what's new" log for end users (dated entries). Local-only;
 # never cleared by deploy, unlike commit.md.
 updates.md
+
+# Generated at web build time by apps/web/scripts/build-item-thumbs.mjs.
+# Derived from the committed item art, so it is rebuilt rather than tracked.
+apps/web/public/assets/items/thumbs/

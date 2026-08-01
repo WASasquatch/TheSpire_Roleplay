@@ -21,6 +21,7 @@ import { FloatingWindow } from "../shared/FloatingWindow.js";
 import { TabBtn } from "../shared/TabBtn.js";
 import { DisplayPrivacyRow } from "../profile/DisplayPrivacyRow.js";
 import { useEarning, lookupRankTier, progressToNextTier } from "../../state/earning.js";
+import { itemThumbProps } from "../../lib/itemThumbs.js";
 import { useChat } from "../../state/store.js";
 import {
   buyItem,
@@ -5323,8 +5324,11 @@ function InventoryRow({ item, quantity }: { item: ItemCatalogRow; quantity: numb
       <div className="flex justify-center">
         <div className="relative">
           {item.iconUrl ? (
+            // Thumbnail, not the 600px original: this tops out at 112px, and a
+            // shop page renders dozens at once. Falls back automatically when
+            // no thumbnail was generated. See lib/itemThumbs.
             <img
-              src={item.iconUrl}
+              {...itemThumbProps(item.iconUrl)}
               alt=""
               loading="lazy"
               className="h-20 w-20 rounded border border-keep-rule/60 bg-keep-bg object-contain sm:h-24 sm:w-24 lg:h-28 lg:w-28"
@@ -5423,7 +5427,7 @@ function ShopRow({
       <div className="flex justify-center">
         {item.iconUrl ? (
           <img
-            src={item.iconUrl}
+            {...itemThumbProps(item.iconUrl)}
             alt=""
             loading="lazy"
             className="h-20 w-20 rounded border border-keep-rule/60 bg-keep-bg object-contain sm:h-24 sm:w-24 lg:h-28 lg:w-28"
@@ -5502,7 +5506,7 @@ function ItemIcon({
   if (iconUrl) {
     return (
       <img
-        src={iconUrl}
+        {...itemThumbProps(iconUrl)}
         alt=""
         width={px}
         height={px}

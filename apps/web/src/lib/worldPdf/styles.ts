@@ -142,6 +142,28 @@ export function magazineCss(scope: string, paper: Paper): string {
   const rule = tint(paper.border, 0.55);
   const hairline = tint(paper.border, 0.3);
   const wash = tint(paper.panel, paper.dark ? 0.45 : 0.55);
+
+  /**
+   * Drop shadow for text sitting on cover art.
+   *
+   * A cover is whatever image the author uploaded, so the ink can land on
+   * anything from a near-black photo to a pale sepia map, and the scrim below
+   * only tints toward the world's own background. A shadow is what makes the
+   * title hold up either way. It contrasts against the INK, not the page: a
+   * light title gets a dark halo, a dark title a light one, which is the same
+   * rule `bannerInkStyle` uses for forum headers.
+   *
+   * The blur numbers look too big because they are. html2canvas multiplies a
+   * shadow's offsets by the capture scale but assigns `shadowBlur` straight
+   * through (renderer, `textShadows.forEach`), so at scale 2 a blur written as
+   * 6px paints as 6 DEVICE pixels, which is 3 CSS px of apparent softness.
+   * These are doubled to land where they read.
+   */
+  const inkIsLight = luminance(paper.text) > 0.55;
+  const halo = (blur: number, alpha: number) =>
+    `0 1px ${blur * 2}px ${inkIsLight ? `rgba(0, 0, 0, ${alpha})` : `rgba(255, 255, 255, ${alpha})`}`;
+  const coverShadow = `${halo(9, 0.85)}, ${halo(2, 0.65)}`;
+  const coverShadowSm = `${halo(5, 0.8)}, ${halo(1.5, 0.6)}`;
   return `
 /* NOT scoped, and not decoration. html2pdf captures each page by cloning it
    into a fixed, full-viewport overlay at z-index 1000, invisible (opacity 0)
@@ -210,9 +232,17 @@ ${s} .wm-flow > * { margin: 0; }
 /* ---- cover ---- */
 ${s} .wm-cover { position: relative; flex: 1 1 auto; width: 100%; height: 100%; background: ${paper.bg}; overflow: hidden; }
 ${s} .wm-cover-art { position: absolute; inset: 0; background-size: cover; background-position: center; }
+/* Reaches FULLY opaque before the bottom edge rather than at it, so the
+   title block below sits on solid paper instead of on whatever the artwork
+   happens to be doing down there. The old ramp only hit 0.97 at the very
+   bottom, which left the type fighting the picture across its whole height. */
 ${s} .wm-cover-scrim {
   position: absolute; inset: 0;
-  background: linear-gradient(to bottom, ${tint(paper.bg, 0.15)} 0%, ${tint(paper.bg, 0.55)} 45%, ${tint(paper.bg, 0.97)} 100%);
+  background: linear-gradient(to bottom,
+    ${tint(paper.bg, 0.1)} 0%,
+    ${tint(paper.bg, 0.4)} 42%,
+    ${tint(paper.bg, 0.88)} 72%,
+    ${paper.bg} 88%);
 }
 ${s} .wm-cover-plate {
   position: absolute; inset: 0;
@@ -224,6 +254,7 @@ ${s} .wm-cover-inner {
 ${s} .wm-cover-kicker {
   font-size: 8pt; letter-spacing: 0.28em; text-transform: uppercase; color: ${paper.action};
   padding-bottom: 10pt;
+  text-shadow: ${coverShadowSm};
 }
 /* The one place a tight ratio is safe: nothing beside it gives the eye a
    reference, so the baseline drift a tighter line-height costs is invisible. */
@@ -231,18 +262,21 @@ ${s} .wm-cover-title {
   font-family: ${DISPLAY_FONT};
   font-size: 40pt; line-height: 1.12; font-weight: 700; color: ${paper.text};
   padding-bottom: 10pt;
+  text-shadow: ${coverShadow};
 }
-${s} .wm-cover-sub { font-size: 11pt; color: ${paper.text}; padding-bottom: 12pt; }
+${s} .wm-cover-sub { font-size: 11pt; color: ${paper.text}; padding-bottom: 12pt; text-shadow: ${coverShadowSm}; }
 ${s} .wm-cover-rule { height: 1.4pt; background: ${paper.action}; width: 96pt; margin-bottom: 12pt; }
 /* Dot-separated, not boxed: same reason as .wm-tags below. */
 ${s} .wm-cover-meta {
   font-size: 8.5pt; letter-spacing: 0.12em; text-transform: uppercase; color: ${paper.muted};
+  text-shadow: ${coverShadowSm};
 }
 ${s} .wm-cover-meta em { font-style: normal; }
 ${s} .wm-cover-foot {
   position: absolute; left: ${MARGIN.side}pt; right: ${MARGIN.side}pt; top: ${MARGIN.top}pt;
   display: flex; justify-content: space-between;
   font-size: 7.5pt; letter-spacing: 0.22em; text-transform: uppercase; color: ${paper.muted};
+  text-shadow: ${coverShadowSm};
 }
 
 /* ---- section furniture ---- */

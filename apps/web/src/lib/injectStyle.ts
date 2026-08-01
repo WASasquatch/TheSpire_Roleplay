@@ -35,6 +35,32 @@ export function createNonceStyleTag(): HTMLStyleElement {
   return el;
 }
 
+/**
+ * Write the real nonce back onto a live `<style>`'s CONTENT attribute.
+ *
+ * Needed only when a stylesheet has to survive being moved into another
+ * document, which today means html2canvas: it adopts the whole
+ * `documentElement` into an iframe before reading computed styles.
+ *
+ * The trap is in the CSP spec. When a `<style nonce="X">` first becomes
+ * browsing-context connected the browser moves X into an internal slot and
+ * blanks the content attribute (nonce hiding, so injected script can't read
+ * it back). `adoptNode` then re-connects the element in the iframe, which
+ * re-runs that same step, and this time it reads the BLANK attribute and
+ * clobbers the internal nonce to "". Under a strict `style-src 'self'
+ * 'nonce-…'` the sheet is dropped, so the capture comes out with no styling
+ * at all: correct in dev, where there is no CSP, and broken in production.
+ *
+ * Re-asserting the attribute is what makes the value present at adoption
+ * time. It re-exposes the nonce in the DOM, which is what hiding exists to
+ * prevent, but the value is already readable by any script on the page from
+ * the `csp-nonce` meta tag, so nothing is given away.
+ */
+export function reassertStyleNonce(el: HTMLStyleElement): void {
+  if (!CSP_NONCE) return;
+  el.setAttribute("nonce", CSP_NONCE);
+}
+
 export function ensureInjectedStyle(id: string, css: string): void {
   if (typeof document === "undefined") return;
   if (document.getElementById(id)) return;

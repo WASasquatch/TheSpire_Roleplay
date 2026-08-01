@@ -22,7 +22,36 @@
  */
 import html2pdf from "html2pdf.js";
 import { jsPDF } from "jspdf";
+import { CSP_NONCE } from "../cspNonce.js";
 import { JSPDF_OPTS, SHEET_H_PT, SHEET_W_PT } from "./page.js";
+
+/**
+ * Rebuild every stylesheet inside html2canvas's clone so it carries a valid
+ * nonce in the document it will actually be parsed in.
+ *
+ * html2canvas reads computed styles from an iframe it `adoptNode`s the whole
+ * document into, and adoption re-runs CSP's nonce-hiding step against a
+ * content attribute the browser blanked when the element was first inserted.
+ * The internal nonce is wiped, a strict `style-src 'self' 'nonce-…'` drops the
+ * sheet, and the page rasterizes with NO styling: right in dev, where there is
+ * no CSP, and catastrophically wrong in production.
+ *
+ * `reassertStyleNonce` puts the value back before capture, which should be
+ * enough on its own. This runs in the clone as well because the failure is
+ * silent and total, and a freshly created element that carries the nonce at
+ * insertion time is allowed with no reliance on how adoption treats the
+ * internal slot. Text content survives a blocked sheet, so rebuilding from it
+ * is lossless.
+ */
+function renonceClonedStyles(doc: Document): void {
+  if (!CSP_NONCE) return;
+  doc.querySelectorAll("style").forEach((old) => {
+    const fresh = doc.createElement("style");
+    fresh.setAttribute("nonce", CSP_NONCE);
+    fresh.textContent = old.textContent;
+    old.replaceWith(fresh);
+  });
+}
 
 /**
  * The bit of html2pdf's worker we actually drive.
@@ -108,6 +137,7 @@ export async function renderPagesToPdf(pages: readonly HTMLElement[], opts: Rend
       useCORS: true,
       imageTimeout: 20_000,
       removeContainer: true,
+      onclone: renonceClonedStyles,
     },
     jsPDF: JSPDF_OPTS,
     pdf,

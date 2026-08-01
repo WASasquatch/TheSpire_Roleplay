@@ -26,6 +26,7 @@ import {
   type WorldMapMarker,
   type WorldPage,
 } from "@thekeep/shared";
+import { safeCssColor } from "../../components/shared/RoleBadgeChips.js";
 import { formatDate } from "../intlFormat.js";
 import { legibleHtmlColors, sanitizeUserHtml, USER_HTML_SCOPE_CLASS } from "../userHtml.js";
 import { buildWorldTree, type WorldTreeNode } from "../worlds.js";
@@ -635,7 +636,11 @@ function mapPlate(ctx: BuildCtx, m: WorldExportMap, section: string): Block[] {
 }
 
 function pinHtml(ctx: BuildCtx, k: WorldMapMarker): string {
-  const color = k.color ?? ctx.kindDefs.find((d) => d.key === k.kind)?.color ?? ctx.paper.action;
+  // Marker colours are free text in the database, same as on the live map, so
+  // they go through the app's own clamp before landing in a style attribute.
+  const color = safeCssColor(k.color)
+    ?? safeCssColor(ctx.kindDefs.find((d) => d.key === k.kind)?.color)
+    ?? ctx.paper.action;
   const showText = k.labelMode !== "icon" && k.label.trim();
   return `<div class="wm-pin" style="left:${(k.x * 100).toFixed(2)}%;top:${(k.y * 100).toFixed(2)}%">`
     + `<span class="wm-pin-dot" style="background:${esc(color)}"></span>`

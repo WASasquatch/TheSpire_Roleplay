@@ -34,7 +34,7 @@
 import type { TFunction } from "i18next";
 import type { Theme, WorldExportDossier } from "@thekeep/shared";
 import { readError } from "../http.js";
-import { createNonceStyleTag } from "../injectStyle.js";
+import { createNonceStyleTag, reassertStyleNonce } from "../injectStyle.js";
 import { themeStyle } from "../theme.js";
 import {
   buildBlocks,
@@ -94,6 +94,12 @@ export async function exportWorldPdf(opts: ExportWorldPdfOpts): Promise<void> {
   const styleTag = createNonceStyleTag();
   styleTag.textContent = magazineCss(scope, paper);
   document.head.appendChild(styleTag);
+  // MUST come after insertion, not before. html2canvas adopts the whole
+  // document into an iframe to read computed styles, and adoption re-runs the
+  // CSP nonce-hiding step against a content attribute the browser blanked on
+  // first insert, wiping the nonce and getting the sheet dropped in
+  // production. See reassertStyleNonce.
+  reassertStyleNonce(styleTag);
 
   const root = document.createElement("div");
   root.className = scope;
@@ -172,6 +178,12 @@ export async function exportWorldPdf(opts: ExportWorldPdfOpts): Promise<void> {
       root.appendChild(sheet);
       return sheet;
     });
+
+    // Author page CSS rides inside the bodies as its own nonce-stamped
+    // `<style>` blocks (scopeAndNonceStyleBlocks), so every one of them hits
+    // the same adoption trap as the magazine sheet. Without this, a world with
+    // custom page styling prints unstyled in production.
+    root.querySelectorAll("style").forEach((tag) => reassertStyleNonce(tag));
 
     opts.onProgress?.("rendering", 0, sheets.length);
     await renderPagesToPdf(sheets, {

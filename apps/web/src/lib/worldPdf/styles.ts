@@ -43,7 +43,7 @@
  * and packs pages arithmetically, and collapsing margins would make the sum
  * of the parts disagree with the height of the whole.
  */
-import { legibleThemePalette, type Theme } from "@thekeep/shared";
+import { DEFAULT_THEME, legibleThemePalette, type Theme } from "@thekeep/shared";
 import { MARGIN, PAGE_H_PT, PAGE_W_PT } from "./page.js";
 
 export interface Paper {
@@ -66,10 +66,31 @@ export interface Paper {
  */
 const BODY_LINE_HEIGHT = 1.5;
 
-/** `#rrggbb` (or `#rgb`) to `rgba(r, g, b, a)`. Falls back to the input. */
+const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+/**
+ * Clamp one palette slot to a plain hex colour.
+ *
+ * `normalizeTheme` only checks that a stored slot is a STRING, so a world's
+ * theme can hold any text at all, and this stylesheet interpolates those
+ * values straight into a `<style>` block. A malformed value therefore breaks
+ * a declaration at best, and at worst (a value carrying a brace or a comment
+ * opener) takes the rest of the sheet with it. Production really does hold
+ * one: a world with `panel: "#2c88f"`, five digits, which no CSS parser will
+ * accept. Everything author-supplied gets clamped here so nothing unvalidated
+ * can reach the generated CSS.
+ */
+function safeHex(value: string | undefined, fallback: string): string {
+  const v = (value ?? "").trim();
+  return HEX_RE.test(v) ? v : fallback;
+}
+
+/** `#rrggbb` (or `#rgb`) to `rgba(r, g, b, a)`. Inputs are pre-clamped by
+ *  {@link paperFrom}, so the unparseable branch yields a harmless transparent
+ *  rather than echoing the value back into the stylesheet. */
 export function tint(hex: string, alpha: number): string {
-  const m = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.exec(hex.trim());
-  if (!m) return hex;
+  const m = HEX_RE.exec(hex.trim());
+  if (!m) return "rgba(0, 0, 0, 0)";
   let h = m[1]!;
   if (h.length === 3) h = h.split("").map((c) => c + c).join("");
   const r = parseInt(h.slice(0, 2), 16);
@@ -97,16 +118,17 @@ function luminance(hex: string): number {
  */
 export function paperFrom(theme: Theme): Paper {
   const p = legibleThemePalette(theme);
+  const bg = safeHex(p.bg, DEFAULT_THEME.bg);
   return {
-    bg: p.bg,
-    panel: p.panel,
-    border: p.border,
-    text: p.text,
-    muted: p.muted,
-    action: p.action,
-    accent: p.accent,
-    system: p.system,
-    dark: luminance(p.bg) < 0.5,
+    bg,
+    panel: safeHex(p.panel, DEFAULT_THEME.panel),
+    border: safeHex(p.border, DEFAULT_THEME.border),
+    text: safeHex(p.text, DEFAULT_THEME.text),
+    muted: safeHex(p.muted, DEFAULT_THEME.muted),
+    action: safeHex(p.action, DEFAULT_THEME.action),
+    accent: safeHex(p.accent, DEFAULT_THEME.accent),
+    system: safeHex(p.system, DEFAULT_THEME.system),
+    dark: luminance(bg) < 0.5,
   };
 }
 

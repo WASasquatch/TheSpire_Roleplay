@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { Db } from "../db/index.js";
 import type { Io } from "./worlds/shared.js";
 import { registerWorldCoreRoutes } from "./worlds/core.js";
+import { registerWorldExportRoutes } from "./worlds/exportDossier.js";
 import { registerWorldKnowledgeBaseRoutes } from "./worlds/knowledgeBase.js";
 import { registerWorldMapRoutes } from "./worlds/maps.js";
 import { registerWorldMembershipRoutes } from "./worlds/membership.js";
@@ -16,6 +17,7 @@ import { registerWorldApplicationRoutes } from "./worlds/applications.js";
  */
 export async function registerWorldRoutes(app: FastifyInstance, db: Db, io: Io, uploadsRoot: string): Promise<void> {
   await registerWorldCoreRoutes(app, db, io);
+  await registerWorldExportRoutes(app, db);
   await registerWorldKnowledgeBaseRoutes(app, db, io);
   await registerWorldMapRoutes(app, db, io, uploadsRoot);
   await registerWorldMembershipRoutes(app, db, io);

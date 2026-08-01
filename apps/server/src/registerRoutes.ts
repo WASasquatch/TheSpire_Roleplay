@@ -25,6 +25,7 @@ import { registerDataExportRoutes } from "./routes/dataExport.js";
 import { registerLinkRoutes } from "./routes/links.js";
 import { registerWorldRoutes } from "./routes/worlds.js";
 import { registerOverlookRoutes } from "./routes/overlook.js";
+import { registerMediaProxyRoutes } from "./routes/mediaProxy.js";
 import { registerStoryRoutes } from "./routes/stories.js";
 import { registerForumRoutes } from "./routes/forums.js";
 import { registerServerRoutes } from "./routes/servers.js";
@@ -82,6 +83,9 @@ export async function registerAllRoutes(
   // Overlook canvases hang off BOTH rooms and worlds, so they get their own
   // registrar rather than living under either scope's routes.
   await registerOverlookRoutes(baseApp, db);
+  // Same-origin image proxy shared by canvas-rasterizing surfaces (world PDF
+  // export). Not tied to any one feature, so it registers on its own.
+  await registerMediaProxyRoutes(baseApp, db);
   await registerStoryRoutes(baseApp, db, io);
   await registerForumRoutes(baseApp, db, io, uploadsRoot);
   await registerServerRoutes(baseApp, db, io, uploadsRoot, registry);

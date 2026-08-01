@@ -24,6 +24,7 @@ import { makeMarkerKindMeta, readMapLayerPrefs, writeMapLayerPrefs } from "../..
 import { anchorIdFor, decorateWorldMentionsIn, flashKbEntry, makeWorldChipClickHandler } from "../../lib/worldMentions.js";
 import { REQUEST_OPEN_SERVER_EVENT, type RequestOpenServerEventDetail } from "../servers/ServerEventsPanel.js";
 import { WorldMapStage, type MapFlyRequest, type MapStageHandle } from "./WorldMapStage.js";
+import { WorldPdfButton } from "./WorldPdfButton.js";
 
 /** A "Show on map" jump: which map to select and which marker to fly to.
  *  `seq` makes every request unique so repeat clicks re-fly. */
@@ -210,6 +211,12 @@ export function WorldKnowledgeBase({ worldId, detail, membership }: { worldId: s
           placeholder={t("kb.searchPlaceholder")}
           className="ml-auto w-44 rounded border border-keep-rule bg-keep-bg px-2 py-1 text-xs"
         />
+        {/* Signed-in only: the export pulls every remote image through the
+            same-origin proxy (a canvas can't be read back once a
+            cross-origin file taints it), and that proxy refuses anonymous
+            callers, so an anonymous export would silently come out with
+            every portrait and map missing. */}
+        {membership?.isAuthenticated === false ? null : <WorldPdfButton worldId={worldId} />}
       </div>
 
       {searchResults ? (

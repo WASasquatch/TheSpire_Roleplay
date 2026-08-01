@@ -1,14 +1,76 @@
+# Docker build context exclusions.
+#
+# READ THIS BEFORE REMOVING A LINE. The Dockerfile does `COPY . .` in the
+# builder stage and then `COPY --from=builder /app /app` into the runtime
+# stage, so ANYTHING that reaches the build context is baked into the
+# published production image and ships to Fly. This file is the only thing
+# standing between a local scratch file and the deployed container.
+#
+# It is also NOT the same list as .gitignore. A path being gitignored says
+# nothing about whether Docker sees it; the two have to be kept in step by
+# hand, and the expensive mistakes have all been things that were gitignored
+# and assumed to be safe.
+
+# ---------------------------------------------------------------------
+# Secrets and real user data. Never in the image, at any size.
+# ---------------------------------------------------------------------
+# Downloaded PRODUCTION database snapshots (see the "inspect prod backup"
+# workflow) plus whatever else gets dropped here while debugging. These are
+# full copies of the live DB: emails, password hashes, private messages, DMs,
+# IP logs, dates of birth. They were reaching the image until 2026-07-31 and
+# were also ~77MB of the 201MB build context.
+backups/
+**/*.sqlite
+**/*.sqlite-wal
+**/*.sqlite-shm
+**/*.sqlite.gz
+# Google OAuth client-secret JSON as downloaded from the Cloud Console. The
+# server reads its credentials from env/Fly secrets, never from a file, so a
+# copy in the tree is a stray credential with no reason to travel.
+client_secret_*.json
+**/.env
+*.pem
+*.key
+
+# ---------------------------------------------------------------------
+# Local dev state. The deployed server keeps all of this on the Fly volume
+# at /data, so the repo copy is dev-only noise (a local DB, locally uploaded
+# images, crash logs from this machine).
+# ---------------------------------------------------------------------
+apps/server/data/
+**/data/*.sqlite*
+**/data/*.shm
+**/data/*.wal
+**/crash-log.jsonl*
+
+# ---------------------------------------------------------------------
+# Build output and dependencies. Both are regenerated inside the image:
+# `pnpm install --frozen-lockfile` restores node_modules, and
+# `pnpm --filter @thekeep/web run build` produces apps/web/dist.
+# ---------------------------------------------------------------------
 node_modules
 **/node_modules
 **/dist
-**/.env
 .git
 .gitignore
 *.log
 /tmp
-**/data/*.sqlite*
-**/data/*.shm
-**/data/*.wal
+
+# ---------------------------------------------------------------------
+# Working notes and scratch. None of it is read at build or run time.
+# `plan.md` / `plan_ext.md` are rotating scratch files, `updates.md` is the
+# local player-facing log, `commit.md` is the pending changelog.
+# ---------------------------------------------------------------------
+plan.md
+plan_ext.md
+feature-scope.md
+updates.md
+commit.md
+docs/
+__pycache__/
+**/__pycache__/
+*.py
+.claude/
 README.md
 phpMyChat
 

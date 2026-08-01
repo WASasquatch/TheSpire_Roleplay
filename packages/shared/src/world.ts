@@ -873,3 +873,57 @@ export interface WorldEntityMapRef {
   mapSlug: string;
   markerId: string;
 }
+
+/* =========================================================
+ *  Export dossier (the "print my world as a magazine" payload)
+ * ========================================================= */
+
+/** One map plus its markers, as bundled into the export dossier. */
+export interface WorldExportMap {
+  map: WorldMap;
+  markers: WorldMapMarker[];
+}
+
+/**
+ * Everything needed to typeset a whole world offline, from GET
+ * /worlds/:idOrSlug/export.
+ *
+ * WorldDetail deliberately ships light rows (no entry / session bodies, no
+ * map images or markers) because the viewer lazy-loads whatever the reader
+ * actually opens. A PDF opens EVERYTHING at once, so driving it off the
+ * viewer's payload would mean one request per entry: hundreds of round
+ * trips on a large world, each re-running the same visibility checks. This
+ * endpoint runs those checks once and returns the full set.
+ *
+ * Same visibility rules as the viewer, applied server-side: non-editors get
+ * only public entries and never see secret map markers, and the whole route
+ * sits behind `resolveWorld` (private worlds, the hard 18+ gate).
+ */
+export interface WorldExportDossier {
+  world: WorldSummary;
+  /** Lore tree, flat + with bodies. Client rebuilds the tree for ordering. */
+  pages: WorldPage[];
+  /** Typed entries WITH bodies (WorldDetail carries the light rows). */
+  entities: WorldEntity[];
+  entityKinds: WorldEntityKind[];
+  arcs: WorldArc[];
+  /** Session logs WITH bodies, chronological. */
+  sessions: WorldSession[];
+  /** Maps with their markers inlined; secret markers scrubbed for non-editors. */
+  maps: WorldExportMap[];
+  members: WorldMemberRef[];
+  collaborators: WorldCollaborator[];
+  /**
+   * The world's Overlook scene, serialized, or null when the canvas is off /
+   * blank / the feature is disabled sitewide. Rendered into the PDF as a
+   * single scaled-down plate, so the reader gets the shape of the board
+   * without the app.
+   */
+  overlookSceneJson: string | null;
+  /** True iff the requester is an editor, i.e. this dossier includes
+   *  non-public entries and secret markers. Stamped on the colophon so a
+   *  shared file's provenance is legible. */
+  viewerCanEdit: boolean;
+  /** Server clock at generation, for the cover date. */
+  generatedAt: number;
+}

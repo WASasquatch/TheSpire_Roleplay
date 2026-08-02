@@ -10,6 +10,7 @@ import { blockedUserIdsFor } from "../auth/blocks.js";
 import { recordAudit } from "../audit.js";
 import { canonicalizeNameForLookup, loweredSpaceCanonical, substringNameInsensitive, escapeLike } from "../lib/nameLookup.js";
 import { DEFAULT_SERVER_ID } from "../earning/pool.js";
+import { deleteUserAccount } from "../lib/deleteUserAccount.js";
 import { softHideUserMessages } from "../lib/purgeUserMessages.js";
 import type { Db } from "../db/index.js";
 import { getSessionUser } from "./auth.js";
@@ -1278,9 +1279,14 @@ export async function registerUsersRoutes(
   });
 
   /**
-   * Hard-delete a user. Cascades through every FK - characters, room_members,
-   * messages (kept by `set null` for displayName history), bans, mutes,
-   * sessions. System and self are off-limits.
+   * Hard-delete a user, for real. See lib/deleteUserAccount for what that
+   * takes: three foreign keys that otherwise abort the statement outright,
+   * about twenty identity-keyed tables no cascade can reach, and chat history
+   * that has to be anonymised rather than destroyed because it lives in other
+   * people's rooms. Books another member paid for are handed to the reserved
+   * account instead of being deleted out of their library.
+   *
+   * System and self are off-limits.
    */
   app.delete<{ Params: { id: string } }>("/admin/users/:id", async (req, reply) => {
     const me = await getSessionUser(req, db);
@@ -1305,14 +1311,31 @@ export async function registerUsersRoutes(
       if (uid === id) s.disconnect(true);
     }
 
-    await db.delete(users).where(eq(users.id, id));
+    let outcome;
+    try {
+      outcome = deleteUserAccount(db, id);
+    } catch (err) {
+      // The whole thing is one transaction, so a failure here leaves the
+      // account untouched rather than half-scrubbed. Surface it instead of
+      // reporting a success that didn't happen, which is how the old bare
+      // delete hid its own foreign-key aborts.
+      req.log.error({ err, targetUserId: id }, "hard delete failed");
+      reply.code(500);
+      return { error: "delete failed" };
+    }
+
     await recordAudit(db, {
       actorUserId: me.id,
       action: "user_disable",
       // The user row is gone (cascade); store enough metadata to reconstruct.
-      metadata: { hardDelete: true, username: target.username, email: target.email },
+      metadata: {
+        hardDelete: true,
+        username: target.username,
+        email: target.email,
+        ...outcome,
+      },
     });
-    return { ok: true };
+    return { ok: true, ...outcome };
   });
 
   /**

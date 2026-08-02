@@ -1,7 +1,7 @@
 {
   "name": "thekeep",
   "private": true,
-  "version": "0.35.4",
+  "version": "0.35.5",
   "description": "The Spire - a roleplay-focused chat system",
   "type": "module",
   "scripts": {
